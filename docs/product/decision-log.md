@@ -97,6 +97,7 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 | Username changes | Decided for public alpha | Inferred (INF-2) | Once per 30 days; 90-day redirect; **released names never return to the available pool, including after account deletion** | — |
 | Minimum age | **Required (new in v0.6)** | Policy | 13+. Date-of-birth gate at signup. No accounts below 13 | Only with a deliberate COPPA compliance program |
 | Match card second party | Provisional | Best practice | A match card may show another user's handle and avatar only if their profile is public and no block exists. Private users appear anonymized | Before match sharing ships in early traction |
+| **Scope of suspension** | **Decided 2026-08-13** | Founder | A suspended account **cannot write and is invisible as a subject** — it disappears from feed, leaderboard, discovery, match, tagging and the public pages. It **retains read access**: the person can still open the app and browse. Suspension therefore means "you can no longer participate", not "you no longer have access", and it is fully reversible. Raised because the code behaved this way without anyone having chosen it | If read access is itself being used to harass, e.g. a suspended user watching a victim's activity |
 | Public web indexing | Decided for public alpha | Founder (v0.5) | Public pages are `noindex` during alpha | After privacy, moderation, and GTM evidence |
 
 ---
