@@ -195,7 +195,7 @@ Not queueable, for the same reason `block` is not: PRD §22 makes safety actions
 
 Resolution has no client surface at all. The founder reads `moderation_queue`, acts, and records the action — see `data-model.md` §13. Suspension is applied by updating `profiles.status`, which takes effect across every read surface at once through `can_view_profile`, and blocks writes through `assert_can_write()`.
 
-> **Not yet built.** Reporting and moderation ship on their own branch (`change-log-v0.6.md` §7.5). Nothing in this section exists in the schema today.
+The subject's owner is resolved server-side rather than taken from the caller, since a client-supplied owner would let anyone attribute a report to an account of their choosing. A repeat report of the same subject is silently accepted and not duplicated, because confirming the earlier one discloses its state to the reporter.
 
 ---
 
@@ -243,6 +243,7 @@ One structured shape, so the client can respond to a class of failure rather tha
 | `23505` | Uniqueness conflict — already exists, already accepted | `BG409` |
 | `55000` | Wrong state for the operation, e.g. `set_bucket` on a ranked title | `BG409` |
 | `22023` | Invalid argument | `BG400` |
+| `53400` | A configured per-user ceiling was reached, e.g. the daily report cap | `BG429` |
 | `23514`, `P0001` | An invariant would be violated | `BG422` |
 
 Anything unmapped surfaces as a generic failure and is reported, rather than being guessed at.

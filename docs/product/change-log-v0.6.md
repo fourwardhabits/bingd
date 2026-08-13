@@ -243,15 +243,17 @@ They shared a cause: a session stored its search bounds as **absolute positions*
 
 `_rank_finalize` now recomputes the band inside its advisory lock and refuses an out-of-band position outright. I2 cannot be expressed as a constraint, so without a backstop a violation is silent and surfaces weeks later as a ranking the user knows is wrong and cannot explain.
 
-### 7.5 Reporting and moderation — specified, shipping on its own branch
+### 7.5 Reporting and moderation — `20260813001700_moderation.sql`
 
 PRD §22 marks reporting **Required** by policy, §23 lists a `reports` entity, AC 26.15.5 requires a report flow, and `api.md` §9 rate-limits a `report` function. **None of it existed.** No table, no function, no operator surface. Blocking shipped and reporting did not, leaving a product with user-generated usernames, display names, and list titles with nowhere for a complaint to arrive — a platform obligation, not a feature.
 
-**This is a gap identified, not yet a gap closed.** It is a new subsystem rather than a correction, so it gets its own branch and its own independent review instead of riding along with fixes to unrelated tables. The founder confirmed on 2026-08-13 that it lands before public alpha rather than later.
+Built on its own branch with its own review, because a missing subsystem is not a correction and should not ride along with fixes to unrelated tables. The founder confirmed on 2026-08-13 that it lands before public alpha rather than later.
 
-Specified in `data-model.md` §13: a `reports` table with the §22 taxonomy and one open report per reporter per subject; reversible account **suspension** through `profiles.status`, threaded into `can_view_profile` so it reaches all seven surfaces at once; `assert_can_write()` so a suspended account cannot write; an audited `moderation_actions` log; and two `security_invoker` views for triage.
+Added: a `reports` table with the §22 taxonomy and one open report per reporter per subject; a `report()` function, since with no insert policy and no client write grant the table alone was a mailbox with no slot; reversible account **suspension** via `profiles.status`, threaded into `can_view_profile` so it reaches all seven surfaces at once; `assert_can_write()`; an audited `moderation_actions` log; and two `security_invoker` views for triage.
 
-One detail to get right when it is built, because the first draft got it wrong: **`assert_can_write` was defined and never called from anywhere**, which meant suspension silently stopped nothing. A guard nobody invokes is worse than no guard, because the documentation reads as though the account is contained.
+**The first draft defined `assert_can_write` and never called it**, so suspension silently stopped nothing while the documentation read as though the account were contained. A safety control that does nothing is worse than an absent one, because it gets relied upon. The guard is now applied by wrapping each ranking RPC, and — more importantly — the wiring is **asserted structurally**: a test reads `pg_proc.prosrc` and fails if any client-facing `rank_*` function omits the call. That is the difference between fixing an instance and closing the class.
+
+Deliberately **not** built: an admin application, an appeals flow, automated detection. For 30–60 users the operator surface is the Supabase SQL editor, and building a console before any triage experience is the expensive way to learn what it should contain. None of the three is acceptable beyond alpha.
 
 Deliberately **not** built: an admin application, an appeals flow, automated detection. For 30–60 users the operator surface is the Supabase SQL editor, and building a console before any triage experience is the expensive way to learn what it should contain. None of the three is acceptable beyond alpha.
 

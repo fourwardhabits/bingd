@@ -17,6 +17,7 @@ A social collection and discovery app for movies and TV seasons. Log what you wa
 | Design system and screens | Complete, in review |
 | Phase 0 scaffold | Complete, in review |
 | Database schema, RLS, ranking engine | Complete, in review |
+| Reporting, suspension, operator views | Complete, awaiting review |
 | Phase 0 exit (Supabase projects, dev build on device, Sentry, analytics) | Blocked on account setup |
 | Phase 1 onward (auth, catalog, import, social) | Not started |
 
