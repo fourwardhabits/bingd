@@ -1,0 +1,20 @@
+# Cloudflare Pages headers.
+
+# Apple requires this file be served as JSON despite having no extension. Served
+# as text/plain, iOS fetches it and silently declines to parse it, and every
+# Universal Link keeps opening Safari with nothing to indicate why.
+/.well-known/apple-app-site-association
+  Content-Type: application/json
+  Cache-Control: public, max-age=3600
+
+/.well-known/assetlinks.json
+  Content-Type: application/json
+  Cache-Control: public, max-age=3600
+
+# The public alpha is noindex by founder decision (decision log §3). Set as a
+# header rather than a meta tag so it also covers the JSON files and anything
+# served that is not HTML.
+/*
+  X-Robots-Tag: noindex, nofollow
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

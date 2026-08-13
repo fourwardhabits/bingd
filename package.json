@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "test": "jest",
     "test:db": "node --test \"supabase/tests/*.test.mjs\"",
-    "test:remote": "node supabase/tests/remote-smoke.mjs"
+    "test:remote": "node supabase/tests/remote-smoke.mjs",
+    "build:web": "node web/build.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/dm-serif-display": "^0.4.2",
