@@ -247,20 +247,84 @@ describe('the guard is wired in, not merely present', () => {
    * Asserting the wiring structurally is what stops that returning: a new write
    * RPC that forgets the guard fails here rather than in production.
    */
-  it('has every client-facing ranking RPC call assert_can_write', async () => {
+  /**
+   * This assertion started out matching `rank\_%` against a `prosrc` substring, and
+   * a review pointed out both halves were weak enough to be worthless later. The
+   * prefix meant the first write RPC not named `rank_something` — `follow`, `block`,
+   * `react`, `set_bucket`, all on the roadmap — would go unchecked while the test
+   * stayed green. And `prosrc` includes comments, so `-- assert_can_write` in a
+   * function that never calls it satisfied the old form.
+   *
+   * The subject is now "every function a client can execute that writes", derived
+   * from the grants and the body rather than from a naming convention, and the
+   * pattern requires something that looks like a call.
+   */
+  it('has every client-callable function that writes call assert_can_write', async () => {
     const { rows } = await t.sql(`
-      select p.proname
-        from pg_proc p
-        join pg_namespace n on n.oid = p.pronamespace
-       where n.nspname = 'public'
-         and p.proname like 'rank\\_%'
-         and p.prosrc not like '%assert_can_write%'
+      with client_callable as (
+        select p.oid, p.proname, p.prosrc
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public'
+           and (has_function_privilege('authenticated', p.oid, 'execute')
+                or has_function_privilege('anon', p.oid, 'execute'))
+      ),
+      -- Comments are stripped first, so a mention of the guard in prose cannot
+      -- stand in for calling it.
+      bodies as (
+        select oid, proname,
+               regexp_replace(
+                 regexp_replace(prosrc, '/\\*.*?\\*/', ' ', 'gs'),
+                 '--[^\\n]*', ' ', 'g'
+               ) as src
+          from client_callable
+      )
+      select proname
+        from bodies
+       where src ~ '(insert|update|delete)\\s'
+         and src !~ 'assert_can_write\\s*\\('
+       order by proname
     `);
+
     assert.deepEqual(
       rows.map((r) => r.proname),
       [],
-      'these write RPCs are reachable by a suspended account',
+      'these functions write and are reachable by a suspended account',
     );
+  });
+
+  it('would notice a write RPC that only mentions the guard in a comment', async () => {
+    // Guards the guard. If this passes trivially the assertion above has stopped
+    // testing anything, which is how the previous version failed.
+    await t.sql(`
+      create function _probe_unguarded_write(p_note text)
+      returns void language plpgsql security definer set search_path = public as $fn$
+      begin
+        -- assert_can_write(auth.uid()) is emphatically not called here
+        insert into app_config (key, value) values ('probe', to_jsonb(p_note))
+          on conflict (key) do update set value = to_jsonb(p_note);
+      end; $fn$;
+    `);
+    await t.sql(`grant execute on function _probe_unguarded_write(text) to authenticated`);
+
+    try {
+      const { rows } = await t.sql(`
+        select p.proname
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public'
+           and has_function_privilege('authenticated', p.oid, 'execute')
+           and regexp_replace(p.prosrc, '--[^\\n]*', ' ', 'g') ~ '(insert|update|delete)\\s'
+           and regexp_replace(p.prosrc, '--[^\\n]*', ' ', 'g') !~ 'assert_can_write\\s*\\('
+      `);
+      assert.deepEqual(
+        rows.map((r) => r.proname),
+        ['_probe_unguarded_write'],
+        'the detection above must catch an unguarded write that name-drops the guard',
+      );
+    } finally {
+      await t.sql(`drop function _probe_unguarded_write(text)`);
+    }
   });
 
   it('does not expose the unguarded implementations to clients', async () => {

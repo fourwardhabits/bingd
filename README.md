@@ -134,6 +134,10 @@ Two lessons are written into that file, because both produced false confidence o
 - **Probe with real arguments.** PostgREST answers an argument mismatch with 404, so calling everything with `{}` yields a page of passes that would pass against a wide-open database.
 - **An application error means the call succeeded.** PostgREST maps SQLSTATE class 28 to HTTP 403, so a guard raising `unauthenticated` is indistinguishable from a privilege refusal *by status code*. Classify on the SQLSTATE, or the guard impersonates the control you are testing.
 
+The fix for those six functions came with a claim attached, and the claim was wrong. `20260813001800` also ran `alter default privileges ... revoke execute on functions from public, anon, authenticated`, on the reasoning that new functions would then arrive closed and nobody would have to remember. Inspecting `pg_default_acl` afterwards: the `anon` and `authenticated` parts took effect, and the part that mattered did not. Every function created since still carries `=X`, the implicit grant to `PUBLIC` — and since every role belongs to `PUBLIC`, `anon` reaches it regardless.
+
+The next function written was executable by strangers, and `function-grants.test.mjs` failed on it within seconds. So the allow-list in `20260813002000` is the authoritative one, and the test is the thing actually holding the door shut. A configuration setting assumed to work is worth less than a check that runs on every commit, and this is the second time today that turned out to be the shape of the problem.
+
 ---
 
 ## Repository layout

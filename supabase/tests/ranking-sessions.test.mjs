@@ -60,6 +60,33 @@ describe('skipping a comparison', () => {
     await t.assertValid(user);
   });
 
+  it('offers a new title on each skip rather than repeating one', async () => {
+    // The offset used to reset to 1 on every call, and lo/hi do not move when a
+    // comparison is skipped, so every skip re-offered mid + 1 — the user was shown
+    // a comparison they had just declined to judge. ranking.md §5 specifies
+    // stepping outward: mid + 1, then mid - 1, then mid + 2.
+    for (let i = 0; i < 9; i += 1) {
+      await rankBelow(await movie(`skip_distinct_base_${i}`), 'fine');
+    }
+
+    const subject = await movie('skip_distinct_subject');
+    let result = await rpc(`select rank_start($1, 'fine') as r`, [subject]);
+
+    const offered = [result.pivot];
+    while (!result.done) {
+      result = await rpc(`select rank_skip($1) as r`, [result.session_id]);
+      if (!result.done) offered.push(result.pivot);
+    }
+
+    assert.ok(offered.length > 2, 'the band is large enough to offer several comparisons');
+    assert.equal(
+      new Set(offered).size,
+      offered.length,
+      `every comparison offered should be a distinct title, got ${JSON.stringify(offered)}`,
+    );
+    await t.assertValid(user);
+  });
+
   it('places the title and says so once the skip limit is reached', async () => {
     const subject = await movie('skip_limit');
     let result = await rpc(`select rank_start($1, 'loved') as r`, [subject]);
