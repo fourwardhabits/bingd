@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Expo / React Native
+.expo/
+.expo-shared/
+dist/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+ios/
+android/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+google-services.json
+GoogleService-Info.plist
+
+# Build output
+build/
+*.apk
+*.aab
+*.ipa
+*.tar.gz
+
+# Design references (large third-party screenshot archives, not redistributable)
+design-references/
+*.zip
+
+# Logs and caches
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.cache/
+.turbo/
+coverage/
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+*.swp
