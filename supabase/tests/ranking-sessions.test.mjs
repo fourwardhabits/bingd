@@ -87,6 +87,42 @@ describe('skipping a comparison', () => {
     await t.assertValid(user);
   });
 
+  it('keeps offering comparisons when a skip follows an answer', async () => {
+    // The fix for consecutive skips counted against session-wide `skips`, which
+    // rank_answer does not reset — correctly, since the cap is meant to count the
+    // whole session. So once an answer moved the band, the walk skipped past
+    // candidates it had never offered, ran out, and placed the title immediately.
+    // A review reproduced it on a band of three.
+    for (let i = 0; i < 3; i += 1) {
+      await rankBelow(await movie(`interleave_base_${i}`), 'not_for_me');
+    }
+
+    const subject = await movie('interleave_subject');
+    const started = await rpc(`select rank_start($1, 'not_for_me') as r`, [subject]);
+    assert.equal(started.done, false);
+
+    const skipped = await rpc(`select rank_skip($1) as r`, [started.session_id]);
+    assert.equal(skipped.done, false, 'the first skip should offer another comparison');
+
+    // The *subject* has to win. Letting the pivot win raises the lower bound to the
+    // top of the band and ends the session, so the interleaving under test never
+    // happens — which is how the first version of this test passed against the bug
+    // it was written for.
+    const answered = await rpc(`select rank_answer($1, $2) as r`, [started.session_id, subject]);
+    assert.equal(answered.done, false, 'the band should have narrowed, not closed');
+
+    const after = await rpc(`select rank_skip($1) as r`, [started.session_id]);
+    assert.equal(
+      after.done,
+      false,
+      'skipping after an answer must offer a comparison, not finalize early — a ' +
+        'valid unoffered pivot exists and the skip cap has not been reached',
+    );
+    assert.ok(after.pivot, 'and that comparison must be a real title');
+
+    await t.assertValid(user);
+  });
+
   it('places the title and says so once the skip limit is reached', async () => {
     const subject = await movie('skip_limit');
     let result = await rpc(`select rank_start($1, 'loved') as r`, [subject]);

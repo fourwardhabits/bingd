@@ -341,13 +341,50 @@ The fix is not revocation, because policies genuinely need these helpers and a p
 - **A second skip re-offered the same comparison.** `ranking.md` §5 specifies stepping outward — mid + 1, then mid − 1, then mid + 2 — but the offset reset to 1 on every call and the band bounds do not move when a comparison is skipped, so every skip re-displayed the title just declined. No corruption, and the only finding across both rounds that a user would have noticed.
 - **The daily report cap is advisory**, counted before insert without a lock. Documented rather than fixed: idempotency is index-backed and cannot be raced, and the cap being soft by a few reports does not matter at alpha scale. `53400` also surfaces as HTTP 500 through PostgREST rather than 429, so the clean rate-limit response depends on reporting going through the edge layer.
 
-#### The lesson that cost the most to learn
+#### A wrong claim, and then a wrong correction to it
 
-`20260813001800` swept the existing functions and then set `alter default privileges ... revoke execute on functions from public, anon, authenticated`, on the reasoning that new functions would arrive closed and nobody would need to remember. The review checked the part I flagged as risky — whether the CLI's temporary login role would make the defaults apply — and confirmed it does.
+This one is worth reading in full, because the second mistake is more instructive than the first.
 
-The mechanism failed for a different reason. `pg_default_acl` shows the `anon` and `authenticated` deltas took effect and the `PUBLIC` one did not: every function created since still carries `=X`, and since every role belongs to `PUBLIC`, `anon` reaches it anyway. The very next function written was executable by strangers.
+`20260813001800` swept the existing functions and then set `alter default privileges in schema public revoke execute on functions from public, anon, authenticated`, so that new functions would arrive closed and nobody would need to remember. The review checked the part flagged as risky — whether the CLI's temporary login role would make the defaults apply — and confirmed it does.
 
-It was caught in seconds, by `function-grants.test.mjs` failing. So the allow-list is now restated in full in `20260813002000` as the authoritative one, and the honest description of the protection is that **the test is what holds the door shut**, not the setting. A configuration assumed to work is worth less than a check that runs on every commit — which is the same conclusion as the RLS test harness, reached twice in one day by different routes.
+The next function written was executable by strangers, and `function-grants.test.mjs` failed on it in seconds. `pg_default_acl` showed the `anon` and `authenticated` deltas had taken effect and the `PUBLIC` one had not: every function created since carried `=X`, and every role belongs to `PUBLIC`.
+
+**The conclusion drawn was that the setting silently doesn't work, so trust tests over settings.** That went into the README and this document. A third review then found the actual explanation, by reading the manual rather than the ACL dump: PostgreSQL documents that exact statement as its example of a command that does nothing, because per-schema default privileges can only *add* to the global setting, never subtract from it, and `PUBLIC`'s execute comes from the built-in global default. The `anon` and `authenticated` revokes worked because they were undoing Supabase's own per-schema grants — the one case the manual carves out.
+
+So the mechanism works, and the wrong variant was used. `20260813002100` issues the global form, verified by execution.
+
+The conclusion survives the correction, but for a stated reason instead of a vague one: default privileges attach to the role that set them, so the statement covers objects created by that role and nothing else — an extension, or anything created by `supabase_admin`, falls outside it. A CI sweep of the whole schema has no such boundary. **The test is still the guard, because of a documented limitation rather than because settings are untrustworthy.**
+
+The general lesson is not the one first written here. It is that a confident diagnosis of surprising behaviour deserves ten minutes in the documentation before it becomes a lesson other people are taught. Being wrong about the schema was cheap; being wrong in the section explaining how not to be wrong was the expensive part.
+
+#### Configured defaults that were not defaults — `20260813002100`
+
+Three functions read a tuning value with a written fallback, and all three wrote it the same wrong way:
+
+```sql
+select coalesce((value)::integer, 20) into v_cap
+  from app_config where key = 'report.max_per_day';
+```
+
+With no matching row the query returns *no rows*, so the `coalesce` is never evaluated and the variable is left NULL. Verified by execution: the same expression returns NULL when the row is absent and `90` when written as a scalar subquery.
+
+The consequences are worse than a missing default, because two of the three are a limit quietly ceasing to exist — `NULL >= anything` is NULL, so the `if` never fires:
+
+| Config key | Consequence when the row is absent |
+|---|---|
+| `username.redirect_days` | A rename fails outright: `redirect_until` is `NOT NULL` and receives NULL |
+| `ranking.max_skips` | The skip cap silently stops applying |
+| `report.max_per_day` | The daily report cap silently stops applying |
+
+All three rows are seeded and clients cannot write `app_config`, so an operator would have to delete one. It is fixed anyway, because the code asserted a default it did not have — committed, as it happens, inside the migrations whose subject was claims that nothing enforces.
+
+#### Skipping after answering finalized early — `20260813002100`
+
+The consecutive-skip fix counted against session-wide `skips`, which `rank_answer` does not reset and should not, since the cap counts the whole session. Once an answer moved the band, the walk skipped past candidates it had never offered, ran out, and placed the title. Reproduced on a band of three: skip, answer, skip placed the title immediately while a valid unoffered pivot existed and only two of three permitted skips had been used.
+
+Skips within the current band are now counted separately, with the band change detected inside `rank_skip` by recording the bounds a skip was offered against. `rank_answer`, `rank_back` and `rank_reorder` all move the bounds, and any of them forgetting to reset a counter would reintroduce the defect — nothing to forget beats three call sites to remember.
+
+**The test written for the original fix did not catch this, and the test written for *this* fix did not either, at first.** It answered in a way that let the pivot win, which closes the band and ends the session before the interleaving under test can happen, so it passed against the bug. It now fails when the fix is reverted, which was confirmed by reverting it. A behavioural test that has never been seen to fail is an assertion about nothing.
 
 The remote probe also no longer exits zero on an inconclusive result. A probe whose signature does not resolve never ran, so the privilege behind it is untested, and treating that as a pass turned the suite into a test of its own argument names. It now covers both oracles, both replacements, and an `anon` username comparison — the one check that settles whether the extension exclusion in the grants sweep is correct, which PGlite cannot answer because it shims `citext` as a domain.
 

@@ -14,8 +14,9 @@ import { createTestDb } from './harness.mjs';
  * they have no part in.
  *
  * `can_view_profile(viewer, subject)` is the sharpest case. It is the schema's
- * single visibility rule, granted to `anon` because policies in eight migrations
- * call it. Taking `viewer` as a parameter means an unauthenticated stranger can
+ * single visibility rule, granted to `anon` because ten policies across five
+ * migrations call it. Taking `viewer` as a parameter means an unauthenticated
+ * stranger can
  * ask "can Alice see Bob?" — and since the answer folds in blocks, suspension,
  * and approved follows, the reply discloses a private social graph one bit at a
  * time.
@@ -46,7 +47,7 @@ test('a stranger cannot ask whether one user can see another', async () => {
           'Alice follows a private account. The viewer must come from auth.uid(), ' +
           'not from an argument.',
       );
-      assert.match(err.message, /permission denied|does not exist/i);
+      assert.equal(err.code, '42501', 'must be a privilege refusal, not a missing function');
     });
   } finally {
     await t.close();
@@ -71,6 +72,7 @@ test('a signed-in user cannot ask about a relationship they are not part of', as
     await t.asUser(eve, async () => {
       const err = await t.errorFrom(`select can_view_profile($1, $2)`, [alice, bob]);
       assert.ok(err, 'Eve learned whether Alice can see Bob');
+      assert.equal(err.code, '42501', 'must be a privilege refusal, not a missing function');
     });
   } finally {
     await t.close();
@@ -94,6 +96,7 @@ test('the block graph is not readable by an unauthenticated caller', async () =>
         err,
         'an anonymous caller read the private block graph through blocked_between',
       );
+      assert.equal(err.code, '42501', 'must be a privilege refusal, not a missing function');
     });
   } finally {
     await t.close();
@@ -112,6 +115,7 @@ test('a signed-in stranger cannot enumerate blocks between other people', async 
     await t.asUser(eve, async () => {
       const err = await t.errorFrom(`select blocked_between($1, $2)`, [carol, alice]);
       assert.ok(err, 'Eve read a block she has no part in');
+      assert.equal(err.code, '42501', 'must be a privilege refusal, not a missing function');
     });
   } finally {
     await t.close();

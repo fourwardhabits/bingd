@@ -794,7 +794,7 @@ The point of several choices above is that a violation cannot be written, not me
 | Early Access grants cannot become permanent | `early_access_must_expire` check constraint |
 | One reaction per user per item | Primary key on `(feed_event_id, user_id)` |
 | Reactions carry no moderation surface | No text column exists, and `kind` is a closed set |
-| A deleted account's username is never reusable | `username_history` primary key, populated by a `before delete` trigger |
+| A released username is never reusable, whether released by deletion or rename | `assert_username_available` refuses it, checking reservations written by `reserve_username_on_profile_delete` and `reserve_username_on_rename`. Not the `username_history` primary key, which this row credited until a review pointed out it only prevents duplicate history rows |
 | Growth provenance is never destroyed | `invite_attributions.inviter_id` detaches instead of cascading |
 | A suspended account is invisible everywhere at once | One clause in `can_view_profile` (AD-5) |
 | A view cannot leak past RLS | Every view is `security_invoker` |

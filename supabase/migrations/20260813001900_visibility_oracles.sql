@@ -93,7 +93,7 @@ comment on function watch_tag_visible is
 -- ---------------------------------------------------------------------------
 -- Every policy that named the two-argument form
 --
--- Ten policies across six migrations. Each is recreated with identical logic and
+-- Ten policies, defined across five migrations. Each is recreated with identical logic and
 -- the viewer-less helper. A missed one does not degrade quietly: revoking EXECUTE
 -- below makes it raise `permission denied for function`, failing the whole query
 -- rather than filtering it, which the tests in oracles.test.mjs check for.
