@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   check:
-    name: Typecheck, lint, test
+    name: Typecheck, lint, test, database
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,3 +34,7 @@ jobs:
       - run: npm run lint
 
       - run: npm test -- --ci
+
+      # Migrations and RPCs run against real Postgres compiled to WebAssembly,
+      # so the schema and the ranking invariants are verified without Docker.
+      - run: npm run test:db

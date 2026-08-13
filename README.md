@@ -16,7 +16,9 @@ A social collection and discovery app for movies and TV seasons. Log what you wa
 | Architecture | Complete, in review |
 | Design system and screens | Complete, in review |
 | Phase 0 scaffold | Complete, in review |
-| Phase 1 onward (auth, catalog, log-and-rank) | Not started |
+| Database schema, RLS, ranking engine | Complete, in review |
+| Phase 0 exit (Supabase projects, dev build on device, Sentry, analytics) | Blocked on account setup |
+| Phase 1 onward (auth, catalog, import, social) | Not started |
 
 ---
 
@@ -85,6 +87,7 @@ npm start
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint, including the raw-colour ban |
 | `npm test` | Jest, including the contrast assertions |
+| `npm run test:db` | Applies every migration to real Postgres and tests the ranking engine |
 
 `APP_VARIANT` selects the build variant — `development`, `preview`, or `production` — which sets the bundle identifier, the app name, and the backend. Non-production builds carry a visible environment badge.
 
@@ -95,6 +98,14 @@ Both exist because the design system found defects that would otherwise have shi
 **Colour literals are banned** outside `src/ui/tokens/`. A hardcoded `#D4A64C` in a component is a lint error, because that is exactly how the contrast defect in `docs/design/design-system.md` §1 would come back.
 
 **Contrast is asserted, not assumed.** `src/ui/tokens/contrast.test.ts` computes WCAG ratios for every permitted foreground and pins each to the value printed in the design system tables. It also asserts that Amber and Sage still *fail* on Parchment, so the rule that they are fills and never ink cannot be quietly undone. It has already caught two ratios that were rounded wrongly by hand.
+
+### The database runs in tests without Docker
+
+`npm run test:db` boots Postgres compiled to WebAssembly ([PGlite](https://pglite.dev)), applies every migration in `supabase/migrations/` in order, and exercises the ranking engine through its real RPCs.
+
+That matters most for ranking, which is the component most likely to corrupt data in ways nobody notices for weeks. The tests assert the four invariants from `docs/architecture/ranking.md` **after every single mutation**, and one test drives sixty randomised operations — insertions, unrankings, reorderings — re-checking all four each time. Another gives each film a secret true ordering, answers every comparison from it, and asserts the finished ranking reproduces that order exactly, which verifies the insertion search is correct rather than merely self-consistent.
+
+Two known limits of the WebAssembly build, neither consequential: `citext` is unavailable and is shimmed as `text`, and row-level security is not enforced against the owning role, so policy behaviour is tested by calling `can_view_profile` directly.
 
 ---
 
@@ -111,6 +122,9 @@ src/
   ui/tokens/        The only place a colour literal may appear
   ui/components/    Shared primitives
   lib/              Env, Supabase client, query keys
+supabase/
+  migrations/       Schema, RLS policies, and the ranking RPCs
+  tests/            Run against Postgres-in-WebAssembly, no Docker needed
 docs/
   product/          Specification, decisions, open questions, change log
   architecture/     Data model, ranking, API, offline sync, recommendations, client
