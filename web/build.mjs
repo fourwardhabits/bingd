@@ -32,13 +32,11 @@ if (!config.appleTeamId) {
 
 const withFingerprints = config.variants.filter((v) => v.androidSha256.length > 0);
 
-if (withFingerprints.length === 0) {
-  problems.push(
-    'No variant has an androidSha256 fingerprint. Run `eas credentials`, or read it ' +
-      'from Play Console > Setup > App integrity if Play re-signs the app.',
-  );
-}
-
+// A missing Android fingerprint is not an error, because it cannot be obtained
+// until an Android build exists and the site should not be blocked on that. It is
+// a warning, and assetlinks.json is then not written at all — serving a valid file
+// with an empty list would look configured while verifying nothing, which is the
+// harder failure to notice of the two.
 for (const variant of config.variants) {
   for (const fingerprint of variant.androidSha256) {
     if (!/^([A-F0-9]{2}:){31}[A-F0-9]{2}$/.test(fingerprint)) {
@@ -108,11 +106,24 @@ const assetlinks = withFingerprints.map((variant) => ({
   },
 }));
 
-await writeFile(
-  join(dist, '.well-known', 'assetlinks.json'),
-  `${JSON.stringify(assetlinks, null, 2)}\n`,
-);
+if (assetlinks.length > 0) {
+  await writeFile(
+    join(dist, '.well-known', 'assetlinks.json'),
+    `${JSON.stringify(assetlinks, null, 2)}\n`,
+  );
+}
 
 console.log(`Built ${dist}`);
 console.log(`  apple-app-site-association  ${appleAppIds.length} app IDs, ${config.appPaths.length} paths`);
-console.log(`  assetlinks.json             ${assetlinks.length} package(s)`);
+
+if (assetlinks.length > 0) {
+  console.log(`  assetlinks.json             ${assetlinks.length} package(s)`);
+} else {
+  console.log('  assetlinks.json             NOT WRITTEN');
+  console.log('');
+  console.log('  Android App Links will not verify, so a tapped link opens the browser on');
+  console.log('  Android. Nothing else is affected. Add a fingerprint to');
+  console.log('  web/deep-links.config.json once an Android build exists — from');
+  console.log('  `eas credentials`, or from Play Console > Setup > App integrity if Play');
+  console.log('  re-signs the app.');
+}

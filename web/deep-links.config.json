@@ -16,7 +16,7 @@
 
   "domain": "bingd.app",
 
-  "appleTeamId": null,
+  "appleTeamId": "98729PG8GD",
 
   "variants": [
     { "name": "production", "bundleId": "app.bingd", "androidSha256": [] },
