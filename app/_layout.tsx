@@ -19,6 +19,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { initAnalytics, track } from '@/lib/analytics';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
 import { createQueryClient } from '@/lib/query';
+import { startUpdateChecks } from '@/lib/updates';
 import { theme } from '@/ui/tokens';
 
 // Before the first render, so a crash during startup is still reported. Both
@@ -56,6 +57,8 @@ function RootLayout() {
   useEffect(() => {
     track({ name: 'app_opened' });
   }, []);
+
+  useEffect(() => startUpdateChecks(), []);
 
   useEffect(() => {
     if (fontsLoaded || fontError) {

@@ -17,6 +17,12 @@ const variants: Record<Variant, { name: string; bundleId: string; scheme: string
 const current = variants[variant];
 
 /**
+ * `eas init` could not write this itself: it edits app.json, and this project uses a
+ * TypeScript config so the variant logic above is expressible.
+ */
+const EAS_PROJECT_ID = 'd10f76cc-fac0-4812-9938-d32e8bcea008';
+
+/**
  * Destinations for the share sheet. Declared in every build even though v1 never
  * calls them directly, because a manifest change cannot ship over the air —
  * see PRD §16 and docs/architecture/README.md.
@@ -76,6 +82,29 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 
   web: { bundler: 'metro', output: 'server' },
 
+  /**
+   * Over-the-air updates, so a fix reaches testers without redistributing a build.
+   *
+   * The `fingerprint` runtime version policy is the load-bearing part. It derives a
+   * hash of everything native in the project, and an update is only offered to
+   * builds whose native side matches. So adding a native module and publishing an
+   * update means older builds simply do not see it — they stay on the last version
+   * that works, instead of downloading JavaScript that calls into a module they do
+   * not contain and crashing on launch. That crash is unrecoverable from the user's
+   * side and is the single worst failure mode of OTA updates.
+   *
+   * The cost of that safety is honest: whenever the fingerprint changes, testers
+   * need a new build. `eas update` says so rather than leaving it to be discovered.
+   */
+  updates: {
+    url: `https://u.expo.dev/${EAS_PROJECT_ID}`,
+    // Start from the cached bundle immediately and fetch in the background. A
+    // blocking check costs every user a slow launch on a bad connection to save one
+    // relaunch after an update, which is the wrong trade for a film app.
+    fallbackToCacheTimeout: 0,
+  },
+  runtimeVersion: { policy: 'fingerprint' },
+
   plugins: [
     'expo-router',
     'expo-font',
@@ -119,9 +148,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   experiments: { typedRoutes: true, reactCompiler: true },
 
   extra: {
-    // `eas init` could not write this itself: it edits app.json, and this project
-    // uses a TypeScript config so that the variant logic above is expressible.
-    eas: { projectId: 'd10f76cc-fac0-4812-9938-d32e8bcea008' },
+    eas: { projectId: EAS_PROJECT_ID },
 
     variant,
     supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,

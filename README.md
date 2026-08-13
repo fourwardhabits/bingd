@@ -158,6 +158,20 @@ The allow-list test remains the real guard, but for a stated reason rather than 
 
 **Sign in with Apple is iOS-only, deliberately.** Apple requires the button wherever a third-party sign-in is offered (App Review 4.8), and Google sign-in triggers that. The requirement is Apple's, so it applies to Apple's platform. Offering it on Android would mean the OAuth redirect flow, which needs a Services ID and a client secret that is a JWT signed with a `.p8` key — **and Apple caps that JWT at six months**. It does not warn, it does not degrade: sign-in works for half a year and then stops. Android already has Google and email, so that maintenance trap buys nothing. `ios.usesAppleSignIn` adds the entitlement and EAS enables the capability on the App ID during the first build, so there is nothing to click in the Apple portal.
 
+### Shipping a change to testers without redistributing a build
+
+```bash
+eas update --branch preview --message "what changed"
+```
+
+Testers get it the next time the app returns to the foreground, because `src/lib/updates.ts` checks then and reloads. Without that, `expo-updates` applies an update on the *next cold start*, which for an app opened a few times a week means days.
+
+**What cannot be updated this way is the thing to understand.** An over-the-air update replaces JavaScript and assets. It cannot add native code. So a new native dependency, a change to a native field in `app.config.ts`, an Expo SDK upgrade, or a new permission all require a fresh build that testers install by hand.
+
+The dangerous version of that boundary is being on the wrong side of it silently: publishing JavaScript that calls into a native module the installed build does not contain crashes the app on launch, every launch, unrecoverably from the user's side. `runtimeVersion: { policy: 'fingerprint' }` prevents it. EAS hashes everything native and offers an update only to builds whose hash matches, so an older build sees no update rather than a broken one — and `eas update` reports the mismatch instead of leaving it to be discovered by a tester.
+
+The practical rule: if `npx expo install` added a package, or `app.config.ts` changed outside `extra`, expect to rebuild.
+
 ### Android App Links are half-configured, and the missing half is the invisible one
 
 `web/deep-links.config.json` carries the EAS upload keystore fingerprint for `app.bingd`, so `assetlinks.json` is no longer an empty array. That covers an APK installed directly.
