@@ -42,7 +42,7 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 |---|---|---|---|
 | ~~INF-1~~ | ~~Letterboxd star ratings auto-map to buckets~~ | **Confirmed by the founder on 2026-08-12.** Now a founder decision — see §4 | — |
 | INF-2 | Usernames may be changed once per 30 days; the previous username redirects for 90 days, then releases and can never be instantly reused | Question A6 was left blank | Share and invite routes depend on `bingd.app/u/<username>`; instant reuse is an impersonation vector |
-| INF-3 | Bucket bands partition the ranking (all *Loved it* above all *It was fine* above all *Not for me*) | Founder said "take the recommended path" for A1, which included this | Stated as part of the recommendation, but the founder did not restate it |
+| ~~INF-3~~ | ~~Bucket bands partition the ranking~~ | **Confirmed by the founder on 2026-08-12.** Now a founder decision — see §2 | — |
 | INF-4 | Five-tab navigation with Rankings and Lists inside Profile | Founder said to derive design decisions from the brand guidelines | Derived, not directed. Marked Provisional in the PRD |
 | INF-5 | Activation is defined as "ranked 10 titles" with no time bound for attribution, and "ranked 10 titles within 24 hours" for the activation-rate metric | v0.5 used two near-definitions; neither was chosen by the founder | One canonical definition is needed for invite and share attribution to be reportable |
 
@@ -54,7 +54,7 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 |---|---|---|---|---|
 | Core mechanic | Decided | Founder | Pairwise "this or that" comparison produces an ordered personal ranking | Never, without a product pivot |
 | Rating entry | **Decided (new in v0.6)** | Founder | Three buckets first — **Loved it / It was fine / Not for me** — then pairwise comparison within that bucket | Bucket labels may be reworded after user testing; the three-bucket structure is fixed |
-| Bucket semantics | Decided | Inferred (INF-3) | Buckets partition the ranking into three ordered bands. A title cannot rank above a title in a higher band | If users report the partition feels wrong |
+| Bucket semantics | Decided | Founder | Buckets partition the ranking into three ordered bands. A title cannot rank above a title in a higher band. Comparisons therefore only ever run within one band, which is how Beli avoids asking users to compare across reaction levels | If users report the partition feels wrong |
 | Media scope | Decided | Founder | Movies and TV seasons. Episodes are never ranked. Whole-series ranking is not the primary TV unit | Never for public alpha |
 | TV progress | Decided | Founder | A season may be marked *Watching*, but becomes rankable only when marked completed | — |
 | Ranking output | Decided for public alpha | Founder | Exact ordinal position only, e.g. `#18 in Movies`. **No 0–10 score, no 0–100 score, no percentile** | After alpha, only with evidence that a secondary number adds value |

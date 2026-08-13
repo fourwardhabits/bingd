@@ -60,13 +60,9 @@ Confirmed by the founder. Star ratings auto-map to buckets (4.0+ → *Loved it*,
 
 **Cost to overturn:** Low before implementation. High after, because share and invite routes depend on `bingd.app/u/<username>`.
 
-### INF-3 — Bucket bands partition the ranking
+### ~~INF-3 — Bucket bands partition the ranking~~ — **RESOLVED 2026-08-12**
 
-**Recorded as:** All *Loved it* titles rank above all *It was fine* titles, which rank above all *Not for me* titles.
-
-**Why it is an inference:** Presented as part of the A1 recommendation, which the founder accepted as a whole without restating this element.
-
-**Cost to overturn:** High after implementation. The partition is what makes comparisons cheap and it shapes the ranking data model.
+Confirmed by the founder. All *Loved it* titles rank above all *It was fine* titles, which rank above all *Not for me* titles. Comparisons run only within a band, which is the mechanism that keeps them short and avoids asking a user to compare titles they placed at different reaction levels. This is now a founder decision, recorded in `decision-log.md` §2 and implemented as invariant **I2** in `../architecture/ranking.md`.
 
 ### INF-4 — Navigation structure
 

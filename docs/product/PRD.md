@@ -1572,7 +1572,7 @@ All six product decisions that blocked architecture at v0.5 are resolved (see `o
 
 **Conditions attached:**
 
-1. **Four inferences (INF-2 to INF-5)** are recorded as decisions but were made by the agent, not the founder. INF-3 is the expensive one to reverse after implementation and should be confirmed before Phase 3. INF-1 was confirmed by the founder on 2026-08-12 and is no longer an inference.
+1. **Three inferences (INF-2, INF-4, INF-5)** are recorded as decisions but were made by the agent, not the founder. All three are cheap to reverse: INF-4 is already marked Provisional, and INF-5 only needs settling before attribution reporting is built. INF-1 and INF-3 — the two expensive ones — were both confirmed by the founder on 2026-08-12.
 2. **HG-1 (TMDB)** should be sent immediately. The six-month caching conflict could change the offline design in §18, and a reply may take weeks.
 3. **HG-6 (brand assets)** blocks Phase 9, not Phase 0.
 
