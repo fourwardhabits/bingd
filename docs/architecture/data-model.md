@@ -17,7 +17,7 @@ Three differences from the SQL sketched below, all deliberate:
 >
 > Two of them mattered more than the rest. **`date_of_birth` was readable by any signed-in user**, because a comment claimed a column-level guarantee that row level security cannot provide. And **a released username was still claimable**, because the protection was credited to a primary key that had no connection to `profiles.username`. Both were guarantees asserted in prose and enforced nowhere, which is the failure mode this document has to be read for.
 >
-> **§13 is a specification, not yet a migration.** Reporting and moderation ship on their own branch with their own review (PRD §22). Nothing described there — `reports`, `profiles.status`, `assert_can_write`, the operator views — exists in the schema yet.
+> **Reporting and moderation (§13) landed separately** in `20260813001700_moderation.sql`, on their own branch and with their own review, because a missing subsystem is not a correction and should not ride along with fixes to unrelated tables.
 
 ---
 
@@ -29,7 +29,7 @@ Three differences from the SQL sketched below, all deliberate:
 - Timestamps are `timestamptz`, never bare `timestamp`.
 - Soft deletion is used only where history matters. Everything else deletes.
 - **Every view is created `with (security_invoker = true)`.** This one is easy to miss and expensive to miss. A Postgres view runs with its *owner's* permissions by default, which means a view over an RLS-protected table hands out rows the caller could never select directly. `visible_collection` is the sharpest example: `user_media` is owner-only precisely because it carries notes and watch dates, and a default-owner view over it would publish them to every caller. `security_invoker` makes the view evaluate the caller's own policies, which is the behaviour every view in §10 of [`api.md`](./api.md) assumes.
-- Writes will additionally call `assert_can_write()`, which refuses suspended accounts (§13, not yet migrated).
+- Writes additionally call `assert_can_write()`, which refuses suspended accounts (§13).
 
 ---
 
@@ -727,7 +727,23 @@ alter table profiles add column status profile_status not null default 'active';
 
 Suspension is threaded through `can_view_profile`, which is the entire payoff of AD-5. One clause hides a suspended account from the feed, the leaderboard, discovery, match scores, tagging, and the public web pages simultaneously, instead of seven separate changes that could each be forgotten. The self-check stays first, so a suspended user can still load their own profile and be told what happened.
 
-Reads and writes are separate questions, so writes get their own guard. Every write RPC calls `assert_can_write()`, which refuses a suspended account with `BG403`. Without it a suspended user would go on ranking, following, and tagging into a void.
+Reads and writes are separate questions, so writes get their own guard. Every write RPC calls `assert_can_write()`, which refuses a suspended account with `BG403`. Without it a suspended user would go on ranking, following, and tagging into a void, and everything they did would appear at once the moment the suspension lifted.
+
+> **The first draft of this defined `assert_can_write` and never called it from anywhere.** Suspension therefore stopped nothing, while this document read as though the account were contained — the same failure as the `date_of_birth` comment in §2, and arguably worse, because a safety control that silently does nothing is relied upon.
+>
+> The guard is applied by renaming each ranking RPC to an unguarded implementation and re-exposing it through a thin wrapper that calls `assert_can_write()` first. Wrapping rather than rewriting keeps the ranking logic in one migration; copying five hundred lines into the moderation migration would have produced two versions that immediately began to drift.
+>
+> **The wiring is asserted structurally**, not by inspection: a test queries `pg_proc.prosrc` for every client-facing `rank_*` function and fails if any of them lacks the call, and a second test confirms the unguarded implementations are not executable by client roles. A future write RPC that forgets the guard fails in CI rather than in production.
+
+### Filing a report
+
+There is no insert policy on `reports` and no client write grant anywhere in the schema, so `report(subject_type, subject_id, reason, note?)` is the only way a report can come into existence. An earlier draft created the table and no function, which is a mailbox with no slot.
+
+**The subject's owner is resolved server-side** rather than accepted from the caller. Trusting a client-supplied owner would let anyone attribute a report to an account of their choosing, which is precisely the reporting-as-harassment vector PRD §22 names. A subject the caller cannot see returns "not found" for the same reason api.md §8 collapses missing and forbidden into `BG404`.
+
+Reporting the same subject twice is silently idempotent. Telling the reporter that a report already exists would disclose which of their earlier complaints is still open, which is not their business.
+
+**`reaction` is deliberately not a reportable subject type.** Reactions come from a closed set of six values (PRD §14), so there is nothing in one to report; a reaction someone dislikes is a person they can block.
 
 ### The operator surface
 
