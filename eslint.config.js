@@ -25,9 +25,9 @@ module.exports = [
     },
   },
   {
-    // Command-line scripts under supabase/, where printing a report is the whole
-    // point rather than a leftover debug statement.
-    files: ['supabase/**/*.mjs'],
+    // Command-line scripts, where printing a report is the whole point rather than
+    // a leftover debug statement.
+    files: ['supabase/**/*.mjs', 'web/*.mjs'],
     rules: {
       'no-console': 'off',
     },
