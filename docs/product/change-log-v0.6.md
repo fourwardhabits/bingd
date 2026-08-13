@@ -255,8 +255,6 @@ Added: a `reports` table with the §22 taxonomy and one open report per reporter
 
 Deliberately **not** built: an admin application, an appeals flow, automated detection. For 30–60 users the operator surface is the Supabase SQL editor, and building a console before any triage experience is the expensive way to learn what it should contain. None of the three is acceptable beyond alpha.
 
-Deliberately **not** built: an admin application, an appeals flow, automated detection. For 30–60 users the operator surface is the Supabase SQL editor, and building a console before any triage experience is the expensive way to learn what it should contain. None of the three is acceptable beyond alpha.
-
 ### 7.6 The TMDB gate change
 
 HG-1 was closed on 2026-08-13 by asserting that Bingd "is non-commercial under TMDB's operative test." Three problems: the kickoff brief named that specific assumption as one not to make, `decision-log.md` §10 contradicted it two rows below the row that stated it, and the gate was closed without approval.
@@ -289,6 +287,31 @@ Recorded so neither gets "fixed" later.
 **`feed_events.list_id` was reported as missing a foreign key.** The feed migration declares it as a bare `uuid`, but `20260813000800` adds the constraint once `lists` exists, which is the only order the dependency permits. Adding it again would have created a duplicate constraint on the same column, which Postgres permits and nobody wants.
 
 Both were caught by reading the migrations rather than the documents, which is the general lesson: `data-model.md` explains reasoning and the migrations are what runs, so a claim about the schema has to be checked against the schema.
+
+### 7.9 Six functions were reachable without an account
+
+Found on the first run against a **deployed** project, and findable no other way we had. Migration `20260813001800`.
+
+Postgres grants `EXECUTE` on a new function to `PUBLIC`. So this, written in four separate migrations, does not do what it appears to:
+
+```sql
+create function my_capabilities() ... ;
+grant execute on function my_capabilities() to authenticated;
+```
+
+The grant is **additive** — it adds a role to a set that already contains everyone. It reads as a restriction and is an expansion.
+
+`anon` could execute `my_capabilities`, `assert_can_write`, `report`, and the `rank_*` write paths. Five were saved by `assert_can_write` refusing a caller with no account, so nothing was exploitable; `my_capabilities` had no guard and answered strangers with `["base_free"]`. The containment that did hold came from a guard *inside* each function rather than from the privilege system, which is the part that mattered: the next function written without a guard would have been genuinely open.
+
+The fix is a sweep plus default-deny going forward, not seven revokes — naming the six would have fixed today and left the trap armed. Same reasoning as the table-privilege revoke in `20260813001400` §3: a client-reachable path now needs both a policy and a grant, and neither appears by accident.
+
+Two details were nearly wrong in ways worth recording.
+
+**Extension functions had to be excluded.** `citext` is installed into `public` with no schema clause, its equality operator is implemented by a function, and using an operator checks `EXECUTE` on that function. A truly blanket revoke would have stopped `anon` comparing a username to a string — usernames silently ceasing to resolve, looking nothing like a privilege bug.
+
+**The test that found this was wrong twice before it was right**, and both false-confidence modes are now documented in `remote-smoke.mjs`. Probing every function with `{}` produced a page of passes, because PostgREST answers an argument mismatch with 404. Then, with real arguments, PostgREST's mapping of SQLSTATE class 28 to HTTP 403 made `assert_can_write` raising `unauthenticated` indistinguishable *by status code* from a privilege refusal — the guard was impersonating the control being tested, and four write paths passed because of it. Classification is now on the SQLSTATE.
+
+Pinned locally by `supabase/tests/function-grants.test.mjs`, written as a whole-schema sweep against an allow-list rather than one assertion per function, because the failure mode is *a function nobody remembered to check* — and a per-function test only covers the ones someone already thought of.
 
 ### 7.8 Scope
 

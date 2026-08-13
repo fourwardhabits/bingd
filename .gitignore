@@ -35,6 +35,11 @@ build/
 design-references/
 *.zip
 
+# Supabase CLI local state. .temp holds the linked project ref and pooler
+# details; the migrations and tests beside it are the versioned part.
+supabase/.temp/
+supabase/.branches/
+
 # Logs and caches
 *.log
 npm-debug.*
@@ -46,6 +51,8 @@ coverage/
 
 # Scratch
 .commit-msg.tmp
+.pr-body.tmp
+.remote-schema.sql
 
 # Editor and OS
 .DS_Store

@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "jest",
-    "test:db": "node --test \"supabase/tests/*.test.mjs\""
+    "test:db": "node --test \"supabase/tests/*.test.mjs\"",
+    "test:remote": "node supabase/tests/remote-smoke.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/dm-serif-display": "^0.4.2",
