@@ -196,11 +196,44 @@ create unique index on media_items (kind, tmdb_id) where kind in ('movie','serie
 create unique index on media_items (parent_id, season_number) where kind = 'season';
 create index on media_items using gin (genres);
 create index on media_items (title text_pattern_ops);
+
+-- Added 2026-08-13 with the seed catalogue; see Provenance below.
+alter table media_items
+  add column provenance   catalogue_provenance not null default 'tmdb',
+  add column wikidata_qid text;
 ```
 
 One table for movies, series, and seasons (AD-1). Seasons carry a `parent_id` to their series. **Only `movie` and `season` rows are ever rankable** — series exist for browsing and grouping, and PRD §10 forbids ranking a whole series.
 
 The rankable category is derived, not stored: `movie` → `movies`, `season` → `tv_seasons`.
+
+### Provenance — added 2026-08-13
+
+```sql
+create type catalogue_provenance as enum ('tmdb', 'wikidata', 'manual');
+
+alter table media_items
+  add column provenance   catalogue_provenance not null default 'tmdb',
+  add column wikidata_qid text;
+
+create unique index on media_items (wikidata_qid) where wikidata_qid is not null;
+```
+
+The table was designed around one provider, and PRD §19 requires TMDB-derived metadata to refresh or reduce to an identifier inside six months. `fetched_at` measures the window, but nothing said whether the window applied, so a retention job would have had to treat every row as TMDB's or none of them.
+
+That became concrete with the seed catalogue below, whose rows are CC0 and expire never. **The default is `'tmdb'` on purpose**, even though it is the one that causes work: the two ways of being wrong are not symmetrical. Defaulting to `'tmdb'` can expire a row that need not expire, which costs a refetch. Defaulting to `'wikidata'` would silently exempt provider data from the six-month rule and turn a forgotten argument into a licence breach.
+
+`wikidata_qid` is how a refresh finds the row it produced, and how a title stays identifiable if its `tmdb_id` turns out to be wrong.
+
+### The seed catalogue — added 2026-08-13
+
+`20260813002500_seed_catalogue.sql` inserts roughly 380 films, 190 series and 1,400 seasons. It is generated — `supabase/seed/fetch-catalogue.mjs` queries Wikidata into `catalogue.json`, and `make-seed-migration.mjs` writes the migration from it. Neither runs in CI, and the SQL is never hand-edited.
+
+**Why it exists.** Nothing can enter `media_items` yet: the provider adapter is unwritten, and the licence question governing it is unanswered — TMDB's terms make anything beyond personal use a commercial negotiation, and no answer has come back. A catalogue is needed to test the core loop now. Wikidata's content is CC0: no attribution obligation, no retention window, and nothing to renegotiate when a private test stops being private.
+
+**Why a migration rather than a script.** `supabase db push` is already how every environment gets its schema and the harness already replays every migration, so a seed arriving that way needs no second mechanism and no step anyone can forget. `app_config` is seeded the same way. A refresh is a new generated migration whose upserts correct the same rows; that they do is asserted, because a mistaken conflict target would double the catalogue rather than fail.
+
+**What it does not have.** No posters, because a poster is not a free work and Wikidata has none to give — so the client must look right without artwork, which is better learned now than after screens assume it. No `popularity`, because PRD §19 defines that as the provider's score; the ordering that chose these titles is Wikipedia sitelink count, a proxy for "widely known" and not the same measure. Every row does carry its `tmdb_id`, so once the licence is settled the adapter enriches these rows in place instead of building a second catalogue beside them.
 
 ```sql
 create table media_cache (

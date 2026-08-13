@@ -102,6 +102,8 @@ npm start
 | `npm test` | Jest, including the contrast assertions |
 | `npm run test:db` | Applies every migration to real Postgres and tests the ranking engine |
 | `npm run test:remote` | Probes a deployed project from an unauthenticated client's position |
+| `npm run seed:fetch` | Rebuilds `supabase/seed/catalogue.json` from Wikidata. Run by hand, never in CI |
+| `npm run seed:migration` | Writes the seed catalogue migration from that dataset |
 
 `APP_VARIANT` selects the build variant — `development`, `preview`, or `production` — which sets the bundle identifier, the app name, and the backend. Non-production builds carry a visible environment badge.
 
@@ -122,6 +124,12 @@ That matters most for ranking, which is the component most likely to corrupt dat
 Row-level security **is** enforced: the harness creates the three Supabase roles and switches into them, because a query run as the table owner skips every policy. That was not always true, and the period when it wasn't is instructive — the suite would have passed with the policies deleted, and an independent review found four holes living in that blind spot.
 
 One limit remains: `citext` is unavailable in the WebAssembly build and is shimmed as `text`, so case-insensitive uniqueness is not exercised locally. It has little practical consequence, since `profiles.username_format` forbids uppercase from being stored at all.
+
+The migrations are applied once per process and the result reloaded per test file, because the seed catalogue is two thousand rows and replaying it each time nearly tripled the suite. The snapshot comes from the real migrations in the real order, not from a schema dump kept beside them, so it cannot drift into disagreeing with production.
+
+### There is a catalogue, and it is not TMDB's
+
+`supabase/seed/` holds about 380 films, 190 series and 1,400 seasons seeded from Wikidata, shipped as a generated migration so every environment and every test run has titles to work with. It exists because the provider adapter is unwritten and the licence question governing it is unanswered, and because Wikidata is CC0 — no attribution obligation, no retention window, nothing to renegotiate. There are no posters, since a poster is not a free work; the client is expected to look right without them. Every row keeps its TMDB id, so the adapter will enrich these rows in place rather than start again. `docs/architecture/data-model.md` §4 has the reasoning.
 
 ### And a check the local suite cannot perform
 
