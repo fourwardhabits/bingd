@@ -166,11 +166,18 @@ It does **not** cover a build installed from Play. Play App Signing strips the u
 
 `preview` and `development` have no fingerprints because EAS creates a keystore per application identifier and those identifiers have none yet. Android links will not verify in those variants until they do, which is worth knowing before concluding that deep linking is broken.
 
-### One thing that is not yet safe, and should be before any store build
+### Build environment variables, and why `production` is deliberately empty
 
-Build-time environment variables are not configured in EAS. `.env` is gitignored and EAS uploads only tracked files, so a build gets no Supabase URL — and `src/lib/env.ts` throws **at app start**, not at build time. So the failure is loud but late: the build succeeds, the app dies on open.
+`.env` is gitignored and EAS uploads only tracked files, so a build reads nothing from it. The four publishable values are set as EAS environment variables instead, scoped to the `development` and `preview` environments:
 
-Worse is the shape it takes once values do get set carelessly, because there is currently only one Supabase project. Set them once at the account level and a `production` build points at `bingd-nonprod`, and nothing anywhere says so — the badge is off in production builds, which is exactly when you would want the warning. Per-environment EAS variables scoped to `production` are the fix, and it needs `bingd-production` to exist first. Tracked, not done.
+```
+EXPO_PUBLIC_SUPABASE_URL          EXPO_PUBLIC_SENTRY_DSN
+EXPO_PUBLIC_SUPABASE_ANON_KEY     EXPO_PUBLIC_POSTHOG_KEY
+```
+
+`production` has **none**, on purpose, and that is the load-bearing part. `bingd-production` does not exist yet, so the only Supabase project available is the alpha one. Setting these at account scope instead would make a production build talk to `bingd-nonprod` while telling nobody — production is exactly where the environment badge is suppressed. Leaving `production` empty converts that silent mistake into `src/lib/env.ts` throwing on launch. Fill it in when the production project exists, not before.
+
+Note the failure is at **app start**, not build time: a misconfigured build still succeeds and then dies on open. Loud, but late.
 
 ---
 
