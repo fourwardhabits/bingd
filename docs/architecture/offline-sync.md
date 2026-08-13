@@ -65,22 +65,24 @@ create table outbox (
 Every outbox-eligible RPC opens with:
 
 ```sql
-insert into processed_operations (operation_id, user_id)
-values (p_operation_id, auth.uid())
-on conflict (operation_id) do nothing;
-
-if not found then
+if not _claim_operation(p_operation_id, 'log_watched') then
   return jsonb_build_object('status', 'already_applied');
 end if;
 ```
 
-A replay is therefore a no-op that returns success rather than an error, which matters because the common cause of a replay is a response lost on a flaky connection — the write did land, and the client simply never heard back.
+A replay is therefore a no-op that returns success rather than an error, which matters because the common cause of a replay is a response lost on a flaky connection: the write did land, and the client simply never heard back.
+
+**The ledger is keyed per account — corrected 2026-08-13.** This document previously specified `on conflict (operation_id)` against a globally unique key, and `20260813000100` built the table that way. The key is now `(user_id, operation_id)`. Under a global key, an id one account has already claimed silences the same id sent by another: the write is skipped, `already_applied` comes back, and the second client reports success because the response says so. The row simply never appears.
+
+Being exact about what that needs, because the alarming version of the story does not hold up: for the *other* account to be the one silenced, its id must be burned before it sends it, which means knowing a v4 uuid generated on someone else's device — and no API, table policy or error surface exposes one. As a targeted attack it is not reachable. What is reachable is disclosure by accident: operation ids travel in crash reports and support screenshots, and an outbox surviving an account switch on a shared device carries one account's ids into another's session. The narrower key is worth it because it stops the question from needing an answer at all — idempotency only ever needs to hold within one device's queue, every queue belongs to one account, and scoping it that way gives up nothing.
 
 ### Ordering
 
 Operations drain **in creation order**, one at a time. Parallel draining would be faster and wrong: `set_list_item(add)` followed by `set_list_item(remove)` must not arrive reversed.
 
 Retries use exponential backoff with jitter, capped at roughly five minutes. After a configurable number of failures an operation moves to `failed` and surfaces in Settings.
+
+**Note edits coalesce per title — Required.** `save_note` is the one queued write that carries a base version, and two queued edits to the same note share the base captured before either of them, so draining them in order makes the second conflict with the user's own first edit. A note is a draft and only its latest text matters, so the queue keeps **one** `save_note` per title: newest text, original base, and the `operation_id` of the entry it replaces so the id still corresponds to one user action. A client that would rather drain them separately can instead carry the `note_version` each call returns forward as the next base. Ordering above still holds; this is a rule about what goes into the queue, not about how it comes out.
 
 ### The allowlist is not sufficient on its own — Required
 
@@ -120,7 +122,14 @@ The synced state shows nothing at all. A persistent green tick trains people to 
 
 Notes are the only free text a user writes, so losing one to a silent overwrite is a real loss rather than an inconvenience. When a note is edited offline and the server copy has also changed, both versions are kept and the user chooses.
 
-**How that is detected — Required.** The rule above was unimplementable as written: nothing in a `save_note` call said which version the edit was based on, and `user_media.updated_at` was set once on insert and never advanced, so the server had no version to compare against and would have overwritten silently while this document promised it would not. Two additions close it. A trigger maintains `updated_at`, and outbox replays of `save_note` must carry `p_base_updated_at` — the value the device held when the user typed. A mismatch raises `BG409` with both texts, and the client presents the choice. Online edits may omit the parameter, since divergence is only possible across a queue.
+**How that is detected — Required.** The rule above was unimplementable as written: nothing in a `save_note` call said which version the edit was based on, and `user_media.updated_at` was set once on insert and never advanced, so the server had no version to compare against and would have overwritten silently while this document promised it would not. Outbox replays of `save_note` now carry `p_base_updated_at` — the value the device held when the user typed — and a mismatch raises `BG409`. Online edits may omit the parameter, since divergence is only possible across a queue.
+
+**The version belongs to the note, not the row — corrected 2026-08-13.** The first implementation compared against `user_media.updated_at`, which every write to the row advances. Under this document's own drain contract that is a guaranteed false conflict: §3 queues a bucket tap and a note edit in the order the user made them, `set_bucket` drains first and moves `updated_at`, and the note edit then arrives with a base that no longer matches. The prompt would appear on most offline sessions, about a note nothing else had touched. `user_media.note_updated_at` advances only when the note text changes, so unrelated writes no longer disturb a queued edit.
+
+**What the client must do — Required.** Two consequences, both on the client side:
+
+- **Coalesce note edits per title in the outbox.** Two queued edits to the same note share the base captured before either was written, so the second collides with the user's own first edit. A note is a draft and only the latest text matters, so the queue should keep one entry per title with the newest text and the original base. `save_note` also returns `note_version`, which a client that prefers to drain them separately can carry forward as the next base.
+- **Read the note back on `BG409`.** The payload deliberately carries the server's version and not the server's text: Postgres logs an exception's `DETAIL`, and PRD §22 classifies a note as always-private, so putting it there would deposit private text into operator-visible logs on every conflict. The client owns the row and reads its own note to present the choice.
 
 An operation targeting an object that has been deleted or has become inaccessible fails with `BG404`, is removed from the queue, and produces a plain-language explanation rather than an indefinite retry.
 
@@ -162,4 +171,6 @@ Every row of the PRD §18 matrix is tested in both connectivity states. Beyond t
 - A note edited both offline and on another device produces a user-visible choice, never a silent overwrite.
 - The `pending` marker is present on every optimistic update until the server confirms.
 - `set_bucket` and `unlog` against a **ranked** title are refused with `BG409` in both connectivity states, and the client offers the online-only path rather than the queue. Asserted per function, because the allowlist cannot express a row-state condition.
-- A queued `save_note` whose `p_base_updated_at` is stale raises `BG409` and returns both texts. Asserted with a deliberate second-device edit between the queue and the drain, since a test that only replays its own write will pass while the mechanism is absent.
+- A queued `save_note` whose `p_base_updated_at` is stale raises `BG409`. Asserted with a deliberate second edit between the base being read and the stale write arriving, and by checking that the superseding text survives — a test that fabricates staleness from an arbitrary timestamp passes while the version trigger is absent, which is how the first version of this test escaped the gap it was written to close.
+- A bucket or watch-date write between a note being read and the queued edit draining does **not** raise. This is the same mechanism from the other side, and it fails against a row-level version, so it is what keeps §5's correction from regressing.
+- A failed operation leaves no row in `processed_operations`, so the outbox entry stays retryable rather than answering `already_applied` for a write that never happened.

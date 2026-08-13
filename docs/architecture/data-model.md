@@ -244,7 +244,8 @@ create table user_media (
   note          text,
   source        content_source not null default 'in_app',
   created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  note_updated_at timestamptz,
   primary key (user_id, media_item_id)
 );
 
@@ -274,7 +275,9 @@ create index on rankings (user_id, category, position);
 
 **Why the unique constraint is deferrable.** Insertion shifts every position at or below the insertion point (AD-2). That `UPDATE` transiently produces two rows with the same position. A deferred constraint checks at commit, by which time the shift is complete.
 
-`bucket` appears on both tables. On `user_media` it is the user's reaction; on `rankings` it identifies the band. They are kept in step by the ranking RPCs, which are the only writers of either.
+`bucket` appears on both tables. On `user_media` it is the user's reaction; on `rankings` it identifies the band. They are kept in step by the ranking RPCs and by `set_bucket`, which refuses a title that is already ranked rather than moving one side of the pair.
+
+**Why the note has its own timestamp.** `updated_at` answers "when did this row last change," which is what a bucket tap, a watch date, and a note edit all change. `note_updated_at` answers "when did the note last change," and only a note edit advances it. `offline-sync.md` §5's conflict rule needs the second question: keyed to `updated_at`, an ordinary offline bucket tap invalidated a queued note edit and produced a conflict prompt about a note nothing had touched. Null means no note has ever been stored, so there is nothing a stale edit could destroy.
 
 ```sql
 create table comparisons (
@@ -686,15 +689,19 @@ Holds the push delivery flag (AD-10), cache retention windows (AD-8), and every 
 
 ```sql
 create table processed_operations (
-  operation_id uuid primary key,
+  operation_id uuid not null,
   user_id      uuid not null references profiles(id) on delete cascade,
-  processed_at timestamptz not null default now()
+  kind         text,
+  processed_at timestamptz not null default now(),
+  primary key (user_id, operation_id)
 );
 ```
 
-Every outbox-eligible RPC begins by inserting here. A duplicate key means the operation already ran, and the function returns the prior result rather than repeating the write. This is the whole of PRD §18's idempotency requirement, in one table.
+Every outbox-eligible RPC begins by inserting here. A duplicate key means the operation already ran, and the function answers `{"status": "already_applied"}` — not the prior result, which is not stored — and repeats no write. This is the whole of PRD §18's idempotency requirement, in one table.
 
-Rows older than 30 days are pruned by a scheduled job.
+**The key is per account, not global — corrected 2026-08-13.** `20260813000100` built it as `operation_id uuid primary key`, and `20260813002300` narrowed it when the first real callers arrived. Ids are generated on the device, so a shared key means an id disclosed by one account can silence another's genuine write while its client reports success. Idempotency only has to hold within one account's queue, so scoping it there costs nothing. The same migration added the foreign key this section had described all along, so a deleted account no longer leaves its ledger behind. `kind` records which function claimed the id, for debugging a stuck outbox.
+
+**No prune job exists yet.** This section previously said rows older than 30 days were pruned by a scheduled job; nothing schedules anything. The `processed_at` index is in place for when one is written, and the table grows unbounded until then — a few rows per write per user, which is not a problem at alpha scale and is not a permanent answer.
 
 ---
 

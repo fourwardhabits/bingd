@@ -56,6 +56,17 @@ const ALLOWED = {
   'rank_reorder(uuid,integer)': ['authenticated'],
   'rank_rebucket(uuid,taste_bucket)': ['authenticated'],
   'report(report_subject,uuid,text,text)': ['authenticated'],
+
+  // The collection writes (api.md §1). Their helpers are absent on purpose:
+  // _media_kind and _assert_unranked answer questions about a row, _claim_operation
+  // called directly would let a client burn an operation id so that a later genuine
+  // write returns success without happening.
+  'log_watched(uuid,uuid,date,text)': ['authenticated'],
+  'set_bucket(uuid,uuid,taste_bucket)': ['authenticated'],
+  'unlog(uuid,uuid)': ['authenticated'],
+  'set_watchlist(uuid,uuid,boolean)': ['authenticated'],
+  'set_season_progress(uuid,uuid,season_progress)': ['authenticated'],
+  'save_note(uuid,uuid,text,timestamp with time zone)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {

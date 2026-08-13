@@ -144,6 +144,14 @@ An implementation agent may resolve these using documented best practice. They a
 - Push delivery service configuration behind the feature flag
 - Letterboxd title-matching algorithm and its ambiguity threshold
 - Database index strategy
+- Note length cap (2000 characters, chosen in `20260813002300`; nothing in the PRD specifies one)
+
+### Known and deferred
+
+Not questions so much as work deliberately not done yet, recorded so it is not rediscovered as a surprise.
+
+- **Bucket desync between `set_bucket` and a concurrent ranking.** `set_bucket` checks that the title is unranked and then upserts, with no lock across the two statements, so one account ranking the same title from a second device in that window leaves `user_media.bucket` disagreeing with `rankings.bucket` — an I3 violation. It needs the same account writing twice in the same instant and costs one desynced bucket, no data loss. Closing it means the seven ranking RPCs and `set_bucket`/`unlog` taking a shared advisory lock on `(user_id, media_item_id)`, which is a change across two migrations and was not worth bundling into the collection writers.
+- **`processed_operations` is never pruned.** The index for it exists; the scheduled job does not. A few rows per write per user, so it is an alpha-scale non-problem and a real one later.
 
 ---
 
