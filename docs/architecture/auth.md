@@ -112,3 +112,38 @@ Rules for that state:
 | Token refresh after a long offline period | Session restored, outbox drains under the same identity |
 
 The unverified-email row is the one to write first and the one to keep. It is the only test in the matrix that fails *open* — an implementation that gets it wrong looks entirely correct from the outside, because the user reaches an account, and it happens to be someone else's.
+
+---
+
+## 8. Implementation status — added 2026-08-13
+
+Built: session storage, the three sign-in methods, the authenticated-without-a-profile state, and account creation. `create_profile` and `username_available` are in `supabase/migrations/20260813002200_signup.sql`; the client is in `src/features/auth/`.
+
+Two decisions in the build are worth recording because the obvious alternative is wrong in each case.
+
+**The under-13 refusal is a returned value, not an error.** §4 requires the account to be *deleted* on refusal, and a function that raises cannot delete anything — the exception rolls the transaction back, deletion included, so the account survives every attempt to remove it. `create_profile` therefore answers `{"ok": false, "reason": "under_13"}` for that one case and raises for everything else, since rolling back is the correct outcome for a taken username or a malformed date. A consequence worth stating: an under-13 date is destructive in a way no other field on the form is, so the client confirms the date before submitting rather than after.
+
+**Session tokens are chunked.** §5's requirement for `expo-secure-store` is not a drop-in swap for `AsyncStorage`: iOS Keychain rejects values much above 2 KB and a real Supabase session exceeds that. An unchunked adapter works for the whole of development and then fails on a live token, with the symptom being a user signed out on every cold start. `src/lib/session-storage.ts` splits values and writes the chunk count last, so an interrupted write reads as absent rather than as a short value.
+
+### Not yet done
+
+**§2 linking is enforced by Supabase's defaults, not by Bingd — and the default is the safe one.** An earlier draft of this section called this the row that fails open, on the reasoning that nothing in Bingd's code enforces §2 and an unverified email linking into an existing account would be an account takeover that looks like a normal sign-in. An independent review checked the actual behaviour rather than the worry: Supabase's identity-linking documentation states that automatic linking requires a verified email, and GoTrue's `internal/models/linking.go` decides `CreateAccount` unconditionally when the provider asserts no verified email, blanking the candidate address where it would duplicate an existing account. It never reaches `LinkAccount` on that path.
+
+So the outcome of the dangerous row is a **duplicate account**, not a takeover. That is visible, recoverable, and the correct failure. What remains is a divergence from spec rather than a hole: §2 promises a fixed refusal message and the user silently gets a second account instead, and there is no Settings flow to merge the two. Both should be closed, and neither is urgent.
+
+The live check is still worth doing once, because the above is evidence about documented behaviour and published source rather than about the GoTrue version this project is deployed against. It is no longer a gate on distributing a build.
+
+**The remaining matrix rows** — returning users by each method, Hide My Email on second authorization, adding a method from Settings — need a device and a real provider, so they are manual for now. Settings has no link-a-method screen at all yet, which §3 notes is load-bearing for Apple relay users rather than a convenience.
+
+**Abandoned sessions are not pruned**, which §4 said they would be. `sendEmailCode` passes `shouldCreateUser: true`, so every code request mints a permanent `auth.users` row for whatever address was typed, whether or not anyone ever verifies it, and nothing removes the profile-less ones. It needs a scheduled job deleting rows older than some window with no `profiles` row. Worth knowing before writing it: that job runs into the same delete-privilege question as the age gate below, so it is a good place to discover a non-cascading foreign key.
+
+**Sign-out does not clear an outbox or a SQLite cache**, because neither exists. §5 requires it when they do.
+
+**The age gate's deletion is verified only against the test harness.** In PGlite, `auth.users` is a shim table owned by the same role that owns the function, so the delete is trivially permitted and cascades to nothing; on hosted Supabase the table belongs to `supabase_auth_admin`. The delete should succeed, since a `postgres`-owned definer function is Supabase's own documented pattern and GoTrue's dependent tables cascade, but that is reasoning rather than observation. `create_profile` now raises rather than returning `ok: false` if the delete fails, so the failure cannot masquerade as a successful refusal, and one live probe against the running project would retire the question.
+
+### Two settings this depends on
+
+Both are in the Supabase dashboard, and both fail in ways that do not name their cause.
+
+1. **The email template must contain `{{ .Token }}`.** Supabase's default sends `{{ .ConfirmationURL }}`, a magic link. The app asks for a six-digit code, so with the default template the email arrives with no code in it and the verification screen has nothing to accept. Authentication → Emails → Magic Link.
+2. **The OAuth redirect must be registered.** Google returns to `Linking.createURL('auth/callback')`, which resolves per variant — `bingd://auth/callback`, `bingd-preview://auth/callback`, `bingd-dev://auth/callback`. An unregistered value is refused by Supabase before the provider is ever reached.

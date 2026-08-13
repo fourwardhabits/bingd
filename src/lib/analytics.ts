@@ -35,6 +35,11 @@ type Surface = 'onboarding' | 'search' | 'collection' | 'import' | 'recommendati
 export type AnalyticsEvent =
   | { name: 'app_opened'; props?: undefined }
   | { name: 'sign_in_completed'; props: { method: 'email_code' | 'apple' | 'google' } }
+  // Separate from sign_in_completed because they are different failures. A gap
+  // between the two is people who authenticated and then abandoned the profile
+  // form — the state auth.md §4 exists to describe — and that is invisible if one
+  // event covers both.
+  | { name: 'account_created'; props?: undefined }
   | { name: 'onboarding_completed'; props: { seconds: number; titlesRanked: number } }
 
   // The core loop. PRD §28 defines activation as ten ranked titles, so the

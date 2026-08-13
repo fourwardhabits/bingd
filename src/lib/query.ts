@@ -9,6 +9,9 @@ import { QueryClient } from '@tanstack/react-query';
  */
 export const queryKeys = {
   capabilities: () => ['capabilities'] as const,
+  // Keyed by user id so a sign-out followed by a different sign-in cannot read the
+  // previous account's profile out of the cache.
+  myProfile: (userId: string) => ['my-profile', userId] as const,
   collection: (userId: string) => ['collection', userId] as const,
   rankings: (userId: string, category: string) => ['rankings', userId, category] as const,
   feed: (cursor?: string) => ['feed', { cursor }] as const,

@@ -274,6 +274,7 @@ describe('the guard is wired in, not merely present', () => {
     'list_items_by_list',
     'my_capabilities',
     'unranked_queue',
+    'username_available',
   ];
 
   /** Client-executable functions whose body does not call the guard. */
