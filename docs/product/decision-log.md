@@ -43,7 +43,7 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 | ~~INF-1~~ | ~~Letterboxd star ratings auto-map to buckets~~ | **Confirmed by the founder on 2026-08-12.** Now a founder decision — see §4 | — |
 | INF-2 | Usernames may be changed once per 30 days; the previous username redirects for 90 days, then releases and can never be instantly reused | Question A6 was left blank | Share and invite routes depend on `bingd.app/u/<username>`; instant reuse is an impersonation vector |
 | ~~INF-3~~ | ~~Bucket bands partition the ranking~~ | **Confirmed by the founder on 2026-08-12.** Now a founder decision — see §2 | — |
-| INF-4 | Five-tab navigation with Rankings and Lists inside Profile | Founder said to derive design decisions from the brand guidelines | Derived, not directed. Marked Provisional in the PRD |
+| ~~INF-4~~ | ~~Five-tab navigation with Rankings and Lists inside Profile~~ | **Revisited during design and changed. Confirmed by the founder on 2026-08-13** — see §12 | — |
 | INF-5 | Activation is defined as "ranked 10 titles" with no time bound for attribution, and "ranked 10 titles within 24 hours" for the activation-rate metric | v0.5 used two near-definitions; neither was chosen by the founder | One canonical definition is needed for invite and share attribution to be reportable |
 
 ---
@@ -241,8 +241,11 @@ Derived from the brand system in PRD §5 at founder instruction, not separately 
 | Theme | Parchment light only in v1. Tokens structured so Midnight dark mode is purely additive later | §5 frames Midnight as optional |
 | Corner radius | 12px cards, 8px inputs, full-round for avatars only. No pill buttons | Serif type and pill shapes conflict |
 | Motion | Minimal, with one exception: the ranking reveal earns real animation | "Every surface should earn its place" |
-| Navigation | **Provisional (INF-4).** Five tabs: Feed, Search, center **+** to log, Recommendations, Profile. Rankings and Lists live inside Profile | Your ranking is your identity |
+| Navigation | **Decided 2026-08-13.** Five tabs: Feed, Collection, center **+** to log, Recommendations, Profile. No Search tab — the **+** and title search are the same action | Reference evidence, `../design/screens.md` §2 |
 | Reference discipline | Apple TV, Apple Wallet, and Open inform **design language**. Spotify, Cash App, Strava, and Beli inform **flows only** | Founder instruction |
+| Comparison context | **Decided 2026-08-13.** A comparison card never shows the opponent's current rank | An ordinal is an anchor that invites agreement instead of a real judgment |
+| Amber and Sage | **Decided 2026-08-13.** Fill colors only, never text. Both measure below 2.2:1 on Parchment and fail WCAG at every size | Measured, `../design/design-system.md` §1 |
+| Artwork on Parchment | **Decided 2026-08-13.** Posters are printed objects on a page — hairline border, soft shadow, real margins — and are the only color on any surface where they appear | Apple Wallet precedent, `../design/design-system.md` §1 |
 
 ---
 

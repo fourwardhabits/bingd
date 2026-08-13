@@ -311,13 +311,13 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 | Area | Purpose | Key elements |
 |---|---|---|
 | Feed | Social activity and lightweight discovery | Ranks, watches, list adds, milestones; chronological; reactions; tags visible |
-| Search / Discover | Find titles, filter the catalog, find people | Global online search; Movies/TV toggle; cached own-collection search offline; People and leaderboard |
+| Collection | The user's own working surface | Ranked (Movies / TV Seasons), Logged, Watchlist, Lists; title search in the header |
 | **+** (center action) | Log and rank | Search, mark watched, choose bucket, tag people, compare |
 | Recommendations | Instant personalized suggestions | Guarded slate, explanations, add to watchlist, dismiss |
-| Profile | Identity, collection, and organization | Rankings (Movies / TV Seasons tabs), Logged collection, Lists, basic stats, followers and following, invite entry point |
+| Profile | Public identity and social standing | Basic stats, top of the ranking, match, leaderboard, followers and following, people search, invite entry point, settings |
 | Settings | Account, privacy, notifications, offline state | Invite Friends, privacy toggle, notification preferences, data export, cache and sync status, account deletion |
 
-> **Provisional (INF-4).** Five tabs: Feed, Search, **+**, Recommendations, Profile. Rankings and Lists live inside Profile on the logic that a ranking *is* an identity. Tab count and arrangement are expected to be revisited during design. Sharing appears contextually on artifacts, never as a tab.
+> **Decided 2026-08-13, superseding Provisional INF-4.** Five tabs: **Feed, Collection, +, Recommendations, Profile.** The collection gets a top-level tab rather than sitting inside Profile, because it is the surface a user returns to daily and the artifact the product exists to produce; Profile stays the public-facing identity page. There is no Search tab — searching for a title is how you log one, so the center **+** and title search are the same entry point, with a header affordance on Feed and Collection. People search lives in Profile and the invite flow. Sharing appears contextually on artifacts, never as a tab. Reasoning and evidence in `../design/screens.md` §2.
 >
 > **Renamed from v0.5.** The area formerly called "Settings / Subscription" is now **Settings**. Plan management and restore are paid-beta-only and do not exist in v1.
 
@@ -1572,7 +1572,7 @@ All six product decisions that blocked architecture at v0.5 are resolved (see `o
 
 **Conditions attached:**
 
-1. **Three inferences (INF-2, INF-4, INF-5)** are recorded as decisions but were made by the agent, not the founder. All three are cheap to reverse: INF-4 is already marked Provisional, and INF-5 only needs settling before attribution reporting is built. INF-1 and INF-3 — the two expensive ones — were both confirmed by the founder on 2026-08-12.
+1. **Two inferences (INF-2, INF-5)** are recorded as decisions but were made by the agent, not the founder. Both are cheap to reverse; INF-5 only needs settling before attribution reporting is built. INF-1 and INF-3 — the two expensive ones — were confirmed by the founder on 2026-08-12, and INF-4 was revisited during design and confirmed on 2026-08-13.
 2. **HG-1 (TMDB)** should be sent immediately. The six-month caching conflict could change the offline design in §18, and a reply may take weeks.
 3. **HG-6 (brand assets)** blocks Phase 9, not Phase 0.
 

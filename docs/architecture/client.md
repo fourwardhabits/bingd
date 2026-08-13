@@ -12,7 +12,7 @@ Expo, React Native, TypeScript. One codebase, three variants.
 ```
 app/                        Expo Router — file-based routes
   (auth)/                   sign-in, sign-up, onboarding
-  (tabs)/                   feed, search, log, recommendations, profile
+  (tabs)/                   feed, collection, log, recommendations, profile
   title/[id].tsx
   u/[username].tsx
   lists/[id].tsx
@@ -33,15 +33,15 @@ Expo Router is used because deep links are a product requirement, not an afterth
 
 ---
 
-## 2. Navigation — Provisional (INF-4)
+## 2. Navigation — Decided 2026-08-13
 
-Five tabs: **Feed · Search · + · Recommendations · Profile**, with Rankings and Lists inside Profile.
+Five tabs: **Feed · Collection · + · Recommendations · Profile**.
 
-The reasoning is that a ranking *is* an identity, so it belongs with the profile rather than competing with it for a tab. The center **+** is the log-and-rank entry point, which is the action the product most wants to be frictionless.
+Collection holds Ranked, Logged, Watchlist, and Lists — the user's working surface. Profile is the public identity page and holds stats, match, and the leaderboard. The center **+** is the log-and-rank entry point and opens directly into title search, which is why there is no separate Search tab.
 
-Marked Provisional in the PRD and expected to change during design. Nothing else in the architecture depends on it.
+This replaces the Provisional INF-4 arrangement, which put rankings and lists inside Profile. Reasoning and reference evidence in [`../design/screens.md`](../design/screens.md) §2.
 
-**It has changed.** [`../design/screens.md`](../design/screens.md) §2 proposes **Feed · Collection · + · Recommendations · Profile**, moving the collection out of Profile and dropping the separate Search tab. Pending founder confirmation; this section is superseded once that lands.
+Route groups follow accordingly: `(tabs)/feed`, `(tabs)/collection`, `(tabs)/log`, `(tabs)/recommendations`, `(tabs)/profile`.
 
 ---
 

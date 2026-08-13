@@ -23,14 +23,16 @@ Read `design-system.md` §1 first. It contains the two findings that changed the
 
 ---
 
-## Open, needing a founder decision
+## Decided during design
 
-| Question | Recommendation |
+| Question | Decision |
 |---|---|
-| Tab structure — supersedes Provisional INF-4 | Feed · Collection · + · Recommendations · Profile |
-| Does the comparison card show the opponent's rank | Hide it |
+| Tab structure — supersedes Provisional INF-4 | **Feed · Collection · + · Recommendations · Profile.** No Search tab; the **+** and title search are the same action |
+| Does a comparison card show the opponent's rank | **No.** An ordinal is an anchor that invites agreement instead of a judgment |
 
-Both are in [`screens.md`](./screens.md) §17 with the reasoning.
+Both confirmed by the founder on 2026-08-13. Reasoning in [`screens.md`](./screens.md) §2 and §4.
+
+Nothing in these documents is blocking. What remains open — illustration style, nudge copy — is in [`screens.md`](./screens.md) §17.
 
 ---
 

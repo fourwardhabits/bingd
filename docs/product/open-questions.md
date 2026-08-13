@@ -64,13 +64,11 @@ Confirmed by the founder. Star ratings auto-map to buckets (4.0+ → *Loved it*,
 
 Confirmed by the founder. All *Loved it* titles rank above all *It was fine* titles, which rank above all *Not for me* titles. Comparisons run only within a band, which is the mechanism that keeps them short and avoids asking a user to compare titles they placed at different reaction levels. This is now a founder decision, recorded in `decision-log.md` §2 and implemented as invariant **I2** in `../architecture/ranking.md`.
 
-### INF-4 — Navigation structure
+### ~~INF-4 — Navigation structure~~ — **RESOLVED 2026-08-13**
 
-**Recorded as:** Five tabs — Feed, Search, center **+** to log, Recommendations, Profile — with Rankings and Lists inside Profile.
+Revisited during design and changed, as anticipated. The tabs are **Feed, Collection, +, Recommendations, Profile**. The collection moves out of Profile to a top-level tab, and the separate Search tab is dropped because the center **+** and title search are the same action.
 
-**Why it is an inference:** The founder asked the agent to derive design decisions from the brand guidelines rather than answering directly. v0.5 left tab count Open.
-
-**Cost to overturn:** Low. Marked Provisional. Expected to be revisited during design.
+The evidence is in `../design/screens.md` §2: both reference apps give the user's own collection a top-level tab and neither hides it behind a profile, and in Beli the center button *is* search. Confirmed by the founder and now a founder decision, recorded in `decision-log.md` §12.
 
 ### INF-5 — Definition of activation
 

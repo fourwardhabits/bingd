@@ -161,17 +161,17 @@ Everything else from v0.5 is preserved in substance. Where phrasing changed, it 
 
 ## 5. Inferences introduced in v0.6
 
-Five decisions were made by the agent because the founder did not answer. They are recorded as decisions so work can proceed, and flagged in `open-questions.md` §2 so they cannot be mistaken for founder direction. **The two expensive ones have since been confirmed.**
+Five decisions were made by the agent because the founder did not answer. They are recorded as decisions so work can proceed, and flagged in `open-questions.md` §2 so they cannot be mistaken for founder direction. **Three have since been confirmed by the founder, including both expensive ones.**
 
 | # | Inference | Cost to reverse later |
 |---|---|---|
 | ~~INF-1~~ | ~~Letterboxd star ratings auto-map to buckets on fixed defaults~~ | **Confirmed by the founder on 2026-08-12.** Now a founder decision |
 | INF-2 | Username change policy | Low now, **high after implementation** — share and invite routes depend on usernames |
 | ~~INF-3~~ | ~~Bucket bands partition the ranking~~ | **Confirmed by the founder on 2026-08-12.** Now a founder decision |
-| INF-4 | Five-tab navigation | Low — marked Provisional, expected to change in design |
+| ~~INF-4~~ | ~~Five-tab navigation~~ | **Revisited in design and changed. Confirmed by the founder on 2026-08-13** |
 | INF-5 | Canonical activation definition | Low, but must settle before attribution reporting is built |
 
-The three that remain are all cheap to reverse. None blocks implementation.
+The two that remain are both cheap to reverse. Neither blocks implementation.
 
 ---
 

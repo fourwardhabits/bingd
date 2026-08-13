@@ -37,15 +37,15 @@ Where a screen has an unresolved choice, it is marked **Open** and repeated in �
 
 ---
 
-## 2. Navigation — supersedes Provisional INF-4
+## 2. Navigation — Decided 2026-08-13, superseding Provisional INF-4
 
-[`client.md`](../architecture/client.md) §2 proposed **Feed · Search · + · Recommendations · Profile**, with rankings and lists inside Profile, and flagged it as expected to change during design. It should change, for two reasons.
+[`client.md`](../architecture/client.md) §2 proposed **Feed · Search · + · Recommendations · Profile**, with rankings and lists inside Profile, and flagged it as expected to change during design. It changed, for two reasons.
 
 **The collection is buried.** Both reference apps give the user's own collection a top-level tab and neither hides it behind a profile. Letterboxd's first tab is the user's own films; Beli's second is "Your Lists." A ranking is the thing a Bingd user returns to daily and the artifact the whole product produces, and reaching it through Profile puts the user's private working surface behind their public identity page.
 
 **Search does not need a tab of its own.** In Beli the center button *is* search, because searching for a place is how you log one. The same is true here: you search for a film in order to log it, so the center **+** and the search field are the same action. Keeping both spends a tab slot on a duplicate entry point.
 
-**Recommended:**
+**Decided:**
 
 | Tab | Contents |
 |---|---|
@@ -57,7 +57,7 @@ Where a screen has an unresolved choice, it is marked **Open** and repeated in �
 
 Search for **people** lives in Profile and in the invite flow; search for **titles** lives behind **+** and as a header affordance on Feed and Collection. Leaderboard sits inside Profile because it is a statement about standing among friends, which is identity rather than a daily surface.
 
-**Open — founder confirmation.** This replaces a Provisional decision, so it needs a yes rather than silence.
+Confirmed by the founder on 2026-08-13. Recorded in [`../product/decision-log.md`](../product/decision-log.md) §12.
 
 ---
 
@@ -113,7 +113,7 @@ Progress is shown as a quiet line — "About 3 more" — rather than a bar, beca
 
 The next pivot's poster prefetches while the user decides ([`client.md`](../architecture/client.md) §5). A stall here damages the whole mechanic.
 
-**Open — does the comparison card show the opponent's current rank?** Beli shows the opponent's score (`7.8` in the reference). The Bingd equivalent is its ordinal. Showing it gives useful context; hiding it keeps the judgment clean, since "this is my #2" is an anchor that invites agreement rather than a real comparison. **Recommendation: hide it.** The mechanic's value comes from unanchored preference, and the position is visible everywhere else in the app.
+**The comparison card never shows the opponent's current rank.** Beli shows the opponent's score (`7.8` in the reference) and Bingd deliberately does not show the equivalent ordinal. "This is my #2" is an anchor that invites agreement rather than a real judgment, and the mechanic's whole value is unanchored preference. The position is visible everywhere else in the app. Decided by the founder on 2026-08-13.
 
 ### Reveal
 
@@ -273,9 +273,9 @@ Deliberately out of scope for v1, listed so their absence is not read as an over
 
 ## 17. Open
 
-| # | Question | Recommendation | Blocking |
-|---|---|---|---|
-| 1 | Tab structure — §2 | Feed · Collection · + · Recommendations · Profile | Yes, before any screen is built |
-| 2 | Does the comparison card show the opponent's rank — §4 | Hide it | Yes, small but affects the core mechanic |
-| 3 | Illustration style for empty states and onboarding | Choose a source before the first build | No |
-| 4 | Ranking nudge copy and timing — PRD §15 | Draft alongside notification implementation | No |
+Both of the blocking questions in this section were resolved by the founder on 2026-08-13: the tab structure in §2 and the comparison card in §4. What remains is not blocking.
+
+| # | Question | Working answer |
+|---|---|---|
+| 1 | Illustration style for empty states and onboarding | Choose a source before the first build |
+| 2 | Ranking nudge copy and timing — PRD §15 | Draft alongside notification implementation |

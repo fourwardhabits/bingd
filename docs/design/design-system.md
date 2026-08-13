@@ -296,7 +296,7 @@ Two mechanisms, both cheap, both preventing the failures this document exists to
 
 | Item | Who decides |
 |---|---|
-| Whether the comparison target displays its current position | Founder — [`screens.md`](./screens.md) §4 |
-| Tab structure, which supersedes Provisional INF-4 | Founder — [`screens.md`](./screens.md) §2 |
 | Illustration style for empty states and onboarding | Founder, once a source is chosen |
 | Whether Midnight ships as a dark theme before mass market | Deferred — PRD §5 |
+
+Two items that sat here were resolved by the founder on 2026-08-13: the tab structure ([`screens.md`](./screens.md) §2) and whether a comparison card shows its opponent's rank, which it does not ([`screens.md`](./screens.md) §4).
