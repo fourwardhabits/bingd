@@ -81,7 +81,7 @@ Not new brand colors. Each is a tint or shade of two colors already in the syste
 | `text.primary` | `#242326` | 13.3:1 |
 | `text.secondary` | `#5F5A56` | 5.8:1 — supporting copy |
 | `text.tertiary` | `#6E6862` | 4.7:1 — timestamps, counts, metadata |
-| `text.onFill` | `#242326` | Ink on Amber (7.0:1) or Sage (6.2:1) |
+| `text.onFill` | `#242326` | Ink on Amber (7.0:1) or Sage (6.1:1) |
 | `text.inverse` | `#F5EBDD` | Parchment on Maroon (7.4:1) |
 
 There is no lighter tertiary. A fourth text tone would fall below 4.5:1, and the honest fix for "this is less important" is smaller type or more space, not weaker contrast.
@@ -110,8 +110,8 @@ Three buckets, always in this order, always with a label.
 | Bucket | Color | Token | Ink on fill |
 |---|---|---|---|
 | Loved it | Bingd Maroon `#773744` | `bucket.loved` | — uses `text.inverse` at 7.4:1 |
-| It was fine | Muted Sage `#92A895` | `bucket.fine` | 6.2:1 |
-| Not for me | Stone `#9A8F86` | `bucket.notForMe` | 5.0:1 |
+| It was fine | Muted Sage `#92A895` | `bucket.fine` | 6.1:1 |
+| Not for me | Stone `#9A8F86` | `bucket.notForMe` | 4.9:1 |
 
 **Stone is a derived warm grey**, named so it cannot be mistaken for a brand accent. It reads as receded rather than as a rejection, which matches the product's position: the buckets express *for me* and *not for me*, not good and bad.
 
@@ -232,7 +232,7 @@ The ordinal, rendered as `#18` in Inter 600 on `surface.raised` with a `border.h
 
 `poster.xl`, title beneath in `title2`, nothing else. The card is deliberately bare — no year, no runtime, no genre, no rank. Every additional element is something the user reads instead of deciding, and the mechanic depends on feeling fast.
 
-Whether the comparison target shows its current position is an open question in [`screens.md`](./screens.md) §4.
+The comparison target does **not** show its current position — founder decision, 2026-08-13. Showing it turns a gut call into arithmetic, and the mechanic depends on the answer being instinctive ([`screens.md`](./screens.md) §4).
 
 ### Sheet
 

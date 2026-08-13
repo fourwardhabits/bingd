@@ -1,0 +1,28 @@
+﻿Scaffold the Expo app on SDK 57
+
+Phase 0: the app builds, typechecks, lints, and tests clean, with no product
+feature implemented. Structure follows docs/architecture/client.md rather than
+the default template.
+
+Navigation is the five tabs the founder fixed on 2026-08-13, and the deep-link
+routes from PRD 16 exist as real route definitions so a shared link and the
+in-app screen cannot drift apart.
+
+Two guardrails are wired up because the design review found defects that would
+otherwise have shipped, and discipline alone would not have caught them:
+
+- A lint rule bans colour literals outside src/ui/tokens, so a hardcoded hex
+  cannot reintroduce the contrast defect design-system.md opens with.
+- A contrast test computes WCAG ratios for every permitted foreground and pins
+  each to the value printed in the design tables. It also asserts Amber and
+  Sage still fail on Parchment, so the fills-never-ink rule cannot be quietly
+  undone. It immediately caught two ratios rounded wrongly by hand: Ink on Sage
+  is 6.1 not 6.2, and Ink on Stone is 4.9 not 5.0. Both still clear AA, so the
+  design is unchanged and the tables are corrected.
+
+Share-destination URL schemes are declared in the native config even though v1
+routes through the OS share sheet and never calls them, since a manifest entry
+cannot ship over the air.
+
+Also resolves a stale cross-reference in design-system.md that still described
+the comparison card's opponent rank as an open question after it was decided.

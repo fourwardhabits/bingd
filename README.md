@@ -8,14 +8,15 @@ A social collection and discovery app for movies and TV seasons. Log what you wa
 
 ## Status
 
-**Pre-implementation.** Specification, architecture, and design are written. No application code exists yet.
+**Phase 0.** Specification, architecture, and design are written. The application scaffold builds, typechecks, lints, and tests clean; no product feature is implemented yet.
 
 | Milestone | State |
 |---|---|
 | PRD finalized (v0.6) | Complete |
 | Architecture | Complete, in review |
 | Design system and screens | Complete, in review |
-| Implementation | Not started |
+| Phase 0 scaffold | Complete, in review |
+| Phase 1 onward (auth, catalog, log-and-rank) | Not started |
 
 ---
 
@@ -62,17 +63,54 @@ Agents may not autonomously merge, deploy, run a production migration, delete pr
 
 ---
 
-## Planned stack
+## Stack
 
-Expo · React Native · TypeScript · Supabase · TMDB (behind a Bingd-owned adapter) · EAS Build and Update · Sentry · RevenueCat (paid beta only)
+Expo SDK 57 · React Native 0.86 · React 19 · TypeScript · Expo Router · TanStack Query · Supabase · TMDB (behind a Bingd-owned adapter) · EAS Build and Update · Sentry · RevenueCat (paid beta only)
 
 See PRD §23 and §24.
+
+---
+
+## Running it
+
+```bash
+npm install
+cp .env.example .env    # fill in the Supabase URL and anon key
+npm start
+```
+
+| Command | Purpose |
+|---|---|
+| `npm start` | Expo dev server |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | ESLint, including the raw-colour ban |
+| `npm test` | Jest, including the contrast assertions |
+
+`APP_VARIANT` selects the build variant — `development`, `preview`, or `production` — which sets the bundle identifier, the app name, and the backend. Non-production builds carry a visible environment badge.
+
+### Two guardrails worth knowing about
+
+Both exist because the design system found defects that would otherwise have shipped, and both fail the build rather than relying on discipline.
+
+**Colour literals are banned** outside `src/ui/tokens/`. A hardcoded `#D4A64C` in a component is a lint error, because that is exactly how the contrast defect in `docs/design/design-system.md` §1 would come back.
+
+**Contrast is asserted, not assumed.** `src/ui/tokens/contrast.test.ts` computes WCAG ratios for every permitted foreground and pins each to the value printed in the design system tables. It also asserts that Amber and Sage still *fail* on Parchment, so the rule that they are fills and never ink cannot be quietly undone. It has already caught two ratios that were rounded wrongly by hand.
 
 ---
 
 ## Repository layout
 
 ```
+app/                Expo Router routes. File-based, so a deep link and the
+                    in-app screen are one definition and cannot drift
+  (auth)/           Sign-in and onboarding
+  (tabs)/           Feed · Collection · + · Recommendations · Profile
+  title/ u/ lists/  Public deep-link destinations
+  i/[token].tsx     Invitation acceptance
+src/
+  ui/tokens/        The only place a colour literal may appear
+  ui/components/    Shared primitives
+  lib/              Env, Supabase client, query keys
 docs/
   product/          Specification, decisions, open questions, change log
   architecture/     Data model, ranking, API, offline sync, recommendations, client
@@ -81,6 +119,8 @@ docs/
   reference/        Source documents, provider correspondence
 Brand SVGs/         Wordmark and film-frame explorations (see PRD §5 — not yet production-ready)
 ```
+
+Source is organised by **feature** rather than by technical layer. A `components/` directory holding every component forces each change to touch several distant folders; grouping a screen with its hooks and its data access keeps a change local.
 
 `design-references/` is git-ignored. It holds the full third-party UI screenshot archives used for design study, which are not redistributable. Only the individual screens actually cited in the design documents are committed, resized, under `docs/design/references/` — PRD §5.
 
