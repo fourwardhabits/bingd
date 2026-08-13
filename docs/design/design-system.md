@@ -200,7 +200,7 @@ Rules that make artwork sit on Parchment:
 - **Shadow `e1` at md and above only.** Small posters with shadows produce visual noise in a list.
 - **Never full-bleed.** No backdrop headers, no artwork behind text, no edge-to-edge grids. Minimum 16pt of Parchment on every screen edge.
 - **Artwork is the only color present.** On any surface showing posters, all other elements are Ink, Parchment, or a derived neutral. Amber and Sage do not appear near artwork (§1).
-- **Missing artwork is a designed state**, not a broken image: `surface.sunken` fill, the title's first two initials in DM Serif Display, `text.tertiary`. This will be common — Letterboxd imports contain obscure titles, and HG-1 may restrict artwork outright.
+- **Missing artwork is a designed state**, not a broken image: `surface.sunken` fill, the title's first two initials in DM Serif Display, `text.tertiary`. This will be common, because Letterboxd imports reach obscure titles the catalog has no poster for.
 
 ---
 

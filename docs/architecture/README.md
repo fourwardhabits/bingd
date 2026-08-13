@@ -133,9 +133,9 @@ Match scores are materialized into `match_scores` by a scheduled job for user pa
 
 `tmdb-adapter` is the sole holder of the API key and the sole caller of TMDB. It normalizes responses into Bingd's schema, writes through to `media_items` and `media_cache`, and returns Bingd-shaped data. No other component knows TMDB's response format.
 
-This satisfies the credential requirement in PRD §19 and makes the provider replaceable, which matters because the provider relationship is an unresolved Hard Gate (HG-1).
+This satisfies the credential requirement in PRD §19 and makes the provider replaceable, which matters because the catalog is a hard dependency and TMDB publishes no SLA.
 
-**Cache retention is deliberately left configurable** rather than hard-coded, because HG-1 may force a six-month ceiling on TMDB-derived data (PRD §18). Retention is a config value read at runtime, not a constant in a migration.
+**Cache retention is a runtime config value**, not a constant in a migration. TMDB's terms cap retention of TMDB-derived data at six months, so `tmdb-adapter` writes an expiry on every cached record and Bingd's own collection data lives in separate tables that no expiry touches ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)).
 
 ### AD-9 — Capabilities resolve through one function, and limits never delete
 
@@ -190,3 +190,5 @@ Listed so they are not silently resolved.
 | Letterboxd title-matching thresholds | Engineering, tuned against real exports |
 
 > **Settled 2026-08-12.** Bucket bands partition the ranking (formerly INF-3). This document and [`ranking.md`](./ranking.md) both assume it, and it is now a founder decision rather than an assumption.
+>
+> **Settled 2026-08-13.** Navigation is Feed · Collection · + · Recommendations · Profile ([`client.md`](./client.md) §2). TMDB is no longer a gate: Bingd connects on a free developer key, caps TMDB-derived cache retention under six months, and buys the self-serve commercial plan before charging anyone ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)).

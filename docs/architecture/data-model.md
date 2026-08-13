@@ -179,7 +179,7 @@ create table media_cache (
 create index on media_cache (expires_at);
 ```
 
-Facet-level TTLs match PRD §19: availability expires in hours, credits and keywords in weeks. `expires_at` is computed by `tmdb-adapter` from configuration in `app_config`, **not** from a constant — HG-1 may impose a six-month ceiling on all TMDB-derived retention, and that must be a config change rather than a migration.
+Facet-level TTLs match PRD §19: availability expires in hours, credits and keywords in weeks. `expires_at` is computed by `tmdb-adapter` from configuration in `app_config`, **not** from a constant. Bingd caps all TMDB-derived retention under six months to stay inside the API terms ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)), and that window must be adjustable without a migration.
 
 > **Read access is public** on `media_items` and `media_cache`. Catalog metadata is not user data. This is the only unrestricted read in the schema.
 
@@ -596,7 +596,7 @@ create table app_config (
 );
 ```
 
-Holds the push delivery flag (AD-10), cache retention windows (AD-8), and every tuning value in PRD `open-questions.md` §6. Runtime configuration rather than constants, because PRD §13 requires tuning values to be "configurable and versioned rather than hard-coded," and because HG-1 may force a retention change at short notice.
+Holds the push delivery flag (AD-10), cache retention windows (AD-8), and every tuning value in PRD `open-questions.md` §6. Runtime configuration rather than constants, because PRD §13 requires tuning values to be "configurable and versioned rather than hard-coded," and because a change in TMDB's terms should move a retention window without a migration.
 
 ```sql
 create table processed_operations (

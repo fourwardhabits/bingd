@@ -38,7 +38,7 @@ Matches PRD §18. Every window is configuration, not a constant.
 | Visited profiles and lists | LRU, 20–50 objects |
 | Images | Bounded LRU disk cache |
 
-> **Flagged conflict.** "Until logout" applies to Bingd's own data — positions, buckets, list membership — without qualification. The **TMDB-derived title metadata attached to it** may be subject to a six-month ceiling depending on HG-1. The client therefore stores the two separately: a durable Bingd row keyed by `media_item_id`, and a metadata record with its own expiry. If HG-1 forces a limit, the metadata expires and is re-fetched on next connection while the user's collection stays intact. This costs one extra table now and avoids a rewrite later.
+> **Resolved 2026-08-13.** "Until logout" applies to Bingd's own data — positions, buckets, list membership, notes — without qualification. The **TMDB-derived title metadata attached to it** is capped under six months, which is what TMDB's terms require, so the separation below is load-bearing rather than precautionary: a durable Bingd row keyed by `media_item_id`, and a metadata record with its own expiry. Metadata expires and re-fetches on next connection while the user's collection stays intact. A user offline past the window sees their collection with placeholder artwork, never an empty list.
 
 ---
 

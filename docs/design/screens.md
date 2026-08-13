@@ -147,7 +147,7 @@ Order: the user's own state first (bucket, rank, note, watch date), then the pri
 
 The user's own state comes first because this screen is most often opened by someone deciding whether they have already seen something.
 
-**Provider attribution** appears here in whatever form HG-1 requires. Its placement is a layout slot now so that a licensing requirement later is a content change rather than a redesign.
+**Provider attribution** appears here. TMDB's requirements are published and specific — an approved logo, kept less prominent than Bingd's own mark, plus the exact notice "This product uses the TMDB API but is not endorsed or certified by TMDB" in an About or Credits section. The notice itself lives in Settings; this screen carries the source line. Details in [`../reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 
 For a series, seasons are listed with per-season state, since the season is the rankable unit and the series is not (AD-1). This distinction is invisible in the data model and has to be made obvious here.
 
@@ -245,7 +245,9 @@ Beli's streak reminders are **not** adopted. Streaks manufacture obligation, and
 
 ## 14. Sharing
 
-The **Top 10 share card** is the polished artifact (PRD §16): DM Serif Display, Parchment, ten posters, wordmark. It must render correctly with ten titles, with fewer than ten, and with missing artwork — and the text-only version is a real layout, not a degraded one, because HG-1 may restrict artwork in exported images ([`client.md`](../architecture/client.md) §6).
+The **Top 10 share card** is the polished artifact (PRD §16), and it is **typographic rather than poster-based**: DM Serif Display, Parchment, ten ranked titles, wordmark. It must render correctly with ten titles and with fewer than ten.
+
+Going text-first is deliberate on two counts. It avoids the one genuinely ambiguous question in TMDB's terms — whether provider artwork may appear in an image exported to another app ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)) — and it is the better artifact, since serif type on Parchment is unmistakably Bingd while a grid of studio posters is not.
 
 Secondary cards: a single ranking reveal, and a profile match card.
 

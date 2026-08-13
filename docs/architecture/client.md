@@ -121,7 +121,9 @@ Rendered **on-device** to PNG via `react-native-view-shot`, from real React comp
 
 On-device rather than server-side because PRD §16 requires sharing to work under weak connectivity. A server-rendered card needs a round trip at the exact moment someone is trying to post something.
 
-The Top 10 is the polished artifact (PRD §16) and must render correctly with ten titles, with fewer than ten, and with missing artwork. The text-first fallback is a real layout, not a degraded one — it exists both for missing artwork and for the possibility that HG-1 restricts artwork in exported images.
+The Top 10 is the polished artifact (PRD §16) and must render correctly with ten titles and with fewer than ten.
+
+**The text-first layout is the primary card, not a fallback.** It carries no TMDB artwork, which sidesteps the one genuinely ambiguous question in TMDB's terms — whether provider artwork may appear in an image a user exports to a messaging app ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)). It is also the stronger artifact: DM Serif Display on Parchment is Bingd's brand, and a grid of other people's posters is not. Poster-bearing variants remain possible later.
 
 Open Graph images for web pages are server-rendered by `og-render`, since they are requested by messaging platforms rather than by the app.
 

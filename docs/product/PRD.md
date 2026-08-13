@@ -70,7 +70,7 @@
 | **Required** | Recommendation quality is governed by explicit eligibility, repetition, popularity, diversity, explanation, feedback, and evaluation guardrails. Clicks and global popularity alone do not define quality. |
 | **Recommended** | The app is offline-resilient, not offline-first. Own collection is readable offline; a narrow set of writes queue; all ranking mutations require connectivity. |
 | **Provisional** | TMDB is the media provider, behind a Bingd-owned adapter and cache. Supabase is the application data layer. |
-| **Hard Gate** | Written provider clarification is required before any revenue. A free alpha for a product with declared subscription intent is not assumed to be noncommercial. |
+| **Hard Gate** | An external dependency requiring a manual founder action before the gated activity may proceed — Android developer verification, trademark clearance, the legal pack. |
 
 ### Product thesis
 
@@ -947,7 +947,7 @@ Bingd is **offline-resilient**, not offline-first. Users can open the app, see t
 
 Own collection, rankings, buckets, watchlist, and lists persist until logout. Recent feed: 100 items or 30 days. Recommendations: 50 items plus a generation timestamp. Visited profiles and lists: LRU, roughly 20–50 objects. Images: bounded LRU disk cache.
 
-> **Conflict flagged — Hard Gate input.** "Persist until logout" conflicts with TMDB's six-month caching restriction for TMDB-derived data. Bingd's own user-generated data (positions, buckets, list membership) is unaffected, but the normalized title metadata attached to it is. This must be raised explicitly in the licensing inquiry. See §19.
+> **Conflict resolved 2026-08-13.** "Persist until logout" conflicted with TMDB's six-month restriction on retaining TMDB-derived data. Resolved by complying rather than seeking an exception: **Bingd's own data — positions, buckets, list membership, notes — persists without limit.** The TMDB-derived title metadata attached to it carries a fetch timestamp and refreshes on a rolling basis inside six months, or reduces to a TMDB identifier and re-fetches on demand. The client stores the two separately for exactly this reason. See §19.
 
 ### Offline sharing
 
@@ -963,17 +963,19 @@ Locally rendered cards remain shareable offline. Canonical links attach only whe
 
 **Required:** no provider credential ever ships inside the mobile app. All provider calls originate from the backend.
 
-### Licensing — Hard Gate
+### Licensing — Required, no longer a Hard Gate
 
-Written clarification is required **before any revenue**. This does not block the free alpha, but a reply may take weeks, so the inquiry should be sent immediately.
+**Revised 2026-08-13 after research.** This was recorded as a Hard Gate on the assumption that commercial access needed a negotiated agreement with weeks of latency. It does not.
 
-**Required framing:** a free public alpha for a product with declared subscription intent is **not** assumed to be noncommercial.
+Bingd connects now on a **free developer key**, because it charges nobody and sells nothing, which is non-commercial under TMDB's operative test. When subscriptions ship, the commercial plan is a **self-serve purchase** — reported by TMDB staff at $149/month under $1M revenue — bought before the first payment lands. No correspondence is required in either direction.
 
-Scope to resolve: commercial status; mobile and web surfaces; caching, retention, and refresh; artwork in-app, on the web, in share cards, in invitation previews, and in Open Graph; watch-provider availability data; collaborative, social, and content-based recommendation methods; model training and evaluation; attribution; correction, termination, migration, and deletion; rate limits; support; price.
+**Required regardless:**
 
-Draft letter: [`docs/reference/tmdb-commercial-inquiry.md`](../reference/tmdb-commercial-inquiry.md).
+1. **Attribution.** The exact notice "This product uses the TMDB API but is not endorsed or certified by TMDB," an approved TMDB logo kept less prominent than Bingd's own mark, placed in an About or Credits section. Built into the first screens, not retrofitted.
+2. **Cache TMDB-derived metadata for under six months**, refreshing on a rolling basis. Bingd's own collection data is retained without limit. This is the conservative reading of the terms and it removes the §18 conflict rather than needing it resolved.
+3. **The primary Top 10 share card is text-first**, carrying no TMDB artwork. This sidesteps the one genuinely ambiguous question — artwork in exported images — and is the stronger brand artifact anyway.
 
-**Known conflict to raise:** TMDB's API terms restrict caching TMDB-derived information beyond six months absent other agreement terms. This is incompatible with the device-retention target in §18 as written.
+Details and the triggers for revisiting: [`docs/reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 
 ### Access pattern — Recommended
 
@@ -1479,7 +1481,7 @@ Public alpha may not ship until every item is true.
 - [ ] Store metadata, screenshots, and review notes prepared for both platforms.
 - [ ] A documented rollback path and a triage owner for the first 72 hours.
 
-> **HG-1 (TMDB commercial clarification)** does not block the free alpha, but blocks any revenue. It should be in flight before launch.
+> **TMDB is not a gate.** Connect on a free developer key; buy the self-serve commercial plan before charging anyone. See §19.
 
 ---
 
@@ -1527,8 +1529,8 @@ v0.5 used two near-definitions interchangeably; this is the canonical one. See I
 | Invitations feel spammy or unsafe | No contact upload; explicit acceptance; no auto-follow; block, report, revoke, and rate limits |
 | Offline expectations exceed the design | Explicit capability matrix; honest state labels; ranking clearly online-only |
 | Sync conflicts corrupt data | Narrow queueable set; idempotent operations; server authoritative for order, entitlement, privacy, and moderation |
-| Metadata licensing blocks revenue | Provider-agnostic adapter and Bingd identifiers; commercial inquiry sent early; text-first share fallback |
-| Six-month cache limit conflicts with offline design | Flagged explicitly in the licensing inquiry; resolution may change device retention |
+| Metadata licensing blocks revenue | **Largely retired 2026-08-13.** The commercial plan is a self-serve purchase, so revenue is never blocked on a negotiation. Provider-agnostic adapter and Bingd identifiers remain, against a change in TMDB's terms or pricing |
+| Six-month cache limit conflicts with offline design | **Resolved 2026-08-13** by complying rather than seeking an exception. Bingd's own collection data persists without limit; TMDB metadata expires and re-fetches inside six months. The two live in separate tables |
 | Provider outage breaks the app | Cached reads for own collection always succeed; degrade enrichment first |
 | Metadata or image cost scales unexpectedly | Cache only touched titles; staggered TTLs; rate limits; bandwidth monitoring |
 | Premium messaging damages a free alpha | No prices, no purchases, no Pro badge; nothing before the first ranking reveal; growth loops permanently free |
@@ -1573,14 +1575,14 @@ All six product decisions that blocked architecture at v0.5 are resolved (see `o
 **Conditions attached:**
 
 1. **Two inferences (INF-2, INF-5)** are recorded as decisions but were made by the agent, not the founder. Both are cheap to reverse; INF-5 only needs settling before attribution reporting is built. INF-1 and INF-3 — the two expensive ones — were confirmed by the founder on 2026-08-12, and INF-4 was revisited during design and confirmed on 2026-08-13.
-2. **HG-1 (TMDB)** should be sent immediately. The six-month caching conflict could change the offline design in §18, and a reply may take weeks.
+2. **HG-1 (TMDB) is closed as of 2026-08-13** and is no longer a Hard Gate. Connect on a free developer key now; buy the self-serve commercial plan when subscriptions ship. The six-month caching conflict is resolved by complying rather than seeking an exception. See §19.
 3. **HG-6 (brand assets)** blocks Phase 9, not Phase 0.
 
 ### Stage gates
 
 **Continue to early traction when:** activation and day-7 return are healthy; ranking and import completion are healthy; the social graph forms without manual intervention; recommendations meet quality guardrails on real data; sharing and invitations produce measurable attributed activation; offline behavior is stable; metadata cost per active user is predictable.
 
-**Continue to paid beta when:** Free-tier quality and retention are established; premium intent is evidenced by gate-hit data rather than assumption; **HG-1 is resolved in writing**; recommendation quality is stable enough that a paid tier would not be selling a worse experience.
+**Continue to paid beta when:** Free-tier quality and retention are established; premium intent is evidenced by gate-hit data rather than assumption; **the TMDB commercial plan is purchased and active**; recommendation quality is stable enough that a paid tier would not be selling a worse experience.
 
 **Stop and reassess if:** ranking completion is poor even after bucketing; imported libraries correlate with abandonment; match scores do not change behavior; recommendations cannot pass the guardrails on real data; sharing produces no attributed activation; metadata cost or licensing makes the model unviable; premium interest concentrates exclusively in features that must remain free.
 

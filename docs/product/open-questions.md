@@ -129,17 +129,15 @@ An implementation agent may resolve these using documented best practice. They a
 
 Each requires a **manual founder action**. None can be resolved by an agent.
 
-### HG-1 — TMDB commercial clarification
+### ~~HG-1 — TMDB commercial clarification~~ — **NOT A HARD GATE. Closed 2026-08-13**
 
-**Status:** Not started. Letter drafted at [`docs/reference/tmdb-commercial-inquiry.md`](../reference/tmdb-commercial-inquiry.md).
+Recorded as a Hard Gate on the assumption that commercial API access required a negotiated written agreement with weeks of latency. Research showed it does not.
 
-**Blocks:** Any revenue — subscriptions, advertising, sponsorship, or paid access. Does **not** block the free alpha.
+**Connect now on a free developer key.** Bingd charges nobody, which is non-commercial under TMDB's operative test. **When subscriptions ship, buy the commercial plan** — self-serve, reported by TMDB staff at $149/month under $1M revenue. Nothing needs to be asked or waited for.
 
-**Action:** Send the drafted letter. Expect weeks for a reply, so send early.
+The six-month caching conflict is resolved by complying with the terms as written rather than seeking an exception: TMDB-derived metadata refreshes on a rolling basis under six months, and Bingd's own collection data is retained without limit. The architecture already separates the two. The one genuinely ambiguous question — artwork in exported share cards — is sidestepped by making the text-first Top 10 card the primary artifact, which `../architecture/client.md` §6 already specifies as a real layout.
 
-**Must resolve:** commercial status for a free alpha with declared subscription intent; mobile and web surfaces; caching and retention, including the six-month conflict below; artwork in-app, on the web, in share cards, in invitation previews, and in Open Graph; watch-provider availability data; collaborative, social, and content-based recommendation methods; model training and evaluation; attribution; correction, termination, migration, and deletion; rate limits; support; price.
-
-**Known conflict to raise explicitly:** TMDB's API terms restrict caching TMDB-derived information beyond six months absent other agreement terms. The PRD's device-retention target keeps normalized metadata for a user's own collection persistently. These are incompatible as written and the resolution changes the offline design.
+Attribution wording and placement are published, specific, and built into the first screens. Full position and the triggers for revisiting: [`docs/reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 
 ### HG-2 — Android developer verification
 

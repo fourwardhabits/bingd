@@ -25,13 +25,13 @@ An implementation agent resolving a conflict between the two documents must reso
 
 ---
 
-## Provider correspondence
+## Providers
 
 | Document | Purpose | Status |
 |---|---|---|
-| [`tmdb-commercial-inquiry.md`](./tmdb-commercial-inquiry.md) | Draft letter for Hard Gate HG-1 | **Not yet sent** |
+| [`tmdb-integration.md`](./tmdb-integration.md) | Licensing position, attribution requirements, caching rules | Researched 2026-08-13. **No blocker** |
 
-HG-1 does not block the free public alpha. It blocks **any revenue**. Replies commonly take weeks, so it should be sent well before paid beta is contemplated. See `open-questions.md` §5.
+TMDB was recorded as Hard Gate HG-1 on the assumption that commercial access needed a negotiated agreement. It does not — the commercial plan is self-serve, and Bingd is non-commercial until it charges. Connect on a free developer key now. The document records the attribution wording and the two build rules that keep Bingd inside the terms without asking anyone anything.
 
 ---
 
