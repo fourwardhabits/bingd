@@ -33,10 +33,16 @@ if (!config.appleTeamId) {
 const withFingerprints = config.variants.filter((v) => v.androidSha256.length > 0);
 
 // A missing Android fingerprint is not an error, because it cannot be obtained
-// until an Android build exists and the site should not be blocked on that. It is
-// a warning, and assetlinks.json is then not written at all — serving a valid file
-// with an empty list would look configured while verifying nothing, which is the
-// harder failure to notice of the two.
+// until an Android build exists and the site should not be blocked on that. It is a
+// warning, and assetlinks.json is written with an empty statement list.
+//
+// Writing it empty rather than omitting it is deliberate, and the first attempt got
+// this wrong. Omitting the file is only safe if the host answers a missing path with
+// a 404; Cloudflare Pages instead falls back to index.html with a 200, and the
+// Content-Type rule in _headers then labelled that HTML as application/json. A
+// crawler or a debugging session sees a 200 and well-formed-looking headers, and the
+// actual problem is invisible. An empty array is valid JSON, correctly typed, and
+// reads unambiguously as "no packages are declared here".
 for (const variant of config.variants) {
   for (const fingerprint of variant.androidSha256) {
     if (!/^([A-F0-9]{2}:){31}[A-F0-9]{2}$/.test(fingerprint)) {
@@ -106,23 +112,19 @@ const assetlinks = withFingerprints.map((variant) => ({
   },
 }));
 
-if (assetlinks.length > 0) {
-  await writeFile(
-    join(dist, '.well-known', 'assetlinks.json'),
-    `${JSON.stringify(assetlinks, null, 2)}\n`,
-  );
-}
+await writeFile(
+  join(dist, '.well-known', 'assetlinks.json'),
+  `${JSON.stringify(assetlinks, null, 2)}\n`,
+);
 
 console.log(`Built ${dist}`);
 console.log(`  apple-app-site-association  ${appleAppIds.length} app IDs, ${config.appPaths.length} paths`);
+console.log(`  assetlinks.json             ${assetlinks.length} package(s)`);
 
-if (assetlinks.length > 0) {
-  console.log(`  assetlinks.json             ${assetlinks.length} package(s)`);
-} else {
-  console.log('  assetlinks.json             NOT WRITTEN');
+if (assetlinks.length === 0) {
   console.log('');
-  console.log('  Android App Links will not verify, so a tapped link opens the browser on');
-  console.log('  Android. Nothing else is affected. Add a fingerprint to');
+  console.log('  No Android fingerprint, so App Links will not verify and a tapped link');
+  console.log('  opens the browser on Android. iOS is unaffected. Add one to');
   console.log('  web/deep-links.config.json once an Android build exists — from');
   console.log('  `eas credentials`, or from Play Console > Setup > App integrity if Play');
   console.log('  re-signs the app.');
