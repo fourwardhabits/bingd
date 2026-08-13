@@ -64,7 +64,17 @@ The general rule this exposes, which matters for any RPC added later: **a functi
 
 `save_note` takes an optional `p_base_updated_at`. `offline-sync.md` §5 promises that a note edited offline while the server copy also changed produces a user-visible choice rather than a silent overwrite, and there was no mechanism capable of keeping that promise: nothing in the request said which version the edit was based on, and `user_media.updated_at` was never advanced after insert.
 
-Both halves are now fixed. A trigger maintains `updated_at`, and when the client supplies `p_base_updated_at` and it does not match the stored value, the function raises `BG409` with both texts in the payload so the client can offer keep-mine or keep-theirs. Online edits may omit the parameter; **outbox replays must include it**, since that is the only case where divergence is possible.
+**The version is `user_media.note_updated_at`, not `updated_at`.** The first implementation compared against the row's `updated_at`, which the `touch_updated_at` trigger advances on *every* write to the row. That turned the ordinary offline sequence into a guaranteed conflict: tap a bucket, then write a note on the same film, drain in that order, and `set_bucket` moves the version out from under the queued note edit — a "changed on another device" dialog about a note nothing had touched. A conflict prompt that fires on a routine session teaches people to dismiss it, which is precisely when it needs to be believed. `note_updated_at` is advanced only when the note text actually changes, on insert as well as update.
+
+When the client supplies `p_base_updated_at` and it does not match, the function raises `BG409`. Online edits may omit the parameter; **outbox replays must include it**, since that is the only case where divergence is possible. Three details the client depends on:
+
+- **The payload carries the server's version, not the server's text.** Postgres writes an exception's `DETAIL` into the database log at default settings, and a note is always-private under PRD §22. The client owns the row, so on `BG409` it reads its own note to present keep-mine or keep-theirs. `DETAIL` reaches the client as the `details` field of PostgREST's error body — the same forwarding caveat as the `53400` note in §8.
+- **`save_note` and `log_watched` both return `note_version`.** A client draining two edits to the same note must carry that forward as the next base, or its second edit conflicts with its own first. Coalescing the edits per title in the outbox is the simpler answer and is what `offline-sync.md` §3 asks for. A base version must always be one the server issued for that note — never a locally invented timestamp, which reads as divergence.
+- **A row that has never held a note has a null version**, and any base against it is accepted. There is no text to lose, so there is nothing to ask the user about.
+
+`p_note` is capped at 2000 characters (`BG400`). Nothing in the PRD specifies a length; the cap exists because an uncapped text column is one a modified client can put a megabyte in, per title, the same reasoning that capped `reports.note`.
+
+`p_watched_on` is refused beyond `current_date + 1`, not `current_date`. The server is UTC and the client sends a local date, so east of UTC the local date is a day ahead for the first hours of every day, and refusing tomorrow would reject a correct "watched tonight" depending on longitude.
 
 ---
 
@@ -251,12 +261,15 @@ One structured shape, so the client can respond to a class of failure rather tha
 | `22023` | Invalid argument | `BG400` |
 | `53400` | A configured per-user ceiling was reached, e.g. the daily report cap | `BG429` |
 | `23514`, `P0001` | An invariant would be violated | `BG422` |
+| `23503` | A referenced row does not exist, in practice a session with no profile yet | `BG422` |
 
 Anything unmapped surfaces as a generic failure and is reported, rather than being guessed at.
 
 Two of these mappings deserve a note, because the SQLSTATE alone does not get you there.
 
 **`53400` only becomes a clean `BG429` behind the edge layer.** PostgREST maps it to HTTP **500** on its own. `53400` is `configuration_limit_exceeded`, which PostgREST treats as a server-side misconfiguration rather than as a per-user ceiling; most of the rest of class 53 is `insufficient_resources` and maps to 503. Either way, a client calling `rpc/report` directly is told the server broke when it had merely hit its daily limit. Since the mapping table above is applied at the edge, the behaviour is right as long as reporting goes through it — a constraint on the client, not a detail of the database.
+
+**`23503` should be unreachable, which is why it maps to `BG422`.** A session that has authenticated but not yet completed `create_profile` passes `assert_can_write` — there is no profile row to be suspended — and then trips a foreign key on the first write, both in `processed_operations` and in `user_media`. A correct client never reaches a write from that state, so the honest surface is "report this as a bug" rather than a field error the user can act on.
 
 **A pivot that stops being ranked mid-session makes `rank_answer` reject rather than re-prompt.** If a title is unranked in another session, or on another device, while it is on screen as a comparison, answering with it returns `BG409` and the client should restart the session. `rank_back` and `rank_skip` behave the same way. The alternative — silently substituting a different pivot — would attribute an answer to a comparison the user was never shown, and a ranking is only as trustworthy as the comparisons behind it.
 

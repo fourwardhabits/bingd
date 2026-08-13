@@ -19,19 +19,29 @@
 -- which is what offline-sync.md §3 describes. Its first real callers arrive in this
 -- migration, and a globally unique key is the wrong shape for them.
 --
--- The key lets one account's operation id silence another's. Two users cannot
--- collide by accident at uuid v4 odds, but they need not collide by accident: ids are
--- generated on the device, so a modified client can send any value it chooses, and
--- sending one another account has already used returns 'already_applied' and writes
--- nothing. The victim's client reports success, because the response says so, and the
--- row never appears. Silent, targeted, and invisible to the person it happens to.
+-- Under a global key, an id claimed by one account silences the same id sent by
+-- another: the guard answers 'already_applied' and writes nothing, and the second
+-- client reports success because the response says so. The row simply never appears.
 --
--- Scoping the key to the account removes the whole class at no cost: idempotency only
--- ever has to hold within one device's queue, and every queue belongs to one account.
+-- Being precise about what that requires, because the obvious telling of it does not
+-- hold up: harm needs the id burned *before* its owner sends it, so an attacker would
+-- have to know a v4 uuid generated on someone else's device, and no API, table policy
+-- or error surface exposes one. As a targeted attack it is not reachable.
 --
--- The foreign key is the other half. user_id was an unconstrained uuid, so a deleted
--- account left its ledger behind forever, and nothing prevented a row naming an
--- account that never existed.
+-- What is reachable is disclosure by accident. Operation ids travel in crash reports
+-- and support screenshots, and an outbox surviving an account switch on a shared
+-- device carries one account's ids into another's session. Each of those is a
+-- collision waiting on a coincidence rather than an adversary.
+--
+-- The point of the narrower key is that it stops the question from needing an answer.
+-- Idempotency only ever has to hold within one device's queue, every queue belongs to
+-- one account, and scoping the key that way costs nothing — so there is no need to
+-- reason about which disclosure paths exist now or arrive later.
+--
+-- The foreign key is the other half, and brings the schema in line with
+-- data-model.md §12, which has described this column as referencing profiles all
+-- along. It was an unconstrained uuid, so a deleted account left its ledger behind
+-- forever and nothing prevented a row naming an account that never existed.
 -- ---------------------------------------------------------------------------
 
 alter table processed_operations
@@ -50,7 +60,7 @@ alter table processed_operations
   add column kind text;
 
 comment on table processed_operations is
-  'Idempotency ledger for outbox-eligible RPCs (offline-sync.md §3). Keyed per account, not globally: ids come from the device, so a global key would let one client burn another''s id and make a genuine write return success without happening. Row level security is on with no policies, so only SECURITY DEFINER functions reach it.';
+  'Idempotency ledger for outbox-eligible RPCs (offline-sync.md §3). Keyed per account rather than globally: ids are generated on the device, and a shared key means an id disclosed by one account can make another account''s genuine write return success without happening. Row level security is on with no policies, so only SECURITY DEFINER functions reach it.';
 
 -- The prune the foundation migration promised does not exist yet, and its retention
 -- is not a free choice: it must exceed the longest a client can hold an unsent
@@ -97,7 +107,73 @@ comment on function _claim_operation(uuid, text) is
   'Idempotency guard for outbox-eligible RPCs. Returns false when the operation was already applied, which the caller reports as success (offline-sync.md §3).';
 
 -- ---------------------------------------------------------------------------
--- 3. Refusing a ranked title
+-- 3. The note gets its own version
+--
+-- offline-sync.md §5 detects a note conflict by comparing the version the edit was
+-- based on against the stored one, and the first draft of this migration used
+-- user_media.updated_at for that. It cannot be used, and the reason is worth keeping:
+-- touch_updated_at advances updated_at on *every* update of the row, so a bucket
+-- change, a watch date, or a progress change all move the note's version without the
+-- note changing.
+--
+-- That is not a corner case, it is the ordinary flow. Offline, a user taps a bucket
+-- and then writes a note on the same film — the natural order of the core interaction.
+-- The queue drains in creation order, set_bucket advances updated_at, and save_note
+-- then arrives carrying the base captured before the drain. Guaranteed conflict, on a
+-- note nothing else touched, presented as "this changed on another device". Two of the
+-- user's own offline note edits collide the same way.
+--
+-- A mechanism built to prevent silent data loss would instead manufacture a dialog
+-- often enough to teach people to dismiss it, which is exactly when it needs to be
+-- believed.
+--
+-- So the version tracks the note and nothing else.
+-- ---------------------------------------------------------------------------
+
+alter table user_media
+  add column note_updated_at timestamptz;
+
+comment on column user_media.note_updated_at is
+  'Version for the offline-sync.md §5 note conflict rule. Advances only when note changes, unlike updated_at, which every write to the row advances — using that one made an unrelated bucket tap invalidate a queued note edit. Null means no note has ever been stored, in which case there is nothing to overwrite and no conflict to detect.';
+
+-- Insert as well as update. log_watched can create the row with a note already in it,
+-- and a null version means "nothing stored, nothing to lose" — so an update-only
+-- trigger would leave every note written at creation time freely overwritable by a
+-- stale queued edit, which is the failure this column exists to prevent.
+create or replace function touch_note_version()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.note is not null then
+      new.note_updated_at = now();
+    end if;
+  elsif new.note is distinct from old.note then
+    new.note_updated_at = now();
+  end if;
+  return new;
+end;
+$$;
+
+create trigger user_media_touch_note_version
+  before insert or update on user_media
+  for each row execute function touch_note_version();
+
+-- Backfill, so an existing note is not treated as never-written and therefore freely
+-- overwritable. updated_at is the best available approximation of when it was last
+-- touched, and is correct for any row whose last write was the note itself.
+update user_media set note_updated_at = updated_at where note is not null;
+
+-- The cap lives on the column as well as in the functions, the way reports.note's does.
+-- The functions raise 22023 so the client gets a field error rather than an invariant
+-- violation; the constraint is what still holds if user_media ever gains a write policy.
+alter table user_media
+  add constraint user_media_note_length
+  check (note is null or char_length(note) <= 2000);
+
+-- ---------------------------------------------------------------------------
+-- 4. Refusing a ranked title
 --
 -- offline-sync.md §3 and api.md §1: set_bucket and unlog are queueable, and both
 -- are ranking mutations when the title is ranked. Changing the bucket of a ranked
@@ -128,7 +204,7 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 4. Media item existence and kind
+-- 5. Media item existence and kind
 --
 -- P0002 for a missing title, per the api.md §8 mapping to BG404. media_items is
 -- world-readable, so there is no visibility question to conflate with existence
@@ -158,6 +234,23 @@ begin
 end;
 $$;
 
+-- A note is owner-private, so an unbounded one is storage abuse rather than a vector
+-- pointed at anyone. It still gets a bound, for the reason reports.note got one: a
+-- column with no limit is a column a modified client can put a megabyte in, per title.
+-- 2000 characters is an engineering choice and not a product decision; nothing in the
+-- PRD specifies a length, and if the founder wants a different one this is where it
+-- lives.
+create or replace function _assert_note_length(p_note text)
+returns void
+language plpgsql immutable
+as $$
+begin
+  if p_note is not null and char_length(p_note) > 2000 then
+    raise exception 'a note is limited to 2000 characters' using errcode = '22023';
+  end if;
+end;
+$$;
+
 create or replace function _assert_loggable(p_media_item_id uuid)
 returns void
 language plpgsql stable security definer
@@ -173,7 +266,7 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 5. log_watched
+-- 6. log_watched
 --
 -- Upsert rather than insert. Logging a title already logged is not an error — it is
 -- a user correcting a watch date or adding a note — and returning 23505 would make
@@ -197,7 +290,8 @@ security definer
 set search_path = public
 as $$
 declare
-  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+  v_note    text := nullif(btrim(coalesce(p_note, '')), '');
+  v_version timestamptz;
 begin
   perform assert_can_write();
 
@@ -206,8 +300,15 @@ begin
   end if;
 
   perform _assert_loggable(p_media_item_id);
+  perform _assert_note_length(v_note);
 
-  if p_watched_on is not null and p_watched_on > current_date then
+  -- current_date + 1, not current_date. The server is UTC and the client sends a local
+  -- date, so for the first hours of the day everywhere east of UTC the local date is
+  -- already tomorrow in server terms. Comparing against today refuses a correct
+  -- "I watched this tonight" for a large part of every day, depending on longitude.
+  -- One day of slack accepts a genuinely-tomorrow date from a determined client, which
+  -- costs nothing, and stops refusing real ones.
+  if p_watched_on is not null and p_watched_on > current_date + 1 then
     raise exception 'watch date is in the future' using errcode = '22023';
   end if;
 
@@ -215,14 +316,19 @@ begin
   values (auth.uid(), p_media_item_id, p_watched_on, v_note)
   on conflict (user_id, media_item_id) do update
     set watched_on = coalesce(excluded.watched_on, user_media.watched_on),
-        note       = coalesce(excluded.note,       user_media.note);
+        note       = coalesce(excluded.note,       user_media.note)
+  returning note_updated_at into v_version;
 
-  return jsonb_build_object('status', 'ok');
+  -- The note version comes back here too, since this is the other function that can
+  -- write one. A client that logged with a note has no server version for it until
+  -- something hands one over, and a base version must always be one the server issued
+  -- — never a locally invented timestamp, which would read as a conflict.
+  return jsonb_build_object('status', 'ok', 'note_version', v_version);
 end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 6. set_bucket
+-- 7. set_bucket
 --
 -- Creates the user_media row when absent. A bucket is a statement about a title the
 -- user has seen, so bucketing implies logging, and requiring two round trips to
@@ -233,6 +339,14 @@ $$;
 -- low-conflict write that queues offline; opening a comparison session needs the
 -- server. A user who buckets offline gets a Logged title and can rank it later,
 -- which is the two-state model in PRD §11.
+--
+-- Known and not closed here: the unranked check and the upsert are two statements with
+-- no lock spanning them, so one account's rank_start committing between them leaves
+-- user_media.bucket disagreeing with rankings.bucket — an I3 violation. It needs the
+-- same account writing from two devices in the same instant, and costs one desynced
+-- bucket. Closing it properly means the ranking RPCs taking the same advisory lock on
+-- (user_id, media_item_id), which is a change to seven functions in another migration
+-- and not something to bundle in here. Recorded in open-questions.md.
 -- ---------------------------------------------------------------------------
 
 create or replace function set_bucket(
@@ -269,7 +383,7 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 7. unlog
+-- 8. unlog
 -- ---------------------------------------------------------------------------
 
 create or replace function unlog(
@@ -308,7 +422,7 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 8. set_watchlist
+-- 9. set_watchlist
 --
 -- The one collection write that accepts a series, for the reason in §4.
 -- ---------------------------------------------------------------------------
@@ -352,7 +466,7 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 9. set_season_progress
+-- 10. set_season_progress
 -- ---------------------------------------------------------------------------
 
 create or replace function set_season_progress(
@@ -390,20 +504,34 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 10. save_note
+-- 11. save_note
 --
 -- The only write here with a conflict rule beyond last-one-wins. A note is the only
 -- free text a user writes, so losing one to a silent overwrite is a real loss
--- (offline-sync.md §5). When the client supplies the version its edit was based on
--- and that no longer matches, both texts come back and the user chooses.
+-- (offline-sync.md §5). When the client supplies the version its edit was based on and
+-- that no longer matches, the write is refused and the user chooses.
 --
--- The comparison is truncated to milliseconds, which is not fussiness. Postgres
--- keeps timestamps to microseconds; JavaScript's Date holds milliseconds. Any client
--- path that parses the timestamp into a Date and serializes it again — which is the
--- ordinary thing to do — loses the microseconds. Compared exactly, that mismatch
--- reads as a conflict, and every single note edit would raise BG409 and demand the
--- user resolve a divergence between a text and itself. Truncating cannot mask a real
--- conflict either: two edits inside the same millisecond are one edit.
+-- The refusal carries the server's version and *not* the server's text. The client can
+-- read its own note — it owns the row — and Postgres writes an exception's DETAIL into
+-- the database log at default settings, so putting note text there would deposit a
+-- field PRD §22 classifies as always-private into operator-visible logs every time a
+-- conflict fires. One extra read on a rare path is a better trade.
+--
+-- The comparison is truncated to milliseconds, which is not fussiness. Postgres keeps
+-- timestamps to microseconds; JavaScript's Date holds milliseconds. Any client path
+-- that parses the timestamp into a Date and serializes it again — the ordinary thing
+-- to do — loses the microseconds, and compared exactly that mismatch reads as a
+-- conflict, so every note edit would demand the user resolve a divergence between a
+-- text and itself.
+--
+-- The cost is a one-millisecond window in which a genuine second write is not seen as
+-- one. Two edits landing that close are two transactions, not one, so the window is
+-- real and accepted rather than absent: it takes a second device writing inside the
+-- same millisecond as the base it is racing, and losing that is a smaller harm than
+-- making every ordinary edit look like a conflict.
+--
+-- Returns the new version, so a client draining several edits to one note can carry
+-- the base forward instead of colliding with its own previous write.
 -- ---------------------------------------------------------------------------
 
 create or replace function save_note(
@@ -420,12 +548,15 @@ as $$
 declare
   v_note    text := nullif(btrim(coalesce(p_note, '')), '');
   v_current user_media;
+  v_version timestamptz;
 begin
   perform assert_can_write();
 
   if not _claim_operation(p_operation_id, 'save_note') then
     return jsonb_build_object('status', 'already_applied');
   end if;
+
+  perform _assert_note_length(v_note);
 
   select * into v_current
     from user_media
@@ -435,35 +566,39 @@ begin
     raise exception 'not in your collection' using errcode = 'P0002';
   end if;
 
+  -- A null stored version means no note has ever been written here, so there is
+  -- nothing a stale edit could destroy and nothing to ask the user about.
   if p_base_updated_at is not null
-     and date_trunc('milliseconds', v_current.updated_at)
+     and v_current.note_updated_at is not null
+     and date_trunc('milliseconds', v_current.note_updated_at)
       <> date_trunc('milliseconds', p_base_updated_at) then
-    raise exception 'the note changed on another device'
+    raise exception 'the note changed elsewhere'
       using errcode = '55000',
             detail  = jsonb_build_object(
-              'mine',              v_note,
-              'theirs',            v_current.note,
-              'server_updated_at', v_current.updated_at
+              'conflict',       'note',
+              'server_version', v_current.note_updated_at
             )::text;
   end if;
 
   update user_media
      set note = v_note
-   where user_id = auth.uid() and media_item_id = p_media_item_id;
+   where user_id = auth.uid() and media_item_id = p_media_item_id
+  returning note_updated_at into v_version;
 
-  return jsonb_build_object('status', 'ok');
+  return jsonb_build_object('status', 'ok', 'note_version', v_version);
 end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- 11. Privileges
+-- 12. Privileges
 --
 -- 20260813001800 made execute default-deny with an explicit allow-list, and
 -- 20260813002100 issued the global form so new functions arrive with no PUBLIC
--- grant. The six public entry points are granted; the four helpers are not, because
+-- grant. The six public entry points are granted; the five helpers are not, because
 -- _assert_unranked and _media_kind would each answer a question about a row the
 -- caller may not be entitled to ask about, and _claim_operation called directly
 -- would let a client burn an operation id to make a later real write disappear.
+-- (touch_note_version is a trigger function and never callable as an RPC.)
 -- ---------------------------------------------------------------------------
 
 grant execute on function log_watched(uuid, uuid, date, text)          to authenticated;
@@ -474,10 +609,10 @@ grant execute on function set_season_progress(uuid, uuid, season_progress) to au
 grant execute on function save_note(uuid, uuid, text, timestamptz)     to authenticated;
 
 comment on function log_watched(uuid, uuid, date, text) is
-  'Marks a title watched. Outbox-eligible. Upserts, so a repeat with a corrected date is not a conflict.';
+  'Marks a title watched. Outbox-eligible. Upserts, so a repeat with a corrected date is not a conflict. Returns note_version when a note was written, since that is the value a later save_note must send as its base. Accepts a watch date up to tomorrow, because the server is UTC and a client east of it sends a local date a day ahead for the first hours of its day.';
 comment on function set_bucket(uuid, uuid, taste_bucket) is
   'Sets the bucket without starting comparisons, creating the collection row if absent. Refuses a ranked title with 55000: for a ranked title this is a band move, which PRD §18 forbids queuing.';
 comment on function unlog(uuid, uuid) is
   'Removes a title from the collection. Refuses a ranked title with 55000, since queuing it would discard ranking work silently on reconnect.';
 comment on function save_note(uuid, uuid, text, timestamptz) is
-  'Updates the private note. When p_base_updated_at is supplied and stale, raises 55000 with both texts in DETAIL so the client can offer a choice. Comparison is truncated to milliseconds because JavaScript Date cannot carry the microseconds Postgres stores.';
+  'Updates the private note and returns the new note_version. The base version is compared against note_updated_at, which only a note change advances, so an unrelated bucket or date write cannot invalidate a queued edit. When it is stale, raises 55000 carrying the server version but not the server text, which stays out of the database log; the client reads its own note to show the choice. Comparison is truncated to milliseconds because JavaScript Date cannot carry the microseconds Postgres stores.';

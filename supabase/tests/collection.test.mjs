@@ -13,8 +13,10 @@ import { createTestDb } from './harness.mjs';
  *     (offline-sync.md §3),
  *   - set_bucket and unlog refuse a *ranked* title, since for a ranked title both
  *     are ranking mutations and PRD §18 forbids queuing those,
- *   - save_note refuses a stale write and hands back both texts rather than
- *     overwriting, which offline-sync.md §5 promises and nothing enforced before.
+ *   - save_note refuses a write whose base version a later edit superseded rather than
+ *     overwriting it, which offline-sync.md §5 promises and nothing enforced before —
+ *     and refuses *only* that, since a conflict rule that fires on ordinary offline
+ *     sequences trains people to dismiss it.
  */
 describe('collection writes', () => {
   let t;
@@ -39,12 +41,17 @@ describe('collection writes', () => {
 
   const collectionRow = async (mediaItemId) => {
     const { rows } = await t.sql(
-      `select bucket, progress, watched_on, note, updated_at
+      `select bucket, progress, watched_on, note, updated_at, note_updated_at
          from user_media where user_id = $1 and media_item_id = $2`,
       [user, mediaItemId],
     );
     return rows[0] ?? null;
   };
+
+  // now() is the transaction timestamp, and the conflict comparison is truncated to
+  // milliseconds, so two writes issued back to back can share a version. Anywhere a
+  // test needs one write to be genuinely *later* than another, it has to wait.
+  const pastAMillisecond = async () => t.sql(`select pg_sleep(0.005)`);
 
   describe('log_watched', () => {
     it('creates the collection row', async () => {
@@ -58,6 +65,11 @@ describe('collection writes', () => {
       const row = await collectionRow(film);
       assert.equal(row.note, 'on 35mm');
       assert.equal(row.watched_on.toISOString().slice(0, 10), '2026-08-01');
+      assert.equal(
+        new Date(result.note_version).getTime(),
+        row.note_updated_at.getTime(),
+        'a note written here needs a version too, or the client has none to send back',
+      );
     });
 
     /**
@@ -95,10 +107,26 @@ describe('collection writes', () => {
     it('refuses a future watch date', async () => {
       const film = await t.createMovie('Unreleased', 1005);
       const err = await t.errorFrom(
-        `select log_watched($1, $2, (current_date + 1)::date)`,
+        `select log_watched($1, $2, (current_date + 2)::date)`,
         [await uuid(), film],
       );
       assert.equal(err?.code, '22023');
+    });
+
+    /**
+     * The server runs on UTC and the client sends a local date, so everywhere east of
+     * UTC the local date is a day ahead of the server's for the first hours of the day.
+     * Refusing current_date + 1 rejects a correct "I watched this tonight" for a large
+     * part of every day depending on longitude, which is a worse failure than accepting
+     * a date one day further out than any real timezone can justify.
+     */
+    it("accepts tomorrow's date, because a client east of UTC is not lying", async () => {
+      const film = await t.createMovie('Tomorrow', 1026);
+      const ok = await call(`log_watched($1, $2, (current_date + 1)::date)`, [
+        await uuid(),
+        film,
+      ]);
+      assert.equal(ok.status, 'ok');
     });
 
     it('refuses a title that does not exist', async () => {
@@ -262,12 +290,18 @@ describe('collection writes', () => {
   });
 
   describe('save_note', () => {
-    it('replaces the note', async () => {
+    it('replaces the note and hands back the new version', async () => {
       const film = await t.createMovie('Barry Lyndon', 1015);
       await call(`log_watched($1, $2)`, [await uuid(), film]);
-      await call(`save_note($1, $2, 'the candlelight')`, [await uuid(), film]);
+      const result = await call(`save_note($1, $2, 'the candlelight')`, [await uuid(), film]);
 
-      assert.equal((await collectionRow(film)).note, 'the candlelight');
+      const row = await collectionRow(film);
+      assert.equal(row.note, 'the candlelight');
+      assert.equal(
+        new Date(result.note_version).getTime(),
+        row.note_updated_at.getTime(),
+        'a client draining several edits needs the version back to carry the base forward',
+      );
     });
 
     it('refuses a title that is not in the collection', async () => {
@@ -278,35 +312,138 @@ describe('collection writes', () => {
 
     /**
      * A note is the only free text a user writes, so losing one to a silent overwrite
-     * is a real loss rather than an inconvenience. This is the mechanism behind
-     * offline-sync.md §5's promise, and the promise had nothing behind it until
-     * updated_at got a trigger and the call got a base version.
+     * is a real loss rather than an inconvenience — offline-sync.md §5.
+     *
+     * Divergence here is genuine: a second edit actually lands between the base being
+     * read and the stale write arriving. The earlier version of this test faked
+     * staleness with `now() - interval '1 hour'`, which proved only that a mismatching
+     * timestamp raises. It never exercised the other half — the version *advancing* on
+     * an edit — so it passed with the trigger dropped while real divergence was
+     * silently overwritten. The assertion on the stored note is what pins that half:
+     * with no version trigger, the write below lands and the second edit is gone.
      */
-    it('refuses a stale write and returns both texts', async () => {
+    it('refuses a write based on a version a later edit has superseded', async () => {
       const film = await t.createMovie('The Shining', 1017);
       await call(`log_watched($1, $2)`, [await uuid(), film]);
-      await call(`save_note($1, $2, 'typed on the device')`, [await uuid(), film]);
+      await call(`save_note($1, $2, 'from this device')`, [await uuid(), film]);
+      const base = (await collectionRow(film)).note_updated_at;
+
+      await pastAMillisecond();
+      await call(`save_note($1, $2, 'from the other device')`, [await uuid(), film]);
+
+      const err = await t.errorFrom(`select save_note($1, $2, 'typed offline', $3)`, [
+        await uuid(),
+        film,
+        base,
+      ]);
+
+      assert.equal(err?.code, '55000');
+      assert.equal(
+        (await collectionRow(film)).note,
+        'from the other device',
+        'the superseding edit must survive, or the conflict rule protects nothing',
+      );
+
+      /**
+       * The detail carries the server's version and deliberately not the server's
+       * text: Postgres logs an exception's DETAIL at default settings, and a note is
+       * always-private under PRD §22. The client owns the row, so it reads its own
+       * note to show the choice.
+       */
+      const detail = JSON.parse(err.detail);
+      assert.equal(detail.conflict, 'note');
+      assert.ok(detail.server_version, 'the client needs a version it can rebase onto');
+      assert.equal(
+        JSON.stringify(detail).includes('from the other device'),
+        false,
+        'private note text must not reach the database log',
+      );
+    });
+
+    /**
+     * The defect this column exists for. updated_at moves on every write to the row,
+     * so while the base was read from it, the ordinary offline sequence — tap a bucket,
+     * then write a note, drained in that order — raised a guaranteed conflict about a
+     * note nothing had touched. A dialog that cries wolf on a routine session teaches
+     * people to dismiss it, which is exactly when it needs to be believed.
+     */
+    it('is not disturbed by an unrelated write to the same title', async () => {
+      const film = await t.createMovie('Days of Heaven', 1022);
+      await call(`log_watched($1, $2)`, [await uuid(), film]);
+      await call(`save_note($1, $2, 'the magic hour')`, [await uuid(), film]);
+      const base = (await collectionRow(film)).note_updated_at;
+
+      await pastAMillisecond();
+      await call(`set_bucket($1, $2, 'loved')`, [await uuid(), film]);
+
+      const before = await collectionRow(film);
+      assert.notEqual(
+        before.updated_at.getTime(),
+        base.getTime(),
+        'the bucket write must really have moved the row version, or this proves nothing',
+      );
+
+      const ok = await call(`save_note($1, $2, 'edited offline', $3)`, [
+        await uuid(),
+        film,
+        base,
+      ]);
+      assert.equal(ok.status, 'ok');
+      assert.equal((await collectionRow(film)).note, 'edited offline');
+    });
+
+    it('accepts the version it last handed out, so a drain can chain edits', async () => {
+      const film = await t.createMovie('Full Metal Jacket', 1018);
+      await call(`log_watched($1, $2)`, [await uuid(), film]);
+      const first = await call(`save_note($1, $2, 'first')`, [await uuid(), film]);
+
+      await pastAMillisecond();
+      const second = await call(`save_note($1, $2, 'second', $3)`, [
+        await uuid(),
+        film,
+        first.note_version,
+      ]);
+
+      assert.equal(second.status, 'ok');
+      assert.equal((await collectionRow(film)).note, 'second');
+    });
+
+    /**
+     * A base version against a row that has never held a note. There is no text to
+     * lose, so asking the user to resolve a conflict would be asking about nothing.
+     */
+    it('accepts a base version when no note has ever been stored', async () => {
+      const film = await t.createMovie('Solaris 1972', 1023);
+      await call(`log_watched($1, $2)`, [await uuid(), film]);
+      const row = await collectionRow(film);
+      assert.equal(row.note_updated_at, null);
 
       const stale = (await t.sql(`select (now() - interval '1 hour') as t`)).rows[0].t;
-      const err = await t.errorFrom(`select save_note($1, $2, 'typed offline', $3)`, [
+      const ok = await call(`save_note($1, $2, 'the first note', $3)`, [
         await uuid(),
         film,
         stale,
       ]);
-
-      assert.equal(err?.code, '55000');
-      const detail = JSON.parse(err.detail);
-      assert.equal(detail.mine, 'typed offline');
-      assert.equal(detail.theirs, 'typed on the device', 'the client cannot offer a choice without both');
+      assert.equal(ok.status, 'ok');
     });
 
-    it('accepts a matching base version', async () => {
-      const film = await t.createMovie('Full Metal Jacket', 1018);
-      await call(`log_watched($1, $2)`, [await uuid(), film]);
-      const { updated_at } = await collectionRow(film);
+    /**
+     * A note created by log_watched rather than save_note still gets a version. With an
+     * update-only trigger it would read as "never written" and a stale queued edit
+     * would overwrite it without a word.
+     */
+    it('versions a note written at creation time', async () => {
+      const film = await t.createMovie('Come and See', 1024);
+      await call(`log_watched($1, $2, null, 'devastating')`, [await uuid(), film]);
+      assert.ok((await collectionRow(film)).note_updated_at);
 
-      const ok = await call(`save_note($1, $2, 'later', $3)`, [await uuid(), film, updated_at]);
-      assert.equal(ok.status, 'ok');
+      const stale = (await t.sql(`select (now() - interval '1 hour') as t`)).rows[0].t;
+      const err = await t.errorFrom(`select save_note($1, $2, 'overwrite me', $3)`, [
+        await uuid(),
+        film,
+        stale,
+      ]);
+      assert.equal(err?.code, '55000');
     });
 
     /**
@@ -317,10 +454,10 @@ describe('collection writes', () => {
      */
     it('tolerates a base version truncated to milliseconds', async () => {
       const film = await t.createMovie('Eyes Wide Shut', 1019);
-      await call(`log_watched($1, $2)`, [await uuid(), film]);
+      await call(`log_watched($1, $2, null, 'the mask')`, [await uuid(), film]);
 
       const { rows } = await t.sql(
-        `select date_trunc('milliseconds', updated_at) as truncated
+        `select date_trunc('milliseconds', note_updated_at) as truncated
            from user_media where user_id = $1 and media_item_id = $2`,
         [user, film],
       );
@@ -331,6 +468,25 @@ describe('collection writes', () => {
         rows[0].truncated,
       ]);
       assert.equal(ok.status, 'ok');
+    });
+
+    it('refuses a note longer than the cap', async () => {
+      const film = await t.createMovie('War and Peace', 1025);
+      await call(`log_watched($1, $2)`, [await uuid(), film]);
+      const err = await t.errorFrom(`select save_note($1, $2, repeat('x', 2001))`, [
+        await uuid(),
+        film,
+      ]);
+      assert.equal(err?.code, '22023', 'a field error, not an invariant violation');
+
+      // And on the column too, following reports.note: the function's raise is the
+      // legible error, the constraint is what survives user_media gaining a writer.
+      const direct = await t.errorFrom(
+        `update user_media set note = repeat('x', 2001)
+          where user_id = $1 and media_item_id = $2`,
+        [user, film],
+      );
+      assert.equal(direct?.code, '23514');
     });
   });
 
@@ -358,6 +514,35 @@ describe('collection writes', () => {
       [other, film],
     );
     assert.equal(rows[0].n, 1, 'and the write must actually have happened');
+  });
+
+  /**
+   * The ledger row and the write commit together or not at all. If a claim survived a
+   * failed operation, the outbox entry would be poisoned: every retry would answer
+   * 'already_applied' for a write that never happened, and the client would report
+   * success forever. This holds because the raise rolls back the whole function, but
+   * nothing pinned it.
+   */
+  it('leaves no claim behind when the operation fails, so a retry can still work', async () => {
+    const film = await t.createMovie('Retry', 1027);
+    const operation = await uuid();
+
+    const err = await t.errorFrom(`select log_watched($1, $2, (current_date + 2)::date)`, [
+      operation,
+      film,
+    ]);
+    assert.equal(err?.code, '22023');
+
+    const { rows } = await t.sql(
+      `select count(*)::int as n from processed_operations
+        where user_id = $1 and operation_id = $2`,
+      [user, operation],
+    );
+    assert.equal(rows[0].n, 0);
+
+    const ok = await call(`log_watched($1, $2, '2026-05-05')`, [operation, film]);
+    assert.equal(ok.status, 'ok', 'the corrected retry must apply, not answer already_applied');
+    assert.equal((await collectionRow(film)).watched_on.toISOString().slice(0, 10), '2026-05-05');
   });
 
   it('refuses a null operation id', async () => {
