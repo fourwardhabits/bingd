@@ -146,6 +146,26 @@ The allow-list test remains the real guard, but for a stated reason rather than 
 
 ---
 
+## Builds and native identities
+
+`eas.json` defines one profile per app variant, so the profile name and the `APP_VARIANT` it sets never drift apart. The EAS project is `@fourward/bingd` (`d10f76cc-…`), and its id lives in `app.config.ts` under `extra.eas.projectId` — `eas init` could not put it there itself, because it writes to `app.json` and this project needs a TypeScript config for the variant logic. That warning is expected, not a failure.
+
+| Profile | Distribution | Android artifact | Purpose |
+|---|---|---|---|
+| `development` | internal | APK | Dev client, for running unpublished JS on a device |
+| `preview` | internal | APK | Release-mode build for TestFlight and internal testers |
+| `production` | store | AAB | Store submissions |
+
+**Sign in with Apple is iOS-only, deliberately.** Apple requires the button wherever a third-party sign-in is offered (App Review 4.8), and Google sign-in triggers that. The requirement is Apple's, so it applies to Apple's platform. Offering it on Android would mean the OAuth redirect flow, which needs a Services ID and a client secret that is a JWT signed with a `.p8` key — **and Apple caps that JWT at six months**. It does not warn, it does not degrade: sign-in works for half a year and then stops. Android already has Google and email, so that maintenance trap buys nothing. `ios.usesAppleSignIn` adds the entitlement and EAS enables the capability on the App ID during the first build, so there is nothing to click in the Apple portal.
+
+### One thing that is not yet safe, and should be before any store build
+
+Build-time environment variables are not configured in EAS. `.env` is gitignored and EAS uploads only tracked files, so a build gets no Supabase URL — and `src/lib/env.ts` throws **at app start**, not at build time. So the failure is loud but late: the build succeeds, the app dies on open.
+
+Worse is the shape it takes once values do get set carelessly, because there is currently only one Supabase project. Set them once at the account level and a `production` build points at `bingd-nonprod`, and nothing anywhere says so — the badge is off in production builds, which is exactly when you would want the warning. Per-environment EAS variables scoped to `production` are the fix, and it needs `bingd-production` to exist first. Tracked, not done.
+
+---
+
 ## Repository layout
 
 ```
