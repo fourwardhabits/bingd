@@ -21,6 +21,13 @@
 -- assert_username_available() enforces, plus the format constraint, so a form
 -- that says "available" cannot be contradicted by the insert. A test asserts
 -- the two agree, because that divergence is the whole risk of having both.
+--
+-- The normalization has to happen here too, not only in create_profile. Checking
+-- the raw input makes the two disagree on anything create_profile would have
+-- normalized: 'MixedCase' fails the lowercase regex and reads as unavailable,
+-- while create_profile lowercases it and accepts it. The direction is safe — the
+-- form refuses a name that would have worked — but "these two agree" is the
+-- property the pair exists to have, and it either holds or it does not.
 -- ---------------------------------------------------------------------------
 
 create or replace function username_available(p_username text)
@@ -28,19 +35,22 @@ returns boolean
 language sql stable security definer
 set search_path = public
 as $$
-  select p_username is not null
-     and p_username ~ '^[a-z0-9_]{3,24}$'
+  with candidate as (
+    select lower(btrim(coalesce(p_username, ''))) as name
+  )
+  select c.name ~ '^[a-z0-9_]{3,24}$'
      and not exists (
-       select 1 from profiles p where p.username = p_username::citext
+       select 1 from profiles p where p.username = c.name::citext
      )
      -- A name in history is taken unless it is the caller's own former name.
      -- profile_id null means the owning account was deleted, which is a
      -- permanent reservation against impersonation and never reclaimable.
      and not exists (
        select 1 from username_history h
-        where h.username = p_username::citext
+        where h.username = c.name::citext
           and (h.profile_id is null or h.profile_id is distinct from auth.uid())
-     );
+     )
+    from candidate c;
 $$;
 
 comment on function username_available(text) is
@@ -92,6 +102,17 @@ begin
       using errcode = '22023';
   end if;
 
+  -- A display name renders on every social surface and is a named report subject,
+  -- so it gets the same treatment reports.note and reactions.kind already get: an
+  -- unbounded text column accepting anything *is* a free-text field pointed at
+  -- whoever reads it, whatever a well-behaved client happens to send. The client
+  -- caps this at 50; a modified client is the case the check exists for.
+  if v_display is not null
+     and (char_length(v_display) > 50 or v_display ~ '[[:cntrl:]]') then
+    raise exception 'display name must be 50 characters or fewer, on one line'
+      using errcode = '22023';
+  end if;
+
   -- Absent or impossible dates are input errors, not eligibility decisions, and
   -- must not delete anything. A date in the future or before 1906 is a broken
   -- form, not a claim about a person.
@@ -104,8 +125,26 @@ begin
   -- The gate. Nothing about this date is written down: not in profiles, not in
   -- profile_private, not in a log. The only trace it leaves is the absence of an
   -- account.
+  --
+  -- The delete has a precondition worth knowing before adding a feature that runs
+  -- before profile creation: it succeeds because every table referencing
+  -- auth.users(id) at this point cascades. A future foreign key without ON DELETE
+  -- CASCADE blocks it — storage.objects.owner is the usual culprit — so an avatar
+  -- uploaded during onboarding would break the age gate rather than the upload.
+  --
+  -- Which is why a failure here is raised rather than swallowed. Returning
+  -- {"ok": false, "account_deleted": true} when the delete did not happen would
+  -- tell a child we removed their details while keeping them, and that is the one
+  -- statement this function must never make falsely. Failing loudly costs a
+  -- confusing error message; failing quietly costs the guarantee.
   if p_date_of_birth > (current_date - interval '13 years') then
-    delete from auth.users where id = v_user;
+    begin
+      delete from auth.users where id = v_user;
+    exception when others then
+      raise exception 'age refusal could not delete the account: %', sqlerrm
+        using errcode = 'P0001';
+    end;
+
     return jsonb_build_object('ok', false, 'reason', 'under_13', 'account_deleted', true);
   end if;
 
@@ -123,6 +162,14 @@ begin
   return jsonb_build_object('ok', true);
 end;
 $$;
+
+-- The structural half of the display-name rule. create_profile is the only writer
+-- today, so the check above is sufficient today; the constraint is what keeps it
+-- true when update_profile and the import path arrive and nobody rereads this file.
+alter table profiles
+  add constraint display_name_shape
+  check (char_length(display_name) between 1 and 50
+         and display_name !~ '[[:cntrl:]]');
 
 comment on function create_profile(text, text, date) is
   'Creates profiles and profile_private together. An under-13 date of birth returns {"ok":false,"reason":"under_13"} and deletes the auth.users row — returned rather than raised, because raising would roll the deletion back (auth.md §4). Raises 42710 if the caller already has a profile, 23505 if the username is unavailable, 22023 for a malformed username or an impossible date.';

@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 
@@ -25,6 +26,7 @@ import { theme } from '@/ui/tokens';
 export default function CreateProfileScreen() {
   const auth = useAuth();
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -152,6 +154,18 @@ export default function CreateProfileScreen() {
         <Text variant="body" tone="secondary">
           We have not kept your details, and no account was created.
         </Text>
+        {/*
+          Without this the screen is a dead end. The session is already signed out, and
+          routing only moves signed-out users who are *outside* the auth group, so it
+          leaves this screen alone and there is nothing to tap. The only way out is
+          force-quitting the app, which reads as a crash. Navigating explicitly rather
+          than clearing `refused`, which would show the signup form to a signed-out user.
+        */}
+        <Button
+          label="Done"
+          kind="secondary"
+          onPress={() => router.replace('/(auth)/sign-in')}
+        />
       </Screen>
     );
   }

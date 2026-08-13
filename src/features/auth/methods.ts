@@ -113,7 +113,15 @@ export async function signInWithApple(): Promise<SignInOutcome> {
       provider: 'apple',
       token: credential.identityToken,
     });
-    if (error) return { ok: false, cancelled: false, message: error.message };
+    if (error) {
+      // The parked name is cleared here, and only here, because this is the branch
+      // that leaves it orphaned: no session was created, so nothing will sign out and
+      // clear it, and no profile will be created and clear it either. It would sit in
+      // the Keychain under a fixed key until someone else signed in on the same
+      // device, and pre-fill their signup form with this person's legal name.
+      await clearPendingDisplayName();
+      return { ok: false, cancelled: false, message: error.message };
+    }
     track({ name: 'sign_in_completed', props: { method: 'apple' } });
     return { ok: true };
   } catch (e) {

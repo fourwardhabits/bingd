@@ -120,6 +120,42 @@ describe('create_profile', () => {
       assert.equal(result.reason, 'under_13');
     });
 
+    /**
+     * The delete succeeds today because everything referencing auth.users(id) at this
+     * point cascades. A future foreign key that does not cascade blocks it, and
+     * storage.objects.owner is the usual culprit, so an avatar uploaded during
+     * onboarding would break the age gate rather than the upload.
+     *
+     * What must not happen then is returning {"ok": false, "account_deleted": true}
+     * while the account still exists, because the screen tells the child their
+     * details were not kept. This simulates that future by adding exactly such a
+     * reference, and asserts the request fails loudly instead.
+     */
+    it('fails loudly rather than claiming a deletion that did not happen', async () => {
+      await t.sql(`
+        create table blocks_the_delete (
+          user_id uuid primary key references auth.users(id)
+        )
+      `);
+      try {
+        const user = await newAuthUser();
+        await t.sql(`insert into blocks_the_delete (user_id) values ($1)`, [user]);
+        const { rows: d } = await t.sql(`select (current_date - interval '7 years')::date as d`);
+
+        const err = await createProfileAs(user, { username: 'undeletable', dob: d[0].d });
+        assert.ok(err, 'a blocked deletion must not be reported as a successful one');
+        assert.equal(err.code, 'P0001');
+
+        const { rows } = await t.sql(
+          `select count(*)::int as n from profiles where id = $1`,
+          [user],
+        );
+        assert.equal(rows[0].n, 0, 'and it must not have created a profile either');
+      } finally {
+        await t.sql(`drop table blocks_the_delete`);
+      }
+    });
+
     it('deletes the account, so no dormant authenticated user is left behind', async () => {
       const user = await newAuthUser();
       const { rows: d } = await t.sql(`select (current_date - interval '8 years')::date as d`);
@@ -226,23 +262,75 @@ describe('create_profile', () => {
   });
 
   /**
+   * A display name renders on every social surface and is a named report subject, so
+   * an unbounded column is a free-text field pointed at whoever reads it. The client
+   * caps it at 50; a modified client is what the server check is for, which is the
+   * same reasoning that closed reports.note and reactions.kind.
+   */
+  describe('display name', () => {
+    it('refuses one longer than the client allows', async () => {
+      const user = await newAuthUser();
+      const err = await createProfileAs(user, {
+        username: 'longnamed',
+        displayName: 'q'.repeat(51),
+      });
+      assert.ok(err, 'a megabyte display name must not be storable');
+      assert.equal(err.code, '22023');
+    });
+
+    it('refuses embedded control characters', async () => {
+      const user = await newAuthUser();
+      const err = await createProfileAs(user, {
+        username: 'multiline',
+        displayName: 'first\nsecond',
+      });
+      assert.ok(err, 'a newline lets one name occupy two rows of every list');
+      assert.equal(err.code, '22023');
+    });
+
+    it('holds even against a direct insert, not only through the RPC', async () => {
+      // The constraint rather than the function check. update_profile and the import
+      // path do not exist yet, and this is what makes the rule true for them.
+      const user = await newAuthUser();
+      const err = await t.errorFrom(
+        `insert into profiles (id, username, display_name) values ($1, 'directly', $2)`,
+        [user, 'z'.repeat(200)],
+      );
+      assert.ok(err, 'the table itself should refuse it');
+      assert.equal(err.code, '23514');
+    });
+  });
+
+  /**
    * The reason both functions exist is that the form can answer before
    * submitting. The reason that is a risk is that two implementations of one rule
    * drift, and the symptom is a user told a name is free and then refused it.
    */
   describe('username_available agrees with create_profile', () => {
-    const candidates = [
-      'freshname',
-      'taken_name',
-      'departed',
-      'ab',
-      'has space',
-      'MixedCase',
-      'a'.repeat(25),
-      'ok_name_2',
-    ];
-
     it('never reports available for a name create_profile would refuse', async () => {
+      // Fixtures are created here rather than inherited from earlier tests in this
+      // file. The previous version leaned on names those tests happened to leave
+      // behind, and it mattered: 'MixedCase' asserted the two functions agreed, they
+      // genuinely disagreed because only create_profile normalized, and the test
+      // passed because an earlier test had already created 'mixedcase' so the insert
+      // failed for an unrelated reason. Reordering the file would have exposed it.
+      await t.createUser({ username: 'agree_taken' });
+      const departed = await t.createUser({ username: 'agree_gone' });
+      await t.sql(`delete from profiles where id = $1`, [departed]);
+
+      const candidates = [
+        'agree_fresh',
+        'agree_taken',
+        'agree_gone',
+        'ab',
+        'has space',
+        // Normalized by both, so this now passes because they agree rather than
+        // because the name was already taken.
+        'MixedFresh',
+        'a'.repeat(25),
+        'agree_ok_2',
+      ];
+
       for (const candidate of candidates) {
         const user = await newAuthUser();
         const available = await t.asUser(user, async () => {

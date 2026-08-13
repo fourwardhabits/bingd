@@ -16,7 +16,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { AuthProvider, useAuthRouting } from '@/features/auth';
+import { AuthProvider, AuthStatusOverlay, useAuthRouting } from '@/features/auth';
 import { initAnalytics, track } from '@/lib/analytics';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
 import { createQueryClient } from '@/lib/query';
@@ -89,16 +89,19 @@ function Navigation() {
   useAuthRouting();
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: theme.surface.base },
-      }}
-    >
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
-    </Stack>
+    <>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: theme.surface.base },
+        }}
+      >
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
+      </Stack>
+      <AuthStatusOverlay />
+    </>
   );
 }
 

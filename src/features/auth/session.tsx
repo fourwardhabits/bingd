@@ -16,7 +16,7 @@ export type Profile = {
 };
 
 /**
- * Four states, and the third is the one the architecture insists on.
+ * Five states, and `onboarding` is the one the architecture insists on.
  *
  * `onboarding` is being authenticated without having an account: `profiles.id`
  * references `auth.users(id)`, the date of birth is collected during onboarding,

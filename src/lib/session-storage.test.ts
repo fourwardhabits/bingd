@@ -30,6 +30,9 @@ beforeEach(() => {
 
 const KEY = 'sb-abheeqyjzekiowkztfxv-auth-token';
 
+/** What the Keychain counts, which is not what `String.length` returns. */
+const byteLength = (value: string) => Buffer.byteLength(value, 'utf8');
+
 describe('chunked SecureStore', () => {
   it('round-trips a short value', async () => {
     await chunkedSecureStore.setItem(KEY, 'small');
@@ -53,10 +56,72 @@ describe('chunked SecureStore', () => {
     const written = [...store.keys()].filter((k) => k !== `${KEY}.chunks`);
     expect(written.length).toBeGreaterThan(1);
     for (const key of written) {
-      expect(store.get(key)!.length).toBeLessThanOrEqual(2048);
+      expect(byteLength(store.get(key)!)).toBeLessThanOrEqual(2048);
     }
 
     expect(await chunkedSecureStore.getItem(KEY)).toBe(session);
+  });
+
+  /**
+   * Measured in bytes, because that is what the Keychain counts. A JWT is ASCII, so
+   * the character count and the byte count agree for the token and diverge exactly
+   * where the user's own data appears: JSON.stringify does not escape non-ASCII, so a
+   * display name from Apple or Google in a non-Latin script costs two to four bytes
+   * per character. Chunking by length would let a chunk weigh three times its
+   * apparent size and be rejected by the limit chunking exists to respect — and only
+   * for users whose names are not Latin, which is the worst possible distribution
+   * for a bug.
+   */
+  it('respects the byte limit for non-ASCII content, not the character count', async () => {
+    const value = JSON.stringify({ name: 'Ω'.repeat(4_000), token: 'x'.repeat(2_000) });
+    await chunkedSecureStore.setItem(KEY, value);
+
+    for (const key of [...store.keys()].filter((k) => k !== `${KEY}.chunks`)) {
+      expect(byteLength(store.get(key)!)).toBeLessThanOrEqual(2048);
+    }
+    expect(await chunkedSecureStore.getItem(KEY)).toBe(value);
+  });
+
+  /**
+   * A boundary landing inside a surrogate pair leaves a lone surrogate at the end of
+   * one chunk and its partner at the start of the next. Both halves survive this
+   * mock, but on a device the native bridge's UTF-8 conversion replaces each with
+   * U+FFFD, so the rejoined string is not the one written. The damage lands inside a
+   * JSON string value, which stays parseable, so the session loads and the name is
+   * quietly wrong.
+   */
+  it('never splits a surrogate pair across chunks', async () => {
+    // Emoji are four UTF-8 bytes each, so a boundary falls inside one unless the
+    // split is code-point aware.
+    const value = '🎬'.repeat(2_000);
+    await chunkedSecureStore.setItem(KEY, value);
+
+    for (const key of [...store.keys()].filter((k) => k !== `${KEY}.chunks`)) {
+      const chunk = store.get(key)!;
+      expect(chunk).not.toMatch(/[\uD800-\uDBFF]$/);
+      expect(chunk).not.toMatch(/^[\uDC00-\uDFFF]/);
+    }
+    expect(await chunkedSecureStore.getItem(KEY)).toBe(value);
+  });
+
+  /**
+   * Two writes at once used to interleave destructively: each begins by deleting the
+   * other's chunks, and the count written last could describe a mixture. gotrue-js
+   * happens to serialize its own storage calls, so this was unreachable in practice
+   * and correct only by its caller's undocumented internals.
+   */
+  it('serializes overlapping writes to one key', async () => {
+    const first = 'a'.repeat(5_000);
+    const second = 'b'.repeat(3_000);
+
+    await Promise.all([
+      chunkedSecureStore.setItem(KEY, first),
+      chunkedSecureStore.setItem(KEY, second),
+    ]);
+
+    // Whichever landed last, the result must be one of the two values entire, never a
+    // blend of both and never a short read.
+    expect([first, second]).toContain(await chunkedSecureStore.getItem(KEY));
   });
 
   it('preserves content exactly across a chunk boundary', async () => {

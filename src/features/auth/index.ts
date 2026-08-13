@@ -21,3 +21,5 @@ export {
 } from './methods';
 
 export { createProfile, usernameAvailability } from './create-profile';
+
+export { AuthStatusOverlay } from './status-overlay';
