@@ -777,6 +777,24 @@ Rationale: a Top 10 is self-explanatory to someone who has never heard of Bingd,
 | Match card | Match %, shared count, comparison link | **Early traction**; both users' visibility rules apply |
 | Milestone / recap | Milestone or period summary | Early traction; basic Free, richer templates Pro |
 
+### Card formats — Decided 2026-08-13
+
+Two canvases, because the destinations are shaped differently. Both are **poster-forward**; posters are what make a shared image stop someone mid-scroll, and TMDB's terms permit them (§19).
+
+| Format | Ratio | Destination |
+|---|---|---|
+| **Feed card** | 4:5 portrait | Instagram and Facebook feed posts, iMessage, WhatsApp, anywhere an image is attached to a message |
+| **Story card** | 9:16 full-bleed | Instagram and Facebook Stories, TikTok, Snapchat, Threads |
+
+The story card is the one users will reach for most, and it needs its own layout rather than a scaled feed card. Two constraints specific to it:
+
+- **Content stays inside the middle 80% vertically.** Every story platform overlays its own chrome at the top and bottom, and a Top 10 whose tenth title sits under a reply bar is a broken card.
+- **A 9:16 canvas suits a Top 10 well** — a two-column, five-row poster grid, or a single ordered column. It is a better fit for ten ranked items than a square is.
+
+**Sharing route for v1: the operating system share sheet.** The user taps Share, previews the card, and picks Instagram Stories, TikTok, or anything else themselves. This works from the first build, needs no third-party SDK, and needs no Meta app registration.
+
+**Required native declaration.** Direct "share to Instagram Stories" buttons — which skip the share sheet and open the destination composer straight away — require the destination URL schemes to be declared in the native build (`LSApplicationQueriesSchemes` on iOS, `<queries>` intents on Android). **Those declarations ship in the first development build even though v1 does not use them.** Omitting them means a later addition needs a new binary and a store submission, which is the same trap that AD-10 avoids for push notifications. Direct integration also needs a Meta app ID, which is a deferred external dependency and not required for the share-sheet route.
+
 ### Share experience — Required
 
 - Show a preview before the share sheet. Never use a raw screenshot as the default artifact.
@@ -810,7 +828,7 @@ A share or invite token is a **routing and attribution identifier, never authori
 - Private notes, watch dates, import history, email, account identifiers, tags of private users, and capability state never appear in a share payload.
 - The owner controls handle display. A neutral "a Bingd ranking" attribution is available.
 - Another user's taste data never appears in a share card unless it is already public and the feature has passed privacy review.
-- Artwork in share cards and Open Graph previews is subject to the licence gate in §19.
+- Artwork in share cards and Open Graph previews is served from the provider CDN under the terms in §19, never rehosted.
 - Initial public pages are `noindex`.
 
 ### Analytics — Required
@@ -994,7 +1012,7 @@ Cache entries carry a source, fetch timestamp, and version so anything can be in
 
 ### Image delivery — Provisional, licence-gated
 
-Provider CDN with size variants and a bounded device cache. **No rehosting** unless a licence permits it. A text-first branded share card must always exist as a fallback for when artwork is unavailable or not permitted.
+Provider CDN with size variants and a bounded device cache. **No rehosting** on Bingd infrastructure. A text-first branded share layout must always exist for titles the catalog has no artwork for, which is common after a Letterboxd import.
 
 ### Cost model and failure behavior
 

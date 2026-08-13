@@ -247,7 +247,18 @@ Beli's streak reminders are **not** adopted. Streaks manufacture obligation, and
 
 The **Top 10 share card** is the polished artifact (PRD §16): ten posters, ordinals, and titles on Parchment, set in DM Serif Display, with the wordmark. Poster-forward, because artwork is what makes a shared image stop someone mid-scroll, and typographic enough that the card is recognizably Bingd rather than a generic grid.
 
-It must render in three states: ten titles, fewer than ten, and **artwork partly or wholly missing** — the last being common after a Letterboxd import that reaches obscure titles. Missing posters use the designed placeholder, and an all-text layout covers a top 10 that is mostly unillustrated.
+**Two canvases**, designed separately rather than one scaled:
+
+| Format | Layout |
+|---|---|
+| **Feed card**, 4:5 | Two columns of five. Ordinal and title beside each poster |
+| **Story card**, 9:16 | Content confined to the middle 80% vertically, clear of platform chrome. Wordmark at the top of the safe area, ten items below |
+
+The story card matters most, because Stories is where this kind of image actually gets posted. Its trap is vertical safe area: every platform overlays a reply bar and a header, and a tenth title hidden underneath makes the card look broken.
+
+Each must render with ten titles, with fewer than ten, and with **artwork partly or wholly missing** — common after a Letterboxd import reaching obscure titles. Missing posters use the designed placeholder, and an all-text layout covers a top 10 that is mostly unillustrated.
+
+Sharing uses the OS share sheet, so the user picks Instagram Stories or TikTok themselves. Direct-to-Stories buttons are a later addition, and the native declarations that make that addition cheap ship in the first build (PRD §16).
 
 Secondary cards: a single ranking reveal, and a profile match card.
 

@@ -151,6 +151,10 @@ PRD §15 requires the full system in v1 with push installed, credentialed, and f
 
 `expo-notifications` and both platforms' push credentials ship in the **first** development build regardless.
 
+**The same reasoning applies to share destinations.** Direct "share to Instagram Stories" buttons need the destination URL schemes declared natively (`LSApplicationQueriesSchemes` on iOS, `<queries>` intents on Android). v1 ships the OS share sheet and does not use them, but the declarations go in the first build anyway (PRD §16), so adding those buttons later is a JavaScript change rather than a new binary and a store review.
+
+The general rule: **anything that requires a native manifest entry is declared in the first build, even when the feature it enables is not yet used.** A JavaScript-only change can ship over the air via EAS Update; a manifest change cannot.
+
 ---
 
 ## Non-negotiables

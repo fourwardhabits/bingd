@@ -123,7 +123,11 @@ On-device rather than server-side because PRD §16 requires sharing to work unde
 
 The Top 10 is the polished artifact (PRD §16). It is **poster-forward with strong typography** — the posters are what make someone stop scrolling, and the serif type and Parchment ground are what make the card recognizably Bingd rather than generic.
 
-It must render correctly in three cases: ten titles, fewer than ten, and **some or all artwork missing**. The last is not hypothetical, since Letterboxd imports reach titles the catalog has no poster for. Missing artwork falls back to the designed placeholder ([`../design/design-system.md`](../design/design-system.md) §7), and an all-text layout covers the case where most of a top 10 is obscure. That variant exists for artwork availability, not for licensing.
+**Two canvases** per PRD §16: a 4:5 feed card and a 9:16 story card. They are separate components rather than one component scaled, because a story card must keep its content inside the middle 80% vertically to clear the platform chrome, and that changes the layout rather than the dimensions.
+
+Each must render correctly with ten titles, with fewer than ten, and with **some or all artwork missing** — the last being common after a Letterboxd import. Missing posters use the designed placeholder ([`../design/design-system.md`](../design/design-system.md) §7), and an all-text layout covers a top 10 that is mostly unillustrated. That variant exists for artwork availability, not for licensing.
+
+**Sharing goes through the OS share sheet** in v1, so story posting works from the first build with no third-party SDK. The destination URL schemes are nonetheless declared in the native config from the first development build (PRD §16), so adding direct-to-Stories buttons later is a JavaScript change rather than a new binary and store submission. This is the same reasoning as AD-10 for push.
 
 Open Graph images for web pages are server-rendered by `og-render`, since they are requested by messaging platforms rather than by the app.
 
