@@ -3,7 +3,15 @@
 **Version:** v1 (public alpha)
 **Specification:** [`../product/PRD.md`](../product/PRD.md) v0.6 · [`README.md`](./README.md)
 
-All SQL is Postgres 15 as provided by Supabase. Types are illustrative of intent; exact migration files are written during implementation.
+All SQL is Postgres 15 as provided by Supabase.
+
+**The migrations in [`../../supabase/migrations/`](../../supabase/migrations/) are now the source of truth.** This document explains the reasoning; the migrations are what runs. They are applied to real Postgres in CI and the structural guarantees in §14 are each tested by attempting to violate them, so the two cannot drift silently.
+
+Three differences from the SQL sketched below, all deliberate:
+
+- **`pgcrypto` is not installed.** `gen_random_uuid()` has been core Postgres since 13, so the extension was dead weight.
+- **Check constraints replace comments** wherever this document listed valid values in prose — `media_cache.facet`, `feed_events.type`, `import_jobs.status`, `import_rows.status`, `share_tokens.object_type`, `recommendation_feedback.kind`. Same information, in a place where it cannot rot.
+- **`can_view_profile` handles a null viewer explicitly**, returning public profiles only. Unauthenticated reads happen on the public web pages in PRD §16, and leaving that case to `case` fallthrough would have returned null rather than false.
 
 ---
 

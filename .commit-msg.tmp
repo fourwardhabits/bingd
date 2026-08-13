@@ -1,32 +1,5 @@
-Add database schema, row level security, and the ranking engine
+Point the data model at the migrations as source of truth
 
-Thirteen migrations covering the full data model, plus the ranking RPCs. All of
-it runs in CI against real Postgres compiled to WebAssembly, so there is no
-Docker dependency and no separate test schema to drift from the migrations.
-
-The ranking engine is the component most likely to corrupt data in ways nobody
-notices for weeks, so it is tested harder than anything else. The four
-invariants are asserted after every single mutation, not once at the end. One
-test drives sixty randomised insertions, unrankings, and reorderings, checking
-all four after each. Another assigns every film a secret true ordering, answers
-each comparison from it, and asserts the finished ranking reproduces that order
-exactly, which verifies the insertion search is correct rather than merely
-self-consistent.
-
-Structural guarantees from the data model are tested by trying to violate them
-and expecting the database to refuse: a duplicate position, an Early Access
-grant with no expiry, a second live invite token, a second reaction from one
-user, a season with no parent, ranking a whole series. A block overriding public
-visibility is tested in both directions, since that ordering inside
-can_view_profile is the easiest thing in the schema to get backwards.
-
-Two deviations from the written data model, both deliberate:
-
-- pgcrypto is not required. gen_random_uuid() has been core Postgres since 13,
-  so the extension was dead weight.
-- media_cache facets, feed event types, import statuses, and share object types
-  gained check constraints. The document listed the valid values in comments;
-  a constraint is the same information where it cannot rot.
-
-Also drops a stray commit-message temp file that the scaffold commit picked up,
-and gitignores it.
+Records the three places the migrations deliberately depart from the SQL
+sketched in the document, so a reader who compares them is not left guessing
+which one is authoritative.
