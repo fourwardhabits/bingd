@@ -37,13 +37,15 @@ Building to the conservative interpretation removes the question entirely:
 
 [`../architecture/offline-sync.md`](../architecture/offline-sync.md) already stores these separately, and [`../architecture/README.md`](../architecture/README.md) AD-8 already makes retention a runtime config value rather than a constant. Set that value under six months and the terms are satisfied with no correspondence.
 
-### Ship the text-first Top 10 share card as the primary artifact
+### Use posters freely in the app, and in share cards
 
-The genuinely ambiguous question is whether TMDB artwork may appear in an image a user exports to a messaging app, or in an Open Graph preview. The terms permit display within an application and prohibit rehosting; an exported PNG sits between the two.
+**In-app poster use is unambiguous.** TMDB's terms permit displaying their images within your application, which is the API's purpose. Serve artwork from the TMDB CDN at published size variants, do not rehost it on Bingd infrastructure, and attribute correctly. Posters are central to the design ([`../design/design-system.md`](../design/design-system.md) §7) and nothing here constrains that.
 
-[`../architecture/client.md`](../architecture/client.md) §6 already specifies a text-only share card and insists it be "a real layout, not a degraded one." Making it the *primary* Top 10 card resolves the ambiguity by not depending on the answer — and it is the better artifact anyway. DM Serif Display on Parchment is Bingd's brand; a grid of other people's posters is not.
+**Share cards and link previews are standard practice.** An image a user exports to a messaging app, and a server-rendered Open Graph preview, sit slightly outside "display within an application." In practice this is what every app in the category does — Letterboxd ships poster-bearing year-in-review cards and is itself a TMDB commercial licensee. Bingd does the same.
 
-Poster-bearing share cards remain possible later, if and when the question is worth asking.
+**A text-only variant still exists**, but for a product reason rather than a legal one: artwork is often missing for obscure titles, and a Top 10 must render when three of the ten have no poster. See [`../architecture/client.md`](../architecture/client.md) §6.
+
+If poster use in exported images ever needs certainty, `sales@themoviedb.org` will answer it. It is not worth blocking on.
 
 ---
 

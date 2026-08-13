@@ -245,9 +245,9 @@ Beli's streak reminders are **not** adopted. Streaks manufacture obligation, and
 
 ## 14. Sharing
 
-The **Top 10 share card** is the polished artifact (PRD §16), and it is **typographic rather than poster-based**: DM Serif Display, Parchment, ten ranked titles, wordmark. It must render correctly with ten titles and with fewer than ten.
+The **Top 10 share card** is the polished artifact (PRD §16): ten posters, ordinals, and titles on Parchment, set in DM Serif Display, with the wordmark. Poster-forward, because artwork is what makes a shared image stop someone mid-scroll, and typographic enough that the card is recognizably Bingd rather than a generic grid.
 
-Going text-first is deliberate on two counts. It avoids the one genuinely ambiguous question in TMDB's terms — whether provider artwork may appear in an image exported to another app ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)) — and it is the better artifact, since serif type on Parchment is unmistakably Bingd while a grid of studio posters is not.
+It must render in three states: ten titles, fewer than ten, and **artwork partly or wholly missing** — the last being common after a Letterboxd import that reaches obscure titles. Missing posters use the designed placeholder, and an all-text layout covers a top 10 that is mostly unillustrated.
 
 Secondary cards: a single ranking reveal, and a profile match card.
 

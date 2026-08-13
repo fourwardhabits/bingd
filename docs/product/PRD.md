@@ -973,7 +973,7 @@ Bingd connects now on a **free developer key**, because it charges nobody and se
 
 1. **Attribution.** The exact notice "This product uses the TMDB API but is not endorsed or certified by TMDB," an approved TMDB logo kept less prominent than Bingd's own mark, placed in an About or Credits section. Built into the first screens, not retrofitted.
 2. **Cache TMDB-derived metadata for under six months**, refreshing on a rolling basis. Bingd's own collection data is retained without limit. This is the conservative reading of the terms and it removes the §18 conflict rather than needing it resolved.
-3. **The primary Top 10 share card is text-first**, carrying no TMDB artwork. This sidesteps the one genuinely ambiguous question — artwork in exported images — and is the stronger brand artifact anyway.
+3. **Artwork is served from the TMDB CDN, never rehosted on Bingd infrastructure.** Poster use inside the app is unambiguous under the terms and is central to the design. Poster-bearing share cards and link previews follow standard practice in the category. A text-only share layout exists for titles with no artwork, which is a product requirement rather than a licensing one.
 
 Details and the triggers for revisiting: [`docs/reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 

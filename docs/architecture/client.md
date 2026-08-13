@@ -121,9 +121,9 @@ Rendered **on-device** to PNG via `react-native-view-shot`, from real React comp
 
 On-device rather than server-side because PRD §16 requires sharing to work under weak connectivity. A server-rendered card needs a round trip at the exact moment someone is trying to post something.
 
-The Top 10 is the polished artifact (PRD §16) and must render correctly with ten titles and with fewer than ten.
+The Top 10 is the polished artifact (PRD §16). It is **poster-forward with strong typography** — the posters are what make someone stop scrolling, and the serif type and Parchment ground are what make the card recognizably Bingd rather than generic.
 
-**The text-first layout is the primary card, not a fallback.** It carries no TMDB artwork, which sidesteps the one genuinely ambiguous question in TMDB's terms — whether provider artwork may appear in an image a user exports to a messaging app ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)). It is also the stronger artifact: DM Serif Display on Parchment is Bingd's brand, and a grid of other people's posters is not. Poster-bearing variants remain possible later.
+It must render correctly in three cases: ten titles, fewer than ten, and **some or all artwork missing**. The last is not hypothetical, since Letterboxd imports reach titles the catalog has no poster for. Missing artwork falls back to the designed placeholder ([`../design/design-system.md`](../design/design-system.md) §7), and an all-text layout covers the case where most of a top 10 is obscure. That variant exists for artwork availability, not for licensing.
 
 Open Graph images for web pages are server-rendered by `og-render`, since they are requested by messaging platforms rather than by the app.
 
