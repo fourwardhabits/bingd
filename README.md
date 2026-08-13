@@ -8,12 +8,13 @@ A social collection and discovery app for movies and TV seasons. Log what you wa
 
 ## Status
 
-**Pre-implementation.** The product specification is finalized and ready for architecture. No application code exists yet.
+**Pre-implementation.** Specification, architecture, and design are written. No application code exists yet.
 
 | Milestone | State |
 |---|---|
 | PRD finalized (v0.6) | Complete |
-| Architecture | Not started |
+| Architecture | Complete, in review |
+| Design system and screens | Complete, in review |
 | Implementation | Not started |
 
 ---
@@ -28,8 +29,12 @@ Read these in order.
 | [`docs/product/decision-log.md`](docs/product/decision-log.md) | What has been decided, on whose authority, and what would revisit it |
 | [`docs/product/open-questions.md`](docs/product/open-questions.md) | What is deliberately unresolved, and who resolves it |
 | [`docs/product/change-log-v0.6.md`](docs/product/change-log-v0.6.md) | What changed from v0.5 and why |
+| [`docs/architecture/README.md`](docs/architecture/README.md) | System shape and the ten decisions everything else follows from |
+| [`docs/design/design-system.md`](docs/design/design-system.md) | Tokens, type, components, accessibility |
+| [`docs/design/screens.md`](docs/design/screens.md) | What each screen is for and which states it must handle |
+| [`docs/design/reference-notes.md`](docs/design/reference-notes.md) | What the design archives taught, and what was refused |
 
-**Precedence:** the decision log outranks the PRD, and the PRD outranks anything in `docs/reference/`.
+**Precedence:** the decision log outranks the PRD, the PRD outranks architecture and design, and all of them outrank anything in `docs/reference/`.
 
 ---
 
@@ -51,6 +56,7 @@ Hard constraints that are easy to violate by accident:
 - No share or invite token grants access. It routes and attributes only.
 - No provider credential ships in the client bundle.
 - No recommendation explanation is generated rather than derived from stored signals.
+- No text is ever set in Antique Amber or Muted Sage on Parchment. Both measure below 2.2:1 and fail at every size.
 
 Agents may not autonomously merge, deploy, run a production migration, delete production data, configure payment products, or access production secrets.
 
@@ -68,12 +74,15 @@ See PRD §23 and §24.
 
 ```
 docs/
-  product/      Specification, decisions, open questions, change log
-  reference/    Source documents, provider correspondence
-Brand SVGs/     Wordmark and film-frame explorations (see PRD §5 — not yet production-ready)
+  product/          Specification, decisions, open questions, change log
+  architecture/     Data model, ranking, API, offline sync, recommendations, client
+  design/           Design system, screen specification, reference notes
+    references/     The specific third-party screens cited, resized
+  reference/        Source documents, provider correspondence
+Brand SVGs/         Wordmark and film-frame explorations (see PRD §5 — not yet production-ready)
 ```
 
-`design-references/` is git-ignored. It holds third-party UI screenshot archives used for design study, which are not redistributable.
+`design-references/` is git-ignored. It holds the full third-party UI screenshot archives used for design study, which are not redistributable. Only the individual screens actually cited in the design documents are committed, resized, under `docs/design/references/` — PRD §5.
 
 ---
 

@@ -41,6 +41,8 @@ The reasoning is that a ranking *is* an identity, so it belongs with the profile
 
 Marked Provisional in the PRD and expected to change during design. Nothing else in the architecture depends on it.
 
+**It has changed.** [`../design/screens.md`](../design/screens.md) §2 proposes **Feed · Collection · + · Recommendations · Profile**, moving the collection out of Profile and dropping the separate Search tab. Pending founder confirmation; this section is superseded once that lands.
+
 ---
 
 ## 3. State
@@ -105,7 +107,9 @@ Radii follow PRD §5: 12px cards, 8px inputs, full-round on avatars only. No pil
 
 PRD §5 grants exactly one surface real animation, and this is it. Everything else is minimal.
 
-The comparison sequence is deliberately plain — two posters, one question, no decoration — so the reveal lands by contrast. The reveal uses DM Serif Display at display size, Antique Amber for the ordinal, and a single transition. It is the product's payoff moment and the thing most likely to be screenshotted.
+The comparison sequence is deliberately plain — two posters, one question, no decoration — so the reveal lands by contrast. The reveal uses DM Serif Display at display size and a single transition. It is the product's payoff moment and the thing most likely to be screenshotted.
+
+**Corrected 2026-08-13.** This section previously specified Antique Amber for the ordinal. Amber measures 1.9:1 against Parchment and fails WCAG at every text size, so the ordinal is set in Ink on an Amber panel instead — 7.0:1, same visual emphasis. The composition is in [`../design/design-system.md`](../design/design-system.md) §9.
 
 Comparison cards prefetch the next pivot's poster while the user is deciding, so the sequence never stalls on an image load. A stall here is disproportionately damaging, because the whole mechanic depends on feeling quick.
 
