@@ -51,6 +51,8 @@ coverage/
 
 # Scratch
 .commit-msg.tmp
+.pr-body.tmp
+.remote-schema.sql
 
 # Editor and OS
 .DS_Store
