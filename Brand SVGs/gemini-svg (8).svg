@@ -1,0 +1,28 @@
+<svg viewBox="0 0 550 120" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&amp;display=swap');
+    .text { font-family: 'DM Serif Display', serif; font-size: 100px; fill: #773744; dominant-baseline: middle; alignment-baseline: middle; }
+  </style>
+  
+  <g stroke="#773744" stroke-width="8" stroke-linecap="butt" stroke-linejoin="round" fill="none">
+    <!-- Antique Amber Intersection Fill -->
+    <rect x="80" y="40" width="40" height="40" fill="#D4A64C" stroke="none" />
+
+    <!-- Left Film Frame -->
+    <rect x="20" y="10" width="100" height="70" rx="8" />
+    <line x1="45" y1="10" x2="45" y2="80" />
+    <line x1="20" y1="27" x2="45" y2="27" />
+    <line x1="20" y1="45" x2="45" y2="45" />
+    <line x1="20" y1="63" x2="45" y2="63" />
+
+    <!-- Right Film Frame -->
+    <rect x="80" y="40" width="100" height="70" rx="8" />
+    <line x1="155" y1="40" x2="155" y2="110" />
+    <line x1="155" y1="57" x2="180" y2="57" />
+    <line x1="155" y1="75" x2="180" y2="75" />
+    <line x1="155" y1="93" x2="180" y2="93" />
+  </g>
+  
+  <!-- Text locked to center (y=60) -->
+  <text x="210" y="60" class="text">bingd.</text>
+</svg>
