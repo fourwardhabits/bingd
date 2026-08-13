@@ -16,6 +16,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { AuthProvider, useAuthRouting } from '@/features/auth';
 import { initAnalytics, track } from '@/lib/analytics';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
 import { createQueryClient } from '@/lib/query';
@@ -69,20 +70,35 @@ function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider>
-        <StatusBar style="dark" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: theme.surface.base },
-          }}
-        >
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
-        </Stack>
-      </SafeAreaProvider>
+      <AuthProvider>
+        <SafeAreaProvider>
+          <StatusBar style="dark" />
+          <Navigation />
+        </SafeAreaProvider>
+      </AuthProvider>
     </QueryClientProvider>
+  );
+}
+
+/**
+ * Separate from RootLayout only so `useAuthRouting` sits below AuthProvider. It
+ * keeps the visible route and the auth state in agreement in one place, rather
+ * than each screen deciding whether it should be showing (session.tsx).
+ */
+function Navigation() {
+  useAuthRouting();
+
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: theme.surface.base },
+      }}
+    >
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
+    </Stack>
   );
 }
 

@@ -112,3 +112,30 @@ Rules for that state:
 | Token refresh after a long offline period | Session restored, outbox drains under the same identity |
 
 The unverified-email row is the one to write first and the one to keep. It is the only test in the matrix that fails *open* — an implementation that gets it wrong looks entirely correct from the outside, because the user reaches an account, and it happens to be someone else's.
+
+---
+
+## 8. Implementation status — added 2026-08-13
+
+Built: session storage, the three sign-in methods, the authenticated-without-a-profile state, and account creation. `create_profile` and `username_available` are in `supabase/migrations/20260813002200_signup.sql`; the client is in `src/features/auth/`.
+
+Two decisions in the build are worth recording because the obvious alternative is wrong in each case.
+
+**The under-13 refusal is a returned value, not an error.** §4 requires the account to be *deleted* on refusal, and a function that raises cannot delete anything — the exception rolls the transaction back, deletion included, so the account survives every attempt to remove it. `create_profile` therefore answers `{"ok": false, "reason": "under_13"}` for that one case and raises for everything else, since rolling back is the correct outcome for a taken username or a malformed date. A consequence worth stating: an under-13 date is destructive in a way no other field on the form is, so the client confirms the date before submitting rather than after.
+
+**Session tokens are chunked.** §5's requirement for `expo-secure-store` is not a drop-in swap for `AsyncStorage`: iOS Keychain rejects values much above 2 KB and a real Supabase session exceeds that. An unchunked adapter works for the whole of development and then fails on a live token, with the symptom being a user signed out on every cold start. `src/lib/session-storage.ts` splits values and writes the chunk count last, so an interrupted write reads as absent rather than as a short value.
+
+### Not yet done, and one of them is the dangerous one
+
+**§2 linking is unverified.** The rules in §2 are stated as this document's requirements, and nothing in the code enforces them — Supabase decides whether a provider sign-in attaches to an existing account by matching email, and its behaviour has not been tested against the table in §2. This is the row that fails open: if Supabase links on an unverified address, the vector §2 exists to close is open, and the outside view of the bug is a user successfully reaching an account. **It must be tested against the running project before external testers exist**, and the test to write first is the unverified-email row.
+
+**The remaining matrix rows** — returning users by each method, Hide My Email on second authorization, adding a method from Settings — need a device and a real provider, so they are manual for now. Settings has no link-a-method screen at all yet, which §3 notes is load-bearing for Apple relay users rather than a convenience.
+
+**Sign-out does not clear an outbox or a SQLite cache**, because neither exists. §5 requires it when they do.
+
+### Two settings this depends on
+
+Both are in the Supabase dashboard, and both fail in ways that do not name their cause.
+
+1. **The email template must contain `{{ .Token }}`.** Supabase's default sends `{{ .ConfirmationURL }}`, a magic link. The app asks for a six-digit code, so with the default template the email arrives with no code in it and the verification screen has nothing to accept. Authentication → Emails → Magic Link.
+2. **The OAuth redirect must be registered.** Google returns to `Linking.createURL('auth/callback')`, which resolves per variant — `bingd://auth/callback`, `bingd-preview://auth/callback`, `bingd-dev://auth/callback`. An unregistered value is refused by Supabase before the provider is ever reached.
