@@ -88,6 +88,8 @@ create table profile_private (
 
 `username_history` implements the 90-day redirect (INF-2). A username is resolvable if it is live in `profiles`, or present in `username_history` with `redirect_until > now()`. A released username **never** returns to the available pool.
 
+Three database objects hold that last sentence up, and it is worth naming them because the guarantee was asserted here for a while with only one of them in place. `reserve_username_on_profile_delete` writes a reservation when an account is deleted; `reserve_username_on_rename` writes one when a username changes, and is also the only writer of `profiles.username_changed_at`; `assert_username_available` refuses any insert or rename that would take a name already in the history table. The rename trigger was missing until a review tested the claim rather than reading it — deletion was covered, renaming quietly returned the name to the pool.
+
 > **This document previously credited that guarantee to the primary key, and the primary key does not provide it.** That key is unique within `username_history`; nothing connected it to `profiles.username`, so a new account could take a retired name while the history row sat there looking like protection. The reservation is now enforced by a trigger on `profiles` that refuses any insert or update naming a username reserved to somebody else — `assert_username_available` in `20260813001500`. Tested by having a second account attempt the claim, which is the only assertion that would have caught the original defect.
 
 > **Corrected 2026-08-13.** `profile_id` was `not null ... on delete cascade`, which meant deleting an account destroyed its history rows and removed the live username from `profiles`, putting the name back in the pool immediately. That is the impersonation vector INF-2 was written to close, reachable by a shorter route than a username change: delete the account, and every previously shared `bingd.app/u/<name>` link points at whoever claims the name next.
@@ -740,7 +742,11 @@ Reads and writes are separate questions, so writes get their own guard. Every wr
 
 There is no insert policy on `reports` and no client write grant anywhere in the schema, so `report(subject_type, subject_id, reason, note?)` is the only way a report can come into existence. An earlier draft created the table and no function, which is a mailbox with no slot.
 
-**The subject's owner is resolved server-side** rather than accepted from the caller. Trusting a client-supplied owner would let anyone attribute a report to an account of their choosing, which is precisely the reporting-as-harassment vector PRD §22 names. A subject the caller cannot see returns "not found" for the same reason api.md §8 collapses missing and forbidden into `BG404`.
+**The subject's owner is resolved server-side** rather than accepted from the caller. Trusting a client-supplied owner would let anyone attribute a report to an account of their choosing, which is precisely the reporting-as-harassment vector PRD §22 names.
+
+**Reporting is not gated on visibility**, only on the subject existing. An earlier draft of this section and the comment beside the function both claimed the opposite, and a review found the code had never done it. The behaviour is correct and the claim was wrong: the obvious gate would make an abuser unreportable the moment they blocked the person they abused, so being blocked after the fact would withdraw the ability to report it. The cost is that a caller can confirm a UUID names a real row, which is a fair trade.
+
+**The per-day cap is advisory.** It is counted before the insert without a lock, so simultaneous calls from one reporter can exceed it slightly. Idempotency is not advisory — one open report per reporter per subject is held by a partial unique index, which concurrency cannot defeat.
 
 Reporting the same subject twice is silently idempotent. Telling the reporter that a report already exists would disclose which of their earlier complaints is still open, which is not their business.
 
@@ -788,7 +794,7 @@ The point of several choices above is that a violation cannot be written, not me
 | Early Access grants cannot become permanent | `early_access_must_expire` check constraint |
 | One reaction per user per item | Primary key on `(feed_event_id, user_id)` |
 | Reactions carry no moderation surface | No text column exists, and `kind` is a closed set |
-| A deleted account's username is never reusable | `username_history` primary key, populated by a `before delete` trigger |
+| A released username is never reusable, whether released by deletion or rename | `assert_username_available` refuses it, checking reservations written by `reserve_username_on_profile_delete` and `reserve_username_on_rename`. Not the `username_history` primary key, which this row credited until a review pointed out it only prevents duplicate history rows |
 | Growth provenance is never destroyed | `invite_attributions.inviter_id` detaches instead of cascading |
 | A suspended account is invisible everywhere at once | One clause in `can_view_profile` (AD-5) |
 | A view cannot leak past RLS | Every view is `security_invoker` |

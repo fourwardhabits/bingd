@@ -204,6 +204,42 @@ expectRefused(
 expectAllowed('anon can execute list_by_id, by design', await rpc('list_by_id', { target: NIL }));
 expectAllowed('anon can execute list_items_by_list, by design', await rpc('list_items_by_list', { target: NIL }));
 
+// The oracles closed in 20260813001900. Both are SECURITY DEFINER and were
+// granted to anon because policies call them; the argument-taking forms let a
+// stranger ask about other people's blocks and approved follows.
+expectRefused('anon cannot execute can_view_profile', await rpc('can_view_profile', { viewer: NIL, subject: NIL }));
+expectRefused('anon cannot execute blocked_between', await rpc('blocked_between', { a: NIL, b: NIL }));
+
+// The replacements, which take no identity and so must stay reachable.
+expectAllowed('anon can execute can_i_view, by design', await rpc('can_i_view', { subject: NIL }));
+expectAllowed('anon can execute watch_tag_visible, by design', await rpc('watch_tag_visible', { tag_id: NIL }));
+
+// The one thing the local suite structurally cannot check: citext is shimmed as a
+// domain in PGlite, so no local function carries an extension dependency and the
+// pg_depend exclusion that keeps 20260813001800's sweep off citext's operator
+// functions is never exercised. If that predicate were wrong, username lookups
+// would break for anon here and nowhere else.
+{
+  const res = await get('profiles?select=id&username=eq.nobody-should-exist');
+  report(
+    'anon can still compare a citext username',
+    res.status === 200 ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
 const total = passed + failures.length + inconclusive.length;
 console.log(`\n${passed}/${total} passed, ${failures.length} failed, ${inconclusive.length} inconclusive\n`);
-process.exit(failures.length === 0 ? 0 : 1);
+
+// An inconclusive result is a probe that never ran: PostgREST could not resolve the
+// signature, so the privilege behind it is untested. Exiting zero on those turned
+// the suite into a wiring test for its own argument names — drift a parameter and
+// the function silently stops being checked while the run still looks green. A
+// probe that cannot reach its target is a failure of the probe.
+if (inconclusive.length > 0) {
+  console.log('Inconclusive probes never reached their function, so nothing was verified:');
+  for (const probe of inconclusive) console.log(`  - ${probe.name}`);
+  console.log('');
+}
+
+process.exit(failures.length === 0 && inconclusive.length === 0 ? 0 : 1);

@@ -23,9 +23,14 @@ import { createTestDb } from './harness.mjs';
 
 /** Every function a client role may execute, and which roles may execute it. */
 const ALLOWED = {
-  // Called from inside RLS policies, which are evaluated as the querying role.
-  'can_view_profile(uuid,uuid)': ['anon', 'authenticated'],
-  'blocked_between(uuid,uuid)': ['anon', 'authenticated'],
+  // Called from inside RLS policies, which are evaluated as the querying role, so
+  // these grants are unavoidable. What matters is the *signature*: neither takes
+  // an identity to check, so a caller can only ask about themselves or about a row
+  // that already exists. The two-argument forms they replaced — can_view_profile
+  // and blocked_between — were social-graph oracles for exactly that reason, and
+  // are now server-side only. See 20260813001900 and oracles.test.mjs.
+  'can_i_view(uuid)': ['anon', 'authenticated'],
+  'watch_tag_visible(uuid)': ['anon', 'authenticated'],
 
   // Retrieval by identifier: a shared link has to resolve without an account.
   'list_by_id(uuid)': ['anon', 'authenticated'],

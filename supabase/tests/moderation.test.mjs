@@ -247,20 +247,110 @@ describe('the guard is wired in, not merely present', () => {
    * Asserting the wiring structurally is what stops that returning: a new write
    * RPC that forgets the guard fails here rather than in production.
    */
-  it('has every client-facing ranking RPC call assert_can_write', async () => {
-    const { rows } = await t.sql(`
+  /**
+   * Two earlier versions of this assertion tried to identify which functions write,
+   * and both were defeated on inspection.
+   *
+   * The first matched the name prefix `rank\_%` against a `prosrc` substring, so the
+   * first write RPC not called `rank_something` — `follow`, `block`, `react`, all on
+   * the roadmap — went unchecked, and a bare comment mentioning the guard satisfied
+   * it. The second detected writes by regex, and a review broke it three ways in a
+   * few minutes: `INSERT INTO` in uppercase slipped past a case-sensitive operator;
+   * a read-only function returning the string `'please update your app'` was flagged
+   * as a write; and a wrapper that writes only by calling an internal function was
+   * missed entirely, which matters because delegating to a `_*_unguarded` body is
+   * this schema's own architecture.
+   *
+   * So this no longer tries to detect writes. Every function a client can execute
+   * must either call the guard or be named below as read-only. A new function is
+   * therefore a test failure by default, and the author has to say which it is. That
+   * is immune to letter case, to dynamic SQL, and to delegation, because it does not
+   * inspect the body for anything except the guard call.
+   */
+  const READ_ONLY = [
+    'can_i_view',
+    'watch_tag_visible',
+    'list_by_id',
+    'list_items_by_list',
+    'my_capabilities',
+    'unranked_queue',
+  ];
+
+  /** Client-executable functions whose body does not call the guard. */
+  const unguarded = async () => {
+    const { rows } = await t.sql(
+      `
       select p.proname
         from pg_proc p
         join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'public'
-         and p.proname like 'rank\\_%'
-         and p.prosrc not like '%assert_can_write%'
-    `);
-    assert.deepEqual(
-      rows.map((r) => r.proname),
-      [],
-      'these write RPCs are reachable by a suspended account',
+         -- prokind is not filtered: a procedure is just as callable as a function.
+         and (has_function_privilege('authenticated', p.oid, 'execute')
+              or has_function_privilege('anon', p.oid, 'execute'))
+         and not exists (
+           select 1 from pg_depend d
+            where d.objid = p.oid
+              and d.classid = 'pg_proc'::regclass
+              and d.deptype = 'e'
+         )
+         -- Comments stripped, so prose mentioning the guard cannot stand in for
+         -- calling it.
+         and regexp_replace(
+               regexp_replace(p.prosrc, '/\\*.*?\\*/', ' ', 'gs'),
+               '--[^\\n]*', ' ', 'g'
+             ) !~* 'assert_can_write\\s*\\('
+         and not (p.proname = any ($1))
+       order by p.proname
+    `,
+      [READ_ONLY],
     );
+    return rows.map((r) => r.proname);
+  };
+
+  it('has every client-callable function either guarded or declared read-only', async () => {
+    assert.deepEqual(
+      await unguarded(),
+      [],
+      'these are reachable by a suspended account and do not call the guard. Either ' +
+        'call assert_can_write() or add the name to READ_ONLY above, deliberately.',
+    );
+  });
+
+  it('would notice a new client-callable function that skips the guard', async () => {
+    // Guards the guard. If the assertion above ever stops testing anything — which
+    // is how both previous versions failed — this fails too.
+    //
+    // Deliberately shaped like the cases that defeated the old regex: it writes in
+    // uppercase, and only by delegating to another function.
+    await t.sql(`
+      create function _probe_writer(p_note text)
+      returns void language plpgsql security definer set search_path = public as $fn$
+      begin
+        INSERT INTO app_config (key, value) VALUES ('probe', to_jsonb(p_note))
+          ON CONFLICT (key) DO UPDATE SET value = to_jsonb(p_note);
+      end; $fn$;
+    `);
+    await t.sql(`
+      create function _probe_delegating_rpc(p_note text)
+      returns void language plpgsql security definer set search_path = public as $fn$
+      begin
+        -- assert_can_write(auth.uid()) is emphatically not called here
+        perform _probe_writer(p_note);
+      end; $fn$;
+    `);
+    await t.sql(`grant execute on function _probe_delegating_rpc(text) to authenticated`);
+
+    try {
+      assert.deepEqual(
+        await unguarded(),
+        ['_probe_delegating_rpc'],
+        'an unguarded client-callable function must be caught even when it writes ' +
+          'in uppercase through another function',
+      );
+    } finally {
+      await t.sql(`drop function _probe_delegating_rpc(text)`);
+      await t.sql(`drop function _probe_writer(text)`);
+    }
   });
 
   it('does not expose the unguarded implementations to clients', async () => {

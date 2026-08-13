@@ -263,7 +263,7 @@ The gate change is now **approved**, and the reasoning stands without the assump
 
 Two consequences followed as corrections rather than preferences. The six-month window now covers `media_items` (7.2, #6). And **v1 Open Graph link previews are typographic**, because §19 says artwork is never rehosted on Bingd infrastructure while §19 and §16 also promised poster-bearing link previews — a server-rendered preview image *is* served from Bingd's infrastructure. On-device share cards stay poster-forward; the compositing happens on the user's phone.
 
-### 7.5 Specification corrections
+### 7.7 Specification corrections
 
 | Where | Was | Now |
 |---|---|---|
@@ -274,11 +274,11 @@ Two consequences followed as corrections rather than preferences. The six-month 
 | PRD §20, §28 | Early Access implemented; "Early Access engagement vs. control" tracked | **`alpha_early_access` confers nothing in v1**, deliberately. Stated because the metric had no treatment to measure. Removed; gate-hit data is the monetization evidence. Not fixed by granting a benefit, which would split a 40-person sample |
 | All views | Unspecified | **Every view is `security_invoker`.** A default-owner view bypasses RLS on the tables beneath it. `visible_collection` exists *because* `user_media` is owner-only, so a default-owner view over it would have published every user's notes while the table policy still read correctly |
 
-### 7.6 New documents
+### 7.8 New documents
 
 - **[`../architecture/auth.md`](../architecture/auth.md).** Authentication had three sign-in methods, one sentence, and no architecture document while every other v1 subsystem had one. The sentence described the hard problem without solving it, and **AC 26.1.3 was unsafe read literally**: "signing in again by any method reaches the same account" means linking credentials on a matching email, which is account takeover wherever that email is unverified. The document sets the linking rules, covers Apple private relay — where no address can ever match, making the Settings link flow the only path to a second method — and the authenticated-but-not-onboarded state that the 13+ gate creates.
 
-### 7.7 Two review claims that were wrong
+### 7.9 Two review claims that were wrong
 
 Recorded so neither gets "fixed" later.
 
@@ -288,7 +288,7 @@ Recorded so neither gets "fixed" later.
 
 Both were caught by reading the migrations rather than the documents, which is the general lesson: `data-model.md` explains reasoning and the migrations are what runs, so a claim about the schema has to be checked against the schema.
 
-### 7.9 Six functions were reachable without an account
+### 7.10 Six functions were reachable without an account
 
 Found on the first run against a **deployed** project, and findable no other way we had. Migration `20260813001800`.
 
@@ -313,6 +313,83 @@ Two details were nearly wrong in ways worth recording.
 
 Pinned locally by `supabase/tests/function-grants.test.mjs`, written as a whole-schema sweep against an allow-list rather than one assertion per function, because the failure mode is *a function nobody remembered to check* — and a per-function test only covers the ones someone already thought of.
 
-### 7.8 Scope
+### 7.11 A second review round, and the pattern behind it
+
+Two more independent reviews — one of the base schema, one covering moderation and the function grants together — returned no merge blockers and verified five decisions I had specifically asked to be challenged, including two I was unsure of. Migrations `20260813001900` and `20260813002000`.
+
+What is worth recording is not the individual findings but that **three of them were the same defect**: a comment claiming a guarantee that nothing enforced. `report()` was documented as refusing a subject the caller cannot see and never checked visibility. `username_history` was documented as making reuse impossible via its primary key, when reuse is actually blocked by a trigger that existed for deletion and not for renaming. And `20260813001800`'s default-privileges statement was documented as closing every future function, which it did not.
+
+Every one of those read as true on inspection and failed on execution. That is now the project's most common defect by a clear margin, and it argues for a specific habit: a comment asserting a security property is a claim that needs a test, and until it has one the honest thing is to describe what the code does.
+
+#### The social-graph oracles — `20260813001900`
+
+The review found `blocked_between(a, b)` executable by `anon`. Generalising it found the worse case, which was not in the findings: `can_view_profile(viewer, subject)` was too. Both are `SECURITY DEFINER` — they exist to see past row level security — and both accept the identity to check as an argument. Combining those two properties makes an endpoint that answers questions about other people, and `anon` could call them:
+
+- `blocked_between` discloses the block graph, the one thing `blocks_read` exists to keep private.
+- `can_view_profile` folds suspension, blocks, public visibility and **approved follows** into one boolean. Asked about a private subject, `true` means the named viewer is an approved follower — a private relationship between two other people, readable by a stranger holding only the anon key.
+
+Neither is exploitable for writes and neither exposes content. They leak who is connected to whom, which for a product about taste is among the more sensitive things stored.
+
+The fix is not revocation, because policies genuinely need these helpers and a policy is evaluated as the querying role. It is to remove the identity from the signature: `can_i_view(subject)` derives the viewer from `auth.uid()`, and `watch_tag_visible(tag_id)` takes a row key so the block check cannot be aimed at a chosen pair. `auth.uid()` cannot be forged; an argument can. Ten policies across six migrations were rewritten to use them, and the argument-taking forms are now server-side only.
+
+**The general rule, recorded because it will recur:** a definer function reachable by clients must not accept an identity or a relationship to test. It should answer only about its caller, or about a row that already exists.
+
+#### `20260813002000`
+
+- **`profile_private` kept its default `SELECT` grant.** RLS with no read policy did deny reads, but `20260813001400` claimed something stronger — that a separate table cannot be reopened by a careless later `grant`. Revoked, so the claim holds.
+- **A username was reserved on deletion and released on rename.** Nothing wrote to `username_history` when a name changed, so a released name went back into the pool — the INF-2 impersonation outcome, with `bingd.app/u/alice` resolving to whoever took the name next. Not reachable today, since no rename RPC exists; fixed now because the gap only becomes visible at the moment it becomes exploitable. This is also the first writer of `profiles.username_changed_at` and of the 90-day redirect, both declared long ago and never populated.
+- **A second skip re-offered the same comparison.** `ranking.md` §5 specifies stepping outward — mid + 1, then mid − 1, then mid + 2 — but the offset reset to 1 on every call and the band bounds do not move when a comparison is skipped, so every skip re-displayed the title just declined. No corruption, and the only finding across both rounds that a user would have noticed.
+- **The daily report cap is advisory**, counted before insert without a lock. Documented rather than fixed: idempotency is index-backed and cannot be raced, and the cap being soft by a few reports does not matter at alpha scale. `53400` also surfaces as HTTP 500 through PostgREST rather than 429, so the clean rate-limit response depends on reporting going through the edge layer.
+
+#### A wrong claim, and then a wrong correction to it
+
+This one is worth reading in full, because the second mistake is more instructive than the first.
+
+`20260813001800` swept the existing functions and then set `alter default privileges in schema public revoke execute on functions from public, anon, authenticated`, so that new functions would arrive closed and nobody would need to remember. The review checked the part flagged as risky — whether the CLI's temporary login role would make the defaults apply — and confirmed it does.
+
+The next function written was executable by strangers, and `function-grants.test.mjs` failed on it in seconds. `pg_default_acl` showed the `anon` and `authenticated` deltas had taken effect and the `PUBLIC` one had not: every function created since carried `=X`, and every role belongs to `PUBLIC`.
+
+**The conclusion drawn was that the setting silently doesn't work, so trust tests over settings.** That went into the README and this document. A third review then found the actual explanation, by reading the manual rather than the ACL dump: PostgreSQL documents that exact statement as its example of a command that does nothing, because per-schema default privileges can only *add* to the global setting, never subtract from it, and `PUBLIC`'s execute comes from the built-in global default. The `anon` and `authenticated` revokes worked because they were undoing Supabase's own per-schema grants — the one case the manual carves out.
+
+So the mechanism works, and the wrong variant was used. `20260813002100` issues the global form, verified by execution.
+
+The conclusion survives the correction, but for a stated reason instead of a vague one: default privileges attach to the role that set them, so the statement covers objects created by that role and nothing else — an extension, or anything created by `supabase_admin`, falls outside it. A CI sweep of the whole schema has no such boundary. **The test is still the guard, because of a documented limitation rather than because settings are untrustworthy.**
+
+The general lesson is not the one first written here. It is that a confident diagnosis of surprising behaviour deserves ten minutes in the documentation before it becomes a lesson other people are taught. Being wrong about the schema was cheap; being wrong in the section explaining how not to be wrong was the expensive part.
+
+#### Configured defaults that were not defaults — `20260813002100`
+
+Three functions read a tuning value with a written fallback, and all three wrote it the same wrong way:
+
+```sql
+select coalesce((value)::integer, 20) into v_cap
+  from app_config where key = 'report.max_per_day';
+```
+
+With no matching row the query returns *no rows*, so the `coalesce` is never evaluated and the variable is left NULL. Verified by execution: the same expression returns NULL when the row is absent and `90` when written as a scalar subquery.
+
+The consequences are worse than a missing default, because two of the three are a limit quietly ceasing to exist — `NULL >= anything` is NULL, so the `if` never fires:
+
+| Config key | Consequence when the row is absent |
+|---|---|
+| `username.redirect_days` | A rename fails outright: `redirect_until` is `NOT NULL` and receives NULL |
+| `ranking.max_skips` | The skip cap silently stops applying |
+| `report.max_per_day` | The daily report cap silently stops applying |
+
+All three rows are seeded and clients cannot write `app_config`, so an operator would have to delete one. It is fixed anyway, because the code asserted a default it did not have — committed, as it happens, inside the migrations whose subject was claims that nothing enforces.
+
+#### Skipping after answering finalized early — `20260813002100`
+
+The consecutive-skip fix counted against session-wide `skips`, which `rank_answer` does not reset and should not, since the cap counts the whole session. Once an answer moved the band, the walk skipped past candidates it had never offered, ran out, and placed the title. Reproduced on a band of three: skip, answer, skip placed the title immediately while a valid unoffered pivot existed and only two of three permitted skips had been used.
+
+Skips within the current band are now counted separately, with the band change detected inside `rank_skip` by recording the bounds a skip was offered against. `rank_answer`, `rank_back` and `rank_reorder` all move the bounds, and any of them forgetting to reset a counter would reintroduce the defect — nothing to forget beats three call sites to remember.
+
+**The test written for the original fix did not catch this, and the test written for *this* fix did not either, at first.** It answered in a way that let the pivot win, which closes the band and ends the session before the interleaving under test can happen, so it passed against the bug. It now fails when the fix is reverted, which was confirmed by reverting it. A behavioural test that has never been seen to fail is an assertion about nothing.
+
+The remote probe also no longer exits zero on an inconclusive result. A probe whose signature does not resolve never ran, so the privilege behind it is untested, and treating that as a pass turned the suite into a test of its own argument names. It now covers both oracles, both replacements, and an `anon` username comparison — the one check that settles whether the extension exclusion in the grants sweep is correct, which PGlite cannot answer because it shims `citext` as a domain.
+
+The structural guard test was rewritten for the same reason. It matched `rank\_%` against a `prosrc` substring, so the first write RPC not named `rank_something` — `follow`, `block`, `react`, all on the roadmap — would have gone unchecked while the test stayed green, and a comment mentioning the guard satisfied it. It now derives its subject from the grants and the function body, strips comments first, and has a companion test that plants an unguarded write to prove the detection still works.
+
+### 7.12 Scope
 
 PRD §30 gains a **degradation order** — story card, then scheduled nudges, then public web pages, then collaborative filtering. Eleven phases is a large v1 for one founder working through agents, and the failure mode worth avoiding is discovering that in phase 9 and cutting whatever happens to be unfinished. Deciding the order now, while nothing is at stake, costs nothing. Ranking, import, feed, reporting, capability enforcement, invitations, and the offline matrix are above the line.

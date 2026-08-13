@@ -248,6 +248,12 @@ One structured shape, so the client can respond to a class of failure rather tha
 
 Anything unmapped surfaces as a generic failure and is reported, rather than being guessed at.
 
+Two of these mappings deserve a note, because the SQLSTATE alone does not get you there.
+
+**`53400` only becomes a clean `BG429` behind the edge layer.** PostgREST maps it to HTTP **500** on its own. `53400` is `configuration_limit_exceeded`, which PostgREST treats as a server-side misconfiguration rather than as a per-user ceiling; most of the rest of class 53 is `insufficient_resources` and maps to 503. Either way, a client calling `rpc/report` directly is told the server broke when it had merely hit its daily limit. Since the mapping table above is applied at the edge, the behaviour is right as long as reporting goes through it — a constraint on the client, not a detail of the database.
+
+**A pivot that stops being ranked mid-session makes `rank_answer` reject rather than re-prompt.** If a title is unranked in another session, or on another device, while it is on screen as a comparison, answering with it returns `BG409` and the client should restart the session. `rank_back` and `rank_skip` behave the same way. The alternative — silently substituting a different pivot — would attribute an answer to a comparison the user was never shown, and a ranking is only as trustworthy as the comparisons behind it.
+
 ---
 
 ## 9. Rate limits
