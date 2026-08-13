@@ -1,0 +1,7 @@
+<svg viewBox="0 0 200 60" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&amp;display=swap');
+    .text { font-family: 'DM Serif Display', serif; font-size: 56px; fill: #773744; text-anchor: middle; }
+  </style>
+  <text x="100" y="45" class="text">bingd.</text>
+</svg>
