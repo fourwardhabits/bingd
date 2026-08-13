@@ -158,6 +158,14 @@ The allow-list test remains the real guard, but for a stated reason rather than 
 
 **Sign in with Apple is iOS-only, deliberately.** Apple requires the button wherever a third-party sign-in is offered (App Review 4.8), and Google sign-in triggers that. The requirement is Apple's, so it applies to Apple's platform. Offering it on Android would mean the OAuth redirect flow, which needs a Services ID and a client secret that is a JWT signed with a `.p8` key — **and Apple caps that JWT at six months**. It does not warn, it does not degrade: sign-in works for half a year and then stops. Android already has Google and email, so that maintenance trap buys nothing. `ios.usesAppleSignIn` adds the entitlement and EAS enables the capability on the App ID during the first build, so there is nothing to click in the Apple portal.
 
+### Android App Links are half-configured, and the missing half is the invisible one
+
+`web/deep-links.config.json` carries the EAS upload keystore fingerprint for `app.bingd`, so `assetlinks.json` is no longer an empty array. That covers an APK installed directly.
+
+It does **not** cover a build installed from Play. Play App Signing strips the upload signature and re-signs with a key Google holds, so a device verifying the link computes a fingerprint that is not in the file, and App Links fail — with no error, on exactly the distribution channel real users come through. The Play app-signing fingerprint has to be added alongside it, from Play Console → Test and release → Setup → App signing. Both belong in the list; a package may declare several.
+
+`preview` and `development` have no fingerprints because EAS creates a keystore per application identifier and those identifiers have none yet. Android links will not verify in those variants until they do, which is worth knowing before concluding that deep linking is broken.
+
 ### One thing that is not yet safe, and should be before any store build
 
 Build-time environment variables are not configured in EAS. `.env` is gitignored and EAS uploads only tracked files, so a build gets no Supabase URL — and `src/lib/env.ts` throws **at app start**, not at build time. So the failure is loud but late: the build succeeds, the app dies on open.
