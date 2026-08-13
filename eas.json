@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json.schemastore.org/eas.json",
+  "cli": {
+    "version": ">= 21.7.1",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "base": {
+      "node": "22.16.0",
+      "env": {
+        "EXPO_PUBLIC_POSTHOG_HOST": "https://us.i.posthog.com"
+      }
+    },
+
+    "development": {
+      "extends": "base",
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "env": {
+        "APP_VARIANT": "development"
+      },
+      "ios": { "simulator": false },
+      "android": { "buildType": "apk" }
+    },
+
+    "preview": {
+      "extends": "base",
+      "distribution": "internal",
+      "channel": "preview",
+      "env": {
+        "APP_VARIANT": "preview"
+      },
+      "android": { "buildType": "apk" }
+    },
+
+    "production": {
+      "extends": "base",
+      "distribution": "store",
+      "channel": "production",
+      "autoIncrement": true,
+      "env": {
+        "APP_VARIANT": "production"
+      },
+      "android": { "buildType": "app-bundle" }
+    }
+  },
+
+  "submit": {
+    "production": {}
+  }
+}
