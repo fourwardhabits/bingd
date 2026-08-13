@@ -195,7 +195,7 @@ Not queueable, for the same reason `block` is not: PRD §22 makes safety actions
 
 Resolution has no client surface at all. The founder reads `moderation_queue`, acts, and records the action — see `data-model.md` §13. Suspension is applied by updating `profiles.status`, which takes effect across every read surface at once through `can_view_profile`, and blocks writes through `assert_can_write()`.
 
-> **Not yet built.** Reporting and moderation ship on their own branch (`change-log-v0.6.md` §7.4). Nothing in this section exists in the schema today.
+> **Not yet built.** Reporting and moderation ship on their own branch (`change-log-v0.6.md` §7.5). Nothing in this section exists in the schema today.
 
 ---
 

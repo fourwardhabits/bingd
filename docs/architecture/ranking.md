@@ -69,8 +69,9 @@ create table ranking_sessions (
   media_item_id uuid not null references media_items(id) on delete cascade,
   category      ranking_category not null,
   bucket        taste_bucket not null,
-  lo            integer not null,
-  hi            integer not null,
+  lo            integer not null,   -- offset within the band, not a position
+  hi            integer not null,   -- exclusive
+  pivot         integer,            -- offset of the title currently displayed
   history       jsonb   not null default '[]',
   skips         smallint not null default 0,
   created_at    timestamptz not null default now(),
@@ -79,7 +80,11 @@ create table ranking_sessions (
 );
 ```
 
-`lo` and `hi` bound the **insertion point**, not the candidate range. The invariant is that the correct final position lies in `[lo, hi]`. When `lo = hi`, the search is over.
+`lo` and `hi` bound the **insertion point**, not the candidate range, and they are **offsets within the band rather than absolute positions**. Offset 0 is the top of the band wherever the band currently begins; the absolute position is `band.lo + offset`, derived when needed. The correct final position lies at some offset in `[lo, hi]`, and when `lo = hi` the search is over.
+
+> **These were absolute positions until 2026-08-13, and that was a corruption bug.** A position only means something relative to a ranking that is not moving. Rank one more `loved` title while a `fine` session is open and every `fine` position shifts down by one — but the session's bounds did not, so answering it to completion inserted the title at coordinates that now belonged to the `loved` band. **Invariant I2 broken by using the interface exactly as designed.** An offset survives the band sliding, because nothing about it was expressed in terms that moved. Bounds are additionally clamped to the live band size on every read, which covers the band *shrinking* under an open session.
+
+`pivot` records which title is currently being compared against, rather than recomputing it as the midpoint. **Storing it is what makes Skip work at all.** Skip re-anchors deliberately away from the midpoint, so a `rank_answer` that recomputed the midpoint rejected the very title Skip had just displayed — every skip led to a dead end where the only offered answer was refused. Nothing in the bisection requires the pivot to be the midpoint; any offset inside `[lo, hi)` narrows the range correctly, and the midpoint is only the fastest choice.
 
 `history` is a stack of prior `(lo, hi, pivot)` states, which is what makes **Back** work. `skips` counts re-anchors for the 3-skip rule.
 
@@ -98,10 +103,13 @@ rank_start(media_item_id, bucket) -> { session_id, pivot } | { position }
 1. Resolve `category` from the media item's `kind`. Reject `series` — PRD §10 forbids ranking a whole series.
 2. Upsert the `user_media` row with the chosen bucket. **The title is now Logged**, whatever happens next. If the user abandons the session, the bucket survives and the recommendation engine can use it.
 3. Compute `band_bounds`.
-4. If the band is empty, insert directly at `lo` and return the position. No comparison is asked, because there is nothing to compare against.
-5. Otherwise create the session with `lo = band.lo`, `hi = band.hi + 1`, and return the first pivot.
+4. If the band is empty, insert directly at `band.lo` and return the position. No comparison is asked, because there is nothing to compare against.
+5. If a session already exists for this title **and carries the same bucket**, resume it. If the bucket differs, discard it and start again — see below.
+6. Otherwise create the session with `lo = 0`, `hi = band.size`, `pivot = band.size / 2`, and return the first pivot.
 
-`hi` starts at `band.hi + 1` because the new title may belong after every existing member of the band. The range of possible insertion points has one more element than the band has members.
+`hi` starts at the band size rather than one less because the new title may belong after every existing member. The range of possible insertion points has one more element than the band has members.
+
+> **Step 5 used to resume unconditionally, and that broke invariant I3.** Starting a session as `loved`, changing your mind, and starting again as `fine` updated `user_media.bucket` while the session kept the bucket it was created with — so finalizing wrote a `rankings` row disagreeing with the logged bucket. That is not an exotic sequence; it is what a user does when they reconsider halfway through placing a title. The answers already given were collected against a different band and mean nothing in the new one, so the session is discarded rather than translated.
 
 Step 2 is the structural expression of PRD §11: bucketing and ranking are separate acts, and abandoning the second does not undo the first.
 
@@ -116,17 +124,21 @@ rank_answer(session_id, winner) -> { pivot } | { position }
 Standard binary search over the insertion point:
 
 ```
-pivot_position = (lo + hi) / 2                  # floor
-pivot_title    = title at pivot_position
+band        = band_bounds(user, category, bucket)   # recomputed every time
+hi          = min(hi, band.size)                    # the band may have shrunk
+lo          = min(lo, hi)
+pivot_title = title at band.lo + pivot              # stored offset, not the midpoint
 
-if new title wins:                              # ranks above the pivot
-    hi = pivot_position
-else:                                           # ranks below the pivot
-    lo = pivot_position + 1
+if new title wins:                                  # ranks above the pivot
+    hi = pivot
+else:                                               # ranks below the pivot
+    lo = pivot + 1
 
-if lo == hi:  finalize at lo
-else:         return the next pivot
+if lo >= hi:  finalize at band.lo + lo
+else:         pivot = (lo + hi) / 2 and return that title
 ```
+
+The band is recomputed on every answer rather than trusted from when the session opened, and `_rank_finalize` re-derives it once more inside its advisory lock and **refuses** a position outside the band. I2 cannot be expressed as a constraint, so a violation would otherwise be silent and surface weeks later as a ranking the user knows is wrong but cannot explain.
 
 Each answer is also written to `comparisons` for analytics and future recalibration.
 

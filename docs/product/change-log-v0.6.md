@@ -203,9 +203,9 @@ The findings that mattered most were all the same kind of thing: **a guarantee w
 | Decision | Effect |
 |---|---|
 | **The Logged collection inherits profile visibility** | Public on a public profile, approved followers only on a private one. PRD §22's table listed neither state, so the behaviour was going to be settled by whoever wrote the view. Notes and watch dates stay private on both; the **watchlist stays private at every visibility level**, which is a separate question if you want it changed |
-| **TMDB gate change approved** | HG-1 stays closed, but the justification is rewritten. See 7.5 |
+| **TMDB gate change approved** | HG-1 stays closed, but the justification is rewritten. See 7.6 |
 | **The reaction set, with a negative reaction** | Six values, `disagree` included, against an inference that had left it out. See PRD §14 |
-| **Moderation lands before public alpha** | Reporting had no schema; it ships on its own branch with its own review rather than riding along with unrelated fixes. See 7.4 |
+| **Moderation lands before public alpha** | Reporting had no schema; it ships on its own branch with its own review rather than riding along with unrelated fixes. See 7.5 |
 
 ### 7.2 Row level security defects — `20260813001400_security_fixes.sql`
 
@@ -229,7 +229,21 @@ Each was reproduced by a failing test written from the position of an attacker b
 | 4 | `reactions.kind` was unconstrained `text` | The guarantee that reactions carry no moderation surface rests on the column being closed. A column accepting any string *is* a free-text field. The set was first recorded as INF-6 and **resolved by the founder on 2026-08-13** as six values including `disagree` — see PRD §14 |
 | 5 | `media_items` had no expiry and no index on `fetched_at` | `media_cache` had one; the larger share of provider data did not. A title in someone's ranking, untouched for seven months, was retained provider data nothing could find — and compliance with the six-month limit is load-bearing in the decision to connect on a free key |
 
-### 7.4 Reporting and moderation — specified, shipping on its own branch
+### 7.4 Ranking engine defects — `20260813001600_ranking_session_fixes.sql`
+
+Two of these corrupt a ranking through ordinary documented use, and all three were reproduced against the real migrations before being fixed.
+
+They shared a cause: a session stored its search bounds as **absolute positions**, and a position only means something relative to a ranking that is not moving. Bounds are now offsets within the bucket band, so the band sliding underneath an open session no longer invalidates it.
+
+| # | Defect | Why it mattered |
+|---|---|---|
+| 1 | Skip displayed a title the answer path then refused | `rank_skip` re-anchored to a new pivot and stored nothing; `rank_answer` recomputed the midpoint and rejected the title it had just shown. **Skip was not imperfect, it was unusable** — every skip led to a dead end. It survived because tests covered skip and answer separately and never in sequence |
+| 2 | A title could be placed in the wrong band | Rank one more `loved` title while a `fine` session is open, and every `fine` position shifts down by one while the session's bounds do not. Answering it to completion inserted into the `loved` band. **Invariant I2 broken by using the interface as designed** |
+| 3 | Changing bucket mid-session put a title in two buckets at once | `rank_start` resumed any existing session without comparing its bucket to the requested one, so `user_media` said `fine` while the session finalized as `loved`. **Invariant I3.** This is simply what a user does when they reconsider halfway through |
+
+`_rank_finalize` now recomputes the band inside its advisory lock and refuses an out-of-band position outright. I2 cannot be expressed as a constraint, so without a backstop a violation is silent and surfaces weeks later as a ranking the user knows is wrong and cannot explain.
+
+### 7.5 Reporting and moderation — specified, shipping on its own branch
 
 PRD §22 marks reporting **Required** by policy, §23 lists a `reports` entity, AC 26.15.5 requires a report flow, and `api.md` §9 rate-limits a `report` function. **None of it existed.** No table, no function, no operator surface. Blocking shipped and reporting did not, leaving a product with user-generated usernames, display names, and list titles with nowhere for a complaint to arrive — a platform obligation, not a feature.
 
@@ -241,7 +255,7 @@ One detail to get right when it is built, because the first draft got it wrong: 
 
 Deliberately **not** built: an admin application, an appeals flow, automated detection. For 30–60 users the operator surface is the Supabase SQL editor, and building a console before any triage experience is the expensive way to learn what it should contain. None of the three is acceptable beyond alpha.
 
-### 7.5 The TMDB gate change
+### 7.6 The TMDB gate change
 
 HG-1 was closed on 2026-08-13 by asserting that Bingd "is non-commercial under TMDB's operative test." Three problems: the kickoff brief named that specific assumption as one not to make, `decision-log.md` §10 contradicted it two rows below the row that stated it, and the gate was closed without approval.
 
