@@ -1,0 +1,221 @@
+import { strict as assert } from 'node:assert';
+import { test } from 'node:test';
+
+import { createTestDb } from './harness.mjs';
+
+/**
+ * Pins the function-privilege model established by 20260813001800.
+ *
+ * The bug this guards against is not subtle once seen, and was invisible for
+ * four migrations: Postgres grants EXECUTE on a new function to PUBLIC, so
+ *
+ *     grant execute on function f() to authenticated;
+ *
+ * adds a role to a set that already contains everyone. It reads as a restriction
+ * and is an expansion. Six functions were reachable by `anon` on the deployed
+ * database before this was caught.
+ *
+ * The test is written as a whole-schema sweep against an allow-list rather than
+ * as one assertion per function, because the failure mode is *a function nobody
+ * remembered to check*. A per-function test only covers the functions someone
+ * thought of, which is the same set that was already thought about.
+ */
+
+/** Every function a client role may execute, and which roles may execute it. */
+const ALLOWED = {
+  // Called from inside RLS policies, which are evaluated as the querying role.
+  'can_view_profile(uuid,uuid)': ['anon', 'authenticated'],
+  'blocked_between(uuid,uuid)': ['anon', 'authenticated'],
+
+  // Retrieval by identifier: a shared link has to resolve without an account.
+  'list_by_id(uuid)': ['anon', 'authenticated'],
+  'list_items_by_list(uuid)': ['anon', 'authenticated'],
+
+  // Signed-in reads.
+  'my_capabilities()': ['authenticated'],
+  'unranked_queue(integer)': ['authenticated'],
+
+  // Signed-in writes.
+  'rank_start(uuid,taste_bucket)': ['authenticated'],
+  'rank_answer(uuid,uuid)': ['authenticated'],
+  'rank_skip(uuid)': ['authenticated'],
+  'rank_back(uuid)': ['authenticated'],
+  'rank_unrank(uuid)': ['authenticated'],
+  'rank_reorder(uuid,integer)': ['authenticated'],
+  'rank_rebucket(uuid,taste_bucket)': ['authenticated'],
+  'report(report_subject,uuid,text,text)': ['authenticated'],
+};
+
+async function functionPrivileges(t) {
+  const { rows } = await t.sql(`
+    select p.oid::regprocedure::text as signature,
+           has_function_privilege('anon', p.oid, 'execute')          as anon_exec,
+           has_function_privilege('authenticated', p.oid, 'execute') as auth_exec
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.prokind = 'f'
+       and not exists (
+         select 1 from pg_depend d
+          where d.objid = p.oid
+            and d.classid = 'pg_proc'::regclass
+            and d.deptype = 'e'
+       )
+     order by signature
+  `);
+  // regprocedure renders as public.name(args) with spaces after commas.
+  return rows.map((r) => ({
+    signature: r.signature.replace(/^public\./, '').replace(/,\s+/g, ','),
+    anon: r.anon_exec,
+    authenticated: r.auth_exec,
+  }));
+}
+
+test('no function outside the allow-list is executable by a client role', async () => {
+  const t = await createTestDb();
+  try {
+    const unexpected = [];
+    for (const fn of await functionPrivileges(t)) {
+      const allowed = ALLOWED[fn.signature] ?? [];
+      if (fn.anon && !allowed.includes('anon')) unexpected.push(`anon can execute ${fn.signature}`);
+      if (fn.authenticated && !allowed.includes('authenticated')) {
+        unexpected.push(`authenticated can execute ${fn.signature}`);
+      }
+    }
+
+    assert.deepEqual(
+      unexpected,
+      [],
+      `Functions reachable by a client role but not in the allow-list.\n` +
+        `If the new grant is intended, add it to ALLOWED in this file and say why.\n` +
+        `Remember that "grant execute ... to authenticated" does not remove the\n` +
+        `default PUBLIC grant — see 20260813001800.\n\n  ${unexpected.join('\n  ')}\n`,
+    );
+  } finally {
+    await t.close();
+  }
+});
+
+test('every function in the allow-list actually exists with that signature', async () => {
+  const t = await createTestDb();
+  try {
+    // Catches the allow-list drifting out of date: a renamed or re-signatured
+    // function would otherwise sit here forever, silently permitting nothing and
+    // hiding the fact that the real function is unguarded under its new name.
+    const present = new Set((await functionPrivileges(t)).map((f) => f.signature));
+    const missing = Object.keys(ALLOWED).filter((sig) => !present.has(sig));
+    assert.deepEqual(missing, [], `Allow-list names functions that do not exist: ${missing}`);
+  } finally {
+    await t.close();
+  }
+});
+
+test('the helpers RLS policies depend on are executable, or every read breaks', async () => {
+  const t = await createTestDb();
+  try {
+    // The failure this prevents is disproportionate: can_view_profile is named by
+    // policies across eight migrations, and a policy that calls a function the
+    // caller cannot execute fails the entire query rather than filtering it. The
+    // symptom would be "permission denied for function" on an ordinary profile
+    // read, which points nowhere near a grant.
+    const alice = await t.createUser({ username: 'alice' });
+
+    const visible = await t.asAnon(async () => {
+      const { rows } = await t.sql(`select id from profiles where id = $1`, [alice]);
+      return rows;
+    });
+
+    assert.equal(visible.length, 1, 'a signed-out reader should see a public profile');
+  } finally {
+    await t.close();
+  }
+});
+
+test('capability reads are scoped to the caller, with no target argument exposed', async () => {
+  const t = await createTestDb();
+  try {
+    const alice = await t.createUser({ username: 'alice' });
+    const bob = await t.createUser({ username: 'bob' });
+
+    // resolve_capabilities takes a target, which is exactly why it must not be
+    // reachable: it would let anyone read anyone's entitlements.
+    await t.asUser(alice, async () => {
+      const err = await t.errorFrom(`select resolve_capabilities($1)`, [bob]);
+      assert.ok(err, 'resolve_capabilities should not be callable by a client');
+      assert.match(err.message, /permission denied/i);
+    });
+
+    // The sanctioned route answers only for whoever is asking.
+    await t.asUser(alice, async () => {
+      const { rows } = await t.sql(`select my_capabilities() as caps`);
+      assert.ok(rows[0].caps.includes('base_free'));
+    });
+  } finally {
+    await t.close();
+  }
+});
+
+test('a signed-out caller gets no answer from my_capabilities', async () => {
+  const t = await createTestDb();
+  try {
+    // The one finding that was not merely defence in depth: before 001800 this
+    // returned ["base_free"] to strangers on the deployed database.
+    await t.asAnon(async () => {
+      const err = await t.errorFrom(`select my_capabilities()`);
+      assert.ok(err, 'my_capabilities should be refused for an anonymous caller');
+      assert.match(err.message, /permission denied/i);
+    });
+  } finally {
+    await t.close();
+  }
+});
+
+test('write RPCs are refused on privilege, not merely on the suspension guard', async () => {
+  const t = await createTestDb();
+  try {
+    // Before 001800 these were reachable by anon and stopped only by
+    // assert_can_write raising 'unauthenticated'. That is containment inside the
+    // function rather than at the door, and it does not survive someone adding a
+    // function without the guard. Both layers are asserted, in the right order.
+    await t.asAnon(async () => {
+      for (const call of [
+        `select rank_start('00000000-0000-0000-0000-000000000000', 'loved')`,
+        `select rank_reorder('00000000-0000-0000-0000-000000000000', 1)`,
+        `select report('profile', '00000000-0000-0000-0000-000000000000', 'spam', null)`,
+      ]) {
+        const err = await t.errorFrom(call);
+        assert.ok(err, `${call} should be refused`);
+        assert.match(err.message, /permission denied/i, `${call} should fail on privilege`);
+      }
+    });
+  } finally {
+    await t.close();
+  }
+});
+
+test('assert_can_write is internal, and still runs inside the definer functions', async () => {
+  const t = await createTestDb();
+  try {
+    // Revoking it is safe precisely because a security definer function executes
+    // as its owner. This asserts both halves: a client cannot call the guard, and
+    // the guard nonetheless fires for a suspended account going through the RPC.
+    const alice = await t.createUser({ username: 'alice' });
+    const movie = await t.createMovie('Heat', 949);
+
+    await t.asUser(alice, async () => {
+      const err = await t.errorFrom(`select assert_can_write($1)`, [alice]);
+      assert.ok(err, 'assert_can_write should not be client-callable');
+      assert.match(err.message, /permission denied/i);
+    });
+
+    await t.sql(`update profiles set status = 'suspended' where id = $1`, [alice]);
+
+    await t.asUser(alice, async () => {
+      const err = await t.errorFrom(`select rank_start($1, 'loved')`, [movie]);
+      assert.ok(err, 'a suspended account should not be able to rank');
+      assert.match(err.message, /suspend/i, 'and should be told why, not given a privilege error');
+    });
+  } finally {
+    await t.close();
+  }
+});

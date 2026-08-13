@@ -25,6 +25,14 @@ module.exports = [
     },
   },
   {
+    // Command-line scripts under supabase/, where printing a report is the whole
+    // point rather than a leftover debug statement.
+    files: ['supabase/**/*.mjs'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  {
     files: ['jest.setup.js', '**/*.test.{ts,tsx}'],
     languageOptions: {
       globals: {

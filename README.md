@@ -89,6 +89,7 @@ npm start
 | `npm run lint` | ESLint, including the raw-colour ban |
 | `npm test` | Jest, including the contrast assertions |
 | `npm run test:db` | Applies every migration to real Postgres and tests the ranking engine |
+| `npm run test:remote` | Probes a deployed project from an unauthenticated client's position |
 
 `APP_VARIANT` selects the build variant — `development`, `preview`, or `production` — which sets the bundle identifier, the app name, and the backend. Non-production builds carry a visible environment badge.
 
@@ -106,7 +107,20 @@ Both exist because the design system found defects that would otherwise have shi
 
 That matters most for ranking, which is the component most likely to corrupt data in ways nobody notices for weeks. The tests assert the four invariants from `docs/architecture/ranking.md` **after every single mutation**, and one test drives sixty randomised operations — insertions, unrankings, reorderings — re-checking all four each time. Another gives each film a secret true ordering, answers every comparison from it, and asserts the finished ranking reproduces that order exactly, which verifies the insertion search is correct rather than merely self-consistent.
 
-Two known limits of the WebAssembly build, neither consequential: `citext` is unavailable and is shimmed as `text`, and row-level security is not enforced against the owning role, so policy behaviour is tested by calling `can_view_profile` directly.
+Row-level security **is** enforced: the harness creates the three Supabase roles and switches into them, because a query run as the table owner skips every policy. That was not always true, and the period when it wasn't is instructive — the suite would have passed with the policies deleted, and an independent review found four holes living in that blind spot.
+
+One limit remains: `citext` is unavailable in the WebAssembly build and is shimmed as `text`, so case-insensitive uniqueness is not exercised locally. It has little practical consequence, since `profiles.username_format` forbids uppercase from being stored at all.
+
+### And a check the local suite cannot perform
+
+`npm run test:remote` probes a **deployed** project as an unauthenticated client. It exists because the local suite answers a subtly different question: PGlite knows nothing about PostgREST, which is the surface an attacker actually reaches, and a grant revoked in a migration file is not the same claim as a grant revoked on the running database.
+
+It earned its place immediately. Its first run found six functions — including `report()` and the `rank_*` write paths — that `anon` could execute on the live database, because `grant execute ... to authenticated` *adds* a role to a set that already contains everyone and does not remove Postgres's default grant to PUBLIC. Five were saved by an internal guard, so nothing was exploitable; `my_capabilities()` had no guard and answered strangers. Fixed in `20260813001800`, and pinned locally by `supabase/tests/function-grants.test.mjs`.
+
+Two lessons are written into that file, because both produced false confidence on the way:
+
+- **Probe with real arguments.** PostgREST answers an argument mismatch with 404, so calling everything with `{}` yields a page of passes that would pass against a wide-open database.
+- **An application error means the call succeeded.** PostgREST maps SQLSTATE class 28 to HTTP 403, so a guard raising `unauthenticated` is indistinguishable from a privilege refusal *by status code*. Classify on the SQLSTATE, or the guard impersonates the control you are testing.
 
 ---
 
