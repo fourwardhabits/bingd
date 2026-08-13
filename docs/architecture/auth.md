@@ -141,9 +141,14 @@ The live check is still worth doing once, because the above is evidence about do
 
 **The age gate's deletion is verified only against the test harness.** In PGlite, `auth.users` is a shim table owned by the same role that owns the function, so the delete is trivially permitted and cascades to nothing; on hosted Supabase the table belongs to `supabase_auth_admin`. The delete should succeed, since a `postgres`-owned definer function is Supabase's own documented pattern and GoTrue's dependent tables cascade, but that is reasoning rather than observation. `create_profile` now raises rather than returning `ok: false` if the delete fails, so the failure cannot masquerade as a successful refusal, and one live probe against the running project would retire the question.
 
-### Two settings this depends on
+### What email sign-in depends on, which is more than a template
 
-Both are in the Supabase dashboard, and both fail in ways that do not name their cause.
+**Email one-time codes require a custom SMTP provider.** Not for deliverability, though that follows: Supabase does not permit editing email templates at all while the built-in email service is in use, and the built-in templates send `{{ .ConfirmationURL }}`, a magic link. §1 specifies a six-digit code, `verifyEmailCode` calls `verifyOtp`, and the code lives in `{{ .Token }}`. So with the shared sender the email arrives containing no code and the verification screen has nothing to accept — and the setting that would fix it is disabled, rather than merely unset.
 
-1. **The email template must contain `{{ .Token }}`.** Supabase's default sends `{{ .ConfirmationURL }}`, a magic link. The app asks for a six-digit code, so with the default template the email arrives with no code in it and the verification screen has nothing to accept. Authentication → Emails → Magic Link.
-2. **The OAuth redirect must be registered.** Google returns to `Linking.createURL('auth/callback')`, which resolves per variant — `bingd://auth/callback`, `bingd-preview://auth/callback`, `bingd-dev://auth/callback`. An unregistered value is refused by Supabase before the provider is ever reached.
+Two templates need it, not one, and the difference is invisible while testing. Supabase sends **Confirm signup** to an address that has no account yet and **Magic Link** to one that does. Fixing only Magic Link produces an app where sign-in works for everyone who has used it before and fails for everyone new, which is the population you would never be a member of.
+
+The built-in sender also carries a rate limit low enough that a handful of people signing up in the same few minutes will hit it, which is the shape of a movie night. So SMTP is a prerequisite for email sign-in reaching anyone outside the founder, not a polish step.
+
+Until it exists, **Google is the working method on Android and Apple on iOS**, both verified. Email is the one that is configured in code and unusable in the dashboard.
+
+**The OAuth redirects must be registered**, which they are, as `bingd://**`, `bingd-dev://**`, `bingd-preview://**` and `https://bingd.app/**` alongside the three exact callbacks. Google returns to `Linking.createURL('auth/callback')`, which resolves per variant, and an unregistered value is refused by Supabase before the provider is ever contacted — so the symptom names the redirect and not the provider.
