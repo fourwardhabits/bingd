@@ -11,7 +11,7 @@ const migrationsDir = join(here, '..', 'migrations');
  * Supabase provides these; PGlite does not. The shim is deliberately thin, so a
  * test exercises the real migration files rather than a parallel schema.
  *
- * Two known gaps, both harmless:
+ * One known gap:
  *
  *   citext  — unavailable in PGlite, shimmed as plain text. Case-insensitive
  *             uniqueness therefore is not exercised. It has no practical
@@ -19,21 +19,58 @@ const migrationsDir = join(here, '..', 'migrations');
  *             uppercase from being stored at all, so two rows cannot differ by
  *             case alone regardless of the column type.
  *
- *   RLS     — policies are created and their expressions are compiled, but the
- *             owner role bypasses row security. Policy behaviour is tested by
- *             calling can_view_profile directly and by switching to a
- *             non-owning role where it matters.
+ * RLS used to be a second gap, and it was the expensive one: every query ran as
+ * the table owner, and **an owner bypasses row security**, so no policy was ever
+ * evaluated. The suite could pass with the policies deleted. An independent
+ * review found four holes in exactly that blind spot on 2026-08-13.
+ *
+ * The fix is to stop being the owner. The three Supabase roles are created here
+ * and `asRole` switches into them, at which point Postgres enforces policies
+ * normally. Nothing about PGlite prevented this.
+ *
+ * Two details make the simulation faithful rather than approximate:
+ *
+ *   - `auth.uid()` reads `request.jwt.claims`, which is what the real one does.
+ *     The previous shim invented a `test.user_id` setting, so tests agreed with
+ *     the harness instead of with production.
+ *
+ *   - Default privileges grant table and function access to `anon` and
+ *     `authenticated`, because Supabase does. Copying that matters most for what
+ *     it *reveals*: `EXECUTE` reaching those roles by default is precisely how
+ *     `resolve_capabilities` became callable for arbitrary users, so a lockdown
+ *     has to be written explicitly and can then be tested.
  */
 const SHIM = `
   create schema if not exists auth;
   create table auth.users (id uuid primary key);
   create domain citext as text;
 
-  -- Mirrors Supabase's auth.uid(), reading a value the tests can set.
+  create role anon         nologin noinherit;
+  create role authenticated nologin noinherit;
+  create role service_role  nologin noinherit bypassrls;
+
+  grant usage on schema public to anon, authenticated, service_role;
+  grant usage on schema auth   to anon, authenticated, service_role;
+
+  alter default privileges in schema public
+    grant all on tables    to anon, authenticated, service_role;
+  alter default privileges in schema public
+    grant all on sequences to anon, authenticated, service_role;
+  alter default privileges in schema public
+    grant all on functions to anon, authenticated, service_role;
+
+  -- The real auth.uid(): the 'sub' claim of the request JWT, or null when there
+  -- is no JWT at all. The guard is needed because an unset GUC reads as the
+  -- empty string, and ''::json raises.
   create or replace function auth.uid() returns uuid
   language sql stable as $shim$
-    select nullif(current_setting('test.user_id', true), '')::uuid;
+    select case
+      when coalesce(current_setting('request.jwt.claims', true), '') = '' then null
+      else nullif(current_setting('request.jwt.claims', true)::json ->> 'sub', '')::uuid
+    end;
   $shim$;
+
+  grant execute on function auth.uid() to anon, authenticated, service_role;
 `;
 
 export async function createTestDb() {
@@ -65,9 +102,54 @@ export async function createTestDb() {
       return db.exec(query);
     },
 
-    /** Everything after this runs as the given profile, via auth.uid(). */
+    /**
+     * Sets the acting identity for auth.uid() while staying the table owner, so
+     * setup and the functional suites can still write directly. RLS is *not*
+     * enforced in this mode — use asUser or asAnon for anything asserting a policy.
+     */
     async actAs(userId) {
-      await db.query(`select set_config('test.user_id', $1, false)`, [userId ?? '']);
+      const claims = userId ? JSON.stringify({ sub: userId, role: 'authenticated' }) : '';
+      await db.query(`select set_config('request.jwt.claims', $1, false)`, [claims]);
+    },
+
+    /**
+     * Runs fn as a real Supabase role, which is what makes RLS apply: policies
+     * are skipped for the owner and enforced for everyone else. The role is
+     * always reset, including when fn throws, or one failure would silently
+     * de-privilege the rest of the file.
+     */
+    async asRole(role, userId, fn) {
+      const claims = userId ? JSON.stringify({ sub: userId, role }) : '';
+      await db.query(`select set_config('request.jwt.claims', $1, false)`, [claims]);
+      await db.exec(`set role ${role}`);
+      try {
+        return await fn();
+      } finally {
+        await db.exec('reset role');
+      }
+    },
+
+    /** A signed-in client. The ordinary case for a policy test. */
+    async asUser(userId, fn) {
+      return this.asRole('authenticated', userId, fn);
+    },
+
+    /** A signed-out client, as on the public web pages. */
+    async asAnon(fn) {
+      return this.asRole('anon', null, fn);
+    },
+
+    /**
+     * Returns the error a query raises, or null if it succeeded. Reads better
+     * than a try/catch in each test, and makes "this must be refused" explicit.
+     */
+    async errorFrom(query, params) {
+      try {
+        await db.query(query, params);
+        return null;
+      } catch (e) {
+        return e;
+      }
     },
 
     /** Creates an auth user and a profile, and returns the id. */
@@ -76,10 +158,17 @@ export async function createTestDb() {
       const id = rows[0].id;
       await db.query(`insert into auth.users (id) values ($1)`, [id]);
       await db.query(
-        `insert into profiles (id, username, display_name, visibility, date_of_birth)
-         values ($1, $2, $3, $4::profile_visibility, $5)`,
-        [id, username, username, visibility, dob],
+        `insert into profiles (id, username, display_name, visibility)
+         values ($1, $2, $3, $4::profile_visibility)`,
+        [id, username, username, visibility],
       );
+      // date_of_birth lives in its own table with no read policy, so that the
+      // "never returned by any API" guarantee is structural rather than asserted
+      // in a comment (20260813001400 §1).
+      await db.query(`insert into profile_private (profile_id, date_of_birth) values ($1, $2)`, [
+        id,
+        dob,
+      ]);
       return id;
     },
 

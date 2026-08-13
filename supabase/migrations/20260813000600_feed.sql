@@ -53,9 +53,13 @@ create index reactions_event on reactions (feed_event_id);
 alter table feed_events enable row level security;
 alter table reactions   enable row level security;
 
--- Feed reads authorize against the actor (AD-6). Unfollowing removes future
--- events from a viewer's feed; it does not retroactively rewrite history the
--- viewer already saw, because visibility is evaluated per read.
+-- Feed reads authorize against the actor (AD-6).
+--
+-- This policy answers "may the viewer see this actor at all", which for a public
+-- actor is yes regardless of follow state. The follow set is applied by the `feed`
+-- view on top of it. So unfollowing removes that actor's events from the feed
+-- entirely, past ones included: the feed is a live query, not a historical record.
+-- Nothing is deleted, and a re-follow restores visibility (PRD §14).
 create policy feed_events_read on feed_events for select
   using (can_view_profile(auth.uid(), actor_id));
 

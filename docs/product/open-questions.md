@@ -1,7 +1,7 @@
 # Bingd — Open Questions
 
 **Version:** v0.6
-**Last updated:** 2026-08-12
+**Last updated:** 2026-08-13
 **Companion documents:** [`PRD.md`](./PRD.md) · [`decision-log.md`](./decision-log.md) · [`change-log-v0.6.md`](./change-log-v0.6.md)
 
 ---
@@ -52,13 +52,35 @@ Confirmed by the founder. Star ratings auto-map to buckets (4.0+ → *Loved it*,
 
 ### INF-2 — Username change policy
 
-**Recorded as:** Changes allowed once per 30 days; the previous username redirects for 90 days, then releases; released names can never be instantly reused.
+**Recorded as:** Changes allowed once per 30 days; the previous username redirects for 90 days, then stops resolving and **never returns to the available pool**.
 
 **Why it is an inference:** Question A6 was left blank.
 
 **Alternative:** Lock usernames permanently in v1. Simpler, cheaper, and defensible. Say the word and it changes.
 
 **Cost to overturn:** Low before implementation. High after, because share and invite routes depend on `bingd.app/u/<username>`.
+
+**Tightened 2026-08-13, and worth a look.** The original wording said released names "can never be *instantly* reused," which left the end state undefined; the implementation makes reservation **permanent**. Two reasons it went the stricter way. Every previously shared `bingd.app/u/<name>` link keeps pointing at the name, so releasing it hands an impersonator a working URL rather than a dead one — and at alpha scale the namespace cost of never recycling is nil. The same review found that **deleting an account released its username immediately**, reaching the exact outcome this inference exists to prevent by a shorter route than a username change; a `before delete` trigger now reserves it. If you would rather names come back after some period, that is a one-line change now and a migration later.
+
+### ~~INF-6 — The reaction set~~ — resolved by the founder, 2026-08-13
+
+**Resolved.** The set is six: `love`, `agree`, `disagree`, `funny`, `wow`, `moved`. See PRD §14.
+
+The inference proposed five, all positive, on the reasoning that a downvote is a pile-on mechanic. **The founder added a negative reaction, and was right to.** The pile-on argument holds for a public network of strangers; it does not hold for a cohort of friends where disagreeing with someone's ranking is the entire social mechanic. The risk was correctly located in the *display* rather than the reaction: PRD §14 now forbids aggregating any reaction onto a profile, so `disagree` lives on the activity item and never becomes a running total attached to a person.
+
+Two things carried forward from the inference because they proved useful. Values are stored as **meanings rather than glyph names** — `agree`, not `thumbs_up` — so the symbol set stays a copy decision. And the column is **closed by a check constraint**, because a `text` column accepting any string is the free-text field PRD §14 refused to build.
+
+### Deferred — skin-tone variants on the hand reactions
+
+**Not in v1.** Raised by the founder, 2026-08-13, with the right instinct attached: leave it off if it adds clutter or risk.
+
+**Why it is safe to defer, and cheap to add.** A skin tone is a property of the *reactor*, not of the reaction. So it belongs on the profile as a single rendering preference, not on the reaction row — which means adding it later is one additive nullable column and touches no existing reaction data. Aggregation, counts, and the constraint are all unaffected because `agree` stays `agree` however it renders.
+
+**The real cost is in assets, not data,** and it depends on a design decision not yet made. Native platform emoji get tone modifiers free. Custom brand-drawn icons — which is the likelier direction, since native emoji sit awkwardly against DM Serif Display and Parchment — would need five variants of each hand, for a cohort of thirty to sixty people.
+
+**Worth knowing:** the founder's own alternative sidesteps this entirely. An all-faces set with no hands has no skin tone to vary. A skeptical face reads as "bad take" about as clearly as a thumbs down, and faces are more distinctive than the most generic pair of glyphs on the internet. Since values are stored as meanings, that swap remains free at any point.
+
+**Revisit when:** the reaction bar is designed, or if anyone asks.
 
 ### ~~INF-3 — Bucket bands partition the ranking~~ — **RESOLVED 2026-08-12**
 
@@ -129,15 +151,19 @@ An implementation agent may resolve these using documented best practice. They a
 
 Each requires a **manual founder action**. None can be resolved by an agent.
 
-### ~~HG-1 — TMDB commercial clarification~~ — **NOT A HARD GATE. Closed 2026-08-13**
+### ~~HG-1 — TMDB commercial clarification~~ — **NOT A HARD GATE. Closed 2026-08-13, approved by the founder**
 
 Recorded as a Hard Gate on the assumption that commercial API access required a negotiated written agreement with weeks of latency. Research showed it does not.
 
-**Connect now on a free developer key.** Bingd charges nobody, which is non-commercial under TMDB's operative test. **When subscriptions ship, buy the commercial plan** — self-serve, reported by TMDB staff at $149/month under $1M revenue. Nothing needs to be asked or waited for.
+**Connect now on a free developer key. When subscriptions ship, buy the commercial plan** — self-serve, reported by TMDB staff at $149/month under $1M revenue. Nothing needs to be asked or waited for.
 
-The six-month caching conflict is resolved by complying with the terms as written rather than seeking an exception: TMDB-derived metadata refreshes on a rolling basis under six months, and Bingd's own collection data is retained without limit. The architecture already separates the two. The one genuinely ambiguous question — artwork in exported share cards — is sidestepped by making the text-first Top 10 card the primary artifact, which `../architecture/client.md` §6 already specifies as a real layout.
+**Process note, recorded because it matters more than the outcome.** The first version of this closure justified itself by asserting that Bingd "is non-commercial under TMDB's operative test." The kickoff brief had named that specific assumption as one not to make, `decision-log.md` §10 said the opposite two rows below the row that said it, and the gate was closed without approval. The gate change has since been **explicitly approved by the founder**, and the reasoning has been rewritten to stand without the assumption:
 
-Attribution wording and placement are published, specific, and built into the first screens. Full position and the triggers for revisiting: [`docs/reference/tmdb-integration.md`](../reference/tmdb-integration.md).
+The gate is closed because **the downside is bounded and cheap** — if TMDB takes the view that a free alpha with declared subscription intent needs a commercial plan, the remedy is a published price paid self-serve, not a negotiation. A Hard Gate is for dependencies on someone else's timeline, and HG-2 through HG-6 all are. This one is not, and treating it as one would have blocked design work for weeks against a risk resolvable in an afternoon. The obligations that actually matter — attribution in the first screens, retention under six months, no artwork rehosted, no credential in the client — hold identically on a free key and a commercial plan, so nothing is deferred pending an answer.
+
+Two things changed as a consequence rather than as a matter of taste. **The six-month window now covers `media_items`**, which had no expiry at all and holds the bulk of the provider data. And **v1 Open Graph link previews are typographic**, because a server-rendered preview image is served from Bingd's own infrastructure, which is the rehosting PRD §19 forbids — on-device share cards stay poster-forward, since the compositing happens on the user's phone.
+
+Full position and the triggers for revisiting: [`docs/reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 
 ### HG-2 — Android developer verification
 
@@ -207,6 +233,8 @@ Working numbers, expected to change. Every one must be configurable and versione
 | Free custom list limit | 3 |
 | Username change frequency | 1 per 30 days |
 | Username redirect window | 90 days |
+| Provider metadata refresh threshold | 150 days (30-day margin on the six-month cap) |
+| Open reports per reporter per subject | 1 |
 
 ---
 
@@ -224,3 +252,8 @@ Recorded here because they have been mistaken for open questions before, or beca
 - **Whether a recommendation explanation may be generated rather than derived from stored signals.** It may not.
 - **Whether Sign in with Apple is optional on iOS.** It is not, because Google sign-in is offered.
 - **Whether existing user data may be deleted when a capability is absent.** It may not. Read-only, never destructive.
+- **Whether a matching email address alone is enough to link two sign-in methods.** It is not. The provider must assert the email as verified, or the link must come from an authenticated session.
+- **Whether reporting can ship without a way to act on a report.** It cannot. A report flow with no operator surface is a checkbox, and PRD §27 gates the release on the whole loop.
+- **Whether a deleted account's username becomes available.** It does not, ever.
+- **Whether a view may be created without `security_invoker`.** It may not. A default-owner view bypasses RLS on the tables beneath it while the table policies still read correctly.
+- **Whether the Logged collection is private on a public profile.** It is not. It inherits profile visibility, like the rest of the profile. The **watchlist**, separately, is private at every visibility level.

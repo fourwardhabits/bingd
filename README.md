@@ -61,7 +61,7 @@ Hard constraints that are easy to violate by accident:
 - No recommendation explanation is generated rather than derived from stored signals.
 - No text is ever set in Antique Amber or Muted Sage on Parchment. Both measure below 2.2:1 and fail at every size.
 
-Agents may not autonomously merge, deploy, run a production migration, delete production data, configure payment products, or access production secrets.
+Agents may not deploy, run a production migration, delete production data, configure payment products, or access production secrets. Merge authority is set out under [Working agreement](#working-agreement).
 
 ---
 
@@ -142,4 +142,24 @@ Source is organised by **feature** rather than by technical layer. A `components
 
 ## Working agreement
 
-One coherent change, one branch, one pull request. `main` is protected and requires passing checks. Changes to authentication, row-level security, payments, sharing, invitations, offline sync, or database migrations require an independent review before merge.
+One coherent change, one branch, one pull request. `main` is protected and requires passing checks.
+
+**Sensitive surfaces** are authentication, row-level security, payments, sharing, invitations, offline sync, database migrations, and moderation. An agent may merge documentation and ordinary code, and may merge a sensitive change once an independent review has passed — but always after asking first. Reviews go to the latest Fable for foundational work and the latest Codex for contained work. A reviewer reports findings; it does not write the fix, because a reviewer that patches its own findings is no longer an independent check. Deploying, running a production migration, deleting production data, configuring payment products, and touching production secrets are the founder's alone and have no approval path.
+
+### Deciding whether to say yes — for the founder
+
+Two questions settle almost every case.
+
+**Does it touch anything on the sensitive list?** In plain terms, that means: logging in, who is allowed to see whose data, money, links that get shared or invite people in, anything that syncs while offline, any change to the database's shape, and anything to do with reports or suspensions. If the answer is no — copy, layout, a new screen, documentation — say yes and move on. That is most changes.
+
+**If it does, has somebody other than the author actually checked it?** Not "the tests pass." Tests only find what someone thought to test, and the one class of bug that hurts here is data leaking between users, which is easy to have no test for at all.
+
+So before you say yes to a sensitive change, ask for three things:
+
+1. **Who reviewed it, and what did they find?** "A fresh Codex agent found four issues, all fixed" is an answer. "It looks correct" is not.
+2. **What test would fail if this broke?** For a privacy change the honest answer names a test that logs in as the wrong user and confirms it gets nothing back. If no such test exists, the change is not ready regardless of how sound the reasoning sounds.
+3. **Was the reviewer independent?** The author cannot review their own work, and a reviewer that wrote the fix has stopped being a reviewer.
+
+Say no, or wait, when: the review has not happened yet; the reviewer and the author are the same agent; the change is described as urgent (nothing here is); or the explanation you get back is longer and more confident than you can follow. That last one is the most reliable signal there is — a change that cannot be explained simply is usually a change that is doing more than it claims.
+
+You do not need to read the code. You need to know that a second pair of eyes looked, what it found, and what would catch the problem next time.

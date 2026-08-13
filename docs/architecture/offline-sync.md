@@ -82,6 +82,15 @@ Operations drain **in creation order**, one at a time. Parallel draining would b
 
 Retries use exponential backoff with jitter, capped at roughly five minutes. After a configurable number of failures an operation moves to `failed` and surfaces in Settings.
 
+### The allowlist is not sufficient on its own — Required
+
+**Corrected 2026-08-13.** The allowlist in `api.md` reasons about function names, but two queueable functions can touch a **ranked** title, and for a ranked title both are ranking mutations that PRD §18 forbids queuing:
+
+- `set_bucket` would need to move the title into a different band and renumber, which is `rank_rebucket` — an online-only operation whose consequence, the position changing, the user must actually see.
+- `unlog` would delete a `rankings` row and close the gap, discarding ranking work built over dozens of comparisons, applied silently on reconnect.
+
+Both now raise `BG409` when a `rankings` row exists, and the client routes ranked titles to the online-only path instead of the queue. The general rule: **a function is queueable only if it is queueable for every state its target row can be in.** Where that does not hold, the function rejects the unsafe state — the allowlist cannot express it, because the danger is in the row and not the name.
+
 ---
 
 ## 4. UI states
@@ -110,6 +119,8 @@ The synced state shows nothing at all. A persistent green tick trains people to 
 | Rankings, entitlements, privacy, moderation | Server is authoritative, always |
 
 Notes are the only free text a user writes, so losing one to a silent overwrite is a real loss rather than an inconvenience. When a note is edited offline and the server copy has also changed, both versions are kept and the user chooses.
+
+**How that is detected — Required.** The rule above was unimplementable as written: nothing in a `save_note` call said which version the edit was based on, and `user_media.updated_at` was set once on insert and never advanced, so the server had no version to compare against and would have overwritten silently while this document promised it would not. Two additions close it. A trigger maintains `updated_at`, and outbox replays of `save_note` must carry `p_base_updated_at` — the value the device held when the user typed. A mismatch raises `BG409` with both texts, and the client presents the choice. Online edits may omit the parameter, since divergence is only possible across a queue.
 
 An operation targeting an object that has been deleted or has become inaccessible fails with `BG404`, is removed from the queue, and produces a plain-language explanation rather than an indefinite retry.
 
@@ -150,3 +161,5 @@ Every row of the PRD §18 matrix is tested in both connectivity states. Beyond t
 - No ranking, block, or report RPC can be enqueued — asserted against the allowlist itself, not against each function.
 - A note edited both offline and on another device produces a user-visible choice, never a silent overwrite.
 - The `pending` marker is present on every optimistic update until the server confirms.
+- `set_bucket` and `unlog` against a **ranked** title are refused with `BG409` in both connectivity states, and the client offers the online-only path rather than the queue. Asserted per function, because the allowlist cannot express a row-state condition.
+- A queued `save_note` whose `p_base_updated_at` is stale raises `BG409` and returns both texts. Asserted with a deliberate second-device edit between the queue and the drain, since a test that only replays its own write will pass while the mechanism is absent.

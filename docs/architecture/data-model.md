@@ -5,13 +5,19 @@
 
 All SQL is Postgres 15 as provided by Supabase.
 
-**The migrations in [`../../supabase/migrations/`](../../supabase/migrations/) are now the source of truth.** This document explains the reasoning; the migrations are what runs. They are applied to real Postgres in CI and the structural guarantees in §14 are each tested by attempting to violate them, so the two cannot drift silently.
+**The migrations in [`../../supabase/migrations/`](../../supabase/migrations/) are now the source of truth.** This document explains the reasoning; the migrations are what runs. They are applied to real Postgres in CI and the structural guarantees in §15 are each tested by attempting to violate them, so the two cannot drift silently.
 
 Three differences from the SQL sketched below, all deliberate:
 
 - **`pgcrypto` is not installed.** `gen_random_uuid()` has been core Postgres since 13, so the extension was dead weight.
-- **Check constraints replace comments** wherever this document listed valid values in prose — `media_cache.facet`, `feed_events.type`, `import_jobs.status`, `import_rows.status`, `share_tokens.object_type`, `recommendation_feedback.kind`. Same information, in a place where it cannot rot.
+- **Check constraints replace comments** wherever this document listed valid values in prose — `media_cache.facet`, `feed_events.type`, `import_jobs.status`, `import_rows.status`, `share_tokens.object_type`, `recommendation_feedback.kind`, and now `reactions.kind`. Same information, in a place where it cannot rot.
 - **`can_view_profile` handles a null viewer explicitly**, returning public profiles only. Unauthenticated reads happen on the public web pages in PRD §16, and leaving that case to `case` fallthrough would have returned null rather than false.
+
+> **Corrected 2026-08-13** by `20260813001400_security_fixes.sql` and `20260813001500_integrity_fixes.sql`, after an independent review. Each correction is described where the affected table is defined, and the reasoning is in `change-log-v0.6.md` §7.
+>
+> Two of them mattered more than the rest. **`date_of_birth` was readable by any signed-in user**, because a comment claimed a column-level guarantee that row level security cannot provide. And **a released username was still claimable**, because the protection was credited to a primary key that had no connection to `profiles.username`. Both were guarantees asserted in prose and enforced nowhere, which is the failure mode this document has to be read for.
+>
+> **§13 is a specification, not yet a migration.** Reporting and moderation ship on their own branch with their own review (PRD §22). Nothing described there — `reports`, `profiles.status`, `assert_can_write`, the operator views — exists in the schema yet.
 
 ---
 
@@ -22,6 +28,8 @@ Three differences from the SQL sketched below, all deliberate:
 - `id` columns are `uuid default gen_random_uuid()` unless the table has a natural composite key.
 - Timestamps are `timestamptz`, never bare `timestamp`.
 - Soft deletion is used only where history matters. Everything else deletes.
+- **Every view is created `with (security_invoker = true)`.** This one is easy to miss and expensive to miss. A Postgres view runs with its *owner's* permissions by default, which means a view over an RLS-protected table hands out rows the caller could never select directly. `visible_collection` is the sharpest example: `user_media` is owner-only precisely because it carries notes and watch dates, and a default-owner view over it would publish them to every caller. `security_invoker` makes the view evaluate the caller's own policies, which is the behaviour every view in §10 of [`api.md`](./api.md) assumes.
+- Writes will additionally call `assert_can_write()`, which refuses suspended accounts (§13, not yet migrated).
 
 ---
 
@@ -53,7 +61,6 @@ create table profiles (
   display_name        text   not null,
   avatar_url          text,
   visibility          profile_visibility not null default 'public',
-  date_of_birth       date   not null,
   invited_by          uuid   references profiles(id) on delete set null,
   founding_member     boolean not null default true,
   username_changed_at timestamptz,
@@ -64,17 +71,35 @@ create table profiles (
 
 create table username_history (
   username       citext primary key,
-  profile_id     uuid not null references profiles(id) on delete cascade,
+  profile_id     uuid references profiles(id) on delete set null,
   released_at    timestamptz not null default now(),
   redirect_until timestamptz not null
 );
+
+-- No read policy, deliberately. See the note below.
+create table profile_private (
+  profile_id    uuid primary key references profiles(id) on delete cascade,
+  date_of_birth date not null
+);
 ```
 
-**`visibility` defaults to `public`** per PRD §22. **`founding_member` defaults to `true`** and is flipped to `false` by a migration when paid beta opens — every account created before that date qualifies (PRD §17), and defaulting to true means no backfill is needed if the switch happens later than planned.
+**`visibility` defaults to `public`** per PRD §22. **`founding_member` defaults to `true`** and is flipped to `false` by a migration when paid beta opens — every account created before that date qualifies (PRD §17), and defaulting to true means no backfill is needed if the switch happens later than planned. The `status` column that §13 uses as the suspension lever arrives with the moderation migration.
 
-`username_history` implements the 90-day redirect (INF-2). A username is resolvable if it is live in `profiles`, or present in `username_history` with `redirect_until > now()`. A released username **never** returns to the available pool, because rows are retained past `redirect_until` — the primary key blocks reuse permanently.
+`username_history` implements the 90-day redirect (INF-2). A username is resolvable if it is live in `profiles`, or present in `username_history` with `redirect_until > now()`. A released username **never** returns to the available pool.
 
-> **Note on `date_of_birth`.** Stored to enforce the 13+ gate (PRD §22). It is never exposed by any read policy and never appears in an API response, including the user's own. Only `is_over_13` is derivable through a function.
+> **This document previously credited that guarantee to the primary key, and the primary key does not provide it.** That key is unique within `username_history`; nothing connected it to `profiles.username`, so a new account could take a retired name while the history row sat there looking like protection. The reservation is now enforced by a trigger on `profiles` that refuses any insert or update naming a username reserved to somebody else — `assert_username_available` in `20260813001500`. Tested by having a second account attempt the claim, which is the only assertion that would have caught the original defect.
+
+> **Corrected 2026-08-13.** `profile_id` was `not null ... on delete cascade`, which meant deleting an account destroyed its history rows and removed the live username from `profiles`, putting the name back in the pool immediately. That is the impersonation vector INF-2 was written to close, reachable by a shorter route than a username change: delete the account, and every previously shared `bingd.app/u/<name>` link points at whoever claims the name next.
+>
+> `profile_id` is now nullable and detaches on delete, and a `before delete` trigger on `profiles` writes a tombstone for the live username with `redirect_until = now()`. A deleted account has nothing to redirect *to*, so the row does not resolve — but the primary key goes on blocking reuse forever, which is the property that matters. The trigger also expires that account's earlier redirects for the same reason.
+>
+> This tightens INF-2 rather than implementing it exactly: the inference said released names "can never be *instantly* reused," and the schema makes reuse permanent. Permanent is the safe direction, and the namespace cost is negligible at alpha scale, but it is a divergence from the recorded wording and is flagged in `open-questions.md` §2.
+
+> **Note on `date_of_birth`.** Stored to enforce the 13+ gate (PRD §22), in its own table with row level security enabled and **no policy at all** — which denies every client, the owner included. The only route to it is `is_over_13`, a `SECURITY DEFINER` function returning a boolean, and that function is not executable by client roles either.
+>
+> **It used to be a column on `profiles`, carrying a comment that promised exactly the behaviour above, and the comment was false.** Row level security is *row*-level: `profiles_read` admits a row, and an admitted row is readable in every one of its columns. Any signed-in user could select the exact birth date of every public account. A guarantee about a single column cannot be written as a policy, so it moved to where it can be structural.
+>
+> A column privilege would also have worked and was rejected: any later `grant all on profiles` silently undoes it, and nothing would fail. A separate table with no policy cannot be opened by accident.
 
 ---
 
@@ -189,6 +214,14 @@ create index on media_cache (expires_at);
 
 Facet-level TTLs match PRD §19: availability expires in hours, credits and keywords in weeks. `expires_at` is computed by `tmdb-adapter` from configuration in `app_config`, **not** from a constant. Bingd caps all TMDB-derived retention under six months to stay inside the API terms ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)), and that window must be adjustable without a migration.
 
+> **Corrected 2026-08-13.** `media_cache` had an expiry; `media_items` did not. Title, overview, poster path, and genres are the bulk of the provider-derived data, and they carried only `fetched_at` — with no index on it and no job defined to act on it. A row referenced by somebody's ranking and untouched for seven months was retained provider data that nothing could find.
+>
+> `title` is also `not null`, so the "reduce to a bare identifier" fallback described in the integration note was not actually available without a schema change.
+>
+> Added: an index on `fetched_at`, and a `media_refresh_due` view listing rows past `tmdb.metadata_max_age_days` (currently 150, giving a 30-day margin on the six-month limit) that a user collection still references. `tmdb-adapter` drains it. Rows nobody references are pruned rather than refreshed, which reaches the same compliance for less provider quota. **The quota cost of that refresh belongs in the PRD §19 cost model**, because it scales with the number of distinct titles the user base has ever touched rather than with current activity.
+
+
+
 > **Read access is public** on `media_items` and `media_cache`. Catalog metadata is not user data. This is the only unrestricted read in the schema.
 
 ---
@@ -283,7 +316,13 @@ create policy user_media_own on user_media for select
   using (user_id = auth.uid());
 ```
 
-Other users never read `user_media` directly. The bucket, where it should be visible, is exposed through `rankings` or through a view that projects only non-private columns. **`watchlist` is always private** and has an owner-only policy.
+Other users never read `user_media` directly. The bucket, where it should be visible, is exposed through `rankings` or through the `visible_collection` view, which projects only non-private columns. **`watchlist` is always private** and has an owner-only policy.
+
+> **Founder decision, 2026-08-13.** The **Logged collection inherits profile visibility** — on a public profile it is public, on a private profile it is visible only to approved followers. The collection is part of the profile and follows the same rules; it is not a separate privacy domain. PRD §22's always-public table never listed it either way, so the behaviour was arriving as a side effect of a view definition rather than as a decision.
+>
+> This is what the schema already did, and it is why the column split matters. `visible_collection` exposes `media_item_id`, `bucket`, and `progress`. It does **not** expose `note` or `watched_on`, which stay always-private regardless of profile visibility, and it is not a path to `watchlist`, which stays owner-only at every visibility level. A watchlist is forward-looking intent about things you have not watched, which is a different kind of disclosure from a reaction to something you have; PRD §22 keeps it private and this decision does not change that.
+
+
 
 ---
 
@@ -349,11 +388,21 @@ create table reactions (
   user_id       uuid not null references profiles(id) on delete cascade,
   kind          text not null,
   created_at    timestamptz not null default now(),
-  primary key (feed_event_id, user_id)
+  primary key (feed_event_id, user_id),
+  constraint reactions_known_kind
+    check (kind in ('love', 'agree', 'disagree', 'funny', 'wow', 'moved'))
 );
 ```
 
 The primary key on `reactions` enforces PRD §14's one-reaction-per-user rule at the database level. Changing a reaction is an upsert; removing it is a delete. **There is no text column**, which is what keeps reactions free of moderation surface.
+
+> **Corrected 2026-08-13.** `kind` shipped as unconstrained `text`, which quietly undid that last guarantee: a column that accepts any string *is* a free-text field, whatever the client puts in it. The constraint closes it.
+>
+> Values are semantic rather than glyphs, for the same reason `taste_bucket` stores `loved` instead of `Loved it` — which emoji renders is a copy decision and should not be a data migration.
+>
+> **The set is a founder decision as of 2026-08-13** (PRD §14), and it includes `disagree`. An earlier inference left the negative reaction out, reasoning that a downvote counter is a pile-on mechanic. That reasoning applies to a public network; among a cohort of friends, disagreeing with someone's ranking is the mechanic the product is for. The safeguard is in the read path rather than the schema: **no query aggregates reactions onto a profile.** `disagree` is countable on the activity item it belongs to and nowhere else.
+
+`feed_events.list_id` is declared as a bare `uuid` in the feed migration and gains its foreign key in `20260813000800` once `lists` exists, which is the only order the dependency allows. It was reported in review as missing; it is not. Noted because the constraint is not where a reader looks for it.
 
 `payload` on `feed_events` holds a denormalized snapshot — the position at the time of ranking, the bucket, the tagged users. Denormalizing here is deliberate: a feed item should show what was true when it happened, and re-deriving a historical position from current data would be both expensive and wrong.
 
@@ -463,7 +512,19 @@ create index on match_scores (user_a, score desc);
 create index on match_scores (user_b, score desc);
 ```
 
+```sql
+alter table match_scores enable row level security;
+
+create policy match_scores_read on match_scores for select
+  using (
+    (user_a = auth.uid() and can_view_profile(auth.uid(), user_b))
+    or (user_b = auth.uid() and can_view_profile(auth.uid(), user_a))
+  );
+```
+
 The `user_a < user_b` constraint stores each pair once. Both indexes exist because a lookup may arrive from either side.
+
+The read policy is the one place a single-subject visibility check is not enough, because a match row is about two people. A caller may read a row only if they are **one of the two parties** and can view the other, which satisfies PRD §13's rule that a match involving a private user is shown only to that user's approved followers — and also settles the leaderboard question without a second rule, since a private account simply produces no readable row for a non-follower.
 
 **Method.** For the set of titles both users have in `rankings`, count the pairs `(x, y)` where both users ordered them the same way, and divide by the total comparable pairs. This is Kendall's tau-a rescaled to 0–100.
 
@@ -535,7 +596,7 @@ create unique index on invite_tokens (owner_id) where revoked_at is null;
 
 create table invite_attributions (
   invitee_id   uuid primary key references profiles(id) on delete cascade,
-  inviter_id   uuid not null references profiles(id) on delete cascade,
+  inviter_id   uuid references profiles(id) on delete set null,
   token_id     uuid references invite_tokens(id) on delete set null,
   accepted_at  timestamptz,
   activated_at timestamptz
@@ -549,6 +610,20 @@ The partial unique index on `owner_id` enforces PRD §17's **one reusable person
 `invite_attributions` is keyed by `invitee_id` because a person is invited once. `activated_at` is set when the invitee ranks their first title, which is what makes the invite-to-activation metric in PRD §28 a single query — and what would make any future reward farm-resistant.
 
 `env` prevents a nonprod token resolving in production (PRD §17).
+
+> **Corrected 2026-08-13.** `inviter_id` was `not null ... on delete cascade`, so an inviter deleting their account destroyed the invitee's attribution row along with `activated_at`. Decision log §5 marks growth provenance **Required** — "impossible to reconstruct later," "Never remove" — so the cascade broke the one rule this table exists to satisfy, and it would have broken it silently and permanently.
+>
+> `inviter_id` now detaches instead. The attribution and activation facts survive; the departed account's identity does not, which is also the right privacy answer for someone who has asked to be deleted. `profiles.invited_by` already behaved this way, so the two are now consistent.
+
+### When the attribution row is written — Required
+
+PRD §17 tracks `invite_signup_attributed` and `invite_accepted` as **distinct** events, and `accepted_at` is nullable, so the lifecycle needs stating rather than inferring:
+
+1. A row is inserted at **signup** when the account arrived through an invite link or short code, with `accepted_at` null. This is the referral fact.
+2. `accepted_at` is set when the recipient **explicitly taps Accept**, which is also when the follow is created.
+3. `activated_at` is set when the invitee ranks their first title.
+
+A row with `accepted_at` null is therefore a real state — an attributed signup that has not yet accepted — which is what PRD §17 and api.md `block` mean by voiding a *pending* invitation. Without step 1 the two analytics events cannot be distinguished and the "pending invitation" language has no referent.
 
 ```sql
 create table share_tokens (
@@ -620,7 +695,49 @@ Rows older than 30 days are pruned by a scheduled job.
 
 ---
 
-## 13. Index summary
+## 13. Moderation and account status
+
+Added 2026-08-13. PRD §22 marks reporting **Required** by policy, §23 lists a `reports` entity, and AC 26.15.5 requires a working report flow — but no `reports` table was ever created. Blocking shipped and reporting did not, which left the product carrying user-generated usernames, display names, and list titles with nowhere for a complaint about them to arrive. This is the largest single gap the review found, and it is a store-review and platform-obligation problem rather than a nice-to-have.
+
+```sql
+create table reports (
+  id            uuid primary key default gen_random_uuid(),
+  reporter_id   uuid references profiles(id) on delete set null,
+  subject_type  report_subject not null,
+  subject_id    uuid not null,
+  subject_owner uuid references profiles(id) on delete set null,
+  reason        text not null,
+  note          text,
+  state         report_state not null default 'open',
+  created_at    timestamptz not null default now(),
+  resolved_at   timestamptz
+);
+```
+
+`reporter_id` detaches rather than cascading, because a harassment complaint must not disappear when its author leaves. A partial unique index allows **one open report per reporter per subject**: filing the same complaint fifty times is itself an abuse vector, and PRD §22 requires that reporting cannot be turned into harassment.
+
+### Suspension
+
+Before this, the only lever available against an account was deletion — which destroys the evidence needed to judge whether the deletion was right. `profiles.status` adds a reversible one:
+
+```sql
+create type profile_status as enum ('active', 'suspended');
+alter table profiles add column status profile_status not null default 'active';
+```
+
+Suspension is threaded through `can_view_profile`, which is the entire payoff of AD-5. One clause hides a suspended account from the feed, the leaderboard, discovery, match scores, tagging, and the public web pages simultaneously, instead of seven separate changes that could each be forgotten. The self-check stays first, so a suspended user can still load their own profile and be told what happened.
+
+Reads and writes are separate questions, so writes get their own guard. Every write RPC calls `assert_can_write()`, which refuses a suspended account with `BG403`. Without it a suspended user would go on ranking, following, and tagging into a void.
+
+### The operator surface
+
+Deliberately **not** an admin application. For a cohort of 30–60 alpha users, the operator surface is two `security_invoker` views — `moderation_queue` (open reports, worst-offender first) and `moderation_history` — read as `service_role` from the Supabase SQL editor, plus a `moderation_actions` table recording what was done and why. Building a console before there is any triage experience is the expensive way to find out what the console should contain.
+
+What this defers, explicitly: no appeals flow, no user-facing notice on suspension beyond the state being visible on one's own profile, and no automated detection of any kind. All three are acceptable at alpha scale with a single operator and none are acceptable at mass market.
+
+---
+
+## 14. Index summary
 
 Indexes justified by a specific query rather than added speculatively.
 
@@ -638,10 +755,12 @@ Indexes justified by a specific query rather than added speculatively.
 | `invite_tokens (owner_id) where revoked_at is null` | One live token per user |
 | `media_items (kind, tmdb_id)` partial | Adapter upsert |
 | `media_items using gin (genres)` | Genre diversity constraints in re-ranking |
+| `media_items (fetched_at)` | Finding provider rows past the retention window |
+| `reports (state, created_at)` | Moderation triage queue |
 
 ---
 
-## 14. What this model makes impossible
+## 15. What this model makes impossible
 
 The point of several choices above is that a violation cannot be written, not merely that it is forbidden.
 
@@ -651,7 +770,11 @@ The point of several choices above is that a violation cannot be written, not me
 | A capability limit never deletes data | `resolve_capabilities` is called only from insert paths (AD-9) |
 | Early Access grants cannot become permanent | `early_access_must_expire` check constraint |
 | One reaction per user per item | Primary key on `(feed_event_id, user_id)` |
-| Reactions carry no moderation surface | No text column exists |
+| Reactions carry no moderation surface | No text column exists, and `kind` is a closed set |
+| A deleted account's username is never reusable | `username_history` primary key, populated by a `before delete` trigger |
+| Growth provenance is never destroyed | `invite_attributions.inviter_id` detaches instead of cascading |
+| A suspended account is invisible everywhere at once | One clause in `can_view_profile` (AD-5) |
+| A view cannot leak past RLS | Every view is `security_invoker` |
 | One reusable invite link per user | Partial unique index on live rows |
 | A token is never authorization | The resolver returns an object reference; visibility is applied afterward |
 | A block overrides public visibility | The block test precedes the public test in `can_view_profile` |

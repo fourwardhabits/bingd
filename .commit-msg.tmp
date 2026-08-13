@@ -1,5 +1,48 @@
-Point the data model at the migrations as source of truth
+Enforce row level security in tests, and fix what that exposed
 
-Records the three places the migrations deliberately depart from the SQL
-sketched in the document, so a reader who compares them is not left guessing
-which one is authoritative.
+The database suite ran every query as the table owner, and Postgres skips
+row security for an owner. No policy was ever evaluated: the suite would
+have passed with all of them deleted. An independent review found four
+policy defects sitting in exactly that blind spot.
+
+The harness now creates the real anon, authenticated, and service_role
+roles and switches into them, so policies are enforced and a defect fails
+a test. auth.uid() reads request.jwt.claims as the real one does, rather
+than a setting the harness invented. This needed no Docker.
+
+Fixed, each reproduced by a failing test written from the attacker's side
+first:
+
+- date_of_birth was readable by any signed-in user. The column carried a
+  comment promising otherwise, but row level security is row-level: an
+  admitted row is readable in every column. Moved to profile_private,
+  which has RLS enabled and no policy at all.
+- Every SECURITY DEFINER function taking a user argument was an open
+  endpoint, because Postgres grants EXECUTE to PUBLIC and a definer
+  function bypasses RLS. This reached capability state, the age gate, and
+  _rank_finalize, where a direct call would place a title without
+  answering a comparison.
+- Client roles held INSERT, UPDATE and DELETE on every table. AD-4 rested
+  on RLS deny-by-default alone. The test meant to catch this passed
+  because the roles did not exist, so it asserted an empty set was empty.
+- link lists were enumerable, making them public in all but name.
+  Retrieval moved to list_by_id, where naming the id is the gate.
+- A block did not hide a watch tag from either party. The fix needs
+  SECURITY DEFINER: a subquery against blocks inherits blocks_read, which
+  hides a block from the person it should be blocking.
+
+Also five integrity defects. The username one had the same shape as the
+date of birth: reuse was credited to a primary key that had no connection
+to profiles.username, so a retired name was claimable while a history row
+sat there looking like protection. Now enforced by a trigger and tested by
+having a second account attempt the claim.
+
+Reporting and moderation are specified but not included. They are a new
+subsystem rather than a correction, so they get their own branch and their
+own review.
+
+Reaction set recorded as a founder decision: six values including
+disagree, stored as meanings rather than glyph names so the symbols stay a
+copy decision. Merge authority rewritten per PRD 24.
+
+60 tests, up from 39.

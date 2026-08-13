@@ -33,13 +33,32 @@ Outbox-eligible functions additionally take `p_operation_id uuid` as their first
 | Function | Purpose | Queueable |
 |---|---|---|
 | `log_watched(p_operation_id, media_item_id, watched_on?, note?)` | Mark watched. Creates or updates the `user_media` row | **yes** |
-| `set_bucket(p_operation_id, media_item_id, bucket)` | Set or change the bucket **without** starting comparisons | **yes** |
-| `unlog(p_operation_id, media_item_id)` | Remove from the collection. Also removes any ranking | **yes** |
+| `set_bucket(p_operation_id, media_item_id, bucket)` | Set or change the bucket **without** starting comparisons. **Unranked titles only** | **yes**, unranked only |
+| `unlog(p_operation_id, media_item_id)` | Remove from the collection. **Unranked titles only** | **yes**, unranked only |
 | `set_watchlist(p_operation_id, media_item_id, present bool)` | Add or remove from the watchlist | **yes** |
 | `set_season_progress(p_operation_id, media_item_id, progress)` | Mark a season *watching* or *completed* | **yes** |
-| `save_note(p_operation_id, media_item_id, note)` | Update the private note | **yes** |
+| `save_note(p_operation_id, media_item_id, note, p_base_updated_at?)` | Update the private note | **yes** |
 
 `set_bucket` and `rank_start` are deliberately separate. Setting a bucket is a low-conflict write that queues offline; starting a comparison session requires the server. A user who buckets a title offline gets a Logged title, and can rank it later when connected — which is precisely the two-state model in PRD §11.
+
+### The unranked-only restriction — Required
+
+**Corrected 2026-08-13.** `set_bucket` and `unlog` were both unrestricted and both queueable, and both act on titles that may be **ranked**. That is a hole straight through PRD §18's rule that no ranking mutation is ever queued, and the outbox allowlist could not catch it, because the allowlist reasons about function names while the danger depends on the *state of the row* the function is pointed at.
+
+Concretely:
+
+- `set_bucket` on a ranked title breaks invariant I3, which requires `rankings.bucket` and `user_media.bucket` to agree, and I2, which requires a position to sit inside its own bucket's band. Honouring the change means moving the title to a different band and renumbering — which is `rank_rebucket`, an online-only operation with a consequence the user must see, because their position changes.
+- `unlog` on a ranked title deletes a `rankings` row, which requires closing the gap and renumbering every position below it. Queued, it destroys ranking work built over dozens of comparisons, with the deletion applied silently on reconnect and no way to get it back.
+
+Both functions now raise `BG409` when a `rankings` row exists for the title. The client checks first and routes the user to the online-only path — **Change rating** for a ranked title opens `rank_rebucket`, and **Remove** opens `unrank` followed by `unlog` — both of which are refused offline with the graceful message in PRD §18 rather than queued.
+
+The general rule this exposes, which matters for any RPC added later: **a function is queueable only if it is queueable for every state its target row can be in.** Where that is not true, the function must reject the unsafe state rather than the allowlist trying to describe it.
+
+### Note conflict detection — Required
+
+`save_note` takes an optional `p_base_updated_at`. `offline-sync.md` §5 promises that a note edited offline while the server copy also changed produces a user-visible choice rather than a silent overwrite, and there was no mechanism capable of keeping that promise: nothing in the request said which version the edit was based on, and `user_media.updated_at` was never advanced after insert.
+
+Both halves are now fixed. A trigger maintains `updated_at`, and when the client supplies `p_base_updated_at` and it does not match the stored value, the function raises `BG409` with both texts in the payload so the client can offer keep-mine or keep-theirs. Online edits may omit the parameter; **outbox replays must include it**, since that is the only case where divergence is possible.
 
 ---
 
@@ -132,12 +151,16 @@ Two things about this are load-bearing. It counts `source = 'in_app'` only, so i
 1. Resolve the token. Reject if revoked, malformed, or from another environment.
 2. Reject if the caller is the inviter.
 3. Reject if a block exists in either direction.
-4. Reject if already accepted.
+4. Reject with `BG409` if this token has already been accepted by this caller.
 5. Insert a `follows` row from caller to inviter — `approved` if the inviter is public, `pending` if private.
-6. Write `invite_attributions` and set `accepted_at`.
+6. Set `accepted_at` on the caller's `invite_attributions` row. **If a row already exists naming a different inviter, leave it alone** — the follow in step 5 still happens.
 7. Emit a notification to the inviter, which carries the follow-back prompt.
 
 The inviter is never auto-followed. Step 5 creates exactly one row, in one direction.
+
+Step 6 is where the original wording was wrong, and the failure was silent. `invite_attributions` is keyed by `invitee_id`, so a person has exactly one attribution — and a second invite link, opened later from a different friend, would have collided on that primary key. Rejecting the whole call at step 4 would have meant a real person tapping a real friend's real invite and getting an error with no useful explanation, because the reason lives in a row about somebody else entirely.
+
+So attribution and acceptance are separated. **First inviter wins the attribution; every subsequent accept still creates the follow.** Attribution answers "who brought this user to Bingd," which has exactly one true answer and is claimed at signup (see `data-model.md` §11). Acceptance is a social act that can happen any number of times with different people. Conflating them made the more common case fail to protect a number nobody sees.
 
 ---
 
@@ -155,6 +178,24 @@ The inviter is never auto-followed. Step 5 creates exactly one row, in one direc
 | `delete_account()` | Cascading delete, token invalidation, web-page removal |
 
 `my_capabilities()` exists so the client can render a gate as *Coming soon* rather than as a broken button. **It is never the enforcement point.** Every guarded write re-resolves capabilities server-side, so a modified client that lies about its capability set still cannot create a fourth list.
+
+`delete_account()` deletes the caller's `auth.users` row and lets the cascade do the rest. Two things deliberately survive it, both by detaching rather than deleting: the **username reservation**, so the name cannot be claimed by an impersonator, and any **invite attribution** naming the caller as inviter, so growth provenance stays intact. Both are enforced in the schema rather than in this function, so a deletion performed from the Supabase console behaves identically (`data-model.md` §2, §11).
+
+---
+
+## 6a. Reporting and moderation
+
+Added 2026-08-13. `report` appeared in the rate-limit table below but was defined nowhere, and no `reports` table existed — PRD §22 marks reporting **Required**, so this was a missing feature rather than a missing document.
+
+| Function | Purpose | Queueable |
+|---|---|---|
+| `report(subject_type, subject_id, reason, note?)` | File a report. One open report per reporter per subject | **no** |
+
+Not queueable, for the same reason `block` is not: PRD §22 makes safety actions online-only, and a queued report is a complaint the operator has not received while the user believes it was sent. The client hides the reported content locally on tap and submits when connected, so the *response* is immediate even though the *submission* is not.
+
+Resolution has no client surface at all. The founder reads `moderation_queue`, acts, and records the action — see `data-model.md` §13. Suspension is applied by updating `profiles.status`, which takes effect across every read surface at once through `can_view_profile`, and blocks writes through `assert_can_write()`.
+
+> **Not yet built.** Reporting and moderation ship on their own branch (`change-log-v0.6.md` §7.4). Nothing in this section exists in the schema today.
 
 ---
 
@@ -190,6 +231,22 @@ One structured shape, so the client can respond to a class of failure rather tha
 
 **`BG404` covers both "does not exist" and "exists but you may not see it."** Distinguishing them would let an attacker enumerate private profiles and lists by comparing responses.
 
+### Where these codes come from — Required
+
+`BGnnn` is the **API-level** contract. Postgres functions raise **standard SQLSTATEs**, which is the convention already set by the ranking migration, and one mapping layer translates. Writing `BGnnn` into a `raise exception` would put the client's error vocabulary inside the database, where the next caller may not be a client at all.
+
+| SQLSTATE | Raised for | Surfaces as |
+|---|---|---|
+| `28000` | No authenticated caller | `BG401` |
+| `42501` | Not permitted, including a suspended account | `BG403` |
+| `P0002` | Row not found, or not visible to the caller | `BG404` |
+| `23505` | Uniqueness conflict — already exists, already accepted | `BG409` |
+| `55000` | Wrong state for the operation, e.g. `set_bucket` on a ranked title | `BG409` |
+| `22023` | Invalid argument | `BG400` |
+| `23514`, `P0001` | An invariant would be violated | `BG422` |
+
+Anything unmapped surfaces as a generic failure and is reported, rather than being guessed at.
+
 ---
 
 ## 9. Rate limits
@@ -222,3 +279,7 @@ Reads go directly to PostgREST against tables and views, filtered by RLS. Views 
 | `inbox` | Notifications joined to actor and subject |
 
 `visible_collection` is the one that earns its keep. `user_media` holds both public-safe data (the bucket) and always-private data (notes, watch dates) in the same row, and PRD §22 requires the split. Rather than trusting every future query to select the right columns, the raw table is owner-only and the view is the sole path to someone else's collection.
+
+Per the founder decision of 2026-08-13, the **Logged collection inherits profile visibility** — public on a public profile, approved followers only on a private one. `visible_collection` filters on `can_view_profile` like every other visibility-bearing read, so that decision needs no separate rule.
+
+> **Every one of these views must be created `with (security_invoker = true)`.** A Postgres view runs with its *owner's* permissions by default, which means a view over an RLS-protected table returns rows the caller could never select directly. `visible_collection` is where that would hurt most: it exists precisely because `user_media` is owner-only, and a default-owner view over it would publish every user's notes and watch dates to every caller — quietly, while the table policy still looked correct. The RLS test matrix in PRD §25 must assert this from a second user's session rather than trusting the definition.

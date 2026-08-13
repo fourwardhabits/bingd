@@ -15,6 +15,7 @@ This directory describes **how** Bingd is built. The PRD describes **what** it d
 |---|---|
 | **README.md** (this file) | System shape, the ten decisions everything else follows from |
 | [`data-model.md`](./data-model.md) | Postgres schema, indexes, row-level security |
+| [`auth.md`](./auth.md) | Sign-in methods, credential linking, sessions |
 | [`ranking.md`](./ranking.md) | Bucket bands, binary insertion, position maintenance |
 | [`api.md`](./api.md) | The write and read surface |
 | [`offline-sync.md`](./offline-sync.md) | Outbox, idempotency, conflict handling |
@@ -111,6 +112,10 @@ Every user-owned table has RLS enabled with no permissive default. Read policies
 
 Centralizing it matters because PRD §22 defines blocking as affecting feed, leaderboard, discovery, match, tagging, and public web pages simultaneously. Expressing that rule separately in each policy guarantees the copies drift, and a drifted copy is a privacy defect.
 
+The decision paid for itself on 2026-08-13, when account suspension was added ([`data-model.md`](./data-model.md) §13): hiding a suspended account across all seven surfaces was one clause in one function rather than seven policy edits, six of which could have been forgotten quietly.
+
+**Views need their own guard.** RLS protects tables; a Postgres view runs with its *owner's* permissions by default and hands out rows the caller could never select directly. Every view is therefore created `with (security_invoker = true)`. `visible_collection` is the case that matters — it exists because `user_media` is owner-only, and a default-owner view over it would publish every user's private notes while the table policy still read correctly.
+
 ### AD-6 — The feed is assembled on read
 
 Two options: write each activity into every follower's inbox (fan-out on write), or query the union of followed users' activity at read time (fan-out on read).
@@ -120,6 +125,8 @@ Fan-out on write is what you need at social-network scale, where one user has mi
 Fan-out on read is a single indexed query against `feed_events` filtered by followed user IDs, ordered by `created_at`. It also means a privacy change or a block takes effect immediately, with no backfill.
 
 **Reverses if:** median follow counts reach the low thousands, at which point the query degrades. Revisit before mass market.
+
+One consequence worth stating plainly, because the PRD originally described the opposite: **the feed is a live query, not a historical record.** Unfollowing someone removes their events from your feed entirely, past ones included, because the query filters on the current follow set. PRD §14's claim that unfollowing "does not retroactively rewrite history" was true of a fan-out-on-write inbox and is not true here — and it was the more surprising promise anyway. Someone who unfollows expects that person gone from their feed, not their last three weeks preserved. Nothing is deleted; a re-follow restores visibility. §14 has been corrected to describe this.
 
 ### AD-7 — Match scores are computed on a schedule, not on demand
 
@@ -136,6 +143,8 @@ Match scores are materialized into `match_scores` by a scheduled job for user pa
 This satisfies the credential requirement in PRD §19 and makes the provider replaceable, which matters because the catalog is a hard dependency and TMDB publishes no SLA.
 
 **Cache retention is a runtime config value**, not a constant in a migration. TMDB's terms cap retention of TMDB-derived data at six months, so `tmdb-adapter` writes an expiry on every cached record and Bingd's own collection data lives in separate tables that no expiry touches ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)).
+
+That covered `media_cache` and missed `media_items`, which holds the larger share of provider data — title, overview, poster path, genres — with no expiry at all. `tmdb-adapter` also drains `media_refresh_due`, a view of rows past `tmdb.metadata_max_age_days` that a user collection still references; unreferenced stale rows are pruned instead. **This refresh consumes provider quota proportional to the total distinct titles the user base has ever touched**, not to current activity, which is a different growth curve from the one PRD §19's cost model describes.
 
 ### AD-9 — Capabilities resolve through one function, and limits never delete
 
@@ -165,12 +174,17 @@ Constraints from the PRD that are easy to violate accidentally. Each maps to a t
 |---|---|
 | No score or percentile is ever displayed | No API response carries a numeric ranking value other than `position` |
 | No position is derived from an imported rating | The import path writes `bucket` and never touches `rankings` |
-| No ranking mutation is queued offline | Ranking RPCs are absent from the outbox operation allowlist |
+| No ranking mutation is queued offline | Ranking RPCs are absent from the outbox allowlist, **and** `set_bucket` and `unlog` refuse a ranked title |
 | Block and report are never queued | Same allowlist |
 | No capability limit deletes data | Capability checks appear only in insert paths (AD-9) |
 | A share or invite token is never authorization | Token resolution returns an object id; the caller then applies normal visibility rules |
 | No provider credential in the client | TMDB is reachable only from `tmdb-adapter` (AD-8) |
 | Explanations are derived, never invented | Recommendation rows store the evidence they were built from; the client renders stored evidence and cannot compose new reasons |
+| A view never leaks past RLS | Every view is `security_invoker`, asserted from a second user's session |
+| A deleted account's username is never reusable | `username_history` primary key, written by a `before delete` trigger |
+| Growth provenance is never destroyed | `invite_attributions.inviter_id` detaches rather than cascading |
+
+The first row is the one that needed correcting. An allowlist of function *names* cannot express a constraint on the *state of the row* a function is aimed at, and two allowlisted functions — `set_bucket` and `unlog` — could both be pointed at a ranked title, which made each of them a queueable ranking mutation. The general rule: **a function is queueable only if it is queueable for every state its target row can be in.**
 
 ---
 

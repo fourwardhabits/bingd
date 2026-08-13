@@ -2,7 +2,7 @@
 
 **Version:** v0.6 (public-alpha final)
 **Status:** Build-ready for public-alpha architecture
-**Date:** 2026-08-12
+**Date:** 2026-08-12, corrected 2026-08-13 after independent review — see [`change-log-v0.6.md`](./change-log-v0.6.md) §7
 **Supersedes:** `Bingd_PRD_v0.5_Finalization_Draft_20260812.pdf`
 
 **Companion documents:** [`decision-log.md`](./decision-log.md) · [`open-questions.md`](./open-questions.md) · [`change-log-v0.6.md`](./change-log-v0.6.md)
@@ -455,7 +455,7 @@ This is the mechanism that keeps ranking cheap: comparisons only ever search wit
 ### Insertion — Recommended
 
 - Binary insertion within the chosen bucket: compare against a midpoint title, move higher or lower, repeat.
-- A bucket of 64 ranked titles needs at most about 6 comparisons; 256 needs about 8.
+- A band of *k* ranked titles resolves in at most `ceil(log2(k + 1))` comparisons. **A bucket of 64 needs at most 7; 256 needs at most 9.** *(Corrected 2026-08-13: this read "about 6" and "about 8", which were the figures for bands of 63 and 255. Inserting into a list of k items chooses between k + 1 gaps, not k. AC 26.3.4 already said 7 for a bucket of 64, so the two documents disagreed and the acceptance criterion was the one that was right.)*
 - Manual reranking and recalibration remain available later without deleting viewing history.
 - **Required:** pairwise insertion, manual reranking, and recalculation all require connectivity. No ranking mutation is ever placed in the offline outbox.
 
@@ -525,7 +525,7 @@ A bucket is real partial ordering, not a placeholder. A *Loved it* title is know
 - A quiet, dismissible card at the top of Rankings offering **"Rank 5 more"** with the count.
 - The queue is ordered **highest bucket first**, so the part of the list the user cares about gets built first.
 - The card goes quiet once the user has roughly **50 ranked titles**. It remains available but stops prompting.
-- Any Logged title can be ranked directly from its detail page in about 5–6 comparisons.
+- Any Logged title can be ranked directly from its detail page, in `ceil(log2(k + 1))` comparisons against its own band — five or six for the band sizes a real collection produces.
 
 ### Expected effort — informational
 
@@ -671,15 +671,36 @@ Chronological, structured activity from people the user follows. No algorithmic 
 
 **Eligible events:** a title was ranked (with its position), a title was logged with a bucket, a season was completed, a list was created or added to, a milestone was reached, a user joined from an invitation.
 
-**Privacy:** feed events inherit the actor's profile visibility. A private account's activity reaches only approved followers. Blocked users never appear in each other's feeds. Unfollowing removes future events; it does not retroactively rewrite history the user already saw.
+**Privacy:** feed events inherit the actor's profile visibility. A private account's activity reaches only approved followers. Blocked users never appear in each other's feeds.
+
+> **Corrected 2026-08-13.** This section said unfollowing "removes future events; it does not retroactively rewrite history the user already saw." That describes an inbox written per follower, and the feed is assembled on read (AD-6), so it was not true of the system being built.
+>
+> **Unfollowing removes that person's events from your feed entirely, past ones included.** The feed is a live query against your current follow set, not a record of what you have seen. Nothing is deleted, and a re-follow restores visibility. This is also the behaviour a user expects: someone who unfollows wants that person gone, not their last three weeks kept in place.
 
 ### Reactions — Decided for public alpha
 
-A small fixed reaction set on feed activity items. One reaction per user per item, changeable and removable.
+A fixed reaction set of six on feed activity items. One reaction per user per item, changeable and removable.
+
+**The set — founder decision, 2026-08-13** (supersedes INF-6):
+
+| Stored value | Meaning | Working glyph |
+|---|---|---|
+| `love` | Loved this | Heart |
+| `agree` | Good take | Thumbs up |
+| `disagree` | Bad take | Thumbs down |
+| `funny` | Funny | Laughing face |
+| `wow` | Impressive or surprising | Astonished face |
+| `moved` | This moved me | Single tear |
+
+**Values are stored as meanings, not as glyph names.** `agree` rather than `thumbs_up`, for the same reason `taste_bucket` stores `loved` rather than "Loved it". Which symbol renders is a design decision, so swapping a thumb for a flame, or replacing the hands with faces entirely, is a copy change and never a data migration.
+
+**A disagree reaction is included, against the earlier inference.** The reasoning that ruled it out — that a downvote is a pile-on mechanic — holds for a public network of strangers. It does not hold here: arguing about a friend's ranking is the point of the product, and the launch cohort is people who know each other. The pile-on risk lives in the *display*, not in the reaction existing, which is what the rule below addresses.
 
 - **No free text.** This is deliberate: reactions carry zero moderation surface.
 - Reacting notifies the activity owner.
-- Reaction counts are visible; the list of who reacted is visible to the activity owner and to anyone who can see the activity.
+- **Display — Required.** An activity item shows the distinct glyphs present and at most two names ("Jerry and Beth"), with a residual count. Press and hold opens the full list grouped by reaction. This keeps the feed uncluttered and is the pattern Messenger uses ([`../design/reference-notes.md`](../design/reference-notes.md)).
+- **No reaction is ever aggregated onto a profile.** `disagree` in particular never becomes a running total attached to a person or to their Top 10. It is visible on the activity item it belongs to and nowhere else, which is the difference between banter and a scoreboard.
+- Skin-tone variants are **not** in v1. They are a per-reactor rendering preference rather than part of the reaction, so adding one later is an additive profile column and touches no reaction data. See [`open-questions.md`](./open-questions.md) §2.
 - Rate-limited to prevent notification flooding.
 
 > **Comments are Deferred.** Comments would make Bingd a public user-generated-content platform, requiring a comment-specific report flow, hide and delete tooling, blocked-user filtering, and a stated response commitment. Reactions deliver the acknowledgment loop — which is what drives return visits — at a small fraction of the cost. Revisit when moderation capacity exists.
@@ -828,7 +849,7 @@ A share or invite token is a **routing and attribution identifier, never authori
 - Private notes, watch dates, import history, email, account identifiers, tags of private users, and capability state never appear in a share payload.
 - The owner controls handle display. A neutral "a Bingd ranking" attribution is available.
 - Another user's taste data never appears in a share card unless it is already public and the feature has passed privacy review.
-- Artwork in share cards and Open Graph previews is served from the provider CDN under the terms in §19, never rehosted.
+- Artwork in share cards is served from the provider CDN and composited on the user's device under the terms in §19, never rehosted. **Open Graph link previews are typographic in v1 and carry no artwork**, because a server-rendered preview image is served from Bingd's own infrastructure and that is rehosting (§19, item 3).
 - Initial public pages are `noindex`.
 
 ### Analytics — Required
@@ -930,8 +951,12 @@ Bingd is **offline-resilient**, not offline-first. Users can open the app, see t
 | Add or remove from watchlist | **Queued** |
 | Add or remove from a list | **Queued** |
 | Note drafts | **Queued**, never silently overwritten |
+| Bucket an **unranked** title | **Queued** |
+| Remove an **unranked** title from the collection | **Queued** |
 | **Any ranking mutation** | **Online only** — insertion, comparison, manual move, recalculation |
 | Bucket assignment that triggers comparison | Online only |
+| **Change the bucket of a ranked title** | **Online only.** It moves the title into another band and renumbers, which is a ranking mutation |
+| **Remove a ranked title from the collection** | **Online only.** It deletes a position and closes the gap, which is a ranking mutation — and queuing it would discard ranking work silently on reconnect |
 | Global search and discovery | Online only |
 | Follow, unfollow, approve request | Online only |
 | Block and report | Online only, hidden locally on tap, submitted when connected |
@@ -943,6 +968,8 @@ Bingd is **offline-resilient**, not offline-first. Users can open the app, see t
 | Account deletion | Online only |
 
 > **Required.** Ranking mutations are never queued. Ranking is a global ordering; replaying stale insertions against a changed ordering produces incoherent results. Comparison also requires anchor titles the client may not hold.
+>
+> **Required, added 2026-08-13.** Four rows above split on whether the title is **ranked**, because two operations that are perfectly safe to queue for a Logged title are ranking mutations for a Ranked one. Bucketing a ranked title moves it between bands; removing a ranked title deletes a position and closes the gap. Both were queueable without restriction, which put a ranking mutation in the outbox by a route the "no ranking mutation is ever queued" rule did not visibly cover. **Whether an operation may be queued depends on the state of the row, not only on the operation.** Both now refuse a ranked title, and the client offers the online-only path instead.
 >
 > **Required.** Block and report are never placed in the outbox. Both are safety actions where a stale queued state is dangerous. The user sees the effect locally on tap, but the action is submitted only when connected.
 
@@ -991,7 +1018,14 @@ Bingd connects now on a **free developer key**, because it charges nobody and se
 
 1. **Attribution.** The exact notice "This product uses the TMDB API but is not endorsed or certified by TMDB," an approved TMDB logo kept less prominent than Bingd's own mark, placed in an About or Credits section. Built into the first screens, not retrofitted.
 2. **Cache TMDB-derived metadata for under six months**, refreshing on a rolling basis. Bingd's own collection data is retained without limit. This is the conservative reading of the terms and it removes the §18 conflict rather than needing it resolved.
-3. **Artwork is served from the TMDB CDN, never rehosted on Bingd infrastructure.** Poster use inside the app is unambiguous under the terms and is central to the design. Poster-bearing share cards and link previews follow standard practice in the category. A text-only share layout exists for titles with no artwork, which is a product requirement rather than a licensing one.
+3. **Artwork is served from the TMDB CDN, never rehosted on Bingd infrastructure.** Poster use inside the app is unambiguous under the terms and is central to the design. A text-only share layout exists for titles with no artwork, which is a product requirement rather than a licensing one.
+4. **Provider-derived metadata is refreshed on a schedule, not only on access.** Title, overview, poster path, and genres sit in `media_items` and were the one place with no expiry — a title in someone's ranking and untouched for seven months would have been retained provider data with nothing to find it. A scheduled job refreshes referenced rows past 150 days and prunes unreferenced ones. **Its provider quota cost scales with total distinct titles the user base has ever touched**, which is a different curve from the cost model below and needs its own line in cost monitoring.
+
+> **Corrected 2026-08-13, under the approved gate change.** Item 3 previously added that "poster-bearing share cards and link previews follow standard practice in the category," which contradicted the sentence in front of it.
+>
+> The two share paths are not equivalent. An **on-device share card** fetches artwork from the provider CDN and composites it on the user's phone, then the user shares the result — no Bingd server touches the image, and this stays poster-forward as designed. An **Open Graph link preview** is a PNG generated by Bingd's server and served from Bingd's infrastructure to any crawler that requests it, indefinitely, with no user involved. That is rehosting, whatever the surrounding layout does, so "never rehosted" and "poster-bearing link previews" could not both hold.
+>
+> **v1 Open Graph cards are typographic** — ordinal, title, wordmark, no artwork. The cost is small and arguably negative: the poster is the one element every competitor's preview also has. Revisit once the commercial plan is active and the question has a definite answer.
 
 Details and the triggers for revisiting: [`docs/reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 
@@ -1067,6 +1101,12 @@ This governs every current and future limit, and it is the answer to "what happe
 
 > **Resolves a v0.5 contradiction.** v0.5 simultaneously deferred lists past public alpha and listed unlimited lists as a v1 Early Access capability. **Lists ship in v1 with the three-list limit enforced for everyone.** `unlimited_custom_lists` is defined but not granted. Granting it in alpha would remove the only observable signal about whether the limit motivates upgrade.
 
+> **Clarified 2026-08-13.** Read down the Free and Early Access columns: they are identical in every row. That is correct and intended — but it means **`alpha_early_access` confers no benefit in v1.** It is a resolver path with a live grant behind it and nothing on the other side, kept so that granting a real capability later exercises code that has already run in production rather than code written for the occasion.
+>
+> Stated plainly because two things downstream assumed otherwise. AC 26.11.2 tests that the capability "resolves correctly," which is a test of the mechanism and not of any user-visible difference, and §28's *"Early Access engagement vs. control"* metric was unmeasurable as written — there is no treatment to compare against a control. That metric is removed; **gate-hit data is the monetization evidence for the alpha**, and it is better evidence, because a gate hit is someone wanting a thing they cannot have rather than someone using a thing they were given.
+>
+> Deliberately not fixed by giving Early Access a real benefit. A two-tier tester cohort in a 30–60 person alpha splits an already-small sample and contaminates the gate-hit signal that the paid-beta decision actually rests on.
+
 ### Alpha intent surfaces — Required constraints
 
 - Nothing is purchasable. No RevenueCat, no store products, no price display, no purchase, restore, renewal, or manage-plan UI.
@@ -1121,10 +1161,20 @@ Rationale: a social discovery product whose core loops are leaderboards, match s
 |---|---|
 | Display name, username, avatar | Watch dates |
 | Top titles and rankings | Notes |
-| Public lists | Watchlist |
-| Feed activity | Import history |
-| Reactions given | Email and account identifiers |
-| | Capability and Early Access state |
+| **The Logged collection and its buckets** | Watchlist |
+| Public lists | Import history |
+| Feed activity | Email and account identifiers |
+| Reactions given | Capability and Early Access state |
+
+> **Founder decision, 2026-08-13.** The **Logged collection inherits profile visibility**, exactly as rankings do. The collection is part of the profile and follows the same rules; it is not a separate privacy domain. This table previously listed neither state for it, so the behaviour was going to be decided by whoever wrote the view.
+>
+> Three boundaries this does **not** move, all of which stay as they are:
+>
+> - **Notes and watch dates remain always-private**, even on a public profile and even on a title whose bucket is public. A visible Logged entry is the title and the bucket, nothing else.
+> - **The watchlist remains always-private at every visibility level.** It is intent about things you have not watched, which is a different disclosure from a reaction to something you have — closer to a search history than to an opinion. Say so if you want it public; it is a one-line change and a separate decision.
+> - **A private profile's Logged collection is visible to approved followers only**, on the same terms as its rankings.
+
+Rationale, and the reason this needed deciding rather than defaulting: a public Logged collection is what makes a profile worth visiting before someone has ranked much. A new user with 200 imported titles and 12 ranked ones has a profile that is mostly empty if only rankings show, which is the same cold-start problem private-by-default would have caused, applied to the individual profile instead of the network.
 
 ### Follow model
 
@@ -1187,7 +1237,7 @@ Email one-time code, **Sign in with Apple**, and Google. Every account resolves 
 
 ### Core entities
 
-`users` · `profiles` · `follows` (including request state) · `blocks` · `reports` · `titles` · `seasons` · `title_cache` · `user_titles` (watched, bucket, state, dates, notes) · `rankings` (per user, per category, ordinal) · `comparisons` · `watch_tags` · `lists` · `list_items` (with `source: imported | in_app`) · `feed_events` · `reactions` · `notifications` · `notification_preferences` · `device_tokens` · `recommendations` · `recommendation_impressions` · `recommendation_feedback` · `match_scores` · `share_tokens` · `invite_tokens` · `invite_attributions` · `import_jobs` · `import_rows` · `capabilities` · `capability_grants` · `outbox_operations` · `analytics_events`
+`users` · `profiles` (including `status`) · `username_history` · `follows` (including request state) · `blocks` · `reports` · `moderation_actions` · `titles` · `seasons` · `title_cache` · `user_titles` (watched, bucket, state, dates, notes) · `rankings` (per user, per category, ordinal) · `comparisons` · `watch_tags` · `lists` · `list_items` (with `source: imported | in_app`) · `feed_events` · `reactions` · `notifications` · `notification_preferences` · `device_tokens` · `recommendations` · `recommendation_impressions` · `recommendation_feedback` · `match_scores` · `share_tokens` · `invite_tokens` · `invite_attributions` · `import_jobs` · `import_rows` · `capabilities` · `capability_grants` · `outbox_operations` · `analytics_events`
 
 Recorded on every account from day one: `invited_by`, `founding_member`.
 
@@ -1231,8 +1281,14 @@ The founder's prior distribution used manually installed APKs. That ends here. T
 
 - One coherent change, one branch, one pull request. A release may contain many merged pull requests.
 - `main` is protected. Automated checks must pass. No direct pushes.
-- **Required:** an independent review by a fresh agent or conversation before merging changes to authentication, RLS, payments, sharing, invitations, offline sync, or migrations.
-- **Required:** no agent may autonomously merge, deploy, run a production migration, delete production data, configure payment products, or access production secrets.
+
+**Sensitive surfaces** are authentication, row-level security, payments, sharing, invitations, offline sync, database migrations, and moderation.
+
+- **Required:** a change touching a sensitive surface gets an independent review by a fresh agent or conversation before merge. **The implementing agent must request that review itself** rather than wait to be asked, and may never review its own work.
+- **Reviewer selection:** the latest Fable for foundational or architectural changes; the latest Codex for feature-specific or contained ones.
+- **A reviewing agent reviews. It does not patch.** A reviewer that writes the fix becomes an author, and its fix then has no independent review — which defeats the rule. Findings come back as a report; the implementing agent applies them.
+- **An agent may merge** documentation and non-sensitive code, and may merge a sensitive change once an independent review has passed — **in every case only after asking the founder.**
+- **Required:** no agent may deploy, run a production migration, delete production data, configure payment products, or access production secrets. There is no approval path for these; they are the founder's alone.
 
 ---
 
@@ -1260,11 +1316,13 @@ Typecheck and lint on every change. Unit tests for ranking insertion, bucket-ban
 
 **Notifications:** each v1 event generates exactly one inbox item; per-category preferences suppress correctly; the master off switch suppresses everything; the preference screen reflects denied OS permission honestly; **the conditional nudge sends nothing when there is no qualifying content**; sync-failure notices never push.
 
-**Privacy and safety:** RLS denies by default; a block removes follows in both directions and hides all surfaces; block and report are never enqueued; private accounts are absent from public web pages; the 13+ gate cannot be bypassed; account deletion removes data and invalidates tokens.
+**Privacy and safety:** RLS denies by default; a block removes follows in both directions and hides all surfaces; block and report are never enqueued; private accounts are absent from public web pages; the 13+ gate cannot be bypassed; account deletion removes data and invalidates tokens; **a public profile's Logged collection is readable by others while its notes, watch dates, and watchlist are not**; **every view is read from a second user's session and returns exactly what a direct table query would**; a suspended account is invisible everywhere and cannot write; a deleted account's username cannot be re-registered.
 
-**Offline and sync:** every row of the §18 matrix is tested in both directions; duplicate `operation_id` values are idempotent; UI states are honest; failures surface with retry.
+**Authentication:** the [`../architecture/auth.md`](../architecture/auth.md) §7 matrix in full. The load-bearing case is a second sign-in method carrying an **unverified** email that matches an existing account — it must be refused, never linked. That is the only test in the suite that fails *open*: a wrong implementation looks entirely correct from the outside, because the user does reach an account.
 
-**Metadata:** no provider credential exists in the client bundle; TTLs behave; degraded mode serves labeled stale data; core collection reads never fail because of a provider outage.
+**Offline and sync:** every row of the §18 matrix is tested in both directions; duplicate `operation_id` values are idempotent; UI states are honest; failures surface with retry; **`set_bucket` and `unlog` against a ranked title are refused in both connectivity states**, since either one queued would be a ranking mutation in the outbox; a queued note edit whose base version is stale surfaces both texts rather than overwriting, tested with a genuine second-device edit between queue and drain.
+
+**Metadata:** no provider credential exists in the client bundle; TTLs behave; degraded mode serves labeled stale data; core collection reads never fail because of a provider outage; **provider-derived rows past the retention window are found and refreshed even when nobody has opened them**; Open Graph images render with embedded fonts and contain no artwork.
 
 ### Release gate
 
@@ -1280,10 +1338,16 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 
 1. A new user can create an account by email one-time code, Sign in with Apple, or Google, and reach onboarding.
 2. Sign in with Apple is present and functional on iOS.
-3. All three methods resolve to one stable internal user UUID; signing in again by any method reaches the same account.
-4. A date of birth is captured and accounts under 13 are refused.
-5. A username and display name are set during onboarding, with uniqueness enforced and conflicts explained.
-6. A user can delete their account from Settings without contacting support, and afterward their public web pages and tokens no longer resolve.
+3. All three methods resolve to one stable internal user UUID; signing in again by **the same** method reaches the same account.
+4. A second method whose email the provider asserts as **verified** links to the existing account and resolves to the same UUID. A second method whose email is **unverified** is refused, and the refusal names the method the account already has. *(Amended 2026-08-13. Criterion 3 originally read "signing in again by any method reaches the same account," which is only safely achievable for verified emails — linking on an unverified address is an account-takeover vector. See [`../architecture/auth.md`](../architecture/auth.md) §2.)*
+5. A signed-in user can add a second sign-in method from Settings, which is the only path available to an Apple private-relay account.
+6. Sign in with Apple using **Hide My Email** works on first and subsequent authorizations, and the display name captured at first authorization survives.
+7. A date of birth is captured and accounts under 13 are refused, with both the profile attempt and the auth record deleted.
+8. A session authenticated but abandoned mid-onboarding returns to onboarding on reopen, not to an empty profile.
+9. A username and display name are set during onboarding, with uniqueness enforced and conflicts explained.
+10. A user can delete their account from Settings without contacting support, and afterward their public web pages and tokens no longer resolve.
+11. **A deleted account's username cannot be claimed by anyone afterward**, and any invite attribution naming that account as inviter survives the deletion without its identity.
+12. Signing out clears the local cache and any queued writes.
 
 ### 26.2 Search, titles, and seasons
 
@@ -1458,10 +1522,16 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 1. New accounts default to public, and a Private toggle exists in Settings.
 2. Switching to private gates new followers without removing existing ones.
 3. Watch dates, notes, watchlist, import history, email, and capability state never appear on any public surface.
-4. A block removes follows in both directions and hides both users across feed, leaderboard, discovery, match, tagging, and public web pages immediately.
-5. A report flow exists for profiles, lists, list titles, usernames, tags, and reactions, with a reason taxonomy.
-6. RLS denies by default on every user-owned table, verified by test.
-7. A username can be changed once per 30 days; the prior username redirects for 90 days and is never instantly reusable.
+4. **A public profile's Logged collection and its buckets are visible to other users; a private profile's are visible to approved followers only.** Notes, watch dates, and the watchlist stay hidden on both, including on a title whose bucket is visible.
+5. **Every view returns the same rows a direct table query would**, asserted from a second user's session rather than from the view definition. A view created without `security_invoker` bypasses RLS while the table policy still reads correctly, which makes this the one privacy test that cannot be replaced by inspection.
+6. A block removes follows in both directions and hides both users across feed, leaderboard, discovery, match, tagging, and public web pages immediately.
+7. A report flow exists for profiles, display names, lists, list titles, usernames, tags, and reactions, with a reason taxonomy, and a filed report is visible in the operator queue.
+8. A second report on the same subject by the same reporter does not create a second open row.
+9. **A suspended account is invisible across feed, leaderboard, discovery, match, tagging, and public web pages, can still load its own profile, and cannot write.** Restoring reverses all of it.
+10. Every moderation action is recorded with its subject, action, and rationale.
+11. RLS denies by default on every user-owned table, verified by test.
+12. A username can be changed once per 30 days; the prior username redirects for 90 days and is never reusable afterward.
+13. Unfollowing removes that person's events from the feed, past ones included, and re-following restores them.
 
 ### 26.16 Platform and operations
 
@@ -1490,7 +1560,9 @@ Public alpha may not ship until every item is true.
 - [ ] Sharing and invitations work end to end, installed and uninstalled, with the Top 10 card polished.
 - [ ] Offline behavior matches the §18 matrix exactly, with honest state labels.
 - [ ] Privacy defaults, blocking, reporting, and account deletion all function.
+- [ ] **The operator can see a filed report, suspend an account, and reverse it**, and every action is recorded. Reporting without a way to act on a report is a checkbox, not a safety feature.
 - [ ] Crash monitoring, analytics, and alerting are live in production.
+- [ ] A published contact address reaches the founder, and the data-request path in HG-4 has been exercised once end to end rather than only written down.
 - [ ] **HG-2** Android developer verification complete.
 - [ ] **HG-3** App Store and Play name availability confirmed; knockout trademark search complete.
 - [ ] **HG-4** Privacy policy, terms of use, support contact, 13+ statement, age ratings, and data-request path published.
@@ -1526,7 +1598,7 @@ v0.5 used two near-definitions interchangeably; this is the canonical one. See I
 | Recommendations | Save, watch, and later-positive-rank rate; repeat-impression rate; long-tail exposure; slate diversity; explanation-audit failures; cached-serve share |
 | Offline | Queued operations per user; sync success rate; median time to sync; failed-operation rate |
 | Metadata | Cache hit ratio; provider calls per active user; image bandwidth per user; provider error rate |
-| Monetization intent | Gate hits by capability and screen; % reaching the three-list ceiling **via in-app creation only**; Early Access engagement vs. control |
+| Monetization intent | Gate hits by capability and screen; % reaching the three-list ceiling **via in-app creation only**; median collection size at first gate hit |
 
 ---
 
@@ -1557,7 +1629,8 @@ v0.5 used two near-definitions interchangeably; this is the canonical one. See I
 | UGC moderation obligations underestimated | Reactions carry no free text; report flow and blocking in v1; comments deferred until moderation capacity exists |
 | Name or trademark conflict | HG-3 before public launch |
 | Android verification deadline missed | HG-2, deadline 2026-09-30 |
-| Agent-built code carries invisible defects | Required independent review on high-risk areas; automated checks on `main`; no autonomous merge or deploy |
+| Agent-built code carries invisible defects | Required independent review on sensitive surfaces; automated checks on `main`; no autonomous deploy. Observed 2026-08-13: a review found four RLS defects that the test suite could not have caught, because the harness ran as the table owner and no policy was ever enforced |
+| A reviewing agent patches instead of reporting | Its fix then carries no independent review, defeating the control. §24 makes reporting-not-patching explicit. Observed 2026-08-13 |
 
 ---
 
@@ -1566,11 +1639,11 @@ v0.5 used two near-definitions interchangeably; this is the canonical one. See I
 | Phase | Scope | Exit condition |
 |---|---|---|
 | **0. Foundations** | Repo, CI, environments, both Supabase projects, Expo project, **development build including `expo-notifications` and push credentials**, Sentry, analytics, brand tokens | A development build runs on a physical device against nonprod; CI is green; the environment indicator is visible |
-| **1. Identity** | Auth (email OTP, Apple, Google), profiles, usernames, 13+ gate, privacy defaults, RLS foundation, account deletion | §26.1 passes; RLS default-deny verified |
+| **1. Identity** | Auth (email OTP, Apple, Google), **credential linking per [`../architecture/auth.md`](../architecture/auth.md)**, profiles, usernames, 13+ gate, privacy defaults, RLS foundation, account deletion with username reservation | §26.1 passes, including the unverified-email refusal; RLS default-deny verified |
 | **2. Collection** | TMDB adapter and cache, search, title and season detail, watched state, watchlist | §26.2 passes; no credential in the bundle |
 | **3. Ranking** | Three buckets, band partitioning, binary insertion, skip/back, reveal, manual reorder, Logged/Ranked states | §26.3 and §26.4 pass |
 | **4. Import** | Upload, parse, match, preview, bucket mapping, list import, anchor session, unranked card | §26.5 passes |
-| **5. Social** | Follows and requests, feed, people discovery, leaderboard, match score, reactions, tagging, blocking, reporting | §26.6, §26.7, §26.15 pass |
+| **5. Social** | Follows and requests, feed, people discovery, leaderboard, match score, reactions, tagging, blocking, **reporting and the operator moderation surface** | §26.6, §26.7, §26.15 pass |
 | **6. Notifications** | Event generation, inbox, preferences, delivery abstraction with push flagged off | §26.8 passes |
 | **7. Recommendations** | Candidate generation, eligibility, scoring, re-ranking, explanations, impressions, feedback, guardrail test suite | §26.9 passes; every guardrail has a passing test |
 | **8. Lists and capabilities** | Lists with the three-list limit, capability resolver, gate component, *Coming soon* surface, gate analytics | §26.10 and §26.11 pass |
@@ -1579,6 +1652,19 @@ v0.5 used two near-definitions interchangeably; this is the canonical one. See I
 | **11. Release readiness** | Store assets, legal pack, Hard Gates, monitoring, rollback plan, manual QA | §27 fully checked |
 
 Phases 0–3 are strictly sequential. Phases 5–9 may overlap once 3 is complete. Phase 10 must not begin before 3 is stable, since the offline matrix depends on final ranking semantics.
+
+### If the plan runs long — Required
+
+Eleven phases is a large v1 for one founder working through agents, and the failure mode to avoid is discovering that in phase 9 and cutting whatever happens to be unfinished. So the order of degradation is decided now, while nothing is at stake:
+
+| Order | What gives | Why it is the cheapest thing to lose |
+|---|---|---|
+| 1 | The **story card** (9:16), keeping the 4:5 feed card | Two canvases is a doubling of share-card work for a second aspect ratio. One polished card still ships the Top 10 |
+| 2 | **Scheduled nudges**, keeping event notifications and the inbox | The nudge is the notification most likely to annoy a 40-person cohort and the least likely to teach anything |
+| 3 | **Public web pages**, keeping deep links into the app | An installed-app cohort rarely hits the fallback. This is the largest single scope item with the least alpha signal |
+| 4 | **Collaborative-filtering recommendations**, keeping content and bucket signals with cold-start | 40 users produce almost no collaborative signal anyway (§13 acknowledges this) |
+
+Nothing above the line is available: ranking, import, the feed, reporting and its operator surface, capability enforcement, invitations, and the offline matrix all ship. Reporting in particular is a platform obligation rather than a feature, and cutting it is not a scope decision.
 
 ---
 
@@ -1592,9 +1678,11 @@ All six product decisions that blocked architecture at v0.5 are resolved (see `o
 
 **Conditions attached:**
 
-1. **Two inferences (INF-2, INF-5)** are recorded as decisions but were made by the agent, not the founder. Both are cheap to reverse; INF-5 only needs settling before attribution reporting is built. INF-1 and INF-3 — the two expensive ones — were confirmed by the founder on 2026-08-12, and INF-4 was revisited during design and confirmed on 2026-08-13.
-2. **HG-1 (TMDB) is closed as of 2026-08-13** and is no longer a Hard Gate. Connect on a free developer key now; buy the self-serve commercial plan when subscriptions ship. The six-month caching conflict is resolved by complying rather than seeking an exception. See §19.
-3. **HG-6 (brand assets)** blocks Phase 9, not Phase 0.
+1. **Two inferences (INF-2, INF-5)** are recorded as decisions but were made by the agent, not the founder. Both are cheap to reverse; INF-5 only needs settling before attribution reporting is built. INF-1 and INF-3 — the two expensive ones — were confirmed by the founder on 2026-08-12, INF-4 was revisited during design and confirmed on 2026-08-13, and INF-6 was resolved and amended by the founder on 2026-08-13.
+2. **HG-1 (TMDB) is closed as of 2026-08-13, with the gate change approved by the founder** and no longer a Hard Gate. Connect on a free developer key now; buy the self-serve commercial plan when subscriptions ship. **The closure does not rest on Bingd being non-commercial** — it rests on the downside being a published price paid on demand rather than a negotiation. See §19 and `decision-log.md` §10.
+3. **HG-6 (brand assets)** blocks Phase 9, not Phase 0. Note that `og-render` needs the same outlined fonts as the app, since the remote `@import` fails server-side too.
+4. **The moderation operator surface is part of Phase 5, not a later concern.** Reporting had no schema until 2026-08-13, and a report flow with nowhere to act on a report does not satisfy §22. §27 gates the release on the whole loop working, not on the report button existing.
+5. **`docs/architecture/auth.md` governs identity.** AC 26.1.3 was amended because its original wording — "signing in again by any method reaches the same account" — describes an account-takeover vector when the matching email is unverified. Credential linking is not an area for an agent to resolve by plausible default.
 
 ### Stage gates
 

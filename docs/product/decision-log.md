@@ -41,10 +41,13 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 | # | Decision | What was inferred | Why it was inferred |
 |---|---|---|---|
 | ~~INF-1~~ | ~~Letterboxd star ratings auto-map to buckets~~ | **Confirmed by the founder on 2026-08-12.** Now a founder decision — see §4 | — |
-| INF-2 | Usernames may be changed once per 30 days; the previous username redirects for 90 days, then releases and can never be instantly reused | Question A6 was left blank | Share and invite routes depend on `bingd.app/u/<username>`; instant reuse is an impersonation vector |
+| INF-2 | Usernames may be changed once per 30 days; the previous username redirects for 90 days and then **never returns to the available pool** | Question A6 was left blank | Share and invite routes depend on `bingd.app/u/<username>`; reuse is an impersonation vector |
 | ~~INF-3~~ | ~~Bucket bands partition the ranking~~ | **Confirmed by the founder on 2026-08-12.** Now a founder decision — see §2 | — |
 | ~~INF-4~~ | ~~Five-tab navigation with Rankings and Lists inside Profile~~ | **Revisited during design and changed. Confirmed by the founder on 2026-08-13** — see §12 | — |
 | INF-5 | Activation is defined as "ranked 10 titles" with no time bound for attribution, and "ranked 10 titles within 24 hours" for the activation-rate metric | v0.5 used two near-definitions; neither was chosen by the founder | One canonical definition is needed for invite and share attribution to be reportable |
+| ~~INF-6~~ | ~~The reaction set is `love`, `like`, `laugh`, `wow`, `agree` — five, all positive~~ | **Resolved by the founder on 2026-08-13, and changed.** Six values including a negative one — see §2 | — |
+
+**INF-2 tightened, 2026-08-13.** The original wording said a released name "can never be *instantly* reused," which left the eventual behaviour undefined. The schema makes reuse **permanent**, and a `before delete` trigger extends that to deleted accounts — previously, deleting an account released its username immediately, which reached the impersonation outcome INF-2 exists to prevent by a shorter route than a username change. Permanent reservation is the safe direction and costs nothing at alpha scale, but it is a divergence from the recorded wording rather than an implementation of it, so it stays flagged.
 
 ---
 
@@ -65,7 +68,10 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 | Ranking connectivity | Decided for public alpha | Founder | Pairwise insertion, manual reranking, and recalculation require internet | After alpha, only if offline ranking demand is evidenced |
 | Social graph | Decided | Founder | One-way follow. Mutual follow is a state, not a separate connection type | — |
 | Feed | Decided | Founder | Chronological structured activity. No algorithmic ranking in v1 | Post-alpha, with volume |
-| Feed interaction | **Decided for public alpha (new in v0.6)** | Founder | **Reactions only.** A small fixed reaction set on activity items | — |
+| Feed interaction | **Decided for public alpha (new in v0.6)** | Founder | **Reactions only.** A fixed reaction set on activity items | — |
+| Reaction set | **Decided 2026-08-13** | Founder | Six: `love`, `agree`, `disagree`, `funny`, `wow`, `moved`. Stored as meanings, not glyph names, so the symbols stay a copy decision. Supersedes INF-6, which proposed five and no negative | If `disagree` is used to needle rather than to argue |
+| Reaction display | **Decided 2026-08-13** | Founder | Distinct glyphs plus at most two names, residual count, press and hold for the full list — the Messenger pattern. **No reaction is ever aggregated onto a profile**, which is what keeps `disagree` banter rather than a scoreboard | — |
+| Reaction skin tones | Deferred | Founder | Not in v1. A reactor-level rendering preference, so adding it later is one additive column and no data migration | When the reaction bar is designed, or if asked |
 | Comments | **Deferred (reaffirmed in v0.6)** | Founder | Not in v1. Requires moderation tooling, a report-comment flow, and a stated response commitment before it can ship | When moderation capacity exists and reactions prove insufficient |
 | Watch tagging | **Decided for public alpha (new in v0.6)** | Founder | Tag Bingd users in a watch. Limited to people you follow or who follow you. Max 10 per watch. Tagging does not modify the tagged user's collection. The tagged user is notified and may remove the tag | — |
 | Tagging non-users | Decided for public alpha | Founder | Not supported. Attempting to tag someone not on Bingd offers the invite flow instead | Post-alpha if demand appears |
@@ -80,12 +86,15 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 |---|---|---|---|---|
 | Default profile visibility | **Decided (resolves v0.5 Open)** | Founder | **Public by default**, with a Private toggle in Settings | If abuse or discomfort appears in alpha |
 | Always-public fields | Decided | Founder | Display name, username, avatar, top titles, rankings, public lists, feed activity | — |
+| **Logged collection visibility** | **Decided 2026-08-13** | **Founder** | **The Logged collection and its buckets inherit profile visibility — public on a public profile, approved followers only on a private one.** The collection is part of the profile and follows the same rules. Notes and watch dates stay private on both; the watchlist stays private at every visibility level | If alpha testers treat a bucket as more private than a ranking |
 | Always-private fields | Required | Best practice | Watch dates, notes, watchlist, import history, email, account identifiers, capability state | Never |
 | Follow approval | Decided | Founder | Instant follow for public accounts. Private accounts require approval | — |
+| Feed on unfollow | **Corrected 2026-08-13** | Best practice | The feed is a live query against the current follow set, so unfollowing removes that person's events **including past ones**. Nothing is deleted; re-following restores them. PRD §14 previously promised the opposite, which was untrue of the fan-out-on-read design and the more surprising behaviour anyway | If the feed moves to fan-out-on-write before mass market |
 | Blocking | Required | Best practice | A block removes existing follows in both directions, hides each user from the other's feed, leaderboard, and match surfaces, voids pending invitations between them, prevents tagging, and blocks access to each other's public web pages | — |
 | Block/report connectivity | Required | Best practice | Online-only. Hidden locally on tap, submitted when connected. Not placed in the offline outbox | — |
-| Reporting | **Required (new in v0.6)** | Policy | Report flow with a defined reason taxonomy, covering profiles, lists, list titles, usernames, tags, and reactions. Triage process and response commitment documented before public release | — |
-| Username changes | Decided for public alpha | Inferred (INF-2) | Once per 30 days; 90-day redirect; released names are never instantly reusable | — |
+| Reporting | **Required (new in v0.6)** | Policy | Report flow with a defined reason taxonomy, covering profiles, display names, lists, list titles, usernames, tags, and reactions. Triage process and response commitment documented before public release | — |
+| **Moderation tooling** | **Required 2026-08-13** | Policy | Reporting had no schema and no operator surface. Now: a `reports` table, reversible account **suspension** through `can_view_profile`, an audited `moderation_actions` log, and two SQL-editor views for triage. **No admin application in v1** — 30–60 users do not justify one, and building it before any triage experience is the expensive way to learn what it should contain. No appeals flow and no automated detection, both acceptable only at alpha scale | Before early traction, or on the first report volume that outgrows an SQL editor |
+| Username changes | Decided for public alpha | Inferred (INF-2) | Once per 30 days; 90-day redirect; **released names never return to the available pool, including after account deletion** | — |
 | Minimum age | **Required (new in v0.6)** | Policy | 13+. Date-of-birth gate at signup. No accounts below 13 | Only with a deliberate COPPA compliance program |
 | Match card second party | Provisional | Best practice | A match card may show another user's handle and avatar only if their profile is public and no block exists. Private users appear anonymized | Before match sharing ships in early traction |
 | Public web indexing | Decided for public alpha | Founder (v0.5) | Public pages are `noindex` during alpha | After privacy, moderation, and GTM evidence |
@@ -169,6 +178,7 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 | Public alpha billing | Decided for public alpha | Founder | **No billing of any kind.** No RevenueCat, no store products, no purchase, restore, renewal, price display, or manage-plan UI | Paid beta only, after explicit approval |
 | "Pro" status display | **Decided (new in v0.6)** | Founder | **Nobody is shown as Pro in v1.** No Pro badge, no plan row, no "you are on the free plan" language. A feature is either available or shows a non-paid *Coming soon* note | Paid beta |
 | Capability architecture | Decided for public alpha | Founder | Named capabilities resolved centrally, enforced on the backend. Access sources implemented in v1: `base_free`, `alpha_early_access` | — |
+| **`alpha_early_access` confers nothing in v1** | **Clarified 2026-08-13** | Engineering | The tier matrix is identical down the Free and Early Access columns, so the capability is a resolver path with a live grant and nothing behind it — deliberately, so that granting something real later exercises code already proven in production. Stated because two things assumed otherwise: AC 26.11.2 tests the mechanism rather than any user-visible difference, and §28's "Early Access engagement vs. control" metric had no treatment to measure and has been removed. **Not fixed by granting a real benefit** — a two-tier cohort of 30–60 testers splits the sample and contaminates the gate-hit data the paid-beta decision rests on | Paid beta, or a deliberate time-boxed test |
 | Upgrade surface | **Decided (new in v0.6)** | Founder | One shared gate component and one upgrade-prompt surface. In v1 it renders *Coming soon*; in paid beta the same call site renders a real paywall. Feature screens never change | — |
 | Custom lists in v1 | **Decided (resolves v0.5 contradiction)** | Founder | Lists ship in v1 with the **three-list limit enforced for everyone**. `unlimited_custom_lists` is defined but **not granted** as Early Access | Grant only for a deliberate, time-boxed test |
 | Over-limit rule | **Required (new in v0.6, universal)** | Founder | When a capability is absent or lost, **existing data is never deleted or hidden.** It becomes read-only and no new items may be created until the capability is granted. This rule governs every current and future limit | Never |
@@ -192,7 +202,9 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 | Queueable offline | Decided for public alpha | Founder | Watched state, watchlist membership, list membership, note drafts | — |
 | Online-only | Decided for public alpha | Founder | All ranking mutations, bucket assignment that triggers comparison, global search, follow/unfollow, block/report, invite token creation, acceptance, import, account deletion, live match and recommendation calculation | — |
 | Ranking in the outbox | Decided for public alpha | Founder | **Explicitly excluded.** No ranking insert or move is ever queued | Post-alpha only with evidence |
+| **Queueable is a row-state property, not a function property** | **Required 2026-08-13** | Engineering | An allowlist of function names could not express this, and two allowlisted functions defeated the rule above. `set_bucket` on a ranked title requires a band move and renumber; `unlog` on a ranked title deletes a position and closes the gap. Both are ranking mutations, both were queueable, and both now refuse a ranked title so the client routes to the online-only path. **A function is queueable only if it is queueable for every state its target row can be in** | Never — the rule generalizes to every RPC added later |
 | Conflict model | Recommended | Best practice | Idempotent operations keyed by `operation_id`; latest valid operation wins for membership-style writes; local drafts are never silently overwritten; server is authoritative for entitlements, privacy, and moderation | — |
+| **Note conflict mechanism** | **Required 2026-08-13** | Engineering | "Local drafts are never silently overwritten" had no mechanism behind it: nothing in a `save_note` call said which version the edit was based on, and `user_media.updated_at` was never advanced after insert, so the server had nothing to compare. A trigger now maintains it and outbox replays carry the base version. Without both halves the rule above was aspirational | — |
 | Full replication | Deferred | Founder | No broad social or catalog replication in v1 | — |
 
 ---
@@ -204,10 +216,24 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 | Provider | Provisional | Founder | TMDB, behind a Bingd-owned adapter and normalized schema | If licensing or economics fail |
 | Credential custody | Required | Best practice | No provider token ever ships inside the mobile app | Never |
 | Access pattern | Recommended | Best practice | Live-plus-cache through the backend. Never a per-screen provider call; never a full catalog mirror | — |
-| Commercial rights | **Required (was Hard Gate)** | Policy | **Revised 2026-08-13.** Not a gate. Bingd is non-commercial while it charges nobody, so it connects on a free developer key. The commercial plan is a self-serve purchase — reported at $149/month under $1M revenue — bought before the first payment lands. Attribution wording is published and built in from the first screens | Buy the plan before charging |
-| Six-month cache limit | **Decided 2026-08-13** | Engineering | TMDB restricts retaining TMDB-derived data beyond six months. Resolved by complying: Bingd's own collection data persists without limit; TMDB metadata refreshes on a rolling basis inside six months. The window is a runtime config value, not a constant | Only if TMDB's terms change |
-| Free alpha status | Required | Policy | A free alpha for a product with declared subscription intent is **not** assumed to be noncommercial | — |
-| Image rights | Provisional / license gate | Policy | CDN sizes plus device cache. No rehosting. Text-first share card must always be available as a fallback | — |
+| Commercial rights | **Required (was Hard Gate)** | Policy | **Gate change approved by the founder, 2026-08-13.** Not a gate. Connect on a free developer key now; buy the commercial plan — a self-serve purchase, reported at $149/month under $1M revenue — before the first payment lands. Attribution wording is published and built in from the first screens. The reasoning is below, and it is **not** a claim that Bingd is non-commercial | Buy the plan before charging |
+| Six-month cache limit | **Decided 2026-08-13** | Engineering | TMDB restricts retaining TMDB-derived data beyond six months. Resolved by complying: Bingd's own collection data persists without limit; TMDB metadata refreshes on a rolling basis inside six months, **including `media_items`, which had no expiry until 2026-08-13**. The window is a runtime config value, not a constant | Only if TMDB's terms change |
+| Free alpha status | Required | Policy | A free alpha for a product with declared subscription intent is **not assumed to be noncommercial.** The position below does not depend on it being so | — |
+| Image rights | Required | Policy | CDN sizes plus device cache. **No rehosting on Bingd infrastructure**, which means v1 Open Graph link previews are typographic and carry no artwork — a server-rendered preview image is served from Bingd's own infrastructure, and that is rehosting. On-device share cards stay poster-forward: the compositing happens on the user's phone and the user shares the result | When the commercial plan is active and the question has a definite answer |
+
+### Why the TMDB gate was closed — Required reading before reopening it
+
+The earlier version of the row above justified closing the gate by asserting that "Bingd is non-commercial while it charges nobody." That contradicted the Free alpha status row two lines below it, and the kickoff brief had named that exact assumption as one not to make. Both statements sat in this document at the same time, and the decision log is the tie-breaker for everything else — so it was the one place a contradiction could not be left.
+
+The gate is closed, and the founder has approved it, but on different grounds:
+
+1. **The downside is bounded and cheap.** If TMDB takes the view that a free alpha with declared subscription intent needs a commercial plan, the remedy is a self-serve purchase at a published price. No negotiation, no correspondence, no waiting.
+2. **A Hard Gate is for things with unbounded latency.** HG-2 through HG-6 all involve someone else's timeline. This one does not, and treating it as a gate would have blocked design work for weeks against a risk resolvable in an afternoon with a credit card.
+3. **The obligations that actually matter are met regardless of classification** — attribution in the first screens, retention under six months, no artwork rehosted, no credential in the client. These are required on a free key and on a commercial plan alike, so none of them is deferred pending an answer.
+
+What this is *not*: a determination that Bingd is non-commercial. Nothing in this document should be cited for that, and an agent finding an apparently favourable classification claim elsewhere should treat this row as the authority.
+
+**Revisit immediately if** TMDB contacts Bingd about the account, the terms change, or anything is charged to a user — the last being the trigger for the purchase rather than for a reassessment.
 
 ---
 
@@ -218,6 +244,7 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 | Bundle identifiers | **Decided (new in v0.6)** | Founder | `app.bingd` (production), `app.bingd.dev`, `app.bingd.preview`. Reverse-DNS of the owned domain. Effectively permanent after store submission | Never after submission |
 | Domain | Decided | Founder | `bingd.app`, registered, DNS on Cloudflare. `.app` is HSTS-preloaded, so HTTPS is mandatory from the first deploy | — |
 | Authentication | **Required (strengthened in v0.6)** | Policy | Email one-time code, Sign in with Apple, and Google. **Sign in with Apple is required on iOS**, not optional, because Google sign-in is offered | Never while Google login exists on iOS |
+| **Credential linking** | **Required 2026-08-13** | Best practice | Two credentials link **only on a provider-asserted verified email**, or explicitly from an authenticated session. An unverified match is refused, naming the method the account already has. AC 26.1.3 previously read "signing in again by any method reaches the same account," which is an account-takeover vector if taken literally: anyone can create an account at a third-party provider claiming a victim's address. Apple private-relay accounts can never match by address, so the Settings link flow is their only path to a second method. Full rules in [`../architecture/auth.md`](../architecture/auth.md) | Never — this is the security-relevant half of the identity model |
 | Apple Developer Program | Satisfied | Founder | Account exists | — |
 | Google Play production access | **In progress** | Founder | Applied 2026-08-11 via the existing `com.fourward.app` closed test. Review typically ≤7 days. Production access is account-level, so **Bingd will not repeat the 12-tester/14-day gate** once granted | If the application is rejected |
 | Android developer verification | **Hard Gate** | Policy | Deadline 2026-09-30. Affects the existing account and app. Founder has deferred it | Must complete before the deadline |
@@ -257,8 +284,10 @@ Derived from the brand system in PRD §5 at founder instruction, not separately 
 | Development app | Recommended | Founder | Expo development build with `expo-dev-client`. Expo Go is not the primary test environment |
 | Environments | Recommended | Founder | `bingd-nonprod` and `bingd-production` Supabase projects. Development, preview, and production builds visibly distinct |
 | Branching | Recommended | Founder | One coherent change, one branch, one pull request. A release may contain many merged PRs |
-| Independent review | Required | Founder | A fresh agent or conversation reviews high-risk changes before merge. Applies to auth, RLS, payments, sharing, invitations, offline sync, and migrations |
-| Agent authority | Required | Founder | No agent may autonomously merge, deploy, run a production migration, delete production data, configure payment products, or access production secrets |
+| Independent review | Required | Founder | A fresh agent reviews sensitive surfaces before merge: auth, RLS, payments, sharing, invitations, offline sync, migrations, moderation. The implementing agent requests it. A reviewer reports and does not patch |
+| Reviewer selection | Decided 2026-08-13 | Founder | Latest Fable for foundational or architectural review; latest Codex for feature-specific or contained review |
+| Agent merge authority | Decided 2026-08-13 | Founder | Agents may merge documentation and non-sensitive code, and sensitive changes once independently reviewed — in all cases only after asking the founder. Supersedes the blanket no-autonomous-merge rule |
+| Agent authority — hard limits | Required | Founder | No agent may deploy, run a production migration, delete production data, configure payment products, or access production secrets. No approval path exists |
 | Crash monitoring | Recommended | Founder | Sentry with release tagging and source maps |
 | Analytics | Recommended | Best practice | First-party event schema. Provider selection is an architecture-stage decision; PostHog is the working recommendation |
 

@@ -23,6 +23,19 @@ The guide predates PRD v0.5 and therefore v0.6.
 
 An implementation agent resolving a conflict between the two documents must resolve it in favor of the PRD.
 
+### Specific passages that will mislead an agent
+
+The general rule above is not enough, because the guide's most dangerous content is in its *examples* rather than its scope lists — and an example that illustrates a sound engineering practice reads as instruction even when its subject matter is two versions stale. Each of these contradicts a v0.6 decision that PRD §25 tests for:
+
+| The guide illustrates | v0.6 requires | Where |
+|---|---|---|
+| Queuing a **ranking change** while offline, as the worked example of an outbox | **No ranking mutation is ever queued.** This is one of the "explicitly not open" items | PRD §18, `open-questions.md` §7 |
+| A **paywall on custom lists**, as the worked example of a capability gate | Lists ship in v1 with the three-list limit enforced for **everyone**, and nothing is purchasable. A gate renders *Coming soon* with no price | PRD §20 |
+| **RevenueCat** in the recommended v1 stack | No RevenueCat SDK, no store product, no purchase or restore UI anywhere in the v1 build. Verified by AC 26.11.6 | PRD §21, AC 26.11.6 |
+| Broad local replication as the shape of offline support | Offline-**resilient**, not offline-first. Seven queueable operations | PRD §18, `../architecture/offline-sync.md` |
+
+An agent that copies any of the four has written code that a required test will reject. Listed explicitly because "the PRD wins on scope" does not obviously cover a passage whose stated subject is idempotency or capability architecture.
+
 ---
 
 ## Providers
@@ -31,7 +44,9 @@ An implementation agent resolving a conflict between the two documents must reso
 |---|---|---|
 | [`tmdb-integration.md`](./tmdb-integration.md) | Licensing position, attribution requirements, caching rules | Researched 2026-08-13. **No blocker** |
 
-TMDB was recorded as Hard Gate HG-1 on the assumption that commercial access needed a negotiated agreement. It does not — the commercial plan is self-serve, and Bingd is non-commercial until it charges. Connect on a free developer key now. The document records the attribution wording and the two build rules that keep Bingd inside the terms without asking anyone anything.
+TMDB was recorded as Hard Gate HG-1 on the assumption that commercial access needed a negotiated agreement. It does not — the commercial plan is a self-serve purchase at a published price. Connect on a free developer key now and buy the plan before charging anyone.
+
+**The closure does not rest on Bingd being non-commercial, and nothing here should be cited for that.** It rests on the downside being bounded: if TMDB takes the other view, the remedy costs a published monthly fee and no waiting. `../product/decision-log.md` §10 is the authority on the position and on what would reopen it.
 
 ---
 

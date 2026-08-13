@@ -243,8 +243,8 @@ describe('usernames', () => {
       await assert.rejects(
         () =>
           t.sql(
-            `insert into profiles (id, username, display_name, date_of_birth)
-             values ($1, $2, 'x', '1990-01-01')`,
+            `insert into profiles (id, username, display_name)
+             values ($1, $2, 'x')`,
             [id, bad],
           ),
         /username_format/i,
@@ -254,22 +254,68 @@ describe('usernames', () => {
   });
 
   it('never returns a released username to the available pool', async () => {
-    const u = await t.createUser({ username: 'released_one' });
+    // The property that matters is that *a different account* cannot take the
+    // name. Asserting only that username_history rejects a duplicate would test
+    // the wrong table: that key is unique within the history and has no
+    // connection to profiles.username, which is how a retired name stayed
+    // claimable while a history row sat there looking reassuring.
+    const original = await t.createUser({ username: 'released_one' });
     await t.sql(
       `insert into username_history (username, profile_id, redirect_until)
        values ('released_one', $1, now() + interval '90 days')`,
-      [u],
+      [original],
     );
-    // Retained past redirect_until, so the primary key blocks reuse permanently.
+
+    const { rows } = await t.sql(`select gen_random_uuid() as id`);
+    const impostor = rows[0].id;
+    await t.sql(`insert into auth.users (id) values ($1)`, [impostor]);
+
     await assert.rejects(
       () =>
-        t.sql(
-          `insert into username_history (username, profile_id, redirect_until)
-           values ('released_one', $1, now())`,
-          [u],
-        ),
-      /duplicate key/i,
+        t.sql(`insert into profiles (id, username, display_name) values ($1, 'released_one', 'x')`, [
+          impostor,
+        ]),
+      /reserved|duplicate key/i,
+      'a retired username was claimable by another account',
     );
+  });
+
+  it('reserves the username of a deleted account', async () => {
+    const leaving = await t.createUser({ username: 'gone_away' });
+    await t.sql(`delete from profiles where id = $1`, [leaving]);
+
+    // The name must not simply become free. Every bingd.app/u/gone_away link
+    // ever shared would otherwise point at whoever claimed it next, which is the
+    // impersonation outcome INF-2 exists to prevent.
+    const { rows: reserved } = await t.sql(
+      `select profile_id from username_history where username = 'gone_away'`,
+    );
+    assert.equal(reserved.length, 1, 'the released name was not reserved');
+    assert.equal(reserved[0].profile_id, null, 'a reservation has no redirect target');
+
+    const { rows } = await t.sql(`select gen_random_uuid() as id`);
+    const next = rows[0].id;
+    await t.sql(`insert into auth.users (id) values ($1)`, [next]);
+    await assert.rejects(
+      () =>
+        t.sql(`insert into profiles (id, username, display_name) values ($1, 'gone_away', 'x')`, [
+          next,
+        ]),
+      /reserved/i,
+    );
+  });
+
+  it('still lets an account keep its own name through an unrelated update', async () => {
+    // The reservation trigger fires on update too, so a profile writing its own
+    // unchanged username must not be refused by its own history rows.
+    const u = await t.createUser({ username: 'keeps_name' });
+    await t.sql(
+      `insert into username_history (username, profile_id, redirect_until)
+       values ('old_name', $1, now() + interval '90 days')`,
+      [u],
+    );
+    await t.sql(`update profiles set display_name = 'Renamed' where id = $1`, [u]);
+    await t.sql(`update profiles set username = 'keeps_name' where id = $1`, [u]);
   });
 });
 
