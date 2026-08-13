@@ -68,6 +68,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-router',
     'expo-font',
     'expo-image',
+    'expo-localization',
+    // Uploads source maps at build time, using SENTRY_AUTH_TOKEN from the EAS
+    // secret. Without it a crash report shows minified output instead of a
+    // filename and a line number, which is most of the value gone.
+    [
+      '@sentry/react-native/expo',
+      { organization: 'fourward-habits', project: 'bingd-react-native' },
+    ],
     'expo-secure-store',
     'expo-sqlite',
     'expo-sharing',
@@ -101,5 +109,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     variant,
     supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
     supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+    // Both are publishable by design: a Sentry DSN only accepts events, and a
+    // PostHog project token is write-only. Neither reads anything back, which is
+    // why they can sit in a client bundle at all.
+    sentryDsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+    posthogKey: process.env.EXPO_PUBLIC_POSTHOG_KEY,
+    posthogHost: process.env.EXPO_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com',
   },
 });

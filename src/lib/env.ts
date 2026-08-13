@@ -10,6 +10,22 @@ const schema = z.object({
   variant: z.enum(['development', 'preview', 'production']),
   supabaseUrl: z.string().url(),
   supabaseAnonKey: z.string().min(1),
+
+  // Optional so the project runs with no Sentry or PostHog account at all.
+  // Both integrations become no-ops when absent, which keeps a contributor from
+  // needing credentials to a service they have no reason to touch. An empty
+  // string is normalised to undefined, because a .env with a blank value is the
+  // ordinary way to say "not configured".
+  sentryDsn: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined)
+    .pipe(z.string().url().optional()),
+  posthogKey: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  posthogHost: z.string().url().default('https://us.i.posthog.com'),
 });
 
 const parsed = schema.safeParse(Constants.expoConfig?.extra ?? {});

@@ -68,7 +68,19 @@ Agents may not deploy, run a production migration, delete production data, confi
 
 ## Stack
 
-Expo SDK 57 · React Native 0.86 · React 19 · TypeScript · Expo Router · TanStack Query · Supabase · TMDB (behind a Bingd-owned adapter) · EAS Build and Update · Sentry · RevenueCat (paid beta only)
+Expo SDK 57 · React Native 0.86 · React 19 · TypeScript · Expo Router · TanStack Query · Supabase · TMDB (behind a Bingd-owned adapter) · EAS Build and Update · Sentry · PostHog · RevenueCat (paid beta only)
+
+### Crash reporting and analytics
+
+Both are **optional**. With no `EXPO_PUBLIC_SENTRY_DSN` or `EXPO_PUBLIC_POSTHOG_KEY` they become no-ops, so the project runs for someone with no accounts and no reason to want them. Reporting that forces credentials on every contributor gets switched off locally, and then nobody notices it is off in CI either.
+
+Two decisions in there are load-bearing rather than incidental.
+
+**PostHog autocapture is off, and stays off.** In a mobile app it records the text of whatever was tapped — which in this one means film titles out of somebody's private collection. Every event is instead declared in `src/lib/analytics.ts`, and **the type is the enforcement**: there is no `track(name, props)` overload to reach for, and no declared event accepts a title, a username, a note, or a media id. It cannot be sent in a hurry before a demo.
+
+**Sentry is treated as hostile to privacy until configured otherwise.** `sendDefaultPii` is off, the user object is reduced to the internal UUID, console breadcrumbs are dropped, and query strings are stripped from URLs — route paths like `/title/<uuid>` name an identifier, but the search screen's query string is whatever the user typed. Knowing someone crashed on search does not require knowing what they searched for.
+
+Source map upload needs `SENTRY_AUTH_TOKEN`, which is an **EAS secret and never committed**. Without it a crash report shows minified output instead of a filename and a line number.
 
 See PRD §23 and §24.
 
