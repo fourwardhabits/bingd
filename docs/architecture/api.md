@@ -39,6 +39,12 @@ Outbox-eligible functions additionally take `p_operation_id uuid` as their first
 | `set_season_progress(p_operation_id, media_item_id, progress)` | Mark a season *watching* or *completed* | **yes** |
 | `save_note(p_operation_id, media_item_id, note, p_base_updated_at?)` | Update the private note | **yes** |
 
+**Implemented in `20260813002300_collection_writers.sql`.** Two behaviours the table above does not state, both settled while building it:
+
+`set_bucket` creates the collection row when the title has not been logged. A bucket is a statement about something the user has watched, so bucketing implies logging, and making the client send two operations to express one tap would open a window in which a title is watched with no opinion attached — a state no screen asks for.
+
+**A series can be watchlisted but not logged.** PRD §10 forbids ranking a whole series, and the collection is what feeds ranking. "I want to watch this show" is also a coherent statement where "I watched this show" is ambiguous about which seasons, so `set_watchlist` accepts any kind and the rest of §1 requires a movie or a season.
+
 `set_bucket` and `rank_start` are deliberately separate. Setting a bucket is a low-conflict write that queues offline; starting a comparison session requires the server. A user who buckets a title offline gets a Logged title, and can rank it later when connected — which is precisely the two-state model in PRD §11.
 
 ### The unranked-only restriction — Required

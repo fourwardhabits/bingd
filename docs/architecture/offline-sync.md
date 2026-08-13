@@ -65,16 +65,14 @@ create table outbox (
 Every outbox-eligible RPC opens with:
 
 ```sql
-insert into processed_operations (operation_id, user_id)
-values (p_operation_id, auth.uid())
-on conflict (operation_id) do nothing;
-
-if not found then
+if not _claim_operation(p_operation_id, 'log_watched') then
   return jsonb_build_object('status', 'already_applied');
 end if;
 ```
 
-A replay is therefore a no-op that returns success rather than an error, which matters because the common cause of a replay is a response lost on a flaky connection — the write did land, and the client simply never heard back.
+A replay is therefore a no-op that returns success rather than an error, which matters because the common cause of a replay is a response lost on a flaky connection: the write did land, and the client simply never heard back.
+
+**The ledger is keyed per account — corrected 2026-08-13.** This document previously specified `on conflict (operation_id)` against a globally unique key, and `20260813000100` built the table that way. The key is now `(user_id, operation_id)`, because ids are generated on the device and a global key lets a modified client send one another account has already used. That returns `already_applied` and writes nothing, while the victim's client reports success because the response says so. The row simply never appears, and nothing about it is visible to the person it happens to. Idempotency only ever needs to hold within one device's queue, and every queue belongs to one account, so the narrower key gives up nothing.
 
 ### Ordering
 
