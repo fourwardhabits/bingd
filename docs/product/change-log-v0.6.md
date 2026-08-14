@@ -476,6 +476,20 @@ Smaller: the ten-token cap dropped words 11 and beyond, so an eleventh word wide
 
 Thirty tests, and this time they were checked the way the review checked them: seventeen deliberate regressions — each tier of the ordering removed in turn, the tokenizer reverted, the fold table corrupted, `english` restored, the AND made an OR, the cap removed — every one of which now fails at least one test. The first two passes of that exercise found two more tests that could not fail.
 
-### 7.17 Scope
+### 7.17 The first half of the loop, on a screen
+
+Search, the season picker, and the log sheet. A title can now be found and put in a collection from the app rather than from a SQL prompt, which is the first point at which any of this is testable by someone who is not reading the schema.
+
+Three decisions in it are worth recording.
+
+**A series opens its seasons rather than the log sheet.** `_assert_loggable` refuses a series, because the season is the rankable unit and a series is not (AD-1, PRD §10). That distinction is invisible in the data and would otherwise surface as a user tapping a result and being told no. The picker reads `media_items` straight through PostgREST — the catalogue is world-readable, so an RPC would be ceremony.
+
+**The sheet keeps bucketing and ranking apart, visibly.** Choosing a bucket saves immediately and the title is Logged; *Find where it lands* stays disabled, with its reason stated, until that has happened. PRD §11 makes this a rule and screens.md §4 makes it a surface, and it is the sort of rule that erodes the moment one screen decides to be helpful and start comparisons on the user's behalf.
+
+**Writes are online-only, and say so.** The outbox in `offline-sync.md` does not exist in the client — no SQLite mirror, no queue, no pending marker. A failed save keeps the user's choice on screen and tells them it did not save. The alternative was a sheet that looks like it queued and silently did not, which is worse than the gap and much harder to notice. Recorded in `client.md` §3 and in open questions as work to do before anyone tests this somewhere with poor signal.
+
+The search hook debounces at 180ms and keeps the previous results on screen while the next ones load. That second part is doing more work than it sounds: without it the list empties on every keystroke, and a list that blinks reads as slower than one that lags slightly behind.
+
+### 7.18 Scope
 
 PRD §30 gains a **degradation order** — story card, then scheduled nudges, then public web pages, then collaborative filtering. Eleven phases is a large v1 for one founder working through agents, and the failure mode worth avoiding is discovering that in phase 9 and cutting whatever happens to be unfinished. Deciding the order now, while nothing is at stake, costs nothing. Ranking, import, feed, reporting, capability enforcement, invitations, and the offline matrix are above the line.

@@ -68,15 +68,35 @@ Structured so invalidation can be surgical:
 ['recommendations', userId]
 ['title', mediaItemId]
 ['capabilities']
+['search', query]
+['seasons', seriesId]
 ```
 
 Completing a ranking invalidates `['rankings', me, category]` and `['collection', me]` and nothing else. The feed refreshes on its own schedule rather than being blown away by an unrelated write.
+
+The last two are **not** keyed by user, unlike everything above them. The catalogue is the same for every account, so a sign-out need not discard it and two accounts on one device can share it. Keying them by user would only mean fetching the same rows twice.
 
 ### Optimistic updates
 
 Only for outbox-eligible operations ([`api.md`](./api.md) §1). Every one carries the `pending` marker from [`offline-sync.md`](./offline-sync.md) §4 until the server confirms.
 
 **Ranking is never optimistic.** The position comes from the server, and guessing it would mean showing the user a number that might change — in the one moment the product has built up to.
+
+> **Not built yet, as of 2026-08-14.** There is no outbox and no SQLite mirror. Collection writes go straight to the RPC and a failure is shown as a failure — the log sheet keeps the user's choice on screen and says the save did not happen. `offline-sync.md` describes the design in full and none of it exists in the client, so a bucket chosen on the Underground is lost rather than queued. This is a gap to close before anyone tests the app somewhere with poor signal, not a decision.
+
+---
+
+## 3a. The log and rank loop — implemented 2026-08-14
+
+Search is the `+` tab (`app/(tabs)/log.tsx`), which is why there is no Search tab ([`screens.md`](../design/screens.md) §2). It calls `search_titles` through `useTitleSearch`, debounced at 180ms with `keepPreviousData`, which is what makes it read as filtering rather than as querying: without the latter, every keystroke empties the list for a round trip, and a list that blinks between states feels slower than one lagging a beat behind.
+
+Two characters is the floor. Below that every query matches half the catalogue.
+
+**A series opens its seasons, not the log sheet.** `_assert_loggable` refuses a series outright — the season is the rankable unit (AD-1, PRD §10) — so tapping one has to lead somewhere rather than fail. `SeasonPicker` reads `media_items` directly through PostgREST, since the catalogue is world-readable and needs no RPC, and hands the chosen season to the sheet along with the series title so the header does not read "Season 3" and nothing else.
+
+**The log sheet enforces the split the product depends on.** Choosing a bucket calls `set_bucket` and the title is Logged; comparisons begin only when the user taps *Find where it lands*, which stays disabled with a stated reason until a bucket is saved. That separation is a PRD §11 rule and this is the surface where a user first meets it.
+
+Every write carries an operation id generated per user intent, never per attempt — a retry must reuse it or the `processed_operations` ledger cannot tell a retry from a second opinion. `src/features/collection/writes.ts` is the only place SQLSTATEs are turned into sentences, for the same reason `create-profile.ts` is: matching on message text breaks silently the first time someone rewords one.
 
 ---
 
