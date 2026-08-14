@@ -10,14 +10,14 @@ import { EmptyState, Screen } from '@/ui/components';
  * rather than silently binding to whoever happens to be logged in.
  */
 export default function InvitationScreen() {
-  const { token } = useLocalSearchParams<{ token: string }>();
+  useLocalSearchParams<{ token: string }>();
 
   return (
-    <Screen airy>
+    <Screen airy includeBottomInset>
       <EmptyState
         kind="nothingYet"
         title="You have been invited"
-        body={`Invitation ${token}.`}
+        body="Invitations are not active in this build yet."
         action={{ label: 'Accept invitation', onPress: () => {} }}
       />
     </Screen>

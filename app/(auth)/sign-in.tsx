@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { isAppleSignInAvailable, sendEmailCode, signInWithApple, signInWithGoogle } from '@/features/auth';
-import { Button, Field, Screen, Text } from '@/ui/components';
+import { BrandLockup, Button, Field, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /** Email one-time code, plus Apple and Google sign-in (PRD §8). Every method
@@ -53,8 +53,9 @@ export default function SignInScreen() {
   };
 
   return (
-    <Screen airy>
+    <Screen airy includeBottomInset>
       <View style={styles.intro}>
+        <BrandLockup size="lg" />
         <Text variant="display">Keep what you watch.</Text>
         <Text variant="body" tone="secondary">
           Rank films and seasons against each other, and find out whose taste actually
@@ -112,7 +113,7 @@ export default function SignInScreen() {
 }
 
 const styles = StyleSheet.create({
-  intro: { gap: theme.space[3] },
+  intro: { gap: theme.space[3], alignItems: 'flex-start' },
   form: { gap: theme.space[4] },
   providers: { gap: theme.space[3] },
 });

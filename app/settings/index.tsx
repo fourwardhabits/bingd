@@ -1,18 +1,27 @@
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
+import { Stack, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { env } from '@/lib/env';
-import { Screen, Text } from '@/ui/components';
+import { Button, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /** Privacy controls, blocking, notification preferences, account deletion, and
  *  the TMDB attribution notice required by §19. */
 export default function SettingsScreen() {
+  const router = useRouter();
+
   return (
-    <Screen>
+    <Screen includeBottomInset>
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: 'Settings',
+          headerRight: () => <Button label="Close" kind="tertiary" onPress={() => router.back()} />,
+        }}
+      />
       <ScrollView contentContainerStyle={styles.page}>
-        <Text variant="headline">Settings</Text>
         <Text tone="secondary">Privacy, notifications, and account controls are not built yet.</Text>
 
         <BuildDetails />

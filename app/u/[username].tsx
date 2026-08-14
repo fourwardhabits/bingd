@@ -8,8 +8,12 @@ export default function PublicProfileScreen() {
   const { username } = useLocalSearchParams<{ username: string }>();
 
   return (
-    <Screen>
-      <EmptyState kind="nothingYet" title={`@${username}`} body="Public profile." />
+    <Screen includeBottomInset>
+      <EmptyState
+        kind="nothingYet"
+        title={`@${username}`}
+        body="Public profiles are not available in this build yet."
+      />
     </Screen>
   );
 }

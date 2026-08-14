@@ -4,7 +4,7 @@ import { EmptyState, Screen } from '@/ui/components';
 
 export default function NotFoundScreen() {
   return (
-    <Screen>
+    <Screen includeBottomInset>
       <EmptyState
         kind="couldNotLoad"
         title="We could not find that"

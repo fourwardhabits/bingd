@@ -1,4 +1,5 @@
 import PostHog from 'posthog-react-native';
+import { Platform } from 'react-native';
 
 import { env } from './env';
 
@@ -81,6 +82,9 @@ let client: PostHog | null = null;
 
 export function initAnalytics(): PostHog | null {
   if (!env.posthogKey) return null;
+  // posthog-react-native requires a native storage backend. Web builds used for previews
+  // and screenshot harnesses do not have one, so analytics is disabled there.
+  if (Platform.OS === 'web') return null;
   client ??= new PostHog(env.posthogKey, {
     host: env.posthogHost,
     // Named events only. See the note at the top of this file.

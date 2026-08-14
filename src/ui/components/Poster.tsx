@@ -9,6 +9,7 @@ export type PosterProps = {
   uri?: string | null;
   title: string;
   size?: PosterSize;
+  width?: number | 'fill';
   /** Blurhash from the catalog, used as the placeholder while artwork loads. */
   blurhash?: string | null;
 };
@@ -20,16 +21,24 @@ export type PosterProps = {
  * The hairline border is not decoration: without it pale posters dissolve into
  * Parchment. Never render this full-bleed, behind text, or edge to edge.
  */
-export function Poster({ uri, title, size = 'sm', blurhash }: PosterProps) {
-  const { width, height } = theme.poster[size];
-  const radius = posterRadius(size);
+export function Poster({ uri, title, size = 'sm', width, blurhash }: PosterProps) {
+  const { height } = theme.poster[size];
+  const responsive = typeof width === 'number' || width === 'fill';
+  const frameWidth = width === 'fill' ? '100%' : width ?? theme.poster[size].width;
+  const radius = responsive ? theme.radius.control : posterRadius(size);
 
   return (
     <View
       style={[
-        { width, height, borderRadius: radius },
+        {
+          width: frameWidth,
+          height: responsive ? undefined : height,
+          aspectRatio: theme.layout.aspect.poster,
+          borderRadius: radius,
+          maxWidth: width === 'fill' ? theme.poster.xl.width : undefined,
+        },
         styles.frame,
-        posterHasShadow(size) && theme.elevation.e1,
+        (!responsive ? posterHasShadow(size) : true) && theme.elevation.e1,
       ]}
     >
       {uri ? (
@@ -71,10 +80,19 @@ function MissingArtwork({
     .map((word) => word[0] ?? '')
     .join('')
     .toUpperCase();
+  const showRail = size !== 'xs';
 
   return (
     <View style={[styles.fill, styles.missing, { borderRadius: radius }]}>
-      <Text variant={size === 'xs' || size === 'sm' ? 'title2' : 'title1'} tone="tertiary">
+      {showRail ? (
+        <View style={styles.rail}>
+          <View style={styles.sprocket} />
+          <View style={styles.sprocket} />
+          <View style={styles.sprocket} />
+          {size !== 'sm' ? <View style={styles.sprocket} /> : null}
+        </View>
+      ) : null}
+      <Text variant={size === 'xs' ? 'headline' : 'title2'} tone="tertiary">
         {initials}
       </Text>
     </View>
@@ -91,6 +109,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: theme.surface.sunken,
+  },
+  rail: {
+    position: 'absolute',
+    left: theme.space[1],
+    top: theme.space[2],
+    bottom: theme.space[2],
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sprocket: {
+    width: theme.space[1],
+    height: theme.space[2],
+    borderRadius: theme.radius.full,
+    backgroundColor: theme.border.hairline,
   },
   hairline: {
     position: 'absolute',

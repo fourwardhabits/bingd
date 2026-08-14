@@ -45,6 +45,12 @@ export const typography = {
     lineHeight: 16,
     letterSpacing: 0.2,
   },
+  ordinal: {
+    fontFamily: fontFamily.sansSemibold,
+    fontSize: 15,
+    lineHeight: 20,
+    fontVariant: ['tabular-nums'],
+  },
 } as const satisfies Record<string, TypeToken>;
 
 export type TypographyToken = keyof typeof typography;

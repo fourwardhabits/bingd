@@ -1,4 +1,4 @@
-import { logWatched, newOperationId, setBucket, today } from './writes';
+import { logWatched, newOperationId, setBucket, setWatchlist, today } from './writes';
 
 const mockRpc = jest.fn();
 
@@ -153,6 +153,34 @@ describe('logWatched', () => {
       p_media_item_id: mediaItemId,
       p_watched_on: null,
       p_note: null,
+    });
+  });
+});
+
+describe('setWatchlist', () => {
+  it('passes the operation id, media id, and desired presence', async () => {
+    mockRpc.mockResolvedValue({ data: { status: 'ok' }, error: null });
+
+    await setWatchlist({ operationId, mediaItemId, present: true });
+    expect(mockRpc).toHaveBeenCalledWith('set_watchlist', {
+      p_operation_id: operationId,
+      p_media_item_id: mediaItemId,
+      p_present: true,
+    });
+  });
+
+  it('treats already_applied as success', async () => {
+    mockRpc.mockResolvedValue({ data: { status: 'already_applied' }, error: null });
+    expect(await setWatchlist({ operationId, mediaItemId, present: false })).toEqual({
+      outcome: 'already_applied',
+    });
+  });
+
+  it('maps known SQLSTATE values to user-facing messages', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'x' } });
+    expect(await setWatchlist({ operationId, mediaItemId, present: true })).toEqual({
+      outcome: 'failed',
+      message: 'Your account cannot make changes right now.',
     });
   });
 });

@@ -58,6 +58,9 @@ const item = (title: string, year: string) => ({
   title,
   release_date: `${year}-01-01`,
   poster_path: `/${title}.jpg`,
+  genres: ['Drama'],
+  runtime_minutes: 120,
+  kind: 'movie',
 });
 
 beforeEach(() => {
@@ -70,8 +73,8 @@ const readOf = (table: string) => reads.find((read) => read.table === table)!;
 describe('the ranked list', () => {
   beforeEach(() => {
     rows.rankings = [
-      { media_item_id: 'a', bucket: 'loved', position: 1, media_items: item('Heat', '1995') },
-      { media_item_id: 'b', bucket: 'fine', position: 2, media_items: item('Drive', '2011') },
+      { media_item_id: 'a', bucket: 'loved', position: 1, category: 'movies', media_items: item('Heat', '1995') },
+      { media_item_id: 'b', bucket: 'fine', position: 2, category: 'movies', media_items: item('Drive', '2011') },
     ];
   });
 
@@ -96,8 +99,12 @@ describe('the ranked list', () => {
       title: 'Heat',
       year: 1995,
       posterPath: '/Heat.jpg',
+      genres: ['Drama'],
+      runtimeMinutes: 120,
+      kind: 'movie',
       bucket: 'loved',
       position: 1,
+      category: 'movies',
     });
   });
 });

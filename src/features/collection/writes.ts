@@ -132,6 +132,27 @@ export async function logWatched(input: {
   return { ...statusOf(data), noteVersion: result?.note_version };
 }
 
+/**
+ * Adds or removes a title from the watchlist.
+ *
+ * This accepts movies, series, and seasons. Series are intentionally allowed here:
+ * "want to watch this show" is coherent even though logging/ranking requires season-level
+ * granularity.
+ */
+export async function setWatchlist(input: {
+  operationId: string;
+  mediaItemId: string;
+  present: boolean;
+}): Promise<WriteResult> {
+  const { data, error } = await supabase.rpc('set_watchlist', {
+    p_operation_id: input.operationId,
+    p_media_item_id: input.mediaItemId,
+    p_present: input.present,
+  });
+
+  return error ? interpret(error) : statusOf(data);
+}
+
 /** The local calendar date, formatted the way the database wants it. */
 export const today = () => {
   const now = new Date();

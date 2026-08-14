@@ -97,11 +97,19 @@ function Navigation() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: theme.surface.base },
+          headerStyle: { backgroundColor: theme.surface.base },
+          headerTintColor: theme.text.primary,
         }}
       >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(auth)" />
-        <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="title/[id]" options={{ headerShown: true, title: 'Title' }} />
+        <Stack.Screen name="u/[username]" options={{ headerShown: true, title: 'Profile' }} />
+        <Stack.Screen name="lists/[id]" options={{ headerShown: true, title: 'List' }} />
+        <Stack.Screen
+          name="settings"
+          options={{ presentation: 'modal', headerShown: true, title: 'Settings' }}
+        />
       </Stack>
       <AuthStatusOverlay />
     </>

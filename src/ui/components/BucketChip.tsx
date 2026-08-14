@@ -19,6 +19,28 @@ export type BucketChipProps = {
   onPress: () => void;
 };
 
+export type ChipProps = {
+  label: string;
+  selected?: boolean;
+  onPress: () => void;
+};
+
+export function Chip({ label, selected = false, onPress }: ChipProps) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={[styles.chip, selected && styles.chipSelected]}
+      hitSlop={theme.space[2]}
+    >
+      <Text variant="callout" tone={selected ? 'primary' : 'secondary'}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 /**
  * Selection is signalled by fill, checkmark, and border simultaneously, so
  * colour is never the only carrier of meaning.
@@ -63,6 +85,17 @@ export function BucketChip({ bucket, selected, onPress }: BucketChipProps) {
 const CIRCLE = 44;
 
 const styles = StyleSheet.create({
+  chip: {
+    minHeight: theme.layout.control.chipHeight,
+    borderRadius: theme.radius.control,
+    borderColor: theme.border.hairline,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    backgroundColor: theme.surface.raised,
+    paddingHorizontal: theme.space[3],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chipSelected: { backgroundColor: theme.surface.sunken },
   container: {
     flex: 1,
     alignItems: 'center',

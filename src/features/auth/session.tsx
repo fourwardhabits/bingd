@@ -43,6 +43,7 @@ export const useAuth = () => useContext(AuthContext);
 /** Throws outside a `ready` session, so screens behind the gate need no null checks. */
 export function useCurrentProfile(): Profile {
   const auth = useAuth();
+
   if (auth.status !== 'ready') {
     throw new Error('useCurrentProfile was called outside a signed-in, onboarded session.');
   }

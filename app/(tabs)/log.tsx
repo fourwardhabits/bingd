@@ -1,14 +1,27 @@
+import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import { useCurrentProfile } from '@/features/auth';
+import { useLoggedCollection } from '@/features/collection/use-collection';
 import { LogSheet, type LoggableTitle } from '@/features/collection/LogSheet';
 import { RankingSheet } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
 import { posterUri } from '@/lib/images';
 import { theme } from '@/ui/tokens';
-import { EmptyState, Field, Screen, Text, TitleRow, type BucketId } from '@/ui/components';
+import {
+  AppHeader,
+  EmptyState,
+  Screen,
+  SearchField,
+  Text,
+  TitleMetadata,
+  TitleRow,
+  type BucketId,
+} from '@/ui/components';
 
 /**
  * The centre + tab. Opens directly into title search, which is why there is no separate
@@ -19,6 +32,9 @@ import { EmptyState, Field, Screen, Text, TitleRow, type BucketId } from '@/ui/c
  * user tap something and be told no.
  */
 export default function LogScreen() {
+  const router = useRouter();
+  const profile = useCurrentProfile();
+  const { data: watched } = useLoggedCollection(profile.id);
   const [input, setInput] = useState('');
   const [series, setSeries] = useState<{ id: string; title: string } | null>(null);
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
@@ -31,7 +47,7 @@ export default function LogScreen() {
 
   const { results, idle, isPending, isError, isPlaceholderData, refetch } = useTitleSearch(input);
 
-  const open = (result: SearchResult) => {
+  const openLog = (result: SearchResult) => {
     if (result.kind === 'series') {
       setSeries({ id: result.id, title: result.title });
       return;
@@ -48,17 +64,18 @@ export default function LogScreen() {
 
   return (
     <Screen>
+      <AppHeader />
       <View style={styles.field}>
-        <Field
-          label="Search"
+        <SearchField
+          accessibilityLabel="Search"
           placeholder="A film or a series"
           value={input}
           onChangeText={setInput}
+          onClear={() => setInput('')}
           autoFocus
           autoCorrect={false}
           autoCapitalize="none"
           returnKeyType="search"
-          clearButtonMode="while-editing"
           accessibilityHint="Results appear as you type"
         />
       </View>
@@ -69,8 +86,10 @@ export default function LogScreen() {
         error={isError}
         stale={isPlaceholderData}
         results={results}
+        watched={watched?.entries ?? []}
         onRetry={() => void refetch()}
-        onOpen={open}
+        onOpenTitle={(result) => router.push(`/title/${result.id}`)}
+        onOpenLog={openLog}
       />
 
       <SeasonPicker
@@ -128,24 +147,43 @@ function Results({
   error,
   stale,
   results,
+  watched,
   onRetry,
-  onOpen,
+  onOpenTitle,
+  onOpenLog,
 }: {
   idle: boolean;
   loading: boolean;
   error: boolean;
   stale: boolean;
   results: SearchResult[];
+  watched: { mediaItemId: string; title: string }[];
   onRetry: () => void;
-  onOpen: (result: SearchResult) => void;
+  onOpenTitle: (result: SearchResult) => void;
+  onOpenLog: (result: SearchResult) => void;
 }) {
   if (idle) {
     return (
-      <EmptyState
-        kind="nothingYet"
-        title="What did you watch?"
-        body="Start typing a film or a series to log it."
-      />
+      <View style={styles.idle}>
+        <EmptyState
+          kind="nothingYet"
+          compact
+          title="What did you watch?"
+          body="Search for a title, open it, then log it with +."
+        />
+        {watched.length > 0 ? (
+          <View style={styles.recent}>
+            <Text variant="caption" tone="tertiary">
+              RECENTLY WATCHED
+            </Text>
+            {watched.slice(0, 3).map((entry, index) => (
+              <Text key={`${entry.mediaItemId}-${index}`} variant="footnote" tone="secondary" numberOfLines={1}>
+                {entry.title}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+      </View>
     );
   }
 
@@ -188,13 +226,35 @@ function Results({
       style={stale ? styles.stale : undefined}
       keyExtractor={(item) => item.id}
       keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      contentContainerStyle={styles.results}
       renderItem={({ item }) => (
         <TitleRow
           title={item.title}
           year={yearOf(item.release_date)}
           posterUri={posterUri(item.poster_path)}
-          bucketLabel={item.kind === 'series' ? 'Series · pick a season' : undefined}
-          onPress={() => onOpen(item)}
+          size="xs"
+          secondary={
+            item.kind === 'series' ? (
+              `Series · ${item.season_count ?? 0} seasons`
+            ) : (
+              <TitleMetadata
+                runtimeMinutes={item.runtime_minutes}
+                genres={item.genres}
+                showYear={false}
+              />
+            )
+          }
+          trailing={
+            <Pressable
+              accessibilityLabel={`Log ${item.title}`}
+              onPress={() => onOpenLog(item)}
+              hitSlop={theme.space[2]}
+            >
+              <Ionicons name="add-circle" size={theme.layout.icon.lg} color={theme.semantic.action} />
+            </Pressable>
+          }
+          onPress={() => onOpenTitle(item)}
         />
       )}
     />
@@ -202,7 +262,10 @@ function Results({
 }
 
 const styles = StyleSheet.create({
-  field: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[3] },
+  field: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
   status: { padding: theme.layout.gutter },
   stale: { opacity: 0.6 },
+  idle: { gap: theme.space[3], paddingTop: theme.space[4] },
+  recent: { paddingHorizontal: theme.layout.gutter, gap: theme.space[1] },
+  results: { paddingBottom: theme.space[8] },
 });

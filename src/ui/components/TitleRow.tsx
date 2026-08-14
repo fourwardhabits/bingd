@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { theme } from '../tokens';
@@ -8,12 +9,13 @@ export type TitleRowProps = {
   title: string;
   year?: number | null;
   posterUri?: string | null;
-  bucketLabel?: string;
-  position?: number;
-  category?: string;
-  /** Queued write awaiting sync (offline-sync.md §4). */
+  size?: 'xs' | 'sm';
+  secondary?: ReactNode;
+  tertiary?: ReactNode;
+  leading?: ReactNode;
+  trailing?: ReactNode;
   pending?: boolean;
-  onPress?: () => void;
+  onPress: () => void;
 };
 
 /**
@@ -27,39 +29,49 @@ export function TitleRow({
   title,
   year,
   posterUri,
-  bucketLabel,
-  position,
-  category,
+  size = 'sm',
+  secondary,
+  tertiary,
+  leading,
+  trailing,
   pending = false,
   onPress,
 }: TitleRowProps) {
-  const metadata = [
-    bucketLabel,
-    position && category ? `#${position} in ${category}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const compact = size === 'xs';
+  const secondaryLabel = typeof secondary === 'string' ? secondary : null;
+  const tertiaryLabel = typeof tertiary === 'string' ? tertiary : null;
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[title, year, metadata].filter(Boolean).join(', ')}
+      accessibilityLabel={[title, year, secondaryLabel, tertiaryLabel].filter(Boolean).join(', ')}
       accessibilityHint={pending ? 'Saved on this device, waiting to sync' : undefined}
       onPress={onPress}
-      style={[styles.row, pending && styles.pending]}
+      style={[styles.row, compact && styles.rowCompact, pending && styles.pending]}
     >
-      <Poster uri={posterUri} title={title} size="sm" />
+      {leading ? <View style={styles.leading}>{leading}</View> : null}
+      <Poster uri={posterUri} title={title} size={compact ? 'xs' : 'sm'} />
       <View style={styles.text}>
-        <Text variant="headline" numberOfLines={2}>
+        <Text variant={compact ? 'callout' : 'headline'} numberOfLines={2}>
           {title}
           {year ? ` (${year})` : ''}
         </Text>
-        {metadata ? (
-          <Text variant="footnote" tone="tertiary" numberOfLines={1}>
-            {metadata}
+        {typeof secondary === 'string' ? (
+          <Text variant="footnote" tone="secondary" numberOfLines={1}>
+            {secondary}
           </Text>
-        ) : null}
+        ) : (
+          secondary
+        )}
+        {typeof tertiary === 'string' ? (
+          <Text variant="footnote" tone="tertiary" numberOfLines={1}>
+            {tertiary}
+          </Text>
+        ) : (
+          tertiary
+        )}
       </View>
+      {trailing ? <View style={styles.trailing}>{trailing}</View> : null}
       {pending ? <View style={styles.syncGlyph} accessibilityElementsHidden /> : null}
     </Pressable>
   );
@@ -68,13 +80,28 @@ export function TitleRow({
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: theme.space[3],
-    minHeight: theme.layout.rowMinHeight,
+    minHeight: theme.layout.row.media,
     paddingVertical: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
   },
-  text: { flex: 1, gap: theme.space[1] },
+  rowCompact: {
+    minHeight: theme.layout.row.dense,
+    paddingVertical: theme.space[1],
+  },
+  leading: {
+    width: theme.layout.row.ordinalColumn,
+    minHeight: theme.poster.sm.height,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  text: { flex: 1, gap: 2, minHeight: theme.poster.sm.height, justifyContent: 'center' },
+  trailing: {
+    minHeight: theme.poster.sm.height,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+  },
   pending: { opacity: 0.7 },
   syncGlyph: {
     width: theme.space[2],

@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -13,16 +13,30 @@ import {
   type RankingCategory,
 } from '@/features/collection/use-collection';
 import { posterUri } from '@/lib/images';
+import { readPref, writePref } from '@/lib/prefs';
 import { theme } from '@/ui/tokens';
-import { EmptyState, Screen, Text, TitleRow } from '@/ui/components';
+import {
+  AppHeader,
+  EmptyState,
+  MediumSelector,
+  Screen,
+  SegmentedTabs,
+  Text,
+  TitleMetadata,
+  TitleRow,
+} from '@/ui/components';
 
-type Segment = 'ranked' | 'logged' | 'watchlist';
+type Segment = 'ranked' | 'watched' | 'watchlist' | 'unranked';
+type Medium = RankingCategory;
 
-const SEGMENTS: { id: Segment; label: string }[] = [
-  { id: 'ranked', label: 'Ranked' },
-  { id: 'logged', label: 'Logged' },
-  { id: 'watchlist', label: 'Watchlist' },
-];
+type UnrankedNudgePref = {
+  dismissedAt: string;
+  rankedCountAtDismissal: number;
+  dismissCount: number;
+};
+
+const NUDGE_PREF_KEY = 'collection.unranked-nudge';
+const NUDGE_COOLDOWN_DAYS = 14;
 
 /**
  * The user's own working surface (screens.md §5).
@@ -36,34 +50,92 @@ const SEGMENTS: { id: Segment; label: string }[] = [
  */
 export default function CollectionScreen() {
   const profile = useCurrentProfile();
-  const router = useRouter();
+  const { data: loggedSummary } = useLoggedCollection(profile.id);
   const [segment, setSegment] = useState<Segment>('ranked');
+  const [medium, setMedium] = useState<Medium>('movies');
+  const [nudgePref, setNudgePref] = useState<UnrankedNudgePref | null>(null);
+  const [nudgePrefLoaded, setNudgePrefLoaded] = useState(false);
+
+  useEffect(() => {
+    readPref<UnrankedNudgePref>(`${profile.id}.${NUDGE_PREF_KEY}`)
+      .then(setNudgePref)
+      .catch(() => setNudgePref(null))
+      .finally(() => setNudgePrefLoaded(true));
+  }, [profile.id]);
+
+  const unrankedCount = loggedSummary?.unranked.length ?? 0;
+  const rankedCount = loggedSummary?.rankedCount ?? 0;
+
+  const segments: { id: Segment; label: string }[] = useMemo(
+    () => [
+      { id: 'ranked', label: 'Ranked' },
+      { id: 'watched', label: 'Watched' },
+      { id: 'watchlist', label: 'Watchlist' },
+      ...(unrankedCount > 0 ? [{ id: 'unranked' as const, label: 'Unranked' }] : []),
+    ],
+    [unrankedCount],
+  );
+
+  const showNudge = shouldShowUnrankedNudge({
+    unrankedCount,
+    rankedCount,
+    pref: nudgePref,
+    loaded: nudgePrefLoaded,
+  });
+
+  const dismissNudge = async () => {
+    const next: UnrankedNudgePref = {
+      dismissedAt: new Date().toISOString(),
+      rankedCountAtDismissal: rankedCount,
+      dismissCount: (nudgePref?.dismissCount ?? 0) + 1,
+    };
+    setNudgePref(next);
+    await writePref(`${profile.id}.${NUDGE_PREF_KEY}`, next);
+  };
 
   return (
     <Screen>
-      <View style={styles.segments} accessibilityRole="tablist">
-        {SEGMENTS.map((option) => (
+      <AppHeader />
+      <MediumSelector
+        value={medium}
+        onPress={() => setMedium((value) => (value === 'movies' ? 'tv_seasons' : 'movies'))}
+      />
+      <SegmentedTabs options={segments} value={segment} onChange={setSegment} />
+
+      {segment === 'ranked' && showNudge ? (
+        <View style={styles.nudge}>
           <Pressable
-            key={option.id}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: segment === option.id }}
-            onPress={() => setSegment(option.id)}
-            style={[styles.segment, segment === option.id && styles.segmentSelected]}
+            accessibilityRole="button"
+            onPress={() => {
+              setSegment('unranked');
+            }}
+            style={styles.nudgeMain}
           >
-            <Text variant="callout" tone={segment === option.id ? 'primary' : 'secondary'}>
-              {option.label}
+            <Text variant="footnote" tone="secondary">
+              Rank a few more and your recommendations get sharper.
+            </Text>
+            <Text variant="callout" tone="action">
+              Rank some
             </Text>
           </Pressable>
-        ))}
-      </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              void dismissNudge().catch(() => {});
+            }}
+            hitSlop={theme.space[2]}
+          >
+            <Text variant="callout" tone="tertiary">
+              Not now
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
-      {segment === 'ranked' ? (
-        <Ranked userId={profile.id} />
-      ) : segment === 'logged' ? (
-        <Logged userId={profile.id} onLog={() => router.push('/log')} />
-      ) : (
-        <Watchlist userId={profile.id} />
-      )}
+      {segment === 'ranked' ? <Ranked userId={profile.id} medium={medium} /> : null}
+      {segment === 'watched' ? <Watched userId={profile.id} medium={medium} /> : null}
+      {segment === 'watchlist' ? <Watchlist userId={profile.id} medium={medium} /> : null}
+      {segment === 'unranked' ? <Unranked userId={profile.id} medium={medium} /> : null}
     </Screen>
   );
 }
@@ -72,33 +144,12 @@ export default function CollectionScreen() {
  * The artifact. Titles in position order under band headers, which is how the bucket
  * partition becomes legible rather than mysterious.
  */
-function Ranked({ userId }: { userId: string }) {
-  const [category, setCategory] = useState<RankingCategory>('movies');
-  const { data = [], isPending, isError } = useRankedCollection(userId, category);
+function Ranked({ userId, medium }: { userId: string; medium: Medium }) {
+  const router = useRouter();
+  const { data = [], isPending, isError } = useRankedCollection(userId, medium);
 
   return (
     <View style={styles.body}>
-      <View style={styles.categories}>
-        {(
-          [
-            { id: 'movies', label: 'Movies' },
-            { id: 'tv_seasons', label: 'TV seasons' },
-          ] as const
-        ).map((option) => (
-          <Pressable
-            key={option.id}
-            accessibilityRole="button"
-            accessibilityState={{ selected: category === option.id }}
-            onPress={() => setCategory(option.id)}
-            hitSlop={theme.space[2]}
-          >
-            <Text variant="callout" tone={category === option.id ? 'action' : 'tertiary'}>
-              {option.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
       {isError ? (
         <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />
       ) : isPending ? (
@@ -126,8 +177,19 @@ function Ranked({ userId }: { userId: string }) {
                     title={entry.title}
                     year={entry.year}
                     posterUri={posterUri(entry.posterPath)}
-                    position={entry.position}
-                    category={category === 'movies' ? 'Movies' : 'TV seasons'}
+                    leading={
+                      <Text variant="ordinal" tone="tertiary">
+                        #{entry.position}
+                      </Text>
+                    }
+                    secondary={
+                      <TitleMetadata
+                        runtimeMinutes={entry.runtimeMinutes}
+                        genres={entry.genres}
+                        showYear={false}
+                      />
+                    }
+                    onPress={() => router.push(`/title/${entry.mediaItemId}`)}
                   />
                 ))}
               </View>
@@ -146,7 +208,8 @@ function Ranked({ userId }: { userId: string }) {
  * bar and no "380 remaining": PRD §5 is explicit that someone importing 800 films must not
  * open this tab and feel behind.
  */
-function Logged({ userId, onLog }: { userId: string; onLog: () => void }) {
+function Watched({ userId, medium }: { userId: string; medium: Medium }) {
+  const router = useRouter();
   const { data, isPending, isError } = useLoggedCollection(userId);
 
   if (isError) {
@@ -157,25 +220,28 @@ function Logged({ userId, onLog }: { userId: string; onLog: () => void }) {
     return (
       <EmptyState
         kind="nothingYet"
-        title="Your collection starts here"
-        body="Log something you have seen and it lands here, whether or not you rank it."
-        action={{ label: 'Log a title', onPress: onLog }}
+        title="Your watched list starts here"
+        body="Log something you have seen and it lands here."
+        action={{ label: 'Log a title', onPress: () => router.push('/log') }}
       />
     );
   }
 
+  const entries = filterByMedium(data.entries, medium);
+
   return (
     <View style={styles.body}>
       <Text variant="footnote" tone="secondary" style={styles.count}>
-        {data.rankedCount} ranked · {data.loggedCount} logged
+        {data.rankedCount} ranked · {data.loggedCount} watched
       </Text>
-      <Rows entries={data.unranked} empty="Everything you have logged has a position." />
+      <Rows entries={entries} empty="Nothing watched yet." />
     </View>
   );
 }
 
-function Watchlist({ userId }: { userId: string }) {
+function Watchlist({ userId, medium }: { userId: string; medium: Medium }) {
   const { data = [], isPending, isError } = useWatchlist(userId);
+  const entries = filterByMedium(data, medium);
 
   if (isError) {
     return <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />;
@@ -184,12 +250,23 @@ function Watchlist({ userId }: { userId: string }) {
 
   return (
     <View style={styles.body}>
-      <Rows entries={data} empty="Nothing saved for later yet." />
+      <Rows entries={entries} empty="Nothing saved for later yet." />
     </View>
   );
 }
 
+function Unranked({ userId, medium }: { userId: string; medium: Medium }) {
+  const { data, isPending, isError } = useLoggedCollection(userId);
+  const entries = filterByMedium(data?.unranked ?? [], medium);
+  if (isError) {
+    return <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />;
+  }
+  if (isPending) return <Loading />;
+  return <Rows entries={entries} empty="Everything you watched is already ranked." />;
+}
+
 function Rows({ entries, empty }: { entries: LoggedEntry[]; empty: string }) {
+  const router = useRouter();
   if (entries.length === 0) {
     return (
       <View style={styles.padded}>
@@ -208,7 +285,27 @@ function Rows({ entries, empty }: { entries: LoggedEntry[]; empty: string }) {
           title={entry.title}
           year={entry.year}
           posterUri={posterUri(entry.posterPath)}
-          bucketLabel={entry.bucket ? BAND_LABEL[entry.bucket] : undefined}
+          secondary={
+            <TitleMetadata
+              bucketLabel={entry.bucket ? BAND_LABEL[entry.bucket] : null}
+              runtimeMinutes={entry.runtimeMinutes}
+              genres={entry.genres}
+              showYear={false}
+            />
+          }
+          trailing={
+            entry.watchedOn ? (
+              <Text variant="footnote" tone="tertiary">
+                {new Date(`${entry.watchedOn}T00:00:00Z`).toLocaleDateString(undefined, {
+                  timeZone: 'UTC',
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
+              </Text>
+            ) : null
+          }
+          onPress={() => router.push(`/title/${entry.mediaItemId}`)}
         />
       ))}
     </ScrollView>
@@ -226,25 +323,21 @@ function Loading() {
 }
 
 const styles = StyleSheet.create({
-  segments: {
-    flexDirection: 'row',
-    gap: theme.space[2],
-    paddingHorizontal: theme.layout.gutter,
-    paddingBottom: theme.space[3],
-  },
-  segment: {
-    minHeight: theme.layout.minTapTarget,
-    justifyContent: 'center',
+  nudge: {
+    marginHorizontal: theme.layout.gutter,
+    marginBottom: theme.space[2],
     paddingHorizontal: theme.space[3],
+    paddingVertical: theme.space[2],
     borderRadius: theme.radius.control,
-  },
-  segmentSelected: { backgroundColor: theme.surface.sunken },
-  categories: {
+    backgroundColor: theme.surface.raised,
+    borderColor: theme.border.hairline,
+    borderWidth: StyleSheet.hairlineWidth * 2,
     flexDirection: 'row',
-    gap: theme.space[4],
-    paddingHorizontal: theme.layout.gutter,
-    paddingBottom: theme.space[2],
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: theme.space[3],
   },
+  nudgeMain: { gap: theme.space[1], flex: 1, minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
   body: { flex: 1 },
   count: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
   list: { paddingBottom: theme.space[8] },
@@ -252,3 +345,34 @@ const styles = StyleSheet.create({
   bandHeader: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[1] },
   padded: { padding: theme.layout.gutter },
 });
+
+function shouldShowUnrankedNudge({
+  unrankedCount,
+  rankedCount,
+  pref,
+  loaded,
+}: {
+  unrankedCount: number;
+  rankedCount: number;
+  pref: UnrankedNudgePref | null;
+  loaded: boolean;
+}) {
+  if (!loaded) return false;
+  if (unrankedCount <= 0) return false;
+  if (rankedCount >= 50) return false;
+  if (!pref) return true;
+
+  if (pref.dismissCount >= 2 && rankedCount <= pref.rankedCountAtDismissal) return false;
+
+  const lastDismissedAt = new Date(pref.dismissedAt).getTime();
+  const elapsedDays = (Date.now() - lastDismissedAt) / (1000 * 60 * 60 * 24);
+  if (elapsedDays < NUDGE_COOLDOWN_DAYS) return false;
+
+  return rankedCount > pref.rankedCountAtDismissal;
+}
+
+function filterByMedium(entries: LoggedEntry[], medium: Medium) {
+  return entries.filter((entry) =>
+    medium === 'movies' ? entry.kind === 'movie' : entry.kind === 'season' || entry.kind === 'series',
+  );
+}

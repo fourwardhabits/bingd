@@ -2,7 +2,8 @@ import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { theme } from '@/ui/tokens';
-import { EmptyState, Text } from '@/ui/components';
+import { EmptyState, Poster, Text } from '@/ui/components';
+import { posterUri } from '@/lib/images';
 
 import { useSeasons, yearOf } from './use-title-search';
 
@@ -95,12 +96,15 @@ export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
                 }
                 style={styles.row}
               >
-                <Text variant="headline">{season.title}</Text>
-                {season.release_date ? (
-                  <Text variant="footnote" tone="tertiary">
-                    {yearOf(season.release_date)}
-                  </Text>
-                ) : null}
+                <Poster uri={posterUri(season.poster_path)} title={season.title} size="xs" />
+                <View style={styles.rowText}>
+                  <Text variant="headline">{season.title}</Text>
+                  {season.release_date ? (
+                    <Text variant="footnote" tone="tertiary">
+                      {yearOf(season.release_date)}
+                    </Text>
+                  ) : null}
+                </View>
               </Pressable>
             ))}
           </ScrollView>
@@ -123,9 +127,11 @@ const styles = StyleSheet.create({
   list: { paddingBottom: theme.space[8] },
   row: {
     minHeight: theme.layout.rowMinHeight,
-    justifyContent: 'center',
-    gap: theme.space[1],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[3],
     paddingVertical: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
   },
+  rowText: { flex: 1, gap: theme.space[1] },
 });

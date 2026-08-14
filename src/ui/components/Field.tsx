@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { forwardRef, useId } from 'react';
 import { StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
 
 import { theme } from '../tokens';
@@ -15,7 +15,10 @@ export type FieldProps = Omit<TextInputProps, 'style' | 'placeholderTextColor'> 
   error?: string;
 };
 
-export function Field({ label, hint, error, ...rest }: FieldProps) {
+export const Field = forwardRef<TextInput, FieldProps>(function Field(
+  { label, hint, error, ...rest },
+  ref,
+) {
   const id = useId();
   const description = error ?? hint;
 
@@ -25,12 +28,10 @@ export function Field({ label, hint, error, ...rest }: FieldProps) {
         {label}
       </Text>
       <TextInput
-        accessibilityLabel={label}
+        ref={ref}
+        accessibilityLabel={error ? `${label}. ${error}` : label}
         accessibilityLabelledBy={`${id}-label`}
         accessibilityHint={description}
-        // Announced rather than shown in red only, so the message reaches a user
-        // who cannot distinguish the border colour.
-        aria-invalid={Boolean(error)}
         placeholderTextColor={theme.text.tertiary}
         style={[styles.input, Boolean(error) && styles.inputError]}
         {...rest}
@@ -42,7 +43,7 @@ export function Field({ label, hint, error, ...rest }: FieldProps) {
       ) : null}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   wrapper: { gap: theme.space[1] },

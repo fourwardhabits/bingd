@@ -51,7 +51,7 @@ export default function VerifyScreen() {
 
   if (!address) {
     return (
-      <Screen airy>
+      <Screen airy includeBottomInset>
         <Text variant="title1">Start again</Text>
         <Text variant="body" tone="secondary">
           We lost track of which address to check. Enter it once more.
@@ -62,7 +62,7 @@ export default function VerifyScreen() {
   }
 
   return (
-    <Screen airy>
+    <Screen airy includeBottomInset>
       <View style={styles.intro}>
         <Text variant="title1">Check your email</Text>
         <Text variant="body" tone="secondary">

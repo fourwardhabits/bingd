@@ -17,8 +17,12 @@ export type RankedEntry = {
   title: string;
   year: number | null;
   posterPath: string | null;
+  genres: string[];
+  runtimeMinutes: number | null;
+  kind: 'movie' | 'season' | 'series';
   bucket: 'loved' | 'fine' | 'not_for_me';
   position: number;
+  category: RankingCategory;
 };
 
 export type LoggedEntry = {
@@ -26,6 +30,9 @@ export type LoggedEntry = {
   title: string;
   year: number | null;
   posterPath: string | null;
+  genres: string[];
+  runtimeMinutes: number | null;
+  kind: 'movie' | 'season' | 'series';
   bucket: 'loved' | 'fine' | 'not_for_me' | null;
   watchedOn: string | null;
 };
@@ -34,11 +41,25 @@ export type RankingCategory = 'movies' | 'tv_seasons';
 
 const yearOf = (date: string | null) => (date ? Number(date.slice(0, 4)) : null);
 
-type MediaShape = { title: string; release_date: string | null; poster_path: string | null };
+type MediaShape = {
+  title: string;
+  release_date: string | null;
+  poster_path: string | null;
+  genres: string[] | null;
+  runtime_minutes: number | null;
+  kind: 'movie' | 'season' | 'series';
+};
 
 /** PostgREST returns an embedded row as an object, but types it as an array. */
 const media = (value: MediaShape | MediaShape[] | null): MediaShape =>
-  (Array.isArray(value) ? value[0] : value) ?? { title: '', release_date: null, poster_path: null };
+  (Array.isArray(value) ? value[0] : value) ?? {
+    title: '',
+    release_date: null,
+    poster_path: null,
+    genres: [],
+    runtime_minutes: null,
+    kind: 'movie',
+  };
 
 /**
  * The ranked list for one category, in position order.
@@ -53,7 +74,9 @@ export function useRankedCollection(userId: string, category: RankingCategory) {
     queryFn: async (): Promise<RankedEntry[]> => {
       const { data, error } = await supabase
         .from('rankings')
-        .select('media_item_id, bucket, position, media_items(title, release_date, poster_path)')
+        .select(
+          'media_item_id, bucket, position, category, media_items(title, release_date, poster_path, genres, runtime_minutes, kind)',
+        )
         .eq('user_id', userId)
         .eq('category', category)
         .order('position');
@@ -64,8 +87,12 @@ export function useRankedCollection(userId: string, category: RankingCategory) {
         title: media(row.media_items).title,
         year: yearOf(media(row.media_items).release_date),
         posterPath: media(row.media_items).poster_path,
+        genres: media(row.media_items).genres ?? [],
+        runtimeMinutes: media(row.media_items).runtime_minutes,
+        kind: media(row.media_items).kind,
         bucket: row.bucket,
         position: row.position,
+        category: row.category,
       }));
     },
   });
@@ -91,7 +118,9 @@ export function useLoggedCollection(userId: string) {
       const [logged, ranked] = await Promise.all([
         supabase
           .from('user_media')
-          .select('media_item_id, bucket, watched_on, media_items(title, release_date, poster_path)')
+          .select(
+            'media_item_id, bucket, watched_on, media_items(title, release_date, poster_path, genres, runtime_minutes, kind)',
+          )
           .eq('user_id', userId)
           .order('created_at', { ascending: false }),
         supabase.from('rankings').select('media_item_id').eq('user_id', userId),
@@ -108,6 +137,9 @@ export function useLoggedCollection(userId: string) {
           title: media(row.media_items).title,
           year: yearOf(media(row.media_items).release_date),
           posterPath: media(row.media_items).poster_path,
+          genres: media(row.media_items).genres ?? [],
+          runtimeMinutes: media(row.media_items).runtime_minutes,
+          kind: media(row.media_items).kind,
           bucket: row.bucket,
           watchedOn: row.watched_on,
         } satisfies LoggedEntry,
@@ -115,6 +147,7 @@ export function useLoggedCollection(userId: string) {
       }));
 
       return {
+        entries: rows.map((r) => r.entry),
         // Titles without a position. PRD §5 is explicit that this is not a backlog and
         // must not be presented as one: no progress bar, no "380 remaining".
         unranked: rows.filter((r) => !r.ranked).map((r) => r.entry),
@@ -131,7 +164,9 @@ export function useWatchlist(userId: string) {
     queryFn: async (): Promise<LoggedEntry[]> => {
       const { data, error } = await supabase
         .from('watchlist')
-        .select('media_item_id, media_items(title, release_date, poster_path)')
+        .select(
+          'media_item_id, media_items(title, release_date, poster_path, genres, runtime_minutes, kind)',
+        )
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -141,6 +176,9 @@ export function useWatchlist(userId: string) {
         title: media(row.media_items).title,
         year: yearOf(media(row.media_items).release_date),
         posterPath: media(row.media_items).poster_path,
+        genres: media(row.media_items).genres ?? [],
+        runtimeMinutes: media(row.media_items).runtime_minutes,
+        kind: media(row.media_items).kind,
         bucket: null,
         watchedOn: null,
       }));

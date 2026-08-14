@@ -14,7 +14,7 @@ export const queryKeys = {
   myProfile: (userId: string) => ['my-profile', userId] as const,
   collection: (userId: string) => ['collection', userId] as const,
   rankings: (userId: string, category: string) => ['rankings', userId, category] as const,
-  feed: (cursor?: string) => ['feed', { cursor }] as const,
+  feed: (userId: string, cursor?: string) => ['feed', userId, { cursor }] as const,
   recommendations: (userId: string) => ['recommendations', userId] as const,
   title: (mediaItemId: string) => ['title', mediaItemId] as const,
   // Deliberately separate from `title`: the comparison card reads three columns, and

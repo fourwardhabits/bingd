@@ -11,6 +11,9 @@ export type SearchResult = {
   release_date: string | null;
   poster_path: string | null;
   provenance: 'tmdb' | 'wikidata' | 'manual';
+  genres: string[];
+  runtime_minutes: number | null;
+  season_count?: number;
 };
 
 /**
@@ -59,7 +62,43 @@ export function useTitleSearch(input: string) {
         p_limit: 25,
       });
       if (error) throw error;
-      return (data ?? []) as SearchResult[];
+      const rpcRows = (data ?? []) as Omit<SearchResult, 'genres' | 'runtime_minutes' | 'season_count'>[];
+      if (!rpcRows.length) return [];
+
+      const ids = rpcRows.map((row) => row.id);
+      const seriesIds = rpcRows.filter((row) => row.kind === 'series').map((row) => row.id);
+
+      const [{ data: metaRows, error: metaError }, { data: seasonRows, error: seasonError }] =
+        await Promise.all([
+          supabase.from('media_items').select('id, genres, runtime_minutes').in('id', ids),
+          seriesIds.length
+            ? supabase
+                .from('media_items')
+                .select('id, parent_id')
+                .eq('kind', 'season')
+                .in('parent_id', seriesIds)
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+
+      if (metaError) throw metaError;
+      if (seasonError) throw seasonError;
+
+      const metaById = new Map((metaRows ?? []).map((row) => [row.id, row]));
+      const seasonCountBySeries = new Map<string, number>();
+      for (const row of seasonRows ?? []) {
+        if (!row.parent_id) continue;
+        seasonCountBySeries.set(row.parent_id, (seasonCountBySeries.get(row.parent_id) ?? 0) + 1);
+      }
+
+      return rpcRows.map((row) => {
+        const meta = metaById.get(row.id);
+        return {
+          ...row,
+          genres: meta?.genres ?? [],
+          runtime_minutes: meta?.runtime_minutes ?? null,
+          season_count: row.kind === 'series' ? seasonCountBySeries.get(row.id) ?? 0 : undefined,
+        };
+      });
     },
   });
 

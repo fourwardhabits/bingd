@@ -24,6 +24,11 @@ export const layout = {
   /** WCAG minimum, applied to every interactive element without exception. */
   minTapTarget: 44,
   buttonMinHeight: 48,
+  aspect: { poster: 2 / 3, backdrop: 16 / 9 },
+  avatar: { xs: 24, sm: 32, md: 44, lg: 72 },
+  icon: { sm: 20, md: 24, lg: 28 },
+  control: { searchFieldHeight: 40, chipHeight: 32, headerHeight: 44 },
+  row: { dense: 56, media: 76, ordinalColumn: 28 },
 } as const;
 
 /** No pill buttons — PRD §5. Full-round is for avatars only. */

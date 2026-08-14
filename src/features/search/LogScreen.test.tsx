@@ -8,22 +8,52 @@ import { renderWithProviders } from '@/test-utils/render';
 import LogScreen from '../../../app/(tabs)/log';
 
 const mockRpc = jest.fn();
-const mockSeasons = jest.fn();
+const mockPush = jest.fn();
+const tableRows: Record<string, unknown[]> = {};
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (...args: unknown[]) => mockRpc(...args),
-    from: () => {
+    from: (table: string) => {
+      const filters: Record<string, unknown> = {};
+      const inFilters: Record<string, unknown[]> = {};
+      const rows = () => {
+        const source = tableRows[table] ?? [];
+        return source.filter((row) => {
+          const object = row as Record<string, unknown>;
+          for (const [key, value] of Object.entries(filters)) {
+            if (object[key] !== value) return false;
+          }
+          for (const [key, value] of Object.entries(inFilters)) {
+            if (!value.includes(object[key])) return false;
+          }
+          return true;
+        });
+      };
       const chain = {
         select: () => chain,
-        eq: () => chain,
-        order: () => mockSeasons(),
-        single: () => mockSeasons(),
+        eq: (column: string, value: unknown) => {
+          filters[column] = value;
+          return chain;
+        },
+        in: (column: string, values: unknown[]) => {
+          inFilters[column] = values;
+          return chain;
+        },
+        order: () => Promise.resolve({ data: rows(), error: null }),
+        single: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
+        maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
+        then: (resolve: (value: unknown) => unknown) =>
+          resolve({ data: rows(), error: null }),
       };
       return chain;
     },
   },
   startSessionRefresh: () => () => {},
+}));
+
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: mockPush }),
 }));
 
 jest.mock('@/features/auth', () => ({
@@ -56,19 +86,37 @@ const film = {
 beforeEach(() => {
   issued = 0;
   mockRpc.mockReset();
-  mockSeasons.mockReset();
+  mockPush.mockReset();
+  for (const key of Object.keys(tableRows)) delete tableRows[key];
   mockRpc.mockImplementation((fn: string) =>
     fn === 'search_titles'
       ? Promise.resolve({ data: [series, film], error: null })
       : Promise.resolve({ data: { status: 'ok' }, error: null }),
   );
-  mockSeasons.mockResolvedValue({
-    data: [
-      { id: 'season-1', season_number: 1, title: 'Season 1', release_date: '2008-01-20', poster_path: null },
-      { id: 'season-2', season_number: 2, title: 'Season 2', release_date: '2009-03-08', poster_path: null },
-    ],
-    error: null,
-  });
+  tableRows.user_media = [];
+  tableRows.rankings = [];
+  tableRows.media_items = [
+    { id: 'series-1', genres: ['Crime', 'Drama'], runtime_minutes: null, kind: 'series' },
+    { id: 'film-1', genres: ['Sci-Fi'], runtime_minutes: 148, kind: 'movie' },
+    {
+      id: 'season-1',
+      parent_id: 'series-1',
+      season_number: 1,
+      title: 'Season 1',
+      release_date: '2008-01-20',
+      poster_path: null,
+      kind: 'season',
+    },
+    {
+      id: 'season-2',
+      parent_id: 'series-1',
+      season_number: 2,
+      title: 'Season 2',
+      release_date: '2009-03-08',
+      poster_path: null,
+      kind: 'season',
+    },
+  ];
 });
 
 const callsTo = (fn: string) => mockRpc.mock.calls.filter(([name]) => name === fn);
@@ -79,9 +127,7 @@ const search = async (term: string) => {
   return view;
 };
 
-// Result rows are addressed the way a screen reader announces them, which is also the only
-// string that carries the "pick a season" hint.
-const SERIES_ROW = 'Breaking Bad, 2008, Series · pick a season';
+const SERIES_ROW = 'Breaking Bad, 2008, Series · 2 seasons';
 const FILM_ROW = 'Inception, 2010';
 
 /**
@@ -92,26 +138,20 @@ const FILM_ROW = 'Inception, 2010';
  * one has to lead somewhere rather than fail.
  */
 describe('a series in the results', () => {
-  it('opens its seasons rather than the log sheet', async () => {
+  it('opens title detail from the row', async () => {
     const view = await search('breaking');
 
     await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
-    expect(view.getByText('Series · pick a season')).toBeTruthy();
-
     await fireEvent.press(view.getByLabelText(SERIES_ROW));
-
-    await waitFor(() =>
-      expect(view.getByText('Seasons are ranked separately, so pick the one you watched.')),
-    );
-    // The log sheet's own prompt. If it were open, the user could bucket a series.
+    expect(mockPush).toHaveBeenCalledWith('/title/series-1');
     expect(view.queryByText('How was it?')).toBeNull();
   });
 
-  it('logs the season the user picked, not the series', async () => {
+  it('starts season logging from the + action', async () => {
     const view = await search('breaking');
 
     await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
-    await fireEvent.press(view.getByLabelText(SERIES_ROW));
+    await fireEvent.press(view.getByLabelText('Log Breaking Bad'));
     await waitFor(() => expect(view.getByText('Season 2')).toBeTruthy());
 
     await fireEvent.press(view.getByLabelText('Season 2, 2009'));
@@ -127,11 +167,11 @@ describe('a series in the results', () => {
 });
 
 describe('a film in the results', () => {
-  it('goes straight to the bucket prompt', async () => {
+  it('starts logging from the + action', async () => {
     const view = await search('inception');
 
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
-    await fireEvent.press(view.getByLabelText(FILM_ROW));
+    await fireEvent.press(view.getByLabelText('Log Inception'));
 
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('It was fine'));
@@ -147,7 +187,7 @@ describe('a film in the results', () => {
     const view = await search('inception');
 
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
-    await fireEvent.press(view.getByLabelText(FILM_ROW));
+    await fireEvent.press(view.getByLabelText('Log Inception'));
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('It was fine'));
 

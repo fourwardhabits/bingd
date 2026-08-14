@@ -266,7 +266,6 @@ function Comparison({
   return (
     <View style={styles.comparison}>
       <TopBar onClose={onClose} />
-
       <Text variant="title2" style={styles.centre}>
         Which did you like more?
       </Text>
@@ -356,10 +355,12 @@ function Card({
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
-      <Poster uri={posterUri} title={title} size="xl" />
-      <Text variant="headline" numberOfLines={2} style={styles.centre}>
-        {title}
-      </Text>
+      <Poster uri={posterUri} title={title} width="fill" size="xl" />
+      <View style={styles.cardTitleBox}>
+        <Text variant="headline" numberOfLines={2} style={styles.centre}>
+          {title}
+        </Text>
+      </View>
     </Pressable>
   );
 }
@@ -433,17 +434,26 @@ const styles = StyleSheet.create({
   comparison: {
     flex: 1,
     padding: theme.layout.gutter,
-    gap: theme.layout.sectionGap,
+    gap: theme.space[4],
   },
   topBar: { alignItems: 'flex-end' },
   cards: {
     flex: 1,
     flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'center',
-    gap: theme.space[4],
+    alignItems: 'flex-start',
+    gap: theme.space[3],
   },
-  card: { flex: 1, alignItems: 'center', gap: theme.space[3] },
+  card: {
+    flex: 1,
+    alignItems: 'center',
+    maxWidth: theme.poster.xl.width,
+    gap: theme.space[3],
+  },
+  cardTitleBox: {
+    height: 44,
+    justifyContent: 'flex-start',
+  },
   pressed: { opacity: 0.85 },
   controls: { gap: theme.space[3] },
   centre: { textAlign: 'center' },

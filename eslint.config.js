@@ -16,6 +16,8 @@ module.exports = [
       'dist/**',
       'android/**',
       'ios/**',
+      '.cursor/**',
+      '.agents/**',
     ],
   },
   {

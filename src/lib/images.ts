@@ -13,11 +13,22 @@
 const BASE = 'https://image.tmdb.org/t/p';
 
 export type PosterSize = 'row' | 'card';
+export type BackdropSize = 'card' | 'hero';
 
 const WIDTH: Record<PosterSize, string> = {
   row: 'w342',
   card: 'w500',
 };
 
+const BACKDROP_WIDTH: Record<BackdropSize, string> = {
+  card: 'w780',
+  hero: 'w1280',
+};
+
 export const posterUri = (path: string | null | undefined, size: PosterSize = 'row') =>
   path ? `${BASE}/${WIDTH[size]}${path}` : null;
+
+export const backdropUri = (
+  path: string | null | undefined,
+  size: BackdropSize = 'card',
+) => (path ? `${BASE}/${BACKDROP_WIDTH[size]}${path}` : null);
