@@ -125,11 +125,13 @@ Row-level security **is** enforced: the harness creates the three Supabase roles
 
 One limit remains: `citext` is unavailable in the WebAssembly build and is shimmed as `text`, so case-insensitive uniqueness is not exercised locally. It has little practical consequence, since `profiles.username_format` forbids uppercase from being stored at all.
 
-The migrations are applied once per process and the result reloaded per test file, because the seed catalogue is two thousand rows and replaying it each time nearly tripled the suite. The snapshot comes from the real migrations in the real order, not from a schema dump kept beside them, so it cannot drift into disagreeing with production.
+The migrations are applied once per process — and `node --test` gives each test file its own process, so that means once per file, with the snapshot reloaded for any further database the same file creates. It exists because the seed catalogue is two thousand rows and replaying it per database took the suite from 40s to 114s; it is back to about 60s. The snapshot comes from the real migrations in the real order, not from a schema dump kept beside them, so it cannot drift into disagreeing with production, and a broken migration still fails in every file with the filename in the message.
 
 ### There is a catalogue, and it is not TMDB's
 
-`supabase/seed/` holds about 380 films, 190 series and 1,400 seasons seeded from Wikidata, shipped as a generated migration so every environment and every test run has titles to work with. It exists because the provider adapter is unwritten and the licence question governing it is unanswered, and because Wikidata is CC0 — no attribution obligation, no retention window, nothing to renegotiate. There are no posters, since a poster is not a free work; the client is expected to look right without them. Every row keeps its TMDB id, so the adapter will enrich these rows in place rather than start again. `docs/architecture/data-model.md` §4 has the reasoning.
+`supabase/seed/` holds about 380 films, 190 series and 1,400 seasons seeded from Wikidata, shipped as a generated migration so every environment and every test run has titles to work with. It exists because the provider adapter is unwritten and the licence question governing it is unanswered, and because Wikidata is CC0 — no attribution obligation, no retention window, nothing to renegotiate.
+
+It is thin on purpose. No posters, since a poster is not a free work, so the client is expected to look right without them; no `popularity`, `overview`, `original_title` or `backdrop_path` either. Every film and series keeps its TMDB id and every row keeps its Wikidata id, so the adapter enriches these rows in place rather than starting again. `docs/architecture/data-model.md` §4 has the reasoning.
 
 ### And a check the local suite cannot perform
 

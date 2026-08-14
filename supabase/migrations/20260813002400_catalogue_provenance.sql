@@ -37,3 +37,44 @@ create unique index media_items_wikidata on media_items (wikidata_qid)
 -- Both are metadata about the provider, not about a user, and media_items is already
 -- world-readable (`using (true)`), so no policy changes: a client can see which source
 -- a title came from, which is exactly what an attribution line needs.
+
+-- ---------------------------------------------------------------------------
+-- The retention view has to read the column, or the column decides nothing
+--
+-- media_refresh_due (from 20260813001500) selects every row with a tmdb_id past the
+-- window. Adding a provenance column without changing it would have left the column
+-- written by the seed and read by nobody: the refresh job would still have offered
+-- Wikidata rows to TMDB for refresh, and the justification above — that a retention job
+-- can now tell the two apart — would have been true of the schema and false of the code.
+--
+-- provenance is also projected, so a job draining the view can log or branch on it
+-- rather than joining back to find out what it is looking at. That is why this drops and
+-- recreates rather than replacing: CREATE OR REPLACE VIEW can only append a column, and
+-- the projection reads better with provenance beside the id it qualifies. Nothing depends
+-- on the view yet — the refresh job it exists for is unwritten.
+-- ---------------------------------------------------------------------------
+
+drop view media_refresh_due;
+
+create view media_refresh_due with (security_invoker = true) as
+select mi.id,
+       mi.kind,
+       mi.tmdb_id,
+       mi.parent_id,
+       mi.provenance,
+       mi.fetched_at
+  from media_items mi
+ where mi.provenance = 'tmdb'
+   and mi.tmdb_id is not null
+   and mi.fetched_at <
+       now() - (((select value #>> '{}' from app_config
+                   where key = 'tmdb.metadata_max_age_days')::integer)
+                * interval '1 day')
+   and (   exists (select 1 from user_media  um where um.media_item_id = mi.id)
+        or exists (select 1 from rankings    r  where r.media_item_id  = mi.id)
+        or exists (select 1 from watchlist   w  where w.media_item_id  = mi.id)
+        or exists (select 1 from list_items  li where li.media_item_id = mi.id)
+        or exists (select 1 from media_items s  where s.parent_id      = mi.id));
+
+comment on view media_refresh_due is
+  'TMDB-derived rows past the retention window that a user collection still references. Drained by the tmdb-adapter refresh job, which runs as service_role. Filtered on provenance, so CC0 rows — which have no expiry — are never offered for refresh.';

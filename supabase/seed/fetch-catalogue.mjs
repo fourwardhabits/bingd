@@ -60,6 +60,7 @@ let lastRequest = 0;
  */
 const request = async (query, format) => {
   for (let attempt = 1; ; attempt += 1) {
+    let retryAfter = 0;
     const wait = Math.max(0, lastRequest + PACE_MS - Date.now());
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
     lastRequest = Date.now();
@@ -80,31 +81,39 @@ const request = async (query, format) => {
       if (attempt === 5) {
         throw new Error(`Wikidata answered ${response.status}: ${body.slice(0, 200)}`);
       }
+      // A 429 usually says how long to wait, and guessing shorter just earns another one.
+      retryAfter = Number(response.headers.get('retry-after')) * 1000 || 0;
     } catch (error) {
       if (attempt === 5) throw error;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, attempt * 8000));
+    await new Promise((resolve) => setTimeout(resolve, Math.max(retryAfter, attempt * 8000)));
   }
 };
 
 const sparql = (query) => request(query, 'json');
 
 /**
- * Only ever asked to read two columns of URIs and integers, neither of which can
- * contain a comma or a quote, so this stays a split rather than growing into a CSV
- * parser. A row that does not look like that is dropped, and a truncated body loses its
- * final line rather than yielding half a value.
+ * Only ever asked to read two columns of URIs and integers, neither of which can contain
+ * a comma or a quote, so this stays a split rather than growing into a CSV parser.
+ *
+ * A malformed line *raises*. It would be easier to drop it, and that is what this did at
+ * first — which quietly defeated the retry above: a body cut mid-line loses that line and
+ * every line after it, and returning a short list with no error is how a refresh would
+ * have produced a smaller catalogue with nothing to show that anything went wrong.
  */
 const parseCsv = (body) => {
   const [header, ...lines] = body.trim().split(/\r?\n/);
   if (!header) throw new Error('empty response');
 
   const columns = header.split(',');
-  return lines
-    .map((line) => line.split(','))
-    .filter((cells) => cells.length === columns.length)
-    .map((cells) => Object.fromEntries(columns.map((name, i) => [name, cells[i]])));
+  return lines.map((line) => {
+    const cells = line.split(',');
+    if (cells.length !== columns.length) {
+      throw new Error(`truncated or malformed row: ${line.slice(0, 80)}`);
+    }
+    return Object.fromEntries(columns.map((name, i) => [name, cells[i]]));
+  });
 };
 
 const qid = (uri) => uri.split('/').pop();
@@ -168,6 +177,8 @@ const LANGUAGE_CODES = {
   'Latin American Spanish': 'es',
 };
 
+const CANDIDATE_LIMIT = 5000;
+
 const candidates = async (classQid, minSitelinks) => {
   const rows = await request(
     `
@@ -176,10 +187,20 @@ const candidates = async (classQid, minSitelinks) => {
             wikibase:sitelinks ?sitelinks .
       FILTER(?sitelinks >= ${minSitelinks})
     }
-    LIMIT 5000
+    ORDER BY DESC(?sitelinks)
+    LIMIT ${CANDIDATE_LIMIT}
   `,
     'csv',
   );
+
+  // Hitting the limit means the answer was cut, and an unordered cut is an arbitrary
+  // sample rather than the top of the list. Lowering MIN_SITELINKS is the likely way to
+  // get here, so it fails rather than quietly reshaping the catalogue.
+  if (rows.length >= CANDIDATE_LIMIT) {
+    throw new Error(
+      `${classQid}: ${rows.length} candidates hit the limit; raise MIN_SITELINKS or page the query`,
+    );
+  }
 
   return rows
     .map((row) => ({ qid: qid(row.item), sitelinks: Number(row.sitelinks) }))
@@ -187,22 +208,75 @@ const candidates = async (classQid, minSitelinks) => {
     .sort((a, b) => b.sitelinks - a.sitelinks);
 };
 
+/** Wikidata's duration units. Anything else is refused rather than assumed. */
+const UNIT_TO_MINUTES = {
+  Q7727: 1, // minute
+  Q11574: 1 / 60, // second
+  Q25235: 60, // hour
+};
+
 /**
- * One row per (date × runtime × language) combination, because Wikidata records a
- * release date per country and a runtime per cut. Collapsing to the earliest date and
- * the shortest runtime picks the original release and the theatrical cut often enough,
- * and always gives one answer rather than an arbitrary one.
+ * Runtime in whole minutes, or null.
+ *
+ * The unit is not decoration. `P2047` is a quantity *with* a unit, and some items record
+ * it in seconds — Oppenheimer is stored as 10809, which read as a bare number shipped a
+ * three-hour film as a seven-day one. Taking the shortest of several values does not save
+ * you either: it only helps when a correct value in minutes is also present.
+ *
+ * An unrecognised unit yields null, and so does anything outside a plausible range. A
+ * missing runtime is a gap; a wrong one is on the screen.
+ */
+const runtimeMinutes = (amount, unitUri) => {
+  const factor = UNIT_TO_MINUTES[qid(unitUri ?? '')];
+  if (!factor || !Number.isFinite(Number(amount))) return null;
+
+  const minutes = Math.round(Number(amount) * factor);
+  return minutes >= 1 && minutes <= 600 ? minutes : null;
+};
+
+/**
+ * A date, only if Wikidata knows the actual day.
+ *
+ * `wikibase:timePrecision` is 11 for a day, 10 for a month, 9 for a year — and a
+ * year-precision value is *rendered* as 1 January, indistinguishable from a real one
+ * unless the precision is asked for. Without this check, 86 titles claimed a 1 January
+ * release, and taking the earliest value made it worse: an item with both a year and a
+ * real date resolved to 1 January of that year. Once Upon a Time in the West came out in
+ * December 1968 and the catalogue said January.
+ */
+const preciseDate = (value, precision) =>
+  Number(precision) >= 11 ? isoDate(value) : null;
+
+/**
+ * One row per (date × runtime × language) combination, because Wikidata records a release
+ * date per country, a runtime per cut, and a language per language spoken. Every value is
+ * therefore collected first and reduced afterwards — the earlier version took whichever
+ * row happened to arrive first for language, which is how Inception came to be a French
+ * film and The Godfather an Italian one.
  */
 const details = async (items, tmdbProperty, startProperty) => {
   const byQid = new Map(items.map((item) => [item.qid, item]));
+  for (const item of items) {
+    item.dates = new Set();
+    item.runtimes = new Set();
+    item.languages = new Set();
+  }
 
   for (const batch of batches([...byQid.keys()])) {
     const rows = await sparql(`
-      SELECT ?item ?itemLabel ?tmdb ?date ?runtime ?languageLabel WHERE {
+      SELECT ?item ?itemLabel ?tmdb ?date ?datePrecision ?runtime ?runtimeUnit ?languageLabel WHERE {
         VALUES ?item { ${values(batch)} }
         OPTIONAL { ?item wdt:${tmdbProperty} ?tmdb }
-        OPTIONAL { ?item wdt:${startProperty} ?date }
-        OPTIONAL { ?item wdt:P2047 ?runtime }
+        OPTIONAL {
+          ?item p:${startProperty}/psv:${startProperty} ?dateValue .
+          ?dateValue wikibase:timeValue ?date ;
+                     wikibase:timePrecision ?datePrecision .
+        }
+        OPTIONAL {
+          ?item p:P2047/psv:P2047 ?runtimeValue .
+          ?runtimeValue wikibase:quantityAmount ?runtime ;
+                        wikibase:quantityUnit ?runtimeUnit .
+        }
         OPTIONAL { ?item wdt:P364 ?language }
         SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
       }
@@ -217,20 +291,40 @@ const details = async (items, tmdbProperty, startProperty) => {
       // nobody can read is worse than a slightly smaller catalogue.
       if (/^Q\d+$/.test(label)) continue;
 
-      const date = isoDate(row.date?.value);
-      const runtime = row.runtime ? Math.round(Number(row.runtime.value)) : null;
-
       item.title ??= label;
       item.tmdb_id ??= row.tmdb ? Number(row.tmdb.value) : null;
-      item.original_language ??= LANGUAGE_CODES[row.languageLabel?.value] ?? null;
-      if (date && (!item.release_date || date < item.release_date)) item.release_date = date;
-      if (runtime && (!item.runtime_minutes || runtime < item.runtime_minutes)) {
-        item.runtime_minutes = runtime;
-      }
+
+      const date = preciseDate(row.date?.value, row.datePrecision?.value);
+      if (date) item.dates.add(date);
+
+      const runtime = runtimeMinutes(row.runtime?.value, row.runtimeUnit?.value);
+      if (runtime) item.runtimes.add(runtime);
+
+      if (row.languageLabel) item.languages.add(row.languageLabel.value);
     }
   }
 
-  return items.filter((item) => item.title);
+  for (const item of items) {
+    // Earliest release and shortest runtime: the original release and, usually, the
+    // theatrical cut. Both are choices between real values rather than between a real
+    // value and an artefact, which is the part that had to be fixed.
+    item.release_date = [...item.dates].sort()[0] ?? null;
+    item.runtime_minutes = item.runtimes.size ? Math.min(...item.runtimes) : null;
+
+    // One language means one answer. Several means Wikidata is recording every language
+    // spoken in the film, which does not identify the original — Inception lists English,
+    // French, Japanese and Swahili — so the honest value is none.
+    item.original_language =
+      item.languages.size === 1 ? (LANGUAGE_CODES[[...item.languages][0]] ?? null) : null;
+
+    delete item.dates;
+    delete item.runtimes;
+    delete item.languages;
+  }
+
+  // A movie or series with no TMDB id cannot be enriched later and cannot collide on the
+  // conflict target that makes a refresh idempotent, so it is not worth carrying.
+  return items.filter((item) => item.title && Number.isInteger(item.tmdb_id));
 };
 
 const attachGenres = async (items) => {
@@ -269,13 +363,17 @@ const seasonsOf = async (series) => {
 
   for (const batch of batches(series.map((item) => item.qid))) {
     const rows = await sparql(`
-      SELECT ?series ?season ?ordinal ?date WHERE {
+      SELECT ?series ?season ?ordinal ?date ?datePrecision WHERE {
         VALUES ?series { ${values(batch)} }
         ?series p:P527 ?statement .
         ?statement ps:P527 ?season ;
                    pq:P1545 ?ordinal .
         ?season wdt:P31 wd:Q3464665 .
-        OPTIONAL { ?season wdt:P580 ?date }
+        OPTIONAL {
+          ?season p:P580/psv:P580 ?dateValue .
+          ?dateValue wikibase:timeValue ?date ;
+                     wikibase:timePrecision ?datePrecision .
+        }
       }
     `);
 
@@ -285,14 +383,21 @@ const seasonsOf = async (series) => {
       if (!Number.isInteger(number) || number < 1 || number > 100) continue;
 
       const key = `${parent}:${number}`;
-      const date = isoDate(row.date?.value);
+      const date = preciseDate(row.date?.value, row.datePrecision?.value);
       const existing = seasons.get(key);
 
       if (!existing) {
+        // The season's own Wikidata id is kept, and it is the point of this being a
+        // bridge rather than a throwaway: without it a season row is identified only by
+        // its parent and its number, so a provider could never match it directly. Seasons
+        // are the rankable TV unit under PRD §10, which makes it most of the television
+        // half of the product.
+        //
         // Titled by number rather than by Wikidata's label, which is "Breaking Bad,
         // season 1" — the series name is already beside it wherever a season appears.
         seasons.set(key, {
           parent_qid: parent,
+          wikidata_qid: qid(row.season.value),
           season_number: number,
           title: `Season ${number}`,
           release_date: date,
@@ -350,6 +455,8 @@ const main = async () => {
 
   const byTitle = (a, b) => a.title.localeCompare(b.title);
 
+  const kept = new Set(keptSeries.map((item) => item.qid));
+
   const catalogue = {
     source: 'wikidata',
     license: 'CC0-1.0',
@@ -357,11 +464,16 @@ const main = async () => {
     query: { min_sitelinks: MIN_SITELINKS },
     movies: films.map((item) => shape(item, 'movie')).sort(byTitle),
     series: keptSeries.map((item) => shape(item, 'series')).sort(byTitle),
-    seasons: seasons.sort((a, b) =>
-      a.parent_qid === b.parent_qid
-        ? a.season_number - b.season_number
-        : a.parent_qid.localeCompare(b.parent_qid),
-    ),
+    // A season whose series was dropped would name a parent that is not in the file, and
+    // the migration's join would silently discard it. Dropping it here instead keeps the
+    // dataset self-describing: everything in it is something the migration will insert.
+    seasons: seasons
+      .filter((season) => kept.has(season.parent_qid))
+      .sort((a, b) =>
+        a.parent_qid === b.parent_qid
+          ? a.season_number - b.season_number
+          : a.parent_qid.localeCompare(b.parent_qid),
+      ),
   };
 
   const path = fileURLToPath(new URL('./catalogue.json', import.meta.url));

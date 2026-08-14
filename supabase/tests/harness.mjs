@@ -230,12 +230,27 @@ export async function createTestDb() {
       return rows[0].id;
     },
 
+    /**
+     * The parent must itself be a fixture. Negating tmdb ids protects films and series
+     * from colliding with the seed catalogue, but a season's identity is its parent plus
+     * its number, so handing this a *seeded* series id reproduces the same unique-index
+     * failure one table over — and it would look like a bug in whatever was being tested.
+     */
     async createSeason(parentId, seasonNumber, title) {
       const { rows } = await db.query(
         `insert into media_items (kind, parent_id, season_number, title, provenance)
-         values ('season', $1, $2, $3, 'manual') returning id`,
+         select 'season', p.id, $2, $3, 'manual'
+           from media_items p
+          where p.id = $1 and p.kind = 'series' and p.provenance = 'manual'
+         returning id`,
         [parentId, seasonNumber, title],
       );
+      if (!rows[0]) {
+        throw new Error(
+          'createSeason needs a fixture series as its parent: pass an id from createSeries, ' +
+            'not a seeded one, or its season numbers will collide with the catalogue',
+        );
+      }
       return rows[0].id;
     },
 
