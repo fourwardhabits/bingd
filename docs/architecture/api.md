@@ -87,10 +87,12 @@ When the client supplies `p_base_updated_at` and it does not match, the function
 | `rank_skip(session_id)` | Re-anchor. Places at the midpoint on the third skip |
 | `rank_back(session_id)` | Step back one comparison |
 | `rank_cancel(session_id)` | Abandon the session. The bucket survives; the title stays Logged |
-| `rank_move(media_item_id, new_position)` | Manual reorder, clamped to the title's own band |
-| `unrank(media_item_id)` | Remove the position, keep the `user_media` row and its history |
+| `rank_reorder(media_item_id, new_position)` | Manual reorder, clamped to the title's own band |
+| `rank_unrank(media_item_id)` | Remove the position, keep the `user_media` row and its history |
 
 Every one of these is **absent from the outbox allowlist**, which is how PRD §18's rule that no ranking mutation is ever queued is enforced. Offline, the client does not attempt them and says so.
+
+> **Corrected 2026-08-14.** Two of these names were wrong here and one function did not exist. The table said `rank_move` and `unrank`; the implementations have always been `rank_reorder` and `rank_unrank`. And `rank_cancel` was specified from the beginning and never written — the gap survived because nothing called it, there being no comparison screen and therefore no close control. Building that screen is what found it. It exists now (`20260814050000`), because the alternatives were making a user unwind five answers with Back to escape a session, or leaving the row behind for `rank_start` to resume mid-search the next time that title came up.
 
 Semantics are in [`ranking.md`](./ranking.md).
 

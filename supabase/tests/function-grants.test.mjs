@@ -60,6 +60,8 @@ const ALLOWED = {
   'rank_skip(uuid)': ['authenticated'],
   'rank_back(uuid)': ['authenticated'],
   'rank_unrank(uuid)': ['authenticated'],
+  // Added 2026-08-14 with the comparison screen, which needed a way out of a session.
+  'rank_cancel(uuid)': ['authenticated'],
   'rank_reorder(uuid,integer)': ['authenticated'],
   'rank_rebucket(uuid,taste_bucket)': ['authenticated'],
   'report(report_subject,uuid,text,text)': ['authenticated'],

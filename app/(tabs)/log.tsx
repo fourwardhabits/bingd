@@ -3,10 +3,11 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { LogSheet, type LoggableTitle } from '@/features/collection/LogSheet';
+import { RankingSheet } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
 import { theme } from '@/ui/tokens';
-import { EmptyState, Field, Screen, Text, TitleRow } from '@/ui/components';
+import { EmptyState, Field, Screen, Text, TitleRow, type BucketId } from '@/ui/components';
 
 /**
  * The centre + tab. Opens directly into title search, which is why there is no separate
@@ -20,6 +21,9 @@ export default function LogScreen() {
   const [input, setInput] = useState('');
   const [series, setSeries] = useState<{ id: string; title: string } | null>(null);
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
+  const [ranking, setRanking] = useState<{ id: string; title: string; bucket: BucketId } | null>(
+    null,
+  );
 
   const { results, idle, isPending, isError, isPlaceholderData, refetch } = useTitleSearch(input);
 
@@ -83,7 +87,23 @@ export default function LogScreen() {
         }}
       />
 
-      <LogSheet title={logging} onClose={() => setLogging(null)} />
+      <LogSheet
+        title={logging}
+        onClose={() => setLogging(null)}
+        onFindWhereItLands={(bucket) => {
+          if (!logging) return;
+          // The log sheet closes as the comparison opens. screens.md §4 asks for one
+          // continuous motion, and two stacked sheets is the opposite of that.
+          setRanking({ id: logging.id, title: logging.title, bucket });
+          setLogging(null);
+        }}
+      />
+
+      <RankingSheet
+        subject={ranking}
+        onClose={() => setRanking(null)}
+        onRankAnother={() => setInput('')}
+      />
     </Screen>
   );
 }

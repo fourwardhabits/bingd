@@ -490,6 +490,24 @@ Three decisions in it are worth recording.
 
 The search hook debounces at 180ms and keeps the previous results on screen while the next ones load. That second part is doing more work than it sounds: without it the list empties on every keystroke, and a list that blinks reads as slower than one that lags slightly behind.
 
-### 7.18 Scope
+### 7.18 The other half: comparison, reveal, and a function that was never written
+
+Two posters, one question, and the position at the end of it. The loop now runs from typing a title to seeing where it landed.
+
+**The comparison screen shows no rank for the opponent.** Beli shows the incumbent's score and Bingd deliberately does not show the equivalent ordinal — "this is my #2" is an anchor that invites agreement rather than a judgement, and unanchored preference is the entire value of the mechanic. That decision was the founder's on 2026-08-13, and it is visible in the code as the component fetching only titles: there is nothing to leak.
+
+**Beli's three controls became two.** Its "Too tough" and "Skip" both map to `rank_skip`, so shipping both would be two buttons that do the same thing and a choice the user has to think about for no reason.
+
+**Progress is a line of text.** The remaining count is an estimate from a binary search whose range only the server knows, and a bar implies a precision the algorithm does not have.
+
+**`rank_cancel` did not exist.** `api.md` §2 has described it since the API was specified — abandon the session, keep the bucket, stay Logged — and nobody wrote it. The gap survived because nothing called it: there was no comparison screen, so no close control, so nothing needed a way out. Building the screen is what found it.
+
+The alternatives were both bad. Pressing Back repeatedly does cancel, since `rank_back` deletes the session at the first comparison, but making someone unwind five answers to escape is not an exit. Leaving the row behind is worse in a quieter way: `rank_start` resumes an open session, so an abandoned one would reappear the next time that title was ranked, mid-search, with no explanation to the user of why they were being asked again. It now exists, with eight tests.
+
+While checking that, two more names in the same table turned out to be wrong: `rank_move` and `unrank` have always been `rank_reorder` and `rank_unrank` in the code. Corrected in place, with a note saying so.
+
+**Share is missing from the reveal on purpose.** Share cards are not built, and an action that does nothing is worse than one not offered yet.
+
+### 7.19 Scope
 
 PRD §30 gains a **degradation order** — story card, then scheduled nudges, then public web pages, then collaborative filtering. Eleven phases is a large v1 for one founder working through agents, and the failure mode worth avoiding is discovering that in phase 9 and cutting whatever happens to be unfinished. Deciding the order now, while nothing is at stake, costs nothing. Ranking, import, feed, reporting, capability enforcement, invitations, and the offline matrix are above the line.
