@@ -42,6 +42,9 @@ const ALLOWED = {
   // Not anon: it answers which usernames exist, and a signed-out client has no
   // account to create, so the grant would buy enumeration and nothing else.
   'username_available(text)': ['authenticated'],
+  // Not anon either, per PRD §26.2 AC 1, which gives search to a signed-in user.
+  // media_fold and media_search are deliberately absent: they exist to be indexed.
+  'search_titles(text,integer)': ['authenticated'],
 
   // Account creation. Authenticated because a session exists before a profile
   // does — the user has completed a sign-in method and has no profile row yet.

@@ -304,6 +304,16 @@ Reads go directly to PostgREST against tables and views, filtered by RLS. Views 
 | `unranked_queue` | The highest-bucket-first queue from [`ranking.md`](./ranking.md) §10 |
 | `inbox` | Notifications joined to actor and subject |
 
+### Title search
+
+`search_titles(p_query text, p_limit integer default 20)` — added 2026-08-14. Returns `id, kind, title, release_date, poster_path, provenance`, films and series only, at most 50 rows. Signed-in callers only, per PRD §26.2 AC 1. A season is reached from its series page (AC 2); it would also be useless in a result list, since every seeded season is titled "Season 3".
+
+It is a function rather than a PostgREST filter because the matching is not expressible as one. `media_items` gained a GIN index over `media_search(title, original_title)`, a folded `to_tsvector('simple', …)`, and every typed token becomes a prefix term ANDed with the rest — so "dar kni" finds The Dark Knight and "amelie" finds Amélie. The tsquery is assembled from tokens split on non-alphanumerics rather than passed to `to_tsquery` directly, which is what stops "Fast & Furious" raising a syntax error and stops a user writing query operators.
+
+Ordering is total: a title starting with the query, then `ts_rank`, then `popularity`, `release_date`, `title`, `id`. The last two exist so that repeating a query returns the same page — without them, rows tying on rank swap between calls and pagination starts skipping titles.
+
+**No extension.** `pg_trgm` and `unaccent` would each be the obvious tool and neither exists in PGlite, which is the test harness — so an extension-based search would be exercised by nothing until it reached the hosted database. Full text search and GIN are core, and the accent fold is a fixed Latin table in `media_fold`. It folds Latin script only and ligatures lose their second letter, both of which are worth revisiting if `unaccent` ever becomes available on both sides.
+
 `visible_collection` is the one that earns its keep. `user_media` holds both public-safe data (the bucket) and always-private data (notes, watch dates) in the same row, and PRD §22 requires the split. Rather than trusting every future query to select the right columns, the raw table is owner-only and the view is the sole path to someone else's collection.
 
 Per the founder decision of 2026-08-13, the **Logged collection inherits profile visibility** — public on a public profile, approved followers only on a private one. `visible_collection` filters on `can_view_profile` like every other visibility-bearing read, so that decision needs no separate rule.

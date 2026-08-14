@@ -201,6 +201,9 @@ create index on media_items (title text_pattern_ops);
 alter table media_items
   add column provenance   catalogue_provenance not null default 'tmdb',
   add column wikidata_qid text;
+
+-- Added 2026-08-14 with search_titles; see Search below.
+create index on media_items using gin (media_search(title, original_title));
 ```
 
 One table for movies, series, and seasons (AD-1). Seasons carry a `parent_id` to their series. **Only `movie` and `season` rows are ever rankable** — series exist for browsing and grouping, and PRD §10 forbids ranking a whole series.
@@ -269,6 +272,14 @@ Facet-level TTLs match PRD §19: availability expires in hours, credits and keyw
 
 
 > **Read access is public** on `media_items` and `media_cache`. Catalog metadata is not user data. This is the only unrestricted read in the schema.
+
+### Search — added 2026-08-14
+
+`media_items` was searchable only by `like 'Incep%'`, which the `(title text_pattern_ops)` index above serves. That index cannot do case-insensitive matching, cannot fold an accent, and cannot match a word in the middle of a title — "knight" would never have found The Dark Knight.
+
+So there are now two immutable helpers and a GIN index over them. `media_fold(text)` lower-cases and strips Latin diacritics, and `media_search(title, original_title)` builds a `to_tsvector('simple', …)` from the folded pair. Both are `IMMUTABLE`, which is the only reason the expression can be indexed, and both are revoked from every client role: they exist to be indexed, not called, so they stay free to change. `search_titles` is the single read path, documented in [`api.md`](./api.md) §10.
+
+Two choices are worth keeping straight. The `simple` configuration rather than `english`, because stemming buys little on proper nouns while the stop-word list actively breaks things — under `english`, searching "the" produces an empty tsquery and therefore no rows. And **no extension**: `pg_trgm` and `unaccent` would each do this better, and neither exists in PGlite, which is the test harness. An extension-based search would have been exercised by nothing until it reached the hosted database, and search is on the path of every screen. The cost is a fold that handles Latin script only and loses the second letter of a ligature.
 
 ---
 

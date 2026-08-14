@@ -442,6 +442,16 @@ Three data defects came with them, none of which a schema can catch. Oppenheimer
 
 The two remaining test-only findings were closed the same way: `createSeason` now refuses a seeded series as its parent, since negating fixture TMDB ids protected films but not season numbers, and the README's description of the harness snapshot was inverted.
 
-### 7.16 Scope
+### 7.16 Search, without an extension
+
+The catalogue had 2,010 titles in it and no way to find one. `media_items` carried a `(title text_pattern_ops)` index, which serves `like 'Incep%'` and nothing else: case-sensitive, accent-sensitive, and unable to match a word anywhere but the start, so "knight" would never have found The Dark Knight.
+
+`search_titles(query, limit)` replaces it with Postgres full text search — a GIN index over a folded `to_tsvector`, every typed token turned into a prefix term and ANDed with the rest, so "dar kni" finds the film and a second word narrows rather than widens. Films and series only, since PRD §26.2 gives search those two and a season is reached from its series page.
+
+The decision worth recording is what it does **not** use. `pg_trgm` and `unaccent` are the obvious tools for fuzzy matching and accent folding, and both are extensions that PGlite — the test harness — does not have. Building on them would have meant the search path was exercised by nothing until it reached the hosted database, which is a poor thing to discover about the feature every screen depends on. Full text search and GIN are core Postgres, present identically in both, and the accent fold is a fixed Latin table. It costs something honest: the fold handles Latin script only, and a ligature loses its second letter, so Æon Flux answers to "aon" rather than "aeon".
+
+Seventeen tests, written against the real catalogue rather than fixtures, because the failures worth catching are about real titles — a stop word in The Office, an accent in Amélie, a word in the middle of The Dark Knight. A fixture called "Test Movie" would pass all of them and prove nothing. One asserts the query plan uses the index, which is the only thing that would notice if the expression in the function ever drifted from the expression in the index: results would stay correct and every other test would keep passing while the search quietly read the whole table.
+
+### 7.17 Scope
 
 PRD §30 gains a **degradation order** — story card, then scheduled nudges, then public web pages, then collaborative filtering. Eleven phases is a large v1 for one founder working through agents, and the failure mode worth avoiding is discovering that in phase 9 and cutting whatever happens to be unfinished. Deciding the order now, while nothing is at stake, costs nothing. Ranking, import, feed, reporting, capability enforcement, invitations, and the offline matrix are above the line.
