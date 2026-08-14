@@ -2,7 +2,10 @@ import { fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
-import LogScreen from './log';
+// Not colocated with the screen: everything under app/ is pulled into the bundle by
+// expo-router's require.context, which has no exclusion for test files, so a test living
+// next to its route ships the testing library to users. See app-directory.test.ts.
+import LogScreen from '../../../app/(tabs)/log';
 
 const mockRpc = jest.fn();
 const mockSeasons = jest.fn();
