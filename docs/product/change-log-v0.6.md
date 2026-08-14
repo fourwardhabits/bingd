@@ -508,6 +508,16 @@ While checking that, two more names in the same table turned out to be wrong: `r
 
 **Share is missing from the reveal on purpose.** Share cards are not built, and an action that does nothing is worse than one not offered yet.
 
-### 7.19 Scope
+### 7.19 Collection
+
+Three segments: Ranked, Logged, Watchlist. Lists is the fourth in the design and is not here, because there is no list UI to put behind it and an empty tab that cannot be filled is worse than one that has not arrived.
+
+**Ranked** is titles in position order under band headers, with a switcher between Movies and TV seasons. The two are never merged: a position is only meaningful inside its category, and a combined list would imply an ordering across them that nobody expressed.
+
+**Logged** states the split — "12 ranked · 40 logged" — and lists what has no position yet. No progress bar and no "380 remaining", per PRD §5. Someone importing 800 films must not open this tab and feel behind.
+
+One thing worth writing down because it would have been a runtime failure rather than a compile error: the Logged query originally asked PostgREST to embed `rankings(position)` from `user_media`. PostgREST embeds across a foreign key and there is none between those two tables — they share a primary key shape and nothing else, deliberately, since a constraint between them would assert something about ordering that is not true. It is two requests inside one query instead, which also keeps the two counts in the header from disagreeing for a moment whenever either one lands.
+
+### 7.20 Scope
 
 PRD §30 gains a **degradation order** — story card, then scheduled nudges, then public web pages, then collaborative filtering. Eleven phases is a large v1 for one founder working through agents, and the failure mode worth avoiding is discovering that in phase 9 and cutting whatever happens to be unfinished. Deciding the order now, while nothing is at stake, costs nothing. Ranking, import, feed, reporting, capability enforcement, invitations, and the offline matrix are above the line.
