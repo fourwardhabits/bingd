@@ -73,10 +73,22 @@ const SHIM = `
   grant execute on function auth.uid() to anon, authenticated, service_role;
 `;
 
-export async function createTestDb() {
-  const db = await PGlite.create();
-  await db.exec(SHIM);
+/**
+ * The migrated database, dumped once and reloaded for each test database.
+ *
+ * Applying the migrations is no longer cheap: the seed catalogue is two thousand rows,
+ * and replaying it per test file took the suite from forty seconds to nearly two
+ * minutes — the sort of cost that quietly stops people running tests. A PGlite data
+ * directory dump reloads in a fraction of the time.
+ *
+ * What matters for trust: this is a snapshot of the real migrations, applied in the real
+ * order, taken in this process. It is not a schema dump maintained beside them, which is
+ * the version of this idea that rots and starts disagreeing with production. If a
+ * migration is broken, the first `createTestDb` still fails, and it names the file.
+ */
+let migratedSnapshot;
 
+const applyMigrations = async (db) => {
   const files = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
 
   for (const file of files) {
@@ -88,6 +100,23 @@ export async function createTestDb() {
     } catch (e) {
       throw new Error(`Migration ${file} failed: ${e.message}`);
     }
+  }
+
+  return files;
+};
+
+export async function createTestDb() {
+  let db;
+  let files;
+
+  if (migratedSnapshot) {
+    db = await PGlite.create({ loadDataDir: migratedSnapshot.dump.slice() });
+    files = migratedSnapshot.files;
+  } else {
+    db = await PGlite.create();
+    await db.exec(SHIM);
+    files = await applyMigrations(db);
+    migratedSnapshot = { dump: await db.dumpDataDir('none'), files };
   }
 
   return {
@@ -172,31 +201,56 @@ export async function createTestDb() {
       return id;
     },
 
-    /** Creates a movie and returns its id. */
+    /**
+     * Creates a movie and returns its id.
+     *
+     * The tmdb id a test passes is negated. Since the seed catalogue arrived, the
+     * positive range holds real titles, and a fixture asking for 1018 collided with a
+     * real film and failed on a unique index — a test failing because of what someone
+     * else's catalogue happens to contain. Negative ids cannot be real, so a fixture
+     * and the catalogue can no longer meet, and the numbers tests pass keep their only
+     * job: telling one fixture apart from another. `provenance` is stated for the same
+     * reason it exists: a fixture is not TMDB's and must not be treated as expiring.
+     */
     async createMovie(title, tmdbId) {
       const { rows } = await db.query(
-        `insert into media_items (kind, tmdb_id, title)
-         values ('movie', $1, $2) returning id`,
-        [tmdbId, title],
+        `insert into media_items (kind, tmdb_id, title, provenance)
+         values ('movie', $1, $2, 'manual') returning id`,
+        [-Math.abs(tmdbId), title],
       );
       return rows[0].id;
     },
 
     async createSeries(title, tmdbId) {
       const { rows } = await db.query(
-        `insert into media_items (kind, tmdb_id, title)
-         values ('series', $1, $2) returning id`,
-        [tmdbId, title],
+        `insert into media_items (kind, tmdb_id, title, provenance)
+         values ('series', $1, $2, 'manual') returning id`,
+        [-Math.abs(tmdbId), title],
       );
       return rows[0].id;
     },
 
+    /**
+     * The parent must itself be a fixture. Negating tmdb ids protects films and series
+     * from colliding with the seed catalogue, but a season's identity is its parent plus
+     * its number, so handing this a *seeded* series id reproduces the same unique-index
+     * failure one table over — and it would look like a bug in whatever was being tested.
+     */
     async createSeason(parentId, seasonNumber, title) {
       const { rows } = await db.query(
-        `insert into media_items (kind, parent_id, season_number, title)
-         values ('season', $1, $2, $3) returning id`,
+        `insert into media_items (kind, parent_id, season_number, title, provenance)
+         select 'season', p.id, $2, $3, 'manual'
+           from media_items p
+          where p.id = $1 and p.kind = 'series' and p.provenance = 'manual'
+         returning id`,
         [parentId, seasonNumber, title],
       );
+      if (!rows[0]) {
+        throw new Error(
+          'createSeason needs a fixture series as its parent: pass an id from createSeries, ' +
+            'not a seeded one, or its season numbers will collide with the catalogue',
+        );
+      }
       return rows[0].id;
     },
 

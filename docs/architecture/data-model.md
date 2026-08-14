@@ -196,11 +196,54 @@ create unique index on media_items (kind, tmdb_id) where kind in ('movie','serie
 create unique index on media_items (parent_id, season_number) where kind = 'season';
 create index on media_items using gin (genres);
 create index on media_items (title text_pattern_ops);
+
+-- Added 2026-08-13 with the seed catalogue; see Provenance below.
+alter table media_items
+  add column provenance   catalogue_provenance not null default 'tmdb',
+  add column wikidata_qid text;
 ```
 
 One table for movies, series, and seasons (AD-1). Seasons carry a `parent_id` to their series. **Only `movie` and `season` rows are ever rankable** — series exist for browsing and grouping, and PRD §10 forbids ranking a whole series.
 
 The rankable category is derived, not stored: `movie` → `movies`, `season` → `tv_seasons`.
+
+### Provenance — added 2026-08-13
+
+```sql
+create type catalogue_provenance as enum ('tmdb', 'wikidata', 'manual');
+
+alter table media_items
+  add column provenance   catalogue_provenance not null default 'tmdb',
+  add column wikidata_qid text;
+
+create unique index on media_items (wikidata_qid) where wikidata_qid is not null;
+```
+
+The table was designed around one provider, and PRD §19 requires TMDB-derived metadata to refresh or reduce to an identifier inside six months. `fetched_at` measures the window, but nothing said whether the window applied, so a retention job would have had to treat every row as TMDB's or none of them.
+
+That became concrete with the seed catalogue below, whose rows are CC0 and expire never. **The default is `'tmdb'` on purpose**, even though it is the one that causes work: the two ways of being wrong are not symmetrical. Defaulting to `'tmdb'` can expire a row that need not expire, which costs a refetch. Defaulting to `'wikidata'` would silently exempt provider data from the six-month rule and turn a forgotten argument into a licence breach.
+
+`wikidata_qid` is how a refresh finds the row it produced, and how a title stays identifiable if its `tmdb_id` turns out to be wrong. It is also the conflict target the seed upserts on, for that reason: a corrected TMDB id is routine and a Q-number is stable, so keying on the id that does not move lets a refresh update the row instead of colliding with the other unique index and aborting the whole migration.
+
+**`media_refresh_due` filters on it.** The same migration rebuilt the view, because a provenance column the retention job does not read decides nothing: the job would still have offered CC0 rows to TMDB for refresh, and the paragraph above would have been true of the schema and false of the code. The column is projected too, so a job draining the view can branch on it without joining back.
+
+### The seed catalogue — added 2026-08-13
+
+`*_seed_catalogue.sql` — one timestamped file, currently `20260814001131` — inserts roughly 380 films, 190 series and 1,400 seasons. It is generated — `supabase/seed/fetch-catalogue.mjs` queries Wikidata into `catalogue.json`, and `make-seed-migration.mjs` writes the migration from it. Neither runs in CI, and the SQL is never hand-edited.
+
+**Why it exists.** Nothing can enter `media_items` yet: the provider adapter is unwritten, and the licence question governing it is unanswered — TMDB's terms make anything beyond personal use a commercial negotiation, and no answer has come back. A catalogue is needed to test the core loop now. Wikidata's content is CC0: no attribution obligation, no retention window, and nothing to renegotiate when a private test stops being private.
+
+**Why a migration rather than a script.** `supabase db push` is already how every environment gets its schema and the harness already replays every migration, so a seed arriving that way needs no second mechanism and no step anyone can forget. `app_config` is seeded the same way. A refresh is a **new** generated migration — the filename carries a timestamp and the generator refuses to overwrite an existing file, because `db push` records a version as applied and then skips it, so regenerating in place would freeze the hosted catalogue at the first version while every fresh database got the new one.
+
+Its upserts correct the same rows rather than duplicating them, and three cases are asserted: a byte-identical re-application, a title whose local copy has drifted, and a **corrected `tmdb_id`**, which is the case that actually happens and the one that used to abort the migration.
+
+A refresh also stays in its own lane. Each `do update` carries `where media_items.provenance = 'wikidata'`, so a row the adapter has already enriched is left untouched. Without that clause a refresh reset `provenance` to `'wikidata'` while leaving the provider's poster, synopsis and score in place — relabelling TMDB content as CC0 and exempt from expiry, which is the failure this column exists to prevent, arrived at from the other side.
+
+**What it does not have.** No posters, because a poster is not a free work and Wikidata has none to give — so the client must look right without artwork, which is better learned now than after screens assume it. No `popularity`, because PRD §19 defines that as the provider's score; the ordering that chose these titles is Wikipedia sitelink count, a proxy for "widely known" and not the same measure. No `overview`, `original_title` or `backdrop_path` either — `overview` being the body text of a title detail screen, which will be empty until a provider fills it.
+
+Every film and series carries its `tmdb_id`, so once the licence is settled the adapter enriches those rows in place instead of building a second catalogue beside them. Seasons carry a Wikidata id but no TMDB one, because Wikidata has no property for a TMDB season: a season matches through its parent series and its number. That matters more than it sounds, since the season is the rankable television unit under PRD §10 — it is how the TV half of the catalogue stays connected to a provider at all.
+
+Two known blemishes in the data, both from the source rather than the pipeline: `original_language` is null for any title Wikidata records in more than one language, because `P364` lists every language spoken and does not identify the original, and the genre strings are Wikidata's taxonomy rather than a viewer's vocabulary — `huis-clos film` and `flashback film` appear. Mapping them to a controlled set is worth doing before genres are put in front of anyone.
 
 ```sql
 create table media_cache (

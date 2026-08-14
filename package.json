@@ -13,6 +13,8 @@
     "test": "jest",
     "test:db": "node --test \"supabase/tests/*.test.mjs\"",
     "test:remote": "node supabase/tests/remote-smoke.mjs",
+    "seed:fetch": "node supabase/seed/fetch-catalogue.mjs",
+    "seed:migration": "node supabase/seed/make-seed-migration.mjs",
     "build:web": "node web/build.mjs"
   },
   "dependencies": {

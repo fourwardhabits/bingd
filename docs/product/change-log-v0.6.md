@@ -410,6 +410,38 @@ The test written to guard that promise fabricated staleness from an arbitrary ti
 
 Three smaller corrections came with it. The future-date check compared against the server's UTC `current_date`, which refuses a correct "watched tonight" from anyone east of UTC for the first hours of their day, so it now allows one day of slack. The conflict payload no longer carries note text, because Postgres writes an exception's detail into the database log and a note is always-private under PRD §22 — the client owns the row and reads it back. And the migration's own justification for narrowing the idempotency key described an attack that could not happen as told: harm required burning an operation id before its owner sent it, which means predicting a uuid generated on someone else's device. The narrower key is still right, for the reason that it stops the question from needing an answer — but a comment asserting something false is a defect here, and it was rewritten to say what the change actually buys.
 
-### 7.14 Scope
+### 7.14 A catalogue that does not need a licence first
+
+Nothing could enter `media_items`. The provider adapter is unwritten, and the question governing it — whether a free alpha with declared subscription intent needs TMDB's commercial plan — has had no answer from TMDB. Meanwhile every part of the app that matters, logging and ranking and searching, needs titles to exist.
+
+So the alpha catalogue is seeded from Wikidata: about 380 films, 190 series and 1,400 seasons, chosen by Wikipedia sitelink count, which is a serviceable proxy for "a tester will search for this". Wikidata is CC0, so there is no attribution obligation, no six-month retention window and no negotiation standing between today and a phone with a working app on it. Every film and series keeps its TMDB id and every row keeps its Wikidata id, so the adapter enriches these rows in place when it arrives rather than building a second catalogue beside them.
+
+The catalogue is deliberately thin: no posters, because a poster is not a free work and Wikidata has none to give — which means the client has to look right without artwork, better learned now than after screens assume it. No `popularity`, because PRD §19 defines that as the provider's score and sitelink count is not the same measure; writing it there would have been a small lie something downstream would eventually rank by. No `overview`, `original_title` or `backdrop_path` either.
+
+The catalogue ships as a **generated migration**, which is the part worth defending. Data in a migration is unusual, but `supabase db push` is already how every environment gets its schema, the test harness already replays every migration, and `app_config` is seeded the same way — so a seed arriving by that route needs no second mechanism and no step anyone can forget before a build. The generator is committed alongside the dataset it reads and the SQL is never hand-edited.
+
+`media_items` gained a `provenance` column, because PRD §19's six-month window applies to TMDB rows and not to these, and `fetched_at` alone cannot tell them apart. Its default is `'tmdb'` deliberately: expiring a row that need not expire costs a refetch, while the opposite mistake is a licence breach.
+
+The harness also began caching, because replaying two thousand seed rows per test database took the suite from forty seconds to nearly two minutes, which is how a suite stops being run. It applies the migrations once per process — and `node --test` gives each file its own process — then reloads a snapshot for any further database, which brings it back to about a minute. The snapshot comes from the real migrations in the real order rather than a schema dump maintained beside them, so it cannot drift into disagreeing with production.
+
+### 7.15 What the review of that PR found, which was mostly the same mistake twice
+
+Nothing in the seed was broken in a way a test would have caught, and that is the point: the review found five defects that all consisted of a document or comment describing something the code did not do.
+
+The catalogue claimed every row carried its TMDB id. Seasons carried neither a TMDB id nor a Wikidata one — 1,432 of 2,010 rows, 71% of the catalogue, identified by nothing outside this database. The season's Wikidata id was being fetched and thrown away one line before it could have been saved. Since the season is the rankable television unit under PRD §10, the sentence was wrong about most of the TV half of the product. Seasons now keep their Wikidata id; a TMDB one does not exist, because Wikidata has no property for it, so the documentation says that instead of implying otherwise.
+
+The generator's own header said a refresh writes a *new* migration and the old one stays applied. The filename was a constant, so it overwrote the file in place. `db push` records a version as applied and skips it thereafter, so the hosted catalogue would have frozen at the first version forever while every fresh database — a reset, a new environment, every test run — got the new one. The name now carries a timestamp and the write refuses to overwrite an existing file.
+
+`provenance` was written by the seed and read by nobody: `media_refresh_due` still selected every row with a TMDB id, so the refresh job would have offered CC0 rows to TMDB, and the justification for adding the column was true of the schema and false of the code. The view now filters on it and projects it.
+
+Re-applying the seed reset `provenance` to `'wikidata'` on a row the adapter had enriched, while leaving the provider's poster, synopsis and score in place — relabelling TMDB content as CC0 and exempt from expiry. That is precisely the failure the column was added to prevent, reached from the direction nobody was looking. Each `do update` now carries `where media_items.provenance = 'wikidata'`.
+
+And the upserts keyed on `(kind, tmdb_id)` when the table has two unique indexes. A Wikidata TMDB-id correction — routine — would have collided with the other one and aborted the migration, which on a hosted push rolls back everything. They key on the Wikidata id now, which is the identity that does not move. The idempotency test had passed throughout, because it re-applied a byte-identical file; it now also mutates a `tmdb_id` and an enriched row first, and both new assertions fail against the old behaviour.
+
+Three data defects came with them, none of which a schema can catch. Oppenheimer shipped with a runtime of 10,809 minutes, because `P2047` is a quantity with a unit and that title records seconds; the unit is read now and implausible values are dropped. About thirty well-known English-language films were labelled French, German or Italian, because `P364` is multi-valued and whichever row arrived first won — Inception was French and The Godfather Italian. A title Wikidata records in more than one language now has no language rather than an arbitrary one. And 86 titles claimed a 1 January release, because Wikidata renders a year-precision date as 1 January and taking the earliest value made it worse; only day-precision dates are stored, which cost nothing in the end since every one of the 382 films has one.
+
+The two remaining test-only findings were closed the same way: `createSeason` now refuses a seeded series as its parent, since negating fixture TMDB ids protected films but not season numbers, and the README's description of the harness snapshot was inverted.
+
+### 7.16 Scope
 
 PRD §30 gains a **degradation order** — story card, then scheduled nudges, then public web pages, then collaborative filtering. Eleven phases is a large v1 for one founder working through agents, and the failure mode worth avoiding is discovering that in phase 9 and cutting whatever happens to be unfinished. Deciding the order now, while nothing is at stake, costs nothing. Ranking, import, feed, reporting, capability enforcement, invitations, and the offline matrix are above the line.
