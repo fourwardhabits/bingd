@@ -18,7 +18,8 @@
       "distribution": "internal",
       "channel": "development",
       "env": {
-        "APP_VARIANT": "development"
+        "APP_VARIANT": "development",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       },
       "ios": { "simulator": false },
       "android": { "buildType": "apk" }
@@ -29,7 +30,8 @@
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "APP_VARIANT": "preview"
+        "APP_VARIANT": "preview",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       },
       "android": { "buildType": "apk" }
     },

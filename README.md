@@ -82,6 +82,12 @@ Two decisions in there are load-bearing rather than incidental.
 
 Source map upload needs `SENTRY_AUTH_TOKEN`, which is an **EAS secret and never committed**. Without it a crash report shows minified output instead of a filename and a line number.
 
+The Sentry Gradle step does not treat a missing token as optional — it fails the build outright, with `Auth token is required for this request`, four minutes in. So the `development` and `preview` profiles set `SENTRY_DISABLE_AUTO_UPLOAD=true`: an internal build reports crashes but names them in minified code. `production` deliberately does not, so a store build fails loudly rather than shipping without source maps. Create the secret before the first production build:
+
+```bash
+eas env:create --environment production --name SENTRY_AUTH_TOKEN --type sensitive --value <token>
+```
+
 See PRD §23 and §24.
 
 ---
