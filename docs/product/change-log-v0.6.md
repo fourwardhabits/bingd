@@ -476,6 +476,72 @@ Smaller: the ten-token cap dropped words 11 and beyond, so an eleventh word wide
 
 Thirty tests, and this time they were checked the way the review checked them: seventeen deliberate regressions — each tier of the ordering removed in turn, the tokenizer reverted, the fold table corrupted, `english` restored, the AND made an OR, the cap removed — every one of which now fails at least one test. The first two passes of that exercise found two more tests that could not fail.
 
-### 7.17 Scope
+### 7.17 The first half of the loop, on a screen
+
+Search, the season picker, and the log sheet. A title can now be found and put in a collection from the app rather than from a SQL prompt, which is the first point at which any of this is testable by someone who is not reading the schema.
+
+Three decisions in it are worth recording.
+
+**A series opens its seasons rather than the log sheet.** `_assert_loggable` refuses a series, because the season is the rankable unit and a series is not (AD-1, PRD §10). That distinction is invisible in the data and would otherwise surface as a user tapping a result and being told no. The picker reads `media_items` straight through PostgREST — the catalogue is world-readable, so an RPC would be ceremony.
+
+**The sheet keeps bucketing and ranking apart, visibly.** Choosing a bucket saves immediately and the title is Logged; *Find where it lands* stays disabled, with its reason stated, until that has happened. PRD §11 makes this a rule and screens.md §4 makes it a surface, and it is the sort of rule that erodes the moment one screen decides to be helpful and start comparisons on the user's behalf.
+
+**Writes are online-only, and say so.** The outbox in `offline-sync.md` does not exist in the client — no SQLite mirror, no queue, no pending marker. A failed save keeps the user's choice on screen and tells them it did not save. The alternative was a sheet that looks like it queued and silently did not, which is worse than the gap and much harder to notice. Recorded in `client.md` §3 and in open questions as work to do before anyone tests this somewhere with poor signal.
+
+The search hook debounces at 180ms and keeps the previous results on screen while the next ones load. That second part is doing more work than it sounds: without it the list empties on every keystroke, and a list that blinks reads as slower than one that lags slightly behind.
+
+### 7.18 The other half: comparison, reveal, and a function that was never written
+
+Two posters, one question, and the position at the end of it. The loop now runs from typing a title to seeing where it landed.
+
+**The comparison screen shows no rank for the opponent.** Beli shows the incumbent's score and Bingd deliberately does not show the equivalent ordinal — "this is my #2" is an anchor that invites agreement rather than a judgement, and unanchored preference is the entire value of the mechanic. That decision was the founder's on 2026-08-13, and it is visible in the code as the component fetching only titles: there is nothing to leak.
+
+**Beli's three controls became two.** Its "Too tough" and "Skip" both map to `rank_skip`, so shipping both would be two buttons that do the same thing and a choice the user has to think about for no reason.
+
+**Progress is a line of text.** The remaining count is an estimate from a binary search whose range only the server knows, and a bar implies a precision the algorithm does not have.
+
+**`rank_cancel` did not exist.** `api.md` §2 has described it since the API was specified — abandon the session, keep the bucket, stay Logged — and nobody wrote it. The gap survived because nothing called it: there was no comparison screen, so no close control, so nothing needed a way out. Building the screen is what found it.
+
+The alternatives were both bad. Pressing Back repeatedly does cancel, since `rank_back` deletes the session at the first comparison, but making someone unwind five answers to escape is not an exit. Leaving the row behind is worse in a quieter way: `rank_start` resumes an open session, so an abandoned one would reappear the next time that title was ranked, mid-search, with no explanation to the user of why they were being asked again. It now exists, with eight tests.
+
+While checking that, two more names in the same table turned out to be wrong: `rank_move` and `unrank` have always been `rank_reorder` and `rank_unrank` in the code. Corrected in place, with a note saying so.
+
+**Share is missing from the reveal on purpose.** Share cards are not built, and an action that does nothing is worse than one not offered yet.
+
+### 7.19 Collection
+
+Three segments: Ranked, Logged, Watchlist. Lists is the fourth in the design and is not here, because there is no list UI to put behind it and an empty tab that cannot be filled is worse than one that has not arrived.
+
+**Ranked** is titles in position order under band headers, with a switcher between Movies and TV seasons. The two are never merged: a position is only meaningful inside its category, and a combined list would imply an ordering across them that nobody expressed.
+
+**Logged** states the split — "12 ranked · 40 logged" — and lists what has no position yet. No progress bar and no "380 remaining", per PRD §5. Someone importing 800 films must not open this tab and feel behind.
+
+One thing worth writing down because it would have been a runtime failure rather than a compile error: the Logged query originally asked PostgREST to embed `rankings(position)` from `user_media`. PostgREST embeds across a foreign key and there is none between those two tables — they share a primary key shape and nothing else, deliberately, since a constraint between them would assert something about ordering that is not true. It is two requests inside one query instead, which also keeps the two counts in the header from disagreeing for a moment whenever either one lands.
+
+### 7.20 What the review of the core loop found, which was one gap with four faces
+
+The review of the client PR gave the same verdict twice over: the two pure modules with tests were sound — 20 of 23 deliberate breakages caught — and the 1,374 lines of UI had no tests at all, so every one of the twelve mutants planted in it survived, including deleting the `rank_cancel` call that was the headline of the PR. Three of the four blocking findings were defects reproduced by execution in code no test touched. That is not a coincidence; it is the same finding stated four ways.
+
+**The log sheet filed a private note against the wrong film.** The sheet was rendered by a parent that swapped its `title` prop, and it cleared its own state by hand — from `close()` only. The other way out, "Find where it lands", left everything behind: the next title opened with the previous one's bucket pre-selected, its "Logged." message shown for a title nothing had been written for, and its note still in the field. Blurring that field then sent `log_watched` with the new title's id and the old title's private note. Notes are always-private under PRD §22, so this was not a leak to another account, but it was silent corruption of something the user wrote, plus a watch date recorded for a film they had not said they watched.
+
+The fix is structural rather than another `reset()` call. The component is now a wrapper that returns nothing when there is no title, and an inner sheet keyed by the title's id. Unmounting clears the state; the key covers the case where one title replaces another directly. Two of the eleven new tests are the two paths — title → different title, and title → none → the same title again — because a key alone fixes the first and only unmounting fixes the second.
+
+**An already-ranked title showed the user the words "use rank_rebucket to move it".** `rank_start` raises `23505`, which the client did not map, so it fell to the default branch that passes the server's message straight through. api.md §8 had the row all along. Mapped now, with a note in api.md that for this particular code the server's own text is a function name.
+
+**Closing the sheet leaked the session in two of the four states it can be closed from.** The cancel was guarded on `step.state === 'comparing'`, which covers the ordinary case and misses both edges: while the opening request is in flight the client has not learned the session id yet, and after a failure that is not a restart — a dropped connection, a suspension mid-session — the session is still standing on the server. Both leak exactly the orphan `rank_cancel` was written to prevent. The client now keeps the open session in a ref, cleared when the server says it finished the session itself, and cancels a session that arrives after the sheet has already been dismissed. The opening state also gained a Close control, since it previously rendered none at all.
+
+**The user could answer a comparison against a card they could not see.** The opponent's card was disabled until its row arrived; the subject's card was not. So during the read — which happens on every comparison, after the `rank_answer` round trip — a tap on the left card recorded a preference over a card reading "…". If the read failed outright the window never closed, because the error was never rendered. Both cards now wait, and a failed read says so with a retry.
+
+That last one made two standing documentation claims false, and they are retracted rather than papered over: `client.md` §5 and §9 both promised that the next pivot's poster is prefetched during the current decision. It cannot be. `rank_answer` chooses the next pivot from the answer being given, so its identity does not exist until the response returns. The claim was written before the screen was, and this PR is the first code it could be checked against.
+
+**The tests that could not fail.** Two claims failed the standard set in §7.16. The "two-character floor" test asserted `not.toHaveBeenCalled()` immediately after a rerender, before any debounce could fire, so it passed with the floor set to one — and with the debounce removed entirely. Both now wait a real interval and then assert, because "nothing happened yet" is only meaningful once the window has elapsed. And `newOperationId`'s test asserted a mocked constant while its own comment claimed to rule out a module constant; it now asserts two calls differ and that the platform generator was asked twice.
+
+**`rank_cancel`'s `security definer` was load-bearing and invisible.** Changed to `security invoker`, all 222 database tests passed — and the function failed with "permission denied" for every real client, because `authenticated` holds only `SELECT` on `ranking_sessions`. The whole suite ran through the harness's `actAs`, which sets `auth.uid()` while staying the table owner. There is now one test that calls it as a real `authenticated` role, and the SQLSTATE the client keys its already-gone tolerance off is asserted as a code rather than as a message.
+
+**Verification.** Thirty-seven mutants across the client, applied one at a time, all caught — including every one of the twelve the review planted in the UI, the nine collection-read mutants that previously had no test to face, and the two database breakages above. Two of my own mutants had to be retargeted first: one was behaviourally identical to the original, and one was caught only in a state the test never reached, which is the same class of mistake the review was pointing at. Client tests went from 74 to 127.
+
+Two smaller things went in alongside. Poster paths were being carried from the search results and then thrown away at every screen boundary, which is latent today because the Wikidata seed has no posters and would have surfaced as "the posters do not work" the day the TMDB adapter landed; there is now one helper that turns a path into a URL, used everywhere. And the comparison card was caching three columns under the same key a title screen would use for a whole row, so whichever query ran first would have served the other for five minutes.
+
+### 7.21 Scope
 
 PRD §30 gains a **degradation order** — story card, then scheduled nudges, then public web pages, then collaborative filtering. Eleven phases is a large v1 for one founder working through agents, and the failure mode worth avoiding is discovering that in phase 9 and cutting whatever happens to be unfinished. Deciding the order now, while nothing is at stake, costs nothing. Ranking, import, feed, reporting, capability enforcement, invitations, and the offline matrix are above the line.

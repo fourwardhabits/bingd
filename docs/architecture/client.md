@@ -68,15 +68,41 @@ Structured so invalidation can be surgical:
 ['recommendations', userId]
 ['title', mediaItemId]
 ['capabilities']
+['search', query]
+['seasons', seriesId]
 ```
 
 Completing a ranking invalidates `['rankings', me, category]` and `['collection', me]` and nothing else. The feed refreshes on its own schedule rather than being blown away by an unrelated write.
+
+The last two are **not** keyed by user, unlike everything above them. The catalogue is the same for every account, so a sign-out need not discard it and two accounts on one device can share it. Keying them by user would only mean fetching the same rows twice.
 
 ### Optimistic updates
 
 Only for outbox-eligible operations ([`api.md`](./api.md) §1). Every one carries the `pending` marker from [`offline-sync.md`](./offline-sync.md) §4 until the server confirms.
 
 **Ranking is never optimistic.** The position comes from the server, and guessing it would mean showing the user a number that might change — in the one moment the product has built up to.
+
+> **Not built yet, as of 2026-08-14.** There is no outbox and no SQLite mirror. Collection writes go straight to the RPC and a failure is shown as a failure — the log sheet keeps the user's choice on screen and says the save did not happen. `offline-sync.md` describes the design in full and none of it exists in the client, so a bucket chosen on the Underground is lost rather than queued. This is a gap to close before anyone tests the app somewhere with poor signal, not a decision.
+
+---
+
+## 3a. The log and rank loop — implemented 2026-08-14
+
+Search is the `+` tab (`app/(tabs)/log.tsx`), which is why there is no Search tab ([`screens.md`](../design/screens.md) §2). It calls `search_titles` through `useTitleSearch`, debounced at 180ms with `keepPreviousData`, which is what makes it read as filtering rather than as querying: without the latter, every keystroke empties the list for a round trip, and a list that blinks between states feels slower than one lagging a beat behind.
+
+Two characters is the floor. Below that every query matches half the catalogue.
+
+**A series opens its seasons, not the log sheet.** `_assert_loggable` refuses a series outright — the season is the rankable unit (AD-1, PRD §10) — so tapping one has to lead somewhere rather than fail. `SeasonPicker` reads `media_items` directly through PostgREST, since the catalogue is world-readable and needs no RPC, and hands the chosen season to the sheet along with the series title so the header does not read "Season 3" and nothing else.
+
+**The log sheet enforces the split the product depends on.** Choosing a bucket calls `set_bucket` and the title is Logged; comparisons begin only when the user taps *Find where it lands*, which stays disabled with a stated reason until a bucket is saved. That separation is a PRD §11 rule and this is the surface where a user first meets it.
+
+Every write carries an operation id generated per user intent, never per attempt — a retry must reuse it or the `processed_operations` ledger cannot tell a retry from a second opinion. `src/features/collection/writes.ts` is the only place SQLSTATEs are turned into sentences, for the same reason `create-profile.ts` is: matching on message text breaks silently the first time someone rewords one.
+
+**Comparison and reveal** live in one sheet (`RankingSheet`), because screens.md §4 asks for the sequence to feel like a single motion. The session RPCs return one jsonb blob that means four different things depending on which keys are present — a comparison, a placement, a cancellation, or an error — and `src/features/ranking/session.ts` is where that becomes a discriminated union. Reading it wrong is not a visible bug: it is a comparison shown after the title has already been placed, or a reveal with no number in it.
+
+The component fetches the pivot's **title and poster only**. There is deliberately no query for its position: the opponent's rank is never shown, so there is nothing on the client to leak by accident.
+
+Closing mid-session calls `rank_cancel`. Ending a comparison sheet without it would leave a session for `rank_start` to resume the next time that title came up, mid-search, with no explanation.
 
 ---
 
@@ -111,7 +137,9 @@ The comparison sequence is deliberately plain — two posters, one question, no 
 
 **Corrected 2026-08-13.** This section previously specified Antique Amber for the ordinal. Amber measures 1.9:1 against Parchment and fails WCAG at every text size, so the ordinal is set in Ink on an Amber panel instead — 7.0:1, same visual emphasis. The composition is in [`../design/design-system.md`](../design/design-system.md) §9.
 
-Comparison cards prefetch the next pivot's poster while the user is deciding, so the sequence never stalls on an image load. A stall here is disproportionately damaging, because the whole mechanic depends on feeling quick.
+**Corrected 2026-08-14.** This section previously claimed comparison cards prefetch the next pivot's poster while the user is deciding. Nothing prefetches, and nothing can: `rank_answer` chooses the next pivot from the answer being given, so its identity does not exist until the response arrives. The claim was written before the screen was, and the first code measured against it did not hold it.
+
+What the built screen does instead is refuse to accept an answer until the opponent is on screen. The window is real — the pivot's title and poster are read after the comparison renders — and letting the user tap through it recorded a preference over a card showing an ellipsis. A stall here is still disproportionately damaging, because the whole mechanic depends on feeling quick; closing it means fewer round trips, not speculative loading.
 
 ---
 
@@ -177,7 +205,7 @@ Non-production builds show a persistent environment badge. Icons differ so the t
 |---|---|
 | Long ranking lists | `FlashList`, with positions already dense so no client-side ordering is needed |
 | Poster loading | `expo-image` with disk cache and blurhash placeholders |
-| Comparison prefetch | Next pivot's artwork prefetched during the current decision |
+| Comparison card | Opponent read on arrival; both cards inert until it is on screen (§5 — the prefetch this row once claimed is impossible) |
 | Feed pagination | Cursor-based on `created_at`, never offset |
 | Cold start | Own collection renders from SQLite before any network response |
 

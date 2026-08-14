@@ -87,10 +87,12 @@ When the client supplies `p_base_updated_at` and it does not match, the function
 | `rank_skip(session_id)` | Re-anchor. Places at the midpoint on the third skip |
 | `rank_back(session_id)` | Step back one comparison |
 | `rank_cancel(session_id)` | Abandon the session. The bucket survives; the title stays Logged |
-| `rank_move(media_item_id, new_position)` | Manual reorder, clamped to the title's own band |
-| `unrank(media_item_id)` | Remove the position, keep the `user_media` row and its history |
+| `rank_reorder(media_item_id, new_position)` | Manual reorder, clamped to the title's own band |
+| `rank_unrank(media_item_id)` | Remove the position, keep the `user_media` row and its history |
 
 Every one of these is **absent from the outbox allowlist**, which is how PRD §18's rule that no ranking mutation is ever queued is enforced. Offline, the client does not attempt them and says so.
+
+> **Corrected 2026-08-14.** Two of these names were wrong here and one function did not exist. The table said `rank_move` and `unrank`; the implementations have always been `rank_reorder` and `rank_unrank`. And `rank_cancel` was specified from the beginning and never written — the gap survived because nothing called it, there being no comparison screen and therefore no close control. Building that screen is what found it. It exists now (`20260814050000`), because the alternatives were making a user unwind five answers with Back to escape a session, or leaving the row behind for `rank_start` to resume mid-search the next time that title came up.
 
 Semantics are in [`ranking.md`](./ranking.md).
 
@@ -270,6 +272,8 @@ Two of these mappings deserve a note, because the SQLSTATE alone does not get yo
 **`53400` only becomes a clean `BG429` behind the edge layer.** PostgREST maps it to HTTP **500** on its own. `53400` is `configuration_limit_exceeded`, which PostgREST treats as a server-side misconfiguration rather than as a per-user ceiling; most of the rest of class 53 is `insufficient_resources` and maps to 503. Either way, a client calling `rpc/report` directly is told the server broke when it had merely hit its daily limit. Since the mapping table above is applied at the edge, the behaviour is right as long as reporting goes through it — a constraint on the client, not a detail of the database.
 
 **`23503` should be unreachable, which is why it maps to `BG422`.** A session that has authenticated but not yet completed `create_profile` passes `assert_can_write` — there is no profile row to be suspended — and then trips a foreign key on the first write, both in `processed_operations` and in `user_media`. A correct client never reaches a write from that state, so the honest surface is "report this as a bug" rather than a field error the user can act on.
+
+**`23505` from `rank_start` is a product state, not a conflict to retry.** It means the title already has a position, and the database's own message names `rank_rebucket`, which is an internal function and not a sentence to show anyone. The client replaces it with "This already has a position. Move it from your collection instead." Recorded here because the first client written against this table missed the row: an unmapped SQLSTATE falls through to the generic branch, which passes the server's text straight to the screen — and for this one code the server's text is a function name.
 
 **A pivot that stops being ranked mid-session makes `rank_answer` reject rather than re-prompt.** If a title is unranked in another session, or on another device, while it is on screen as a comparison, answering with it returns `BG409` and the client should restart the session. `rank_back` and `rank_skip` behave the same way. The alternative — silently substituting a different pivot — would attribute an answer to a comparison the user was never shown, and a ranking is only as trustworthy as the comparisons behind it.
 
