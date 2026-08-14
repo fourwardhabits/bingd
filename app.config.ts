@@ -123,7 +123,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-sharing',
     'expo-status-bar',
     'expo-web-browser',
-    ['expo-splash-screen', { backgroundColor: '#F5EBDD' }],
+    // Sets the Android root view background, so the first frame is the brand cream
+    // rather than white. It is also what makes userInterfaceStyle above mean anything
+    // on Android — prebuild says so out loud: "userInterfaceStyle: Install
+    // expo-system-ui in your project to enable this feature."
+    'expo-system-ui',
+    // expo-splash-screen is deliberately not configured here. Its plugin writes
+    // `windowSplashScreenAnimatedIcon="@drawable/splashscreen_logo"` into the theme
+    // whether or not an `image` was given, and generates that drawable only when one
+    // was — so configuring it with a colour alone fails the Android build at resource
+    // linking with "resource drawable/splashscreen_logo not found", ten minutes in.
+    // The package stays installed because the app calls preventAutoHideAsync; it gets
+    // its plugin entry back with a real logo in the brand asset pass (PRD §5).
     // Present in all variants from the first build (PRD §15). Delivery is
     // flagged off server-side in production rather than omitted here.
     // Icon and sound assets are added with the brand asset pass (PRD §5).
