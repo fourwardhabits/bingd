@@ -43,8 +43,12 @@ const ALLOWED = {
   // account to create, so the grant would buy enumeration and nothing else.
   'username_available(text)': ['authenticated'],
   // Not anon either, per PRD §26.2 AC 1, which gives search to a signed-in user.
-  // media_fold and media_search are deliberately absent: they exist to be indexed.
   'search_titles(text,integer)': ['authenticated'],
+  // Only because search_titles runs as the caller and folds the query text through it. A
+  // security invoker function cannot call what the caller may not. It is a pure function
+  // of a string and knows nothing about anybody. media_search and media_sort_key are
+  // deliberately absent: they exist to generate columns, not to be called.
+  'media_fold(text)': ['authenticated'],
 
   // Account creation. Authenticated because a session exists before a profile
   // does — the user has completed a sign-in method and has no profile row yet.
