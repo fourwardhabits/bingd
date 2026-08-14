@@ -98,6 +98,12 @@ Two characters is the floor. Below that every query matches half the catalogue.
 
 Every write carries an operation id generated per user intent, never per attempt — a retry must reuse it or the `processed_operations` ledger cannot tell a retry from a second opinion. `src/features/collection/writes.ts` is the only place SQLSTATEs are turned into sentences, for the same reason `create-profile.ts` is: matching on message text breaks silently the first time someone rewords one.
 
+**Comparison and reveal** live in one sheet (`RankingSheet`), because screens.md §4 asks for the sequence to feel like a single motion. The session RPCs return one jsonb blob that means four different things depending on which keys are present — a comparison, a placement, a cancellation, or an error — and `src/features/ranking/session.ts` is where that becomes a discriminated union. Reading it wrong is not a visible bug: it is a comparison shown after the title has already been placed, or a reveal with no number in it.
+
+The component fetches the pivot's **title and poster only**. There is deliberately no query for its position: the opponent's rank is never shown, so there is nothing on the client to leak by accident.
+
+Closing mid-session calls `rank_cancel`. Ending a comparison sheet without it would leave a session for `rank_start` to resume the next time that title came up, mid-search, with no explanation.
+
 ---
 
 ## 4. Design tokens
