@@ -20,6 +20,8 @@ const CODES = {
   /** The session, or a pivot in it, is gone. */
   notFound: 'P0002',
   invalidInput: '22023',
+  /** The title already has a position, so `rank_start` refuses (api.md §8, BG409). */
+  alreadyRanked: '23505',
   suspended: '42501',
   unauthenticated: '28000',
 } as const;
@@ -87,6 +89,14 @@ const fail = (error: { code?: string; message: string }): SessionFailed => {
     case CODES.invalidInput:
       // Includes the pivot that stopped being ranked while it was on screen.
       return { state: 'failed', message: error.message, restart: true };
+    case CODES.alreadyRanked:
+      // The database's own text names rank_rebucket, which is an internal function and not
+      // a sentence to show anybody. Rebucketing from the collection is the way out.
+      return {
+        state: 'failed',
+        message: 'This already has a position. Move it from your collection instead.',
+        restart: false,
+      };
     case CODES.suspended:
       return {
         state: 'failed',

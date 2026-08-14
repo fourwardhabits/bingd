@@ -17,6 +17,10 @@ export const queryKeys = {
   feed: (cursor?: string) => ['feed', { cursor }] as const,
   recommendations: (userId: string) => ['recommendations', userId] as const,
   title: (mediaItemId: string) => ['title', mediaItemId] as const,
+  // Deliberately separate from `title`: the comparison card reads three columns, and
+  // sharing a key with a full title row would let whichever query ran first serve the
+  // other a shape it did not ask for.
+  comparisonCard: (mediaItemId: string) => ['comparison-card', mediaItemId] as const,
   // Not keyed by user: the catalogue is the same for everyone, so a sign-out need not
   // discard it and two accounts on one device share the cache.
   search: (query: string) => ['search', query] as const,

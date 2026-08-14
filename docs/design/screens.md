@@ -92,6 +92,8 @@ Opened from **+**, from a title page, or from a search result. A sheet, not a sc
 
 Anatomy: title header with poster and a close control; a category indicator (Movies or TV seasons); **"How was it?"** with the three bucket chips; then optional rows for who you watched it with, a private note, and the date.
 
+**Built 2026-08-14 without two of those rows.** The tagging picker needs the social graph, which does not exist yet. The date row is not built either, and the consequence is worth stating plainly: the watch date is written only alongside a note, so a user cannot record "I watched this last night" without also typing something. Recorded in [`open-questions.md`](../product/open-questions.md).
+
 Two rules the architecture depends on:
 
 - Choosing a bucket **saves immediately** and is queueable offline. The title is now Logged.
@@ -105,13 +107,15 @@ Offline, the bucket saves with a pending marker and the ranking action is disabl
 
 ![Beli's comparison screen](./references/beli-252-comparison.jpg)
 
-Beli's version is a stacked card inside the same sheet, with Undo, "Too tough," and Skip along the bottom. The structure is right and Bingd should follow it: staying in the sheet preserves the sense that bucketing and comparing are one flow, and the three controls map exactly to the API — `rank_back`, `rank_skip`, `rank_skip` ([`ranking.md`](../architecture/ranking.md)).
+Beli's version is a stacked card inside the same sheet, with Undo, "Too tough," and Skip along the bottom. The structure is right and Bingd should follow it: staying in the sheet preserves the sense that bucketing and comparing are one flow.
 
-Bingd's version is barer. Two `poster.xl` cards, **"Which did you like more?"** above them in `title2`, the film's title beneath each card, and the three controls below. No year, no runtime, no genre. Everything else is something the user reads instead of deciding.
+Bingd's version is barer. Two `poster.xl` cards, **"Which did you like more?"** above them in `title2`, the film's title beneath each card, and the controls below. No year, no runtime, no genre. Everything else is something the user reads instead of deciding.
 
-Progress is shown as a quiet line — "About 3 more" — rather than a bar, because the count is an estimate from the binary search and a bar implies precision the algorithm does not have.
+**Two controls, not three (built 2026-08-14).** This section previously specified three, mapping to `rank_back`, `rank_skip` and `rank_skip`. Beli's "Too tough" and Skip call the same thing, so Bingd ships **Back** and **Too tough to call**: two buttons that do the same work is a choice the user has to think about for no reason.
 
-The next pivot's poster prefetches while the user decides ([`client.md`](../architecture/client.md) §5). A stall here damages the whole mechanic.
+Progress is shown as a quiet line rather than a bar, because the count is an estimate from the binary search and a bar implies precision the algorithm does not have. **Built without the count.** This section previously specified "About 3 more". The remaining count is a property of a range only the server knows, and the server does not return it, so the line reads "A few comparisons to go" and then "Getting closer" — an estimate stated as one, rather than a fabricated number.
+
+**No prefetch, and none is possible (corrected 2026-08-14).** This section previously claimed the next pivot's poster prefetches while the user decides. It cannot: the next pivot's identity is chosen by `rank_answer` from the answer being given, so it does not exist until the round trip returns. What is built instead is that neither card can be tapped until the opponent is on screen — answering against a card showing an ellipsis records a preference over something the user was never shown. A stall here still damages the mechanic, and the honest fix is the server round trip, not a prefetch.
 
 **The comparison card never shows the opponent's current rank.** Beli shows the opponent's score (`7.8` in the reference) and Bingd deliberately does not show the equivalent ordinal. "This is my #2" is an anchor that invites agreement rather than a real judgment, and the mechanic's whole value is unanchored preference. The position is visible everywhere else in the app. Decided by the founder on 2026-08-13.
 
@@ -119,7 +123,7 @@ The next pivot's poster prefetches while the user decides ([`client.md`](../arch
 
 The composition in [`design-system.md`](./design-system.md) §9: an Amber panel, the ordinal in Ink at display size, category and title below.
 
-Below the panel, three actions: **Share**, **Rank another**, and **Done**. Beli celebrates the first rank specifically ([`references/beli-229-first-rank-celebration.jpg`](./references/beli-229-first-rank-celebration.jpg)) and Bingd should too — the first reveal is the moment the product explains itself, and it is worth a distinct line of copy.
+Below the panel, three actions: **Share**, **Rank another**, and **Done**. **Share is absent as built (2026-08-14)** — share cards do not exist, and an action that does nothing is worse than one that has not arrived. Beli celebrates the first rank specifically ([`references/beli-229-first-rank-celebration.jpg`](./references/beli-229-first-rank-celebration.jpg)) and Bingd should too — the first reveal is the moment the product explains itself, and it is worth a distinct line of copy.
 
 ---
 
@@ -130,6 +134,8 @@ The user's own working surface. Four segments: **Ranked · Logged · Watchlist �
 **Ranked** is the artifact. Titles in position order, grouped under band headers — *Loved it*, *It was fine*, *Not for me* — which is how the bucket partition (INF-3, now decided) becomes legible rather than mysterious. Each row is a title row with its ordinal. A category switcher toggles Movies and TV seasons, which are separate rankings.
 
 **Logged** holds watched titles without a position. Its header states the split plainly — "142 ranked · 380 logged" — which is the PRD §5 wording, and offers **"Rank a few"** to start a session over unranked titles. No progress bar toward 100% and no "380 remaining," per the same guidance. Someone importing 800 films must not open this tab and feel behind.
+
+**"Rank a few" is not built (2026-08-14).** The `unranked_queue` RPC that would serve it exists and is unused. The tab lists the unranked titles and each one can be opened individually; what is missing is the batch entry point.
 
 **Watchlist** is a simple list with the fastest possible path to logging.
 

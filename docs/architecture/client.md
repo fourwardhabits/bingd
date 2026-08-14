@@ -137,7 +137,9 @@ The comparison sequence is deliberately plain — two posters, one question, no 
 
 **Corrected 2026-08-13.** This section previously specified Antique Amber for the ordinal. Amber measures 1.9:1 against Parchment and fails WCAG at every text size, so the ordinal is set in Ink on an Amber panel instead — 7.0:1, same visual emphasis. The composition is in [`../design/design-system.md`](../design/design-system.md) §9.
 
-Comparison cards prefetch the next pivot's poster while the user is deciding, so the sequence never stalls on an image load. A stall here is disproportionately damaging, because the whole mechanic depends on feeling quick.
+**Corrected 2026-08-14.** This section previously claimed comparison cards prefetch the next pivot's poster while the user is deciding. Nothing prefetches, and nothing can: `rank_answer` chooses the next pivot from the answer being given, so its identity does not exist until the response arrives. The claim was written before the screen was, and the first code measured against it did not hold it.
+
+What the built screen does instead is refuse to accept an answer until the opponent is on screen. The window is real — the pivot's title and poster are read after the comparison renders — and letting the user tap through it recorded a preference over a card showing an ellipsis. A stall here is still disproportionately damaging, because the whole mechanic depends on feeling quick; closing it means fewer round trips, not speculative loading.
 
 ---
 
@@ -203,7 +205,7 @@ Non-production builds show a persistent environment badge. Icons differ so the t
 |---|---|
 | Long ranking lists | `FlashList`, with positions already dense so no client-side ordering is needed |
 | Poster loading | `expo-image` with disk cache and blurhash placeholders |
-| Comparison prefetch | Next pivot's artwork prefetched during the current decision |
+| Comparison card | Opponent read on arrival; both cards inert until it is on screen (§5 — the prefetch this row once claimed is impossible) |
 | Feed pagination | Cursor-based on `created_at`, never offset |
 | Cold start | Own collection renders from SQLite before any network response |
 

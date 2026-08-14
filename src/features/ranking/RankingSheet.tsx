@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useCurrentProfile } from '@/features/auth';
+import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/ui/tokens';
@@ -20,7 +21,7 @@ import {
 
 export type RankingSheetProps = {
   /** The title being placed, with the bucket the user already chose for it. */
-  subject: { id: string; title: string; bucket: BucketId } | null;
+  subject: { id: string; title: string; bucket: BucketId; posterUri?: string | null } | null;
   onClose: () => void;
   /** "Rank another" — closes this and sends the user back to search. */
   onRankAnother?: () => void;
@@ -61,8 +62,19 @@ function Session({
   const [busy, setBusy] = useState(true);
   const [answered, setAnswered] = useState(0);
 
+  // The session the server is still holding, if any — what closing owes a rank_cancel to.
+  // A ref because it has to be right in the same tick as the press, and because it has to
+  // outlive the states that render nothing from it.
+  const openSession = useRef<string | null>(null);
+
   const apply = useCallback(
     (next: SessionStep) => {
+      if (next.state === 'comparing') openSession.current = next.sessionId;
+      // placed and ended mean the server deleted the session itself; a failure asking for
+      // a restart means it was already gone. A failure that does not — a dropped
+      // connection, a suspension mid-session — leaves it standing, so the id is kept.
+      else if (next.state !== 'failed' || next.restart) openSession.current = null;
+
       setStep(next);
       if (next.state === 'placed') {
         // The position is the server's, and it changed this category and this collection.
@@ -79,9 +91,17 @@ function Session({
   useEffect(() => {
     let live = true;
     void rankStart(subject.id, subject.bucket).then((next) => {
-      if (!live) return;
-      setBusy(false);
-      apply(next);
+      if (live) {
+        setBusy(false);
+        apply(next);
+        return;
+      }
+
+      // Dismissed while the session was still opening, so nothing on screen ever learned
+      // its id. Cancelling it here is the only chance: leave it and the next rank_start
+      // for this title resumes it mid-search, with no explanation for why the user is
+      // being asked again.
+      if (next.state === 'comparing') void rankCancel(next.sessionId);
     });
 
     return () => {
@@ -89,19 +109,21 @@ function Session({
     };
   }, [subject, apply]);
 
-  const act = async (run: () => Promise<SessionStep>, countsAsAnswer = false) => {
+  const act = async (run: () => Promise<SessionStep>, progress = 0) => {
     if (busy) return;
     setBusy(true);
     const next = await run();
     setBusy(false);
-    if (countsAsAnswer) setAnswered((n) => n + 1);
+    if (progress) setAnswered((n) => Math.max(0, n + progress));
     apply(next);
   };
 
   const close = async () => {
-    // Leave the session behind and rank_start would resume it mid-search the next time
-    // this title came up, with no explanation for why the user was being asked again.
-    if (step?.state === 'comparing') await rankCancel(step.sessionId);
+    const sessionId = openSession.current;
+    openSession.current = null;
+    // Already gone reads as success, so this is safe when the server finalised the session
+    // under a request that was still in flight.
+    if (sessionId) await rankCancel(sessionId);
     onClose();
   };
 
@@ -134,9 +156,9 @@ function Session({
             answered={answered}
             busy={busy}
             onPick={(winnerId) =>
-              void act(() => rankAnswer(step.sessionId, winnerId, subject.id), true)
+              void act(() => rankAnswer(step.sessionId, winnerId, subject.id), 1)
             }
-            onBack={() => void act(() => rankBack(step.sessionId, subject.id))}
+            onBack={() => void act(() => rankBack(step.sessionId, subject.id), -1)}
             onSkip={() => void act(() => rankSkip(step.sessionId, subject.id))}
             onClose={() => void close()}
           />
@@ -165,6 +187,9 @@ function Session({
             <Text variant="body" tone="tertiary">
               Working out what to ask…
             </Text>
+            {/* A way out while the first request is in flight. Without it the only exit is
+                the hardware back button, which is not an exit a person can see. */}
+            <Button label="Close" kind="secondary" onPress={() => void close()} />
           </Centred>
         )}
       </SafeAreaView>
@@ -183,7 +208,7 @@ function Comparison({
   onSkip,
   onClose,
 }: {
-  subject: { id: string; title: string };
+  subject: { id: string; title: string; posterUri?: string | null };
   pivotId: string;
   skipped: boolean;
   answered: number;
@@ -193,8 +218,15 @@ function Comparison({
   onSkip: () => void;
   onClose: () => void;
 }) {
-  const { data: pivot } = useQuery({
-    queryKey: queryKeys.title(pivotId),
+  const {
+    data: pivot,
+    isError,
+    isFetching,
+    refetch,
+  } = useQuery({
+    // Its own key, not queryKeys.title: this is three columns, and a title screen caching a
+    // whole row under the same key would hand whichever ran first to the other.
+    queryKey: queryKeys.comparisonCard(pivotId),
     staleTime: 5 * 60_000,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -207,20 +239,33 @@ function Comparison({
     },
   });
 
+  if (isError) {
+    // The alternative is a card reading "…" that the user can still tap, which records a
+    // preference over something they were never shown.
+    return (
+      <View style={styles.comparison}>
+        <TopBar onClose={onClose} />
+        <Centred>
+          <Text variant="title2" style={styles.centre}>
+            Could not load the other title
+          </Text>
+          <Text variant="body" tone="secondary" style={styles.centre}>
+            Comparing needs a connection. The answers you have given are saved.
+          </Text>
+          <Button label="Try again" onPress={() => void refetch()} disabled={isFetching} />
+          <Button label="Close" kind="secondary" onPress={onClose} />
+        </Centred>
+      </View>
+    );
+  }
+
+  // Both cards wait for it, not just the pivot's. Leaving the subject tappable meant a user
+  // could answer a comparison whose other side was still an ellipsis.
+  const waiting = busy || !pivot;
+
   return (
     <View style={styles.comparison}>
-      <View style={styles.topBar}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          onPress={onClose}
-          hitSlop={theme.space[3]}
-        >
-          <Text variant="headline" tone="secondary">
-            Close
-          </Text>
-        </Pressable>
-      </View>
+      <TopBar onClose={onClose} />
 
       <Text variant="title2" style={styles.centre}>
         Which did you like more?
@@ -229,13 +274,14 @@ function Comparison({
       <View style={styles.cards}>
         <Card
           title={subject.title}
-          disabled={busy}
+          posterUri={subject.posterUri ?? null}
+          disabled={waiting}
           onPress={() => onPick(subject.id)}
         />
         <Card
           title={pivot?.title ?? '…'}
-          posterUri={pivot?.poster_path ?? null}
-          disabled={busy || !pivot}
+          posterUri={posterUri(pivot?.poster_path, 'card')}
+          disabled={waiting}
           onPress={() => pivot && onPick(pivot.id)}
         />
       </View>
@@ -270,6 +316,23 @@ function Comparison({
           disabledReason="Waiting for the last answer to save."
         />
       </View>
+    </View>
+  );
+}
+
+function TopBar({ onClose }: { onClose: () => void }) {
+  return (
+    <View style={styles.topBar}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+        onPress={onClose}
+        hitSlop={theme.space[3]}
+      >
+        <Text variant="headline" tone="secondary">
+          Close
+        </Text>
+      </Pressable>
     </View>
   );
 }

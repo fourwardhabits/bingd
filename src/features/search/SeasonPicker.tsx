@@ -9,7 +9,12 @@ import { useSeasons, yearOf } from './use-title-search';
 export type SeasonPickerProps = {
   series: { id: string; title: string } | null;
   onClose: () => void;
-  onPick: (season: { id: string; title: string; year: number | null }) => void;
+  onPick: (season: {
+    id: string;
+    title: string;
+    year: number | null;
+    posterPath: string | null;
+  }) => void;
 };
 
 /**
@@ -85,6 +90,7 @@ export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
                     id: season.id,
                     title: season.title,
                     year: yearOf(season.release_date),
+                    posterPath: season.poster_path,
                   })
                 }
                 style={styles.row}

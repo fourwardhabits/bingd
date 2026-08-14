@@ -9,11 +9,21 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
+const mockRandomUUID = jest.fn();
+
 jest.mock('expo-crypto', () => ({
-  randomUUID: () => '11111111-2222-3333-4444-555555555555',
+  randomUUID: () => mockRandomUUID(),
 }));
 
-beforeEach(() => mockRpc.mockReset());
+let issued = 0;
+
+beforeEach(() => {
+  mockRpc.mockReset();
+  issued = 0;
+  mockRandomUUID.mockReset();
+  // A fresh value every call, so a module-level constant cannot pass for a generator.
+  mockRandomUUID.mockImplementation(() => `1111111${(issued += 1)}-2222-3333-4444-555555555555`);
+});
 
 const operationId = '00000000-0000-4000-8000-000000000000';
 const mediaItemId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -114,6 +124,26 @@ describe('logWatched', () => {
     ).toMatchObject({ outcome: 'ok', noteVersion: '2026-08-14T00:00:00.000Z' });
   });
 
+  it('puts the date in the date and the note in the note', async () => {
+    // With both absent they are both null, and a swapped pair looks identical. The note
+    // arriving as p_watched_on is a 22007 the user cannot act on; the reverse files the
+    // date as private prose.
+    mockRpc.mockResolvedValue({ data: { status: 'ok' }, error: null });
+    await logWatched({
+      operationId,
+      mediaItemId,
+      watchedOn: '2026-08-13',
+      note: 'better than I expected',
+    });
+
+    expect(mockRpc).toHaveBeenCalledWith('log_watched', {
+      p_operation_id: operationId,
+      p_media_item_id: mediaItemId,
+      p_watched_on: '2026-08-13',
+      p_note: 'better than I expected',
+    });
+  });
+
   it('sends nulls rather than undefined for the fields it was not given', async () => {
     mockRpc.mockResolvedValue({ data: { status: 'ok' }, error: null });
     await logWatched({ operationId, mediaItemId });
@@ -128,10 +158,16 @@ describe('logWatched', () => {
 });
 
 describe('operation ids and dates', () => {
-  it('generates an operation id per call', () => {
-    // The value is mocked; what matters is that the module asks for one rather than
-    // holding a constant, which would make every write look like a retry of the first.
-    expect(newOperationId()).toBe('11111111-2222-3333-4444-555555555555');
+  it('asks for a fresh id on every call rather than holding a constant', () => {
+    // A constant would make every write look like a retry of the first, and the ledger
+    // would drop all but one. Asserting a mocked value cannot see that, because the mock
+    // is itself a constant — so this asserts two calls differ, and that the generator is
+    // the platform's rather than something home-made.
+    const first = newOperationId();
+    const second = newOperationId();
+
+    expect(first).not.toBe(second);
+    expect(mockRandomUUID).toHaveBeenCalledTimes(2);
   });
 
   it('formats today as a local calendar date', () => {

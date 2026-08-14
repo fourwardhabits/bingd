@@ -140,6 +140,29 @@ describe('rank_cancel', () => {
     ]);
     assert.ok(err);
     assert.match(err.message, /no such ranking session/);
+    // The code, not just the wording: session.ts treats P0002 as success, on the grounds
+    // that a session already gone is the outcome the caller asked for. Every other test in
+    // this file matches on the message, which a change of SQLSTATE would leave untouched.
+    assert.equal(err.code, 'P0002', 'the client keys its already-gone tolerance off this');
+  });
+
+  it('is callable by a real authenticated client, not only by the owner', async () => {
+    // Every test above runs through actAs, which stays the table owner. `authenticated`
+    // holds SELECT on ranking_sessions and nothing else, so a rank_cancel that lost its
+    // security definer would fail with "permission denied" for every real client while
+    // this whole file stayed green.
+    const subject = await movie('cancel_as_authenticated');
+    const started = await rpc(`select rank_start($1, 'loved') as r`, [subject]);
+    assert.equal(started.done, false, 'the fixture must actually open a session');
+    const before = await sessionCount();
+
+    const cancelled = await t.asUser(user, async () => {
+      const { rows } = await t.sql(`select rank_cancel($1) as r`, [started.session_id]);
+      return rows[0].r;
+    });
+
+    assert.deepEqual(cancelled, { done: true, cancelled: true });
+    assert.equal(await sessionCount(), before - 1, 'and the session is gone for good');
   });
 
   it('is guarded, so a suspended account cannot call it', async () => {

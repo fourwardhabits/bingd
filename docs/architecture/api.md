@@ -273,6 +273,8 @@ Two of these mappings deserve a note, because the SQLSTATE alone does not get yo
 
 **`23503` should be unreachable, which is why it maps to `BG422`.** A session that has authenticated but not yet completed `create_profile` passes `assert_can_write` — there is no profile row to be suspended — and then trips a foreign key on the first write, both in `processed_operations` and in `user_media`. A correct client never reaches a write from that state, so the honest surface is "report this as a bug" rather than a field error the user can act on.
 
+**`23505` from `rank_start` is a product state, not a conflict to retry.** It means the title already has a position, and the database's own message names `rank_rebucket`, which is an internal function and not a sentence to show anyone. The client replaces it with "This already has a position. Move it from your collection instead." Recorded here because the first client written against this table missed the row: an unmapped SQLSTATE falls through to the generic branch, which passes the server's text straight to the screen — and for this one code the server's text is a function name.
+
 **A pivot that stops being ranked mid-session makes `rank_answer` reject rather than re-prompt.** If a title is unranked in another session, or on another device, while it is on screen as a comparison, answering with it returns `BG409` and the client should restart the session. `rank_back` and `rank_skip` behave the same way. The alternative — silently substituting a different pivot — would attribute an answer to a comparison the user was never shown, and a ranking is only as trustworthy as the comparisons behind it.
 
 ---

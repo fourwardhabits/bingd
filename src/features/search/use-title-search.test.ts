@@ -1,12 +1,34 @@
-import { renderHook, waitFor } from '@testing-library/react-native';
+import { act, renderHook, waitFor } from '@testing-library/react-native';
 
-import { useDebounced, useTitleSearch, yearOf } from './use-title-search';
+import { useDebounced, useSeasons, useTitleSearch, yearOf } from './use-title-search';
 
 const mockRpc = jest.fn();
+const mockSeasons = jest.fn();
+
+type Read = { columns: string; filters: Record<string, unknown>; order: string[] };
+// Prefixed so jest allows the mock factory below to reach it.
+let mockRead: Read;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (...args: unknown[]) => mockRpc(...args),
+    from: () => {
+      const chain = {
+        select: (columns: string) => {
+          mockRead.columns = columns;
+          return chain;
+        },
+        eq: (column: string, value: unknown) => {
+          mockRead.filters[column] = value;
+          return chain;
+        },
+        order: (column: string) => {
+          mockRead.order.push(column);
+          return mockSeasons();
+        },
+      };
+      return chain;
+    },
   },
   startSessionRefresh: () => () => {},
 }));
@@ -39,6 +61,9 @@ jest.mock('@tanstack/react-query', () => {
 beforeEach(() => {
   mockRpc.mockReset();
   mockRpc.mockResolvedValue({ data: [], error: null });
+  mockRead = { columns: '', filters: {}, order: [] };
+  mockSeasons.mockReset();
+  mockSeasons.mockResolvedValue({ data: [], error: null });
 });
 
 describe('useDebounced', () => {
@@ -59,6 +84,18 @@ describe('useDebounced', () => {
   });
 });
 
+/**
+ * A real wait, not `waitFor`.
+ *
+ * `waitFor` returns the moment its callback passes, which for "nothing has happened yet" is
+ * immediately — before any debounce could have fired. Both tests below are about something
+ * *not* happening within a window, so the window has to actually elapse.
+ */
+const wait = (ms: number) =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  });
+
 describe('useTitleSearch', () => {
   it('does not search until there are two characters to search with', async () => {
     const { result, rerender } = await renderHook<
@@ -69,12 +106,31 @@ describe('useTitleSearch', () => {
     expect(result.current.idle).toBe(true);
 
     await rerender({ q: 'i' });
+    await wait(400);
+
+    // Well past the debounce, so a floor of one would have searched by now.
     expect(result.current.idle).toBe(true);
     expect(mockRpc).not.toHaveBeenCalled();
 
     await rerender({ q: 'in' });
     await waitFor(() => expect(mockRpc).toHaveBeenCalled());
     expect(result.current.idle).toBe(false);
+  });
+
+  it('holds a keystroke back long enough to be worth batching', async () => {
+    // The floor above only proves that one character does not search. This proves the
+    // second character does not search *immediately*: with no debounce a fast typist sends
+    // one request per keystroke, which is the cost this hook exists to avoid.
+    const { rerender } = await renderHook<ReturnType<typeof useTitleSearch>, { q: string }>(
+      ({ q }) => useTitleSearch(q),
+      { initialProps: { q: '' } },
+    );
+
+    await rerender({ q: 'in' });
+    await wait(60);
+    expect(mockRpc).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledTimes(1));
   });
 
   it('trims before searching, so a trailing space is not a second query', async () => {
@@ -101,6 +157,31 @@ describe('useTitleSearch', () => {
     // The server caps at 50 regardless; asking for 25 keeps the payload to what a person
     // will actually scroll through before retyping.
     expect(mockRpc.mock.calls[0][1].p_limit).toBe(25);
+  });
+});
+
+describe('useSeasons', () => {
+  it('reads the seasons of one series, in season order', async () => {
+    // Without kind = 'season' this returns the series itself alongside its seasons, and the
+    // picker offers the user something the database will refuse to log (AD-1). Without the
+    // ordering, seasons appear in whatever order the planner chose.
+    await renderHook(() => useSeasons('series-1'));
+
+    await waitFor(() => expect(mockSeasons).toHaveBeenCalled());
+    expect(mockRead.filters).toEqual({ parent_id: 'series-1', kind: 'season' });
+    expect(mockRead.order).toEqual(['season_number']);
+  });
+
+  it('carries the poster, so a season is not always a placeholder', async () => {
+    await renderHook(() => useSeasons('series-1'));
+
+    await waitFor(() => expect(mockSeasons).toHaveBeenCalled());
+    expect(mockRead.columns).toMatch(/poster_path/);
+  });
+
+  it('asks for nothing until there is a series', async () => {
+    await renderHook(() => useSeasons(null));
+    expect(mockSeasons).not.toHaveBeenCalled();
   });
 });
 

@@ -53,6 +53,23 @@ export type LogSheetProps = {
  * to have queued. Claiming otherwise would be worse than the gap.
  */
 export function LogSheet({ title, onClose, onFindWhereItLands }: LogSheetProps) {
+  if (!title) return null;
+
+  // Keyed by the title, and unmounted entirely when there is none. Both matter: a sheet
+  // that stays mounted between titles inherits the last one's bucket, its "Logged."
+  // message and — worst of all — its unsaved note, which then gets filed against whatever
+  // is on screen now. Clearing state by hand instead only covered the way out through
+  // Close, and the way out through "Find where it lands" is the common one.
+  return (
+    <Sheet key={title.id} title={title} onClose={onClose} onFindWhereItLands={onFindWhereItLands} />
+  );
+}
+
+function Sheet({
+  title,
+  onClose,
+  onFindWhereItLands,
+}: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
 
@@ -62,18 +79,7 @@ export function LogSheet({ title, onClose, onFindWhereItLands }: LogSheetProps) 
   const [problem, setProblem] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  const reset = () => {
-    setSelectedBucket(null);
-    setNote('');
-    setSaving(false);
-    setProblem(null);
-    setSaved(false);
-  };
-
-  const close = () => {
-    reset();
-    onClose();
-  };
+  const close = onClose;
 
   const report = (result: WriteResult) => {
     if (result.outcome === 'ranked') {
@@ -88,7 +94,7 @@ export function LogSheet({ title, onClose, onFindWhereItLands }: LogSheetProps) 
   };
 
   const choose = async (chosen: BucketId) => {
-    if (!title || saving) return;
+    if (saving) return;
 
     setSelectedBucket(chosen);
     setSaving(true);
@@ -112,7 +118,7 @@ export function LogSheet({ title, onClose, onFindWhereItLands }: LogSheetProps) 
   };
 
   const saveNote = async () => {
-    if (!title || !note.trim()) return;
+    if (!note.trim()) return;
 
     setSaving(true);
     setProblem(null);
@@ -129,8 +135,6 @@ export function LogSheet({ title, onClose, onFindWhereItLands }: LogSheetProps) 
     setSaving(false);
     if (report(result)) setNote('');
   };
-
-  if (!title) return null;
 
   const category = title.kind === 'movie' ? 'Movies' : 'TV seasons';
   const heading = title.seriesTitle ? `${title.seriesTitle}: ${title.title}` : title.title;

@@ -82,7 +82,7 @@ export function useSeasons(seriesId: string | null) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('media_items')
-        .select('id, season_number, title, release_date')
+        .select('id, season_number, title, release_date, poster_path')
         .eq('parent_id', seriesId)
         .eq('kind', 'season')
         .order('season_number');
@@ -92,6 +92,7 @@ export function useSeasons(seriesId: string | null) {
         season_number: number;
         title: string;
         release_date: string | null;
+        poster_path: string | null;
       }[];
     },
   });

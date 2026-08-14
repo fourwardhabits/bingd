@@ -12,6 +12,7 @@ import {
   type LoggedEntry,
   type RankingCategory,
 } from '@/features/collection/use-collection';
+import { posterUri } from '@/lib/images';
 import { theme } from '@/ui/tokens';
 import { EmptyState, Screen, Text, TitleRow } from '@/ui/components';
 
@@ -124,6 +125,7 @@ function Ranked({ userId }: { userId: string }) {
                     key={entry.mediaItemId}
                     title={entry.title}
                     year={entry.year}
+                    posterUri={posterUri(entry.posterPath)}
                     position={entry.position}
                     category={category === 'movies' ? 'Movies' : 'TV seasons'}
                   />
@@ -205,6 +207,7 @@ function Rows({ entries, empty }: { entries: LoggedEntry[]; empty: string }) {
           key={entry.mediaItemId}
           title={entry.title}
           year={entry.year}
+          posterUri={posterUri(entry.posterPath)}
           bucketLabel={entry.bucket ? BAND_LABEL[entry.bucket] : undefined}
         />
       ))}

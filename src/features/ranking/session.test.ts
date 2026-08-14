@@ -171,4 +171,38 @@ describe('arguments', () => {
       p_winner: pivot,
     });
   });
+
+  it.each([
+    ['rankSkip', rankSkip, 'rank_skip'],
+    ['rankBack', rankBack, 'rank_back'],
+  ] as const)('calls the function %s is named after', async (_name, fn, rpc) => {
+    // These four RPCs take the same single argument and answer with the same shape, so
+    // calling the wrong one is invisible to every other test here. rankBack reaching
+    // rank_cancel would end the session instead of stepping back a comparison, which the
+    // user would read as the app losing their answers (PRD §26.3.9).
+    mockRpc.mockResolvedValue({ data: { done: false, session_id: session, pivot }, error: null });
+    await fn(session, subject);
+
+    expect(mockRpc).toHaveBeenCalledWith(rpc, { p_session_id: session });
+  });
+});
+
+describe('an already ranked title', () => {
+  it('is explained without naming an internal function', async () => {
+    // rank_start raises 23505 with "use rank_rebucket to move it". Unmapped, that sentence
+    // reaches the screen (api.md §8 maps it to BG409).
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: '23505', message: 'title is already ranked; use rank_rebucket to move it' },
+    });
+
+    const result = await rankStart(subject, 'loved');
+
+    expect(result).toEqual({
+      state: 'failed',
+      message: 'This already has a position. Move it from your collection instead.',
+      restart: false,
+    });
+    expect(JSON.stringify(result)).not.toMatch(/rank_rebucket/);
+  });
 });

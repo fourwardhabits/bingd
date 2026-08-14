@@ -6,6 +6,7 @@ import { LogSheet, type LoggableTitle } from '@/features/collection/LogSheet';
 import { RankingSheet } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
+import { posterUri } from '@/lib/images';
 import { theme } from '@/ui/tokens';
 import { EmptyState, Field, Screen, Text, TitleRow, type BucketId } from '@/ui/components';
 
@@ -21,9 +22,12 @@ export default function LogScreen() {
   const [input, setInput] = useState('');
   const [series, setSeries] = useState<{ id: string; title: string } | null>(null);
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
-  const [ranking, setRanking] = useState<{ id: string; title: string; bucket: BucketId } | null>(
-    null,
-  );
+  const [ranking, setRanking] = useState<{
+    id: string;
+    title: string;
+    bucket: BucketId;
+    posterUri: string | null;
+  } | null>(null);
 
   const { results, idle, isPending, isError, isPlaceholderData, refetch } = useTitleSearch(input);
 
@@ -37,7 +41,7 @@ export default function LogScreen() {
       id: result.id,
       title: result.title,
       year: yearOf(result.release_date),
-      posterUri: null,
+      posterUri: posterUri(result.poster_path, 'card'),
       kind: result.kind === 'season' ? 'season' : 'movie',
     });
   };
@@ -79,7 +83,7 @@ export default function LogScreen() {
             id: season.id,
             title: season.title,
             year: season.year,
-            posterUri: null,
+            posterUri: posterUri(season.posterPath, 'card'),
             kind: 'season',
             seriesTitle: series?.title ?? null,
           });
@@ -94,7 +98,12 @@ export default function LogScreen() {
           if (!logging) return;
           // The log sheet closes as the comparison opens. screens.md §4 asks for one
           // continuous motion, and two stacked sheets is the opposite of that.
-          setRanking({ id: logging.id, title: logging.title, bucket });
+          setRanking({
+            id: logging.id,
+            title: logging.title,
+            bucket,
+            posterUri: logging.posterUri,
+          });
           setLogging(null);
         }}
       />
@@ -183,6 +192,7 @@ function Results({
         <TitleRow
           title={item.title}
           year={yearOf(item.release_date)}
+          posterUri={posterUri(item.poster_path)}
           bucketLabel={item.kind === 'series' ? 'Series · pick a season' : undefined}
           onPress={() => onOpen(item)}
         />
