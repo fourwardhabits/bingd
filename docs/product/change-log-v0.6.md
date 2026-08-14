@@ -442,6 +442,40 @@ Three data defects came with them, none of which a schema can catch. Oppenheimer
 
 The two remaining test-only findings were closed the same way: `createSeason` now refuses a seeded series as its parent, since negating fixture TMDB ids protected films but not season numbers, and the README's description of the harness snapshot was inverted.
 
-### 7.16 Scope
+### 7.16 Search, without an extension
+
+The catalogue had 2,010 titles in it and no way to find one. `media_items` carried a `(title text_pattern_ops)` index, which serves `like 'Incep%'` and nothing else: case-sensitive, accent-sensitive, and unable to match a word anywhere but the start, so "knight" would never have found The Dark Knight.
+
+`search_titles(query, limit)` replaces it with Postgres full text search — a GIN index over a folded `tsvector`, every typed token turned into a prefix term and ANDed with the rest, so "dar kni" finds the film and a second word narrows rather than widens. Films and series only, since PRD §26.2 gives search those two and a season is reached from its series page.
+
+The decision worth recording is what it does **not** use. `pg_trgm` and `unaccent` are the obvious tools for fuzzy matching and accent folding, and both are extensions that PGlite — the test harness — does not have. Building on them would have meant the search path was exercised by nothing until it reached the hosted database, which is a poor thing to discover about the feature every screen depends on. Full text search and GIN are core Postgres, present identically in both, and the accent fold is a fixed Latin table. It costs something honest: the fold handles Latin script only, and a ligature loses its second letter, so Æon Flux answers to "aon" rather than "aeon".
+
+Tests are written against the real catalogue rather than fixtures, because the failures worth catching are about real titles — a stop word in The Office, an accent in Amélie, a word in the middle of The Dark Knight. A fixture called "Test Movie" would pass all of them and prove nothing.
+
+#### What the review of that PR found
+
+Two of the claims made for it above were false, and both were claims about its own testing. The review made the exact change the suite was said to catch and watched every test pass.
+
+**The plan test never called the function.** It asserted the plan of a hand-written query that happened to resemble the function's body. Inlining the expression inside `search_titles` — leaving the index alone, which is precisely the drift the test's comment named — returned identical rows, dropped the GIN index from the plan, took the query from 9ms to 122ms, and failed nothing.
+
+**Ranking recomputed the search vector for every matched row**, which was 96% of the query's cost and the thing the plan test was thought to be protecting. Grown to 100,000 rows, a one-letter query took 7.6 seconds — and search-as-you-type issues a one-letter query on the first keystroke.
+
+Both have the same fix, and it is a better one than repairing the test: `search_vec` and `sort_key` are now stored generated columns. There is one copy of each expression instead of two, so drift is not a thing that can happen, and ranking reads a column instead of computing one. The same 100k-row query now takes 110ms, and the worst query the review found went from 4.6 seconds to 110ms.
+
+**Non-ASCII query text was silently destroyed.** The tokenizer split on `[^a-z0-9]+`, so every character the fold does not cover was treated as a separator and dropped. A Cyrillic or Japanese title indexed correctly and could not be reached by typing it exactly — while the migration's comment claimed the opposite. Worse than a miss: "Čapek" was searched for as "apek", a different word that matches other things. The split is Unicode-aware now, and `media_fold` composes to NFC first, so a decomposed "é" and a precomposed one stop being different letters.
+
+**Typing a film's whole name could return its sequel.** "the dark knight" led with The Dark Knight Rises and "alien" with Aliens: both tie on `ts_rank` exactly, popularity is null across the seed, and the tiebreak was release date, which prefers the newer entry in a franchise every time. There are two new tiers — the title the query names exactly, and then the shorter title — and the exact tier sits above popularity, so it will still hold once the adapter fills popularity in and a famous sequel outranks the film that was asked for.
+
+**The prefix boost was off whenever the user typed a space.** It compared against the raw query text, so "man " — what a person types on the way to a second word — matched no title at all. It compares against the reassembled tokens now. It was also untested: deleting the boost entirely failed nothing, because the query the test used put the right answer first without it.
+
+**The tiebreak test could not fail.** It ran the same query twice and compared. One session gets one plan and one heap order, so the two agree whether or not `title` and `id` are in the `ORDER BY` — the review deleted both and all tests passed. It is now two rows alike in everything but id, inserted so that heap order is the reverse of id order.
+
+Smaller: the ten-token cap dropped words 11 and beyond, so an eleventh word widened a search that every earlier word had narrowed — and "The Lord of the Rings: The Fellowship of the Ring" is already ten. There is no token cap now; the 100-character cap bounds the work, and truncating a query is honest in a way that dropping its last words is not. A limit of zero returned one row. The claim that every seeded season is titled "Season 3", repeated in four places, was simply false — there are 50 distinct season titles and Season 1 is the most common; the argument it supported survives, the fact did not. And the comment justifying the `revoke` said it was the thing keeping the helpers internal, when two earlier migrations already revoke by default and the allow-list test is what is authoritative.
+
+`search_titles` is also `security invoker` now rather than `security definer`. The catalogue is world-readable so it never needed the elevation, and a definer function would have gone on returning rows if a policy ever hid some.
+
+Thirty tests, and this time they were checked the way the review checked them: seventeen deliberate regressions — each tier of the ordering removed in turn, the tokenizer reverted, the fold table corrupted, `english` restored, the AND made an OR, the cap removed — every one of which now fails at least one test. The first two passes of that exercise found two more tests that could not fail.
+
+### 7.17 Scope
 
 PRD §30 gains a **degradation order** — story card, then scheduled nudges, then public web pages, then collaborative filtering. Eleven phases is a large v1 for one founder working through agents, and the failure mode worth avoiding is discovering that in phase 9 and cutting whatever happens to be unfinished. Deciding the order now, while nothing is at stake, costs nothing. Ranking, import, feed, reporting, capability enforcement, invitations, and the offline matrix are above the line.

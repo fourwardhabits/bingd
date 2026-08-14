@@ -304,6 +304,20 @@ Reads go directly to PostgREST against tables and views, filtered by RLS. Views 
 | `unranked_queue` | The highest-bucket-first queue from [`ranking.md`](./ranking.md) §10 |
 | `inbox` | Notifications joined to actor and subject |
 
+### Title search
+
+`search_titles(p_query text, p_limit integer default 20)` — added 2026-08-14. Returns `id, kind, title, release_date, poster_path, provenance`, films and series only, at most 50 rows. Signed-in callers only, per PRD §26.2 AC 1. A season is reached from its series page (AC 2); it would also be useless in a result list, since a season is titled "Season 4" and a page of bare ordinals says nothing about which show each belongs to. PRD §8's scope line says "movie, series, and season search", which contradicts §26.2 — see [open questions](../product/open-questions.md).
+
+It is a function rather than a PostgREST filter because the matching is not expressible as one. `media_items` carries `search_vec`, a stored generated `tsvector`, with a GIN index on it, and every typed token becomes a prefix term ANDed with the rest — so "dar kni" finds The Dark Knight and "amelie" finds Amélie. The tsquery is assembled from tokens split on non-alphanumerics rather than passed to `to_tsquery` directly, which is what stops "Fast & Furious" raising a syntax error and stops a user writing query operators. The split is Unicode-aware (`[^[:alnum:]]+`): the ASCII form it replaced deleted every character the fold does not cover, so a Cyrillic or Japanese title was unreachable even when typed exactly and "Čapek" was searched for as "apek".
+
+Ordering, in tiers: the title the query names exactly, then one starting with it, then `ts_rank`, `popularity`, the shorter title, `release_date`, `title`, `id`. The first tier stops a sequel leading — "the dark knight" used to return The Dark Knight Rises first, because both tie on rank exactly and the tiebreak was release date. `title` and `id` last make the order total, so repeating a query returns the same page rather than one of several. Both the exact and starting-with tiers compare against `sort_key`, a stored generated column holding the folded title reduced to words, so that "spider man no way home" is recognised as naming a film that is punctuated differently.
+
+`p_limit` clamps to 0…50; zero returns nothing. Values above `int32` are rejected by Postgres as no such function, which a JSON client can provoke.
+
+**No extension.** `pg_trgm` and `unaccent` would each be the obvious tool and neither exists in PGlite, which is the test harness — so an extension-based search would be exercised by nothing until it reached the hosted database. Full text search and GIN are core, and the accent fold is a fixed Latin table in `media_fold`. It folds Latin script only, so a Cyrillic or Japanese title keeps its own characters and is matched as it stands, and ligatures lose their second letter ("Æon Flux" answers to "aon", not "aeon"). Both are worth revisiting if `unaccent` ever becomes available on both sides.
+
+Unusually for a read RPC this one is `security invoker`: the catalogue is world-readable, so it needs no elevated rights, and a definer function would go on returning rows if a policy ever hid some. The cost is that `media_fold` is granted to `authenticated`, since the function folds the query text as the caller. It is a pure function of a string; `media_search` and `media_sort_key` stay internal.
+
 `visible_collection` is the one that earns its keep. `user_media` holds both public-safe data (the bucket) and always-private data (notes, watch dates) in the same row, and PRD §22 requires the split. Rather than trusting every future query to select the right columns, the raw table is owner-only and the view is the sole path to someone else's collection.
 
 Per the founder decision of 2026-08-13, the **Logged collection inherits profile visibility** — public on a public profile, approved followers only on a private one. `visible_collection` filters on `can_view_profile` like every other visibility-bearing read, so that decision needs no separate rule.

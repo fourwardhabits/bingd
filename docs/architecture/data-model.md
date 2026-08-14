@@ -201,6 +201,14 @@ create index on media_items (title text_pattern_ops);
 alter table media_items
   add column provenance   catalogue_provenance not null default 'tmdb',
   add column wikidata_qid text;
+
+-- Added 2026-08-14 with search_titles; see Search below.
+alter table media_items
+  add column search_vec tsvector generated always as (media_search(title, original_title)) stored,
+  add column sort_key   text     generated always as (media_sort_key(title))               stored;
+
+create index media_items_search   on media_items using gin (search_vec);
+create index media_items_sort_key on media_items (sort_key text_pattern_ops);
 ```
 
 One table for movies, series, and seasons (AD-1). Seasons carry a `parent_id` to their series. **Only `movie` and `season` rows are ever rankable** — series exist for browsing and grouping, and PRD §10 forbids ranking a whole series.
@@ -269,6 +277,16 @@ Facet-level TTLs match PRD §19: availability expires in hours, credits and keyw
 
 
 > **Read access is public** on `media_items` and `media_cache`. Catalog metadata is not user data. This is the only unrestricted read in the schema.
+
+### Search — added 2026-08-14
+
+`media_items` was searchable only by `like 'Incep%'`, which the `(title text_pattern_ops)` index above serves. That index cannot do case-insensitive matching, cannot fold an accent, and cannot match a word in the middle of a title — "knight" would never have found The Dark Knight.
+
+So there are three immutable helpers and two stored generated columns built from them. `media_fold(text)` composes to NFC, lower-cases and strips Latin diacritics; `media_search(title, original_title)` builds a `to_tsvector('simple', …)` from the folded pair into `search_vec`; `media_sort_key(title)` reduces the folded title to words separated by single spaces into `sort_key`, which is what the ordering compares a query against. All three are `IMMUTABLE`, which is what allows a generated column at all. `media_search` and `media_sort_key` are revoked from every client role — they exist to generate columns, not to be called. `media_fold` is granted to `authenticated`, because `search_titles` runs as the caller and folds the query text through it. `search_titles` is the single read path, documented in [`api.md`](./api.md) §10.
+
+**Stored columns rather than an expression index.** The first version indexed the expression and had the function repeat it — once in the `where`, once in the `order by`. Recomputing the vector for every matched row was 96% of the query's cost: at 100k rows a one-letter query took 7.6 seconds, and search-as-you-type issues a one-letter query on the first keystroke. It also left two copies of one expression free to drift apart, which would keep results correct while silently abandoning the index. A generated column has one expression and ranking reads a column, so both problems are gone; the same 100k-row query now takes 110ms.
+
+Two choices are worth keeping straight. The `simple` configuration rather than `english`, because stemming buys little on proper nouns while the stop-word list actively breaks things — under `english`, searching "the" produces an empty tsquery and therefore no rows. And **no extension**: `pg_trgm` and `unaccent` would each do this better, and neither exists in PGlite, which is the test harness. An extension-based search would have been exercised by nothing until it reached the hosted database, and search is on the path of every screen. The cost is a fold that handles Latin script only and loses the second letter of a ligature. Non-Latin titles are not lost by it — the tokenizer is Unicode-aware on both sides, so they match as they stand.
 
 ---
 

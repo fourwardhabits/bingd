@@ -275,6 +275,10 @@ describe('the guard is wired in, not merely present', () => {
     'my_capabilities',
     'unranked_queue',
     'username_available',
+    'search_titles',
+    // Reachable only because search_titles runs as the caller and folds the query through
+    // it. Pure, and writes nothing.
+    'media_fold',
   ];
 
   /** Client-executable functions whose body does not call the guard. */
