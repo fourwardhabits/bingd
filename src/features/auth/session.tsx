@@ -153,6 +153,11 @@ export function useAuthRouting() {
       return;
     }
 
-    if (inAuthGroup) router.replace('/(tabs)/feed');
+    // `/` is the other route a ready user does not belong on. `(tabs)` is a group and
+    // contributes no path segment, so nothing serves `/` and `app/index.tsx` only waits
+    // here. At the root index `segments` is empty, which is what the undefined group
+    // means. Redirecting from that screen instead would mount the feed before this
+    // state resolves, and the feed calls useCurrentProfile, which throws.
+    if (inAuthGroup || group === undefined) router.replace('/(tabs)/feed');
   }, [auth, segments, router]);
 }
