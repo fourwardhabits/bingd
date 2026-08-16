@@ -4,6 +4,7 @@ import { useRouter, useSegments } from 'expo-router';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { identify } from '@/lib/analytics';
+import { avatarUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { startSessionRefresh, supabase } from '@/lib/supabase';
 
@@ -11,7 +12,11 @@ export type Profile = {
   id: string;
   username: string;
   display_name: string;
-  avatar_url: string | null;
+  /** The object path as stored. Pass to `set_avatar` and to the delete of the
+   *  previous file; use `avatarUri` for anything that renders. */
+  avatar_path: string | null;
+  /** Already resolved against the project's storage origin. */
+  avatarUri: string | null;
   visibility: 'public' | 'private';
 };
 
@@ -99,11 +104,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryFn: async (): Promise<Profile | null> => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, username, display_name, avatar_url, visibility')
+        .select('id, username, display_name, avatar_path, visibility')
         .eq('id', userId!)
         .maybeSingle();
       if (error) throw error;
-      return (data as Profile) ?? null;
+      if (!data) return null;
+
+      // Resolved here rather than at the `<Avatar>`, so a bare object path
+      // cannot reach an `<Image source>` anywhere downstream.
+      const row = data as Omit<Profile, 'avatarUri'> & { avatar_path: string | null };
+      return { ...row, avatarUri: avatarUri(row.avatar_path) };
     },
   });
 

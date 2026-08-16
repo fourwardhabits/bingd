@@ -1,6 +1,6 @@
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
-import { Button, Text } from '@/ui/components';
+import { Button, LoadingScreen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { useAuth } from './session';
@@ -26,13 +26,9 @@ import { useAuth } from './session';
 export function AuthStatusOverlay() {
   const auth = useAuth();
 
-  if (auth.status === 'loading') {
-    return (
-      <View style={styles.fill}>
-        <ActivityIndicator color={theme.semantic.action} />
-      </View>
-    );
-  }
+  // The visual handover from the native splash. Same mark, same background, so
+  // hiding one and showing the other is not a cut to a spinner on a blank page.
+  if (auth.status === 'loading') return <LoadingScreen />;
 
   if (auth.status === 'error') {
     return (

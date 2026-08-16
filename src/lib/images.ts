@@ -10,6 +10,8 @@
  * Sizes are TMDB's own width buckets. w342 is the largest that is still smaller than a
  * phone's row artwork at 3x, and w500 covers the comparison cards.
  */
+import { env } from './env';
+
 const BASE = 'https://image.tmdb.org/t/p';
 
 export type PosterSize = 'row' | 'card';
@@ -32,3 +34,18 @@ export const backdropUri = (
   path: string | null | undefined,
   size: BackdropSize = 'card',
 ) => (path ? `${BASE}/${BACKDROP_WIDTH[size]}${path}` : null);
+
+/**
+ * An avatar object path into a URL.
+ *
+ * `profiles.avatar_path` stores `{uuid}/{filename}` and not a URL, because the
+ * origin belongs to the deployment rather than to the row: a dump restored into
+ * a second project would otherwise leave every face pointing at the first one.
+ * See 20260815020000.
+ *
+ * The bucket is public, so this is a plain URL rather than a signed one and
+ * needs no round trip. Resolve at the two data boundaries — the session profile
+ * and the feed query — so nothing downstream ever holds a bare path.
+ */
+export const avatarUri = (path: string | null | undefined) =>
+  path ? `${env.supabaseUrl.replace(/\/+$/, '')}/storage/v1/object/public/avatars/${path}` : null;

@@ -1,78 +1,125 @@
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
+import { useMemo, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { useWatchlist } from '@/features/collection/use-collection';
+import { newOperationId, setWatchlist } from '@/features/collection/writes';
 import { useFeed, type FeedItem } from '@/features/feed/use-feed';
 import { posterUri } from '@/lib/images';
+import { queryKeys } from '@/lib/query';
+import { ActivityRow, AppHeader, EmptyState, Screen, SkeletonRow } from '@/ui/components';
 import { theme } from '@/ui/tokens';
-import { ActivityCard, AppHeader, EmptyState, Screen, Text } from '@/ui/components';
 
 /** PRD §14. Fan-out on read: followed users' activity is queried at read time
  *  rather than written into per-user inboxes (docs/architecture/README.md AD-5). */
 export default function FeedScreen() {
   const profile = useCurrentProfile();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const feed = useFeed(profile.id);
+  const watchlist = useWatchlist(profile.id);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const saved = useMemo(
+    () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
+    [watchlist.data],
+  );
+
+  // Adding a friend's title to your own watchlist is the feed's whole point —
+  // PRD §28 counts it as the product's core virality metric — so it happens
+  // here rather than a page away.
+  const toggleWatchlist = async (mediaItemId: string) => {
+    if (busy) return;
+    setBusy(mediaItemId);
+    const result = await setWatchlist({
+      operationId: newOperationId(),
+      mediaItemId,
+      present: !saved.has(mediaItemId),
+    });
+    setBusy(null);
+
+    if (result.outcome === 'failed') {
+      Alert.alert('Could not update watchlist', result.message);
+      return;
+    }
+
+    await queryClient.invalidateQueries({
+      queryKey: [...queryKeys.collection(profile.id), 'watchlist'],
+    });
+  };
+
+  const events = feed.data ?? [];
 
   return (
     <Screen>
       <AppHeader />
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.section}>
-          {feed.isError ? (
+        {feed.isError ? (
+          <View style={styles.pad}>
             <EmptyState
               kind="couldNotLoad"
               title="Could not load activity"
               body="Check your connection and try again."
             />
-          ) : feed.isPending ? (
-            <View style={styles.sectionPad}>
-              <Text variant="body" tone="tertiary">
-                Loading activity...
-              </Text>
-            </View>
-          ) : (feed.data ?? []).length === 0 ? (
+          </View>
+        ) : feed.isPending ? (
+          <SkeletonRow count={5} />
+        ) : events.length === 0 ? (
+          <View style={styles.pad}>
             <EmptyState
               kind="nothingYet"
               compact
               title="Your feed is quiet right now."
-              body="Rank a title and activity will appear here."
+              body="Rank a title, or follow someone, and activity will appear here."
             />
-          ) : (
-            (feed.data ?? []).map((event) => (
-              <ActivityCard
-                key={event.id}
-                actorName={event.actorName}
-                actorAvatarUri={event.actorAvatarUri}
-                sentence={sentenceFor(event)}
-                metadata={event.position ? `#${event.position} in ${event.category === 'tv_seasons' ? 'TV seasons' : 'Movies'}` : undefined}
-                posterUri={posterUri(event.posterPath)}
-                timeLabel={relativeTime(event.createdAt)}
-                onPress={() => event.mediaItemId && router.push(`/title/${event.mediaItemId}`)}
-              />
-            ))
-          )}
-        </View>
+          </View>
+        ) : (
+          events.map((event) => (
+            <ActivityRow
+              key={event.id}
+              actorName={event.actorName}
+              actorAvatarUri={event.actorAvatarUri}
+              verb={VERB[event.type]}
+              title={event.title}
+              year={event.year}
+              posterUri={posterUri(event.posterPath)}
+              metadata={metadataFor(event)}
+              score={event.score}
+              bucket={event.bucket}
+              timeLabel={relativeTime(event.createdAt)}
+              onPressTitle={() => event.mediaItemId && router.push(`/title/${event.mediaItemId}`)}
+              onPressWatchlist={
+                event.mediaItemId ? () => toggleWatchlist(event.mediaItemId!) : undefined
+              }
+              inWatchlist={event.mediaItemId ? saved.has(event.mediaItemId) : false}
+            />
+          ))
+        )}
       </ScrollView>
     </Screen>
   );
 }
 
+const VERB: Record<FeedItem['type'], string> = {
+  title_ranked: 'ranked',
+  title_logged: 'watched',
+  season_completed: 'finished',
+};
+
 const styles = StyleSheet.create({
-  content: {
-    gap: theme.space[3],
-    paddingBottom: theme.space[10],
-  },
-  section: { gap: theme.space[2] },
-  sectionPad: { paddingHorizontal: theme.layout.gutter },
+  content: { paddingBottom: theme.space[10] },
+  pad: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
 });
 
-function sentenceFor(event: FeedItem) {
-  const actor = event.actorName;
-  const title = event.title ?? 'a title';
-  if (event.type === 'title_ranked') return `${actor} ranked ${title}.`;
-  if (event.type === 'season_completed') return `${actor} finished ${title}.`;
-  return `${actor} watched ${title}.`;
+/** `148m · Sci-fi`, the same line the compact row uses everywhere else. */
+function metadataFor(event: FeedItem) {
+  const parts = [
+    event.runtimeMinutes ? `${event.runtimeMinutes}m` : null,
+    event.genres[0] ?? null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
 }
 
 function relativeTime(value: string) {

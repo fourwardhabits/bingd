@@ -71,6 +71,53 @@ const SHIM = `
   $shim$;
 
   grant execute on function auth.uid() to anon, authenticated, service_role;
+
+  -- Storage, in the two tables and one function the avatars migration touches.
+  --
+  -- Thin on purpose, and the thinness is the point: the avatar rules are
+  -- ordinary row policies over an ordinary table, so once the table exists
+  -- Postgres enforces them here exactly as it does in production. What is not
+  -- simulated is Supabase's upload path -- the size and mime limits on the
+  -- bucket row are theirs to apply, and a test asserting them would be
+  -- asserting this shim.
+  create schema if not exists storage;
+
+  create table storage.buckets (
+    id                 text primary key,
+    name               text not null,
+    public             boolean not null default false,
+    file_size_limit    bigint,
+    allowed_mime_types text[],
+    created_at         timestamptz not null default now()
+  );
+
+  create table storage.objects (
+    id         uuid primary key default gen_random_uuid(),
+    bucket_id  text not null references storage.buckets(id),
+    name       text not null,
+    owner      uuid,
+    metadata   jsonb,
+    created_at timestamptz not null default now(),
+    unique (bucket_id, name)
+  );
+
+  alter table storage.objects enable row level security;
+
+  -- Supabase's own definition. Everything before the final slash, split on
+  -- slashes -- so 'uid/face.jpg' yields {uid} and a bare 'face.jpg' yields {}.
+  create or replace function storage.foldername(name text) returns text[]
+  language plpgsql immutable as $shim$
+  declare
+    parts text[];
+  begin
+    parts := string_to_array(name, '/');
+    return parts[1 : array_length(parts, 1) - 1];
+  end;
+  $shim$;
+
+  grant usage on schema storage to anon, authenticated, service_role;
+  grant all on storage.buckets, storage.objects to anon, authenticated, service_role;
+  grant execute on function storage.foldername(text) to anon, authenticated, service_role;
 `;
 
 /**
@@ -293,7 +340,12 @@ export async function createTestDb() {
         if (comparisons > 64) throw new Error('insertion did not converge');
       }
 
-      return { position: result.position, comparisons, adjustable: result.adjustable };
+      return {
+        position: result.position,
+        score: result.score,
+        comparisons,
+        adjustable: result.adjustable,
+      };
     },
 
     async close() {

@@ -19,7 +19,8 @@ export type PosterProps = {
  * saturated cards on a light ground (design-system.md §1, §7).
  *
  * The hairline border is not decoration: without it pale posters dissolve into
- * Parchment. Never render this full-bleed, behind text, or edge to edge.
+ * the page. Never render this full-bleed, behind text, or edge to edge — the
+ * title-page hero is the app's one full-bleed surface and it is not a Poster.
  */
 export function Poster({ uri, title, size = 'sm', width, blurhash }: PosterProps) {
   const { height } = theme.poster[size];
@@ -62,8 +63,12 @@ export function Poster({ uri, title, size = 'sm', width, blurhash }: PosterProps
 }
 
 /**
- * A designed state rather than a broken image. Common in practice, because
- * Letterboxd imports reach obscure titles the catalog has no poster for.
+ * A designed state rather than a broken image. Common in practice: the seed
+ * catalogue ships without artwork, and Letterboxd imports reach obscure titles
+ * no provider has art for.
+ *
+ * Sized by width rather than by size name, so a new poster token cannot arrive
+ * with a film-rail and display-scale initials crammed into 38 points.
  */
 function MissingArtwork({
   title,
@@ -80,7 +85,9 @@ function MissingArtwork({
     .map((word) => word[0] ?? '')
     .join('')
     .toUpperCase();
-  const showRail = size !== 'xs';
+
+  const { width } = theme.poster[size];
+  const showRail = width >= theme.poster.sm.width;
 
   return (
     <View style={[styles.fill, styles.missing, { borderRadius: radius }]}>
@@ -89,10 +96,10 @@ function MissingArtwork({
           <View style={styles.sprocket} />
           <View style={styles.sprocket} />
           <View style={styles.sprocket} />
-          {size !== 'sm' ? <View style={styles.sprocket} /> : null}
+          {width >= theme.poster.md.width ? <View style={styles.sprocket} /> : null}
         </View>
       ) : null}
-      <Text variant={size === 'xs' ? 'headline' : 'title2'} tone="tertiary">
+      <Text variant={width >= theme.poster.md.width ? 'title2' : 'headline'} tone="tertiary">
         {initials}
       </Text>
     </View>

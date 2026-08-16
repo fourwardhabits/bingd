@@ -1,8 +1,27 @@
 # TMDB — Integration Position
 
 **Researched:** 2026-08-13
-**Status:** No blocker. Connect on the free developer key now.
+**Connected:** 2026-08-15, on the free developer key. `tmdb-adapter` and `20260815000000_tmdb_adapter.sql`.
+**Status:** No blocker. **Buy the commercial plan before the first payment lands** — see "Revisit when" below.
 **Supersedes:** an earlier draft of this file, which was a long licensing inquiry letter. The letter was unnecessary.
+
+> **What connecting actually settled, 2026-08-15.** Three of the obligations below stopped
+> being intentions and became code, and one did not.
+>
+> - **Retention now has a writer.** `media_refresh_due` had no job draining it; `tmdb-adapter`'s
+>   `refresh` action is that job. Separately, enriching a title forces `provenance` to `'tmdb'`,
+>   which is what puts a formerly-Wikidata row inside the window it now belongs in. Without that
+>   line the seed catalogue would have been carrying TMDB overviews and posters while flagged
+>   CC0 and exempt — the exact failure this file's own correction warns about, one table over.
+> - **No credential in the client** is now structural rather than intended: the key is a
+>   Supabase secret, `verify_jwt` rejects an unauthenticated caller at the edge, and the only
+>   client-side file with TMDB in its name posts to Bingd's own project.
+> - **Attribution is in both slots** the section below asks for: the notice, quoted exactly, in
+>   Settings › About, and a source line on title detail.
+> - **Still owed: the logo.** The terms require an approved TMDB logo, unmodified in colour and
+>   aspect and less prominent than Bingd's mark. Nothing ships a redrawn approximation, because
+>   that would breach the same terms the notice satisfies. It arrives with the brand asset pass
+>   (PRD §5), and until then the attribution is text-only.
 
 ---
 

@@ -1,5 +1,5 @@
 export { AppHeader, type AppHeaderProps } from './AppHeader';
-export { ActivityCard, type ActivityCardProps } from './ActivityCard';
+export { ActivityRow, type ActivityRowProps } from './ActivityRow';
 export { Avatar, type AvatarProps } from './Avatar';
 export { Backdrop, type BackdropProps } from './Backdrop';
 export { BrandLockup, type BrandLockupProps } from './BrandLockup';
@@ -11,15 +11,25 @@ export { Divider } from './Divider';
 export { EmptyState, type EmptyStateKind } from './EmptyState';
 export { Field, type FieldProps } from './Field';
 export { FeaturedCard, type FeaturedCardProps } from './FeaturedCard';
+export { LoadingScreen, type LoadingScreenProps } from './LoadingScreen';
 export { MediumSelector, type Medium } from './MediumSelector';
 export { Poster } from './Poster';
-export { RankBadge } from './RankBadge';
+export {
+  PosterGrid,
+  PosterShelf,
+  type PosterGridProps,
+  type PosterShelfProps,
+  type PosterTile,
+} from './PosterWall';
 export { Screen } from './Screen';
+export { ScoreBadge, type ScoreBadgeProps } from './ScoreBadge';
 export { SearchField, type SearchFieldProps } from './SearchField';
 export { SectionHeader, type SectionHeaderProps } from './SectionHeader';
 export { SegmentedTabs, type SegmentOption } from './SegmentedTabs';
+export { SkeletonRow, type SkeletonRowProps } from './SkeletonRow';
 export { StatRow, type StatItem } from './StatRow';
 export { Text } from './Text';
+export { TitleHero, type TitleHeroProps } from './TitleHero';
 export { TitleMetadata, type TitleMetadataProps } from './TitleMetadata';
 export { TitleRow } from './TitleRow';
 export { Wordmark, type WordmarkProps } from './Wordmark';

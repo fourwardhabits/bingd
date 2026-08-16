@@ -214,6 +214,97 @@ expectRefused('anon cannot execute blocked_between', await rpc('blocked_between'
 expectAllowed('anon can execute can_i_view, by design', await rpc('can_i_view', { subject: NIL }));
 expectAllowed('anon can execute watch_tag_visible, by design', await rpc('watch_tag_visible', { tag_id: NIL }));
 
+// ---------------------------------------------------------------------------
+// The TMDB adapter's write path (20260815000000)
+//
+// These four functions write the catalogue and run as service_role. The local
+// suite asserts the same thing, but only about migrations it just replayed —
+// whether the *deployed* database revoked EXECUTE is a separate claim, and it is
+// the one that matters. An unguarded tmdb_upsert_titles would let anyone rewrite
+// every title in the app.
+// ---------------------------------------------------------------------------
+
+expectRefused(
+  'anon cannot execute tmdb_upsert_titles',
+  await rpc('tmdb_upsert_titles', { p_items: [] }),
+);
+expectRefused(
+  'anon cannot execute tmdb_upsert_seasons',
+  await rpc('tmdb_upsert_seasons', { p_parent_id: NIL, p_seasons: [] }),
+);
+expectRefused(
+  'anon cannot execute tmdb_put_facet',
+  await rpc('tmdb_put_facet', { p_media_item_id: NIL, p_facet: 'credits', p_payload: {} }),
+);
+expectRefused(
+  'anon cannot execute tmdb_note_request',
+  await rpc('tmdb_note_request', { p_user_id: NIL }),
+);
+
+// RLS with no policy at all. How often someone searches is not their own business
+// to read and is certainly not a stranger's.
+{
+  const res = await get('tmdb_request_log?select=*&limit=1');
+  const ok = classify(res) === 'refused' || res.body.trim() === '[]';
+  report(
+    'anon cannot read the adapter request log',
+    ok ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
+// The catalogue is world-readable by design (media_items has `using (true)`), and
+// after the backfill that is worth confirming rather than assuming: a search
+// result with no artwork is the symptom the whole integration exists to remove.
+{
+  const res = await get('media_items?select=id&kind=eq.movie&poster_path=not.is.null&limit=1');
+  let hasArtwork = false;
+  try {
+    hasArtwork = JSON.parse(res.body).length === 1;
+  } catch {
+    // Left false; the report below says what came back instead.
+  }
+  report(
+    'the catalogue is readable and has artwork',
+    hasArtwork ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
+// AD-8's client-facing half. The provider quota sits behind this function, so an
+// unauthenticated caller must not reach it — verify_jwt refuses the request before
+// the function starts, and the function refuses again if it ever does not.
+{
+  const res = await fetch(`${url}/functions/v1/tmdb-adapter`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'search', query: 'inception' }),
+  });
+  const body = await res.text();
+  report(
+    'anon cannot reach TMDB through the adapter',
+    res.status === 401 ? 'pass' : 'fail',
+    `${res.status} ${body.slice(0, 200)}`,
+  );
+}
+
+// Maintenance actions are service_role only. The anon key is a valid JWT, so
+// verify_jwt lets it through and resolveCaller is what stops it — which means this
+// probe is testing the function's own logic rather than the platform's.
+{
+  const res = await fetch(`${url}/functions/v1/tmdb-adapter`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'enrich', limit: 1 }),
+  });
+  const body = await res.text();
+  report(
+    'anon cannot trigger a bulk enrichment',
+    res.status === 401 || res.status === 403 ? 'pass' : 'fail',
+    `${res.status} ${body.slice(0, 200)}`,
+  );
+}
+
 // The one thing the local suite structurally cannot check: citext is shimmed as a
 // domain in PGlite, so no local function carries an extension dependency and the
 // pg_depend exclusion that keeps 20260813001800's sweep off citext's operator

@@ -60,7 +60,7 @@ create table profiles (
   id                  uuid primary key references auth.users(id) on delete cascade,
   username            citext not null unique,
   display_name        text   not null,
-  avatar_url          text,
+  avatar_path         text,   -- object path in the public avatars bucket, always {id}/{file}
   visibility          profile_visibility not null default 'public',
   invited_by          uuid   references profiles(id) on delete set null,
   founding_member     boolean not null default true,

@@ -52,7 +52,8 @@ Before writing code:
 
 Hard constraints that are easy to violate by accident:
 
-- No 0–10 score, 0–100 score, or percentile is ever displayed. Ordinal position only.
+- The displayed number is a 0–10 score with one decimal, derived from the title's position within its bucket band (PRD §10). No 0–100 score, no percentile, and no score aggregated across users into an average.
+- No score is ever stored. It is computed from `rankings.position` and the band sizes at render time. The single exception is the snapshot written into `feed_events.payload` at rank finalize.
 - No ranking position is ever derived from an imported rating.
 - No ranking mutation is ever queued offline.
 - No billing code, store product, price, or "Pro" indicator exists in v1.
@@ -60,7 +61,8 @@ Hard constraints that are easy to violate by accident:
 - No share or invite token grants access. It routes and attributes only.
 - No provider credential ships in the client bundle.
 - No recommendation explanation is generated rather than derived from stored signals.
-- No text is ever set in Antique Amber or Muted Sage on Parchment. Both measure below 2.2:1 and fail at every size.
+- No text is ever set in Antique Amber or Muted Sage. Both measure below 2.2:1 on any light surface in the system and fail at every size. They are fills, and the ink on them comes from the certified pairs in `docs/design/design-system.md` §3.
+- Screen backgrounds are Paper `#FBF8F4`. Parchment `#F5EBDD` is the warm accent above it — wells, inputs, chips, selected tabs, poster placeholders — not a page color.
 
 Agents may not deploy, run a production migration, delete production data, configure payment products, or access production secrets. Merge authority is set out under [Working agreement](#working-agreement).
 
@@ -119,7 +121,7 @@ Both exist because the design system found defects that would otherwise have shi
 
 **Colour literals are banned** outside `src/ui/tokens/`. A hardcoded `#D4A64C` in a component is a lint error, because that is exactly how the contrast defect in `docs/design/design-system.md` §1 would come back.
 
-**Contrast is asserted, not assumed.** `src/ui/tokens/contrast.test.ts` computes WCAG ratios for every permitted foreground and pins each to the value printed in the design system tables. It also asserts that Amber and Sage still *fail* on Parchment, so the rule that they are fills and never ink cannot be quietly undone. It has already caught two ratios that were rounded wrongly by hand.
+**Contrast is asserted, not assumed.** `src/ui/tokens/contrast.test.ts` computes WCAG ratios for every permitted foreground and pins each to the value printed in the design system tables. It also asserts that Amber and Sage still *fail* on both Paper and Parchment, so the rule that they are fills and never ink cannot be quietly undone. It has already caught two ratios that were rounded wrongly by hand.
 
 ### The database runs in tests without Docker
 
@@ -133,11 +135,19 @@ One limit remains: `citext` is unavailable in the WebAssembly build and is shimm
 
 The migrations are applied once per process — and `node --test` gives each test file its own process, so that means once per file, with the snapshot reloaded for any further database the same file creates. It exists because the seed catalogue is two thousand rows and replaying it per database took the suite from 40s to 114s; it is back to about 60s. The snapshot comes from the real migrations in the real order, not from a schema dump kept beside them, so it cannot drift into disagreeing with production, and a broken migration still fails in every file with the filename in the message.
 
-### There is a catalogue, and it is not TMDB's
+### The catalogue starts as Wikidata's and is enriched by TMDB
 
-`supabase/seed/` holds about 380 films, 190 series and 1,400 seasons seeded from Wikidata, shipped as a generated migration so every environment and every test run has titles to work with. It exists because the provider adapter is unwritten and the licence question governing it is unanswered, and because Wikidata is CC0 — no attribution obligation, no retention window, nothing to renegotiate.
+`supabase/seed/` holds about 380 films, 190 series and 1,400 seasons seeded from Wikidata, shipped as a generated migration so every environment and every test run has titles to work with without touching a provider. Wikidata is CC0 — no attribution obligation, no retention window, nothing to renegotiate — which is why it is what a fresh database and a CI run get.
 
-It is thin on purpose. No posters, since a poster is not a free work, so the client is expected to look right without them; no `popularity`, `overview`, `original_title` or `backdrop_path` either. Every film and series keeps its TMDB id and every row keeps its Wikidata id, so the adapter enriches these rows in place rather than starting again. `docs/architecture/data-model.md` §4 has the reasoning.
+The seed is deliberately thin: no posters, no `popularity`, `overview`, `original_title` or `backdrop_path`. Every film and series keeps its TMDB id and every row keeps its Wikidata id, so those rows are enriched **in place** rather than duplicated. `docs/architecture/data-model.md` §4 has the reasoning.
+
+**The provider adapter now exists** (2026-08-15). `supabase/functions/tmdb-adapter` is the sole holder of the TMDB key and the sole caller of TMDB (AD-8); search reaches past the local catalogue through it, opening a title fills it in, and one command gives the whole seed its artwork:
+
+```bash
+npm run catalogue:enrich
+```
+
+Enrichment flips a row's `provenance` from `wikidata` to `tmdb`, which is what puts it inside the six-month retention window in PRD §19 — a seeded row carrying TMDB's overview and poster is no longer CC0, and `media_refresh_due` reads that column to decide. See `supabase/functions/README.md` for the credential and the deploy, and `docs/reference/tmdb-integration.md` for the licensing position.
 
 ### And a check the local suite cannot perform
 

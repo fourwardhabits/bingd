@@ -24,6 +24,11 @@ export const queryKeys = {
   // Not keyed by user: the catalogue is the same for everyone, so a sign-out need not
   // discard it and two accounts on one device share the cache.
   search: (query: string) => ['search', query] as const,
+  // Separate from `search`, and separately cached, because the two passes have very
+  // different costs: the local one is a table read and the provider one spends a TMDB
+  // request against a shared quota. Sharing a key would let an invalidation of the cheap
+  // pass silently re-spend the expensive one.
+  providerSearch: (query: string) => ['search', 'provider', query] as const,
   seasons: (seriesId: string) => ['seasons', seriesId] as const,
   profile: (username: string) => ['profile', username] as const,
   notifications: () => ['notifications'] as const,

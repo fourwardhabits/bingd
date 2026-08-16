@@ -1,6 +1,6 @@
 # Bingd — Reference Notes
 
-**Date:** 2026-08-13
+**Date:** 2026-08-15 (v1 was 2026-08-13)
 **Specification:** [`../product/PRD.md`](../product/PRD.md) §5 reference discipline
 
 What was studied in the design archives, what Bingd takes from each app, and what it deliberately refuses. The bulk archives are git-ignored; the screens cited here are committed, resized, under [`references/`](./references/) as PRD §5 requires.
@@ -11,7 +11,7 @@ PRD §5 divides the references: **Apple TV, Apple Wallet, and Open** inform visu
 
 ## 1. Coverage
 
-Eleven apps, 3,479 screens. The Mobbin export is a flat run of numbered PNGs with no flow labels, so each app was surveyed by generating labelled contact sheets and then opening individual screens at full resolution.
+Twelve apps, 3,702 screens. The Mobbin export is a flat run of numbered PNGs with no flow labels, so each app was surveyed by generating labelled contact sheets and then opening individual screens at full resolution.
 
 | App | Screens | Surveyed | Purpose |
 |---|---|---|---|
@@ -20,14 +20,15 @@ Eleven apps, 3,479 screens. The Mobbin export is a flat run of numbered PNGs wit
 | Apple Wallet | 133 | Partially | **Visual.** Saturated objects on a light ground |
 | Apple TV | 136 | Partially | **Visual.** Poster-heavy structure |
 | Open | 210 | Partially | **Visual.** Airy, ceremonial, typographic |
-| Spotify | 588 | Not yet | Discovery shelves, Wrapped-style share cards |
+| Luma | 223 | Partially | **Visual.** Added 2026-08-15. Hero-plus-overlap headers on a light ground |
+| Spotify | 588 | Partially | Compact library rows, filter chips, discovery shelves |
 | Strava | 709 | Not yet | Social feed, kudos, leaderboards |
 | Cash App | 236 | Not yet | Username-as-identity, invite flows |
 | Shop | 283 | Not yet | Product cards on a light ground |
 | Tiimo | 232 | Not yet | Calm scheduling, accessibility-forward |
 | Ultrahuman | 226 | Not yet | Data display — largely a counter-example |
 
-The five unsurveyed apps are not blocking. Nothing in [`design-system.md`](./design-system.md) or [`screens.md`](./screens.md) depends on them, and they are most useful later: Spotify and Strava when the feed and share cards are built, Cash App when invitations are, Tiimo when accessibility is reviewed in depth.
+The four unsurveyed apps are not blocking. Nothing in [`design-system.md`](./design-system.md) or [`screens.md`](./screens.md) depends on them, and they are most useful later: Spotify and Strava when the feed and share cards are built, Cash App when invitations are, Tiimo when accessibility is reviewed in depth.
 
 **On a paid Mobbin account.** It would help, though less than expected. The free export gives the screens but not the flow labels, so 470 unlabelled images had to be surveyed to locate the eight that mattered. Paid access adds named flows and search, which turns that survey into a lookup. That is a real saving if the design work continues at this depth, and close to worthless if it does not — the archives already on disk cover v1.
 
@@ -107,7 +108,29 @@ Its numbered Top 10 treatment is also worth noting as prior art for the share ca
 
 ---
 
-## 6. Open — the ceremonial register
+## 6. Luma — added 2026-08-15
+
+Surveyed because the title page needed a hero and every other reference in the set puts one on a dark ground. Luma is the exception: a light, near-white app that still opens a page with a wide image ([`luma-84`](./references/luma-84-collective-header.jpg)).
+
+### Adopted
+
+**The hero-plus-overlap header.** A 16:9 image, then an identity object — Luma's calendar thumbnail, Bingd's poster — overlapping its bottom edge, then the name, description, and a metadata line. The overlap is what stops the image reading as a banner pasted above an unrelated page: one element crosses the seam, so the two halves become one object. This is the composition of [`screens.md`](./screens.md) §6.
+
+**A chip riding the seam.** Luma's category chip sits half on the image and half on the page. Bingd spends that position on genre, which is the most useful single fact about an unwatched film.
+
+**State and action adjacent, not stacked.** Luma puts `Subscribed` and a map button side by side under the hero. Bingd puts Rank/Ranked, the watch date, the score badge, and Share in that slot — the same idea, with the map replaced by the number a collection app is actually asked for.
+
+**Filter chips above a dated list** ([`luma-84`](./references/luma-84-collective-header.jpg), lower half). Compact rows with a small square thumbnail, a bold title, and a metadata line — the same density target as Letterboxd's diary, reached on a light background.
+
+### Refused
+
+**Pills as the only secondary navigation.** Luma's chips scroll horizontally and filter in place, which suits a list of events. Bingd's equivalent content — cast, details, reviews, seasons — is not a filter of one list but four different things, so it becomes real tabs.
+
+**Near-white with no warmth.** Luma's ground is a neutral grey-white. Bingd's Paper keeps the brand's hue, which is the difference between clean and cold.
+
+---
+
+## 7. Open — the ceremonial register
 
 Also dark, and it paywalls during onboarding, which Bingd must not do (PRD §20). What transfers is composition ([`open-3`](./references/open-3-single-question.jpg)):
 
@@ -117,12 +140,14 @@ Also dark, and it paywalls during onboarding, which Bingd must not do (PRD §20)
 
 ---
 
-## 7. What the references could not settle
+## 8. What the references could not settle
 
-Three things no reference answers, because no reference app has Bingd's combination of constraints.
+**A ceremonial light theme.** Every app studied that treats a moment as ceremonial does it on a dark ground. Amber on a warm light ground is Bingd's own problem and the solution in [`design-system.md`](./design-system.md) §9 has no precedent in this set.
 
-**A ceremonial light theme.** Every app studied that treats a moment as ceremonial does it on a dark ground. Amber-on-Parchment is Bingd's own problem and the solution in [`design-system.md`](./design-system.md) §9 has no precedent in this set.
+**A collection that is explicitly two states.** Logged-but-unranked has no analog. Beli's items are always scored once logged, and Letterboxd's are always either rated or not. The Watched list in [`screens.md`](./screens.md) §5 holds both at once and distinguishes them with a dashed badge, which is unprecedented in this set and therefore the most likely thing to confuse users — the first thing worth watching in the alpha.
 
-**An ordinal as the headline number.** Every reference displays either a score, a percentage, or a count. Nothing in the set displays a rank as its primary output, so the rank badge is designed from first principles.
+### Settled since, and how
 
-**A collection that is explicitly two states.** Logged-but-unranked has no analog. Beli's items are always scored once logged, and Letterboxd's are always either rated or not. The Logged/Ranked split in [`screens.md`](./screens.md) §5 is unprecedented in this set and therefore the most likely to confuse users, which makes it the first thing worth watching in the alpha.
+**An ordinal as the headline number.** v1 recorded this as unsettled: every reference displays a score, a percentage, or a count, and nothing in the set displays a rank as its primary output, so the rank badge was designed from first principles. That turned out to be the finding rather than a gap. Twelve apps converging on a magnitude and none on a rank is evidence, and on 2026-08-15 the founder moved Bingd to a 0–10 score ([`../product/decision-log.md`](../product/decision-log.md) §5).
+
+Beli's badge could not be copied directly. Its circle is an outline whose stroke and number share a color that tracks the score, and two of Bingd's three bucket colors fail WCAG as a stroke on a light ground. Filling the circle instead inverts the problem, and the certified pairs in [`design-system.md`](./design-system.md) §3 all pass — so what transferred was the badge's *position and role*, not its rendering. That is the reference discipline in PRD §5 working as intended.

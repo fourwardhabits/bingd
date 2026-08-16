@@ -11,22 +11,34 @@ export type SegmentedTabsProps<T extends string> = {
   onChange: (next: T) => void;
 };
 
+/**
+ * The tabs under a screen's title (screens.md §5).
+ *
+ * Underline rather than a filled pill. The filled version competed with the
+ * score badges in the list below it — two rounded, tinted shapes in the same
+ * column of the screen, one of which carries meaning and one of which is
+ * navigation. An underline is unmistakably chrome.
+ */
 export function SegmentedTabs<T extends string>({ options, value, onChange }: SegmentedTabsProps<T>) {
   return (
     <View style={styles.row} accessibilityRole="tablist">
-      {options.map((option) => (
-        <Pressable
-          key={option.id}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: option.id === value }}
-          onPress={() => onChange(option.id)}
-          style={[styles.tab, option.id === value && styles.tabActive]}
-        >
-          <Text variant="callout" tone={option.id === value ? 'primary' : 'secondary'}>
-            {option.label}
-          </Text>
-        </Pressable>
-      ))}
+      {options.map((option) => {
+        const selected = option.id === value;
+        return (
+          <Pressable
+            key={option.id}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            onPress={() => onChange(option.id)}
+            style={styles.tab}
+          >
+            <Text variant="callout" tone={selected ? 'primary' : 'tertiary'}>
+              {option.label}
+            </Text>
+            <View style={[styles.underline, selected && styles.underlineActive]} />
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -34,14 +46,21 @@ export function SegmentedTabs<T extends string>({ options, value, onChange }: Se
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    gap: theme.space[2],
+    gap: theme.space[5],
     paddingHorizontal: theme.layout.gutter,
   },
   tab: {
     minHeight: theme.layout.minTapTarget,
     justifyContent: 'center',
-    paddingHorizontal: theme.space[3],
-    borderRadius: theme.radius.control,
+    alignItems: 'center',
+    gap: theme.space[1],
   },
-  tabActive: { backgroundColor: theme.surface.sunken },
+  // Always present, so selecting a tab does not shift the row by two points.
+  underline: {
+    height: 2,
+    alignSelf: 'stretch',
+    borderRadius: theme.radius.full,
+    backgroundColor: 'transparent',
+  },
+  underlineActive: { backgroundColor: theme.semantic.action },
 });

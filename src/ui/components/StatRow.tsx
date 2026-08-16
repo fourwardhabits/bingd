@@ -13,7 +13,16 @@ export function StatRow({ stats }: StatRowProps) {
   return (
     <View style={styles.row}>
       {stats.map((stat, index) => (
-        <View key={stat.label} style={[styles.item, index > 0 && styles.itemDivider]}>
+        <View
+          key={stat.label}
+          // Grouped, or a screen reader reads five bare numbers and then five
+          // words, and the pairing has to be reconstructed by counting. The
+          // label comes first because that is the order the pair makes sense
+          // in when heard rather than seen.
+          accessible
+          accessibilityLabel={`${stat.label}: ${stat.value}`}
+          style={[styles.item, index > 0 && styles.itemDivider]}
+        >
           <Text variant="headline">{stat.value}</Text>
           <Text variant="footnote" tone="secondary">
             {stat.label}

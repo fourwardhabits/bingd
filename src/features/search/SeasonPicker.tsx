@@ -1,6 +1,7 @@
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useSeasonEnrichment } from '@/features/title/use-enrichment';
 import { theme } from '@/ui/tokens';
 import { EmptyState, Poster, Text } from '@/ui/components';
 import { posterUri } from '@/lib/images';
@@ -25,7 +26,12 @@ export type SeasonPickerProps = {
  * rather than failing with an error the user did nothing to deserve.
  */
 export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
-  const { data: seasons = [], isPending, isError } = useSeasons(series?.id ?? null);
+  const { data: seasons = [], isPending, isError, isFetched } = useSeasons(series?.id ?? null);
+
+  // A series found through search has no season rows yet, and this is the first
+  // moment they are needed. `isFetched` matters: without it the empty array that
+  // exists before the first read looks identical to a series with no seasons.
+  const { enriching } = useSeasonEnrichment(series?.id ?? null, isFetched && seasons.length === 0);
 
   if (!series) return null;
 
@@ -65,7 +71,7 @@ export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
             title="Could not load seasons"
             body="Check your connection and try again."
           />
-        ) : isPending ? (
+        ) : isPending || enriching ? (
           <View style={styles.padded}>
             <Text variant="body" tone="tertiary">
               Loading seasons…
@@ -74,8 +80,8 @@ export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
         ) : seasons.length === 0 ? (
           <EmptyState
             kind="nothingYet"
-            title="No seasons yet"
-            body="The catalogue has this series but none of its seasons."
+            title="No seasons listed"
+            body="This series has no seasons on record yet. Try again later."
           />
         ) : (
           <ScrollView contentContainerStyle={styles.list}>

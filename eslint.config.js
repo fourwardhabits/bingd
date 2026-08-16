@@ -18,6 +18,9 @@ module.exports = [
       'ios/**',
       '.cursor/**',
       '.agents/**',
+      // Deno, not React Native. Its imports carry .ts extensions and its globals are
+      // not Node's, so the Expo config flags correct code — `deno lint` covers it.
+      'supabase/functions/**',
     ],
   },
   {

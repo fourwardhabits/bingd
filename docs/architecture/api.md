@@ -191,11 +191,14 @@ So attribution and acceptance are separated. **First inviter wins the attributio
 | `set_all_notifications(enabled)` | Master switch |
 | `register_device_token(token, platform)` | Register for push. Called in v1 even though delivery is off |
 | `my_capabilities()` | The caller's capability set, **for presentation only** |
-| `update_profile(display_name?, avatar_url?, visibility?)` | Profile edits |
+| `update_profile(display_name?, visibility?)` | Profile edits |
+| `set_avatar(object_path)` | Points `profiles.avatar_path` at an object in the public `avatars` bucket. Takes a path, not a URL |
 | `change_username(new_username)` | Enforces the 30-day rule and writes `username_history` |
 | `delete_account()` | Cascading delete, token invalidation, web-page removal |
 
 `my_capabilities()` exists so the client can render a gate as *Coming soon* rather than as a broken button. **It is never the enforcement point.** Every guarded write re-resolves capabilities server-side, so a modified client that lies about its capability set still cannot create a fourth list.
+
+`set_avatar` takes an object path rather than a URL for two reasons. Storing whatever URL a client sends would let any account point its avatar at an off-site address — a tracker that fires once per feed impression, or an image that is one thing during review and another after it. And the origin belongs to the deployment, not to the row, so a dump restored into a second project would otherwise leave every face pointing at the first. The path is validated to begin with the caller's own uuid folder, which is the same rule the storage policy applies to the upload; both are stated, because the two are enforced by different subsystems and neither can see the other. Resolve to a URL with `avatarUri` in `src/lib/images.ts`.
 
 `delete_account()` deletes the caller's `auth.users` row and lets the cascade do the rest. Two things deliberately survive it, both by detaching rather than deleting: the **username reservation**, so the name cannot be claimed by an impersonator, and any **invite attribution** naming the caller as inviter, so growth provenance stays intact. Both are enforced in the schema rather than in this function, so a deletion performed from the Supabase console behaves identically (`data-model.md` §2, §11).
 
@@ -221,7 +224,7 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 
 | Function | Trigger | Role |
 |---|---|---|
-| `tmdb-adapter` | User request | Search and detail. Sole holder of the TMDB key (AD-8). Writes through to `media_items` and `media_cache` |
+| `tmdb-adapter` | User request, and an operator for the two maintenance actions | Search and detail. Sole holder of the TMDB key (AD-8). Writes through to `media_items` and `media_cache`. **Built 2026-08-15** |
 | `import-worker` | Queue, after upload | Parse, match, build the preview, apply on confirmation, delete the source file |
 | `recs-builder` | Schedule + on significant ranking change | Generate a slate per user. See [`recommendations.md`](./recommendations.md) |
 | `match-builder` | Schedule | Materialize `match_scores` (AD-7) |
@@ -230,6 +233,36 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 | `og-render` | Web request | Server-render Open Graph images for share and invite pages |
 
 `nudge-scheduler` is worth calling out. PRD §15 makes the nudge conditional on real content, so the function's first action is a query for qualifying activity, and its most common outcome is to send nothing. That is the intended behavior, not a failure mode, and the metric to watch is the ratio of evaluations to sends.
+
+### `tmdb-adapter` — the four actions
+
+Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may call it.
+
+| Action | Caller | Purpose |
+|---|---|---|
+| `search` | signed-in user | Searches TMDB, writes the results into `media_items`, returns them Bingd-shaped |
+| `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits |
+| `enrich` | `service_role` | Drains `tmdb_enrich_due` — rows carrying a tmdb id that have never been fetched |
+| `refresh` | `service_role` | Drains `media_refresh_due` — the retention window in §AD-8 |
+
+**A search result is already a catalogue row by the time the client sees it.** The adapter
+upserts before it answers and returns Bingd uuids, so there is no import step, no "add this
+title" affordance, and no identifier in the client that means something only to TMDB. It is
+also what lets the client merge local and remote results by `id`: a title in both really is
+one row, because the second pass upserted onto the first.
+
+**Writes go through SQL functions, not PostgREST.** `20260815000000` adds four, and the
+reason is not stylistic: `media_items_tmdb` is a *partial* unique index and PostgREST's
+`.upsert()` cannot name an index predicate, so the obvious client-side upsert fails to infer
+it. `media_cache.expires_at` has the same problem from the other direction — AD-8 requires it
+to be derived from `app_config`, and computing it in the adapter would put the retention
+window in TypeScript, which is exactly where a change in TMDB's terms would fail to reach it.
+
+**Enriching a Wikidata row flips its provenance to `tmdb`.** That is the compliance-relevant
+line in the whole feature. A seeded row is CC0 and exempt from the six-month window; once it
+carries TMDB's overview, poster path and genres it is not, and `media_refresh_due` filters on
+`provenance` to decide. Leaving the column alone would exempt real provider data from PRD §19
+by an accident of where the row originally came from.
 
 ---
 
@@ -246,6 +279,17 @@ One structured shape, so the client can respond to a class of failure rather tha
 | `BG409` | Conflict — already exists, already accepted, stale session | Refresh and retry |
 | `BG422` | Would violate an invariant | Report as a bug. Should be unreachable |
 | `BG429` | Rate limited | Back off, show a plain-language message |
+| `BG500` | Unhandled server fault | Show a generic failure. Reported |
+| `BG502` | An upstream provider failed or timed out | Say the catalogue is unavailable, keep local content on screen |
+
+**`BG500` and `BG502` are Edge Function codes and cannot come from an RPC.** They were added
+2026-08-15 with `tmdb-adapter`, which is the first surface with an upstream: every other
+function in this document either succeeds or raises a SQLSTATE from the table below, and
+neither case can produce "the thing we depend on did not answer". The distinction matters to
+the client because the two want opposite handling — `BG500` is a bug and should be reported,
+while `BG502` is TMDB being TMDB, which the position in
+[`../reference/tmdb-integration.md`](../reference/tmdb-integration.md) explicitly expects
+("there is no SLA") and which must never blank a screen that already has local results.
 
 **`BG404` covers both "does not exist" and "exists but you may not see it."** Distinguishing them would let an attacker enumerate private profiles and lists by comparing responses.
 

@@ -1,6 +1,15 @@
 # UI pass plan — Collection, Search, Title, Ranking, Feed, Profile
 
-Phase 1 output. This is the implementation contract for Phase 2. It supersedes nothing in
+> **Superseded on 2026-08-15, and kept for its audit.** The score-and-surface pass replaced the
+> parts of this plan that describe screens: Parchment is no longer the base surface, the ordinal
+> is no longer the ranking output, and `RankBadge` no longer exists — the score badge took its
+> job and the ordinal moved into the title page's Details tab. Read [`screens.md`](./screens.md)
+> and [`design-system.md`](./design-system.md) for what is true now.
+>
+> §0's findings about the catalogue are still accurate and still the reason several screens look
+> the way they do, which is why this file is kept rather than deleted.
+
+Phase 1 output. This was the implementation contract for Phase 2. It supersedes nothing in
 `design-system.md` or the PRD; where this document and a documented product rule disagree,
 the product rule wins and the conflict is called out inline.
 

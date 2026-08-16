@@ -325,7 +325,44 @@ Whether the card appears is a **client** decision based on the ranked count, not
 
 ---
 
-## 11. Conformance
+## 11. The displayed score
+
+PRD §10 was amended on 2026-08-15: the number a user sees is a 0–10 score with one decimal, not the ordinal. **Nothing above this section changes.** The score is a projection of `position`, computed where it is rendered, and no column stores it.
+
+Each bucket owns a non-overlapping range:
+
+| Bucket | High | Low |
+|---|---|---|
+| `loved` | 10.0 | 7.0 |
+| `fine` | 6.9 | 3.5 |
+| `not_for_me` | 3.4 | 0.0 |
+
+Given a title at absolute `position` in a band whose bounds are `band_bounds(user, cat, bucket)`:
+
+```
+offset = position - band.lo          # 0-based rank within the band
+score  = high - offset × (high - low) / max(band.size - 1, 1)
+```
+
+Rounded to one decimal. Three properties worth stating because each one is a plausible bug:
+
+**A band of one scores the high.** The `max(size - 1, 1)` denominator is what prevents a division by zero, and returning the high rather than the midpoint is deliberate: the first title you ever call *Loved it* is, at that moment, genuinely the best thing in your list.
+
+**The ranges are closed and non-overlapping**, so a bucket is always recoverable from a score. `7.0` is *Loved it* and `6.9` is *It was fine*, with nothing in between. This is what lets the feed show a friend's score without also shipping their bucket.
+
+**Scores reflow.** Because `band.size` is in the denominator, ranking one new title changes the score of every title in that band. That is correct — the score always was a statement about relative position — but it means a score must never be cached anywhere it could be read after the band changed. The one exception is §6's `feed_events.payload`, which is a snapshot on purpose.
+
+### Why it is not a generated column
+
+A score depends on the *sizes of all three bands* for that user and category, not on anything in its own row. Expressed in SQL it would be a correlated subquery over `rankings`, which cannot be `stored` and would have to be recomputed on read anyway. Worse, `size` changes for rows the write never touched: inserting one `loved` title would have to rewrite the score of every other `loved` row, turning a single-row insert into a whole-band update and giving I1's position shift a second thing to stay consistent with. A derived value has no such failure mode, because there is nothing to keep in step.
+
+### The feed exception
+
+`_rank_finalize` denormalizes `position` into `feed_events.payload` (§6) and now writes `score` alongside it. A client cannot derive another user's score, because that needs the other user's band sizes and `rankings` is not readable across users. Writing it at finalize time also makes the feed item honest in a way a live value would not be: an activity item records what happened, and what happened was that this title landed at 8.7.
+
+---
+
+## 12. Conformance
 
 | PRD requirement | Where |
 |---|---|
@@ -337,7 +374,8 @@ Whether the card appears is a **client** decision based on the ranked count, not
 | Three skips places at the midpoint and says so | §5 |
 | Back restores the previous comparison | §5 |
 | No ties | I4 |
-| Exact ordinal display, no score | `rankings.position` is the only numeric output |
+| 0–10 score display, derived from position | `rankings.position` plus `band_bounds` are the only inputs; see §11 |
+| No 0–100 value, percentile, or cross-user average | Nothing in this document computes one |
 | A position is never derived from a rating | Positions are written only by §6, reachable only through a comparison session |
 | Ranking is online-only, never queued | Sessions are server state; no ranking RPC is outbox-eligible |
 | Reranking never deletes viewing history | §7, unranking |

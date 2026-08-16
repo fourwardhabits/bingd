@@ -10,6 +10,17 @@ import LogScreen from '../../../app/(tabs)/log';
 const mockRpc = jest.fn();
 const mockPush = jest.fn();
 const tableRows: Record<string, unknown[]> = {};
+const mockPrefs = new Map<string, unknown>();
+
+// Prefs are SecureStore underneath, which has no test double here. The screen
+// only cares that a value written comes back, so the map is the whole contract.
+jest.mock('@/lib/prefs', () => ({
+  readPref: (name: string) => Promise.resolve(mockPrefs.get(name) ?? null),
+  writePref: (name: string, value: unknown) => {
+    mockPrefs.set(name, value);
+    return Promise.resolve();
+  },
+}));
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -87,6 +98,7 @@ beforeEach(() => {
   issued = 0;
   mockRpc.mockReset();
   mockPush.mockReset();
+  mockPrefs.clear();
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   mockRpc.mockImplementation((fn: string) =>
     fn === 'search_titles'
@@ -209,5 +221,81 @@ describe('before anything is typed', () => {
 
     expect(view.getByText('What did you watch?')).toBeTruthy();
     expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('offers the last search back rather than the prompt', async () => {
+    mockPrefs.set('user-1.search.recent', ['breaking bad']);
+    const view = await renderWithProviders(<LogScreen />);
+
+    await waitFor(() => expect(view.getByText('RECENT SEARCHES')).toBeTruthy());
+    // The prompt is for a first-time user. Someone with a history has already
+    // been told how this works.
+    expect(view.queryByText('What did you watch?')).toBeNull();
+  });
+
+  it('re-runs a recent search when it is tapped', async () => {
+    mockPrefs.set('user-1.search.recent', ['breaking bad']);
+    const view = await renderWithProviders(<LogScreen />);
+
+    await waitFor(() => expect(view.getByLabelText('Search again for breaking bad')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Search again for breaking bad'));
+
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+  });
+
+  it('remembers a search that found something', async () => {
+    const view = await search('breaking');
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+
+    // Recorded on results, not on keystrokes, so the history is searches that
+    // worked rather than every prefix typed on the way to one.
+    await waitFor(() => expect(mockPrefs.get('user-1.search.recent')).toEqual(['breaking']));
+  });
+
+  it('clears the history', async () => {
+    mockPrefs.set('user-1.search.recent', ['breaking bad']);
+    const view = await renderWithProviders(<LogScreen />);
+
+    await waitFor(() => expect(view.getByText('RECENT SEARCHES')).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: 'Clear' }));
+
+    await waitFor(() => expect(view.getByText('What did you watch?')).toBeTruthy());
+  });
+});
+
+describe('the kind filter', () => {
+  it('is hidden until there is something to filter', async () => {
+    const view = await renderWithProviders(<LogScreen />);
+    expect(view.queryByRole('button', { name: 'Movies' })).toBeNull();
+  });
+
+  it('narrows the results to one kind', async () => {
+    const view = await search('a');
+    await fireEvent.changeText(view.getByLabelText('Search'), 'thing');
+
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+    expect(view.getByLabelText(FILM_ROW)).toBeTruthy();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Movies' }));
+
+    await waitFor(() => expect(view.queryByLabelText(SERIES_ROW)).toBeNull());
+    expect(view.getByLabelText(FILM_ROW)).toBeTruthy();
+  });
+
+  it('says the filter is hiding things, not that nothing matched', async () => {
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'search_titles'
+        ? Promise.resolve({ data: [series], error: null })
+        : Promise.resolve({ data: { status: 'ok' }, error: null }),
+    );
+
+    const view = await search('breaking');
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Movies' }));
+
+    // "Nothing matches that" would be a lie: the search worked and the user is
+    // looking at their own filter.
+    await waitFor(() => expect(view.getByText('Nothing in this filter')).toBeTruthy());
   });
 });

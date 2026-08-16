@@ -1,31 +1,44 @@
 import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
-import { useLoggedCollection } from '@/features/collection/use-collection';
 import { LogSheet, type LoggableTitle } from '@/features/collection/LogSheet';
 import { RankingSheet } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
+import { useRecentSearches } from '@/features/search/use-recent-searches';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
 import { posterUri } from '@/lib/images';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
+  Chip,
   EmptyState,
   Screen,
   SearchField,
+  SectionHeader,
+  SkeletonRow,
   Text,
   TitleMetadata,
   TitleRow,
   type BucketId,
 } from '@/ui/components';
 
+/** All first, because the filter is a narrowing of a search the user has
+ *  already made and the unnarrowed state is the one they arrive in. */
+const FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'movies', label: 'Movies' },
+  { id: 'tv', label: 'TV' },
+] as const;
+
+type Filter = (typeof FILTERS)[number]['id'];
+
 /**
  * The centre + tab. Opens directly into title search, which is why there is no separate
- * Search tab (screens.md §2). One field, results as title rows, each with a log action.
+ * Search tab (screens.md §2). One field, results as compact rows, each with a log action.
  *
  * A film opens the log sheet. A series opens its seasons first, because a series is not
  * loggable and the season is the rankable unit (AD-1) — the alternative is letting the
@@ -34,8 +47,8 @@ import {
 export default function LogScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
-  const { data: watched } = useLoggedCollection(profile.id);
   const [input, setInput] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
   const [series, setSeries] = useState<{ id: string; title: string } | null>(null);
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
   const [ranking, setRanking] = useState<{
@@ -45,7 +58,35 @@ export default function LogScreen() {
     posterUri: string | null;
   } | null>(null);
 
-  const { results, idle, isPending, isError, isPlaceholderData, refetch } = useTitleSearch(input);
+  const { recent, remember, clear } = useRecentSearches(profile.id);
+
+  const {
+    results,
+    idle,
+    isPending,
+    isError,
+    isPlaceholderData,
+    refetch,
+    providerSearching,
+    providerExhausted,
+    providerRateLimited,
+    providerFailed,
+  } = useTitleSearch(input);
+
+  // Recorded on results rather than on keystrokes, so the history holds searches
+  // that found something instead of every prefix typed on the way there.
+  const settledQuery = input.trim();
+  const hasResults = results.length > 0;
+  useEffect(() => {
+    if (hasResults) remember(settledQuery);
+  }, [hasResults, settledQuery, remember]);
+
+  const filtered = useMemo(() => {
+    if (filter === 'all') return results;
+    return results.filter((result) =>
+      filter === 'movies' ? result.kind === 'movie' : result.kind !== 'movie',
+    );
+  }, [results, filter]);
 
   const openLog = (result: SearchResult) => {
     if (result.kind === 'series') {
@@ -80,13 +121,35 @@ export default function LogScreen() {
         />
       </View>
 
+      {/* Hidden while idle. A filter over nothing is three buttons that do
+          nothing, and the recent searches below are not filterable by kind. */}
+      {idle ? null : (
+        <View style={styles.filters}>
+          {FILTERS.map((option) => (
+            <Chip
+              key={option.id}
+              label={option.label}
+              selected={filter === option.id}
+              onPress={() => setFilter(option.id)}
+            />
+          ))}
+        </View>
+      )}
+
       <Results
         idle={idle}
         loading={isPending && !idle}
         error={isError}
         stale={isPlaceholderData}
-        results={results}
-        watched={watched?.entries ?? []}
+        results={filtered}
+        filtered={filter !== 'all' && results.length > 0 && filtered.length === 0}
+        recent={recent}
+        onClearRecent={clear}
+        onPickRecent={setInput}
+        searchingWider={providerSearching}
+        exhausted={providerExhausted}
+        rateLimited={providerRateLimited}
+        providerFailed={providerFailed}
         onRetry={() => void refetch()}
         onOpenTitle={(result) => router.push(`/title/${result.id}`)}
         onOpenLog={openLog}
@@ -137,9 +200,9 @@ export default function LogScreen() {
 }
 
 /**
- * The three empty states are deliberately distinct (design-system.md §8): nothing typed
- * yet, nothing matched, and the request failed each read differently and offer different
- * actions. Collapsing them is the usual mistake.
+ * The empty states are deliberately distinct (design-system.md §8): nothing typed
+ * yet, nothing matched, the filter hid everything, and the request failed each read
+ * differently and offer different actions. Collapsing them is the usual mistake.
  */
 function Results({
   idle,
@@ -147,7 +210,14 @@ function Results({
   error,
   stale,
   results,
-  watched,
+  filtered,
+  recent,
+  onClearRecent,
+  onPickRecent,
+  searchingWider,
+  exhausted,
+  rateLimited,
+  providerFailed,
   onRetry,
   onOpenTitle,
   onOpenLog,
@@ -157,33 +227,62 @@ function Results({
   error: boolean;
   stale: boolean;
   results: SearchResult[];
-  watched: { mediaItemId: string; title: string }[];
+  filtered: boolean;
+  recent: string[];
+  onClearRecent: () => void;
+  onPickRecent: (query: string) => void;
+  searchingWider: boolean;
+  exhausted: boolean;
+  rateLimited: boolean;
+  providerFailed: boolean;
   onRetry: () => void;
   onOpenTitle: (result: SearchResult) => void;
   onOpenLog: (result: SearchResult) => void;
 }) {
   if (idle) {
     return (
-      <View style={styles.idle}>
-        <EmptyState
-          kind="nothingYet"
-          compact
-          title="What did you watch?"
-          body="Search for a title, open it, then log it with +."
-        />
-        {watched.length > 0 ? (
-          <View style={styles.recent}>
-            <Text variant="caption" tone="tertiary">
-              RECENTLY WATCHED
-            </Text>
-            {watched.slice(0, 3).map((entry, index) => (
-              <Text key={`${entry.mediaItemId}-${index}`} variant="footnote" tone="secondary" numberOfLines={1}>
-                {entry.title}
-              </Text>
+      <ScrollView
+        contentContainerStyle={styles.idle}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
+        {recent.length > 0 ? (
+          <>
+            <SectionHeader title="Recent searches" actionLabel="Clear" onPressAction={onClearRecent} />
+            {recent.map((query) => (
+              <Pressable
+                key={query}
+                accessibilityRole="button"
+                accessibilityLabel={`Search again for ${query}`}
+                onPress={() => onPickRecent(query)}
+                style={({ pressed }) => [styles.recentRow, pressed && styles.pressed]}
+              >
+                <Ionicons
+                  name="time-outline"
+                  size={theme.layout.icon.md}
+                  color={theme.text.tertiary}
+                />
+                <Text variant="body" numberOfLines={1} style={styles.recentText}>
+                  {query}
+                </Text>
+                <Ionicons
+                  name="arrow-up-outline"
+                  size={theme.layout.icon.sm}
+                  color={theme.text.tertiary}
+                  style={styles.recentArrow}
+                />
+              </Pressable>
             ))}
-          </View>
-        ) : null}
-      </View>
+          </>
+        ) : (
+          <EmptyState
+            kind="nothingYet"
+            compact
+            title="What did you watch?"
+            body="Search for a title, open it, then log it with +."
+          />
+        )}
+      </ScrollView>
     );
   }
 
@@ -198,22 +297,56 @@ function Results({
     );
   }
 
-  if (loading) {
-    return (
-      <View style={styles.status}>
-        <Text variant="body" tone="tertiary">
-          Searching…
-        </Text>
-      </View>
-    );
-  }
+  if (loading) return <SkeletonRow count={6} />;
 
   if (results.length === 0) {
+    // Several different silences, and saying the wrong one is worse than saying
+    // nothing. Still looking is not the same as having looked and found nothing;
+    // being rate limited is not a statement about the catalogue at all; and a
+    // filter hiding every row is not a failed search.
+    if (filtered) {
+      return (
+        <EmptyState
+          kind="nothingMatches"
+          title="Nothing in this filter"
+          body="There are results — just not of this kind. Try All."
+        />
+      );
+    }
+
+    if (searchingWider) {
+      return (
+        <View style={styles.status}>
+          <Text variant="body" tone="tertiary">
+            Looking further afield…
+          </Text>
+        </View>
+      );
+    }
+
     return (
       <EmptyState
-        kind="nothingMatches"
-        title="Nothing matches that"
-        body="The catalogue is small while it is being tested. Try a shorter search."
+        kind={providerFailed && !rateLimited ? 'couldNotLoad' : 'nothingMatches'}
+        title={
+          rateLimited
+            ? 'Too many searches'
+            : providerFailed
+              ? 'Could not search wider'
+              : 'Nothing matches that'
+        }
+        body={
+          rateLimited
+            ? 'Give it a minute and try again.'
+            : providerFailed
+              ? // Not "nothing matches". The catalogue was searched and the
+                // wider lookup broke, so the app does not actually know whether
+                // this title exists.
+                'Your catalogue has nothing, and the wider search did not answer.'
+              : exhausted
+                ? 'Check the spelling, or try the original title.'
+                : 'Try a shorter search.'
+        }
+        action={providerFailed && !rateLimited ? { label: 'Try again', onPress: onRetry } : undefined}
       />
     );
   }
@@ -221,6 +354,17 @@ function Results({
   return (
     <FlashList
       data={results}
+      // The wider search runs after the local one and adds to it, so its progress is
+      // a footer rather than a state: the rows already found stay put and usable.
+      ListFooterComponent={
+        searchingWider ? (
+          <View style={styles.status}>
+            <Text variant="footnote" tone="tertiary">
+              Looking further afield…
+            </Text>
+          </View>
+        ) : null
+      }
       // Stale results stay legible rather than disappearing: a list that blinks on every
       // keystroke reads as slower than one that lags a beat behind.
       style={stale ? styles.stale : undefined}
@@ -233,10 +377,16 @@ function Results({
           title={item.title}
           year={yearOf(item.release_date)}
           posterUri={posterUri(item.poster_path)}
-          size="xs"
           secondary={
             item.kind === 'series' ? (
-              `Series · ${item.season_count ?? 0} seasons`
+              // No count for a series the catalogue has only just met: its seasons
+              // are fetched when the picker opens, and "0 seasons" would be the app
+              // stating as fact something it has not looked up yet.
+              item.season_count ? (
+                `Series · ${item.season_count} seasons`
+              ) : (
+                'Series'
+              )
             ) : (
               <TitleMetadata
                 runtimeMinutes={item.runtime_minutes}
@@ -263,9 +413,24 @@ function Results({
 
 const styles = StyleSheet.create({
   field: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
+  filters: {
+    flexDirection: 'row',
+    gap: theme.space[2],
+    paddingHorizontal: theme.layout.gutter,
+    paddingBottom: theme.space[2],
+  },
   status: { padding: theme.layout.gutter },
   stale: { opacity: 0.6 },
-  idle: { gap: theme.space[3], paddingTop: theme.space[4] },
-  recent: { paddingHorizontal: theme.layout.gutter, gap: theme.space[1] },
+  idle: { paddingTop: theme.space[2], paddingBottom: theme.space[8] },
+  recentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[3],
+    minHeight: theme.layout.minTapTarget,
+    paddingHorizontal: theme.layout.gutter,
+  },
+  recentText: { flex: 1 },
+  recentArrow: { transform: [{ rotate: '-45deg' }] },
+  pressed: { opacity: 0.6 },
   results: { paddingBottom: theme.space[8] },
 });

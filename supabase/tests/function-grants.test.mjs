@@ -76,6 +76,16 @@ const ALLOWED = {
   'set_watchlist(uuid,uuid,boolean)': ['authenticated'],
   'set_season_progress(uuid,uuid,season_progress)': ['authenticated'],
   'save_note(uuid,uuid,text,timestamp with time zone)': ['authenticated'],
+
+  // Added 2026-08-15 with avatar upload. Writes only the caller's own
+  // profiles.avatar_path, and only to a path under the caller's own uuid
+  // folder, so the grant buys no reach over anybody else's row. Not anon: it
+  // needs an auth.uid() to validate the path against.
+  //
+  // storage_public_url is deliberately absent — the URL is composed on the
+  // client from the project it is already talking to, so no such function
+  // exists to grant.
+  'set_avatar(text)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {

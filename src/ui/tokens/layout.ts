@@ -15,7 +15,8 @@ export const space = {
 } as const;
 
 export const layout = {
-  /** Minimum Parchment on every screen edge. Posters are never full-bleed. */
+  /** Minimum Paper on every screen edge. The title-page hero is the one
+   *  full-bleed surface in the app (design-system.md §7). */
   gutter: space[4],
   sectionGap: space[6],
   cardPadding: space[4],
@@ -29,6 +30,17 @@ export const layout = {
   icon: { sm: 20, md: 24, lg: 28 },
   control: { searchFieldHeight: 40, chipHeight: 32, headerHeight: 44 },
   row: { dense: 56, media: 76, ordinalColumn: 28 },
+  /**
+   * The compact list row (design-system.md §8). 60pt is set by the text block —
+   * two lines of type plus padding — and poster.row is sized to fit inside it.
+   * A row must never take its height from its artwork.
+   */
+  compactRow: 60,
+  /** Filled circle carrying the derived score (design-system.md §8). */
+  scoreBadge: { md: 44, sm: 36 },
+  /** Tight, because wide gutters make a poster wall read as scattered. */
+  posterGrid: { columns: 3, gap: space[1] + 2 },
+  posterShelf: { gap: space[2] + 2, peek: 0.7 },
 } as const;
 
 /** No pill buttons — PRD §5. Full-round is for avatars only. */
@@ -69,11 +81,16 @@ export const duration = {
 /**
  * Artwork always renders 2:3, the TMDB standard. Source: design-system.md §7.
  *
- * Radius is 8 below 100pt wide and 12 at or above, which keeps the *visual*
- * corner constant as the poster scales — a 12pt radius on a 40pt thumbnail
- * eats the artwork.
+ * Radius steps down with size, which keeps the *visual* corner constant as the
+ * poster scales — a 12pt radius on a 40pt thumbnail eats the artwork.
  */
 export const poster = {
+  /**
+   * Sized to fit *inside* a 60pt row rather than to define one. `sm` is 84pt
+   * tall, so a row pinned to it was 84pt for two lines of type — artwork
+   * dictating rhythm, which is the bug this size exists to prevent.
+   */
+  row: { width: 38, height: 57 },
   xs: { width: 40, height: 60 },
   sm: { width: 56, height: 84 },
   md: { width: 88, height: 132 },
@@ -83,8 +100,12 @@ export const poster = {
 
 export type PosterSize = keyof typeof poster;
 
-export const posterRadius = (size: PosterSize) =>
-  poster[size].width >= 100 ? radius.card : radius.control;
+export const posterRadius = (size: PosterSize) => {
+  const { width } = poster[size];
+  if (width >= 100) return radius.card;
+  if (width >= 60) return radius.control;
+  return 6;
+};
 
 /** Shadows on small posters produce visual noise in a list. */
 export const posterHasShadow = (size: PosterSize) =>

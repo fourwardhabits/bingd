@@ -1,4 +1,4 @@
-import { border, bucket, semantic, surface, text } from './color';
+import { border, bucket, bucketInk, semantic, surface, text } from './color';
 import {
   duration,
   elevation,
@@ -16,13 +16,14 @@ import { typography } from './typography';
  *
  * See docs/architecture/client.md §4.
  */
-const parchment = {
-  name: 'parchment',
+const paper = {
+  name: 'paper',
   surface,
   border,
   text,
   semantic,
   bucket,
+  bucketInk,
   typography,
   space,
   layout,
@@ -32,10 +33,14 @@ const parchment = {
   poster,
 } as const;
 
-export type Theme = typeof parchment;
+export type Theme = typeof paper;
 
-/** v1 is Parchment light only (PRD §5). Midnight is reserved, not built. */
-export const theme = parchment;
+/**
+ * v1 is light only. Named `paper` since 2026-08-15, when the base surface moved
+ * off Parchment — Parchment is still in the ramp, as `surface.sunken`, but it is
+ * no longer what the theme is (design-system.md §1).
+ */
+export const theme = paper;
 
 /**
  * A hook rather than a bare export so adding Midnight later means adding a

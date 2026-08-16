@@ -1,8 +1,9 @@
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { Stack, useRouter } from 'expo-router';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { AvatarPicker } from '@/features/profile/AvatarPicker';
 import { env } from '@/lib/env';
 import { Button, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -22,11 +23,52 @@ export default function SettingsScreen() {
         }}
       />
       <ScrollView contentContainerStyle={styles.page}>
+        <AvatarPicker />
+
         <Text tone="secondary">Privacy, notifications, and account controls are not built yet.</Text>
 
+        <About />
         <BuildDetails />
       </ScrollView>
     </Screen>
+  );
+}
+
+/**
+ * The attribution TMDB's terms require, quoted exactly.
+ *
+ * Their FAQ asks for this notice placed prominently, in an About or Credits section,
+ * and for the wording not to be paraphrased — so the sentence below is theirs and
+ * should not be edited for tone. `docs/reference/tmdb-integration.md` records why
+ * this ships now rather than with the commercial plan: it is cheap in an empty
+ * settings screen and expensive to retrofit across a shipped app.
+ *
+ * Two obligations are met elsewhere and one is still owed. The per-title source line
+ * is on the title screen; artwork is served from TMDB's CDN and never rehosted
+ * (`src/lib/images.ts`). Still owed is the approved TMDB logo, which has to be
+ * unmodified in colour and aspect and less prominent than Bingd's own mark — it
+ * arrives with the brand asset pass rather than being approximated here, because a
+ * redrawn logo would breach the same terms this section exists to satisfy.
+ */
+function About() {
+  const openAttribution = () => {
+    void Linking.openURL('https://www.themoviedb.org/about/logos-attribution');
+  };
+
+  return (
+    <View style={styles.block}>
+      <Text variant="subhead">About</Text>
+      <Text tone="secondary">
+        This product uses the TMDB API but is not endorsed or certified by TMDB.
+      </Text>
+      <Pressable
+        onPress={openAttribution}
+        accessibilityRole="link"
+        accessibilityLabel="TMDB attribution and logo guidelines"
+      >
+        <Text tone="action">themoviedb.org</Text>
+      </Pressable>
+    </View>
   );
 }
 

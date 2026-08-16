@@ -22,10 +22,23 @@ export type BucketChipProps = {
 export type ChipProps = {
   label: string;
   selected?: boolean;
-  onPress: () => void;
+  /** Omit for a chip that is a label rather than a control — the genre pills on
+   *  the title page are metadata, and a button that does nothing when tapped is
+   *  worse than plain text. */
+  onPress?: () => void;
 };
 
 export function Chip({ label, selected = false, onPress }: ChipProps) {
+  const content = (
+    <Text variant="callout" tone={selected ? 'primary' : 'secondary'}>
+      {label}
+    </Text>
+  );
+
+  if (!onPress) {
+    return <View style={styles.chip}>{content}</View>;
+  }
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -34,9 +47,7 @@ export function Chip({ label, selected = false, onPress }: ChipProps) {
       style={[styles.chip, selected && styles.chipSelected]}
       hitSlop={theme.space[2]}
     >
-      <Text variant="callout" tone={selected ? 'primary' : 'secondary'}>
-        {label}
-      </Text>
+      {content}
     </Pressable>
   );
 }

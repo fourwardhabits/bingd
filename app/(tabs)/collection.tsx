@@ -3,13 +3,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { bandSizes, scoreFor, type Bucket } from '@/features/collection/score';
 import {
-  BAND_LABEL,
-  BAND_ORDER,
   useLoggedCollection,
   useRankedCollection,
   useWatchlist,
   type LoggedEntry,
+  type RankedEntry,
   type RankingCategory,
 } from '@/features/collection/use-collection';
 import { posterUri } from '@/lib/images';
@@ -20,13 +20,15 @@ import {
   EmptyState,
   MediumSelector,
   Screen,
+  ScoreBadge,
   SegmentedTabs,
+  SkeletonRow,
   Text,
   TitleMetadata,
   TitleRow,
 } from '@/ui/components';
 
-type Segment = 'ranked' | 'watched' | 'watchlist' | 'unranked';
+type Segment = 'watched' | 'watchlist' | 'unranked';
 type Medium = RankingCategory;
 
 type UnrankedNudgePref = {
@@ -41,17 +43,26 @@ const NUDGE_COOLDOWN_DAYS = 14;
 /**
  * The user's own working surface (screens.md §5).
  *
- * Lists is the fourth segment in the design and is absent here: there is no list UI yet,
- * and an empty tab that cannot be filled is worse than one that has not arrived.
+ * Ranked and Watched used to be separate tabs and were largely the same list:
+ * almost everything a user logs, they also rank. Two tabs that mostly agree
+ * force a choice with no meaning behind it. They are now one Watched list
+ * sorted by score, which reproduces the old Ranked tab exactly — score order
+ * *is* position order — while also containing the unranked titles, each showing
+ * a dashed Rank badge instead of a number. Unranked survives as a filter of that
+ * list rather than as a different list.
  *
- * Everything reads from the network. The SQLite mirror that would make a cold start on the
- * Underground show a collection rather than a spinner does not exist yet — see
- * `client.md` §3.
+ * Lists is the fourth segment in the design and is absent here: there is no list
+ * UI yet, and an empty tab that cannot be filled is worse than one that has not
+ * arrived.
+ *
+ * Everything reads from the network. The SQLite mirror that would make a cold
+ * start on the Underground show a collection rather than a skeleton does not
+ * exist yet — see `client.md` §3.
  */
 export default function CollectionScreen() {
   const profile = useCurrentProfile();
   const { data: loggedSummary } = useLoggedCollection(profile.id);
-  const [segment, setSegment] = useState<Segment>('ranked');
+  const [segment, setSegment] = useState<Segment>('watched');
   const [medium, setMedium] = useState<Medium>('movies');
   const [nudgePref, setNudgePref] = useState<UnrankedNudgePref | null>(null);
   const [nudgePrefLoaded, setNudgePrefLoaded] = useState(false);
@@ -68,13 +79,20 @@ export default function CollectionScreen() {
 
   const segments: { id: Segment; label: string }[] = useMemo(
     () => [
-      { id: 'ranked', label: 'Ranked' },
       { id: 'watched', label: 'Watched' },
       { id: 'watchlist', label: 'Watchlist' },
+      // Conditional: a tab that is empty for most users is a permanent reminder
+      // of a chore nobody agreed to.
       ...(unrankedCount > 0 ? [{ id: 'unranked' as const, label: 'Unranked' }] : []),
     ],
     [unrankedCount],
   );
+
+  // Ranking the last unranked title removes the tab the user may be standing
+  // on. Derived rather than corrected in an effect: the fallback then applies
+  // in the same render the tab disappears, instead of one frame later with a
+  // blank list in between.
+  const active: Segment = segment === 'unranked' && unrankedCount === 0 ? 'watched' : segment;
 
   const showNudge = shouldShowUnrankedNudge({
     unrankedCount,
@@ -96,19 +114,14 @@ export default function CollectionScreen() {
   return (
     <Screen>
       <AppHeader />
-      <MediumSelector
-        value={medium}
-        onPress={() => setMedium((value) => (value === 'movies' ? 'tv_seasons' : 'movies'))}
-      />
-      <SegmentedTabs options={segments} value={segment} onChange={setSegment} />
+      <MediumSelector value={medium} onChange={setMedium} />
+      <SegmentedTabs options={segments} value={active} onChange={setSegment} />
 
-      {segment === 'ranked' && showNudge ? (
+      {active === 'watched' && showNudge ? (
         <View style={styles.nudge}>
           <Pressable
             accessibilityRole="button"
-            onPress={() => {
-              setSegment('unranked');
-            }}
+            onPress={() => setSegment('unranked')}
             style={styles.nudgeMain}
           >
             <Text variant="footnote" tone="secondary">
@@ -132,91 +145,44 @@ export default function CollectionScreen() {
         </View>
       ) : null}
 
-      {segment === 'ranked' ? <Ranked userId={profile.id} medium={medium} /> : null}
-      {segment === 'watched' ? <Watched userId={profile.id} medium={medium} /> : null}
-      {segment === 'watchlist' ? <Watchlist userId={profile.id} medium={medium} /> : null}
-      {segment === 'unranked' ? <Unranked userId={profile.id} medium={medium} /> : null}
+      {active === 'watched' ? <Watched userId={profile.id} medium={medium} /> : null}
+      {active === 'watchlist' ? <Watchlist userId={profile.id} medium={medium} /> : null}
+      {active === 'unranked' ? <Unranked userId={profile.id} medium={medium} /> : null}
     </Screen>
   );
 }
 
 /**
- * The artifact. Titles in position order under band headers, which is how the bucket
- * partition becomes legible rather than mysterious.
- */
-function Ranked({ userId, medium }: { userId: string; medium: Medium }) {
-  const router = useRouter();
-  const { data = [], isPending, isError } = useRankedCollection(userId, medium);
-
-  return (
-    <View style={styles.body}>
-      {isError ? (
-        <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />
-      ) : isPending ? (
-        <Loading />
-      ) : data.length === 0 ? (
-        <EmptyState
-          kind="nothingYet"
-          title="Nothing ranked yet"
-          body="Log something and choose “Find where it lands” to give it a position."
-        />
-      ) : (
-        <ScrollView contentContainerStyle={styles.list}>
-          {BAND_ORDER.map((band) => {
-            const inBand = data.filter((entry) => entry.bucket === band);
-            if (inBand.length === 0) return null;
-
-            return (
-              <View key={band} style={styles.band}>
-                <Text variant="caption" tone="tertiary" style={styles.bandHeader}>
-                  {BAND_LABEL[band].toUpperCase()}
-                </Text>
-                {inBand.map((entry) => (
-                  <TitleRow
-                    key={entry.mediaItemId}
-                    title={entry.title}
-                    year={entry.year}
-                    posterUri={posterUri(entry.posterPath)}
-                    leading={
-                      <Text variant="ordinal" tone="tertiary">
-                        #{entry.position}
-                      </Text>
-                    }
-                    secondary={
-                      <TitleMetadata
-                        runtimeMinutes={entry.runtimeMinutes}
-                        genres={entry.genres}
-                        showYear={false}
-                      />
-                    }
-                    onPress={() => router.push(`/title/${entry.mediaItemId}`)}
-                  />
-                ))}
-              </View>
-            );
-          })}
-        </ScrollView>
-      )}
-    </View>
-  );
-}
-
-/**
- * Watched, without a position.
+ * One list: everything watched, best first.
  *
- * The header states the split plainly and offers a way to rank a few. There is no progress
- * bar and no "380 remaining": PRD §5 is explicit that someone importing 800 films must not
- * open this tab and feel behind.
+ * Ranked titles sort by score and unranked ones fall to the bottom, which puts
+ * the list in the order the user built and leaves the work still to do in one
+ * place at the end. Both come from queries that were already being made — the
+ * ranked list for the positions, the logged list for the rest — so the merge
+ * costs nothing.
+ *
+ * No band headers. LOVED IT / IT WAS FINE / NOT FOR ME made the bucket
+ * partition legible back when the only number on a row was an ordinal that said
+ * nothing about how much the user liked something. The score says it, and the
+ * badge is tinted by bucket, so the headers would now caption information
+ * already present twice on every row.
  */
 function Watched({ userId, medium }: { userId: string; medium: Medium }) {
   const router = useRouter();
-  const { data, isPending, isError } = useLoggedCollection(userId);
+  const ranked = useRankedCollection(userId, medium);
+  const logged = useLoggedCollection(userId);
 
-  if (isError) {
+  const rows = useMemo(
+    () => mergeWatched(ranked.data ?? [], logged.data?.unranked ?? [], medium),
+    [ranked.data, logged.data, medium],
+  );
+
+  if (ranked.isError || logged.isError) {
     return <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />;
   }
-  if (isPending) return <Loading />;
-  if (data.loggedCount === 0) {
+  if (ranked.isPending || logged.isPending) return <Loading />;
+
+  if (logged.data.loggedCount === 0) {
     return (
       <EmptyState
         kind="nothingYet"
@@ -227,14 +193,45 @@ function Watched({ userId, medium }: { userId: string; medium: Medium }) {
     );
   }
 
-  const entries = filterByMedium(data.entries, medium);
-
   return (
     <View style={styles.body}>
       <Text variant="footnote" tone="secondary" style={styles.count}>
-        {data.rankedCount} ranked · {data.loggedCount} watched
+        {logged.data.rankedCount} ranked · {logged.data.loggedCount} watched
       </Text>
-      <Rows entries={entries} empty="Nothing watched yet." />
+
+      {rows.length === 0 ? (
+        <View style={styles.padded}>
+          <Text variant="body" tone="tertiary">
+            Nothing here in {medium === 'movies' ? 'movies' : 'TV seasons'} yet.
+          </Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.list}>
+          {rows.map((row) => (
+            <TitleRow
+              key={row.mediaItemId}
+              title={row.title}
+              year={row.year}
+              posterUri={posterUri(row.posterPath)}
+              secondary={
+                <TitleMetadata
+                  runtimeMinutes={row.runtimeMinutes}
+                  genres={row.genres}
+                  showYear={false}
+                />
+              }
+              trailing={
+                <ScoreBadge
+                  score={row.score}
+                  bucket={row.bucket}
+                  onPress={() => router.push(`/title/${row.mediaItemId}`)}
+                />
+              }
+              onPress={() => router.push(`/title/${row.mediaItemId}`)}
+            />
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -265,6 +262,7 @@ function Unranked({ userId, medium }: { userId: string; medium: Medium }) {
   return <Rows entries={entries} empty="Everything you watched is already ranked." />;
 }
 
+/** The plain list, for the tabs that carry no score. */
 function Rows({ entries, empty }: { entries: LoggedEntry[]; empty: string }) {
   const router = useRouter();
   if (entries.length === 0) {
@@ -287,23 +285,13 @@ function Rows({ entries, empty }: { entries: LoggedEntry[]; empty: string }) {
           posterUri={posterUri(entry.posterPath)}
           secondary={
             <TitleMetadata
-              bucketLabel={entry.bucket ? BAND_LABEL[entry.bucket] : null}
               runtimeMinutes={entry.runtimeMinutes}
               genres={entry.genres}
               showYear={false}
             />
           }
           trailing={
-            entry.watchedOn ? (
-              <Text variant="footnote" tone="tertiary">
-                {new Date(`${entry.watchedOn}T00:00:00Z`).toLocaleDateString(undefined, {
-                  timeZone: 'UTC',
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
-              </Text>
-            ) : null
+            <ScoreBadge onPress={() => router.push(`/title/${entry.mediaItemId}`)} />
           }
           onPress={() => router.push(`/title/${entry.mediaItemId}`)}
         />
@@ -314,17 +302,69 @@ function Rows({ entries, empty }: { entries: LoggedEntry[]; empty: string }) {
 
 function Loading() {
   return (
-    <View style={styles.padded}>
-      <Text variant="body" tone="tertiary">
-        Loading…
-      </Text>
+    <View style={styles.body}>
+      <SkeletonRow count={7} />
     </View>
   );
+}
+
+type WatchedRow = {
+  mediaItemId: string;
+  title: string;
+  year: number | null;
+  posterPath: string | null;
+  genres: string[];
+  runtimeMinutes: number | null;
+  score: number | null;
+  bucket: Bucket | null;
+};
+
+/**
+ * Ranked titles by score, then the unranked ones.
+ *
+ * Band sizes are computed from the *whole* category before filtering by medium,
+ * which is not an optimisation to skip: `useRankedCollection` is already scoped
+ * to one category, and a score is only meaningful against every title in its
+ * band. Narrowing the input first would rescale everything.
+ */
+function mergeWatched(
+  ranked: RankedEntry[],
+  unranked: LoggedEntry[],
+  medium: Medium,
+): WatchedRow[] {
+  const sizes = bandSizes(ranked);
+
+  const scored: WatchedRow[] = ranked.map((entry) => ({
+    mediaItemId: entry.mediaItemId,
+    title: entry.title,
+    year: entry.year,
+    posterPath: entry.posterPath,
+    genres: entry.genres,
+    runtimeMinutes: entry.runtimeMinutes,
+    score: scoreFor(entry.bucket, entry.position, sizes),
+    bucket: entry.bucket,
+  }));
+
+  const rest: WatchedRow[] = filterByMedium(unranked, medium).map((entry) => ({
+    mediaItemId: entry.mediaItemId,
+    title: entry.title,
+    year: entry.year,
+    posterPath: entry.posterPath,
+    genres: entry.genres,
+    runtimeMinutes: entry.runtimeMinutes,
+    score: null,
+    bucket: null,
+  }));
+
+  // Already in position order from the query, which is score order. Sorting
+  // again would only introduce a way for the two to disagree.
+  return [...scored, ...rest];
 }
 
 const styles = StyleSheet.create({
   nudge: {
     marginHorizontal: theme.layout.gutter,
+    marginTop: theme.space[3],
     marginBottom: theme.space[2],
     paddingHorizontal: theme.space[3],
     paddingVertical: theme.space[2],
@@ -337,12 +377,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: theme.space[3],
   },
-  nudgeMain: { gap: theme.space[1], flex: 1, minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
+  nudgeMain: {
+    gap: theme.space[1],
+    flex: 1,
+    minHeight: theme.layout.minTapTarget,
+    justifyContent: 'center',
+  },
   body: { flex: 1 },
-  count: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
+  count: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[1],
+  },
   list: { paddingBottom: theme.space[8] },
-  band: { paddingTop: theme.space[4] },
-  bandHeader: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[1] },
   padded: { padding: theme.layout.gutter },
 });
 

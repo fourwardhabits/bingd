@@ -18,6 +18,10 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: theme.semantic.action,
         tabBarInactiveTintColor: theme.text.tertiary,
+        // No `height` here, deliberately. Setting one overrides the navigator's
+        // own `49 + insets.bottom` and the bar stops covering the Android
+        // system navigation bar, leaving its buttons on a strip of whatever is
+        // behind them. The colour is all this needs to say.
         tabBarStyle: {
           backgroundColor: theme.surface.raised,
           borderTopColor: theme.border.hairline,

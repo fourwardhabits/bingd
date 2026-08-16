@@ -38,3 +38,11 @@ jobs:
       # Migrations and RPCs run against real Postgres compiled to WebAssembly,
       # so the schema and the ranking invariants are verified without Docker.
       - run: npm run test:db
+
+      # Edge Functions are Deno and are excluded from tsconfig and eslint, so the
+      # steps above cannot see them at all. Without this, tmdb-adapter is checked by
+      # nothing until a deploy fails. Deno is a devDependency rather than a setup
+      # action so these two commands behave the same here as on a developer machine.
+      - run: npm run functions:check
+
+      - run: npm run functions:lint

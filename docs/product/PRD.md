@@ -63,7 +63,7 @@
 |---|---|
 | **Decided** | The rankable units are movies and TV seasons. Episodes are never ranked. Whole-series ranking is not the primary TV unit. |
 | **Decided** | Rating happens in two steps: a three-bucket reaction (**Loved it / It was fine / Not for me**), then pairwise comparison within that bucket. |
-| **Decided for public alpha** | The ranking output shown to users is an exact ordinal position, e.g. `#18 in Movies`. There is no 0–10 score, no 0–100 score, and no percentile. |
+| **Decided 2026-08-15 (supersedes the ordinal-only rule)** | The ranking output shown to users is a **0–10 score with one decimal**, derived from the title's position inside its bucket band. The exact ordinal remains the stored ground truth and is shown as secondary detail on a title page. There is still no 0–100 score and no percentile. |
 | **Decided** | A title is either **Logged** (watched, optionally bucketed) or **Ranked** (has an exact position from comparisons). Positions are never derived from an imported rating. |
 | **Decided** | The product is social: profiles, one-way follows, a chronological feed, people discovery, match scores, recommendations, reactions, watch tagging, outward sharing, and direct invitations. |
 | **Decided for public alpha** | Public alpha is free. There is no billing code, no store products, no purchase UI, and nobody is displayed as "Pro". |
@@ -119,7 +119,7 @@ Has built a meaningful collection, roughly 25–50+ ranked titles, and returns t
 
 1. **Comparison over calibration.** Relative choices beat arbitrary numeric self-rating.
 2. **Structured signals over writing burden.** Logging and ranking are fast. Long reviews are not the product.
-3. **A position must be earned.** An exact ordinal position is only ever produced by comparisons. It is never inferred, estimated, or imported.
+3. **A position must be earned.** An exact ordinal position is only ever produced by comparisons. It is never inferred, estimated, or imported. The displayed score is a function of that position and inherits the same rule.
 4. **Taste compatibility must be legible.** Match scores show confidence and overlap rather than pretending sparse data is precise.
 5. **The social graph improves recommendations.** Following changes discovery value, not just a follower count.
 6. **Movies and TV should feel coherent but not identical.** TV is ranked by season.
@@ -147,7 +147,13 @@ Beli is the closest product-mechanics and go-to-market reference: log an experie
 
 Publicly documented Beli mechanics that informed this PRD: three-bucket classification before comparison; binary-search comparison within the chosen classification; skip and back affordances during comparison; tagging friends in a log; match scores between users; separate ranking categories by type.
 
-**One deliberate divergence.** Beli produces a calibrated 0–10 score. Bingd shows ordinal position only. Beli's own store reviews cite the automatic score as a recurring complaint — that it makes places "seem worse than they are, or sometimes better." An ordinal position makes a weaker and more defensible claim.
+**Score display — reversed 2026-08-15.** This section previously recorded a deliberate divergence: Beli produces a calibrated 0–10 score, and Bingd would show ordinal position only, on the reasoning that Beli's own store reviews cite the automatic score as a recurring complaint — that it makes places "seem worse than they are, or sometimes better."
+
+The founder has decided Bingd shows a 0–10 score, because an ordinal fails at the thing a collection app is for: `#18 in Movies` is unreadable without knowing how long the list is, it changes for reasons the user did not cause, and it cannot be compared between two people at all. A score answers "how much did I like this" in one glance, which is the question a row in a list is actually being asked.
+
+The complaint in those reviews is real and is answered by construction rather than by omission. It is a complaint about *calibration* — a score that claims to measure the film. Bingd's score claims nothing about the film. It is a restatement of where the title sits among the ones this user has already compared it against, so its meaning is bounded by the user's own list, and §10 keeps it honest: the score is derived from comparisons and from nothing else, never from an imported rating, and it is never aggregated across users into a public average.
+
+Mechanically nothing diverges from what this document already specified. Comparisons still produce a position; the score is a presentation of that position.
 
 ### Evidence boundary — Required
 
@@ -177,7 +183,8 @@ Publicly documented Beli mechanics that informed this PRD: three-bucket classifi
 
 | Color | Hex | Role |
 |---|---|---|
-| Parchment | `#F5EBDD` | Primary background: collection, profile, rankings, onboarding, standard share cards |
+| Paper | `#FBF8F4` | Primary background, from 2026-08-15. A warm near-white: same hue family as Parchment, most of the saturation removed |
+| Parchment | `#F5EBDD` | Warm accent surface: grouped wells, inputs, chips, selected tabs, poster placeholders, standard share cards. Was the primary background until 2026-08-15 |
 | Bingd Maroon | `#773744` | Primary identity and action: wordmark, selected states, rank emphasis |
 | Ink | `#242326` | Primary text and structural contrast |
 | Antique Amber | `#D4A64C` | Awards, milestones, reveals, exploration prompts, special share moments |
@@ -196,7 +203,7 @@ Primary voice **Curious Collector**: warm, simple, observant, personal, lightly 
 |---|---|---|
 | Bucket prompt | "How was it?" | "Rate this film" |
 | Comparison | "Which did you like more?" | "Which film is objectively better?" |
-| Ranking result | "Where does it land?" / "#18." | Calibration language |
+| Ranking result | "Where does it land?" / "8.7." | Calibration language, and any claim the number describes the film rather than the user's ordering |
 | Match | "92% match · 143 shared" | Similarity coefficients |
 | Recommendation | "Try this next." | Algorithm terminology |
 | Unranked library | "142 ranked · 380 logged" | "380 remaining", progress bars toward 100% |
@@ -214,7 +221,7 @@ Derived from the brand system above at founder instruction. See decision log §1
 | Emphasis | Poster-dominant on content surfaces; typographic on reveals, milestones, and share cards. |
 | Tone | Restrained by default. Playful only where Antique Amber appears. |
 | Data display | Minimal in v1. One modest stats block on Profile. |
-| Theme | Parchment light only. Tokens structured so a Midnight dark theme is purely additive later. |
+| Theme | Light only. **Amended 2026-08-15:** the base surface is Paper `#FBF8F4` and Parchment is the warm accent above it, because Parchment is chromatic and left artwork no headroom on a poster-heavy screen. Tokens structured so a Midnight dark theme is purely additive later. |
 | Corner radius | 12px cards, 8px inputs, full-round for avatars only. No pill buttons. |
 | Motion | Minimal, with one exception: the ranking reveal earns real animation. |
 
@@ -464,13 +471,35 @@ This is the mechanism that keeps ranking cheap: comparisons only ever search wit
 - **Skip** re-anchors the comparison to a different title in the same bucket.
 - **Back** returns to the previous comparison and lets the user change the answer.
 - After **3 skips** on a single insertion, the title is placed at the midpoint of the remaining uncertainty range, and the user is told the position is adjustable from Rankings.
-- **No ties.** Two titles never share a position. Exact ordinal display makes ties incoherent, and they would contaminate match calculation, share cards, and every ranking query.
+- **No ties.** Two titles never share a position. They may round to the same displayed score, which is fine and expected in a long band — but the underlying order is always total, because ties would contaminate match calculation, share cards, and every ranking query.
 
-### Display — Decided for public alpha
+### Display — Decided 2026-08-15
 
-Show exact ordinal placement as the only ranking output, for example `#18 in Movies`.
+Show a **0–10 score with one decimal**, for example `8.7`. It is the primary ranking output everywhere a title appears: collection rows, the title page, the feed, the ranking reveal, and share cards.
 
-> **Required.** Do **not** display a 0–10 score, a 0–100 score, or a percentile anywhere in public alpha. A derived numeric value may exist in storage for internal ordering, but it is never rendered. This corrects three places in v0.5 that described a "derived display score or percentile."
+The score is **derived, not stored**. Each bucket owns a fixed range, and a title's score is its position interpolated across the range of the band it sits in:
+
+| Bucket | Range |
+|---|---|
+| Loved it | 10.0 → 7.0 |
+| It was fine | 6.9 → 3.5 |
+| Not for me | 3.4 → 0.0 |
+
+```
+score = high - (rankInBand - 1) × (high - low) / max(bandSize - 1, 1)
+```
+
+A title alone in its band scores that band's high. Ranges do not overlap, so a bucket can always be read back off a score — which is what makes the number mean the same thing to the person who set it and the friend who sees it in a feed.
+
+Three properties this is required to keep:
+
+- **Comparisons are still the only source.** The score is a function of `rankings.position` and the band sizes, and a position is only ever written by a comparison session (§11). No rating, import, or estimate can produce one.
+- **A score moves when the list moves.** Ranking a new title reflows the scores around it, because the number was always a statement about relative position. The interface never presents a score as a fixed property of the film.
+- **Scores are never aggregated across users.** There is no public average, no community score, and no per-title score on any surface that is not scoped to one person's list. Averaging would turn a personal ordering into the calibrated rating this product exists to avoid.
+
+> **Required.** Do **not** display a 0–100 score or a percentile anywhere. The exact ordinal remains available as secondary detail on a title page, in the form `#18 of 142 in Movies` — with the denominator, because a bare ordinal is unreadable without it.
+>
+> **History.** Public alpha was specified as ordinal-only, and this section forbade a 0–10 score outright. Reversed by the founder on 2026-08-15; the reasoning is in §4.
 
 ### Open and provisional
 
@@ -492,7 +521,7 @@ Show exact ordinal placement as the only ranking output, for example `#18 in Mov
 | State | Means | Has a position? |
 |---|---|---|
 | **Logged** | The user has watched it. It may have a bucket, a watch date, a note, and tags. | No |
-| **Ranked** | The user has compared it against other titles in its bucket. | Yes — an exact ordinal position |
+| **Ranked** | The user has compared it against other titles in its bucket. | Yes — an exact ordinal position, displayed as a 0–10 score (§10) |
 
 A title moves from Logged to Ranked only by comparison. **There is no other path.**
 
@@ -1025,7 +1054,7 @@ Bingd connects now on a **free developer key**, because it charges nobody and se
 >
 > The two share paths are not equivalent. An **on-device share card** fetches artwork from the provider CDN and composites it on the user's phone, then the user shares the result — no Bingd server touches the image, and this stays poster-forward as designed. An **Open Graph link preview** is a PNG generated by Bingd's server and served from Bingd's infrastructure to any crawler that requests it, indefinitely, with no user involved. That is rehosting, whatever the surrounding layout does, so "never rehosted" and "poster-bearing link previews" could not both hold.
 >
-> **v1 Open Graph cards are typographic** — ordinal, title, wordmark, no artwork. The cost is small and arguably negative: the poster is the one element every competitor's preview also has. Revisit once the commercial plan is active and the question has a definite answer.
+> **v1 Open Graph cards are typographic** — score, title, wordmark, no artwork. The cost is small and arguably negative: the poster is the one element every competitor's preview also has. Revisit once the commercial plan is active and the question has a definite answer.
 
 Details and the triggers for revisiting: [`docs/reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 
@@ -1300,7 +1329,7 @@ Typecheck and lint on every change. Unit tests for ranking insertion, bucket-ban
 
 ### Required test matrices
 
-**Ranking:** insertion correctness within a bucket; band partitioning is never violated; bucket change re-runs comparisons in the new band; skip re-anchors; 3 skips places at midpoint; back restores prior state; no two titles ever share a position; no ranking mutation is ever enqueued offline; **no 0–10, 0–100, or percentile value is rendered anywhere**.
+**Ranking:** insertion correctness within a bucket; band partitioning is never violated; bucket change re-runs comparisons in the new band; skip re-anchors; 3 skips places at midpoint; back restores prior state; no two titles ever share a position; no ranking mutation is ever enqueued offline; **no 0–100 or percentile value is rendered anywhere**; **the derived score is within its bucket's range for every band size including one, and the ranges never overlap**.
 
 **Collection state:** a Logged title never displays a position; a bucket alone never produces a position; the header reports ranked and logged counts; no progress-toward-complete UI exists.
 
@@ -1364,8 +1393,8 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 2. Choosing a bucket with no prior ranked titles in that bucket places the title without comparisons.
 3. Choosing a bucket with existing ranked titles runs pairwise comparisons **only against titles in the same bucket**.
 4. A bucket of 64 ranked titles resolves in at most 7 comparisons.
-5. On completion, the app reveals an exact ordinal position in the form `#18 in Movies`.
-6. No 0–10 score, 0–100 score, or percentile is rendered on any screen or share artifact.
+5. On completion, the app reveals a 0–10 score with one decimal, derived from the title's position within its bucket band per §10.
+6. No 0–100 score or percentile is rendered on any screen or share artifact. No score is ever aggregated across users.
 7. Every *Loved it* title ranks above every *It was fine* title, which ranks above every *Not for me* title, at all times.
 8. Changing a title's bucket moves it into the new band and re-runs comparisons there.
 9. Skip re-anchors to a different title in the same bucket; Back returns to the previous comparison and permits a changed answer.
@@ -1378,7 +1407,7 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 ### 26.4 Logged and Ranked states
 
 1. A title can be marked watched and bucketed without running any comparison, and is then displayed as Logged.
-2. A Logged title displays its bucket and no position — not a position, not `#—`, not a placeholder.
+2. A Logged title displays no score and no position. Where a score would sit it shows an empty, clearly unfilled affordance labelled with the action that would earn one — never `0.0`, `#—`, or a greyed-out number.
 3. The Rankings header reports both counts in the form `142 ranked · 380 logged`.
 4. No screen displays a progress bar, percentage, or "remaining" count toward ranking the full collection.
 5. A Logged title can be ranked from its detail page, and afterward has a position.
@@ -1746,7 +1775,9 @@ Plain-language definitions of the terms used in this document.
 
 **Open Graph** — The metadata that produces a link preview card in messages and social apps.
 
-**Ordinal position** — Exact placement in an ordered list, such as `#18`. Not a score.
+**Ordinal position** — Exact placement in an ordered list, such as `#18`. The stored ground truth, written only by a comparison session. Displayed as secondary detail; the primary display is the score.
+
+**Score** — A 0–10 value with one decimal, derived from a title's ordinal position within its bucket band (§10). A statement about where a title sits in one person's list, never a rating of the film and never averaged across users.
 
 **Outbox** — The local queue holding changes made offline until they sync.
 

@@ -3,12 +3,29 @@ import { useRouter } from 'expo-router';
 import { Alert, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
-import { useLoggedCollection, useRankedCollection } from '@/features/collection/use-collection';
+import { bandSizes, scoreFor } from '@/features/collection/score';
+import {
+  useLoggedCollection,
+  useRankedCollection,
+  useWatchlist,
+} from '@/features/collection/use-collection';
 import { useFeed } from '@/features/feed/use-feed';
 import { posterUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/ui/tokens';
-import { ActivityCard, AppHeader, Avatar, Button, EmptyState, Screen, StatRow, Text, TitleRow } from '@/ui/components';
+import {
+  ActivityRow,
+  AppHeader,
+  Avatar,
+  Button,
+  EmptyState,
+  PosterGrid,
+  Screen,
+  SectionHeader,
+  SkeletonRow,
+  StatRow,
+  Text,
+} from '@/ui/components';
 
 /** The public identity page: stats, match, leaderboard, and the Top 10 that
  *  feeds the share card (PRD §16). */
@@ -17,6 +34,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const ranked = useRankedCollection(profile.id, 'movies');
   const logged = useLoggedCollection(profile.id);
+  const watchlist = useWatchlist(profile.id);
   const feed = useFeed(profile.id);
   const follows = useQuery({
     queryKey: ['profile-follows', profile.id],
@@ -40,7 +58,16 @@ export default function ProfileScreen() {
     },
   });
 
-  const top = ranked.data?.slice(0, 3) ?? [];
+  // Six, so the wall is two full rows of three. Three was a leftover from when
+  // this was a list, and a single row of a three-column grid reads as a stub.
+  const top = ranked.data?.slice(0, 6) ?? [];
+  // Band sizes come from the whole ranking, not the slice: a score is only
+  // meaningful against every title in its band, so scoring the top six against
+  // themselves would give all six a 10.
+  const sizes = bandSizes(ranked.data ?? []);
+  // Own activity only. The feed query spans everyone this user follows, and a
+  // friend's ranking under a heading on *your* profile is a different claim.
+  const recent = (feed.data ?? []).filter((event) => event.actorId === profile.id).slice(0, 3);
   const shareProfile = async () => {
     const url = `https://bingd.app/u/${profile.username}`;
     try {
@@ -56,7 +83,7 @@ export default function ProfileScreen() {
       <AppHeader right={<Button label="Settings" kind="tertiary" onPress={() => router.push('/settings')} />} />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.identity}>
-          <Avatar size="md" uri={profile.avatar_url ?? null} name={profile.display_name || profile.username} />
+          <Avatar size="md" uri={profile.avatarUri} name={profile.display_name || profile.username} />
           <Text variant="title2">{profile.display_name || profile.username}</Text>
           <Text variant="footnote" tone="secondary">
             @{profile.username}
@@ -70,7 +97,12 @@ export default function ProfileScreen() {
             { label: 'Following', value: follows.isPending ? '—' : follows.data?.following ?? 0 },
             { label: 'Ranked', value: logged.isPending ? '—' : logged.data?.rankedCount ?? 0 },
             { label: 'Watched', value: logged.isPending ? '—' : logged.data?.loggedCount ?? 0 },
-            { label: 'Watchlist', value: ranked.isPending ? '—' : top.length },
+            // Was `top.length` — the length of the top-six slice — so it read 6
+            // for anyone with six rankings and nothing on their watchlist.
+            {
+              label: 'Watchlist',
+              value: watchlist.isPending ? '—' : watchlist.data?.length ?? 0,
+            },
           ]}
         />
         <View style={styles.share}>
@@ -78,50 +110,65 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text variant="subhead" tone="tertiary">
-            TOP RANKED
-          </Text>
           {ranked.isPending ? (
-            <Text variant="body" tone="tertiary">
-              Loading your rankings…
-            </Text>
+            <>
+              <SectionHeader title="Top ranked" />
+              <SkeletonRow count={3} />
+            </>
           ) : top.length === 0 ? (
-            <EmptyState
-              kind="nothingYet"
-              title="No rankings yet"
-              body="Log and rank a few titles to build your profile."
-            />
-          ) : (
-            top.map((entry) => (
-              <TitleRow
-                key={entry.mediaItemId}
-                title={entry.title}
-                year={entry.year}
-                posterUri={posterUri(entry.posterPath)}
-                leading={
-                  <Text variant="ordinal" tone="tertiary">
-                    #{entry.position}
-                  </Text>
-                }
-                onPress={() => router.push(`/title/${entry.mediaItemId}`)}
+            <>
+              <SectionHeader title="Top ranked" />
+              <EmptyState
+                kind="nothingYet"
+                title="No rankings yet"
+                body="Log and rank a few titles to build your profile."
               />
-            ))
+            </>
+          ) : (
+            // A wall rather than rows. This is the one block on the profile
+            // that exists to be looked at rather than worked through, and rows
+            // carrying runtime and genre give a visitor metadata they did not
+            // ask for while making the films themselves small.
+            <PosterGrid
+              title="Top ranked"
+              tiles={top.map((entry) => ({
+                id: entry.mediaItemId,
+                title: entry.title,
+                year: entry.year,
+                posterUri: posterUri(entry.posterPath, 'card'),
+                score: scoreFor(entry.bucket, entry.position, sizes),
+                bucket: entry.bucket,
+              }))}
+              onPressTile={(tile) => router.push(`/title/${tile.id}`)}
+            />
           )}
         </View>
 
         <View style={styles.section}>
-          <Text variant="subhead" tone="tertiary" style={styles.sectionHeader}>
-            RECENT ACTIVITY
-          </Text>
-          {(feed.data ?? []).slice(0, 3).map((event) => (
-            <ActivityCard
+          <SectionHeader title="Recent activity" />
+          {feed.isPending ? (
+            <SkeletonRow count={2} />
+          ) : recent.length === 0 ? (
+            <EmptyState
+              kind="nothingYet"
+              compact
+              title="Nothing here yet"
+              body="Rank or log a title and it will show up here."
+            />
+          ) : null}
+          {recent.map((event) => (
+            <ActivityRow
               key={event.id}
               actorName={event.actorName}
               actorAvatarUri={event.actorAvatarUri}
-              sentence={`${event.actorName} ${event.type === 'title_logged' ? 'watched' : 'ranked'} ${event.title ?? 'a title'}.`}
+              verb={event.type === 'title_logged' ? 'watched' : 'ranked'}
+              title={event.title}
+              year={event.year}
               posterUri={posterUri(event.posterPath)}
+              score={event.score}
+              bucket={event.bucket}
               timeLabel={new Date(event.createdAt).toLocaleDateString()}
-              onPress={() => event.mediaItemId && router.push(`/title/${event.mediaItemId}`)}
+              onPressTitle={() => event.mediaItemId && router.push(`/title/${event.mediaItemId}`)}
             />
           ))}
         </View>
