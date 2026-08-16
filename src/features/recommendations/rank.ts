@@ -176,7 +176,9 @@ export const maxPerGenre = (limit: number = SLATE_SIZE) =>
  * and no rule reading titles alone can tell them apart — the second attempt reduced
  * the false positives without eliminating them, and a franchise ceiling that drops an
  * unrelated film is worse than one that misses a franchise. So `Iron Man 2` is a
- * documented **miss**, and the ceiling is keyed only on markers that mean one thing.
+ * documented **miss**. A named marker is not infallible either — see the leading-stem
+ * collision under `franchiseKey` — but it means one thing wherever it appears, which a
+ * bare number does not.
  *
  * The number itself is permissive — digits, roman numerals or a word — because after
  * `Part` or `Chapter` there is nothing else it could be.
@@ -216,12 +218,15 @@ const NUMBERED_PART = /\s(?:part|chapter|volume|vol|episode)\s+(?:\d+|[ivx]+|one
  *
  * ### The one way it can over-group, stated rather than denied
  *
- * Two unrelated films whose leading names are identical — `Heat` (1995) and `Heat`
- * (2022), or a film and someone else's subtitled film of the same name — get one key,
- * because at that point the titles genuinely are the same and nothing short of the
- * provider's collection id can separate them. The ceiling is two of twenty, so this
- * costs a row only when three or more collide. It is held as a test so that it stays a
- * known cost rather than becoming a surprise.
+ * Two unrelated films whose **leading stems** are identical get one key. That covers
+ * two films with the same title — `Heat` (1995) and `Heat` (2022) — and the weaker
+ * case where one film's whole title is the part of another's that precedes its
+ * subtitle. "Leading stem" and not "same name", because the second case is not the
+ * same name and the subtitle split is what makes it collide.
+ *
+ * Nothing short of the provider's collection id separates either. The ceiling is two
+ * of twenty, so this costs a row only when three or more collide. It is held as a test
+ * so that it stays a known cost rather than becoming a surprise.
  */
 export function franchiseKey(title: string): string | null {
   // Everything before the first subtitle separator: a colon, a dash with spaces

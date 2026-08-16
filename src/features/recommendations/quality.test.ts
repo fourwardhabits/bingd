@@ -407,8 +407,11 @@ popularity term is doing more work than its 10% weight suggests.
   re-derived against real \`similar\` facets before anyone treats them as a baseline.
 - The seeded catalogue has no popularity at all, so the popularity prior is being
   tested against a distribution this file invented.
-- Franchise identity is a title-derived proxy, so a franchise that renames its entries
-  is invisible to the figure above. It under-reports; it does not over-report.
+- Franchise identity is a title-derived proxy. It usually **under**-reports: a numbered
+  sequel, a renamed entry or a shared universe is invisible to the figure above. It can
+  also **over**-report, in one way — two unrelated films whose leading stems are
+  identical are counted as one franchise, because at that point the titles are the same
+  and nothing short of the provider's collection id separates them.
 `;
 
     // Only under `npm run report:recommendations`. A unit test that writes into the

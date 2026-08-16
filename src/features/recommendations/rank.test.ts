@@ -466,12 +466,14 @@ describe('what counts as one franchise', () => {
     expect(same('The Fast and the Furious', 'Fast Five')).toBe(false); // retitled reboot
   });
 
-  it('groups two films that simply have the same name, and that is the known cost', () => {
-    // The one direction the proxy can be wrong, asserted rather than denied. Two
-    // unrelated films whose leading names are identical get one key, because at that
-    // point the titles genuinely are the same and only the provider's collection id
-    // could separate them. The ceiling is two of twenty, so it costs a row only when
-    // three or more collide.
+  it('groups unrelated films that share a leading stem, and that is the known cost', () => {
+    // The one direction the proxy can be wrong, asserted rather than denied.
+    //
+    // Two films with the same title get one key, and so does a film whose *subtitled*
+    // title starts with somebody else's whole title — the second is the weaker case
+    // and the honest name for what is shared is the leading stem, not the name.
+    // Either way only the provider's collection id could separate them. The ceiling
+    // is two of twenty, so this costs a row only when three or more collide.
     expect(same('Heat', 'Heat')).toBe(true);
     expect(same('Crash', 'Crash: A Different Story')).toBe(true);
   });
