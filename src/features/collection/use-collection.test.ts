@@ -102,10 +102,40 @@ describe('the ranked list', () => {
       genres: ['Drama'],
       runtimeMinutes: 120,
       kind: 'movie',
+      // Null for a film, and the parent show's name for a season — a ranked TV
+      // list is otherwise a column of rows called "Season 2".
+      seriesTitle: null,
       bucket: 'loved',
       position: 1,
       category: 'movies',
     });
+  });
+
+  it('carries the show’s name on a ranked season', async () => {
+    rows.rankings = [
+      {
+        media_item_id: 's2',
+        bucket: 'loved',
+        position: 1,
+        category: 'tv_seasons',
+        media_items: {
+          title: 'Season 2',
+          release_date: '2010-01-01',
+          poster_path: null,
+          genres: ['Comedy'],
+          runtime_minutes: 22,
+          kind: 'season',
+          parent: { title: 'Parks and Recreation' },
+        },
+      },
+    ];
+
+    const { result } = await renderHookWithProviders(() =>
+      useRankedCollection('user-1', 'tv_seasons'),
+    );
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+
+    expect(result.current.data?.[0]?.seriesTitle).toBe('Parks and Recreation');
   });
 });
 

@@ -20,6 +20,15 @@ export type RankedEntry = {
   genres: string[];
   runtimeMinutes: number | null;
   kind: 'movie' | 'season' | 'series';
+  /**
+   * The parent series, for a season.
+   *
+   * A ranked list of TV is a column of rows called "Season 2", so the name is only
+   * complete with the show attached (`lib/titles.ts`). Carried on the entry rather
+   * than resolved per row at render time, because a second query per season would be
+   * a request per visible row.
+   */
+  seriesTitle: string | null;
   bucket: 'loved' | 'fine' | 'not_for_me';
   position: number;
   category: RankingCategory;
@@ -48,6 +57,7 @@ type MediaShape = {
   genres: string[] | null;
   runtime_minutes: number | null;
   kind: 'movie' | 'season' | 'series';
+  parent?: { title: string } | { title: string }[] | null;
 };
 
 /** PostgREST returns an embedded row as an object, but types it as an array. */
@@ -60,6 +70,11 @@ const media = (value: MediaShape | MediaShape[] | null): MediaShape =>
     runtime_minutes: null,
     kind: 'movie',
   };
+
+const parentTitle = (shape: MediaShape): string | null => {
+  const parent = Array.isArray(shape.parent) ? shape.parent[0] : shape.parent;
+  return parent?.title ?? null;
+};
 
 /**
  * The ranked list for one category, in position order.
@@ -75,7 +90,8 @@ export function useRankedCollection(userId: string, category: RankingCategory) {
       const { data, error } = await supabase
         .from('rankings')
         .select(
-          'media_item_id, bucket, position, category, media_items(title, release_date, poster_path, genres, runtime_minutes, kind)',
+          'media_item_id, bucket, position, category, ' +
+            'media_items(title, release_date, poster_path, genres, runtime_minutes, kind, parent:parent_id(title))',
         )
         .eq('user_id', userId)
         .eq('category', category)
@@ -90,6 +106,7 @@ export function useRankedCollection(userId: string, category: RankingCategory) {
         genres: media(row.media_items).genres ?? [],
         runtimeMinutes: media(row.media_items).runtime_minutes,
         kind: media(row.media_items).kind,
+        seriesTitle: parentTitle(media(row.media_items)),
         bucket: row.bucket,
         position: row.position,
         category: row.category,
