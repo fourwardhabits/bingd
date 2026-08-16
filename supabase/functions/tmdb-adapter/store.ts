@@ -75,24 +75,25 @@ export async function putList(db: Db, listKey: string, ids: string[]) {
 }
 
 /**
- * Whether a facet is already cached and still inside its TTL.
+ * Claims the right to spend a provider request refreshing one facet.
  *
- * The client checks this too — it reads `media_cache` directly, so it knows before it
- * calls. This is the server-side half of the same guard, and it is here because the
- * client's is an optimisation and this one is a limit: a client in a loop, or two
- * devices opening For You at once, must not each spend a provider request on a facet
- * that is already good.
+ * True to exactly one caller while the facet is absent or expired; false to everyone
+ * else, including everyone who arrives while the winner is still fetching. See
+ * `20260816001000` — the mechanism is `media_cache`'s own primary key, and it
+ * replaced a read-then-write check whose comment claimed a guarantee it did not have.
+ *
+ * A read-then-write check cannot do this. Two accounts opening For You on the same
+ * anchor at the same moment both see it stale and both spend, and the per-user hourly
+ * ceiling is no help at all because they are different users — which is precisely the
+ * population that shares an anchor.
  */
-export async function facetIsFresh(db: Db, mediaItemId: string, facet: string) {
-  const { data, error } = await db
-    .from('media_cache')
-    .select('expires_at')
-    .eq('media_item_id', mediaItemId)
-    .eq('facet', facet)
-    .gt('expires_at', new Date().toISOString())
-    .maybeSingle();
-  if (error) throw new Error(`media_cache: ${error.message}`);
-  return Boolean(data);
+export async function claimFacet(db: Db, mediaItemId: string, facet: string) {
+  const { data, error } = await db.rpc('tmdb_claim_facet', {
+    p_media_item_id: mediaItemId,
+    p_facet: facet,
+  });
+  if (error) throw new Error(`tmdb_claim_facet: ${error.message}`);
+  return data === true;
 }
 
 export async function putFacet(db: Db, mediaItemId: string, facet: string, payload: unknown) {
@@ -105,15 +106,31 @@ export async function putFacet(db: Db, mediaItemId: string, facet: string, paylo
 }
 
 /**
- * Counts one request against the caller's hourly ceiling.
+ * Counts requests against the caller's hourly ceiling.
  *
  * 53400 is `configuration_limit_exceeded`, which api.md §8 maps to BG429 — and
  * which PostgREST would otherwise render as a 500, the caveat that section spells
  * out. Translating it here is what makes the mapping true for this surface.
+ *
+ * `count` exists because one *action* is not always one *request*. `similar` makes a
+ * recommendations call and, on a cold isolate, two genre-list calls; recording one
+ * for all three left the ceiling permitting three times the provider traffic it
+ * claimed to. Independent review found it, and the fix is to charge for what actually
+ * goes out rather than for the invocation.
+ *
+ * Implemented as a loop rather than a parameter on `tmdb_note_request`, because that
+ * function is deployed and adding an argument to it means dropping and recreating a
+ * definer function, re-issuing its grants, and re-pinning its signature in
+ * `function-grants.test.mjs` — a lot of moving parts to avoid at most two extra
+ * round trips, on a cold isolate, once.
  */
 export class RateLimited extends Error {}
 
-export async function noteRequest(db: Db, userId: string) {
+export async function noteRequest(db: Db, userId: string, count = 1) {
+  for (let spent = 0; spent < count; spent += 1) await noteOne(db, userId);
+}
+
+async function noteOne(db: Db, userId: string) {
   const { error } = await db.rpc('tmdb_note_request', { p_user_id: userId });
   if (!error) return;
   if (error.code === '53400') throw new RateLimited('TMDB request limit reached');

@@ -78,10 +78,14 @@ export default function RecommendationsScreen() {
 
   const explain = (item: ForYouItem) => {
     const { explanation } = item;
+    const taste = slate.data?.taste;
+    if (!taste) return;
+
     const lines = [
-      headlineFor(explanation, { genres: new Map(), languages: new Map(), sampleSize: 99 }, (code) =>
-        languageName(code) ?? code,
-      ),
+      // The real taste, not a stand-in. A stand-in with a large `sampleSize` was
+      // defeating the suppression that stops a taste built from one ranking being
+      // asserted in words, so this panel showed a sentence the wall would not.
+      headlineFor(explanation, taste, (code) => languageName(code) ?? code),
       `score ${explanation.total.toFixed(3)}`,
       explanation.anchors.length
         ? `anchors: ${explanation.anchors

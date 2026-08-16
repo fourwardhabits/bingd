@@ -250,6 +250,12 @@ expectRefused(
 // Added 2026-08-16 with yearly goals. `authenticated` only — there is no auth.uid()
 // for a goal to belong to otherwise, and the function would write a null-owned row
 // or fail obscurely.
+// Added 2026-08-16 with For You. A client holding this could evict any cached facet
+// in the catalogue by claiming it and never fetching, two minutes at a time.
+expectRefused(
+  'anon cannot execute tmdb_claim_facet',
+  await rpc('tmdb_claim_facet', { p_media_item_id: NIL, p_facet: 'similar' }),
+);
 expectRefused(
   'anon cannot execute set_watch_goal',
   await rpc('set_watch_goal', { p_year: 2026, p_category: 'movies', p_target: 1 }),

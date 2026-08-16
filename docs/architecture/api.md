@@ -250,10 +250,21 @@ Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may
 **`similar` is a user action, and bounded on three sides.** It spends provider quota, which
 normally argues for `service_role` — but what a slate needs depends on which titles *this*
 person ranked highest, and no schedule knows that. The bounds are: the client asks about at
-most six anchors, the answer is cached in `media_cache` under the shared facet TTL so every
-later user of that anchor pays nothing, and `noteRequest` applies the same per-user hourly
-ceiling `search` observes. The adapter re-checks facet freshness before spending a request,
-because the client's identical check is an optimisation and this one is a limit.
+most six anchors; `tmdb_claim_facet` (`20260816001000`) lets exactly one caller in the world
+refresh a given facet at a time, using `media_cache`'s own primary key as the lock; and every
+provider request is charged to the caller's hourly ceiling.
+
+**Every request, not every invocation.** The first version of this recorded one request and
+made three — the recommendations call plus, on a cold isolate, both genre lists — so the
+ceiling permitted three times the provider traffic it claimed to. `noteRequest` now takes a
+count and `tmdb.genreRequestCost()` reports what the genre map is about to cost. `search` was
+wrong in both directions and is fixed with it: it charged for a query shorter than two
+characters, which spends nothing, and under-charged one that warms the genre map.
+
+A read-then-write freshness check cannot do what the claim does. Two accounts opening For You
+on the same anchor at the same moment both see it stale and both spend, and a *per-user*
+ceiling is no help at all when the callers are different users — which is exactly the
+population that shares an anchor.
 
 It writes the facet even when TMDB returns nothing. An obscure title genuinely has no
 recommendations, and caching that fact is what stops every slate rebuild asking again.

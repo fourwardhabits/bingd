@@ -21,7 +21,11 @@ No language model. Recommendations are derived from human ranking behavior, cont
 
 **The client composes the sentence, and that is not a violation of §5.** The rule that the client "has no path to compose a reason of its own" exists to stop **fabricated social proof** — "3 people with similar taste loved this" asserted about people who did not — and it is enforced server-side because the client cannot be trusted with, and must not have, other users' rankings.
 
-V1 uses no cross-user signal at all. Its three inputs are the viewer's own rankings (own-only under RLS), TMDB's association between titles (`media_cache` facet `similar`, world-readable), and genre/language/popularity from `media_items`. There is therefore no social claim available to fabricate, and every sentence it can produce is of the form "because of something *you* did".
+V1 uses **no other Bingd user's data**. Its three inputs are the viewer's own rankings (own-only under RLS), TMDB's association between titles (`media_cache` facet `similar`, world-readable), and genre/language/popularity from `media_items`. There is therefore no social claim available to fabricate, and every sentence it can produce is of the form "because of something *you* did".
+
+> **The stronger phrasing — "no cross-user signal at all" — is false, and independent review said so.** TMDB's recommendations are derived from what *their* users did, and popularity is a crowd measure. Both are external, public, about titles rather than about people, and identical for every viewer, so neither can be attributed to a person and neither is something one Bingd account learns about another. That is the claim; the stronger one was overreach.
+>
+> One residual side channel, recorded rather than closed: `similar` answers `reason: "cached"` faster than it answers a fetch, so an authenticated caller can infer that *some* account recently caused a given title's facet to be filled. It names no person, no score and no time, and any signed-in user may ask about any title anyway. Closing it would mean padding the response, which costs more than the channel is worth.
 
 **The moment a social family is added, scoring moves server-side.** That is not a preference; at that point the client would need other people's rankings in order to score, which is the thing the rule protects.
 

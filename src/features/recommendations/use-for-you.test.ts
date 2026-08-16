@@ -39,6 +39,43 @@ const season = (id: string, seriesId: string | null, position: number): RankedEn
     position,
   });
 
+describe('only what the viewer loved', () => {
+  it('ignores a title they merely finished', () => {
+    // Every anchor is quoted on screen as "Because you loved X". A viewer whose
+    // whole collection is `fine` still has a top-ranked title, and the first version
+    // of this anchored on it — saying "you loved" about a film they had marked
+    // otherwise. Independent review, 2026-08-16.
+    const anchors = anchorsFrom(
+      [entry({ mediaItemId: 'meh', bucket: 'fine', position: 1 })],
+      'movies',
+    );
+
+    expect(anchors).toEqual([]);
+  });
+
+  it('ignores a title they disliked, which would poison the slate anyway', () => {
+    // A `not_for_me` title's associations are titles like something they disliked.
+    const anchors = anchorsFrom(
+      [entry({ mediaItemId: 'no', bucket: 'not_for_me', position: 1 })],
+      'movies',
+    );
+
+    expect(anchors).toEqual([]);
+  });
+
+  it('takes the loved ones past the ones it skipped', () => {
+    const anchors = anchorsFrom(
+      [
+        entry({ mediaItemId: 'meh', bucket: 'fine', position: 1 }),
+        entry({ mediaItemId: 'yes', bucket: 'loved', position: 2 }),
+      ],
+      'movies',
+    );
+
+    expect(anchors.map((anchor) => anchor.mediaItemId)).toEqual(['yes']);
+  });
+});
+
 describe('choosing anchors for films', () => {
   it('takes the highest ranked, in order', () => {
     const anchors = anchorsFrom(

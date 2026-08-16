@@ -20,12 +20,20 @@
  * loved this" asserted about people who did not. It is enforced server-side because
  * the client cannot be trusted with other users' rankings, and must not have them.
  *
- * V1 therefore uses **no cross-user signal at all**. Every input below is either the
+ * V1 therefore uses **no other Bingd user's data**. Every input below is either the
  * viewer's own ranking, or catalogue metadata that is world-readable anyway:
  *
  *   - the viewer's own ranked titles and their derived scores (`rankings`, own-only);
  *   - TMDB's own association between titles (`media_cache` facet `similar`);
  *   - genres, language and popularity from `media_items`.
+ *
+ * "No other Bingd user's data" and not "no cross-user signal", which is what this said
+ * first and is not true: TMDB's recommendations are themselves derived from what their
+ * users did, and popularity is a crowd measure. Independent review was right to call
+ * it. The distinction that matters is that both are *external, public, about titles
+ * rather than about people, and identical for every viewer* — so neither can be
+ * attributed to a person, and neither is something one Bingd account learns about
+ * another.
  *
  * There is consequently no social claim to fabricate. Every sentence this module can
  * produce is of the form "because of something *you* did", and the structure it is

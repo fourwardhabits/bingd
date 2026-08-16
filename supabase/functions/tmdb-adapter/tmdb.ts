@@ -112,6 +112,24 @@ type GenreList = { genres: { id: number; name: string }[] };
 
 let genreCache: Map<number, string> | null = null;
 
+/**
+ * How many provider requests the next `genreNames()` will make: two, or none.
+ *
+ * Exists because callers have to *account* for them. Independent review found that
+ * `similar` recorded one request against the user's hourly ceiling and then made
+ * three — the recommendations call plus, on a cold isolate, both genre lists. At the
+ * configured ceiling that is three hundred and sixty provider requests an hour from
+ * one account rather than a hundred and twenty, which means the ceiling was not
+ * protecting the quota it exists to protect.
+ *
+ * Reading a module-level cache rather than counting inside `request` keeps the
+ * accounting where the decision to spend is made, which is also where the ceiling is
+ * enforced. It is a race against a concurrent cold call — two callers can both see
+ * two and one of them will be charged for a fetch that had already begun. Erring
+ * toward over-counting is the correct direction for a ceiling.
+ */
+export const genreRequestCost = () => (genreCache ? 0 : 2);
+
 export async function genreNames(): Promise<Map<number, string>> {
   if (genreCache) return genreCache;
 

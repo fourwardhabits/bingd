@@ -26,7 +26,7 @@ import {
   countEnrichmentBacklog,
   dueForEnrichment,
   dueForRefresh,
-  facetIsFresh,
+  claimFacet,
   noteRequest,
   putFacet,
   putList,
@@ -131,11 +131,15 @@ async function resolveCaller(db: Db, req: Request): Promise<Caller | null> {
 // search
 // ---------------------------------------------------------------------------
 
-async function handleSearch(db: Db, query: string, limit: number) {
+async function handleSearch(db: Db, query: string, limit: number, userId: string) {
   const trimmed = query.trim();
   // The same floor useTitleSearch applies. Below it every query matches half of
-  // TMDB and spends a provider request to do it.
+  // TMDB and spends a provider request to do it. Nothing is charged for a query that
+  // returns here, because nothing is spent.
   if (trimmed.length < 2) return json({ results: [] });
+
+  // The search itself, plus both genre lists if this isolate is cold.
+  await noteRequest(db, userId, 1 + tmdb.genreRequestCost());
 
   const [{ results }, genres] = await Promise.all([
     tmdb.searchMulti(trimmed),
@@ -265,14 +269,18 @@ const SIMILAR_SIZE = 20;
  * This is the candidate source behind For You. It is a **user** action, like `detail`
  * and unlike `trending`: a slate needs the titles associated with the handful of
  * films that person ranked highest, and nobody else's schedule knows which those are.
- * The cost is bounded on three sides — the client asks for at most six anchors, each
- * answer is cached for every user under the facet TTL, and `noteRequest` applies the
- * same per-user hourly ceiling search does.
+ * The cost is bounded on three sides — the client asks about at most six anchors,
+ * `tmdb_claim_facet` lets exactly one caller in the world refresh a given facet at a
+ * time, and every provider request this makes is charged to the caller's hourly
+ * ceiling.
+ *
+ * "Every request" is the part that had to be fixed. Independent review found this
+ * recording one and making three: the recommendations call, plus both genre lists on
+ * a cold isolate. The ceiling is only a ceiling if it counts what actually goes out.
  *
  * A **season anchor resolves to its series**. TMDB has no season-level
- * recommendations, and the decision says trending and discovery TV are series-level
- * anyway. The facet is written on the series row, which is where a later reader will
- * look for it.
+ * recommendations, and the decision says discovery TV is series-level anyway. The
+ * facet is written on the series row, which is where a later reader will look.
  */
 async function handleSimilar(db: Db, mediaItemId: string, userId: string) {
   const row = await catalogueRow(db, mediaItemId);
@@ -282,17 +290,31 @@ async function handleSimilar(db: Db, mediaItemId: string, userId: string) {
   const targetId = row.kind === 'season' ? row.parent_id : row.id;
   if (!targetId) return { id: mediaItemId, written: 0, reason: 'malformed_season' as const };
 
-  // Before the quota is spent, not after. Two devices opening For You at the same
-  // moment would otherwise each pay for the same list.
-  if (await facetIsFresh(db, targetId, 'similar')) {
-    return { id: targetId, written: 0, reason: 'cached' as const };
+  // A season's parent is `not null` by constraint but is not constrained to *be* a
+  // series, and this function is about to ask TMDB a /tv question about it. Ordinary
+  // data cannot reach here — the adapter validates the parent when it inserts a
+  // season — but the table does not enforce what this code assumes, so it is checked
+  // rather than assumed. Raised by independent review.
+  const target = targetId === row.id ? row : await catalogueRow(db, targetId);
+  if (!target || (row.kind === 'season' && target.kind !== 'series')) {
+    return { id: mediaItemId, written: 0, reason: 'malformed_season' as const };
   }
 
   const kind = row.kind === 'movie' ? 'movie' : 'tv';
-  const tmdbId = row.kind === 'movie' ? row.tmdb_id : await tmdbIdOf(db, targetId);
+  const tmdbId = row.kind === 'movie' ? row.tmdb_id : target.tmdb_id;
+  // Checked before the claim, so a title TMDB cannot answer about does not hold a
+  // two-minute claim that blocks nothing useful and expires into the same refusal.
   if (!tmdbId) return { id: targetId, written: 0, reason: 'no_tmdb_id' as const };
 
-  await noteRequest(db, userId);
+  // Atomic, and it subsumes the freshness check: losing means either the facet is
+  // already good or somebody else is fetching it, and neither wants a second request.
+  if (!(await claimFacet(db, targetId, 'similar'))) {
+    return { id: targetId, written: 0, reason: 'cached' as const };
+  }
+
+  // Charged before the requests go out, and charged for all of them. `genreNames`
+  // costs two on a cold isolate and nothing afterwards.
+  await noteRequest(db, userId, 1 + tmdb.genreRequestCost());
   const { results } = await tmdb.recommendations(kind, tmdbId);
   const genres = await tmdb.genreNames();
   // `kind` as the fallback: /recommendations sends no `media_type` whatsoever, so
@@ -411,9 +433,13 @@ Deno.serve(async (req) => {
     switch (action) {
       case 'search': {
         if (caller.kind !== 'user') return fail('BG403', 'search is a user action', 403);
-        await noteRequest(db, caller.id);
+        const query = String(body.query ?? '');
+        // Charged inside `handleSearch`, after the two-character floor and for every
+        // request it actually makes — the genre lists included. It used to be charged
+        // here, which billed a query too short to spend anything and under-billed one
+        // that spent three. Both directions found by independent review.
         const limit = clamp(body.limit, 10, 1, 20);
-        return await handleSearch(db, String(body.query ?? ''), limit);
+        return await handleSearch(db, query, limit, caller.id);
       }
 
       case 'detail': {

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { bandSizes, scoreFor } from '@/features/collection/score';
 import { useRankedCollection, type RankedEntry } from '@/features/collection/use-collection';
 import { supabase } from '@/lib/supabase';
-import { cacheSimilar } from '@/lib/tmdb-adapter';
+import { AdapterError, cacheSimilar } from '@/lib/tmdb-adapter';
 
 import {
   ANCHOR_LIMIT,
@@ -12,6 +12,7 @@ import {
   type Anchor,
   type Candidate,
   type Scored,
+  type Taste,
 } from './rank';
 
 /**
@@ -45,6 +46,15 @@ export type ForYouSlate = {
   anchorsUsed: number;
   /** True when the slate is popularity-only — no personalisation to claim. */
   lowData: boolean;
+  /**
+   * The affinity vector the slate was scored with.
+   *
+   * Returned so the screen can pass the *real* taste to `headlineFor` rather than a
+   * stand-in. It was passing `{ sampleSize: 99 }`, which defeated the suppression
+   * that stops a taste built from one ranking being asserted in words — the unit test
+   * covered `headlineFor` and not its caller. Independent review found it.
+   */
+  taste: Taste;
 };
 
 const KIND_FOR: Record<Medium, 'movie' | 'series'> = { movies: 'movie', tv: 'series' };
@@ -54,9 +64,22 @@ const TRENDING_FOR: Record<Medium, string> = {
 };
 
 /**
- * The titles a slate reasons from: the viewer's own highest-scoring, capped.
+ * The titles a slate reasons from: the viewer's own **loved** ones, capped.
  *
- * A season's anchor is its **series**, deduplicated — five seasons of one show is one
+ * `loved` and not merely "highest ranked", which is what this did first and what
+ * independent review caught. Every anchor is quoted on screen as "Because you loved
+ * X", and a viewer whose entire collection is `fine` and `not_for_me` still has a
+ * top-ranked title — so the sentence was being said about films they had explicitly
+ * marked as not for them. The arithmetic was sound and the word was a lie.
+ *
+ * It is also the better recommender. A `not_for_me` title's associations are titles
+ * *like something the viewer disliked*, and feeding them in as positive evidence was
+ * always going to be wrong however the sentence was worded.
+ *
+ * A viewer with nothing loved gets no anchors, a popularity-and-genre slate, and a
+ * screen that says "Popular right now" — which is what that slate honestly is.
+ *
+ * A season's anchor is its **series**, deduplicated: five seasons of one show is one
  * anchor, not five, which is both what TMDB can answer and what stops a single
  * favourite show owning the whole TV slate before diversity even runs.
  */
@@ -70,6 +93,7 @@ export function anchorsFrom(ranked: readonly RankedEntry[], medium: Medium): {
   const anchors: { mediaItemId: string; title: string; score: number }[] = [];
 
   for (const entry of ranked) {
+    if (entry.bucket !== 'loved') continue;
     const id = medium === 'tv' ? entry.seriesId : entry.mediaItemId;
     // A ranked season whose parent did not come back is skipped rather than anchored
     // on the season itself, which TMDB cannot answer about.
@@ -183,6 +207,33 @@ async function collectionOf(userId: string) {
   };
 }
 
+/**
+ * Everything about the viewer's rankings that changes a slate, as one short string.
+ *
+ * The key used to carry only the selected medium's anchor ids, which left two ways to
+ * serve a stale slate for half an hour: re-bucketing a title changes the taste vector
+ * without changing which ids are anchors, and editing TV rankings changes the taste
+ * behind the *Movies* wall — taste spans both media on purpose. Independent review
+ * found both.
+ *
+ * A digest rather than the rankings themselves, because a query key is compared by
+ * value on every render and a four-hundred-title collection would be four hundred
+ * comparisons a frame. FNV-1a: not a security hash, and nothing here needs one — a
+ * collision would serve a slightly stale slate.
+ */
+export function rankingFingerprint(...lists: readonly (readonly RankedEntry[])[]): string {
+  let hash = 0x811c9dc5;
+  for (const list of lists) {
+    for (const entry of list) {
+      for (const char of `${entry.mediaItemId}:${entry.bucket}:${entry.position};`) {
+        hash ^= char.charCodeAt(0);
+        hash = Math.imul(hash, 0x01000193);
+      }
+    }
+  }
+  return (hash >>> 0).toString(36);
+}
+
 export function useForYou(userId: string, medium: Medium) {
   // Taste spans both media. Someone who ranks Japanese cinema highly means that about
   // television too, and splitting the affinity vector by medium would halve the
@@ -192,13 +243,15 @@ export function useForYou(userId: string, medium: Medium) {
 
   const ranked = medium === 'movies' ? movies : seasons;
   const anchorSeeds = ranked.data ? anchorsFrom(ranked.data, medium) : [];
-  const anchorKey = anchorSeeds.map((anchor) => anchor.mediaItemId).join(',');
+  // Both lists, because taste spans both media and a slate scored with it is stale
+  // when either changes.
+  const inputs = rankingFingerprint(movies.data ?? [], seasons.data ?? []);
 
   return useQuery({
-    // Keyed by the anchors, so ranking something new rebuilds the slate and nothing
-    // else has to remember to invalidate it. Keyed by the account because `exclude`
-    // is that account's collection.
-    queryKey: ['for-you', userId, medium, anchorKey],
+    // Keyed by everything that feeds the score, so any ranking change rebuilds the
+    // slate and nothing else has to remember to invalidate it. Keyed by the account
+    // because `exclude` is that account's collection.
+    queryKey: ['for-you', userId, medium, inputs],
     enabled: Boolean(userId) && movies.isSuccess && seasons.isSuccess,
     // A slate is stable between rankings. Half an hour stops a tab switch rebuilding
     // it, and any actual change to the inputs changes the key above instead.
@@ -228,9 +281,15 @@ export function useForYou(userId: string, medium: Medium) {
         // Sequentially, so a cold start is six requests spread out rather than six at
         // once against a provider quota shared by everyone.
         for (const id of missing) {
-          // One anchor failing — a title with no TMDB id, a rate limit — must not
-          // cost the whole slate. The others still have lists.
-          await cacheSimilar(id).catch(() => undefined);
+          try {
+            await cacheSimilar(id);
+          } catch (cause) {
+            // A rate limit is about the *account*, not about this anchor, so the five
+            // calls after it would all be refused too — and each one still costs a
+            // round trip and a log line. Every other failure is about the one title,
+            // and the remaining anchors are still worth asking for.
+            if (cause instanceof AdapterError && cause.isRateLimit) break;
+          }
         }
         lists = await cachedSimilar(anchorSeeds.map((anchor) => anchor.mediaItemId));
       }
@@ -258,6 +317,7 @@ export function useForYou(userId: string, medium: Medium) {
         items: slate.map((item) => ({ ...item, saved: saved.has(item.mediaItemId) })),
         anchorsUsed,
         lowData: anchorsUsed === 0,
+        taste,
       };
     },
   });

@@ -39,6 +39,55 @@ describe('PosterGrid', () => {
   });
 });
 
+describe('the watchlist control on a tile', () => {
+  const saveable: PosterTile[] = [
+    { id: 'a', title: 'Inception', year: 2010 },
+    { id: 'b', title: 'Dune', year: 2021, saved: true },
+  ];
+
+  it('is absent unless the surface asked for it', async () => {
+    // The collection walls show things already in the collection. Only For You, where
+    // saving is the point of the screen, gets the control.
+    const view = await render(<PosterGrid tiles={saveable} onPressTile={() => {}} />);
+
+    expect(view.queryByLabelText('Save Inception to watchlist')).toBeNull();
+  });
+
+  it('saves without opening the title underneath it', async () => {
+    // A Pressable inside a Pressable. If the outer one also fired, tapping the
+    // bookmark would navigate away from the wall the user is browsing — which is
+    // both wrong and the most annoying possible version of wrong.
+    const onPressTile = jest.fn();
+    const onToggleSave = jest.fn();
+    const view = await render(
+      <PosterGrid tiles={saveable} onPressTile={onPressTile} onToggleSave={onToggleSave} />,
+    );
+
+    await fireEvent.press(view.getByLabelText('Save Inception to watchlist'));
+
+    expect(onToggleSave).toHaveBeenCalledWith(saveable[0]);
+    expect(onPressTile).not.toHaveBeenCalled();
+  });
+
+  it('says which way it will go', async () => {
+    const view = await render(
+      <PosterGrid tiles={saveable} onPressTile={() => {}} onToggleSave={() => {}} />,
+    );
+
+    expect(view.getByLabelText('Save Inception to watchlist')).toBeTruthy();
+    expect(view.getByLabelText('Remove Dune from watchlist')).toBeTruthy();
+  });
+
+  it('tells a screen reader the tile is saved, not only the button', async () => {
+    // A sighted reader gets it from a filled glyph without touching anything.
+    const view = await render(
+      <PosterGrid tiles={saveable} onPressTile={() => {}} onToggleSave={() => {}} />,
+    );
+
+    expect(view.getByLabelText('Dune, 2021, saved')).toBeTruthy();
+  });
+});
+
 describe('PosterShelf', () => {
   it('carries its reason as the header', async () => {
     const view = await render(

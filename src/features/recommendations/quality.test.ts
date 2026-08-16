@@ -146,9 +146,15 @@ const share = (part: number, whole: number) => (whole === 0 ? 0 : part / whole);
 const measure = (viewer: Viewer) => {
   const { anchors, slate, exclude } = slateFor(viewer);
 
+  // Measured over the *chosen* items. The diversity pass admits deferred candidates
+  // at the end to fill a slate that its own constraints left short, and those are
+  // marked — so a cap stated over the whole slate would be a cap nobody applied. The
+  // deferred share is reported separately, because a slate that is mostly deferred is
+  // one whose constraints did not bind.
+  const chosen = slate.filter((item) => !item.explanation.deferred);
   const perAnchor = new Map<string, number>();
   const perGenre = new Map<string, number>();
-  for (const item of slate) {
+  for (const item of chosen) {
     const lead = item.explanation.anchors[0]?.mediaItemId;
     if (lead) perAnchor.set(lead, (perAnchor.get(lead) ?? 0) + 1);
     const genre = item.genres[0];
@@ -160,8 +166,13 @@ const measure = (viewer: Viewer) => {
     size: slate.length,
     anchors: anchors.length,
     leakedFromCollection: slate.filter((item) => exclude.has(item.mediaItemId)).length,
-    topAnchorShare: share(Math.max(0, ...perAnchor.values()), slate.length),
-    topGenreShare: share(Math.max(0, ...perGenre.values()), slate.length),
+    deferredShare: share(slate.length - chosen.length, slate.length),
+    unexplained: slate.filter(
+      (item) => item.explanation.total <= 0 || !item.explanation.lead,
+    ).length,
+    distinct: new Set(slate.map((item) => item.mediaItemId)).size,
+    topAnchorShare: share(Math.max(0, ...perAnchor.values()), Math.max(1, chosen.length)),
+    topGenreShare: share(Math.max(0, ...perGenre.values()), Math.max(1, chosen.length)),
     anchorLed: share(
       slate.filter((item) => item.explanation.lead === 'anchors').length,
       slate.length,
@@ -197,24 +208,45 @@ describe('recommendation quality', () => {
     for (const measured of all) expect(measured.leakedFromCollection).toBe(0);
   });
 
+  it('shows twenty different titles', () => {
+    for (const measured of all) expect(measured.distinct).toBe(20);
+  });
+
+  it('can say why it chose every single title', () => {
+    // Guards the degenerate pass: a slate of twenty zero-scored rows with empty
+    // explanations satisfies every count-based assertion in this file and is not a
+    // recommendation of anything.
+    for (const measured of all) expect(measured.unexplained).toBe(0);
+  });
+
   it('does not let one favourite own the wall', () => {
-    // "Twenty sequels because of one rating", measured. The diversity cap is four in
-    // twenty; anything above it means the constraint is not binding.
-    expect(overfit.topAnchorShare).toBeLessThanOrEqual(0.25);
-    expect(broad.topAnchorShare).toBeLessThanOrEqual(0.25);
+    // "Twenty sequels because of one rating", measured against the cap the diversity
+    // pass actually applies: four in twenty of the *chosen* items.
+    expect(overfit.topAnchorShare).toBeLessThanOrEqual(0.2);
+    expect(broad.topAnchorShare).toBeLessThanOrEqual(0.2);
   });
 
   it('does not let one genre own the wall', () => {
-    expect(overfit.topGenreShare).toBeLessThanOrEqual(0.45);
-    expect(broad.topGenreShare).toBeLessThanOrEqual(0.45);
+    expect(overfit.topGenreShare).toBeLessThanOrEqual(0.4);
+    expect(broad.topGenreShare).toBeLessThanOrEqual(0.4);
+  });
+
+  it('does not fill the wall from the deferred pile', () => {
+    // The caps are enforced on the chosen items and relaxed on the tail, so a slate
+    // that is mostly tail is a slate whose constraints did not bind. Anything past a
+    // quarter means the candidate pool was too narrow for the constraints to mean
+    // anything.
+    for (const measured of all) expect(measured.deferredShare).toBeLessThanOrEqual(0.25);
   });
 
   it('is not the popularity list wearing a different title', () => {
     // The failure the decision names last and the easiest to ship by accident. A
     // viewer with taste must get a substantially different wall from a viewer with
-    // none — otherwise For You is Trending with a personal pronoun on it.
-    expect(overlapWithCold(broad)).toBeLessThan(0.5);
-    expect(overlapWithCold(overfit)).toBeLessThan(0.5);
+    // none — otherwise For You is Trending with a personal pronoun on it. The
+    // threshold matches what the report claims rather than being loose enough to
+    // pass whatever happens.
+    expect(overlapWithCold(broad)).toBeLessThanOrEqual(0.15);
+    expect(overlapWithCold(overfit)).toBeLessThanOrEqual(0.15);
   });
 
   it('says "popular" when popular is the truth, and stops saying it once it is not', () => {
@@ -234,9 +266,9 @@ describe('recommendation quality', () => {
         (m) =>
           `| ${m.viewer} | ${m.anchors} | ${m.size} | ${pct(m.topAnchorShare)} | ${pct(
             m.topGenreShare,
-          )} | ${pct(m.anchorLed)} | ${pct(m.popularityLed)} | ${m.meanPopularityPrior.toFixed(
-            2,
-          )} | ${pct(overlapWithCold(m))} |`,
+          )} | ${pct(m.deferredShare)} | ${pct(m.anchorLed)} | ${pct(
+            m.popularityLed,
+          )} | ${m.meanPopularityPrior.toFixed(2)} | ${pct(overlapWithCold(m))} |`,
       )
       .join('\n');
 
@@ -256,24 +288,33 @@ make this circular, since the ranker reads genre too.
 
 ## Results
 
-| Viewer | Anchors | Slate | Top anchor share | Top genre share | Anchor-led | Popularity-led | Mean popularity prior | Overlap with cold start |
-|---|---|---|---|---|---|---|---|---|
+| Viewer | Anchors | Slate | Top anchor share | Top genre share | Deferred | Anchor-led | Popularity-led | Mean popularity prior | Overlap with cold start |
+|---|---|---|---|---|---|---|---|---|---|
 ${rows}
 
 Universe mean popularity prior: **${universePopularity.toFixed(2)}**.
 
+Every figure in this table is **asserted** in the test that generates it, at the
+threshold quoted below. A metric nobody can fail is a metric nobody reads.
+
 ## Reading it
 
 **Top anchor share** is the failure the brief names first — twenty sequels because of
-one rating. The diversity pass caps a single anchor at four of twenty (20%), and both
-ranked viewers sit at or under it. A number above 25% would mean the constraint is not
-binding.
+one rating. The diversity pass caps a single anchor at four of twenty, and the figure
+is measured over the *chosen* items rather than the whole slate, because the cap is
+what the pass applies and the deferred tail is explicitly what it relaxes. Asserted at
+≤ 20%.
+
+**Deferred** is the share of the slate that the diversity pass rejected and then
+readmitted because its own constraints had left the wall short. It is the honest
+counterweight to the two shares beside it: a slate that is mostly tail is a slate
+whose constraints did not bind. Asserted at ≤ 25%.
 
 **Overlap with cold start** is the one that decides whether this is a recommender at
 all. The cold-start viewer has no anchors, so their wall is the popularity prior and
 nothing else. A ranked viewer whose wall largely matched it would be receiving
-Trending with a personal pronoun on it, which the brief forbids by name. Both ranked
-viewers come in under 50%.
+Trending with a personal pronoun on it, which the brief forbids by name. Asserted at
+≤ 15%.
 
 **Anchor-led** is the share of the wall whose score was actually carried by "because
 you loved X". It is what the one-line basis under the header is entitled to claim.
@@ -295,9 +336,16 @@ popularity term is doing more work than its 10% weight suggests.
   tested against a distribution this file invented.
 `;
 
-    const dir = join(__dirname, '..', '..', '..', '.agent-workflow');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'recommendation-quality.md'), report, 'utf8');
+    // Best effort. Every number above is asserted by the tests that precede this one,
+    // so the file is an artefact rather than the check — and a hermetic or read-only
+    // CI sandbox should not fail the suite over a report it was never going to read.
+    try {
+      const dir = join(__dirname, '..', '..', '..', '.agent-workflow');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'recommendation-quality.md'), report, 'utf8');
+    } catch {
+      // Deliberately silent: see above.
+    }
 
     expect(report).toContain('Overlap with cold start');
   });
