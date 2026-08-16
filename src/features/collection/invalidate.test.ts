@@ -52,8 +52,11 @@ const KEYS = {
   actorActivity: ['actor-activity', USER, 5],
   watched: ['watched', USER],
   community: ['community-score', TITLE],
+  goalsThisYear: ['goals', USER, 2026],
+  goalsLastYear: ['goals', USER, 2025],
   // Left alone on purpose.
   search: ['search', 'inception'],
+  otherUserGoals: ['goals', OTHER, 2026],
   credits: ['credits', TITLE],
   videos: ['videos', TITLE],
   otherTitle: ['title', 'film-2'],
@@ -105,6 +108,14 @@ describe('after a ranking completes', () => {
     expect(has(touched(), KEYS.community)).toBe(true);
   });
 
+  it('refreshes goal progress for every year, not just the current one', async () => {
+    // A film logged today can carry a watch date from last December, which moves that
+    // year's bar and not this one's. The caller does not know which, so both go.
+    const set = touched();
+    expect(has(set, KEYS.goalsThisYear)).toBe(true);
+    expect(has(set, KEYS.goalsLastYear)).toBe(true);
+  });
+
   it('leaves the catalogue, search and other people alone', async () => {
     // The instruction was explicit that this must not be solved by invalidating
     // everything. Search and credits are the expensive reads a ranking cannot change.
@@ -116,6 +127,7 @@ describe('after a ranking completes', () => {
       KEYS.otherTitle,
       KEYS.otherUserFeed,
       KEYS.otherUserCollection,
+      KEYS.otherUserGoals,
     ]) {
       expect(has(set, key)).toBe(false);
     }

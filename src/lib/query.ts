@@ -42,6 +42,10 @@ export const queryKeys = {
   providerSearch: (query: string) => ['search', 'provider', query] as const,
   seasons: (seriesId: string) => ['seasons', seriesId] as const,
   profile: (username: string) => ['profile', username] as const,
+  // Targets and progress for one year. Keyed by the account for the reason `logState`
+  // records above — a goal is own-read only, so an entry holding one must not be
+  // reachable from a second account signed in on the same device.
+  goals: (userId: string, year: number) => ['goals', userId, year] as const,
   notifications: () => ['notifications'] as const,
 } as const;
 

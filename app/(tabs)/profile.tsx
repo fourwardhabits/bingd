@@ -10,6 +10,7 @@ import {
   useWatchlist,
 } from '@/features/collection/use-collection';
 import { useFeed } from '@/features/feed/use-feed';
+import { GoalsSection } from '@/features/goals/GoalsSection';
 import { posterUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/ui/tokens';
@@ -117,6 +118,11 @@ export default function ProfileScreen() {
         <View style={styles.share}>
           <Button label="Share profile" kind="secondary" onPress={() => void shareProfile()} />
         </View>
+
+        {/* Above Top ranked, below the stats. A goal is about the year in progress
+            and the stats are about all time, so this is where the page stops being a
+            summary and starts being about now. */}
+        <GoalsSection userId={profile.id} />
 
         <View style={styles.section}>
           {ranked.isPending ? (

@@ -230,6 +230,23 @@ export function searchMulti(query: string): Promise<{ results: TmdbSearchResult[
   });
 }
 
+/**
+ * What TMDB is featuring right now.
+ *
+ * The results are search-shaped — genre_ids rather than genre objects, no runtime —
+ * so `fromSearchResult` normalizes them and the genre map is needed here too.
+ *
+ * `media_type` is present on a /trending/all response and, in practice, on the
+ * per-kind ones as well. It is not relied on: the caller asked for one kind and
+ * gets that kind, which is why this takes the kind rather than inferring it.
+ */
+export function trending(
+  kind: 'movie' | 'tv',
+  window: 'day' | 'week',
+): Promise<{ results: TmdbSearchResult[] }> {
+  return request(`/trending/${kind}/${window}`);
+}
+
 export function movieDetail(id: number): Promise<TmdbMovieDetail> {
   return request(`/movie/${id}`, { append_to_response: 'credits,videos' });
 }

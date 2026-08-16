@@ -224,7 +224,7 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 
 | Function | Trigger | Role |
 |---|---|---|
-| `tmdb-adapter` | User request, and an operator for the two maintenance actions | Search and detail. Sole holder of the TMDB key (AD-8). Writes through to `media_items` and `media_cache`. **Built 2026-08-15** |
+| `tmdb-adapter` | User request, and an operator for the three maintenance actions | Search and detail. Sole holder of the TMDB key (AD-8). Writes through to `media_items`, `media_cache` and `provider_list_cache`. **Built 2026-08-15** |
 | `import-worker` | Queue, after upload | Parse, match, build the preview, apply on confirmation, delete the source file |
 | `recs-builder` | Schedule + on significant ranking change | Generate a slate per user. See [`recommendations.md`](./recommendations.md) |
 | `match-builder` | Schedule | Materialize `match_scores` (AD-7) |
@@ -234,7 +234,7 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 
 `nudge-scheduler` is worth calling out. PRD §15 makes the nudge conditional on real content, so the function's first action is a query for qualifying activity, and its most common outcome is to send nothing. That is the intended behavior, not a failure mode, and the metric to watch is the ratio of evaluations to sends.
 
-### `tmdb-adapter` — the four actions
+### `tmdb-adapter` — the five actions
 
 Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may call it.
 
@@ -242,8 +242,16 @@ Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may
 |---|---|---|
 | `search` | signed-in user | Searches TMDB, writes the results into `media_items`, returns them Bingd-shaped |
 | `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits |
+| `trending` | `service_role` | Refreshes the four `provider_list_cache` lists. Added 2026-08-16 |
 | `enrich` | `service_role` | Drains `tmdb_enrich_due` — rows carrying a tmdb id that have never been fetched |
 | `refresh` | `service_role` | Drains `media_refresh_due` — the retention window in §AD-8 |
+
+**`trending` has no read half.** It writes `provider_list_cache`, which is world-readable like
+`media_items` and `media_cache`, so a client selects the list directly and joins the ids to
+`media_items` rather than asking the adapter for it. That is the same split the facet cache
+already uses, and it keeps a screen's read off the provider quota entirely. It is
+`service_role` because it spends four provider requests and eighty upserts per call on a
+schedule — not because the result is private.
 
 **A search result is already a catalogue row by the time the client sees it.** The adapter
 upserts before it answers and returns Bingd uuids, so there is no import step, no "add this

@@ -119,6 +119,13 @@ const ALLOWED = {
   // client from the project it is already talking to, so no such function
   // exists to grant.
   'set_avatar(text)': ['authenticated'],
+
+  // Added 2026-08-16 with yearly watch goals. The only writer for a table that has
+  // a select policy and no write policies, for the usual reason: the clear path is
+  // a delete and the set path is an upsert, and expressing "and only your own, and
+  // only within the sane range" as three policies is three places to get it wrong.
+  // Not anon — a goal needs an auth.uid() to belong to.
+  'set_watch_goal(integer,ranking_category,integer)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {

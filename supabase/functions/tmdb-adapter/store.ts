@@ -59,6 +59,21 @@ export async function upsertSeasons(db: Db, parentId: string, rows: SeasonRow[])
   }));
 }
 
+/**
+ * Replaces one provider list whole.
+ *
+ * Whole rather than merged is the property the table depends on: a trending list is
+ * an ordering, and merging two orderings leaves titles in it that TMDB has stopped
+ * featuring. See the header of 20260816000900.
+ */
+export async function putList(db: Db, listKey: string, ids: string[]) {
+  const { error } = await db.rpc('tmdb_put_list', {
+    p_list_key: listKey,
+    p_payload: { ids },
+  });
+  if (error) throw new Error(`tmdb_put_list: ${error.message}`);
+}
+
 export async function putFacet(db: Db, mediaItemId: string, facet: string, payload: unknown) {
   const { error } = await db.rpc('tmdb_put_facet', {
     p_media_item_id: mediaItemId,

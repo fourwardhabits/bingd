@@ -1,16 +1,18 @@
 /**
  * tmdb-adapter — the sole holder of the TMDB key and the sole caller of TMDB (AD-8).
  *
- * Four actions, split by who may call them:
+ * Five actions, split by who may call them:
  *
- *   search   signed-in user   Titles TMDB knows and the local catalogue does not.
- *                             Writes them through, returns them Bingd-shaped.
- *   detail   signed-in user   Fills one title in: runtime, overview, artwork,
- *                             seasons, credits.
- *   enrich   service_role     Drains tmdb_enrich_due. The Wikidata seed has ids
- *                             and no artwork; this is what gives it posters.
- *   refresh  service_role     Drains media_refresh_due, which is what keeps
- *                             provider data inside PRD §19's six-month window.
+ *   search    signed-in user   Titles TMDB knows and the local catalogue does not.
+ *                              Writes them through, returns them Bingd-shaped.
+ *   detail    signed-in user   Fills one title in: runtime, overview, artwork,
+ *                              seasons, credits.
+ *   trending  service_role     Refreshes the four provider_list_cache lists. The
+ *                              client reads that table directly; this only fills it.
+ *   enrich    service_role     Drains tmdb_enrich_due. The Wikidata seed has ids
+ *                              and no artwork; this is what gives it posters.
+ *   refresh   service_role     Drains media_refresh_due, which is what keeps
+ *                              provider data inside PRD §19's six-month window.
  *
  * Errors use the BGnnn vocabulary from api.md §8 so the client can respond to a
  * class of failure rather than parse a message.
@@ -24,6 +26,7 @@ import {
   dueForRefresh,
   noteRequest,
   putFacet,
+  putList,
   RateLimited,
   searchResultsFor,
   tmdbIdOf,
@@ -136,34 +139,103 @@ async function handleSearch(db: Db, query: string, limit: number) {
     tmdb.genreNames(),
   ]);
 
+  const rows = normalizeList(results, genres, limit);
+  return json({ results: await searchResultsFor(db, await storeInOrder(db, rows)) });
+}
+
+/**
+ * Search-shaped results into title rows, deduplicated and capped.
+ *
+ * The dedup is not tidiness: /search/multi can repeat an id across media types, and
+ * a trending page can repeat one outright. Either way the upsert would hit the same
+ * row twice in one statement, which Postgres refuses with "ON CONFLICT DO UPDATE
+ * command cannot affect row a second time".
+ */
+function normalizeList(
+  results: tmdb.TmdbSearchResult[],
+  genres: Map<number, string>,
+  limit: number,
+): TitleRow[] {
   const rows: TitleRow[] = [];
   const seen = new Set<string>();
   for (const result of results) {
     const row = fromSearchResult(result, genres);
     if (!row) continue;
-    // /search/multi can repeat an id across media types, and the upsert would
-    // then hit the same row twice in one statement — which Postgres refuses with
-    // "ON CONFLICT DO UPDATE command cannot affect row a second time".
     const key = `${row.kind}:${row.tmdb_id}`;
     if (seen.has(key)) continue;
     seen.add(key);
     rows.push(row);
     if (rows.length >= limit) break;
   }
+  return rows;
+}
 
+/**
+ * Writes the rows and hands back their Bingd ids in the order TMDB gave them.
+ *
+ * `INSERT ... RETURNING` makes no promise about row order once ON CONFLICT is
+ * involved, and the provider's own ordering — relevance for a search, trend rank
+ * for a trending list — is the only ordering signal these rows have. `popularity`
+ * was written by this same request, so re-sorting on it would derive a worse copy
+ * of the answer we were already handed.
+ */
+async function storeInOrder(db: Db, rows: TitleRow[]): Promise<string[]> {
   const stored = await upsertTitles(db, rows);
-
-  // Back into the order TMDB gave them in. `INSERT ... RETURNING` makes no promise
-  // about row order once ON CONFLICT is involved, and TMDB's relevance ranking is
-  // the only ordering signal these rows have — `popularity` was written by this
-  // same request, so re-sorting on it would be deriving a worse copy of the answer
-  // we were already handed.
   const byKey = new Map(stored.map((row) => [`${row.kind}:${row.tmdbId}`, row.id]));
-  const ordered = rows
+  return rows
     .map((row) => byKey.get(`${row.kind}:${row.tmdb_id}`))
     .filter((id): id is string => Boolean(id));
+}
 
-  return json({ results: await searchResultsFor(db, ordered) });
+// ---------------------------------------------------------------------------
+// trending
+// ---------------------------------------------------------------------------
+
+/**
+ * The four lists `provider_list_cache` holds, and the TMDB route behind each.
+ *
+ * `series` on our side is `tv` on theirs. The key uses media_kind because that is
+ * what the payload's rows are — see the header of 20260816000900.
+ */
+const TRENDING_LISTS = [
+  { key: 'trending.movie.day', kind: 'movie', window: 'day' },
+  { key: 'trending.movie.week', kind: 'movie', window: 'week' },
+  { key: 'trending.series.day', kind: 'tv', window: 'day' },
+  { key: 'trending.series.week', kind: 'tv', window: 'week' },
+] as const;
+
+/** One TMDB trending page. Asking for more would be a second request per list. */
+const TRENDING_SIZE = 20;
+
+/**
+ * Refreshes all four trending lists.
+ *
+ * The titles are written through `tmdb_upsert_titles` first and the cached payload
+ * holds only their ids, so the poster and overview a trending row renders come from
+ * `media_items` and expire on the retention clock rather than on this six-hour one.
+ *
+ * A list that fails is skipped rather than failing the call: three fresh lists and
+ * one stale one is a better outcome than four stale ones, and the stale one still
+ * has its previous payload to serve until it is refreshed.
+ */
+async function handleTrending(db: Db) {
+  const genres = await tmdb.genreNames();
+  const written: Record<string, number> = {};
+  const failed: string[] = [];
+
+  for (const list of TRENDING_LISTS) {
+    try {
+      const { results } = await tmdb.trending(list.kind, list.window);
+      const ids = await storeInOrder(db, normalizeList(results, genres, TRENDING_SIZE));
+      await putList(db, list.key, ids);
+      written[list.key] = ids.length;
+    } catch (cause) {
+      console.error(`tmdb-adapter trending ${list.key} failed`, cause);
+      failed.push(list.key);
+    }
+  }
+
+  return json({ action: 'trending', written, failed });
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +359,15 @@ Deno.serve(async (req) => {
           return fail('BG404', 'No such title', 404);
         }
         return json({ id, ...result });
+      }
+
+      // service_role for the same reason enrich and refresh are: it spends four
+      // provider requests plus eighty upserts in one call, on a schedule, and no
+      // screen asks for it. Clients read the result straight from
+      // provider_list_cache, which is world-readable.
+      case 'trending': {
+        if (caller.kind !== 'service') return fail('BG403', 'trending requires service role', 403);
+        return await handleTrending(db);
       }
 
       // Maintenance. service_role only: both spend provider quota in bulk, and

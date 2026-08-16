@@ -17,6 +17,7 @@ import {
   useSetReaction,
   type ReactionKind,
 } from '@/features/feed/use-reactions';
+import { TrendingShelf } from '@/features/trending/TrendingShelf';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import {
@@ -115,6 +116,16 @@ export default function FeedScreen() {
       <AppHeader />
       <HeaderBoundary />
       <ScrollView contentContainerStyle={styles.content}>
+        {/* One shelf, above the activity. It renders nothing at all when there is
+            nothing to show, so the social feed keeps the top of the screen whenever
+            discovery has nothing to add — which is the ordering PRD §14 wants. */}
+        <View style={styles.trending}>
+          <TrendingShelf
+            userId={profile.id}
+            onPressTitle={(mediaItemId) => router.push(`/title/${mediaItemId}`)}
+          />
+        </View>
+
         {feed.isError ? (
           <View style={styles.pad}>
             <EmptyState
@@ -222,6 +233,9 @@ const VERB: Record<FeedItem['type'], string> = {
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   pad: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
+  // Collapses to nothing when the shelf renders null, so an absent shelf costs no
+  // space rather than an empty band above the first activity row.
+  trending: { gap: theme.space[2] },
 });
 
 /** `148m · Sci-fi`, the same line the compact row uses everywhere else. */

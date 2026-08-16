@@ -16,6 +16,7 @@
     "seed:fetch": "node supabase/seed/fetch-catalogue.mjs",
     "seed:migration": "node supabase/seed/make-seed-migration.mjs",
     "catalogue:enrich": "node supabase/seed/backfill-tmdb.mjs",
+    "trending:refresh": "node supabase/seed/refresh-trending.mjs",
     "functions:check": "deno check --config supabase/functions/tmdb-adapter/deno.json supabase/functions/tmdb-adapter/index.ts",
     "functions:lint": "deno lint --config supabase/functions/tmdb-adapter/deno.json supabase/functions/tmdb-adapter",
     "brand:render": "node assets/brand/render.mjs",

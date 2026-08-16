@@ -268,6 +268,20 @@ create index on media_cache (expires_at);
 
 Facet-level TTLs match PRD §19: availability expires in hours, credits and keywords in weeks. `expires_at` is computed by `tmdb-adapter` from configuration in `app_config`, **not** from a constant. Bingd caps all TMDB-derived retention under six months to stay inside the API terms ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)), and that window must be adjustable without a migration.
 
+**A provider list is not a facet.** Added 2026-08-16 with trending. Every facet above answers "what does TMDB say about *this title*", and the primary key says so: `media_item_id` is `not null` and references `media_items`. Trending answers "what is TMDB featuring right now", which belongs to no title and has no id to key on. So `provider_list_cache` is a sibling with the same lifecycle contract — jsonb payload, `fetched_at`, `expires_at` from `app_config`, a closed key set, world-readable — keyed on the list instead:
+
+```sql
+create table provider_list_cache (
+  list_key   text not null,          -- 'trending.movie.day' | '.week' | 'trending.series.day' | '.week'
+  payload    jsonb not null,         -- {"ids": [...]}, most trending first
+  fetched_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  primary key (list_key)
+);
+```
+
+The payload holds `media_items` ids and nothing else. The titles are written through `tmdb_upsert_titles` before the list row is, so a trending poster comes from `media_items` and expires on the retention clock rather than on this six-hour one — one copy, one expiry. Replacing the row whole is what keeps a refreshed list free of the previous generation, which is the property a facet row per trending title could not have offered.
+
 > **Corrected 2026-08-13.** `media_cache` had an expiry; `media_items` did not. Title, overview, poster path, and genres are the bulk of the provider-derived data, and they carried only `fetched_at` — with no index on it and no job defined to act on it. A row referenced by somebody's ranking and untouched for seven months was retained provider data that nothing could find.
 >
 > `title` is also `not null`, so the "reduce to a bare identifier" fallback described in the integration note was not actually available without a schema change.
@@ -389,7 +403,34 @@ Other users never read `user_media` directly. The bucket, where it should be vis
 >
 > This is what the schema already did, and it is why the column split matters. `visible_collection` exposes `media_item_id`, `bucket`, and `progress`. It does **not** expose `note` or `watched_on`, which stay always-private regardless of profile visibility, and it is not a path to `watchlist`, which stays owner-only at every visibility level. A watchlist is forward-looking intent about things you have not watched, which is a different kind of disclosure from a reaction to something you have; PRD §22 keeps it private and this decision does not change that.
 
+### Yearly goals — added 2026-08-16
 
+> **Founder decision, 2026-08-16.** One row per `(user_id, year, medium)`. Movies and TV goals are independently optional and independently editable.
+
+```sql
+create table watch_goals (
+  user_id  uuid             not null references profiles(id) on delete cascade,
+  year     integer          not null,
+  category ranking_category not null,   -- 'movies' | 'tv_seasons'
+  target   integer          not null,
+  primary key (user_id, year, category)
+);
+```
+
+**Absence is the only representation of "no goal".** There is no nullable target and nothing seeds a row, so "never set one", "set one and cleared it", and "set one for the other medium" are not three states a reader has to tell apart. The alternative — one row per `(user, year)` with two nullable targets — makes independence a convention rather than a consequence of the key.
+
+The medium is `ranking_category` and not a new enum, because that split already *is* what this app means by medium: it is how rankings are kept, how the collection screen filters, and what `rankable_category` maps a media kind onto. `'tv_seasons'` reads slightly oddly on a goal; two enums to keep in step by hand would read worse.
+
+Own-read only, matching `user_media` rather than `rankings`. No specification has placed a goal on a shareable surface, and private is the half of that choice that can be widened later without having published anything first.
+
+**How progress is counted — decided 2026-08-16, and deliberately not in the database.** The table stores the target and nothing counts against it in SQL. The rule lives in `src/features/goals/goals.ts`, where it can be read as prose and tested as arithmetic:
+
+- **`watched_on` is the only clock.** Never `created_at`. The date a row entered Bingd is a fact about the app, and an import would otherwise credit a decade of watching to one afternoon.
+- **A null `watched_on` counts for nothing.** Onboarding logs historical favourites with no date on purpose (§Onboarding), so this is a live case rather than a hypothetical.
+- **A series never counts.** `rankable_category` returns null for a series and the TV goal counts seasons, so a nine-season show is neither one tick nor nine.
+- **Distinct entities.** Counting is over `media_item_id`, so a rewatch is one. `user_media`'s primary key makes that true already; stating it here is what stops a future watch-history table turning a goal of 52 into a goal of 52 viewings.
+
+There is no `watch_goal_progress` RPC, and that is a choice. Both halves are the caller's own rows under policies that already say so (`watch_goals_own`, `user_media_own`), so a function would be either a query with a grant attached or a screen's arithmetic promoted to `security definer` code taking a year from the client. The read is one person's own rows for one year, bounded by a range filter on `watched_on`.
 
 ---
 

@@ -68,4 +68,10 @@ export function invalidateAfterCollectionChange(
   // The community aggregate for this exact title: the reader's own new rating is part
   // of it, and a score that excludes the rating you just gave reads as broken.
   invalidate(['community-score', mediaItemId]);
+
+  // Yearly goal progress. Keyed by prefix rather than by `queryKeys.goals(userId,
+  // year)`, because the year the user just logged is not necessarily the year on
+  // screen: logging a film watched last December has to move *that* year's bar, and
+  // this module has no business computing which year that was.
+  invalidate(['goals', userId]);
 }
