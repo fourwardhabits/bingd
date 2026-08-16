@@ -240,6 +240,44 @@ expectRefused(
   'anon cannot execute tmdb_note_request',
   await rpc('tmdb_note_request', { p_user_id: NIL }),
 );
+// Added 2026-08-16 with the trending cache. It is the only writer of a
+// world-readable table, so a stranger reaching it could rewrite what the Feed shows
+// everyone.
+expectRefused(
+  'anon cannot execute tmdb_put_list',
+  await rpc('tmdb_put_list', { p_list_key: 'trending.movie.day', p_payload: { ids: [] } }),
+);
+// Added 2026-08-16 with yearly goals. `authenticated` only — there is no auth.uid()
+// for a goal to belong to otherwise, and the function would write a null-owned row
+// or fail obscurely.
+expectRefused(
+  'anon cannot execute set_watch_goal',
+  await rpc('set_watch_goal', { p_year: 2026, p_category: 'movies', p_target: 1 }),
+);
+
+// Own-read only, and a stranger is not the owner. An empty array is the correct
+// answer under RLS; a row would mean the policy is not doing its job.
+{
+  const res = await get('watch_goals?select=*&limit=1');
+  const ok = classify(res) === 'refused' || res.body.trim() === '[]';
+  report(
+    'anon cannot read anyone’s goals',
+    ok ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
+// World-readable *by design*, like media_items and media_cache: it is catalogue
+// metadata and says nothing about any account. Asserted rather than assumed, because
+// the Feed's shelf depends on an unauthenticated-shaped read succeeding.
+// Note what this can and cannot tell you: PostgREST answers a policy denial and an
+// empty table identically, with `200 []`. So this proves the relation exists and is
+// not refused outright; it does not prove a row would come back. The row half is
+// covered once the adapter has been deployed and `npm run trending:refresh` has run.
+expectAllowed(
+  'anon can read the trending cache, by design',
+  await get('provider_list_cache?select=list_key&limit=1'),
+);
 
 // RLS with no policy at all. How often someone searches is not their own business
 // to read and is certainly not a stranger's.
