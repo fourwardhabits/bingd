@@ -9,9 +9,21 @@ import { GOAL_LABEL, GOAL_CATEGORIES, type GoalCategory } from './goals';
 export type GoalDraft = Partial<Record<GoalCategory, number>>;
 
 export type GoalSheetProps = {
-  visible: boolean;
   year: number;
-  /** The stored targets. A missing key is a medium with no goal. */
+  /**
+   * The stored targets, read once when the sheet opens. A missing key is a medium
+   * with no goal.
+   *
+   * **This component must be mounted only while the sheet is open**, which is why
+   * there is no `visible` prop to get that wrong with. The draft below is seeded from
+   * `targets` by a `useState` initializer, and an initializer runs on mount and never
+   * again: a sheet mounted alongside the section it belongs to would seed itself from
+   * whatever the goals query held at *that* moment, which is `{}` while the query is
+   * still in flight. Opening Edit would then show two empty fields, and saving them
+   * would clear both goals — an empty field is how this sheet says "remove".
+   * Independent review found exactly that. Mounting on open makes the initializer run
+   * when the values are known, and makes Cancel discard the draft rather than keep it.
+   */
   targets: GoalDraft;
   /** Called with only the media whose target actually changed. */
   onSave: (changes: { category: GoalCategory; target: number | null }[]) => void;
@@ -42,13 +54,11 @@ const MAX = 10000;
  * Edits are local until Save, matching `CollectionFilterSheet`, and only the changed
  * media are written — so opening the sheet and closing it writes nothing at all.
  */
-export function GoalSheet({ visible, year, targets, onSave, onClose, saving }: GoalSheetProps) {
+export function GoalSheet({ year, targets, onSave, onClose, saving }: GoalSheetProps) {
   const [draft, setDraft] = useState<Record<GoalCategory, string>>(() => ({
     movies: targets.movies != null ? String(targets.movies) : '',
     tv_seasons: targets.tv_seasons != null ? String(targets.tv_seasons) : '',
   }));
-
-  if (!visible) return null;
 
   const parsed = (raw: string): { target: number | null; error: string | null } => {
     const trimmed = raw.trim();

@@ -16,9 +16,19 @@ import { BAND_LABEL } from './use-collection';
 import type { Bucket } from './score';
 
 export type CollectionFilterSheetProps = {
-  visible: boolean;
   /** Every item *before* filtering, so the options describe the whole collection. */
   items: readonly CollectionItem[];
+  /**
+   * The filters currently applied, read once when the sheet opens.
+   *
+   * **This component must be mounted only while the sheet is open**, which is why
+   * there is no `visible` prop. The draft is seeded by a `useState` initializer, and
+   * an initializer runs on mount and never again — so a sheet that stayed mounted
+   * would keep a draft the user abandoned: clear everything, cancel, reopen, and the
+   * sheet would show no filters while the wall was still filtered, with Apply then
+   * clearing them for real. The same defect in `GoalSheet` was found by independent
+   * review on 2026-08-16, where it cost a stored goal rather than a filter.
+   */
   value: CollectionFilters;
   /** Whether to offer rating filters — a watchlist has nothing ranked on it. */
   showBuckets: boolean;
@@ -43,7 +53,6 @@ const BUCKETS: Bucket[] = ['loved', 'fine', 'not_for_me'];
  * meaning distinct from unticking everything.
  */
 export function CollectionFilterSheet({
-  visible,
   items,
   value,
   showBuckets,
@@ -51,8 +60,6 @@ export function CollectionFilterSheet({
   onClose,
 }: CollectionFilterSheetProps) {
   const [draft, setDraft] = useState<CollectionFilters>(value);
-
-  if (!visible) return null;
 
   const options = facetOptions(items);
 

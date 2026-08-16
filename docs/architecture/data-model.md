@@ -430,6 +430,12 @@ Own-read only, matching `user_media` rather than `rankings`. No specification ha
 - **A series never counts.** `rankable_category` returns null for a series and the TV goal counts seasons, so a nine-season show is neither one tick nor nine.
 - **Distinct entities.** Counting is over `media_item_id`, so a rewatch is one. `user_media`'s primary key makes that true already; stating it here is what stops a future watch-history table turning a goal of 52 into a goal of 52 viewings.
 
+> **Known limitation, recorded 2026-08-16 by independent review.** `user_media` holds **one** `watched_on` per `(user, media item)`, and `log_watched` replaces it when a non-null date is supplied. So a film watched in 2025 and rewatched in 2026 does not count once in each year: logging the rewatch moves its only recorded date forward, and 2025's count silently drops by one.
+>
+> This is not fixable without a watch-history table, and the founder decision that specified goals ruled that out in as many words — "do not create a complicated historical-backfill system; yearly goals are intentionally simple". It is accepted rather than overlooked.
+>
+> Its practical reach today is nil, because the only year any screen displays is the current one and a rewatch inside the current year cannot lose a count it is also adding. It becomes visible the day a year-in-review or a past-year selector ships, and that surface must not ship before this is resolved. Carried on the Beta Hardening list.
+
 There is no `watch_goal_progress` RPC, and that is a choice. Both halves are the caller's own rows under policies that already say so (`watch_goals_own`, `user_media_own`), so a function would be either a query with a grant attached or a screen's arithmetic promoted to `security definer` code taking a year from the client. The read is one person's own rows for one year, bounded by a range filter on `watched_on`.
 
 ---

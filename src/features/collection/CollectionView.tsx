@@ -228,17 +228,20 @@ export function CollectionView({
         </ScrollView>
       )}
 
-      <CollectionFilterSheet
-        visible={filterOpen}
-        items={items}
-        value={state.filters}
-        showBuckets={segment !== 'watchlist'}
-        onApply={(filters) => {
-          setFilterOpen(false);
-          onChange({ ...state, filters });
-        }}
-        onClose={() => setFilterOpen(false)}
-      />
+      {/* Mounted only while open, so the draft is seeded from the filters actually
+          in force each time. See the comment on `CollectionFilterSheetProps.value`. */}
+      {filterOpen ? (
+        <CollectionFilterSheet
+          items={items}
+          value={state.filters}
+          showBuckets={segment !== 'watchlist'}
+          onApply={(filters) => {
+            setFilterOpen(false);
+            onChange({ ...state, filters });
+          }}
+          onClose={() => setFilterOpen(false)}
+        />
+      ) : null}
     </View>
   );
 }

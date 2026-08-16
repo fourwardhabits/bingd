@@ -27,6 +27,14 @@ import type { RankingCategory } from '@/features/collection/use-collection';
  *      a second row for a rewatch today — which makes the set here look redundant. It
  *      is not: it is where the rule is *written down*, so that a later watch-history
  *      table cannot quietly turn a goal of 52 into a goal of 52 viewings.
+ *
+ * **What this cannot do, and knows it.** One `watched_on` per title means a film
+ * watched in 2025 and rewatched in 2026 counts in 2026 and stops counting in 2025 —
+ * the rewatch moved the only date there is. Independent review raised it on
+ * 2026-08-16 and it is accepted rather than fixed: the alternative is a watch-history
+ * table, which the decision specifying goals ruled out ("intentionally simple"). No
+ * screen shows a past year, so nothing displays the loss today; the year-in-review
+ * surface that would must not ship until this is resolved. See data-model.md.
  */
 
 export type GoalCategory = RankingCategory;

@@ -98,14 +98,19 @@ export function GoalsSection({ userId, year = currentYear() }: GoalsSectionProps
         </View>
       )}
 
-      <GoalSheet
-        visible={editing}
-        year={year}
-        targets={goals.data?.targets ?? {}}
-        saving={saving}
-        onSave={(changes) => void save(changes)}
-        onClose={() => setEditing(false)}
-      />
+      {/* Mounted only while open. The sheet seeds its draft from `targets` on mount,
+          so a sheet that lived alongside this section would seed itself from `{}`
+          while the query was still in flight — and an empty field is how that sheet
+          says "remove this goal". See the comment on `GoalSheetProps.targets`. */}
+      {editing ? (
+        <GoalSheet
+          year={year}
+          targets={goals.data?.targets ?? {}}
+          saving={saving}
+          onSave={(changes) => void save(changes)}
+          onClose={() => setEditing(false)}
+        />
+      ) : null}
     </View>
   );
 }
