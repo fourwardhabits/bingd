@@ -112,25 +112,19 @@ export async function putFacet(db: Db, mediaItemId: string, facet: string, paylo
  * which PostgREST would otherwise render as a 500, the caveat that section spells
  * out. Translating it here is what makes the mapping true for this surface.
  *
- * `count` exists because one *action* is not always one *request*. `similar` makes a
- * recommendations call and, on a cold isolate, two genre-list calls; recording one
- * for all three left the ceiling permitting three times the provider traffic it
- * claimed to. Independent review found it, and the fix is to charge for what actually
- * goes out rather than for the invocation.
- *
- * Implemented as a loop rather than a parameter on `tmdb_note_request`, because that
- * function is deployed and adding an argument to it means dropping and recreating a
- * definer function, re-issuing its grants, and re-pinning its signature in
- * `function-grants.test.mjs` — a lot of moving parts to avoid at most two extra
- * round trips, on a cold isolate, once.
+ * **One call, one outbound HTTP attempt.** This is not called per action; it is handed
+ * to `tmdb.ts` as a `Charge` and invoked immediately before every `fetch`, retries
+ * included. Two rounds of independent review were needed to get there. The first
+ * version charged once per action and made up to three requests — the call plus both
+ * genre lists on a cold isolate. The second predicted the genre cost and charged that
+ * many, which was right about logical requests and still wrong about HTTP ones,
+ * because `MAX_RETRIES` is 2 and a failing TMDB turns one logical request into three
+ * attempts. A ceiling that counts something other than what leaves the machine is not
+ * a ceiling.
  */
 export class RateLimited extends Error {}
 
-export async function noteRequest(db: Db, userId: string, count = 1) {
-  for (let spent = 0; spent < count; spent += 1) await noteOne(db, userId);
-}
-
-async function noteOne(db: Db, userId: string) {
+export async function noteRequest(db: Db, userId: string) {
   const { error } = await db.rpc('tmdb_note_request', { p_user_id: userId });
   if (!error) return;
   if (error.code === '53400') throw new RateLimited('TMDB request limit reached');

@@ -127,6 +127,18 @@ async function resolveCaller(db: Db, req: Request): Promise<Caller | null> {
   return { kind: 'user', id: data.user.id };
 }
 
+/**
+ * The per-attempt charge for one user's invocation.
+ *
+ * Handed to `tmdb.ts`, which calls it immediately before every outbound attempt —
+ * including retries, which is the part that took two rounds of review to get right.
+ * A charged unit and an HTTP request are the same thing now.
+ *
+ * Never constructed for a service-role caller: `enrich`, `refresh` and `trending` are
+ * operator jobs, and there is no user whose ceiling they belong against.
+ */
+const chargeTo = (db: Db, userId: string) => () => noteRequest(db, userId);
+
 // ---------------------------------------------------------------------------
 // search
 // ---------------------------------------------------------------------------
@@ -135,15 +147,16 @@ async function handleSearch(db: Db, query: string, limit: number, userId: string
   const trimmed = query.trim();
   // The same floor useTitleSearch applies. Below it every query matches half of
   // TMDB and spends a provider request to do it. Nothing is charged for a query that
-  // returns here, because nothing is spent.
+  // returns here, because nothing is spent — it used to be charged before this line.
   if (trimmed.length < 2) return json({ results: [] });
 
-  // The search itself, plus both genre lists if this isolate is cold.
-  await noteRequest(db, userId, 1 + tmdb.genreRequestCost());
+  // Charged per outbound attempt rather than per call: the search, both genre lists
+  // if this isolate is cold, and every retry of any of them.
+  const charge = chargeTo(db, userId);
 
   const [{ results }, genres] = await Promise.all([
-    tmdb.searchMulti(trimmed),
-    tmdb.genreNames(),
+    tmdb.searchMulti(trimmed, charge),
+    tmdb.genreNames(charge),
   ]);
 
   const rows = normalizeList(results, genres, limit);
@@ -312,11 +325,9 @@ async function handleSimilar(db: Db, mediaItemId: string, userId: string) {
     return { id: targetId, written: 0, reason: 'cached' as const };
   }
 
-  // Charged before the requests go out, and charged for all of them. `genreNames`
-  // costs two on a cold isolate and nothing afterwards.
-  await noteRequest(db, userId, 1 + tmdb.genreRequestCost());
-  const { results } = await tmdb.recommendations(kind, tmdbId);
-  const genres = await tmdb.genreNames();
+  const charge = chargeTo(db, userId);
+  const { results } = await tmdb.recommendations(kind, tmdbId, charge);
+  const genres = await tmdb.genreNames(charge);
   // `kind` as the fallback: /recommendations sends no `media_type` whatsoever, so
   // without it every row would be dropped and the facet would cache an empty list.
   const ids = await storeInOrder(db, normalizeList(results, genres, SIMILAR_SIZE, kind));
@@ -337,7 +348,13 @@ async function handleSimilar(db: Db, mediaItemId: string, userId: string) {
  * A season is enriched through its parent, because TMDB has no endpoint that
  * takes a season's own id: the route is /tv/{series}/season/{n}.
  */
-async function enrichOne(db: Db, mediaItemId: string): Promise<{ enriched: boolean; reason?: string }> {
+async function enrichOne(
+  db: Db,
+  mediaItemId: string,
+  // Present for `detail`, absent for the two maintenance batches: those run as
+  // service_role against nobody's ceiling.
+  charge?: tmdb.Charge,
+): Promise<{ enriched: boolean; reason?: string }> {
   const row = await catalogueRow(db, mediaItemId);
   if (!row) return { enriched: false, reason: 'not_found' };
 
@@ -348,7 +365,7 @@ async function enrichOne(db: Db, mediaItemId: string): Promise<{ enriched: boole
     const seriesTmdbId = await tmdbIdOf(db, row.parent_id);
     if (!seriesTmdbId) return { enriched: false, reason: 'no_tmdb_id' };
 
-    const detail = await tmdb.seasonDetail(seriesTmdbId, row.season_number);
+    const detail = await tmdb.seasonDetail(seriesTmdbId, row.season_number, charge);
     await upsertSeasons(db, row.parent_id, [fromSeasonDetail(detail)]);
     if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
     if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
@@ -358,14 +375,14 @@ async function enrichOne(db: Db, mediaItemId: string): Promise<{ enriched: boole
   if (!row.tmdb_id) return { enriched: false, reason: 'no_tmdb_id' };
 
   if (row.kind === 'movie') {
-    const detail = await tmdb.movieDetail(row.tmdb_id);
+    const detail = await tmdb.movieDetail(row.tmdb_id, charge);
     await upsertTitles(db, [fromMovieDetail(detail)]);
     if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
     if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
     return { enriched: true };
   }
 
-  const detail = await tmdb.seriesDetail(row.tmdb_id);
+  const detail = await tmdb.seriesDetail(row.tmdb_id, charge);
   const [stored] = await upsertTitles(db, [fromSeriesDetail(detail)]);
   if (stored) await upsertSeasons(db, stored.id, seasonsOf(detail));
   if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
@@ -446,8 +463,8 @@ Deno.serve(async (req) => {
         if (caller.kind !== 'user') return fail('BG403', 'detail is a user action', 403);
         const id = String(body.mediaItemId ?? '');
         if (!id) return fail('BG400', 'mediaItemId is required', 400);
-        await noteRequest(db, caller.id);
-        const result = await enrichOne(db, id);
+        // Charged per outbound attempt inside the TMDB client, retries included.
+        const result = await enrichOne(db, id, chargeTo(db, caller.id));
         if (!result.enriched && result.reason === 'not_found') {
           return fail('BG404', 'No such title', 404);
         }

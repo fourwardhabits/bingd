@@ -1,7 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { bandSizes, scoreFor } from '@/features/collection/score';
-import { useRankedCollection, type RankedEntry } from '@/features/collection/use-collection';
+import {
+  useRankedCollection,
+  useWatchlist,
+  type RankedEntry,
+} from '@/features/collection/use-collection';
+import { useWatched } from '@/features/collection/use-watched';
 import { supabase } from '@/lib/supabase';
 import { AdapterError, cacheSimilar } from '@/lib/tmdb-adapter';
 
@@ -183,29 +188,26 @@ async function candidatesFor(ids: readonly string[], medium: Medium): Promise<Ca
 }
 
 /**
- * The viewer's own collection and watchlist, as two sets.
+ * A set of ids as one short string, for the query key.
  *
- * `user_media` is everything logged, bucketed or dated — the collection. It is
- * excluded outright: recommending someone a film they logged last week is the fastest
- * way to make a slate look broken.
- *
- * `watchlist` is not excluded. The decision is explicit that a watchlisted title
- * stays and is marked Saved, because wanting to see something is not having seen it,
- * and a wall that hid everything you saved would quietly punish saving.
+ * Order-independent — a sum rather than a running hash — because PostgREST makes no
+ * promise about row order and a re-fetch that returned the same rows differently
+ * ordered must not look like a change.
  */
-async function collectionOf(userId: string) {
-  const [collection, watchlist] = await Promise.all([
-    supabase.from('user_media').select('media_item_id').eq('user_id', userId),
-    supabase.from('watchlist').select('media_item_id').eq('user_id', userId),
-  ]);
-  if (collection.error) throw collection.error;
-  if (watchlist.error) throw watchlist.error;
-
-  return {
-    exclude: new Set((collection.data ?? []).map((row) => row.media_item_id as string)),
-    saved: new Set((watchlist.data ?? []).map((row) => row.media_item_id as string)),
-  };
-}
+const setFingerprint = (ids: Iterable<string>): string => {
+  let total = 0;
+  let count = 0;
+  for (const id of ids) {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < id.length; index += 1) {
+      hash ^= id.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    total = (total + (hash >>> 0)) % 0xffffffff;
+    count += 1;
+  }
+  return `${count}.${total.toString(36)}`;
+};
 
 /**
  * Everything about the viewer's rankings that changes a slate, as one short string.
@@ -241,20 +243,45 @@ export function useForYou(userId: string, medium: Medium) {
   const movies = useRankedCollection(userId, 'movies');
   const seasons = useRankedCollection(userId, 'tv_seasons');
 
+  // Read through their own hooks rather than inside the query, so they are *inputs*
+  // with keys of their own rather than hidden reads inside a cached result. Both are
+  // already cached and already invalidated by `invalidateAfterCollectionChange`.
+  const watched = useWatched(userId);
+  const watchlist = useWatchlist(userId);
+
   const ranked = medium === 'movies' ? movies : seasons;
   const anchorSeeds = ranked.data ? anchorsFrom(ranked.data, medium) : [];
-  // Both lists, because taste spans both media and a slate scored with it is stale
-  // when either changes.
-  const inputs = rankingFingerprint(movies.data ?? [], seasons.data ?? []);
+
+  /**
+   * Everything the *viewer* controls that changes this slate, as one string.
+   *
+   * The key carried only the selected medium's anchor ids, and independent review
+   * found three ways that served a stale wall for half an hour: re-bucketing changes
+   * the taste vector without changing which ids are anchors; editing TV rankings
+   * changes the taste behind the Movies wall, because taste spans both media; and
+   * logging or saving a title changes what is excluded and what reads as Saved.
+   *
+   * What remains outside the key is the catalogue side — the `similar` facets and the
+   * trending fallback. Those change on provider-cache clocks measured in hours
+   * (trending: six) and weeks (`similar`), so the thirty-minute staleness below sits
+   * comfortably inside them. Nothing the person using the app can do falls in that gap.
+   */
+  const inputs = [
+    rankingFingerprint(movies.data ?? [], seasons.data ?? []),
+    setFingerprint(watched.data ?? []),
+    setFingerprint((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
+  ].join('|');
 
   return useQuery({
-    // Keyed by everything that feeds the score, so any ranking change rebuilds the
-    // slate and nothing else has to remember to invalidate it. Keyed by the account
-    // because `exclude` is that account's collection.
     queryKey: ['for-you', userId, medium, inputs],
-    enabled: Boolean(userId) && movies.isSuccess && seasons.isSuccess,
-    // A slate is stable between rankings. Half an hour stops a tab switch rebuilding
-    // it, and any actual change to the inputs changes the key above instead.
+    enabled:
+      Boolean(userId) &&
+      movies.isSuccess &&
+      seasons.isSuccess &&
+      watched.isSuccess &&
+      watchlist.isSuccess,
+    // See the note on `inputs`: everything the viewer can change is in the key, and
+    // what is left changes on a six-hour clock at fastest.
     staleTime: 30 * 60_000,
     queryFn: async (): Promise<ForYouSlate> => {
       const taste = tasteFrom(
@@ -306,10 +333,17 @@ export function useForYou(userId: string, medium: Medium) {
         ...new Set([...anchors.flatMap((anchor) => anchor.similarIds), ...fallback]),
       ];
 
-      const [candidates, { exclude, saved }] = await Promise.all([
-        candidatesFor(candidateIds, medium),
-        collectionOf(userId),
-      ]);
+      const candidates = await candidatesFor(candidateIds, medium);
+
+      // `user_media` is everything logged, bucketed or dated — the collection —
+      // and is excluded outright: recommending someone a film they logged last week
+      // is the fastest way to make a slate look broken.
+      //
+      // The watchlist is not excluded. The decision is explicit that a watchlisted
+      // title stays and is marked Saved: wanting to see something is not having seen
+      // it, and a wall that hid everything you saved would quietly punish saving.
+      const exclude = watched.data ?? new Set<string>();
+      const saved = new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId));
 
       const slate = buildSlate({ candidates, anchors, taste, exclude });
 

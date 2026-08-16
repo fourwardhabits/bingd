@@ -54,7 +54,30 @@ function credential(): { header?: string; apiKey?: string } {
   );
 }
 
-async function request<T>(path: string, params: Record<string, string> = {}): Promise<T> {
+/**
+ * Called immediately before every outbound attempt, and allowed to refuse.
+ *
+ * This exists because a *charged request* and an *HTTP request* were not the same
+ * thing, and the per-user ceiling was counting the first while TMDB sees the second.
+ * With `MAX_RETRIES = 2`, one charged unit could be three attempts — so a hundred and
+ * twenty an hour was three hundred and sixty. Independent review found it twice: once
+ * for the genre lists, and again here after the first fix charged the right number of
+ * *logical* requests.
+ *
+ * Threaded as a parameter rather than kept in module state, because one isolate
+ * serves several invocations at once and a module-level counter would charge one
+ * user's retries to whoever happened to be next.
+ *
+ * Undefined for the service-role paths. `enrich`, `refresh` and `trending` are
+ * operator jobs against no user's ceiling.
+ */
+export type Charge = () => Promise<void>;
+
+async function request<T>(
+  path: string,
+  params: Record<string, string> = {},
+  charge?: Charge,
+): Promise<T> {
   const auth = credential();
 
   const url = new URL(`${BASE}${path}`);
@@ -64,6 +87,11 @@ async function request<T>(path: string, params: Record<string, string> = {}): Pr
 
   for (let attempt = 0; ; attempt += 1) {
     const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+
+    // Before the attempt, so a caller at their ceiling is refused rather than
+    // discovering it afterwards — and so a retry storm is charged as it happens.
+    // Throwing here (RateLimited) leaves the loop and surfaces as BG429.
+    if (charge) await charge();
 
     let response: Response;
     try {
@@ -112,30 +140,16 @@ type GenreList = { genres: { id: number; name: string }[] };
 
 let genreCache: Map<number, string> | null = null;
 
-/**
- * How many provider requests the next `genreNames()` will make: two, or none.
- *
- * Exists because callers have to *account* for them. Independent review found that
- * `similar` recorded one request against the user's hourly ceiling and then made
- * three — the recommendations call plus, on a cold isolate, both genre lists. At the
- * configured ceiling that is three hundred and sixty provider requests an hour from
- * one account rather than a hundred and twenty, which means the ceiling was not
- * protecting the quota it exists to protect.
- *
- * Reading a module-level cache rather than counting inside `request` keeps the
- * accounting where the decision to spend is made, which is also where the ceiling is
- * enforced. It is a race against a concurrent cold call — two callers can both see
- * two and one of them will be charged for a fetch that had already begun. Erring
- * toward over-counting is the correct direction for a ceiling.
- */
-export const genreRequestCost = () => (genreCache ? 0 : 2);
-
-export async function genreNames(): Promise<Map<number, string>> {
+export async function genreNames(charge?: Charge): Promise<Map<number, string>> {
+  // Charged only when it actually fetches, which is what threading the charger all
+  // the way down buys: nothing upstream has to predict whether this isolate is warm.
+  // A predicted count was the first fix and it was still wrong, because it counted
+  // logical requests rather than attempts.
   if (genreCache) return genreCache;
 
   const [movie, tv] = await Promise.all([
-    request<GenreList>('/genre/movie/list'),
-    request<GenreList>('/genre/tv/list'),
+    request<GenreList>('/genre/movie/list', {}, charge),
+    request<GenreList>('/genre/tv/list', {}, charge),
   ]);
 
   const map = new Map<number, string>();
@@ -240,12 +254,15 @@ export type TmdbSeasonDetail = {
   videos?: TmdbVideos;
 };
 
-export function searchMulti(query: string): Promise<{ results: TmdbSearchResult[] }> {
-  return request('/search/multi', {
-    query,
-    include_adult: 'false',
-    page: '1',
-  });
+export function searchMulti(
+  query: string,
+  charge?: Charge,
+): Promise<{ results: TmdbSearchResult[] }> {
+  return request(
+    '/search/multi',
+    { query, include_adult: 'false', page: '1' },
+    charge,
+  );
 }
 
 /**
@@ -281,20 +298,29 @@ export function trending(
 export function recommendations(
   kind: 'movie' | 'tv',
   id: number,
+  charge?: Charge,
 ): Promise<{ results: TmdbSearchResult[] }> {
-  return request(`/${kind}/${id}/recommendations`);
+  return request(`/${kind}/${id}/recommendations`, {}, charge);
 }
 
-export function movieDetail(id: number): Promise<TmdbMovieDetail> {
-  return request(`/movie/${id}`, { append_to_response: 'credits,videos' });
+export function movieDetail(id: number, charge?: Charge): Promise<TmdbMovieDetail> {
+  // One HTTP request, not three: `append_to_response` is TMDB's own mechanism for
+  // exactly that, so credits and videos cost nothing extra.
+  return request(`/movie/${id}`, { append_to_response: 'credits,videos' }, charge);
 }
 
-export function seriesDetail(id: number): Promise<TmdbSeriesDetail> {
-  return request(`/tv/${id}`, { append_to_response: 'credits,videos' });
+export function seriesDetail(id: number, charge?: Charge): Promise<TmdbSeriesDetail> {
+  return request(`/tv/${id}`, { append_to_response: 'credits,videos' }, charge);
 }
 
-export function seasonDetail(seriesId: number, seasonNumber: number): Promise<TmdbSeasonDetail> {
-  return request(`/tv/${seriesId}/season/${seasonNumber}`, {
-    append_to_response: 'credits,videos',
-  });
+export function seasonDetail(
+  seriesId: number,
+  seasonNumber: number,
+  charge?: Charge,
+): Promise<TmdbSeasonDetail> {
+  return request(
+    `/tv/${seriesId}/season/${seasonNumber}`,
+    { append_to_response: 'credits,videos' },
+    charge,
+  );
 }

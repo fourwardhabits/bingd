@@ -15,7 +15,7 @@ No language model. Recommendations are derived from human ranking behavior, cont
 |---|---|---|
 | Where it runs | Edge Function, on a schedule | On the device, when the tab opens |
 | Candidate families | five, including two social ones | `similar` facets for ≤6 anchors, plus the trending week list |
-| Cross-user signal | `match_scores`, followed users' rankings | **none** |
+| Bingd cross-user data | `match_scores`, followed users' rankings | **none** |
 | Evidence | composed server-side, stored on the row | computed from the viewer's own inputs, returned with the score |
 | Storage | `recommendation_generations` / `recommendations` | nothing persisted |
 
@@ -25,7 +25,7 @@ V1 uses **no other Bingd user's data**. Its three inputs are the viewer's own ra
 
 > **The stronger phrasing — "no cross-user signal at all" — is false, and independent review said so.** TMDB's recommendations are derived from what *their* users did, and popularity is a crowd measure. Both are external, public, about titles rather than about people, and identical for every viewer, so neither can be attributed to a person and neither is something one Bingd account learns about another. That is the claim; the stronger one was overreach.
 >
-> One residual side channel, recorded rather than closed: `similar` answers `reason: "cached"` faster than it answers a fetch, so an authenticated caller can infer that *some* account recently caused a given title's facet to be filled. It names no person, no score and no time, and any signed-in user may ask about any title anyway. Closing it would mean padding the response, which costs more than the channel is worth.
+> One residual side channel, recorded rather than closed: `similar` answers `reason: "cached"` faster than it answers a fetch, so an authenticated caller can infer that *some* account caused a given title's facet to be filled within its TTL. That is a weak cross-user signal and should be described as one rather than as nothing: for an obscure enough title, outside knowledge could make one person the likely requester. What it never exposes is an identity, a score, a time, or which of several people it was — and any signed-in user may ask about any title anyway, so the observation is available to everyone equally. Closing it would mean padding the response to a constant latency, which costs more than the channel is worth.
 
 **The moment a social family is added, scoring moves server-side.** That is not a preference; at that point the client would need other people's rankings in order to score, which is the thing the rule protects.
 
@@ -36,7 +36,7 @@ Two further properties are worth recording because they are what keep the senten
 
 **Anchors are bounded at six.** Each is one provider request the first time it is used and free for every user afterwards, because the answer lands in `media_cache` under the shared facet TTL. A request per ranked title — the obvious implementation — is four hundred TMDB calls for a user with four hundred rankings.
 
-`src/features/recommendations/rank.ts` is the whole rule and carries the reasoning. `src/features/recommendations/quality.test.ts` measures it against the three failures the founder decision names by name, and writes `.agent-workflow/recommendation-quality.md`.
+`src/features/recommendations/rank.ts` is the whole rule and carries the reasoning. `src/features/recommendations/quality.test.ts` measures it against the three failures the founder decision names by name, and `npm run report:recommendations` writes `.agent-workflow/recommendation-quality.md` from it.
 
 ---
 

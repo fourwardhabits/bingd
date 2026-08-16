@@ -146,15 +146,17 @@ const share = (part: number, whole: number) => (whole === 0 ? 0 : part / whole);
 const measure = (viewer: Viewer) => {
   const { anchors, slate, exclude } = slateFor(viewer);
 
-  // Measured over the *chosen* items. The diversity pass admits deferred candidates
-  // at the end to fill a slate that its own constraints left short, and those are
-  // marked — so a cap stated over the whole slate would be a cap nobody applied. The
-  // deferred share is reported separately, because a slate that is mostly deferred is
-  // one whose constraints did not bind.
+  // Measured over the **rendered** slate, deferred items included.
+  //
+  // It was measured over the chosen ones, and independent review was right that this
+  // is where the acceptance metric has to live: "one favourite does not own the wall"
+  // is a claim about the wall the user is looking at, and a slate could satisfy a
+  // chosen-only cap while rendering nine of twenty from one anchor. The deferred
+  // share is still reported, as the diagnostic it always was.
   const chosen = slate.filter((item) => !item.explanation.deferred);
   const perAnchor = new Map<string, number>();
   const perGenre = new Map<string, number>();
-  for (const item of chosen) {
+  for (const item of slate) {
     const lead = item.explanation.anchors[0]?.mediaItemId;
     if (lead) perAnchor.set(lead, (perAnchor.get(lead) ?? 0) + 1);
     const genre = item.genres[0];
@@ -171,8 +173,8 @@ const measure = (viewer: Viewer) => {
       (item) => item.explanation.total <= 0 || !item.explanation.lead,
     ).length,
     distinct: new Set(slate.map((item) => item.mediaItemId)).size,
-    topAnchorShare: share(Math.max(0, ...perAnchor.values()), Math.max(1, chosen.length)),
-    topGenreShare: share(Math.max(0, ...perGenre.values()), Math.max(1, chosen.length)),
+    topAnchorShare: share(Math.max(0, ...perAnchor.values()), slate.length),
+    topGenreShare: share(Math.max(0, ...perGenre.values()), slate.length),
     anchorLed: share(
       slate.filter((item) => item.explanation.lead === 'anchors').length,
       slate.length,
@@ -300,15 +302,16 @@ threshold quoted below. A metric nobody can fail is a metric nobody reads.
 ## Reading it
 
 **Top anchor share** is the failure the brief names first — twenty sequels because of
-one rating. The diversity pass caps a single anchor at four of twenty, and the figure
-is measured over the *chosen* items rather than the whole slate, because the cap is
-what the pass applies and the deferred tail is explicitly what it relaxes. Asserted at
-≤ 20%.
+one rating — and it is measured over the **rendered** slate, deferred items included.
+It was measured over the chosen ones, which was a way of moving the goalposts: the
+claim is about the wall the user is looking at, and a slate could satisfy a
+chosen-only cap while rendering nine of twenty from one anchor. Asserted at ≤ 20%.
 
-**Deferred** is the share of the slate that the diversity pass rejected and then
-readmitted because its own constraints had left the wall short. It is the honest
-counterweight to the two shares beside it: a slate that is mostly tail is a slate
-whose constraints did not bind. Asserted at ≤ 25%.
+**Deferred** is the share of the slate that the strict pass turned away and a relaxed
+pass then admitted. The relaxed pass raises both ceilings by half rather than
+abandoning them, so the tail is bounded too; a final unrestricted pass exists only for
+a pool that cannot fill the wall under any cap. A slate that is mostly tail is a slate
+whose constraints did not bind, which is why the figure is reported. Asserted at ≤ 25%.
 
 **Overlap with cold start** is the one that decides whether this is a recommender at
 all. The cold-start viewer has no anchors, so their wall is the popularity prior and
@@ -336,15 +339,16 @@ popularity term is doing more work than its 10% weight suggests.
   tested against a distribution this file invented.
 `;
 
-    // Best effort. Every number above is asserted by the tests that precede this one,
-    // so the file is an artefact rather than the check — and a hermetic or read-only
-    // CI sandbox should not fail the suite over a report it was never going to read.
-    try {
+    // Only under `npm run report:recommendations`. A unit test that writes into the
+    // workspace on every `npm test` is a side effect nobody asked for, and it can
+    // fail outright in a hermetic or read-only sandbox. Independent review raised it
+    // twice. Every number in the report is asserted by the tests above, so the file
+    // is an artefact of the run rather than the check itself, and gating the write
+    // costs nothing.
+    if (process.env.BINGD_REPORTS === '1') {
       const dir = join(__dirname, '..', '..', '..', '.agent-workflow');
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'recommendation-quality.md'), report, 'utf8');
-    } catch {
-      // Deliberately silent: see above.
     }
 
     expect(report).toContain('Overlap with cold start');

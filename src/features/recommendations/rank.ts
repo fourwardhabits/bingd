@@ -120,6 +120,16 @@ const MAX_GENRE_SHARE = 0.4;
 /** Nor may a single anchor contribute more than this many titles. */
 const MAX_PER_ANCHOR = 4;
 
+/**
+ * How far the ceilings move when the strict pass has left the wall short.
+ *
+ * Not to infinity, which is what the readmission did first: a slate could satisfy
+ * every cap over its chosen items and still render nine of twenty from one anchor,
+ * because the tail was admitted unchecked. Independent review was right that the cap
+ * a user experiences is the one over the wall in front of them.
+ */
+const RELAX = 1.5;
+
 // ---------------------------------------------------------------------------
 // Taste
 // ---------------------------------------------------------------------------
@@ -331,42 +341,68 @@ function leadOf(terms: {
 export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE): Scored[] {
   const byScore = [...scored].sort((a, b) => b.explanation.total - a.explanation.total);
 
-  const genreCeiling = Math.max(1, Math.ceil(limit * MAX_GENRE_SHARE));
   const perGenre = new Map<string, number>();
   const perAnchor = new Map<string, number>();
-
   const chosen: Scored[] = [];
-  const deferred: Scored[] = [];
 
-  for (const candidate of byScore) {
-    if (chosen.length >= limit) break;
+  /**
+   * One greedy pass at a given pair of ceilings. Returns what it turned away.
+   *
+   * The ceilings are arguments rather than constants because the readmission pass
+   * raises them rather than abandoning them. Admitting the deferred tail *without*
+   * any cap was the first version, and independent review was right that it makes the
+   * headline claim untrue: a slate could pass a "no anchor above 20%" check computed
+   * over the chosen items while rendering nine of twenty from one anchor. The cap the
+   * user experiences is the one over the wall they are looking at.
+   */
+  const pass = (pool: readonly Scored[], genreCeiling: number, anchorCeiling: number, mark: boolean) => {
+    const turnedAway: Scored[] = [];
 
-    // The primary genre is TMDB's first, which is the one the provider considers
-    // definitive. Counting every genre would make a three-genre film use up three
-    // slots' worth of the ceiling and effectively ban broad titles.
-    const primary = candidate.genres[0] ?? null;
-    const leadAnchor = candidate.explanation.anchors[0]?.mediaItemId ?? null;
+    for (const candidate of pool) {
+      if (chosen.length >= limit) {
+        turnedAway.push(candidate);
+        continue;
+      }
 
-    const genreFull = primary != null && (perGenre.get(primary) ?? 0) >= genreCeiling;
-    const anchorFull = leadAnchor != null && (perAnchor.get(leadAnchor) ?? 0) >= MAX_PER_ANCHOR;
+      // The primary genre is TMDB's first, which is the one the provider considers
+      // definitive. Counting every genre would make a three-genre film use up three
+      // slots' worth of the ceiling and effectively ban broad titles.
+      const primary = candidate.genres[0] ?? null;
+      const leadAnchor = candidate.explanation.anchors[0]?.mediaItemId ?? null;
 
-    if (genreFull || anchorFull) {
-      deferred.push(candidate);
-      continue;
+      const genreFull = primary != null && (perGenre.get(primary) ?? 0) >= genreCeiling;
+      const anchorFull = leadAnchor != null && (perAnchor.get(leadAnchor) ?? 0) >= anchorCeiling;
+
+      if (genreFull || anchorFull) {
+        turnedAway.push(candidate);
+        continue;
+      }
+
+      if (primary != null) perGenre.set(primary, (perGenre.get(primary) ?? 0) + 1);
+      if (leadAnchor != null) perAnchor.set(leadAnchor, (perAnchor.get(leadAnchor) ?? 0) + 1);
+      chosen.push(mark ? { ...candidate, explanation: { ...candidate.explanation, deferred: true } } : candidate);
     }
 
-    if (primary != null) perGenre.set(primary, (perGenre.get(primary) ?? 0) + 1);
-    if (leadAnchor != null) perAnchor.set(leadAnchor, (perAnchor.get(leadAnchor) ?? 0) + 1);
-    chosen.push(candidate);
-  }
+    return turnedAway;
+  };
 
-  for (const candidate of deferred) {
-    if (chosen.length >= limit) break;
-    chosen.push({
-      ...candidate,
-      explanation: { ...candidate.explanation, deferred: true },
-    });
-  }
+  const strictGenre = Math.max(1, Math.ceil(limit * MAX_GENRE_SHARE));
+  const deferred = pass(byScore, strictGenre, MAX_PER_ANCHOR, false);
+
+  // Relaxed, not abandoned. One and a half times each ceiling is enough to fill a
+  // wall for a viewer whose candidate pool is narrow, and still bounds what any one
+  // anchor or genre can take of the rendered slate.
+  const stillOut = pass(
+    deferred,
+    Math.ceil(strictGenre * RELAX),
+    Math.ceil(MAX_PER_ANCHOR * RELAX),
+    true,
+  );
+
+  // Last resort, and only reachable when the pool genuinely cannot fill the wall
+  // under any cap — a viewer with one anchor, one genre and nothing else. A short
+  // wall would be a worse answer than a repetitive one.
+  pass(stillOut, limit, limit, true);
 
   return chosen;
 }
