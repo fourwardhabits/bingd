@@ -120,16 +120,6 @@ const MAX_GENRE_SHARE = 0.4;
 /** Nor may a single anchor contribute more than this many titles. */
 const MAX_PER_ANCHOR = 4;
 
-/**
- * How far the ceilings move when the strict pass has left the wall short.
- *
- * Not to infinity, which is what the readmission did first: a slate could satisfy
- * every cap over its chosen items and still render nine of twenty from one anchor,
- * because the tail was admitted unchecked. Independent review was right that the cap
- * a user experiences is the one over the wall in front of them.
- */
-const RELAX = 1.5;
-
 // ---------------------------------------------------------------------------
 // Taste
 // ---------------------------------------------------------------------------
@@ -203,8 +193,6 @@ export type Explanation = {
   language: { code: string; affinity: number } | null;
   /** 0–1, the bounded popularity prior. */
   popularity: number;
-  /** Set by `diversify` when a constraint moved this title down the slate. */
-  deferred: boolean;
   /** Which signal actually carried it. Drives the sentence and the debug view. */
   lead: 'anchors' | 'genre' | 'language' | 'popular';
 };
@@ -277,7 +265,6 @@ export function scoreCandidate(candidate: Candidate, anchors: readonly Anchor[],
       genre,
       language,
       popularity,
-      deferred: false,
       lead: leadOf({
         anchor: WEIGHTS.anchor * anchorSignal,
         genre: WEIGHTS.genre * (genre?.affinity ?? 0),
@@ -333,10 +320,17 @@ function leadOf(terms: {
  * a slate looks wrong you can replay the selection and see which constraint rejected
  * which title, which is not true of a solver.
  *
- * A rejected title is deferred, not discarded. If the constraints leave the slate
- * short — a viewer with one anchor and one genre — the deferred titles come back in
- * score order rather than the wall being half empty. They carry `deferred: true`, so
- * the debug view can tell "chosen" from "chosen because there was nothing else".
+ * **A rejected title is dropped, and the slate may come back short.** That is the
+ * whole of it, and it took three passes to get back to. The version before this one
+ * readmitted rejected titles under relaxed ceilings and then under none at all, so
+ * that the wall was always full — and the effect was that "no anchor above 20% of the
+ * wall" was a claim the code could break and the tests happened not to catch. A cap
+ * that yields when it is inconvenient is not a cap.
+ *
+ * The cost is a short wall for a viewer whose candidate pool is genuinely narrow. In
+ * practice that is rare: the trending fallback supplies twenty candidates with no
+ * anchor at all, and a candidate with no lead anchor counts against no anchor's
+ * ceiling.
  */
 export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE): Scored[] {
   const byScore = [...scored].sort((a, b) => b.explanation.total - a.explanation.total);
@@ -345,24 +339,10 @@ export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE)
   const perAnchor = new Map<string, number>();
   const chosen: Scored[] = [];
 
-  /**
-   * One greedy pass at a given pair of ceilings. Returns what it turned away.
-   *
-   * The ceilings are arguments rather than constants because the readmission pass
-   * raises them rather than abandoning them. Admitting the deferred tail *without*
-   * any cap was the first version, and independent review was right that it makes the
-   * headline claim untrue: a slate could pass a "no anchor above 20%" check computed
-   * over the chosen items while rendering nine of twenty from one anchor. The cap the
-   * user experiences is the one over the wall they are looking at.
-   */
-  const pass = (pool: readonly Scored[], genreCeiling: number, anchorCeiling: number, mark: boolean) => {
-    const turnedAway: Scored[] = [];
-
+  /** One greedy pass. A candidate that would break either ceiling is dropped. */
+  const pass = (pool: readonly Scored[], genreCeiling: number, anchorCeiling: number) => {
     for (const candidate of pool) {
-      if (chosen.length >= limit) {
-        turnedAway.push(candidate);
-        continue;
-      }
+      if (chosen.length >= limit) return;
 
       // The primary genre is TMDB's first, which is the one the provider considers
       // definitive. Counting every genre would make a three-genre film use up three
@@ -373,36 +353,29 @@ export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE)
       const genreFull = primary != null && (perGenre.get(primary) ?? 0) >= genreCeiling;
       const anchorFull = leadAnchor != null && (perAnchor.get(leadAnchor) ?? 0) >= anchorCeiling;
 
-      if (genreFull || anchorFull) {
-        turnedAway.push(candidate);
-        continue;
-      }
+      if (genreFull || anchorFull) continue;
 
       if (primary != null) perGenre.set(primary, (perGenre.get(primary) ?? 0) + 1);
       if (leadAnchor != null) perAnchor.set(leadAnchor, (perAnchor.get(leadAnchor) ?? 0) + 1);
-      chosen.push(mark ? { ...candidate, explanation: { ...candidate.explanation, deferred: true } } : candidate);
+      chosen.push(candidate);
     }
-
-    return turnedAway;
   };
 
-  const strictGenre = Math.max(1, Math.ceil(limit * MAX_GENRE_SHARE));
-  const deferred = pass(byScore, strictGenre, MAX_PER_ANCHOR, false);
-
-  // Relaxed, not abandoned. One and a half times each ceiling is enough to fill a
-  // wall for a viewer whose candidate pool is narrow, and still bounds what any one
-  // anchor or genre can take of the rendered slate.
-  const stillOut = pass(
-    deferred,
-    Math.ceil(strictGenre * RELAX),
-    Math.ceil(MAX_PER_ANCHOR * RELAX),
-    true,
-  );
-
-  // Last resort, and only reachable when the pool genuinely cannot fill the wall
-  // under any cap — a viewer with one anchor, one genre and nothing else. A short
-  // wall would be a worse answer than a repetitive one.
-  pass(stillOut, limit, limit, true);
+  // One pass, and the ceilings are hard.
+  //
+  // There were three: strict, then relaxed by half, then unrestricted to fill any
+  // shortfall. Independent review killed it, correctly. A relaxed ceiling of six per
+  // anchor on a wall of twenty is thirty per cent, and the documentation, the report
+  // and the tests all said twenty — the synthetic fixtures simply never reached the
+  // boundary, so the assertions passed while production could violate them. A cap
+  // that yields when it is inconvenient is not a cap, and a claim the code can break
+  // is worse than a weaker claim it cannot.
+  //
+  // The cost is that a viewer whose candidate pool is genuinely narrow gets a shorter
+  // wall. That is the honest outcome and in practice a rare one: the trending
+  // fallback contributes twenty candidates with no anchor at all, and a candidate
+  // with no lead anchor counts against no anchor's ceiling.
+  pass(byScore, Math.max(1, Math.ceil(limit * MAX_GENRE_SHARE)), MAX_PER_ANCHOR);
 
   return chosen;
 }

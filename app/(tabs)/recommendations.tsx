@@ -99,7 +99,6 @@ export default function RecommendationsScreen() {
         ? `language: ${explanation.language.code} ${explanation.language.affinity.toFixed(2)}`
         : 'language: none',
       `popularity prior: ${explanation.popularity.toFixed(2)}`,
-      explanation.deferred ? 'admitted after a diversity constraint deferred it' : null,
     ].filter(Boolean);
 
     Alert.alert(item.title, lines.join('\n'));

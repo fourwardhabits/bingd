@@ -146,14 +146,8 @@ const share = (part: number, whole: number) => (whole === 0 ? 0 : part / whole);
 const measure = (viewer: Viewer) => {
   const { anchors, slate, exclude } = slateFor(viewer);
 
-  // Measured over the **rendered** slate, deferred items included.
-  //
-  // It was measured over the chosen ones, and independent review was right that this
-  // is where the acceptance metric has to live: "one favourite does not own the wall"
-  // is a claim about the wall the user is looking at, and a slate could satisfy a
-  // chosen-only cap while rendering nine of twenty from one anchor. The deferred
-  // share is still reported, as the diagnostic it always was.
-  const chosen = slate.filter((item) => !item.explanation.deferred);
+  // Measured over the rendered slate, which is now the only slate there is: the
+  // ceilings are hard and a rejected candidate is dropped rather than readmitted.
   const perAnchor = new Map<string, number>();
   const perGenre = new Map<string, number>();
   for (const item of slate) {
@@ -168,7 +162,6 @@ const measure = (viewer: Viewer) => {
     size: slate.length,
     anchors: anchors.length,
     leakedFromCollection: slate.filter((item) => exclude.has(item.mediaItemId)).length,
-    deferredShare: share(slate.length - chosen.length, slate.length),
     unexplained: slate.filter(
       (item) => item.explanation.total <= 0 || !item.explanation.lead,
     ).length,
@@ -233,14 +226,6 @@ describe('recommendation quality', () => {
     expect(broad.topGenreShare).toBeLessThanOrEqual(0.4);
   });
 
-  it('does not fill the wall from the deferred pile', () => {
-    // The caps are enforced on the chosen items and relaxed on the tail, so a slate
-    // that is mostly tail is a slate whose constraints did not bind. Anything past a
-    // quarter means the candidate pool was too narrow for the constraints to mean
-    // anything.
-    for (const measured of all) expect(measured.deferredShare).toBeLessThanOrEqual(0.25);
-  });
-
   it('is not the popularity list wearing a different title', () => {
     // The failure the decision names last and the easiest to ship by accident. A
     // viewer with taste must get a substantially different wall from a viewer with
@@ -268,7 +253,7 @@ describe('recommendation quality', () => {
         (m) =>
           `| ${m.viewer} | ${m.anchors} | ${m.size} | ${pct(m.topAnchorShare)} | ${pct(
             m.topGenreShare,
-          )} | ${pct(m.deferredShare)} | ${pct(m.anchorLed)} | ${pct(
+          )} | ${pct(m.anchorLed)} | ${pct(
             m.popularityLed,
           )} | ${m.meanPopularityPrior.toFixed(2)} | ${pct(overlapWithCold(m))} |`,
       )
@@ -290,8 +275,8 @@ make this circular, since the ranker reads genre too.
 
 ## Results
 
-| Viewer | Anchors | Slate | Top anchor share | Top genre share | Deferred | Anchor-led | Popularity-led | Mean popularity prior | Overlap with cold start |
-|---|---|---|---|---|---|---|---|---|---|
+| Viewer | Anchors | Slate | Top anchor share | Top genre share | Anchor-led | Popularity-led | Mean popularity prior | Overlap with cold start |
+|---|---|---|---|---|---|---|---|---|
 ${rows}
 
 Universe mean popularity prior: **${universePopularity.toFixed(2)}**.
@@ -302,16 +287,12 @@ threshold quoted below. A metric nobody can fail is a metric nobody reads.
 ## Reading it
 
 **Top anchor share** is the failure the brief names first — twenty sequels because of
-one rating — and it is measured over the **rendered** slate, deferred items included.
-It was measured over the chosen ones, which was a way of moving the goalposts: the
-claim is about the wall the user is looking at, and a slate could satisfy a
-chosen-only cap while rendering nine of twenty from one anchor. Asserted at ≤ 20%.
-
-**Deferred** is the share of the slate that the strict pass turned away and a relaxed
-pass then admitted. The relaxed pass raises both ceilings by half rather than
-abandoning them, so the tail is bounded too; a final unrestricted pass exists only for
-a pool that cannot fill the wall under any cap. A slate that is mostly tail is a slate
-whose constraints did not bind, which is why the figure is reported. Asserted at ≤ 25%.
+one rating — measured over the rendered slate, which is now the only slate there is.
+Two earlier versions were softer: one measured over the "chosen" items while a
+readmitted tail rendered alongside them, and one relaxed the ceiling by half to keep
+the wall full. Both made this number a claim the code could break, and independent
+review caught each. **The ceilings are hard now**, and a wall short of twenty is the
+honest outcome when the candidate pool cannot fill it under them. Asserted at ≤ 20%.
 
 **Overlap with cold start** is the one that decides whether this is a recommender at
 all. The cold-start viewer has no anchors, so their wall is the popularity prior and

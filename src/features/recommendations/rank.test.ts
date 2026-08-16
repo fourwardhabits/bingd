@@ -265,16 +265,14 @@ describe('diversity', () => {
     ];
 
     const slate = diversify(scored, 10);
-    const chosen = slate.filter((item) => !item.explanation.deferred);
 
     // Four of ten is the ceiling, and the twenty Action titles all out-score every
     // Drama one — so without the constraint the wall would be Action end to end.
-    expect(chosen.filter((item) => item.genres[0] === 'Action')).toHaveLength(4);
-    expect(chosen.filter((item) => item.genres[0] === 'Drama')).toHaveLength(4);
-    // Two genres cannot fill ten slots at 40% each, so the last two come back from
-    // the deferred pile rather than the wall ending at eight.
-    expect(slate).toHaveLength(10);
-    expect(slate.filter((item) => item.explanation.deferred)).toHaveLength(2);
+    expect(slate.filter((item) => item.genres[0] === 'Action')).toHaveLength(4);
+    expect(slate.filter((item) => item.genres[0] === 'Drama')).toHaveLength(4);
+    // Two genres cannot fill ten slots at 40% each, and the ceiling does not yield:
+    // the wall ends at eight rather than the cap being quietly relaxed to fill it.
+    expect(slate).toHaveLength(8);
   });
 
   it('will not let one favourite own the slate', () => {
@@ -294,19 +292,18 @@ describe('diversity', () => {
     });
 
     const led = slate.filter((item) => item.explanation.anchors[0]?.mediaItemId === 'marvel');
-    const undeferred = led.filter((item) => !item.explanation.deferred);
 
-    expect(undeferred.length).toBeLessThanOrEqual(4);
+    expect(led.length).toBeLessThanOrEqual(4);
   });
 
-  it('fills the slate rather than leaving it short when there is nothing else', () => {
-    // A viewer with one anchor and one genre gets a full wall of what they like,
-    // marked as having been let in by the shortfall rather than chosen.
+  it('returns a short wall rather than breaking its own ceiling', () => {
+    // Twelve candidates, all one genre, for a wall of ten. The honest answer is four
+    // — 40% of ten — and not ten with the cap quietly relaxed to reach it. The
+    // version that filled the wall made "no genre above 40%" a claim the code could
+    // break, which independent review caught in the assertions rather than the code.
     const scored = scoredRun(12, () => ({ genres: ['Action'] }));
-    const slate = diversify(scored, 10);
 
-    expect(slate).toHaveLength(10);
-    expect(slate.filter((item) => item.explanation.deferred).length).toBeGreaterThan(0);
+    expect(diversify(scored, 10)).toHaveLength(4);
   });
 
   it('keeps the best title first', () => {
