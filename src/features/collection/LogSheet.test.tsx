@@ -602,14 +602,134 @@ describe('the watch date', () => {
 });
 
 describe('rows that are not built yet', () => {
-  it.each([
-    ['Who I watched with'],
-    ['Photos'],
-  ])('renders %s as present but inert, with a reason', async (label) => {
+  it('renders Photos as present but inert, with a reason', async () => {
     const sheet = await open(filmA);
 
-    const row = sheet.getByLabelText(label);
+    const row = sheet.getByLabelText('Photos');
     expect(row.props.accessibilityState.disabled).toBe(true);
     expect(row.props.accessibilityHint).toBe('Coming soon');
+  });
+});
+
+/**
+ * Who I watched with (PRD §14). The rules that matter on this side are the two the
+ * server also enforces — only connected people are offered, and at most ten — plus
+ * the one it cannot: each tick saves on its own, because the sheet has no Done button
+ * and saving from an unmount is where writes go to be lost.
+ */
+describe('who I watched with', () => {
+  const withPeople = (rows: Record<string, unknown>[]) => {
+    mockFrom.mockImplementation((table: string) => {
+      const chain: Record<string, unknown> = {};
+      const answer = () =>
+        Promise.resolve({
+          data: table === 'follows' ? rows : table === 'watch_tags' ? [] : null,
+          error: null,
+        });
+      Object.assign(chain, {
+        select: () => chain,
+        eq: () => chain,
+        in: () => chain,
+        order: () => chain,
+        maybeSingle: () => Promise.resolve({ data: null, error: null }),
+        then: (resolve: (value: unknown) => unknown) => answer().then(resolve),
+      });
+      return chain;
+    });
+  };
+
+  const person = (id: string, name: string) => ({
+    profiles: { id, username: name.toLowerCase(), display_name: name, avatar_path: null },
+  });
+
+  const openWho = async () => {
+    const sheet = await open(filmA);
+    await waitFor(() =>
+      expect(sheet.getByLabelText('Who I watched with').props.accessibilityState.disabled).toBe(
+        false,
+      ),
+    );
+    await fireEvent.press(sheet.getByRole('button', { name: 'Who I watched with' }));
+    return sheet;
+  };
+
+  it('offers the people the viewer is connected to, each once', async () => {
+    // The same person appears in both the following and the follower query when the
+    // follow is mutual, and a list with your closest friend in it twice is a bug
+    // people notice immediately.
+    withPeople([person('u1', 'Anna'), person('u1', 'Anna'), person('u2', 'Raj')]);
+    const sheet = await openWho();
+
+    await waitFor(() => expect(sheet.getByLabelText('Anna')).toBeTruthy());
+    expect(sheet.getAllByLabelText('Anna')).toHaveLength(1);
+    expect(sheet.getByLabelText('Raj')).toBeTruthy();
+  });
+
+  it('saves the whole list on each tick rather than waiting for a close', async () => {
+    withPeople([person('u1', 'Anna'), person('u2', 'Raj')]);
+    const sheet = await openWho();
+    await waitFor(() => expect(sheet.getByLabelText('Anna')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByLabelText('Anna'));
+    await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(1));
+    expect(callsTo('set_watch_tags')[0][1].p_tagged_ids).toEqual(['u1']);
+
+    await fireEvent.press(sheet.getByLabelText('Raj'));
+    await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(2));
+    // The complete set, not a delta: one call is one idempotency key, and "these
+    // two people" replays correctly where "add Raj" does not.
+    expect(callsTo('set_watch_tags')[1][1].p_tagged_ids).toEqual(['u1', 'u2']);
+  });
+
+  it('creates the watch first, since a tag hangs off one', async () => {
+    withPeople([person('u1', 'Anna')]);
+    const sheet = await openWho();
+    await waitFor(() => expect(sheet.getByLabelText('Anna')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByLabelText('Anna'));
+
+    await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(1));
+    expect(callsTo('log_watched')).toHaveLength(1);
+  });
+
+  it('untags on a second tap', async () => {
+    withPeople([person('u1', 'Anna')]);
+    const sheet = await openWho();
+    await waitFor(() => expect(sheet.getByLabelText('Anna')).toBeTruthy());
+
+    await fireEvent.press(sheet.getByLabelText('Anna'));
+    await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(1));
+    await fireEvent.press(sheet.getByLabelText('Anna'));
+
+    await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(2));
+    expect(callsTo('set_watch_tags')[1][1].p_tagged_ids).toEqual([]);
+  });
+
+  it('stops offering more once ten are chosen', async () => {
+    withPeople(
+      Array.from({ length: 12 }, (_, index) => person(`u${index}`, `Friend${index}`)),
+    );
+    const sheet = await openWho();
+    await waitFor(() => expect(sheet.getByLabelText('Friend0')).toBeTruthy());
+
+    for (let index = 0; index < 10; index += 1) {
+      await fireEvent.press(sheet.getByLabelText(`Friend${index}`));
+    }
+
+    await waitFor(() =>
+      expect(sheet.getByLabelText('Friend11').props.accessibilityState.disabled).toBe(true),
+    );
+    // Disabled rather than hidden, so the reason the tap did nothing is visible.
+    expect(sheet.getByLabelText('Friend11').props.accessibilityHint).toBe(
+      'You can tag up to 10 people',
+    );
+    expect(sheet.getByLabelText('Friend0').props.accessibilityState.disabled).toBe(false);
+  });
+
+  it('says so plainly when nobody can be tagged yet', async () => {
+    withPeople([]);
+    const sheet = await openWho();
+
+    await waitFor(() => expect(sheet.getByText('Nobody to tag yet')).toBeTruthy());
   });
 });

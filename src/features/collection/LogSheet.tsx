@@ -17,7 +17,9 @@ import {
   type BucketId,
 } from '@/ui/components';
 
+import { CompanionPicker } from './CompanionPicker';
 import { formatWatchDate, today } from './dates';
+import { useCompanions, useSetCompanions, useTaggablePeople } from './use-companions';
 import { emptyLogState, useLogState } from './use-log-state';
 import { WatchDatePicker } from './WatchDatePicker';
 import {
@@ -77,7 +79,10 @@ export function LogSheet({ title, onClose, onRank }: LogSheetProps) {
   return <Body key={title.id} title={title} onClose={onClose} onRank={onRank} />;
 }
 
-type Expanded = 'notes' | 'date' | null;
+type Expanded = 'notes' | 'date' | 'who' | null;
+
+/** PRD §14. Mirrors `watch_tags.max_per_watch`, which is what actually enforces it. */
+const MAX_COMPANIONS = 10;
 
 function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
@@ -127,6 +132,15 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirmRebucket, setConfirmRebucket] = useState<BucketId | null>(null);
+
+  const people = useTaggablePeople(profile.id);
+  const companions = useCompanions(profile.id, title.id);
+  const saveCompanions = useSetCompanions(profile.id);
+  // Same overlay rule as the note: null means untouched, so the stored list shows
+  // until the user changes it and an empty selection is a real edit.
+  const [companionEdit, setCompanionEdit] = useState<string[] | null>(null);
+  const stored = companions.data?.map((c) => c.id) ?? [];
+  const chosen = companionEdit ?? stored;
 
   const bucket = bucketEdit ?? state.bucket;
   const note = noteEdit ?? state.note;
@@ -304,6 +318,50 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
     if (ok) refresh();
   };
 
+  /**
+   * Companions are saved as they are ticked, not on close.
+   *
+   * The sheet has no Done button — it never has — so "on close" would mean saving
+   * from an unmount, which is where writes go to be lost. Each tap is one call that
+   * sends the whole list, so a failed one leaves the previous list intact rather
+   * than half of a new one.
+   */
+  const toggleCompanion = async (id: string) => {
+    const next = chosen.includes(id) ? chosen.filter((one) => one !== id) : [...chosen, id];
+    if (next.length > MAX_COMPANIONS) return;
+
+    setCompanionEdit(next);
+    setProblem(null);
+
+    // A tag hangs off a watch, so the row has to exist. Bucketing or a date will
+    // usually have created it already; this covers tagging as the first thing done.
+    if (!state.exists) {
+      const created = await logWatched({
+        operationId: newOperationId(),
+        mediaItemId: title.id,
+        watchedOn: effectiveDate,
+      });
+      if (!report(created)) {
+        setCompanionEdit(null);
+        return;
+      }
+    }
+
+    const result = await saveCompanions(title.id, next);
+    if (!result.ok) {
+      setProblem(result.message);
+      setCompanionEdit(null);
+      return;
+    }
+    refresh();
+  };
+
+  const companionValue = chosen.length
+    ? chosen.length === 1
+      ? (people.data?.find((person) => person.id === chosen[0])?.name ?? '1 person')
+      : `${chosen.length} people`
+    : 'Add';
+
   const category = title.kind === 'movie' ? 'Movies' : 'TV season';
   const heading = title.seriesTitle ? `${title.seriesTitle} — ${title.title}` : title.title;
   const noteValue = note.trim() ? `${note.trim().split(/\s+/).length} words` : 'Add';
@@ -388,8 +446,22 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
           <SheetRow
             icon="people-outline"
             label="Who I watched with"
-            disabledReason="Coming soon"
+            value={loaded ? companionValue : undefined}
+            expanded={expanded === 'who'}
+            onPress={loaded ? () => setExpanded(expanded === 'who' ? null : 'who') : undefined}
+            disabledReason={loaded ? undefined : 'Loading'}
           />
+          {loaded && expanded === 'who' ? (
+            <View style={styles.expanded}>
+              <CompanionPicker
+                people={people.data ?? []}
+                selected={chosen}
+                onToggle={(id) => void toggleCompanion(id)}
+                max={MAX_COMPANIONS}
+                loading={people.isPending}
+              />
+            </View>
+          ) : null}
 
           {/* Inert until the read lands, rather than absent: the rows are the
               sheet's shape, and having them appear a beat after the buckets would

@@ -33,9 +33,17 @@ export type ReactionSummary = {
   mine: ReactionKind | null;
   /** Distinct kinds present, most common first. PRD §14 shows the glyphs, not a total. */
   kinds: ReactionKind[];
-  /** At most two, for "Jerry and Beth". */
+  /** At most two, for "Jerry and Beth". Never the reader. */
   names: string[];
-  /** How many reactors beyond the named ones. */
+  /**
+   * Reactors beyond the named ones, with the reader excluded.
+   *
+   * Both exclusions, not just the first. Naming the reader was already ruled out —
+   * "You and Beth reacted" on your own feed reads as being reported to yourself —
+   * but leaving them in the residual only moved it: two reactors, one of them you,
+   * rendered "Beth and 1 other", and the other one was you. Found by independent
+   * review, 2026-08-16.
+   */
   others: number;
 };
 
@@ -103,7 +111,8 @@ export function useReactions(eventIds: string[], viewerId: string) {
         summary.kinds = [...(counts.get(eventId) ?? new Map())]
           .sort((a, b) => b[1] - a[1])
           .map(([kind]) => kind);
-        summary.others = Math.max(summary.total - summary.names.length, 0);
+        const mine = summary.mine ? 1 : 0;
+        summary.others = Math.max(summary.total - summary.names.length - mine, 0);
       }
 
       return byEvent;

@@ -187,6 +187,23 @@ describe('reacting to something you are not allowed to see', () => {
 });
 
 describe('the row belongs to whoever wrote it', () => {
+  it('removes only the caller’s own row', async () => {
+    // Independent review, 2026-08-16: the delete is correctly scoped to
+    // `user_id = auth.uid()`, and the suite would have passed with that clause
+    // deleted — the ownership test never removed anything and the removal test had
+    // only one reactor.
+    const event = await eventOf(alice, await movie('react_scoped_delete'));
+    const jane = await t.createUser({ username: 'jane_react_scope' });
+    await t.actAs(jane);
+    await react(event, 'love');
+    await t.actAs(bob);
+    await react(event, 'agree');
+
+    await react(event, null);
+
+    assert.deepEqual(await reactionsOn(event), [{ user_id: jane, kind: 'love' }]);
+  });
+
   it('is written as the caller, whatever they claim', async () => {
     // There is no user parameter, which is the point: the only identity the
     // function will write is auth.uid(). A caller cannot react as someone else
@@ -290,6 +307,69 @@ describe('what the activity owner is told', () => {
 
     assert.equal(asRecipient.rows.length, 1);
     assert.equal(asReactor.rows.length, 0, 'the reactor does not get to read the inbox');
+  });
+});
+
+describe('the flood ceiling PRD §14 asks for', () => {
+  it('refuses once the day’s reactions are spent, and counts attempts not survivors', async () => {
+    const flooder = await t.createUser({ username: 'flooder_react' });
+    await t.sql(`update app_config set value = '3'::jsonb where key = 'reactions.max_per_day'`);
+    await t.actAs(flooder);
+
+    try {
+      const events = [];
+      for (let i = 0; i < 4; i += 1) {
+        events.push(await eventOf(alice, await movie(`react_flood_${i}`)));
+      }
+
+      await react(events[0], 'love');
+      // Removing gives the row back and does *not* give the allowance back: the
+      // limit counts operations, so a react-and-unreact loop is bounded where a
+      // count of surviving rows would not be.
+      await react(events[0], null);
+      await react(events[1], 'love');
+
+      const error = await t.errorFrom(`select set_reaction(gen_random_uuid(), $1, 'love')`, [
+        events[2],
+      ]);
+      assert.equal(error?.code, '53400');
+    } finally {
+      await t.sql(`update app_config set value = '200'::jsonb where key = 'reactions.max_per_day'`);
+      await t.actAs(bob);
+    }
+  });
+
+  it('does not count another account’s reactions against yours', async () => {
+    const quiet = await t.createUser({ username: 'quiet_react' });
+    await t.sql(`update app_config set value = '2'::jsonb where key = 'reactions.max_per_day'`);
+
+    try {
+      const loud = await t.createUser({ username: 'loud_react' });
+      const event = await eventOf(alice, await movie('react_flood_shared'));
+      await t.actAs(loud);
+      await react(event, 'love');
+      await react(event, 'agree');
+
+      await t.actAs(quiet);
+      assert.equal((await react(event, 'wow')).kind, 'wow');
+    } finally {
+      await t.sql(`update app_config set value = '200'::jsonb where key = 'reactions.max_per_day'`);
+      await t.actAs(bob);
+    }
+  });
+
+  it('holds the once-per-event inbox rule as a constraint, not only as a query', async () => {
+    // The `where not exists` guard it replaced was correct and unenforced. A unique
+    // index cannot be lost by a later edit that reorders the body.
+    const event = await eventOf(alice, await movie('react_notify_constraint'));
+    await react(event, 'love');
+
+    const error = await t.errorFrom(
+      `insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
+       values ($1, 'reaction', $2, 'feed_event', $3, '{}'::jsonb)`,
+      [alice, bob, event],
+    );
+    assert.equal(error?.code, '23505');
   });
 });
 

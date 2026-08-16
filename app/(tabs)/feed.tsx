@@ -123,6 +123,7 @@ export default function FeedScreen() {
                   : () => router.push(`/u/${event.actorUsername}`)
               }
               verb={VERB[event.type]}
+              companions={event.companions}
               title={event.title}
               year={event.year}
               posterUri={posterUri(event.posterPath)}

@@ -76,6 +76,21 @@ describe('useReactions', () => {
     const summary = (await summaries('me'))?.get('event-1');
     expect(summary?.names).toEqual(['Beth']);
     expect(summary?.total).toBe(2);
+    // And not in the residual either. Leaving the reader there only moved the
+    // problem: "Beth and 1 other", where the other one is you.
+    expect(summary?.others).toBe(0);
+  });
+
+  it('keeps the reader out of the residual count as well as out of the names', async () => {
+    mockRows = ['Jerry', 'Beth', 'Morty'].map((name, index) =>
+      row({ user_id: `u${index}`, profiles: { display_name: name, username: name } }),
+    );
+    mockRows.push(row({ user_id: 'me', profiles: { display_name: 'Me', username: 'me' } }));
+
+    const summary = (await summaries('me'))?.get('event-1');
+    expect(summary?.total).toBe(4);
+    expect(summary?.names).toEqual(['Jerry', 'Beth']);
+    expect(summary?.others).toBe(1);
   });
 
   it('names at most two and counts the rest', async () => {

@@ -31,6 +31,8 @@ export type ActivityRowProps = {
   onPressActor?: () => void;
   /** The verb between the actor and the title: "ranked", "watched", "finished". */
   verb: string;
+  /** Names the actor said they watched it with (PRD §14). */
+  companions?: string[];
   /** Already in its full form — "Parks and Recreation — Season 2" (`lib/titles.ts`). */
   title: string | null;
   year?: number | null;
@@ -76,6 +78,7 @@ export function ActivityRow({
   actorAvatarUri,
   onPressActor,
   verb,
+  companions = [],
   title,
   year,
   posterUri,
@@ -133,6 +136,17 @@ export function ActivityRow({
                 {actorName}
               </Text>
               {` ${verb}`}
+              {/* Inside the sentence rather than on a line of its own. "Sai and
+                  Anna watched" is the fact; a separate "with Anna" row would be a
+                  second band for three words. */}
+              {companions.length ? (
+                <Text variant="footnote" tone="secondary">
+                  {' with '}
+                  <Text variant="footnote" style={styles.entity}>
+                    {companionNames(companions)}
+                  </Text>
+                </Text>
+              ) : null}
             </Text>
           </View>
 
@@ -242,6 +256,20 @@ export function ActivityRow({
       </View>
     </View>
   );
+}
+
+/**
+ * "Anna", "Anna and Raj", or "Anna and 3 others".
+ *
+ * Two names is the ceiling here as it is for reactions, and for the same reason: the
+ * sentence has to stay one line at a footnote size, and ten tagged friends written
+ * out would push the title off the row they are attached to.
+ */
+function companionNames(names: string[]) {
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  const rest = names.length - 1;
+  return `${names[0]} and ${rest} others`;
 }
 
 /**

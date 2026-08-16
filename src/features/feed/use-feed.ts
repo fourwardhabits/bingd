@@ -53,6 +53,15 @@ export type FeedItem = {
    * still being read, which is the whole point of the visibility control.
    */
   note: FeedNote | null;
+  /**
+   * Who the actor says they watched it with (PRD §14), as names.
+   *
+   * Read live rather than snapshotted into the payload, for the same reason the note
+   * is: the tagged person can hide a tag from their side at any time, and a
+   * denormalised copy would keep showing them in other people's feeds after they
+   * had said not to.
+   */
+  companions: string[];
 };
 
 type Embedded<T> = T | T[] | null;
@@ -96,6 +105,12 @@ type NoteRow = {
   media_item_id: string;
   note: string;
   has_spoilers: boolean;
+};
+
+type CompanionRow = {
+  tagger_id: string;
+  media_item_id: string;
+  profiles: Embedded<{ display_name: string | null; username: string }>;
 };
 
 /**
@@ -180,10 +195,11 @@ export function useFeed(userId: string) {
           bucket: row.payload?.bucket ?? null,
           category: row.payload?.category ?? null,
           note: null,
+          companions: [],
         });
       }
 
-      await attachNotes(items);
+      await Promise.all([attachNotes(items), attachCompanions(items)]);
       return items;
     },
   });
@@ -224,5 +240,45 @@ async function attachNotes(items: FeedItem[]) {
   for (const item of items) {
     if (!item.mediaItemId) continue;
     item.note = byPair.get(`${item.actorId}:${item.mediaItemId}`) ?? null;
+  }
+}
+
+/**
+ * Watch tags for the events just read, in one round trip.
+ *
+ * A plain select rather than an RPC: `watch_tags_read` resolves through
+ * `watch_tag_visible(id)`, which already folds the block, the tagged person's removal
+ * and the tagger's profile visibility into one answer. A tag this viewer may not see
+ * simply does not come back, and nothing here has to know why.
+ *
+ * Swallowed on failure for the same reason the notes are — a companion line is an
+ * enrichment, and losing the feed over one is a bad trade.
+ */
+async function attachCompanions(items: FeedItem[]) {
+  const taggers = [...new Set(items.map((item) => item.actorId))].slice(0, 50);
+  const titles = [
+    ...new Set(items.map((item) => item.mediaItemId).filter(Boolean)),
+  ].slice(0, 50) as string[];
+  if (!taggers.length || !titles.length) return;
+
+  const { data, error } = await supabase
+    .from('watch_tags')
+    .select('tagger_id, media_item_id, profiles:tagged_id(display_name, username)')
+    .in('tagger_id', taggers)
+    .in('media_item_id', titles);
+  if (error || !data) return;
+
+  const byPair = new Map<string, string[]>();
+  for (const row of data as unknown as CompanionRow[]) {
+    const profile = one(row.profiles);
+    const name = profile?.display_name || profile?.username;
+    if (!name) continue;
+    const key = `${row.tagger_id}:${row.media_item_id}`;
+    byPair.set(key, [...(byPair.get(key) ?? []), name]);
+  }
+
+  for (const item of items) {
+    if (!item.mediaItemId) continue;
+    item.companions = byPair.get(`${item.actorId}:${item.mediaItemId}`) ?? [];
   }
 }

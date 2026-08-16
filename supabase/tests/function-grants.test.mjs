@@ -98,6 +98,18 @@ const ALLOWED = {
   // activity.
   'set_reaction(uuid,uuid,text)': ['authenticated'],
 
+  // Added 2026-08-16 with watch tagging (PRD §14). `set_watch_tags` replaces the
+  // whole companion list for one of the caller's own watches; `hide_watch_tag` is
+  // the tagged person's side of it.
+  //
+  // Their helpers are deliberately absent. `_can_tag` answers "may I tag this
+  // person", which folds an approved follow in either direction together with a
+  // block — granting it would answer questions about somebody else's follow graph,
+  // which is what 20260813001900 exists to prevent. `_assert_operation_rate` would
+  // report how much another account has been doing today.
+  'set_watch_tags(uuid,uuid,uuid[])': ['authenticated'],
+  'hide_watch_tag(uuid,uuid)': ['authenticated'],
+
   // Added 2026-08-15 with avatar upload. Writes only the caller's own
   // profiles.avatar_path, and only to a path under the caller's own uuid
   // folder, so the grant buys no reach over anybody else's row. Not anon: it
