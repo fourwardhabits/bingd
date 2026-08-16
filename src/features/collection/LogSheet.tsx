@@ -195,7 +195,7 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.title(title.id) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.logState(title.id) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.logState(profile.id, title.id) });
   };
 
   const report = (result: WriteResult) => {

@@ -20,7 +20,14 @@ export const queryKeys = {
   // What the log sheet opens onto: the user's own bucket, note, watch date and
   // whether the title is ranked. Separate from `title` for the same reason
   // `comparisonCard` is — a different shape read by a different screen.
-  logState: (mediaItemId: string) => ['log-state', mediaItemId] as const,
+  // Keyed by the account as well as the title, like every other per-user key here.
+  // It was not, and independent review found what that costs: this entry holds a
+  // note, and a note is the one thing in the collection PRD §22 keeps private at
+  // every visibility level. `queryClient.clear()` on sign-out (session.tsx) is what
+  // has been preventing the leak in practice, which is a second mechanism doing this
+  // one's job — and `myProfile` above is keyed this way for exactly the reason given
+  // in its own comment. One argument is a cheaper guarantee than a lifecycle.
+  logState: (userId: string, mediaItemId: string) => ['log-state', userId, mediaItemId] as const,
   // Deliberately separate from `title`: the comparison card reads three columns, and
   // sharing a key with a full title row would let whichever query ran first serve the
   // other a shape it did not ask for.

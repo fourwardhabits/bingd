@@ -698,6 +698,50 @@ describe('when the log state cannot be read', () => {
   });
 });
 
+/**
+ * One device, two accounts.
+ *
+ * `useLogState` was keyed by the title alone, so the cache entry holding a note —
+ * the one thing PRD §22 keeps private at every visibility level — was shared between
+ * whoever had opened that title. Independent review, 2026-08-16, constructed the
+ * consequence: B opens the title, React Query serves A's cached state while
+ * refetching, `loaded` is true because `existing` is defined, and if B's refetch fails
+ * A's note stays on screen in B's sheet, editable.
+ *
+ * `queryClient.clear()` on sign-out was what had been preventing it in practice. This
+ * test does not go through sign-out, because the point of the fix is that the key
+ * alone is sufficient and no lifecycle has to be trusted for it.
+ */
+describe('two accounts on one device', () => {
+  it('does not serve one account’s note to another from the cache', async () => {
+    // The signed-in user is `user-1`, from the auth mock at the top of this file,
+    // and their own read fails — the case where a shared cache entry would be the
+    // only thing with anything in it.
+    stubFailedLogState();
+    const view = await renderWithProviders(<LogSheet title={filmA} onClose={() => {}} />);
+
+    // Somebody else's note, written into the cache under the key shape this used to
+    // have: title only, no account. One client, so a shared key really would be
+    // shared — which is what makes this test able to fail.
+    view.client.setQueryData(['log-state', filmA.id], {
+      bucket: 'loved',
+      watchedOn: null,
+      note: 'A private note belonging to somebody else',
+      noteVisibility: 'private',
+      noteSpoilers: false,
+      exists: true,
+      noteVersion: 'v1',
+      ranked: false,
+    });
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Notes').props.accessibilityHint).toBe('Unavailable'),
+    );
+    expect(view.queryByText('A private note belonging to somebody else')).toBeNull();
+    expect(view.queryByPlaceholderText('What did you think?')).toBeNull();
+  });
+});
+
 describe('rows that are not built yet', () => {
   it('renders Photos as present but inert, with a reason', async () => {
     const sheet = await open(filmA);

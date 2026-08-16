@@ -81,7 +81,7 @@ export const emptyLogState: LogState = {
  */
 export function useLogState(userId: string, mediaItemId: string | null) {
   return useQuery({
-    queryKey: queryKeys.logState(mediaItemId ?? ''),
+    queryKey: queryKeys.logState(userId, mediaItemId ?? ''),
     enabled: Boolean(mediaItemId),
     // The sheet is the only writer of most of this, and it invalidates on save. A
     // stale read here would show the user their own edit undone.

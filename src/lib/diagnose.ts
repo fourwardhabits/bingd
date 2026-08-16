@@ -39,7 +39,18 @@ export function diagnose(error: unknown): string | null {
     return `Schema cache is stale: ${message ?? 'the table is not in the cache'}. Reload the PostgREST schema.`;
   }
 
-  return message ? `${message}${code ? ` (${code})` : ''}` : null;
+  /**
+   * Everything else keeps the caller's own wording.
+   *
+   * The first version passed every message through outside production, and
+   * independent review was right to object: Postgres echoes rejected input in a
+   * constraint or type error, so a build handed to a tester could put another
+   * person's value on screen. The three codes above name a missing column, function
+   * or table — schema shape, never row content — which is the whole diagnostic need
+   * here. A timeout or a 500 tells a developer nothing the caller's sentence does
+   * not, and is not worth the exposure.
+   */
+  return null;
 }
 
 /**

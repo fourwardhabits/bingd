@@ -110,6 +110,31 @@ describe('the watchlist action', () => {
   });
 });
 
+describe('the share action', () => {
+  it('is icon-first and carries no large text button', async () => {
+    const onPressShare = jest.fn();
+    const view = await render(<ActivityRow {...props} onPressShare={onPressShare} />);
+
+    // The label names the title being shared, so a screen reader gets the context
+    // the glyph cannot carry. There is deliberately no visible "Share" word.
+    expect(view.queryByText('Share')).toBeNull();
+    await fireEvent.press(view.getByLabelText('Share Inception'));
+    expect(onPressShare).toHaveBeenCalled();
+  });
+
+  it('names the exact entity, so sharing a season does not read as sharing the show', async () => {
+    const view = await render(
+      <ActivityRow {...props} title="Parks and Recreation — Season 2" onPressShare={jest.fn()} />,
+    );
+    expect(view.getByLabelText('Share Parks and Recreation — Season 2')).toBeTruthy();
+  });
+
+  it('is absent when the row has nothing to share', async () => {
+    const view = await render(<ActivityRow {...props} />);
+    expect(view.queryByLabelText(/^Share /)).toBeNull();
+  });
+});
+
 describe('the note', () => {
   it('clamps to two lines until asked to expand', async () => {
     const note = 'Third time and it still holds up.';
