@@ -1,3 +1,4 @@
+import type { CollectionItem } from './filters';
 import { bandSizes, scoreFor, type Bucket } from './score';
 import type { LoggedEntry, RankedEntry, RankingCategory } from './use-collection';
 
@@ -85,3 +86,68 @@ export function mergeWatched(
   // would only introduce a way for the two to disagree.
   return rows;
 }
+
+/**
+ * The Watched list, as the shared shape every collection surface filters and sorts.
+ *
+ * `WatchedRow` predates the filter model and carries what a list row draws;
+ * `CollectionItem` is what List, Wall and the filter sheet all agree on. Rather than
+ * widen one into the other and have two names for one thing, the merge stays as it is
+ * and this converts — which also keeps the language and watch date, which the rows
+ * never needed and the filters do.
+ */
+export function watchedItems(
+  ranked: readonly RankedEntry[],
+  unranked: readonly LoggedEntry[],
+  medium: RankingCategory,
+): CollectionItem[] {
+  const sizes = bandSizes(ranked);
+  const byId = new Map(unranked.map((entry) => [entry.mediaItemId, entry]));
+
+  const items: CollectionItem[] = ranked.map((entry) => ({
+    mediaItemId: entry.mediaItemId,
+    title: entry.title,
+    seriesTitle: entry.seriesTitle,
+    kind: entry.kind,
+    year: entry.year,
+    posterPath: entry.posterPath,
+    genres: entry.genres,
+    language: entry.language,
+    runtimeMinutes: entry.runtimeMinutes,
+    score: scoreFor(entry.bucket, entry.position, sizes),
+    bucket: entry.bucket,
+    // A ranked title's watch date lives on `user_media`, which the logged query
+    // holds — so it is read across from there when both are in hand.
+    watchedOn: byId.get(entry.mediaItemId)?.watchedOn ?? null,
+  }));
+
+  const seen = new Set(items.map((item) => item.mediaItemId));
+
+  for (const entry of filterByMedium(unranked, medium)) {
+    if (seen.has(entry.mediaItemId)) continue;
+    items.push({ ...toItem(entry), score: null, bucket: null });
+  }
+
+  return items;
+}
+
+/** The Watchlist, in the same shape. Nothing on it is ranked, by construction. */
+export const watchlistItems = (
+  entries: readonly LoggedEntry[],
+  medium: RankingCategory,
+): CollectionItem[] => filterByMedium(entries, medium).map(toItem);
+
+const toItem = (entry: LoggedEntry): CollectionItem => ({
+  mediaItemId: entry.mediaItemId,
+  title: entry.title,
+  seriesTitle: entry.seriesTitle,
+  kind: entry.kind,
+  year: entry.year,
+  posterPath: entry.posterPath,
+  genres: entry.genres,
+  language: entry.language,
+  runtimeMinutes: entry.runtimeMinutes,
+  score: null,
+  bucket: entry.bucket,
+  watchedOn: entry.watchedOn,
+});

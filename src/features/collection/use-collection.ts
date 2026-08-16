@@ -44,6 +44,10 @@ export type LoggedEntry = {
   genres: string[];
   runtimeMinutes: number | null;
   kind: 'movie' | 'season' | 'series';
+  /** The parent series, for a season — the same rule as RankedEntry. */
+  seriesTitle: string | null;
+  /** ISO 639-1, for the collection filters. */
+  language: string | null;
   bucket: 'loved' | 'fine' | 'not_for_me' | null;
   watchedOn: string | null;
 };
@@ -140,7 +144,7 @@ export function useLoggedCollection(userId: string) {
         supabase
           .from('user_media')
           .select(
-            'media_item_id, bucket, watched_on, media_items(title, release_date, poster_path, genres, runtime_minutes, kind)',
+            'media_item_id, bucket, watched_on, media_items(title, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title))',
           )
           .eq('user_id', userId)
           .order('created_at', { ascending: false }),
@@ -161,6 +165,8 @@ export function useLoggedCollection(userId: string) {
           genres: media(row.media_items).genres ?? [],
           runtimeMinutes: media(row.media_items).runtime_minutes,
           kind: media(row.media_items).kind,
+          seriesTitle: parentTitle(media(row.media_items)),
+          language: media(row.media_items).original_language ?? null,
           bucket: row.bucket,
           watchedOn: row.watched_on,
         } satisfies LoggedEntry,
@@ -186,7 +192,7 @@ export function useWatchlist(userId: string) {
       const { data, error } = await supabase
         .from('watchlist')
         .select(
-          'media_item_id, media_items(title, release_date, poster_path, genres, runtime_minutes, kind)',
+          'media_item_id, media_items(title, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title))',
         )
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
@@ -200,6 +206,8 @@ export function useWatchlist(userId: string) {
         genres: media(row.media_items).genres ?? [],
         runtimeMinutes: media(row.media_items).runtime_minutes,
         kind: media(row.media_items).kind,
+        seriesTitle: parentTitle(media(row.media_items)),
+        language: media(row.media_items).original_language ?? null,
         bucket: null,
         watchedOn: null,
       }));

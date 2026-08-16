@@ -17,6 +17,8 @@ export type TitleRowProps = {
   leading?: ReactNode;
   trailing?: ReactNode;
   pending?: boolean;
+  /** Draws a hairline under the row, inset to the text column. */
+  divided?: boolean;
   onPress: () => void;
 };
 
@@ -47,6 +49,7 @@ export function TitleRow({
   leading,
   trailing,
   pending = false,
+  divided = false,
   onPress,
 }: TitleRowProps) {
   const compact = size !== 'sm';
@@ -85,6 +88,7 @@ export function TitleRow({
       </View>
       {trailing ? <View style={styles.trailing}>{trailing}</View> : null}
       {pending ? <View style={styles.syncGlyph} accessibilityElementsHidden /> : null}
+      {divided ? <View style={styles.divider} pointerEvents="none" /> : null}
     </Pressable>
   );
 }
@@ -98,8 +102,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: theme.space[3],
     minHeight: theme.layout.row.media,
-    paddingVertical: theme.space[2],
+    // Three rather than two. The founder's note was that rows felt crowded, and
+    // the row's height was set by its poster with barely a hairline of air above
+    // and below the text — eight more points per row is the difference between a
+    // list and a stack.
+    paddingVertical: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
+  },
+  /**
+   * The separator, inset to the text rather than run edge to edge.
+   *
+   * A full-bleed rule cuts the poster column off from the words beside it and makes
+   * the list read as a table. Starting it where the text starts lets the artwork
+   * column run unbroken down the page, which is the Feed's own treatment.
+   */
+  divider: {
+    position: 'absolute',
+    left: theme.layout.gutter + theme.poster.row.width + theme.space[3],
+    right: theme.layout.gutter,
+    bottom: 0,
+    height: StyleSheet.hairlineWidth * 2,
+    backgroundColor: theme.border.hairline,
   },
   rowCompact: {
     minHeight: theme.layout.compactRow,

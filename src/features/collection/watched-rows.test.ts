@@ -37,6 +37,8 @@ const logged = (over: Partial<LoggedEntry> = {}): LoggedEntry => ({
   genres: ['Horror'],
   runtimeMinutes: 137,
   kind: 'movie',
+  seriesTitle: null,
+  language: null,
   bucket: null,
   watchedOn: null,
   ...over,

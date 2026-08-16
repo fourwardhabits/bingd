@@ -1,21 +1,23 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import {
   useLoggedCollection,
   useRankedCollection,
   useWatchlist,
-  type LoggedEntry,
   type RankingCategory,
 } from '@/features/collection/use-collection';
 import {
-  filterByMedium,
-  mergeWatched,
+  CollectionView,
+  initialViewState,
+  type CollectionViewState,
+} from '@/features/collection/CollectionView';
+import {
+  watchedItems,
+  watchlistItems,
 } from '@/features/collection/watched-rows';
-import { posterUri } from '@/lib/images';
-import { fullTitle } from '@/lib/titles';
 import { readPref, writePref } from '@/lib/prefs';
 import { theme } from '@/ui/tokens';
 import {
@@ -24,12 +26,9 @@ import {
   EmptyState,
   MediumSelector,
   Screen,
-  ScoreBadge,
   SegmentedTabs,
   SkeletonRow,
   Text,
-  TitleMetadata,
-  TitleRow,
 } from '@/ui/components';
 
 type Segment = 'watched' | 'watchlist' | 'unranked';
@@ -69,6 +68,12 @@ export default function CollectionScreen() {
   const [segment, setSegment] = useState<Segment>('watched');
   const [medium, setMedium] = useState<Medium>('movies');
   const [nudgePref, setNudgePref] = useState<UnrankedNudgePref | null>(null);
+  /**
+   * Filters, sort, view mode and shuffle seed, owned here rather than by either
+   * section, so they survive switching between Watched and Watchlist. A filter that
+   * resets every time you glance at your watchlist is one nobody sets twice.
+   */
+  const [viewState, setViewState] = useState<CollectionViewState>(initialViewState);
   const [nudgePrefLoaded, setNudgePrefLoaded] = useState(false);
 
   useEffect(() => {
@@ -153,35 +158,43 @@ export default function CollectionScreen() {
         </View>
       ) : null}
 
-      {active === 'watched' ? <Watched userId={profile.id} medium={medium} /> : null}
-      {active === 'watchlist' ? <Watchlist userId={profile.id} medium={medium} /> : null}
-      {active === 'unranked' ? <Unranked userId={profile.id} medium={medium} /> : null}
+      {active === 'watched' ? (
+        <Watched userId={profile.id} medium={medium} state={viewState} onChange={setViewState} />
+      ) : null}
+      {active === 'watchlist' ? (
+        <Watchlist userId={profile.id} medium={medium} state={viewState} onChange={setViewState} />
+      ) : null}
+      {active === 'unranked' ? (
+        <Unranked userId={profile.id} medium={medium} state={viewState} onChange={setViewState} />
+      ) : null}
     </Screen>
   );
 }
 
 /**
- * One list: everything watched, best first.
+ * Everything watched, through the shared view.
  *
- * Ranked titles sort by score and unranked ones fall to the bottom, which puts
- * the list in the order the user built and leaves the work still to do in one
- * place at the end. Both come from queries that were already being made — the
- * ranked list for the positions, the logged list for the rest — so the merge
- * costs nothing.
- *
- * No band headers. LOVED IT / IT WAS FINE / NOT FOR ME made the bucket
- * partition legible back when the only number on a row was an ordinal that said
- * nothing about how much the user liked something. The score says it, and the
- * badge is tinted by bucket, so the headers would now caption information
- * already present twice on every row.
+ * The list order, the filters and the List/Wall choice all live one level up in
+ * `viewState`, so they survive a switch to Watchlist and back — which is what makes
+ * a filter worth setting at all.
  */
-function Watched({ userId, medium }: { userId: string; medium: Medium }) {
+function Watched({
+  userId,
+  medium,
+  state,
+  onChange,
+}: {
+  userId: string;
+  medium: Medium;
+  state: CollectionViewState;
+  onChange: (next: CollectionViewState) => void;
+}) {
   const router = useRouter();
   const ranked = useRankedCollection(userId, medium);
   const logged = useLoggedCollection(userId);
 
-  const rows = useMemo(
-    () => mergeWatched(ranked.data ?? [], logged.data?.unranked ?? [], medium),
+  const items = useMemo(
+    () => watchedItems(ranked.data ?? [], logged.data?.unranked ?? [], medium),
     [ranked.data, logged.data, medium],
   );
 
@@ -190,122 +203,109 @@ function Watched({ userId, medium }: { userId: string; medium: Medium }) {
   }
   if (ranked.isPending || logged.isPending) return <Loading />;
 
-  if (logged.data.loggedCount === 0) {
-    return (
-      <EmptyState
-        kind="nothingYet"
-        title="Your watched list starts here"
-        body="Log something you have seen and it lands here."
-        action={{ label: 'Log a title', onPress: () => router.push('/log') }}
-      />
-    );
-  }
-
   return (
-    <View style={styles.body}>
-      <Text variant="footnote" tone="secondary" style={styles.count}>
-        {logged.data.rankedCount} ranked · {logged.data.loggedCount} watched
-      </Text>
-
-      {rows.length === 0 ? (
-        <View style={styles.padded}>
-          <Text variant="body" tone="tertiary">
-            Nothing here in {medium === 'movies' ? 'movies' : 'TV seasons'} yet.
-          </Text>
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.list}>
-          {rows.map((row) => (
-            <TitleRow
-              key={row.mediaItemId}
-              // A ranked TV list is otherwise a column of rows called "Season 2".
-              title={fullTitle({ kind: row.seriesTitle ? 'season' : 'movie', title: row.title, seriesTitle: row.seriesTitle }) ?? row.title}
-              year={row.year}
-              posterUri={posterUri(row.posterPath)}
-              secondary={
-                <TitleMetadata
-                  runtimeMinutes={row.runtimeMinutes}
-                  genres={row.genres}
-                  showYear={false}
-                />
-              }
-              trailing={
-                <ScoreBadge
-                  score={row.score}
-                  bucket={row.bucket}
-                  onPress={() => router.push(`/title/${row.mediaItemId}`)}
-                />
-              }
-              onPress={() => router.push(`/title/${row.mediaItemId}`)}
-            />
-          ))}
-        </ScrollView>
-      )}
-    </View>
+    <CollectionView
+      items={items}
+      segment="watched"
+      state={state}
+      onChange={onChange}
+      onPressItem={(id) => router.push(`/title/${id}`)}
+      empty={
+        logged.data.loggedCount === 0 ? (
+          <EmptyState
+            kind="nothingYet"
+            title="Your watched list starts here"
+            body="Log something you have seen and it lands here."
+            action={{ label: 'Log a title', onPress: () => router.push('/log') }}
+          />
+        ) : (
+          <View style={styles.padded}>
+            <Text variant="body" tone="tertiary">
+              Nothing here in {medium === 'movies' ? 'movies' : 'TV seasons'} yet.
+            </Text>
+          </View>
+        )
+      }
+    />
   );
 }
 
-function Watchlist({ userId, medium }: { userId: string; medium: Medium }) {
-  const { data = [], isPending, isError } = useWatchlist(userId);
-  const entries = filterByMedium(data, medium);
-
-  if (isError) {
-    return <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />;
-  }
-  if (isPending) return <Loading />;
-
-  return (
-    <View style={styles.body}>
-      <Rows entries={entries} empty="Nothing saved for later yet." />
-    </View>
-  );
-}
-
-function Unranked({ userId, medium }: { userId: string; medium: Medium }) {
-  const { data, isPending, isError } = useLoggedCollection(userId);
-  const entries = filterByMedium(data?.unranked ?? [], medium);
-  if (isError) {
-    return <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />;
-  }
-  if (isPending) return <Loading />;
-  return <Rows entries={entries} empty="Everything you watched is already ranked." />;
-}
-
-/** The plain list, for the tabs that carry no score. */
-function Rows({ entries, empty }: { entries: LoggedEntry[]; empty: string }) {
+function Watchlist({
+  userId,
+  medium,
+  state,
+  onChange,
+}: {
+  userId: string;
+  medium: Medium;
+  state: CollectionViewState;
+  onChange: (next: CollectionViewState) => void;
+}) {
   const router = useRouter();
-  if (entries.length === 0) {
-    return (
-      <View style={styles.padded}>
-        <Text variant="body" tone="tertiary">
-          {empty}
-        </Text>
-      </View>
-    );
+  const { data, isPending, isError } = useWatchlist(userId);
+  const items = useMemo(() => watchlistItems(data ?? [], medium), [data, medium]);
+
+  if (isError) {
+    return <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />;
   }
+  if (isPending) return <Loading />;
 
   return (
-    <ScrollView contentContainerStyle={styles.list}>
-      {entries.map((entry) => (
-        <TitleRow
-          key={entry.mediaItemId}
-          title={entry.title}
-          year={entry.year}
-          posterUri={posterUri(entry.posterPath)}
-          secondary={
-            <TitleMetadata
-              runtimeMinutes={entry.runtimeMinutes}
-              genres={entry.genres}
-              showYear={false}
-            />
-          }
-          trailing={
-            <ScoreBadge onPress={() => router.push(`/title/${entry.mediaItemId}`)} />
-          }
-          onPress={() => router.push(`/title/${entry.mediaItemId}`)}
+    <CollectionView
+      items={items}
+      segment="watchlist"
+      state={state}
+      onChange={onChange}
+      onPressItem={(id) => router.push(`/title/${id}`)}
+      empty={
+        <EmptyState
+          kind="nothingYet"
+          compact
+          title="Nothing saved for later yet."
+          body="Watchlist a title and it lands here."
         />
-      ))}
-    </ScrollView>
+      }
+    />
+  );
+}
+
+/** Watched, but without a position yet. Same view, no score to sort by. */
+function Unranked({
+  userId,
+  medium,
+  state,
+  onChange,
+}: {
+  userId: string;
+  medium: Medium;
+  state: CollectionViewState;
+  onChange: (next: CollectionViewState) => void;
+}) {
+  const router = useRouter();
+  const { data, isPending, isError } = useLoggedCollection(userId);
+  const items = useMemo(() => watchlistItems(data?.unranked ?? [], medium), [data, medium]);
+
+  if (isError) {
+    return <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />;
+  }
+  if (isPending) return <Loading />;
+
+  return (
+    <CollectionView
+      items={items}
+      segment="unranked"
+      state={state}
+      onChange={onChange}
+      onPressItem={(id) => router.push(`/title/${id}`)}
+      empty={
+        <EmptyState
+          kind="nothingYet"
+          compact
+          title="Everything you watched is already ranked."
+          body="Nothing waiting here."
+        />
+      }
+    />
   );
 }
 
