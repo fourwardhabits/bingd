@@ -397,9 +397,11 @@ describe('what counts as one franchise', () => {
    * request per candidate against an architecture that budgets six per slate.
    *
    * What matters about a proxy is **which way it is wrong**, and that is what most of
-   * these cases fix. It groups only on a marker that means one thing, so it misses
-   * franchises rather than dropping a good recommendation to protect against one it
-   * invented. The single exception is stated and tested at the end rather than denied.
+   * these cases fix. It reads a *named* sequel marker, which means one thing wherever
+   * it appears, and it never reads a bare number, which does not — so numbered sequels
+   * are missed rather than unrelated films being dropped for a franchise the code
+   * invented. The subtitle split is the exception: it is not a marker, it can join two
+   * unrelated titles, and that case is stated and tested at the end rather than denied.
    */
   const same = (a: string, b: string) => franchiseKey(a) != null && franchiseKey(a) === franchiseKey(b);
 

@@ -378,10 +378,12 @@ It groups a subtitled entry (\`Spider-Man: No Way Home\`) and a *named* sequel m
 so \`Iron Man 2\` is a **miss** — two rounds of independent review established that no
 rule can tell a sequel index from part of a name, first on Apollo 11/13/18 and then on
 Room / Room 237 / Room 203. Every documented failure is therefore under-grouping — a
-franchise slipping past the ceiling — except one: two films whose leading names are
-identical get one key, which costs a row only when three or more collide. \`rank.ts\`
-states each case and \`rank.test.ts\` holds every one of them, including the two
-counterexamples, as tests.
+franchise slipping past the ceiling — except one: two unrelated films whose derived
+**leading stems** are equal get one key, which costs a row only when three or more
+collide. That covers two films with the same title, and also the case where one film's
+whole title is what precedes another's subtitle, which the subtitle split collides even
+though the titles differ. \`rank.ts\` states each case and \`rank.test.ts\` holds every one
+of them, including the two counterexamples, as tests.
 
 **Overlap with cold start** is the one that decides whether this is a recommender at
 all. The cold-start viewer has no anchors, so their wall is the popularity prior and
@@ -409,9 +411,10 @@ popularity term is doing more work than its 10% weight suggests.
   tested against a distribution this file invented.
 - Franchise identity is a title-derived proxy. It usually **under**-reports: a numbered
   sequel, a renamed entry or a shared universe is invisible to the figure above. It can
-  also **over**-report, in one way — two unrelated films whose leading stems are
-  identical are counted as one franchise, because at that point the titles are the same
-  and nothing short of the provider's collection id separates them.
+  also **over**-report, in one way — two unrelated films whose derived leading stems are
+  equal are counted as one franchise. Sometimes that is because the titles are the same;
+  sometimes it is the subtitle split, where one film's whole title is what precedes
+  another's subtitle. Nothing short of the provider's collection id separates either.
 `;
 
     // Only under `npm run report:recommendations`. A unit test that writes into the
