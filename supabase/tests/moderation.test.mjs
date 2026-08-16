@@ -279,6 +279,12 @@ describe('the guard is wired in, not merely present', () => {
     // Reachable only because search_titles runs as the caller and folds the query through
     // it. Pure, and writes nothing.
     'media_fold',
+    // 20260816000000. Both are stable reads that apply AD-5 from the caller's own
+    // perspective. A suspended account calling either changes nothing and learns
+    // nothing it could not learn while active — can_view_profile already refuses a
+    // suspended *subject*, which is the direction that matters.
+    'public_notes',
+    'community_score',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

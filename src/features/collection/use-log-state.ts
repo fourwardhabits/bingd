@@ -4,6 +4,8 @@ import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import type { BucketId } from '@/ui/components';
 
+import type { NoteVisibility } from './writes';
+
 /** The database's bucket names, back into the UI's. `not_for_me` is `notForMe`. */
 const BUCKET_IDS: Record<string, BucketId> = {
   loved: 'loved',
@@ -15,6 +17,18 @@ export type LogState = {
   bucket: BucketId | null;
   watchedOn: string | null;
   note: string;
+  /**
+   * Who may read the note, as stored.
+   *
+   * Read rather than assumed, and this is the mechanism that keeps the 2026-08-16
+   * amendment from breaking its own promise: a note written when notes were
+   * private-only comes back `private`, the editor shows that, and the user has to
+   * choose to publish it. The forward default lives in the server, applies to a
+   * note that has never existed, and is never inferred here.
+   */
+  noteVisibility: NoteVisibility;
+  /** The author's own claim that the note spoils this exact title. */
+  noteSpoilers: boolean;
   /**
    * Whether a `user_media` row exists at all.
    *
@@ -39,6 +53,10 @@ export const emptyLogState: LogState = {
   bucket: null,
   watchedOn: null,
   note: '',
+  // A note nobody has written yet is the forward-facing case, so the editor opens
+  // on the social default rather than on the historical one.
+  noteVisibility: 'public',
+  noteSpoilers: false,
   exists: false,
   noteVersion: null,
   ranked: false,
@@ -74,7 +92,7 @@ export function useLogState(userId: string, mediaItemId: string | null) {
       const [logged, ranked] = await Promise.all([
         supabase
           .from('user_media')
-          .select('bucket, watched_on, note, note_updated_at')
+          .select('bucket, watched_on, note, note_updated_at, note_visibility, note_has_spoilers')
           .eq('user_id', userId)
           .eq('media_item_id', id)
           .maybeSingle(),
@@ -94,12 +112,20 @@ export function useLogState(userId: string, mediaItemId: string | null) {
         watched_on: string | null;
         note: string | null;
         note_updated_at: string | null;
+        note_visibility: NoteVisibility | null;
+        note_has_spoilers: boolean | null;
       } | null;
 
       return {
         bucket: row?.bucket ? (BUCKET_IDS[row.bucket] ?? null) : null,
         watchedOn: row?.watched_on ?? null,
         note: row?.note ?? '',
+        // The stored value only speaks for a note that exists. A row with no note
+        // carries the column default, which is `private` so that anything created
+        // outside the writers is private by omission — showing that as the editor's
+        // starting state would contradict the forward-facing default.
+        noteVisibility: row?.note ? (row.note_visibility ?? 'private') : 'public',
+        noteSpoilers: Boolean(row?.note && row.note_has_spoilers),
         exists: Boolean(row),
         noteVersion: row?.note_updated_at ?? null,
         ranked: Boolean(ranked.data),

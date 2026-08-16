@@ -328,6 +328,128 @@ describe('notes', () => {
   });
 });
 
+/**
+ * The two claims an author makes about their own note (founder amendment,
+ * 2026-08-16). The cases that matter are the ones where getting it wrong publishes
+ * something: a note written under the private-only promise must open on private and
+ * stay there, and the sheet must send the state it is displaying rather than let the
+ * server infer one.
+ */
+describe('what a note says about itself', () => {
+  const spoilerToggle = (sheet: Awaited<ReturnType<typeof open>>) =>
+    sheet.getByLabelText('This note contains spoilers');
+  const privateToggle = (sheet: Awaited<ReturnType<typeof open>>) =>
+    sheet.getByLabelText('Keep this note private');
+
+  it('opens a new note on the social default', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    expect(privateToggle(sheet).props.accessibilityState.checked).toBe(false);
+    expect(spoilerToggle(sheet).props.accessibilityState.checked).toBe(false);
+    expect(sheet.getByText(/Shown with your rating/)).toBeTruthy();
+  });
+
+  it('opens a note written before notes were social on private, and leaves it there', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'written when this was private',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await waitFor(() => expect(privateToggle(sheet).props.accessibilityState.checked).toBe(true));
+    expect(sheet.getByText('Only you can read this.')).toBeTruthy();
+
+    // Editing the text must carry the stored visibility rather than the default.
+    await fireEvent.changeText(sheet.note(), 'edited, still mine');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1].p_note_visibility).toBe('private');
+  });
+
+  it('writes the spoiler claim with a first note', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'he was dead the whole time');
+    await fireEvent.press(spoilerToggle(sheet));
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1]).toMatchObject({
+      p_note: 'he was dead the whole time',
+      p_note_spoilers: true,
+      p_note_visibility: 'public',
+    });
+  });
+
+  it('makes an existing note private without waiting for a blur', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'out in the open',
+        note_updated_at: 'v1',
+        note_visibility: 'public',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('out in the open'));
+
+    await fireEvent.press(privateToggle(sheet));
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({
+      p_note: 'out in the open',
+      p_note_visibility: 'private',
+    });
+  });
+
+  it('does not write anything when a toggle is flipped against an empty field', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await fireEvent.press(spoilerToggle(sheet));
+
+    await waitFor(() => expect(spoilerToggle(sheet).props.accessibilityState.checked).toBe(true));
+    expect(callsTo('log_watched')).toHaveLength(0);
+    expect(callsTo('save_note')).toHaveLength(0);
+  });
+
+  it('does not resend the note claims on a date-only save', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: '2026-08-01',
+        note: 'unchanged',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: 'Yesterday' }));
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1]).toMatchObject({
+      p_note: null,
+      p_note_visibility: null,
+      p_note_spoilers: null,
+    });
+  });
+});
+
 describe('the watch date', () => {
   it('defaults to today', async () => {
     const sheet = await open(filmA);

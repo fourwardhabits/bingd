@@ -69,3 +69,6 @@ web/dist/
 
 expo-env.d.ts
 # @end expo-cli
+# Agent review workflow artifacts (independent Codex review packets and findings).
+# Engineering process evidence, not product source.
+.agent-workflow/

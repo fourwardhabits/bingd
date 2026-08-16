@@ -84,6 +84,17 @@ const statusOf = (data: unknown): WriteResult =>
     : { outcome: 'ok' };
 
 /**
+ * Who may read a note.
+ *
+ * Sent on every write the user makes from the note editor, rather than left to the
+ * server's default, because the editor shows the current setting: the state the user
+ * saw is then the state that gets stored, and neither side has to infer the other's
+ * intent. Omitting it means "leave whatever is there alone", which is what a caller
+ * that is not editing visibility wants (20260816000000 §1).
+ */
+export type NoteVisibility = 'public' | 'private';
+
+/**
  * Bucketing implies logging: `set_bucket` creates the `user_media` row when absent, so one
  * tap is one round trip. It deliberately does **not** start comparisons — that is a
  * separate action the user takes on purpose (PRD §11, api.md §1).
@@ -118,12 +129,16 @@ export async function logWatched(input: {
   mediaItemId: string;
   watchedOn?: string | null;
   note?: string | null;
+  noteVisibility?: NoteVisibility | null;
+  noteSpoilers?: boolean | null;
 }): Promise<WriteResult & { noteVersion?: string }> {
   const { data, error } = await supabase.rpc('log_watched', {
     p_operation_id: input.operationId,
     p_media_item_id: input.mediaItemId,
     p_watched_on: input.watchedOn ?? null,
     p_note: input.note ?? null,
+    p_note_visibility: input.noteVisibility ?? null,
+    p_note_spoilers: input.noteSpoilers ?? null,
   });
 
   if (error) return interpret(error);
@@ -151,12 +166,16 @@ export async function saveNote(input: {
   mediaItemId: string;
   note: string;
   baseVersion?: string | null;
+  noteVisibility?: NoteVisibility | null;
+  noteSpoilers?: boolean | null;
 }): Promise<WriteResult & { noteVersion?: string }> {
   const { data, error } = await supabase.rpc('save_note', {
     p_operation_id: input.operationId,
     p_media_item_id: input.mediaItemId,
     p_note: input.note,
     p_base_updated_at: input.baseVersion ?? null,
+    p_note_visibility: input.noteVisibility ?? null,
+    p_note_spoilers: input.noteSpoilers ?? null,
   });
 
   if (error) {

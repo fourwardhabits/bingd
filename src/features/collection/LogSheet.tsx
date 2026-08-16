@@ -13,13 +13,21 @@ import {
   Sheet,
   SheetRow,
   Text,
+  ToggleChip,
   type BucketId,
 } from '@/ui/components';
 
 import { formatWatchDate, today } from './dates';
 import { emptyLogState, useLogState } from './use-log-state';
 import { WatchDatePicker } from './WatchDatePicker';
-import { logWatched, newOperationId, saveNote, setBucket, type WriteResult } from './writes';
+import {
+  logWatched,
+  newOperationId,
+  saveNote,
+  setBucket,
+  type NoteVisibility,
+  type WriteResult,
+} from './writes';
 
 export type LoggableTitle = {
   id: string;
@@ -89,6 +97,8 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
    */
   const [bucketEdit, setBucketEdit] = useState<BucketId | null>(null);
   const [noteEdit, setNoteEdit] = useState<string | null>(null);
+  const [visibilityEdit, setVisibilityEdit] = useState<NoteVisibility | null>(null);
+  const [spoilersEdit, setSpoilersEdit] = useState<boolean | null>(null);
   const [dateEdit, setDateEdit] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Expanded>(null);
   const [saving, setSaving] = useState(false);
@@ -97,6 +107,8 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
 
   const bucket = bucketEdit ?? state.bucket;
   const note = noteEdit ?? state.note;
+  const visibility = visibilityEdit ?? state.noteVisibility;
+  const spoilers = spoilersEdit ?? state.noteSpoilers;
   const effectiveDate = dateEdit ?? state.watchedOn ?? today();
 
   const refresh = () => {
@@ -196,11 +208,27 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
    * also typing something (screens.md §4 recorded the gap). Now the date is sent
    * whenever it has been touched or a note exists.
    */
-  const saveDetails = async (nextNote: string, nextDate: string | null) => {
-    const trimmed = nextNote.trim();
+  const saveDetails = async (next: {
+    note?: string;
+    date?: string | null;
+    visibility?: NoteVisibility;
+    spoilers?: boolean;
+  }) => {
+    const trimmed = (next.note ?? note).trim();
+    const nextDate = next.date ?? dateEdit;
+    const nextVisibility = next.visibility ?? visibility;
+    const nextSpoilers = next.spoilers ?? spoilers;
+
     const noteChanged = trimmed !== state.note;
-    const dateChanged = nextDate !== null && nextDate !== state.watchedOn;
-    if (!noteChanged && !dateChanged) return;
+    const dateChanged = nextDate != null && nextDate !== state.watchedOn;
+    // The two claims travel with the note and are meaningless without one, so a
+    // toggle flipped against an empty field is held locally and written by the
+    // save that first stores the text.
+    const claimsChanged =
+      Boolean(trimmed) &&
+      (nextVisibility !== state.noteVisibility || nextSpoilers !== state.noteSpoilers);
+
+    if (!noteChanged && !dateChanged && !claimsChanged) return;
 
     setSaving(true);
     setProblem(null);
@@ -208,14 +236,19 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
     // The date always goes through log_watched, which upserts — and this may be the
     // call that creates the row a note then needs.
     let ok = true;
-    if (dateChanged || (noteChanged && !state.exists)) {
+    const writesNoteHere = (noteChanged || claimsChanged) && !state.exists;
+    if (dateChanged || writesNoteHere) {
       const result = await logWatched({
         operationId: newOperationId(),
         mediaItemId: title.id,
         // Omitting a field leaves the stored value alone — the server coalesces — so
         // an untouched date is not resent and cannot overwrite one already recorded.
         watchedOn: dateChanged ? nextDate : null,
-        note: noteChanged && !state.exists ? trimmed : null,
+        note: writesNoteHere ? trimmed : null,
+        // Sent only alongside the text they describe. Passing them on a
+        // date-only call would republish a note the user was not editing.
+        noteVisibility: writesNoteHere ? nextVisibility : null,
+        noteSpoilers: writesNoteHere ? nextSpoilers : null,
       });
       ok = report(result);
     }
@@ -223,12 +256,17 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
     // An existing note goes through save_note, which assigns rather than coalesces.
     // log_watched cannot clear one: it treats an empty string as "no change", so a
     // deleted note would reappear on the next read.
-    if (ok && noteChanged && state.exists) {
+    if (ok && (noteChanged || claimsChanged) && state.exists) {
       const result = await saveNote({
         operationId: newOperationId(),
         mediaItemId: title.id,
         note: trimmed,
         baseVersion: state.noteVersion,
+        // Always the value the sheet is displaying, so what the user can see is
+        // what gets stored — including for a note written before notes were
+        // social, which opens on `private` and stays there unless they change it.
+        noteVisibility: nextVisibility,
+        noteSpoilers: nextSpoilers,
       });
       ok = report(result);
     }
@@ -336,10 +374,40 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
               <NoteInput
                 value={note}
                 onChangeText={setNoteEdit}
-                onBlur={() => void saveDetails(note, dateEdit)}
+                onBlur={() => void saveDetails({})}
               />
+              {/* Both claims sit with the field they describe rather than in a
+                  settings screen, because both are decisions about this piece of
+                  writing and are only ever made while writing it. */}
+              <View style={styles.noteClaims}>
+                <ToggleChip
+                  icon={spoilers ? 'eye-off' : 'eye-off-outline'}
+                  label="Contains spoilers"
+                  on={spoilers}
+                  accessibilityLabel="This note contains spoilers"
+                  onToggle={() => {
+                    setSpoilersEdit(!spoilers);
+                    void saveDetails({ spoilers: !spoilers });
+                  }}
+                />
+                <ToggleChip
+                  icon={visibility === 'private' ? 'lock-closed' : 'lock-open-outline'}
+                  label="Only me"
+                  on={visibility === 'private'}
+                  accessibilityLabel="Keep this note private"
+                  onToggle={() => {
+                    const next: NoteVisibility = visibility === 'private' ? 'public' : 'private';
+                    setVisibilityEdit(next);
+                    void saveDetails({ visibility: next });
+                  }}
+                />
+              </View>
               <Text variant="caption" tone="tertiary">
-                Only you can read this.
+                {visibility === 'private'
+                  ? 'Only you can read this.'
+                  : spoilers
+                    ? 'Shown with your rating, hidden until people who have not seen it tap to reveal.'
+                    : 'Shown with your rating on your profile and in your friends’ feeds.'}
               </Text>
             </View>
           ) : null}
@@ -359,7 +427,7 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
                 value={effectiveDate}
                 onChange={(iso) => {
                   setDateEdit(iso);
-                  void saveDetails(note, iso);
+                  void saveDetails({ date: iso });
                 }}
               />
             </View>
@@ -426,7 +494,8 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[2],
   },
   expanded: { paddingBottom: theme.space[2] },
-  noteBox: { paddingHorizontal: theme.layout.gutter, gap: theme.space[1] },
+  noteBox: { paddingHorizontal: theme.layout.gutter, gap: theme.space[2] },
+  noteClaims: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
   noteInput: {
     minHeight: 88,
     borderRadius: theme.radius.control,

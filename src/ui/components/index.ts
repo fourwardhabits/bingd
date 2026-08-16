@@ -31,6 +31,7 @@ export { SkeletonRow, type SkeletonRowProps } from './SkeletonRow';
 export { StatRow, type StatItem } from './StatRow';
 export { Text } from './Text';
 export { TitleHero, type TitleHeroProps } from './TitleHero';
+export { ToggleChip, type ToggleChipProps } from './ToggleChip';
 export { TitleMetadata, type TitleMetadataProps } from './TitleMetadata';
 export { TitleRow } from './TitleRow';
 export { Wordmark, type WordmarkProps } from './Wordmark';

@@ -141,7 +141,27 @@ describe('logWatched', () => {
       p_media_item_id: mediaItemId,
       p_watched_on: '2026-08-13',
       p_note: 'better than I expected',
+      // Absent from this call, so the server keeps whatever is stored. Only the
+      // note editor names them, and it names both together.
+      p_note_visibility: null,
+      p_note_spoilers: null,
     });
+  });
+
+  it('carries the two note claims when the caller makes them', async () => {
+    mockRpc.mockResolvedValue({ data: { status: 'ok' }, error: null });
+    await logWatched({
+      operationId,
+      mediaItemId,
+      note: 'the ending is the point',
+      noteVisibility: 'private',
+      noteSpoilers: true,
+    });
+
+    expect(mockRpc).toHaveBeenCalledWith(
+      'log_watched',
+      expect.objectContaining({ p_note_visibility: 'private', p_note_spoilers: true }),
+    );
   });
 
   it('sends nulls rather than undefined for the fields it was not given', async () => {
@@ -153,6 +173,8 @@ describe('logWatched', () => {
       p_media_item_id: mediaItemId,
       p_watched_on: null,
       p_note: null,
+      p_note_visibility: null,
+      p_note_spoilers: null,
     });
   });
 });

@@ -70,12 +70,26 @@ const ALLOWED = {
   // _media_kind and _assert_unranked answer questions about a row, _claim_operation
   // called directly would let a client burn an operation id so that a later genuine
   // write returns success without happening.
-  'log_watched(uuid,uuid,date,text)': ['authenticated'],
+  //
+  // log_watched and save_note gained note_visibility and a spoiler flag on
+  // 2026-08-16. The old four- and three-argument forms were dropped rather than
+  // left as overloads: PostgREST resolves an RPC by the argument names present in
+  // the body, and two candidates whose argument sets nest resolve ambiguously.
+  'log_watched(uuid,uuid,date,text,note_visibility,boolean)': ['authenticated'],
   'set_bucket(uuid,uuid,taste_bucket)': ['authenticated'],
   'unlog(uuid,uuid)': ['authenticated'],
   'set_watchlist(uuid,uuid,boolean)': ['authenticated'],
   'set_season_progress(uuid,uuid,season_progress)': ['authenticated'],
-  'save_note(uuid,uuid,text,timestamp with time zone)': ['authenticated'],
+  'save_note(uuid,uuid,text,timestamp with time zone,note_visibility,boolean)': ['authenticated'],
+
+  // Added 2026-08-16 with social notes. Both are definer reads, and both take a
+  // subject rather than a viewer, so neither can be pointed at someone else's
+  // perspective the way 20260813001900 describes. public_notes projects only the
+  // note columns, because the row it reads also carries the watch date, which PRD
+  // §22 keeps private at every visibility level. Not anon: the public web pages do
+  // not render notes yet, and a grant should follow a surface rather than precede it.
+  'public_notes(uuid[],uuid[],integer)': ['authenticated'],
+  'community_score(uuid)': ['authenticated'],
 
   // Added 2026-08-15 with avatar upload. Writes only the caller's own
   // profiles.avatar_path, and only to a path under the caller's own uuid
