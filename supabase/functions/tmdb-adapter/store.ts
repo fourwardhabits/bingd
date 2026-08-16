@@ -74,6 +74,27 @@ export async function putList(db: Db, listKey: string, ids: string[]) {
   if (error) throw new Error(`tmdb_put_list: ${error.message}`);
 }
 
+/**
+ * Whether a facet is already cached and still inside its TTL.
+ *
+ * The client checks this too — it reads `media_cache` directly, so it knows before it
+ * calls. This is the server-side half of the same guard, and it is here because the
+ * client's is an optimisation and this one is a limit: a client in a loop, or two
+ * devices opening For You at once, must not each spend a provider request on a facet
+ * that is already good.
+ */
+export async function facetIsFresh(db: Db, mediaItemId: string, facet: string) {
+  const { data, error } = await db
+    .from('media_cache')
+    .select('expires_at')
+    .eq('media_item_id', mediaItemId)
+    .eq('facet', facet)
+    .gt('expires_at', new Date().toISOString())
+    .maybeSingle();
+  if (error) throw new Error(`media_cache: ${error.message}`);
+  return Boolean(data);
+}
+
 export async function putFacet(db: Db, mediaItemId: string, facet: string, payload: unknown) {
   const { error } = await db.rpc('tmdb_put_facet', {
     p_media_item_id: mediaItemId,

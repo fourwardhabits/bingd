@@ -22,6 +22,7 @@ const ranked = (over: Partial<RankedEntry> = {}): RankedEntry => ({
   runtimeMinutes: 170,
   kind: 'movie',
   seriesTitle: null,
+  seriesId: null,
   language: null,
   bucket: 'loved',
   position: 1,

@@ -1,12 +1,14 @@
 /**
  * tmdb-adapter — the sole holder of the TMDB key and the sole caller of TMDB (AD-8).
  *
- * Five actions, split by who may call them:
+ * Six actions, split by who may call them:
  *
  *   search    signed-in user   Titles TMDB knows and the local catalogue does not.
  *                              Writes them through, returns them Bingd-shaped.
  *   detail    signed-in user   Fills one title in: runtime, overview, artwork,
  *                              seasons, credits.
+ *   similar   signed-in user   Caches what TMDB associates with one title, as the
+ *                              `similar` facet. The candidate source behind For You.
  *   trending  service_role     Refreshes the four provider_list_cache lists. The
  *                              client reads that table directly; this only fills it.
  *   enrich    service_role     Drains tmdb_enrich_due. The Wikidata seed has ids
@@ -24,6 +26,7 @@ import {
   countEnrichmentBacklog,
   dueForEnrichment,
   dueForRefresh,
+  facetIsFresh,
   noteRequest,
   putFacet,
   putList,
@@ -155,11 +158,15 @@ function normalizeList(
   results: tmdb.TmdbSearchResult[],
   genres: Map<number, string>,
   limit: number,
+  // The kind to fall back on when the response omits `media_type`, which the
+  // single-kind endpoints are entitled to do and /movie/{id}/recommendations always
+  // does. Omitted for /search/multi, where a missing type means a person.
+  assume?: 'movie' | 'tv',
 ): TitleRow[] {
   const rows: TitleRow[] = [];
   const seen = new Set<string>();
   for (const result of results) {
-    const row = fromSearchResult(result, genres);
+    const row = fromSearchResult(result, genres, assume);
     if (!row) continue;
     const key = `${row.kind}:${row.tmdb_id}`;
     if (seen.has(key)) continue;
@@ -226,7 +233,14 @@ async function handleTrending(db: Db) {
   for (const list of TRENDING_LISTS) {
     try {
       const { results } = await tmdb.trending(list.kind, list.window);
-      const ids = await storeInOrder(db, normalizeList(results, genres, TRENDING_SIZE));
+      // The kind is asserted rather than read back. TMDB does send `media_type` on
+      // these responses today, and a comment here used to say it "is not relied on"
+      // — which was wrong, because `fromSearchResult` dropped any row without one.
+      // The day TMDB stopped sending it, trending would have emptied silently.
+      const ids = await storeInOrder(
+        db,
+        normalizeList(results, genres, TRENDING_SIZE, list.kind),
+      );
       await putList(db, list.key, ids);
       written[list.key] = ids.length;
     } catch (cause) {
@@ -236,6 +250,59 @@ async function handleTrending(db: Db) {
   }
 
   return json({ action: 'trending', written, failed });
+}
+
+// ---------------------------------------------------------------------------
+// similar
+// ---------------------------------------------------------------------------
+
+/** One TMDB page is twenty. More would be a second request for a longer tail. */
+const SIMILAR_SIZE = 20;
+
+/**
+ * What TMDB associates with one title, cached as the `similar` facet.
+ *
+ * This is the candidate source behind For You. It is a **user** action, like `detail`
+ * and unlike `trending`: a slate needs the titles associated with the handful of
+ * films that person ranked highest, and nobody else's schedule knows which those are.
+ * The cost is bounded on three sides — the client asks for at most six anchors, each
+ * answer is cached for every user under the facet TTL, and `noteRequest` applies the
+ * same per-user hourly ceiling search does.
+ *
+ * A **season anchor resolves to its series**. TMDB has no season-level
+ * recommendations, and the decision says trending and discovery TV are series-level
+ * anyway. The facet is written on the series row, which is where a later reader will
+ * look for it.
+ */
+async function handleSimilar(db: Db, mediaItemId: string, userId: string) {
+  const row = await catalogueRow(db, mediaItemId);
+  if (!row) return { id: mediaItemId, written: 0, reason: 'not_found' as const };
+
+  // Where the facet belongs, which is not always what was asked about.
+  const targetId = row.kind === 'season' ? row.parent_id : row.id;
+  if (!targetId) return { id: mediaItemId, written: 0, reason: 'malformed_season' as const };
+
+  // Before the quota is spent, not after. Two devices opening For You at the same
+  // moment would otherwise each pay for the same list.
+  if (await facetIsFresh(db, targetId, 'similar')) {
+    return { id: targetId, written: 0, reason: 'cached' as const };
+  }
+
+  const kind = row.kind === 'movie' ? 'movie' : 'tv';
+  const tmdbId = row.kind === 'movie' ? row.tmdb_id : await tmdbIdOf(db, targetId);
+  if (!tmdbId) return { id: targetId, written: 0, reason: 'no_tmdb_id' as const };
+
+  await noteRequest(db, userId);
+  const { results } = await tmdb.recommendations(kind, tmdbId);
+  const genres = await tmdb.genreNames();
+  // `kind` as the fallback: /recommendations sends no `media_type` whatsoever, so
+  // without it every row would be dropped and the facet would cache an empty list.
+  const ids = await storeInOrder(db, normalizeList(results, genres, SIMILAR_SIZE, kind));
+
+  // Written even when empty. An obscure title genuinely has no recommendations, and
+  // caching that fact is what stops every slate rebuild asking TMDB again.
+  await putFacet(db, targetId, 'similar', { ids });
+  return { id: targetId, written: ids.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +426,19 @@ Deno.serve(async (req) => {
           return fail('BG404', 'No such title', 404);
         }
         return json({ id, ...result });
+      }
+
+      // A user action for the same reason detail is: what a slate needs depends on
+      // what this person ranked, and no schedule knows that. Bounded by the client
+      // asking for at most six anchors, by the facet cache serving every user after
+      // the first, and by the same hourly ceiling search observes.
+      case 'similar': {
+        if (caller.kind !== 'user') return fail('BG403', 'similar is a user action', 403);
+        const id = String(body.mediaItemId ?? '');
+        if (!id) return fail('BG400', 'mediaItemId is required', 400);
+        const result = await handleSimilar(db, id, caller.id);
+        if (result.reason === 'not_found') return fail('BG404', 'No such title', 404);
+        return json(result);
       }
 
       // service_role for the same reason enrich and refresh are: it spends four

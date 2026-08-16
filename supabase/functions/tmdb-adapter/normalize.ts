@@ -52,14 +52,32 @@ const textOrNull = (value: string | null | undefined) => {
   return trimmed ? trimmed : null;
 };
 
+/**
+ * A search-shaped result into a catalogue row.
+ *
+ * `assume` is the kind to use when the response does not say. /search/multi always
+ * says, because it has to — the same page carries films, shows and people. The
+ * single-kind endpoints do not have to and are inconsistent about it: /trending/movie
+ * does in practice, /movie/{id}/recommendations does not at all.
+ *
+ * Without this the recommendations endpoint would return nothing whatsoever and look
+ * like a title with no similar films, which is a silent empty rather than an error.
+ * Passing the kind the caller *asked for* is also strictly more trustworthy than
+ * reading it back off the response: a caller that requested /movie got films.
+ *
+ * `assume` is undefined for /search/multi, where a missing `media_type` means a
+ * person and dropping the row is correct.
+ */
 export function fromSearchResult(
   result: TmdbSearchResult,
   genreNames: Map<number, string>,
+  assume?: 'movie' | 'tv',
 ): TitleRow | null {
+  const mediaType = result.media_type ?? assume;
   // /search/multi returns people too, and a person is not a catalogue row.
-  if (result.media_type !== 'movie' && result.media_type !== 'tv') return null;
+  if (mediaType !== 'movie' && mediaType !== 'tv') return null;
 
-  const isMovie = result.media_type === 'movie';
+  const isMovie = mediaType === 'movie';
   const title = textOrNull(isMovie ? result.title : result.name);
   if (!title) return null;
 

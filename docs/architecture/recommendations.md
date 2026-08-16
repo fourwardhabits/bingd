@@ -7,6 +7,35 @@ No language model. Recommendations are derived from human ranking behavior, cont
 
 ---
 
+## 0. What actually shipped — For You V1, 2026-08-16
+
+**Everything from §1 down describes `recs-builder`, which does not exist.** It is the design this converges on and it is still the design. What ships now is a smaller, on-device subset, and the difference matters enough to state before anything else.
+
+| | `recs-builder` (§1–§7) | For You V1 (shipped) |
+|---|---|---|
+| Where it runs | Edge Function, on a schedule | On the device, when the tab opens |
+| Candidate families | five, including two social ones | `similar` facets for ≤6 anchors, plus the trending week list |
+| Cross-user signal | `match_scores`, followed users' rankings | **none** |
+| Evidence | composed server-side, stored on the row | computed from the viewer's own inputs, returned with the score |
+| Storage | `recommendation_generations` / `recommendations` | nothing persisted |
+
+**The client composes the sentence, and that is not a violation of §5.** The rule that the client "has no path to compose a reason of its own" exists to stop **fabricated social proof** — "3 people with similar taste loved this" asserted about people who did not — and it is enforced server-side because the client cannot be trusted with, and must not have, other users' rankings.
+
+V1 uses no cross-user signal at all. Its three inputs are the viewer's own rankings (own-only under RLS), TMDB's association between titles (`media_cache` facet `similar`, world-readable), and genre/language/popularity from `media_items`. There is therefore no social claim available to fabricate, and every sentence it can produce is of the form "because of something *you* did".
+
+**The moment a social family is added, scoring moves server-side.** That is not a preference; at that point the client would need other people's rankings in order to score, which is the thing the rule protects.
+
+Two further properties are worth recording because they are what keep the sentence honest:
+
+- The headline is derived from `lead`, which is whichever *weighted* term actually carried the score. A title that scored on popularity cannot be described as "because you loved X" — the arithmetic decides the wording, not the author.
+- A taste built from fewer than five rankings is not asserted in words. The signal is still used; the sentence falls back to "Popular right now" rather than telling somebody what they like on the evidence of two films.
+
+**Anchors are bounded at six.** Each is one provider request the first time it is used and free for every user afterwards, because the answer lands in `media_cache` under the shared facet TTL. A request per ranked title — the obvious implementation — is four hundred TMDB calls for a user with four hundred rankings.
+
+`src/features/recommendations/rank.ts` is the whole rule and carries the reasoning. `src/features/recommendations/quality.test.ts` measures it against the three failures the founder decision names by name, and writes `.agent-workflow/recommendation-quality.md`.
+
+---
+
 ## 1. Generation model
 
 Slates are built **ahead of time** by `recs-builder`, not on request. Opening the Recommendations tab reads the most recent generation.

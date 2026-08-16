@@ -105,6 +105,9 @@ describe('the ranked list', () => {
       // Null for a film, and the parent show's name for a season — a ranked TV
       // list is otherwise a column of rows called "Season 2".
       seriesTitle: null,
+      // The show's id, for a season. For You anchors on it, because TMDB publishes
+      // recommendations for a series and none for a season.
+      seriesId: null,
       language: null,
       bucket: 'loved',
       position: 1,
@@ -126,6 +129,7 @@ describe('the ranked list', () => {
           genres: ['Comedy'],
           runtime_minutes: 22,
           kind: 'season',
+          parent_id: 'show-1',
           parent: { title: 'Parks and Recreation' },
         },
       },
@@ -137,6 +141,9 @@ describe('the ranked list', () => {
     await waitFor(() => expect(result.current.data).toHaveLength(1));
 
     expect(result.current.data?.[0]?.seriesTitle).toBe('Parks and Recreation');
+    // And its id, which is what For You anchors a TV slate on: TMDB publishes
+    // recommendations for a series and none for a season.
+    expect(result.current.data?.[0]?.seriesId).toBe('show-1');
   });
 });
 

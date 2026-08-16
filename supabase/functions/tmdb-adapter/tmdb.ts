@@ -236,15 +236,35 @@ export function searchMulti(query: string): Promise<{ results: TmdbSearchResult[
  * The results are search-shaped — genre_ids rather than genre objects, no runtime —
  * so `fromSearchResult` normalizes them and the genre map is needed here too.
  *
- * `media_type` is present on a /trending/all response and, in practice, on the
- * per-kind ones as well. It is not relied on: the caller asked for one kind and
- * gets that kind, which is why this takes the kind rather than inferring it.
+ * This takes the kind rather than inferring it, and the caller passes that kind on to
+ * `normalizeList` as the fallback for a missing `media_type`. TMDB does send one on
+ * these responses; nothing here depends on it continuing to.
  */
 export function trending(
   kind: 'movie' | 'tv',
   window: 'day' | 'week',
 ): Promise<{ results: TmdbSearchResult[] }> {
   return request(`/trending/${kind}/${window}`);
+}
+
+/**
+ * What TMDB associates with one title.
+ *
+ * `/recommendations` rather than `/similar`, deliberately. TMDB's "similar" is
+ * computed from shared keywords and genres; "recommendations" is derived from what
+ * people who engaged with this title went on to engage with, and is much the better
+ * of the two for the job here. The facet it lands in is called `similar` because that
+ * is what the closed set in `20260813000400` already contains, and adding a name to
+ * a check constraint is a migration for no behavioural gain.
+ *
+ * Results are search-shaped and carry **no** `media_type` at all, which is why the
+ * caller must pass the kind it asked for.
+ */
+export function recommendations(
+  kind: 'movie' | 'tv',
+  id: number,
+): Promise<{ results: TmdbSearchResult[] }> {
+  return request(`/${kind}/${id}/recommendations`);
 }
 
 export function movieDetail(id: number): Promise<TmdbMovieDetail> {

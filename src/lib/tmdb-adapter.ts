@@ -97,3 +97,23 @@ export async function enrichTitle(mediaItemId: string) {
   });
   return data;
 }
+
+/**
+ * Caches what TMDB associates with one title, as the `similar` facet.
+ *
+ * The candidate source behind For You. The client reads the facet from `media_cache`
+ * directly — it is catalogue data and world-readable — and only calls this when the
+ * facet is missing or expired, so a warm slate costs no provider request at all. The
+ * adapter re-checks freshness before spending one anyway, because a client's guard is
+ * an optimisation and the server's is a limit.
+ *
+ * `id` is what the facet was written against, which is **not** always what was asked
+ * about: a season resolves to its series, because TMDB has no season-level
+ * recommendations.
+ */
+export async function cacheSimilar(mediaItemId: string) {
+  return invoke<{ id: string; written: number; reason?: string }>({
+    action: 'similar',
+    mediaItemId,
+  });
+}

@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { formatScore, type Bucket } from '@/features/collection/score';
@@ -16,6 +17,8 @@ export type PosterTile = {
   /** Chipped onto the corner. Only for a title this user has ranked. */
   score?: number | null;
   bucket?: Bucket | null;
+  /** On the viewer's watchlist. Only meaningful where `onToggleSave` is given. */
+  saved?: boolean;
 };
 
 /**
@@ -84,6 +87,16 @@ export type PosterGridProps = {
   tiles: PosterTile[];
   onPressTile: (tile: PosterTile) => void;
   onPressAll?: () => void;
+  /**
+   * Adds a watchlist control to every tile.
+   *
+   * Absent on the collection walls, which show things already in it. Present on For
+   * You, where saving is the point of the screen and a trip through the title page to
+   * do it would be the slowest possible route to the product's core action (PRD §28).
+   */
+  onToggleSave?: (tile: PosterTile) => void;
+  /** Long-press, for anything a wall of unlabelled artwork cannot say. */
+  onLongPressTile?: (tile: PosterTile) => void;
 };
 
 /**
@@ -93,7 +106,14 @@ export type PosterGridProps = {
  * visible at once, which is the opposite of what a grid is for. Wide gutters on
  * a light ground make it read as scattered rather than as a wall.
  */
-export function PosterGrid({ title, tiles, onPressTile, onPressAll }: PosterGridProps) {
+export function PosterGrid({
+  title,
+  tiles,
+  onPressTile,
+  onPressAll,
+  onToggleSave,
+  onLongPressTile,
+}: PosterGridProps) {
   const { width } = useWindowDimensions();
   const { columns, gap } = theme.layout.posterGrid;
 
@@ -114,7 +134,14 @@ export function PosterGrid({ title, tiles, onPressTile, onPressAll }: PosterGrid
       ) : null}
       <View style={[styles.gridRows, { gap }]}>
         {tiles.map((tile) => (
-          <Tile key={tile.id} tile={tile} width={cardWidth} onPress={() => onPressTile(tile)} />
+          <Tile
+            key={tile.id}
+            tile={tile}
+            width={cardWidth}
+            onPress={() => onPressTile(tile)}
+            onLongPress={onLongPressTile ? () => onLongPressTile(tile) : undefined}
+            onToggleSave={onToggleSave ? () => onToggleSave(tile) : undefined}
+          />
         ))}
       </View>
     </View>
@@ -132,10 +159,14 @@ function Tile({
   tile,
   width,
   onPress,
+  onLongPress,
+  onToggleSave,
 }: {
   tile: PosterTile;
   width: number;
   onPress: () => void;
+  onLongPress?: () => void;
+  onToggleSave?: () => void;
 }) {
   const { score } = tile;
 
@@ -144,9 +175,33 @@ function Tile({
       accessibilityRole="button"
       accessibilityLabel={labelFor(tile)}
       onPress={onPress}
+      onLongPress={onLongPress}
       style={({ pressed }) => [{ width }, pressed && styles.pressed]}
     >
       <Poster uri={tile.posterUri} title={tile.title} blurhash={tile.blurhash} width={width} />
+      {onToggleSave ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: Boolean(tile.saved) }}
+          accessibilityLabel={
+            tile.saved ? `Remove ${tile.title} from watchlist` : `Save ${tile.title} to watchlist`
+          }
+          onPress={onToggleSave}
+          // A tile in a three-column grid is about 115pt wide, and a 44pt visual
+          // control on it would cover most of the artwork. The glyph is 28pt and the
+          // *touch target* is grown to the minimum with hitSlop, which is the only
+          // way to keep both design-system.md §8's tap-target rule and a wall that
+          // still reads as artwork.
+          hitSlop={8}
+          style={({ pressed }) => [styles.save, pressed && styles.pressed]}
+        >
+          <Ionicons
+            name={tile.saved ? 'bookmark' : 'bookmark-outline'}
+            size={16}
+            color={theme.text.inverse}
+          />
+        </Pressable>
+      ) : null}
       {score != null ? (
         <View
           // Maroon whatever the band, matching `ScoreBadge` since 2026-08-16. On a
@@ -172,6 +227,9 @@ const labelFor = (tile: PosterTile) => {
   const parts = [tile.title];
   if (tile.year) parts.push(String(tile.year));
   if (tile.score != null) parts.push(`scored ${formatScore(tile.score)} out of 10`);
+  // Announced on the tile as well as on its own control, because "Saved" is state a
+  // sighted reader gets from a filled glyph they can see without touching anything.
+  if (tile.saved) parts.push('saved');
   return parts.join(', ');
 };
 
@@ -183,6 +241,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     paddingHorizontal: theme.layout.gutter,
+  },
+  save: {
+    position: 'absolute',
+    top: theme.space[1],
+    right: theme.space[1],
+    width: 28,
+    height: 28,
+    borderRadius: theme.radius.control,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.semantic.action,
   },
   chip: {
     position: 'absolute',

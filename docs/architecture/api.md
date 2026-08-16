@@ -242,9 +242,21 @@ Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may
 |---|---|---|
 | `search` | signed-in user | Searches TMDB, writes the results into `media_items`, returns them Bingd-shaped |
 | `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits |
+| `similar` | signed-in user | Caches what TMDB associates with one title as the `similar` facet. The candidate source behind For You. Added 2026-08-16 |
 | `trending` | `service_role` | Refreshes the four `provider_list_cache` lists. Added 2026-08-16 |
 | `enrich` | `service_role` | Drains `tmdb_enrich_due` — rows carrying a tmdb id that have never been fetched |
 | `refresh` | `service_role` | Drains `media_refresh_due` — the retention window in §AD-8 |
+
+**`similar` is a user action, and bounded on three sides.** It spends provider quota, which
+normally argues for `service_role` — but what a slate needs depends on which titles *this*
+person ranked highest, and no schedule knows that. The bounds are: the client asks about at
+most six anchors, the answer is cached in `media_cache` under the shared facet TTL so every
+later user of that anchor pays nothing, and `noteRequest` applies the same per-user hourly
+ceiling `search` observes. The adapter re-checks facet freshness before spending a request,
+because the client's identical check is an optimisation and this one is a limit.
+
+It writes the facet even when TMDB returns nothing. An obscure title genuinely has no
+recommendations, and caching that fact is what stops every slate rebuild asking again.
 
 **`trending` has no read half.** It writes `provider_list_cache`, which is world-readable like
 `media_items` and `media_cache`, so a client selects the list directly and joins the ids to
