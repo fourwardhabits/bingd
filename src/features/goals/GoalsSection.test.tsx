@@ -127,6 +127,64 @@ describe('editing a goal that arrived after the first render', () => {
   });
 });
 
+describe('when the goals change on the server while the sheet is open', () => {
+  /**
+   * The second finding from the same review. The draft was seeded from the targets at
+   * open, but Save compared it against the *live* prop — so a refetch bringing 60 in
+   * behind an open sheet made an untouched Save conclude the user had changed 60 to
+   * 52, reverting a change made on another device from a form nobody typed into.
+   */
+  beforeEach(() => {
+    mockTables.watch_goals = [{ category: 'movies', target: 52 }];
+    mockTables.user_media = [];
+  });
+
+  const openThenRefetchTo = async (target: number) => {
+    const { client } = await renderWithProviders(<GoalsSection userId="user-1" year={2026} />);
+    await waitFor(() => expect(screen.getByText('Edit')).toBeTruthy());
+    await fireEvent.press(screen.getByText('Edit'));
+
+    mockTables.watch_goals = [{ category: 'movies', target }];
+    await client.invalidateQueries({ queryKey: ['goals', 'user-1', 2026] });
+    // `includeHiddenElements`, because the open sheet is a modal and everything
+    // behind it — the bar this is waiting on — is hidden from the accessibility
+    // tree by `accessibilityViewIsModal`, which is exactly right of the sheet and
+    // exactly wrong for a query that wants to know the refetch landed.
+    await waitFor(() =>
+      expect(screen.getByText(`0 of ${target} movies`, { includeHiddenElements: true })).toBeTruthy(),
+    );
+  };
+
+  it('leaves the draft where the user left it', async () => {
+    await openThenRefetchTo(60);
+
+    // An editor that rewrote the field under the user's hands would be worse than
+    // the bug. The draft is theirs until they close it.
+    expect(screen.getByDisplayValue('52')).toBeTruthy();
+  });
+
+  it('writes nothing when the user saves without having touched it', async () => {
+    await openThenRefetchTo(60);
+    await fireEvent.press(screen.getByText('Save'));
+
+    await waitFor(() => expect(screen.queryByText('Save')).toBeNull());
+    expect(mockRpcCalls).toEqual([]);
+  });
+
+  it('still writes what the user actually typed', async () => {
+    await openThenRefetchTo(60);
+    await fireEvent.changeText(screen.getByDisplayValue('52'), '75');
+    await fireEvent.press(screen.getByText('Save'));
+
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
+    expect(mockRpcCalls[0]?.args).toEqual({
+      p_year: 2026,
+      p_category: 'movies',
+      p_target: 75,
+    });
+  });
+});
+
 describe('before the goals have arrived', () => {
   it('offers no Edit control at all', async () => {
     // The other half of the same defect: "Edit" over an unknown current value opens a

@@ -55,9 +55,25 @@ const MAX = 10000;
  * media are written — so opening the sheet and closing it writes nothing at all.
  */
 export function GoalSheet({ year, targets, onSave, onClose, saving }: GoalSheetProps) {
+  /**
+   * The targets as they were when the sheet opened, kept because they are the
+   * baseline Save compares against.
+   *
+   * Comparing the draft against the *live* `targets` prop instead is a stale-baseline
+   * overwrite, found by independent review: open on 52, let a refetch bring 60 in
+   * behind the sheet, press Save without touching anything, and the editor concludes
+   * the user changed 60 to 52 and writes 52 — reverting a change made on another
+   * device from a form nobody typed into. Both the draft and the comparison come from
+   * this one snapshot, so "unchanged" means unchanged by the person looking at it.
+   */
+  const [opening] = useState<GoalDraft>(() => ({
+    movies: targets.movies,
+    tv_seasons: targets.tv_seasons,
+  }));
+
   const [draft, setDraft] = useState<Record<GoalCategory, string>>(() => ({
-    movies: targets.movies != null ? String(targets.movies) : '',
-    tv_seasons: targets.tv_seasons != null ? String(targets.tv_seasons) : '',
+    movies: opening.movies != null ? String(opening.movies) : '',
+    tv_seasons: opening.tv_seasons != null ? String(opening.tv_seasons) : '',
   }));
 
   const parsed = (raw: string): { target: number | null; error: string | null } => {
@@ -78,7 +94,7 @@ export function GoalSheet({ year, targets, onSave, onClose, saving }: GoalSheetP
   const save = () => {
     const changes = GOAL_CATEGORIES.flatMap((category) => {
       const { target } = parsed(draft[category]);
-      const stored = targets[category] ?? null;
+      const stored = opening[category] ?? null;
       // Unchanged media are not written. A no-op `set_watch_goal` is harmless — it is
       // idempotent by construction — but sending it would mean every open-and-close
       // of this sheet touched `updated_at` on a row nobody edited.
@@ -112,7 +128,7 @@ export function GoalSheet({ year, targets, onSave, onClose, saving }: GoalSheetP
               placeholder="No goal"
               error={error ?? undefined}
               hint={
-                targets[category] != null ? 'Clear the field to remove this goal.' : undefined
+                opening[category] != null ? 'Clear the field to remove this goal.' : undefined
               }
             />
           );
