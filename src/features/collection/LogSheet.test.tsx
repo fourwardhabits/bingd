@@ -56,6 +56,39 @@ const stubReads = (
   }));
 };
 
+/**
+ * The same stub, held open until the test releases it.
+ *
+ * Every other test here awaits the resolved row before touching anything, which is
+ * exactly the reason the load-boundary defect survived to review: the window where
+ * the sheet is showing `emptyLogState` for a title that already has a note was never
+ * entered. This is what enters it.
+ */
+const stubSlowReads = (
+  logged: Record<string, unknown> | null,
+  ranked: { bucket: string } | null,
+) => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  mockFrom.mockImplementation((table: string) => ({
+    select: () => ({
+      eq: () => ({
+        eq: () => ({
+          maybeSingle: async () => {
+            await gate;
+            return { data: table === 'user_media' ? logged : ranked, error: null };
+          },
+        }),
+      }),
+    }),
+  }));
+
+  return { release: () => release() };
+};
+
 beforeEach(() => {
   issued = 0;
   mockRpc.mockReset();
@@ -78,10 +111,23 @@ const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> =
     // a screen reader, since one is a button and the other a text field — so the
     // queries here separate them by role rather than by label.
     notesRow: () => view.getByRole('button', { name: 'Notes' }),
-    openNotes: async () => fireEvent.press(view.getByRole('button', { name: 'Notes' })),
+    // Both rows are inert until `useLogState` resolves, so that nothing can be
+    // decided about a note the sheet has not been told about yet. A user waits for
+    // that without noticing; a test has to say so.
+    openNotes: async () => {
+      await waitFor(() =>
+        expect(view.getByLabelText('Notes').props.accessibilityState.disabled).toBe(false),
+      );
+      return fireEvent.press(view.getByRole('button', { name: 'Notes' }));
+    },
     note: () => view.getByPlaceholderText('What did you think?'),
     dateRow: () => view.getByRole('button', { name: 'Watch date' }),
-    openDate: async () => fireEvent.press(view.getByRole('button', { name: 'Watch date' })),
+    openDate: async () => {
+      await waitFor(() =>
+        expect(view.getByLabelText('Watch date').props.accessibilityState.disabled).toBe(false),
+      );
+      return fireEvent.press(view.getByRole('button', { name: 'Watch date' }));
+    },
   };
 };
 
@@ -425,6 +471,47 @@ describe('what a note says about itself', () => {
     expect(callsTo('save_note')).toHaveLength(0);
   });
 
+  /**
+   * The defect independent review found on 2026-08-16, as the sequence that produced
+   * it. Before the sheet knows what is stored it is showing an empty field and the
+   * social default, and a title may already carry a note written back when notes
+   * were private-only. Anything the user does in that window is a decision about a
+   * note they have not been shown.
+   */
+  it('will not take a decision about a note it has not loaded yet', async () => {
+    const slow = stubSlowReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'written when this was private',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+
+    // The row is present so the sheet keeps its shape, but it cannot be opened
+    // and therefore cannot be acted on.
+    const notes = sheet.getByLabelText('Notes');
+    expect(notes.props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(notes);
+    expect(sheet.queryByPlaceholderText('What did you think?')).toBeNull();
+
+    slow.release();
+    await waitFor(() => expect(sheet.notesRow().props.accessibilityState.disabled).toBe(false));
+
+    await sheet.openNotes();
+    await waitFor(() =>
+      expect(sheet.note().props.value).toBe('written when this was private'),
+    );
+    // The stored visibility, not the default the sheet was showing a moment ago.
+    expect(privateToggle(sheet).props.accessibilityState.checked).toBe(true);
+    expect(callsTo('log_watched')).toHaveLength(0);
+    expect(callsTo('save_note')).toHaveLength(0);
+  });
+
   it('does not resend the note claims on a date-only save', async () => {
     stubReads(
       {
@@ -454,7 +541,9 @@ describe('the watch date', () => {
   it('defaults to today', async () => {
     const sheet = await open(filmA);
 
-    expect(sheet.dateRow().props.accessibilityValue.text).toBe('Today');
+    // Once the row knows there is no stored date. Before that it states no value at
+    // all, rather than a default it would overwrite a real date with.
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityValue?.text).toBe('Today'));
   });
 
   /**

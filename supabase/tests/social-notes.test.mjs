@@ -232,6 +232,14 @@ describe('public_notes', () => {
     assert.ok(rows.length <= 100);
   });
 
+  it('refuses a filter with more ids than any screen would ask for', async () => {
+    const { rows } = await t.sql(
+      `select array_agg(gen_random_uuid()) as ids from generate_series(1, 51)`,
+    );
+    const error = await t.errorFrom(`select * from public_notes($1::uuid[], null, 50)`, [rows[0].ids]);
+    assert.equal(error?.code, '22023');
+  });
+
   it('hides a private account from a stranger and shows it to an approved follower', async () => {
     const carol = await t.createUser({ username: 'carol_private', visibility: 'private' });
     const id = await movie('private_account_note');
@@ -372,6 +380,66 @@ describe('community_score', () => {
     // A series is not rankable at all, so its own aggregate is empty rather than
     // the mean of its seasons.
     assert.equal((await scoreOf(series)).rating_count, 0);
+  });
+
+  /**
+   * The subtraction attack the population filter exists to stop, run as an attack
+   * rather than asserted as a property.
+   *
+   * Independent review, 2026-08-16: the first version of this suite tested that
+   * private and suspended accounts were excluded, and would have passed with block
+   * isolation entirely absent — which is what the implementation then was. A rater
+   * who has blocked the viewer is not readable through `rankings_read`, so if the
+   * mean still counted them, the viewer could read the raters they *can* see,
+   * multiply the mean by the count and recover the blocked rating exactly.
+   */
+  it('leaves a blocked rater out, so their score cannot be recovered by subtraction', async () => {
+    const id = await movie('subtraction');
+    await rankedBy(id, 2, 'loved');
+    const blocker = await t.createUser({ username: 'cs_blocker' });
+
+    // The blocker's score for this title differs from the other two, so a mean
+    // that included it would be visibly different from a mean that did not.
+    await t.actAs(blocker);
+    const decoy = await movie('subtraction_decoy');
+    await t.rankToCompletion(decoy, 'loved', async (pivot) => pivot);
+    await t.rankToCompletion(id, 'loved', async (pivot) => pivot);
+    await t.actAs(alice);
+
+    const open = await scoreOf(id);
+    assert.equal(open.rating_count, 3);
+    assert.equal(Number(open.score), 9, 'three raters at 10, 10 and 7');
+
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [blocker, alice]);
+
+    const blocked = await scoreOf(id);
+    assert.equal(blocked.rating_count, 2, 'the blocked rater is out of the population');
+    assert.equal(
+      blocked.score,
+      null,
+      'and with them gone the sample no longer meets the threshold',
+    );
+
+    // The individual read is refused too, which is the fact that makes their
+    // presence in the aggregate a leak rather than a duplicate of public data.
+    await t.asUser(alice, async () => {
+      const { rows } = await t.sql(`select 1 from rankings where user_id = $1`, [blocker]);
+      assert.equal(rows.length, 0);
+    });
+    await t.actAs(alice);
+  });
+
+  it('is symmetric: blocking a rater removes them as surely as being blocked by one', async () => {
+    const id = await movie('symmetric_block');
+    await rankedBy(id, 2, 'loved');
+    const blocked = await t.createUser({ username: 'cs_blocked' });
+    await t.actAs(blocked);
+    await t.rankToCompletion(id, 'loved', async (pivot) => pivot);
+    await t.actAs(alice);
+
+    assert.equal((await scoreOf(id)).rating_count, 3);
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [alice, blocked]);
+    assert.equal((await scoreOf(id)).rating_count, 2);
   });
 
   it('excludes private and suspended accounts from the population', async () => {

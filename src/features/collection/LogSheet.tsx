@@ -84,6 +84,29 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
   const profile = useCurrentProfile();
   const { data: existing } = useLogState(profile.id, title.id);
   const state = existing ?? emptyLogState;
+  /**
+   * Whether the server has said what is already stored about this title.
+   *
+   * The note editor is gated on it, and that gate is load-bearing rather than
+   * cosmetic. Before this read lands the sheet is showing `emptyLogState` — no
+   * text, and the forward-facing `public` — for a title that may already carry a
+   * note written back when notes were private. Independent review, 2026-08-16,
+   * found two ways that published one:
+   *
+   *   - type into the empty field and blur. `state.exists` is still false, so the
+   *     write goes through `log_watched` carrying `public`, and the server applies
+   *     it to the row that was there all along.
+   *   - flip a claim while the field is empty. Nothing is written, correctly — but
+   *     the edit is retained, and when the historical text arrives underneath it
+   *     the next save carries a visibility chosen against a blank field.
+   *
+   * Both are the same defect: the editor was letting someone decide about a note
+   * they had not been shown. The overlay pattern below is right for an editor whose
+   * baseline is known; it cannot be right for one whose baseline is still in
+   * flight. `isPending` is not used, because a background refetch after a save
+   * leaves `existing` defined and must not close the editor under the user.
+   */
+  const loaded = existing !== undefined;
 
   /**
    * Edits overlay what the server said, rather than being copied out of it.
@@ -218,6 +241,12 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
     const nextDate = next.date ?? dateEdit;
     const nextVisibility = next.visibility ?? visibility;
     const nextSpoilers = next.spoilers ?? spoilers;
+
+    // The structural half of the gate above. The rows are not rendered before the
+    // read lands, so this should be unreachable; it is here because "unreachable"
+    // is a claim about the current layout, and what it guards against is writing a
+    // note, or a decision about one, against a baseline nobody has seen.
+    if (!loaded) return;
 
     const noteChanged = trimmed !== state.note;
     const dateChanged = nextDate != null && nextDate !== state.watchedOn;
@@ -362,14 +391,19 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
             disabledReason="Coming soon"
           />
 
+          {/* Inert until the read lands, rather than absent: the rows are the
+              sheet's shape, and having them appear a beat after the buckets would
+              make the sheet resize under the thumb that just tapped one. What is
+              withheld is the ability to act on a baseline that is not there yet. */}
           <SheetRow
             icon="create-outline"
             label="Notes"
-            value={noteValue}
+            value={loaded ? noteValue : undefined}
             expanded={expanded === 'notes'}
-            onPress={() => setExpanded(expanded === 'notes' ? null : 'notes')}
+            onPress={loaded ? () => setExpanded(expanded === 'notes' ? null : 'notes') : undefined}
+            disabledReason={loaded ? undefined : 'Loading'}
           />
-          {expanded === 'notes' ? (
+          {loaded && expanded === 'notes' ? (
             <View style={[styles.expanded, styles.noteBox]}>
               <NoteInput
                 value={note}
@@ -414,14 +448,18 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
 
           <SheetRow icon="image-outline" label="Photos" disabledReason="Coming soon" />
 
+          {/* Gated for the same reason, and for one of its own: `log_watched`
+              assigns the watch date rather than coalescing it, so a date picked
+              against the default would overwrite a real one already recorded. */}
           <SheetRow
             icon="calendar-outline"
             label="Watch date"
-            value={formatWatchDate(effectiveDate)}
+            value={loaded ? formatWatchDate(effectiveDate) : undefined}
             expanded={expanded === 'date'}
-            onPress={() => setExpanded(expanded === 'date' ? null : 'date')}
+            onPress={loaded ? () => setExpanded(expanded === 'date' ? null : 'date') : undefined}
+            disabledReason={loaded ? undefined : 'Loading'}
           />
-          {expanded === 'date' ? (
+          {loaded && expanded === 'date' ? (
             <View style={styles.expanded}>
               <WatchDatePicker
                 value={effectiveDate}
