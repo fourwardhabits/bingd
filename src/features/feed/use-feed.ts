@@ -4,6 +4,12 @@ import type { Bucket } from '@/features/collection/score';
 import { avatarUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
+import { fullTitle, type MediaKind } from '@/lib/titles';
+
+export type FeedNote = {
+  text: string;
+  hasSpoilers: boolean;
+};
 
 export type FeedItem = {
   id: string;
@@ -13,6 +19,12 @@ export type FeedItem = {
   actorName: string;
   actorAvatarUri: string | null;
   mediaItemId: string | null;
+  kind: MediaKind | null;
+  /**
+   * The name to print. For a season this is "Parks and Recreation — Season 2",
+   * because a feed never shows the parent series alongside it and "Season 2" on its
+   * own names nothing (founder amendment, 2026-08-16).
+   */
   title: string | null;
   year: number | null;
   posterPath: string | null;
@@ -32,16 +44,29 @@ export type FeedItem = {
   score: number | null;
   bucket: Bucket | null;
   category: 'movies' | 'tv_seasons' | null;
+  /**
+   * The actor's public note on this title, live rather than snapshotted.
+   *
+   * The opposite choice from the score, and for a reason: a score is a fact about a
+   * moment, and a note is a piece of writing its author can correct, retract or make
+   * private. Showing a stale copy of one would mean a note deleted an hour ago is
+   * still being read, which is the whole point of the visibility control.
+   */
+  note: FeedNote | null;
 };
 
 type Embedded<T> = T | T[] | null;
 
+type ParentShape = { title: string | null };
+
 type MediaShape = {
+  kind: MediaKind;
   title: string;
   release_date: string | null;
   poster_path: string | null;
   genres: string[] | null;
   runtime_minutes: number | null;
+  parent: Embedded<ParentShape>;
 };
 
 type ProfileShape = {
@@ -64,6 +89,13 @@ type FeedRow = {
   } | null;
   media_items: Embedded<MediaShape>;
   profiles: Embedded<ProfileShape>;
+};
+
+type NoteRow = {
+  user_id: string;
+  media_item_id: string;
+  note: string;
+  has_spoilers: boolean;
 };
 
 /**
@@ -94,7 +126,10 @@ export function useFeed(userId: string) {
         .from('feed_events')
         .select(
           'id, type, actor_id, media_item_id, created_at, payload, ' +
-            'media_items(title, release_date, poster_path, genres, runtime_minutes), ' +
+            // The parent series, so a season can be named. A self-join through
+            // parent_id, which PostgREST resolves as an embed like any other.
+            'media_items(kind, title, release_date, poster_path, genres, runtime_minutes, ' +
+            'parent:parent_id(title)), ' +
             'profiles:actor_id(username, display_name, avatar_path)',
         )
         .in('actor_id', actorIds)
@@ -103,9 +138,11 @@ export function useFeed(userId: string) {
         .limit(30);
       if (error) throw error;
 
+      const rows = (data ?? []) as unknown as FeedRow[];
+
       const items: FeedItem[] = [];
 
-      for (const row of (data ?? []) as unknown as FeedRow[]) {
+      for (const row of rows) {
         const profile = one(row.profiles);
         const media = one(row.media_items);
 
@@ -125,7 +162,14 @@ export function useFeed(userId: string) {
           actorName,
           actorAvatarUri: avatarUri(profile?.avatar_path),
           mediaItemId: row.media_item_id,
-          title: media?.title ?? null,
+          kind: media?.kind ?? null,
+          title: media
+            ? fullTitle({
+                kind: media.kind,
+                title: media.title,
+                seriesTitle: one(media.parent)?.title ?? null,
+              })
+            : null,
           year: media?.release_date ? Number(media.release_date.slice(0, 4)) : null,
           posterPath: media?.poster_path ?? null,
           genres: media?.genres ?? [],
@@ -135,10 +179,50 @@ export function useFeed(userId: string) {
           score: row.payload?.score ?? null,
           bucket: row.payload?.bucket ?? null,
           category: row.payload?.category ?? null,
+          note: null,
         });
       }
 
+      await attachNotes(items);
       return items;
     },
   });
+}
+
+/**
+ * Public notes for the events just read, in one round trip.
+ *
+ * `public_notes` takes both filters and applies them together, so this asks for
+ * "notes by these authors on these titles" and matches the pairs up here. The
+ * cross-product is a superset of what is wanted and every row in it is one the
+ * caller may read, so the only cost is a few rows that find no home.
+ *
+ * A failure here is swallowed rather than propagated. A note is an enrichment of an
+ * activity item; losing the whole feed because the note read failed would trade a
+ * small absence for a total one.
+ */
+async function attachNotes(items: FeedItem[]) {
+  const authors = [...new Set(items.map((item) => item.actorId))];
+  const titles = [...new Set(items.map((item) => item.mediaItemId).filter(Boolean))] as string[];
+  if (!authors.length || !titles.length) return;
+
+  const { data, error } = await supabase.rpc('public_notes', {
+    p_user_ids: authors.slice(0, 50),
+    p_media_item_ids: titles.slice(0, 50),
+    p_limit: 100,
+  });
+  if (error || !data) return;
+
+  const byPair = new Map<string, FeedNote>();
+  for (const row of data as NoteRow[]) {
+    byPair.set(`${row.user_id}:${row.media_item_id}`, {
+      text: row.note,
+      hasSpoilers: row.has_spoilers,
+    });
+  }
+
+  for (const item of items) {
+    if (!item.mediaItemId) continue;
+    item.note = byPair.get(`${item.actorId}:${item.mediaItemId}`) ?? null;
+  }
 }

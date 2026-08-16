@@ -1,15 +1,22 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { PixelRatio, Pressable, StyleSheet, View } from 'react-native';
 
 import { formatScore, type Bucket } from '@/features/collection/score';
 
 import { theme } from '../tokens';
 import { Text } from './Text';
 
+export type ScoreBadgeSize = 'md' | 'sm' | 'lg';
+
 export type ScoreBadgeProps = {
   /** Omit for a title that is logged but not yet compared. */
   score?: number | null;
+  /**
+   * Carried for the spoken label only. It no longer decides the colour — see the
+   * note below — but "8.7, Loved it" is still the useful thing to hear, and the
+   * bands are closed so the caller usually has it anyway.
+   */
   bucket?: Bucket | null;
-  size?: 'md' | 'sm';
+  size?: ScoreBadgeSize;
   /** Makes the unranked state a button into the ranking sheet. */
   onPress?: () => void;
 };
@@ -21,20 +28,30 @@ const BAND_LABEL: Record<Bucket, string> = {
 };
 
 /**
- * The derived 0–10 score, as a filled circle in its bucket's colour
- * (design-system.md §8).
+ * The derived 0–10 score, as a filled Maroon circle.
  *
- * Filled rather than outlined, which is where this departs from Beli. Beli's
- * badge is a ring whose stroke and number share a colour that tracks the score;
- * on a light ground two of Bingd's three bucket colours measure under 3:1 as a
- * stroke, so two thirds of the app's most repeated element would have shipped
- * below the text floor. Filling inverts it — the fill carries the colour and
- * the ink carries the contrast, and all three pairs in §3 clear AA.
+ * **One colour, not three.** The badge used to take its fill from the bucket, which
+ * put Maroon, Sage and Stone in the same column of a list. Founder decision,
+ * 2026-08-16, after seeing it on a device: the number already says how good the
+ * rating is, so tinting by band spends the app's scarcest visual resource restating
+ * it — and it restated it weakly, because Sage against Paper reads as washed out
+ * beside the Maroon above it. A single deep Maroon badge is a brand mark that
+ * repeats down a list, which is what a Collection screen wants.
+ *
+ * The three-band palette is not gone; it lives on `BucketChip`, where colour is
+ * distinguishing three choices rather than grading one answer. And nothing is lost
+ * to accessibility by dropping the tint, because the tint was never the only
+ * carrier: the bands are closed and non-overlapping, so the number itself says
+ * which one it is (`score.ts`, `BAND_RANGE`).
+ *
+ * Filled rather than outlined, which is where this departs from Beli. On a light
+ * ground Maroon as a hairline stroke measures under 3:1; filling inverts it, and
+ * Parchment on Maroon is 7.4:1.
  */
 export function ScoreBadge({ score, bucket, size = 'md', onPress }: ScoreBadgeProps) {
-  const diameter = theme.layout.scoreBadge[size];
+  const { diameter, fontSize } = metrics(size);
 
-  if (score == null || bucket == null) {
+  if (score == null) {
     return <UnrankedBadge diameter={diameter} onPress={onPress} />;
   }
 
@@ -44,20 +61,20 @@ export function ScoreBadge({ score, bucket, size = 'md', onPress }: ScoreBadgePr
     <View
       accessible
       accessibilityRole="text"
-      // "8.7" alone is a bare number in a list of film titles. The unit and the
-      // bucket are what make it mean anything read aloud.
-      accessibilityLabel={`${value} out of 10, ${BAND_LABEL[bucket]}`}
-      style={[
-        styles.circle,
-        { width: diameter, height: diameter, backgroundColor: theme.bucket[bucketKey(bucket)] },
-      ]}
+      // "8.7" alone is a bare number in a list of film titles. The unit is what
+      // makes it mean anything read aloud.
+      accessibilityLabel={
+        bucket ? `${value} out of 10, ${BAND_LABEL[bucket]}` : `${value} out of 10`
+      }
+      style={[styles.circle, styles.filled, { width: diameter, height: diameter }]}
     >
       <Text
         variant="score"
-        style={[{ color: theme.bucketInk[bucketKey(bucket)] }, size === 'sm' && styles.small]}
-        // The badge is a fixed circle, so the number cannot grow with Dynamic
-        // Type without spilling out of it. The row around it still scales.
-        maxFontSizeMultiplier={1.2}
+        numberOfLines={1}
+        style={[styles.ink, { fontSize, lineHeight: Math.round(fontSize * 1.15) }]}
+        // The circle already grew with the font scale, so the number must not
+        // grow again on top of it or the ratio the sizing depends on is lost.
+        allowFontScaling={false}
       >
         {value}
       </Text>
@@ -75,7 +92,7 @@ export function ScoreBadge({ score, bucket, size = 'md', onPress }: ScoreBadgePr
 function UnrankedBadge({ diameter, onPress }: { diameter: number; onPress?: () => void }) {
   const content = (
     <View style={[styles.circle, styles.unranked, { width: diameter, height: diameter }]}>
-      <Text variant="caption" tone="tertiary" maxFontSizeMultiplier={1.2}>
+      <Text variant="caption" tone="tertiary" allowFontScaling={false}>
         Rank
       </Text>
     </View>
@@ -96,9 +113,52 @@ function UnrankedBadge({ diameter, onPress }: { diameter: number; onPress?: () =
   );
 }
 
-/** `bucket.notForMe` is camelCase in the palette; the data is snake_case. */
-const bucketKey = (bucket: Bucket): 'loved' | 'fine' | 'notForMe' =>
-  bucket === 'not_for_me' ? 'notForMe' : bucket;
+/**
+ * How wide `10.0` is, as a multiple of the font size, in Inter SemiBold with
+ * tabular figures: three digit advances of 0.60em and a period of 0.28em.
+ *
+ * The badge is sized for that string and only that string. Sizing for the common
+ * `8.7` is what produced the defect the founder found — a perfect score, the one
+ * number a user most wants to show someone, spilling out of its own circle in the
+ * feed. And the font does not shrink for the shorter strings either: `score` is set
+ * in tabular figures precisely so a column of badges holds still, and a `10.0` in
+ * smaller type than the `8.7` above it would undo that at the one place it matters.
+ */
+const WIDEST_SCORE_EMS = 3 * 0.6 + 0.28;
+
+/**
+ * The fraction of the diameter a horizontal string may occupy inside a circle.
+ *
+ * Not the inscribed square's 0.707 — that is the bound for a shape as tall as it is
+ * wide, and a line of text is roughly a third of its own width. 0.80 leaves visible
+ * Maroon either side of `10.0` at every size, which is what "fits cleanly" means
+ * here: not merely uncropped, but framed.
+ */
+const TEXT_SHARE = 0.8;
+
+/** Beyond this, the badge would start pushing rows around rather than reading better. */
+const MAX_FONT_SCALE = 1.3;
+
+const BASE: Record<ScoreBadgeSize, number> = theme.layout.scoreBadge;
+
+/**
+ * Diameter and font size together, both scaled by the user's text size.
+ *
+ * Scaling the circle rather than freezing the number is the difference between a
+ * badge that ignores Dynamic Type and one that honours it: the ratio between them
+ * is what guarantees the fit, so either both move or neither does.
+ */
+function metrics(size: ScoreBadgeSize) {
+  const scale = Math.min(PixelRatio.getFontScale(), MAX_FONT_SCALE);
+  const diameter = Math.round(BASE[size] * scale);
+  return {
+    diameter,
+    fontSize: Math.floor((diameter * TEXT_SHARE) / WIDEST_SCORE_EMS),
+  };
+}
+
+/** Exported for the test that asserts every score from 0.0 to 10.0 fits. */
+export const scoreBadgeMetrics = metrics;
 
 const styles = StyleSheet.create({
   circle: {
@@ -106,11 +166,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  filled: { backgroundColor: theme.semantic.action },
+  ink: { color: theme.semantic.actionText },
   unranked: {
     borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: theme.border.strong,
   },
-  small: { fontSize: 15, lineHeight: 18 },
   pressed: { opacity: 0.7 },
 });

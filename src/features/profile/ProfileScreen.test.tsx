@@ -139,7 +139,10 @@ describe('recent activity', () => {
     mockTables.feed_events = [activity('e1', 'user-1', 'Sai'), activity('e2', 'friend', 'Anna')];
 
     const view = await open();
-    await waitFor(() => expect(view.getAllByText('Inception')).toHaveLength(1));
+    // A regex, because the title and its year share one Text node: the activity
+    // row stopped repeating the title inside its sentence on 2026-08-16, so the
+    // only place it appears is beside the year.
+    await waitFor(() => expect(view.getAllByText(/Inception/)).toHaveLength(1));
     expect(view.queryByText('Anna')).toBeNull();
   });
 

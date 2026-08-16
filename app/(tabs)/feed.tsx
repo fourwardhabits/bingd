@@ -1,10 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { useWatchlist } from '@/features/collection/use-collection';
+import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
 import { useFeed, type FeedItem } from '@/features/feed/use-feed';
 import { posterUri } from '@/lib/images';
@@ -20,6 +21,7 @@ export default function FeedScreen() {
   const queryClient = useQueryClient();
   const feed = useFeed(profile.id);
   const watchlist = useWatchlist(profile.id);
+  const watched = useWatched(profile.id);
   const [busy, setBusy] = useState<string | null>(null);
 
   const saved = useMemo(
@@ -48,6 +50,16 @@ export default function FeedScreen() {
     await queryClient.invalidateQueries({
       queryKey: [...queryKeys.collection(profile.id), 'watchlist'],
     });
+  };
+
+  const shareTitle = async (event: FeedItem) => {
+    if (!event.mediaItemId) return;
+    const url = `https://bingd.app/title/${event.kind ?? 'movie'}/${event.mediaItemId}`;
+    try {
+      await Share.share({ message: url, url });
+    } catch (error) {
+      Alert.alert('Could not share', error instanceof Error ? error.message : 'Sharing failed.');
+    }
   };
 
   const events = feed.data ?? [];
@@ -81,6 +93,13 @@ export default function FeedScreen() {
               key={event.id}
               actorName={event.actorName}
               actorAvatarUri={event.actorAvatarUri}
+              // Own activity has no profile to visit that is not the tab the user
+              // is already one tap from, so the name is not a link on those rows.
+              onPressActor={
+                event.actorId === profile.id || !event.actorUsername
+                  ? undefined
+                  : () => router.push(`/u/${event.actorUsername}`)
+              }
               verb={VERB[event.type]}
               title={event.title}
               year={event.year}
@@ -88,12 +107,26 @@ export default function FeedScreen() {
               metadata={metadataFor(event)}
               score={event.score}
               bucket={event.bucket}
+              note={event.note?.text ?? null}
+              noteHasSpoilers={event.note?.hasSpoilers ?? false}
+              noteMasked={shouldMask({
+                hasSpoilers: event.note?.hasSpoilers ?? false,
+                mediaItemId: event.mediaItemId,
+                viewerId: profile.id,
+                authorId: event.actorId,
+                watched: watched.data,
+              })}
               timeLabel={relativeTime(event.createdAt)}
               onPressTitle={() => event.mediaItemId && router.push(`/title/${event.mediaItemId}`)}
+              // Watchlisting your own already-watched title is not a thing anyone
+              // means to do, so the control is not offered on your own activity.
               onPressWatchlist={
-                event.mediaItemId ? () => toggleWatchlist(event.mediaItemId!) : undefined
+                event.mediaItemId && event.actorId !== profile.id
+                  ? () => toggleWatchlist(event.mediaItemId!)
+                  : undefined
               }
               inWatchlist={event.mediaItemId ? saved.has(event.mediaItemId) : false}
+              onPressShare={event.mediaItemId ? () => void shareTitle(event) : undefined}
             />
           ))
         )}

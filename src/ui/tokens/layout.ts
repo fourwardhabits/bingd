@@ -36,8 +36,16 @@ export const layout = {
    * A row must never take its height from its artwork.
    */
   compactRow: 60,
-  /** Filled circle carrying the derived score (design-system.md §8). */
-  scoreBadge: { md: 44, sm: 36 },
+  /**
+   * Filled circle carrying the derived score (design-system.md §8).
+   *
+   * `sm` went from 36 to 40 on 2026-08-16. `ScoreBadge` sizes its number to fit
+   * `10.0` rather than the more common `8.7`, and at 36 that arithmetic yields
+   * 13pt — legible, but visibly smaller than the row's own footnote beside it.
+   * Four points of diameter buys two of type and the badge reads as the row's
+   * anchor again.
+   */
+  scoreBadge: { lg: 56, md: 44, sm: 40 },
   /** Tight, because wide gutters make a poster wall read as scattered. */
   posterGrid: { columns: 3, gap: space[1] + 2 },
   posterShelf: { gap: space[2] + 2, peek: 0.7 },

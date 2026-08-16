@@ -137,7 +137,7 @@ function Tile({
   width: number;
   onPress: () => void;
 }) {
-  const { score, bucket } = tile;
+  const { score } = tile;
 
   return (
     <Pressable
@@ -147,15 +147,19 @@ function Tile({
       style={({ pressed }) => [{ width }, pressed && styles.pressed]}
     >
       <Poster uri={tile.posterUri} title={tile.title} blurhash={tile.blurhash} width={width} />
-      {score != null && bucket != null ? (
+      {score != null ? (
         <View
-          style={[styles.chip, { backgroundColor: theme.bucket[bucketKey(bucket)] }]}
+          // Maroon whatever the band, matching `ScoreBadge` since 2026-08-16. On a
+          // wall the old bucket tint was at its worst: nine tiles, three colours,
+          // none of them the poster's, all of them restating a number already
+          // printed on top of them.
+          style={styles.chip}
           // Already in the label above, and a chip that announces itself
           // separately makes every tile two stops instead of one.
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
         >
-          <Text variant="caption" style={{ color: theme.bucketInk[bucketKey(bucket)] }}>
+          <Text variant="caption" tone="inverse" allowFontScaling={false}>
             {formatScore(score)}
           </Text>
         </View>
@@ -170,9 +174,6 @@ const labelFor = (tile: PosterTile) => {
   if (tile.score != null) parts.push(`scored ${formatScore(tile.score)} out of 10`);
   return parts.join(', ');
 };
-
-const bucketKey = (bucket: Bucket): 'loved' | 'fine' | 'notForMe' =>
-  bucket === 'not_for_me' ? 'notForMe' : bucket;
 
 const styles = StyleSheet.create({
   shelf: { gap: theme.space[2] },
@@ -192,6 +193,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: theme.radius.control,
     alignItems: 'center',
+    backgroundColor: theme.semantic.action,
   },
   pressed: { opacity: 0.7 },
 });

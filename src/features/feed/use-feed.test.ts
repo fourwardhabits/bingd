@@ -5,9 +5,16 @@ import { renderHookWithProviders } from '@/test-utils/render';
 import { useFeed } from './use-feed';
 
 let mockFeedRows: unknown[] = [];
+let mockNoteRows: unknown[] = [];
+let mockNoteError: unknown = null;
+const rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
+    rpc: (name: string, args: Record<string, unknown>) => {
+      rpcCalls.push({ name, args });
+      return Promise.resolve({ data: mockNoteError ? null : mockNoteRows, error: mockNoteError });
+    },
     from: (table: string) => {
       const chain: Record<string, unknown> = {};
       const result = () =>
@@ -30,11 +37,13 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 const media = {
+  kind: 'movie',
   title: 'Inception',
   release_date: '2010-07-16',
   poster_path: '/p.jpg',
   genres: ['Science Fiction'],
   runtime_minutes: 148,
+  parent: null,
 };
 
 const profile = { username: 'sai', display_name: 'Sai', avatar_path: null };
@@ -66,6 +75,9 @@ const only = async () => {
 
 beforeEach(() => {
   mockFeedRows = [];
+  mockNoteRows = [];
+  mockNoteError = null;
+  rpcCalls.length = 0;
 });
 
 describe('the embedded profile', () => {
@@ -147,11 +159,13 @@ describe('the title card', () => {
     mockFeedRows = [
       event({
         media_items: {
+          kind: 'movie',
           title: 'Untitled',
           release_date: null,
           poster_path: null,
           genres: null,
           runtime_minutes: null,
+          parent: null,
         },
       }),
     ];
@@ -159,5 +173,79 @@ describe('the title card', () => {
     const item = await only();
     expect(item.year).toBeNull();
     expect(item.genres).toEqual([]);
+  });
+});
+
+/**
+ * "Suraj Kandukuri ranked Season 2" was the device-test finding. A feed never shows
+ * the parent series beside the season, so the season's own title names nothing.
+ */
+describe('a season in the feed', () => {
+  const season = (parent: unknown) => ({
+    kind: 'season',
+    title: 'Season 2',
+    release_date: '2010-09-17',
+    poster_path: null,
+    genres: ['Comedy'],
+    runtime_minutes: 22,
+    parent,
+  });
+
+  it('carries the series name with it', async () => {
+    mockFeedRows = [event({ media_items: season({ title: 'Parks and Recreation' }) })];
+
+    const item = await only();
+    expect(item.title).toBe('Parks and Recreation — Season 2');
+    expect(item.kind).toBe('season');
+  });
+
+  it('reads the parent embed whether it arrives as an object or an array', async () => {
+    mockFeedRows = [event({ media_items: season([{ title: 'Parks and Recreation' }]) })];
+    expect((await only()).title).toBe('Parks and Recreation — Season 2');
+  });
+
+  it('falls back to the season alone rather than to nothing', async () => {
+    mockFeedRows = [event({ media_items: season(null) })];
+    expect((await only()).title).toBe('Season 2');
+  });
+});
+
+describe('the note attached to an activity', () => {
+  it('asks for public notes by the actors and titles on screen', async () => {
+    mockFeedRows = [event()];
+    await load();
+
+    const call = rpcCalls.find((c) => c.name === 'public_notes');
+    expect(call?.args.p_user_ids).toEqual(['user-1']);
+    expect(call?.args.p_media_item_ids).toEqual(['film-1']);
+  });
+
+  it('matches a note to its own author and title, not to the other pairing', async () => {
+    mockFeedRows = [
+      event(),
+      event({ id: 'event-2', actor_id: 'friend', media_item_id: 'film-2' }),
+    ];
+    // The RPC filters are a cross product, so it can legitimately return a pair
+    // that belongs to neither event. Matching on both halves is what stops one
+    // person's note appearing under another person's activity.
+    mockNoteRows = [
+      { user_id: 'user-1', media_item_id: 'film-2', note: 'wrong pairing', has_spoilers: false },
+      { user_id: 'friend', media_item_id: 'film-2', note: 'the right one', has_spoilers: true },
+    ];
+
+    const items = await load();
+    expect(items[0].note).toBeNull();
+    expect(items[1].note).toEqual({ text: 'the right one', hasSpoilers: true });
+  });
+
+  it('keeps the feed when the note read fails', async () => {
+    // A note is an enrichment. Losing the whole feed because it could not be
+    // fetched trades a small absence for a total one.
+    mockFeedRows = [event()];
+    mockNoteError = { message: 'nope' };
+
+    const item = await only();
+    expect(item.title).toBe('Inception');
+    expect(item.note).toBeNull();
   });
 });

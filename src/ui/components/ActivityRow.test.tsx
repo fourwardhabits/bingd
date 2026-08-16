@@ -32,15 +32,34 @@ describe('the poster placeholder', () => {
 });
 
 describe('the sentence', () => {
-  it('names the actor and the title', async () => {
+  it('names the actor, and names the title exactly once', async () => {
+    // The title used to appear in the sentence *and* in the card below it. One of
+    // the two was always the redundant one, and dropping it from the sentence is
+    // what let the avatar move onto that line and the row lose a whole band.
     const view = await render(<ActivityRow {...props} />);
+
     expect(view.getByText(/Suraj/)).toBeTruthy();
-    expect(view.getAllByText('Inception').length).toBeGreaterThan(0);
+    expect(view.getAllByText(/Inception/)).toHaveLength(1);
   });
 
   it('says "a title" rather than nothing when the media row is missing', async () => {
     const view = await render(<ActivityRow {...props} title={null} />);
-    expect(view.getAllByText('a title').length).toBeGreaterThan(0);
+    expect(view.getAllByText(/a title/).length).toBeGreaterThan(0);
+  });
+
+  it('carries the full name of a season, since the feed never shows its series', async () => {
+    const view = await render(
+      <ActivityRow {...props} title="Parks and Recreation — Season 2" />,
+    );
+    expect(view.getByText(/Parks and Recreation — Season 2/)).toBeTruthy();
+  });
+
+  it('opens the actor’s profile when there is one to open', async () => {
+    const onPressActor = jest.fn();
+    const view = await render(<ActivityRow {...props} onPressActor={onPressActor} />);
+
+    await fireEvent.press(view.getByLabelText('Suraj’s profile'.replace('’', "'")));
+    expect(onPressActor).toHaveBeenCalled();
   });
 });
 
@@ -97,5 +116,69 @@ describe('the note', () => {
     expect(view.getByText(note).props.numberOfLines).toBe(2);
     await fireEvent.press(view.getByLabelText('Show the whole note'));
     expect(view.getByText(note).props.numberOfLines).toBeUndefined();
+  });
+
+  /**
+   * The rule the whole spoiler feature rests on: a masked note is a note whose text
+   * is not in the tree. Clipping it to zero lines, blurring it or covering it would
+   * all leave the string where a screen reader reads it and a selection copies it.
+   */
+  it('does not render masked text at all, not even clipped', async () => {
+    const note = 'He was dead the whole time.';
+    const view = await render(
+      <ActivityRow {...props} note={note} noteHasSpoilers noteMasked />,
+    );
+
+    expect(view.queryByText(note)).toBeNull();
+    expect(view.getByText('Contains spoilers')).toBeTruthy();
+  });
+
+  it('reveals on a deliberate tap, and only for this reader', async () => {
+    const note = 'He was dead the whole time.';
+    const view = await render(
+      <ActivityRow {...props} note={note} noteHasSpoilers noteMasked />,
+    );
+
+    await fireEvent.press(view.getByLabelText('Contains spoilers for Inception. Show the note.'));
+    expect(view.getByText(note)).toBeTruthy();
+    // The claim survives the reveal — it is part of what the note says about
+    // itself, not just the lock.
+    expect(view.getByText('Spoilers')).toBeTruthy();
+  });
+
+  it('shows a spoiler note unmasked, with its marker, to someone who has seen it', async () => {
+    const note = 'He was dead the whole time.';
+    const view = await render(
+      <ActivityRow {...props} note={note} noteHasSpoilers noteMasked={false} />,
+    );
+
+    expect(view.getByText(note)).toBeTruthy();
+    expect(view.getByText('Spoilers')).toBeTruthy();
+    expect(view.queryByText('Contains spoilers')).toBeNull();
+  });
+});
+
+describe('the reaction control', () => {
+  it('is absent unless the row is given one', async () => {
+    const view = await render(<ActivityRow {...props} />);
+    expect(view.queryByLabelText(/react/i)).toBeNull();
+  });
+
+  it('says whose activity it reacts to, and shows the count', async () => {
+    const onPress = jest.fn();
+    const view = await render(
+      <ActivityRow {...props} reaction={{ count: 3, mine: false, onPress }} />,
+    );
+
+    await fireEvent.press(view.getByLabelText("React to Suraj's activity about Inception"));
+    expect(onPress).toHaveBeenCalled();
+    expect(view.getByText('3')).toBeTruthy();
+  });
+
+  it('offers removal once the reaction is the reader’s own', async () => {
+    const view = await render(
+      <ActivityRow {...props} reaction={{ count: 1, mine: true, onPress: jest.fn() }} />,
+    );
+    expect(view.getByLabelText('You reacted to Inception. Remove your reaction.')).toBeTruthy();
   });
 });

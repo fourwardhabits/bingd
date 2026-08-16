@@ -28,6 +28,7 @@ export { SearchField, type SearchFieldProps } from './SearchField';
 export { SectionHeader, type SectionHeaderProps } from './SectionHeader';
 export { SegmentedTabs, type SegmentOption } from './SegmentedTabs';
 export { SkeletonRow, type SkeletonRowProps } from './SkeletonRow';
+export { SpoilerNote, type SpoilerNoteProps } from './SpoilerNote';
 export { StatRow, type StatItem } from './StatRow';
 export { Text } from './Text';
 export { TitleHero, type TitleHeroProps } from './TitleHero';
