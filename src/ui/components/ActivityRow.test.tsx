@@ -175,10 +175,54 @@ describe('the reaction control', () => {
     expect(view.getByText('3')).toBeTruthy();
   });
 
-  it('offers removal once the reaction is the reader’s own', async () => {
+  it('offers a change once the reaction is the reader’s own', async () => {
     const view = await render(
       <ActivityRow {...props} reaction={{ count: 1, mine: true, onPress: jest.fn() }} />,
     );
-    expect(view.getByLabelText('You reacted to Inception. Remove your reaction.')).toBeTruthy();
+    expect(
+      view.getByLabelText('You reacted to Inception. Change or remove your reaction.'),
+    ).toBeTruthy();
+  });
+
+  /** PRD §14: the glyphs present, at most two names, then a residual count. */
+  describe('who reacted', () => {
+    const withReactors = (names: string[], others: number, count: number) => (
+      <ActivityRow
+        {...props}
+        reaction={{ count, mine: false, names, others, glyphs: ['❤️'], onPress: jest.fn() }}
+      />
+    );
+
+    it('names one', async () => {
+      const view = await render(withReactors(['Jerry'], 0, 1));
+      expect(view.getByText('Jerry')).toBeTruthy();
+    });
+
+    it('names two', async () => {
+      const view = await render(withReactors(['Jerry', 'Beth'], 0, 2));
+      expect(view.getByText('Jerry and Beth')).toBeTruthy();
+    });
+
+    it('names two and counts the rest', async () => {
+      const view = await render(withReactors(['Jerry', 'Beth'], 4, 6));
+      expect(view.getByText('Jerry and Beth and 4 others')).toBeTruthy();
+    });
+
+    it('says "other" rather than "others" for one', async () => {
+      const view = await render(withReactors(['Jerry', 'Beth'], 1, 3));
+      expect(view.getByText('Jerry and Beth and 1 other')).toBeTruthy();
+    });
+
+    it('falls back to a count when there is nobody to name', async () => {
+      // The reader's own reaction is never one of the names, so a row only they
+      // have reacted to has a count and no names.
+      const view = await render(withReactors([], 0, 1));
+      expect(view.getByText('1 reaction')).toBeTruthy();
+    });
+
+    it('shows nothing at all when nobody has reacted', async () => {
+      const view = await render(withReactors([], 0, 0));
+      expect(view.queryByText(/reaction/)).toBeNull();
+    });
   });
 });

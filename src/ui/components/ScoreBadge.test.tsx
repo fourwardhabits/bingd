@@ -24,9 +24,31 @@ import { ScoreBadge, scoreBadgeMetrics, type ScoreBadgeSize } from './ScoreBadge
 
 const SIZES: ScoreBadgeSize[] = ['lg', 'md', 'sm'];
 
-/** Inter SemiBold, tabular figures: a digit is 0.60em, a period 0.28em. */
+/** Inter SemiBold's own advances: 0.60em for a tabular digit, 0.28em for a period. */
 const widthOf = (text: string, fontSize: number) =>
   [...text].reduce((sum, ch) => sum + (ch === '.' ? 0.28 : 0.6), 0) * fontSize;
+
+/**
+ * How wide a horizontal line of a given height can be inside a circle, from the
+ * circle's own geometry: the chord at the text's top and bottom edges.
+ *
+ * This is the part of the test that is not the component talking to itself.
+ * Independent review pointed out, correctly, that asserting the component's linear
+ * `TEXT_SHARE` heuristic against itself proves only that the arithmetic is
+ * self-consistent. The chord does not know about that heuristic — it is a fact about
+ * circles — so a `TEXT_SHARE` raised to 0.95, or a diameter reduced without the font,
+ * fails here even though both would keep the component internally consistent.
+ *
+ * What it still cannot do is measure a real glyph. Proving the founder's `10.0`
+ * defect is gone on a device remains a visual check, and is listed as one.
+ */
+const chordWidth = (diameter: number, textHeight: number) => {
+  const r = diameter / 2;
+  return 2 * Math.sqrt(Math.max(r * r - (textHeight / 2) ** 2, 0));
+};
+
+/** `ScoreBadge` sets its line height to 1.15 of the font size. */
+const lineHeightOf = (fontSize: number) => Math.round(fontSize * 1.15);
 
 /** Every score the bands can produce, at one decimal. */
 const everyScore = () => {
@@ -59,26 +81,43 @@ describe('the number fits the circle', () => {
     expect(scores).toContain(7);
   });
 
+  /** Inside the circle with a tenth of the available chord still empty either side. */
+  const fitsFramed = (text: string, size: ScoreBadgeSize) => {
+    const { diameter, fontSize } = scoreBadgeMetrics(size);
+    const available = chordWidth(diameter, lineHeightOf(fontSize));
+    return { width: widthOf(text, fontSize), limit: available * 0.9 };
+  };
+
   it.each(SIZES)('fits every score at size %s', (size) => {
     atFontScale(1);
-    const { diameter, fontSize } = scoreBadgeMetrics(size);
-    expect(diameter).toBe(theme.layout.scoreBadge[size]);
+    expect(scoreBadgeMetrics(size).diameter).toBe(theme.layout.scoreBadge[size]);
 
     for (const score of everyScore()) {
-      const width = widthOf(formatScore(score), fontSize);
-      expect(width).toBeLessThanOrEqual(diameter * 0.8);
+      const { width, limit } = fitsFramed(formatScore(score), size);
+      expect(width).toBeLessThanOrEqual(limit);
     }
   });
 
   it.each(SIZES)('still fits at size %s when the user has enlarged text', (size) => {
     atFontScale(2);
-    const { diameter, fontSize } = scoreBadgeMetrics(size);
+    const { diameter } = scoreBadgeMetrics(size);
 
     // The badge grows with the text, up to its own ceiling, so the ratio that
     // guarantees the fit is preserved rather than broken by the first user who
     // turns type size up.
     expect(diameter).toBeGreaterThan(theme.layout.scoreBadge[size]);
-    expect(widthOf('10.0', fontSize)).toBeLessThanOrEqual(diameter * 0.8);
+    const { width, limit } = fitsFramed('10.0', size);
+    expect(width).toBeLessThanOrEqual(limit);
+  });
+
+  it('would notice a badge sized for the common score rather than the longest', () => {
+    atFontScale(1);
+    // The defect, restated as a measurement: `sm` was a 36pt circle carrying 15pt
+    // type, which holds `8.7` and does not hold `10.0`. Both numbers are the ones
+    // that actually shipped.
+    const available = chordWidth(36, lineHeightOf(15));
+    expect(widthOf('8.7', 15)).toBeLessThanOrEqual(available * 0.9);
+    expect(widthOf('10.0', 15)).toBeGreaterThan(available * 0.9);
   });
 
   it('is one type size per badge, so a column of scores stays even', () => {
@@ -86,8 +125,7 @@ describe('the number fits the circle', () => {
     // `8.7` and `10.0` set in different sizes would undo the tabular figures at
     // exactly the row where they matter, so the badge sizes for the longest string
     // and uses that size for all of them.
-    const { fontSize, diameter } = scoreBadgeMetrics('md');
-    expect(widthOf('10.0', fontSize)).toBeLessThanOrEqual(diameter * 0.8);
+    const { fontSize } = scoreBadgeMetrics('md');
     expect(widthOf('8.7', fontSize)).toBeLessThan(widthOf('10.0', fontSize));
   });
 });

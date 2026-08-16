@@ -15,6 +15,12 @@ export type ActivityReaction = {
   count: number;
   /** Whether the signed-in user is one of them. */
   mine: boolean;
+  /** The distinct glyphs present, most common first (PRD §14). */
+  glyphs?: string[];
+  /** At most two, for "Jerry and Beth". Never includes the reader. */
+  names?: string[];
+  /** Reactors beyond the named ones, already netted off. */
+  others?: number;
   onPress: () => void;
 };
 
@@ -173,6 +179,29 @@ export function ActivityRow({
         </View>
       ) : null}
 
+      {/* PRD §14: the glyphs present, at most two names, then a residual count.
+          Never a per-kind tally, and never anything that could be aggregated onto a
+          person — `disagree` in particular is countable on the activity it belongs
+          to and nowhere else, which is the difference between banter and a
+          scoreboard. */}
+      {reaction && reaction.count > 0 ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={reactionSummaryLabel(reaction)}
+          onPress={reaction.onPress}
+          style={({ pressed }) => [styles.reactors, pressed && styles.pressed]}
+        >
+          {reaction.glyphs?.length ? (
+            <Text variant="footnote" accessibilityElementsHidden>
+              {reaction.glyphs.join(' ')}
+            </Text>
+          ) : null}
+          <Text variant="footnote" tone="secondary" numberOfLines={1}>
+            {reactorSummary(reaction)}
+          </Text>
+        </Pressable>
+      ) : null}
+
       <View style={styles.actions}>
         {reaction ? (
           <IconAction
@@ -180,7 +209,7 @@ export function ActivityRow({
             active={reaction.mine}
             label={
               reaction.mine
-                ? `You reacted to ${filmName}. Remove your reaction.`
+                ? `You reacted to ${filmName}. Change or remove your reaction.`
                 : `React to ${actorName}'s activity about ${filmName}`
             }
             badge={reaction.count > 0 ? String(reaction.count) : undefined}
@@ -214,6 +243,27 @@ export function ActivityRow({
     </View>
   );
 }
+
+/**
+ * "Jerry and Beth", or "Jerry, Beth and 4 others".
+ *
+ * Two names then a residual, which is PRD §14 and Messenger's pattern. Naming
+ * everyone turns a friendly row into a list, and naming nobody makes a number that
+ * says less than one name would.
+ */
+function reactorSummary({ names = [], others = 0, count }: ActivityReaction) {
+  // Nobody to name means the only reactor is the reader themselves, or the
+  // reactors' profiles did not resolve. A count is the honest fallback.
+  if (!names.length) return count === 1 ? '1 reaction' : `${count} reactions`;
+
+  const named = names.length === 1 ? names[0] : `${names[0]} and ${names[1]}`;
+  if (others <= 0) return named;
+  return `${named} and ${others} ${others === 1 ? 'other' : 'others'}`;
+}
+
+/** The same sentence, plus what pressing it does. */
+const reactionSummaryLabel = (reaction: ActivityReaction) =>
+  `${reactorSummary(reaction)} reacted. Open reactions.`;
 
 /**
  * An action as an icon.
@@ -278,6 +328,12 @@ const styles = StyleSheet.create({
   // Indented to the poster's right edge, so a note reads as belonging to the row
   // above it rather than starting a new one.
   note: { paddingLeft: theme.poster.xs.width + theme.space[3] },
+  reactors: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[2],
+    paddingLeft: theme.poster.xs.width + theme.space[3],
+  },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',

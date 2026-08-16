@@ -7,7 +7,14 @@ import { useCurrentProfile } from '@/features/auth';
 import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
+import { ReactionPicker } from '@/features/feed/ReactionPicker';
 import { useFeed, type FeedItem } from '@/features/feed/use-feed';
+import {
+  REACTION_GLYPH,
+  useReactions,
+  useSetReaction,
+  type ReactionKind,
+} from '@/features/feed/use-reactions';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { ActivityRow, AppHeader, EmptyState, Screen, SkeletonRow } from '@/ui/components';
@@ -23,6 +30,21 @@ export default function FeedScreen() {
   const watchlist = useWatchlist(profile.id);
   const watched = useWatched(profile.id);
   const [busy, setBusy] = useState<string | null>(null);
+  const [reactingTo, setReactingTo] = useState<string | null>(null);
+
+  const eventIds = useMemo(() => (feed.data ?? []).map((event) => event.id), [feed.data]);
+  const reactions = useReactions(eventIds, profile.id);
+  const { setReaction } = useSetReaction(profile.id);
+
+  const choose = async (kind: ReactionKind | null) => {
+    const eventId = reactingTo;
+    if (!eventId) return;
+    setReactingTo(null);
+    const result = await setReaction(eventId, kind);
+    if (!result.ok && result.message) {
+      Alert.alert('Could not save your reaction', result.message);
+    }
+  };
 
   const saved = useMemo(
     () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
@@ -127,12 +149,32 @@ export default function FeedScreen() {
               }
               inWatchlist={event.mediaItemId ? saved.has(event.mediaItemId) : false}
               onPressShare={event.mediaItemId ? () => void shareTitle(event) : undefined}
+              reaction={reactionFor(event.id)}
             />
           ))
         )}
       </ScrollView>
+
+      <ReactionPicker
+        visible={reactingTo !== null}
+        current={reactingTo ? (reactions.data?.get(reactingTo)?.mine ?? null) : null}
+        onClose={() => setReactingTo(null)}
+        onChoose={(kind) => void choose(kind)}
+      />
     </Screen>
   );
+
+  function reactionFor(eventId: string) {
+    const summary = reactions.data?.get(eventId);
+    return {
+      count: summary?.total ?? 0,
+      mine: Boolean(summary?.mine),
+      glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
+      names: summary?.names ?? [],
+      others: summary?.others ?? 0,
+      onPress: () => setReactingTo(eventId),
+    };
+  }
 }
 
 const VERB: Record<FeedItem['type'], string> = {

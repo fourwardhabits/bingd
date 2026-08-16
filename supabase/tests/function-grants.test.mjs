@@ -91,6 +91,13 @@ const ALLOWED = {
   'public_notes(uuid[],uuid[],integer)': ['authenticated'],
   'community_score(uuid)': ['authenticated'],
 
+  // Added 2026-08-16 with reactions (PRD §14). The only writer for a table that has
+  // a select policy and, deliberately, no insert policy: a policy cannot express
+  // "and only on an event you are allowed to see", which is the check that stops a
+  // leaked event id becoming a way to put your name against a private account's
+  // activity.
+  'set_reaction(uuid,uuid,text)': ['authenticated'],
+
   // Added 2026-08-15 with avatar upload. Writes only the caller's own
   // profiles.avatar_path, and only to a path under the caller's own uuid
   // folder, so the grant buys no reach over anybody else's row. Not anon: it

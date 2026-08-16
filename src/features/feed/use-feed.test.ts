@@ -233,9 +233,9 @@ describe('the note attached to an activity', () => {
       { user_id: 'friend', media_item_id: 'film-2', note: 'the right one', has_spoilers: true },
     ];
 
-    const items = await load();
-    expect(items[0].note).toBeNull();
-    expect(items[1].note).toEqual({ text: 'the right one', hasSpoilers: true });
+    const [mine, theirs] = await load();
+    expect(mine?.note).toBeNull();
+    expect(theirs?.note).toEqual({ text: 'the right one', hasSpoilers: true });
   });
 
   it('keeps the feed when the note read fails', async () => {
