@@ -114,11 +114,30 @@ const POPULARITY_CEILING = 500;
 /** A slate. Twenty is what `recommendations.md` §2 specifies and the wall shows. */
 export const SLATE_SIZE = 20;
 
-/** No single genre may exceed this share of a slate. */
+/**
+ * The two ceilings, and what they are ceilings *on*.
+ *
+ * Both are absolute counts against the requested limit — at most four titles from one
+ * anchor, at most `ceil(limit × 0.4)` from one primary genre — and **not** shares of
+ * whatever the wall ends up being. The distinction is not pedantry: the ceilings are
+ * hard, so a narrow candidate pool produces a short wall, and four of an eight-item
+ * wall is half of it while still being the four the quota allowed.
+ *
+ * Independent review caught the documentation claiming the share reading while the
+ * code enforced the count. The count is the enforceable one — a greedy pass cannot
+ * know the final length while it is deciding — so the count is what everything now
+ * says, and `maxPerAnchor`/`maxPerGenre` below are exported so a caller can assert on
+ * the same numbers the code uses.
+ */
 const MAX_GENRE_SHARE = 0.4;
-
-/** Nor may a single anchor contribute more than this many titles. */
 const MAX_PER_ANCHOR = 4;
+
+/** At most this many slate entries may name the same anchor as their lead. */
+export const maxPerAnchor = () => MAX_PER_ANCHOR;
+
+/** At most this many may share a primary genre, for a wall of `limit`. */
+export const maxPerGenre = (limit: number = SLATE_SIZE) =>
+  Math.max(1, Math.ceil(limit * MAX_GENRE_SHARE));
 
 // ---------------------------------------------------------------------------
 // Taste
@@ -375,7 +394,7 @@ export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE)
   // wall. That is the honest outcome and in practice a rare one: the trending
   // fallback contributes twenty candidates with no anchor at all, and a candidate
   // with no lead anchor counts against no anchor's ceiling.
-  pass(byScore, Math.max(1, Math.ceil(limit * MAX_GENRE_SHARE)), MAX_PER_ANCHOR);
+  pass(byScore, maxPerGenre(limit), MAX_PER_ANCHOR);
 
   return chosen;
 }

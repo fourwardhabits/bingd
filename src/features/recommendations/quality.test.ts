@@ -3,7 +3,15 @@ import { join } from 'node:path';
 
 import catalogue from '../../../supabase/seed/catalogue.json';
 
-import { buildSlate, tasteFrom, type Anchor, type Candidate, type Taste } from './rank';
+import {
+  buildSlate,
+  maxPerAnchor,
+  maxPerGenre,
+  tasteFrom,
+  type Anchor,
+  type Candidate,
+  type Taste,
+} from './rank';
 
 /**
  * Does For You actually recommend anything, or does it merely return twenty rows?
@@ -166,6 +174,8 @@ const measure = (viewer: Viewer) => {
       (item) => item.explanation.total <= 0 || !item.explanation.lead,
     ).length,
     distinct: new Set(slate.map((item) => item.mediaItemId)).size,
+    topAnchor: Math.max(0, ...perAnchor.values()),
+    topGenre: Math.max(0, ...perGenre.values()),
     topAnchorShare: share(Math.max(0, ...perAnchor.values()), slate.length),
     topGenreShare: share(Math.max(0, ...perGenre.values()), slate.length),
     anchorLed: share(
@@ -215,15 +225,15 @@ describe('recommendation quality', () => {
   });
 
   it('does not let one favourite own the wall', () => {
-    // "Twenty sequels because of one rating", measured against the cap the diversity
-    // pass actually applies: four in twenty of the *chosen* items.
-    expect(overfit.topAnchorShare).toBeLessThanOrEqual(0.2);
-    expect(broad.topAnchorShare).toBeLessThanOrEqual(0.2);
+    // "Twenty sequels because of one rating", against the quota the pass applies.
+    // A count, not a share: the ceilings are absolute, so a short wall has a higher
+    // share of the same allowed number. Independent review caught the documentation
+    // saying share where the code enforced count.
+    for (const measured of all) expect(measured.topAnchor).toBeLessThanOrEqual(maxPerAnchor());
   });
 
   it('does not let one genre own the wall', () => {
-    expect(overfit.topGenreShare).toBeLessThanOrEqual(0.4);
-    expect(broad.topGenreShare).toBeLessThanOrEqual(0.4);
+    for (const measured of all) expect(measured.topGenre).toBeLessThanOrEqual(maxPerGenre());
   });
 
   it('is not the popularity list wearing a different title', () => {
@@ -286,13 +296,13 @@ threshold quoted below. A metric nobody can fail is a metric nobody reads.
 
 ## Reading it
 
-**Top anchor share** is the failure the brief names first — twenty sequels because of
-one rating — measured over the rendered slate, which is now the only slate there is.
-Two earlier versions were softer: one measured over the "chosen" items while a
-readmitted tail rendered alongside them, and one relaxed the ceiling by half to keep
-the wall full. Both made this number a claim the code could break, and independent
-review caught each. **The ceilings are hard now**, and a wall short of twenty is the
-honest outcome when the candidate pool cannot fill it under them. Asserted at ≤ 20%.
+**Top anchor** is the failure the brief names first — twenty sequels because of one
+rating. It is a **count, not a share**, and the shares in the table are shown for
+reading rather than asserted. That took three rounds of review to land on: the caps
+are absolute quotas against the requested twenty, a greedy pass cannot know the final
+length while it is deciding, and the ceilings being hard means a narrow pool yields a
+*short* wall — where four of eight is half the wall and still the four the quota
+allowed. Asserted at ≤ 4 per anchor and ≤ 8 per primary genre.
 
 **Overlap with cold start** is the one that decides whether this is a recommender at
 all. The cold-start viewer has no anchors, so their wall is the popularity prior and
