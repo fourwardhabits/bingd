@@ -1,7 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
+import { Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { theme } from '@/ui/tokens';
+
+/**
+ * The bar's own height, before the system inset is added to it.
+ *
+ * 49 is React Navigation's iOS figure and is left alone there. Android gets 56: the
+ * icons are the same size, but the gesture pill or the three-button strip sits
+ * directly under the bar rather than beside it, and 49 leaves the labels touching it.
+ */
+const TAB_BAR_HEIGHT = Platform.OS === 'android' ? 56 : 49;
 
 /**
  * Feed · Collection · + · Recommendations · Profile — founder decision,
@@ -12,19 +23,43 @@ import { theme } from '@/ui/tokens';
  * there is no separate Search tab.
  */
 export default function TabsLayout() {
+  const insets = useSafeAreaInsets();
+
+  /**
+   * SDK 57 draws Android edge to edge, so the tab bar's box reaches the bottom of the
+   * display and the system navigation sits over its lower strip. The bar has to be
+   * tall enough to hold both: its own content, and the inset underneath it.
+   *
+   * The previous version set no height at all, reasoning that any height overrides the
+   * navigator's `49 + insets.bottom` and stops the bar covering the system navigation.
+   * That was right about the failure and wrong about the remedy — the answer is not to
+   * omit the height but to put the inset *into* it. A height without the inset crops
+   * the bar; a height with it keeps the coverage and lifts the icons clear.
+   *
+   * `paddingBottom` is what actually moves the content up; the height is what stops
+   * that padding eating the icons. Both are needed, and on iOS neither is: the
+   * navigator is already correct there, and overriding it would only add a second
+   * opinion for no gain.
+   */
+  const androidInsets =
+    Platform.OS === 'android'
+      ? {
+          height: TAB_BAR_HEIGHT + insets.bottom,
+          paddingBottom: insets.bottom,
+          paddingTop: theme.space[1],
+        }
+      : null;
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: theme.semantic.action,
         tabBarInactiveTintColor: theme.text.tertiary,
-        // No `height` here, deliberately. Setting one overrides the navigator's
-        // own `49 + insets.bottom` and the bar stops covering the Android
-        // system navigation bar, leaving its buttons on a strip of whatever is
-        // behind them. The colour is all this needs to say.
         tabBarStyle: {
           backgroundColor: theme.surface.raised,
           borderTopColor: theme.border.hairline,
+          ...androidInsets,
         },
         tabBarLabelStyle: theme.typography.caption,
       }}

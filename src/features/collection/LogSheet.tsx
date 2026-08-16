@@ -2,8 +2,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
+import { invalidateAfterCollectionChange } from './invalidate';
 import { diagnose } from '@/lib/diagnose';
-import { queryKeys } from '@/lib/query';
 import { useCurrentProfile } from '@/features/auth';
 import { theme } from '@/ui/tokens';
 import {
@@ -192,11 +192,10 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
   const spoilers = spoilersEdit ?? state.noteSpoilers;
   const effectiveDate = dateEdit ?? state.watchedOn ?? today();
 
-  const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.title(title.id) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.logState(profile.id, title.id) });
-  };
+  // Logging is a collection change like any other: it writes a feed event, moves the
+  // watchlist, and changes what this reader has watched. The same set as ranking.
+  const refresh = () =>
+    invalidateAfterCollectionChange(queryClient, profile.id, title.id);
 
   const report = (result: WriteResult) => {
     if (result.outcome === 'ranked') {

@@ -111,14 +111,13 @@ const open = async () => {
 };
 
 describe('a title nobody has ranked', () => {
-  it('makes the badge itself the way in, with no second Rank button beside it', async () => {
+  it('offers a visible Rank button, never an invisible tappable area', async () => {
+    // The badge-only version was a hotspot: tappable, with nothing saying so. The
+    // control is now labelled and present in both states, in the same place.
     const view = await open();
 
-    // The founder's device test found a button and a badge doing the same job.
-    // The badge is the control: dashed, labelled, and the only one.
-    expect(view.getByLabelText('Not ranked. Rank this title.')).toBeTruthy();
-    expect(view.queryByLabelText('Rank this title')).toBeNull();
-    expect(view.queryByLabelText('Ranked. Rank again.')).toBeNull();
+    expect(view.getByLabelText('Rank this title')).toBeTruthy();
+    expect(view.queryByLabelText('Ranked. Change your rating.')).toBeNull();
   });
 
   it('puts the genres under the description rather than over the artwork', async () => {
@@ -164,6 +163,12 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByText('#1 in Movies')).toBeTruthy());
   });
 
+  it('shows a Ranked control that leads back into the rating flow', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('Ranked. Change your rating.')).toBeTruthy());
+    expect(view.getByText('Ranked')).toBeTruthy();
+  });
+
   it('puts the watch date where it answers "have I seen this"', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText(/Watched/)).toBeTruthy());
@@ -194,6 +199,15 @@ describe('the community score', () => {
     expect(view.getByText('12 ratings')).toBeTruthy();
   });
 
+  it('lives in its own section rather than beside the reader’s own score', async () => {
+    // The two were the same shape at the same weight in the hero, one about you and
+    // one about the room. The hero answers "what did I think" now.
+    mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Scores')).toBeTruthy());
+  });
+
   it('never calls the aggregate a rank', async () => {
     mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
     const view = await open();
@@ -208,7 +222,8 @@ describe('the community score', () => {
     mockRpcResults.community_score = [{ score: null, rating_count: 2, min_ratings: 3 }];
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('2 so far · 1 more')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('2 ratings · 1 more needed')).toBeTruthy());
+    // Never a zero, and never a real number faded to say "do not trust this".
     expect(view.queryByText('0.0')).toBeNull();
   });
 

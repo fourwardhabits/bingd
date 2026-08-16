@@ -7,6 +7,7 @@ import { formatGenreRank, genreRanksFor } from '@/features/collection/genre-rank
 import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
 import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
 import { posterUri } from '@/lib/images';
+import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { useReducedMotion } from '@/ui/motion';
@@ -94,18 +95,12 @@ function Session({
 
       setStep(next);
       if (next.state === 'placed') {
-        // The position is the server's, and it changed this category and this collection.
-        // Nothing else needs to know (client.md §3).
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.rankings(profile.id, next.category),
+        // Everything a finished ranking changes, named in one place so the two
+        // writers cannot drift. This used to be three keys inline, and the feed was
+        // not among them — which is why a just-ranked film did not appear in it.
+        invalidateAfterCollectionChange(queryClient, profile.id, subject.id, {
+          category: next.category,
         });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) });
-        // The title's own key holds a separate watchlist probe, and ranking now takes
-        // the title off the watchlist server-side (20260815040000). Without this the
-        // page the user ranked *from* keeps saying "In watchlist" until the 60s
-        // staleTime lapses — the server rule would be right and the screen wrong,
-        // which is the bug the invariant exists to fix wearing a different hat.
-        void queryClient.invalidateQueries({ queryKey: queryKeys.title(subject.id) });
       }
     },
     [profile.id, queryClient, subject.id],

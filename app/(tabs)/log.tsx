@@ -101,6 +101,10 @@ export default function LogScreen() {
   return (
     <Screen>
       <AppHeader />
+      {/* The brand header ends here. Everything below is body — the search field
+          included, which is where the founder placed it: it is the first thing you
+          act on, not part of the persistent chrome. */}
+      <HeaderBoundary />
       <View style={styles.field}>
         <SearchField
           accessibilityLabel="Search"
@@ -130,11 +134,6 @@ export default function LogScreen() {
           ))}
         </View>
       )}
-
-      {/* After the filters, not after the header: on this screen the search field
-          and the kind chips are both controls, so the seam belongs below all of
-          them rather than in the middle of the control region. */}
-      <HeaderBoundary />
 
       <Results
         idle={idle}

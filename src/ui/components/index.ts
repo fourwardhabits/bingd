@@ -14,6 +14,7 @@ export { HeaderBoundary } from './HeaderBoundary';
 export { FeaturedCard, type FeaturedCardProps } from './FeaturedCard';
 export { LoadingScreen, type LoadingScreenProps } from './LoadingScreen';
 export { MediumSelector, type Medium } from './MediumSelector';
+export { PersonalState, type PersonalStateProps } from './PersonalState';
 export { Poster } from './Poster';
 export {
   PosterGrid,
@@ -26,6 +27,7 @@ export { Screen } from './Screen';
 export { Sheet, SheetRow, type SheetProps, type SheetRowProps } from './Sheet';
 export { ScoreBadge, type ScoreBadgeProps, type ScoreBadgeSize } from './ScoreBadge';
 export { ScorePanel, type ScorePanelProps } from './ScorePanel';
+export { ScoresSection, type ScoresSectionProps } from './ScoresSection';
 export { SearchField, type SearchFieldProps } from './SearchField';
 export { SectionHeader, type SectionHeaderProps } from './SectionHeader';
 export { SegmentedTabs, type SegmentOption } from './SegmentedTabs';

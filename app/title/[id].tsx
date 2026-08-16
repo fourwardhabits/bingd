@@ -17,7 +17,8 @@ import { useCredits } from '@/features/title/use-credits';
 import { useTitleEnrichment } from '@/features/title/use-enrichment';
 import { useTitleNotes, useTitleVideos } from '@/features/title/use-title-extras';
 import { diagnose } from '@/lib/diagnose';
-import { backdropUri, posterUri, profileUri, videoUri } from '@/lib/images';
+import { heroArtwork } from '@/lib/hero';
+import { posterUri, profileUri, videoUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { fullTitle } from '@/lib/titles';
@@ -27,9 +28,10 @@ import {
   Chip,
   EmptyState,
   LoadingScreen,
+  PersonalState,
   Poster,
   Screen,
-  ScorePanel,
+  ScoresSection,
   SectionHeader,
   SegmentedTabs,
   SpoilerNote,
@@ -98,7 +100,9 @@ export default function TitleScreen() {
       const { data, error: titleError } = await supabase
         .from('media_items')
         .select(
-          'id, kind, title, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, parent:parent_id(id, title)',
+          // The parent's artwork comes with it: a season has no backdrop of its own
+          // (TMDB publishes none) and borrows the series' — see `lib/hero.ts`.
+          'id, kind, title, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, parent:parent_id(id, title, poster_path, backdrop_path)',
         )
         .eq('id', id ?? '')
         .single();
@@ -221,6 +225,14 @@ export default function TitleScreen() {
 
   const title = data.title;
   const parent = Array.isArray(title.parent) ? title.parent[0] : title.parent;
+  // A season borrows its series' key art, because TMDB publishes no season backdrop
+  // and the page was rendering its collapsed band for every one of them.
+  const hero = heroArtwork({
+    backdropPath: title.backdrop_path,
+    posterPath: title.poster_path,
+    parentBackdropPath: parent?.backdrop_path ?? null,
+    parentPosterPath: parent?.poster_path ?? null,
+  });
   // The page shows the series' own name in the hierarchy above the season, so the
   // heading itself stays short: "Season 2", under "Parks and Recreation".
   const displayTitle = fullTitle(
@@ -317,7 +329,11 @@ export default function TitleScreen() {
         }}
       />
       <ScrollView contentContainerStyle={styles.content}>
-        <TitleHero uri={backdropUri(title.backdrop_path, 'hero')} collapsedHeight={HERO_COLLAPSED} />
+        <TitleHero
+          uri={hero.uri}
+          blurred={hero.treatment === 'poster'}
+          collapsedHeight={HERO_COLLAPSED}
+        />
 
         {/* The poster rises into the hero and the score sits opposite it, so the
             two anchor the same band rather than stacking. Negative margin rather
@@ -326,23 +342,17 @@ export default function TitleScreen() {
           <View style={styles.posterFrame}>
             <Poster uri={posterUri(title.poster_path, 'card')} title={title.title} size="lg" />
           </View>
+          {/* My relationship to this title, and nothing else. The community's
+              number moved to its own section further down — beside this one the two
+              were the same shape at the same weight, and the reader's own score is
+              what this half of the page is for. */}
           <View style={styles.scoreColumn}>
-            <ScorePanel
-              yourScore={score}
-              yourBucket={data.ranked?.bucket ?? null}
-              onRank={rankable ? openLog : undefined}
-              ordinal={
-                data.ranked && total ? `#${data.ranked.position} in ${rankCategory}` : null
-              }
-              community={
-                community.data && !isSeries
-                  ? {
-                      score: community.data.score,
-                      ratingCount: community.data.ratingCount,
-                      minRatings: community.data.minRatings,
-                    }
-                  : null
-              }
+            <PersonalState
+              score={score}
+              bucket={data.ranked?.bucket ?? null}
+              ordinal={data.ranked && total ? `#${data.ranked.position} in ${rankCategory}` : null}
+              onPress={openLog}
+              rankable={rankable}
             />
           </View>
         </View>
@@ -374,30 +384,17 @@ export default function TitleScreen() {
           </Text>
         </View>
 
-        <View style={styles.actions}>
-          <IconAction
-            icon={isWatchlisted ? 'bookmark' : 'bookmark-outline'}
-            label={isWatchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
-            selected={isWatchlisted}
-            onPress={() => void toggleWatchlist()}
-            disabled={watchlistBusy}
-          />
-          <IconAction
-            icon="share-outline"
-            label={`Share ${title.title}`}
-            onPress={() => void shareTitle()}
-          />
-          {watchedDate ? (
-            <Text variant="footnote" tone="secondary" style={styles.watched}>
-              Watched {watchedDate}
-            </Text>
-          ) : null}
-        </View>
-
-        {companions.data?.length ? (
+        {watchedDate || companions.data?.length ? (
           <View style={styles.block}>
             <Text variant="footnote" tone="secondary">
-              Watched with {companions.data.map((person) => person.name).join(', ')}
+              {[
+                watchedDate ? `Watched ${watchedDate}` : null,
+                companions.data?.length
+                  ? `with ${companions.data.map((person) => person.name).join(', ')}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' ')}
             </Text>
           </View>
         ) : null}
@@ -431,6 +428,29 @@ export default function TitleScreen() {
             ))}
           </View>
         ) : null}
+
+        {/* A deliberate row rather than two glyphs floating under the title.
+            Rank is not here — it belongs opposite the poster, with the score it
+            changes, and a second Rank affordance is the duplication the founder
+            already rejected once. */}
+        <View style={styles.actionRow}>
+          <RowAction
+            icon={isWatchlisted ? 'bookmark' : 'bookmark-outline'}
+            label={isWatchlisted ? 'Saved' : 'Watchlist'}
+            accessibilityLabel={
+              isWatchlisted ? `Remove ${title.title} from your watchlist` : `Add ${title.title} to your watchlist`
+            }
+            selected={isWatchlisted}
+            onPress={() => void toggleWatchlist()}
+            disabled={watchlistBusy}
+          />
+          <RowAction
+            icon="share-outline"
+            label="Share"
+            accessibilityLabel={`Share ${title.title}`}
+            onPress={() => void shareTitle()}
+          />
+        </View>
 
         {actionError ? (
           <View style={styles.block}>
@@ -541,6 +561,23 @@ export default function TitleScreen() {
           </View>
         ) : null}
 
+        {/* Everyone else's number, well below the reader's own. A series has no
+            aggregate of its own — it cannot be ranked (PRD §10) — so it gets no
+            section rather than a permanent "No ratings yet". */}
+        {!isSeries ? (
+          <ScoresSection
+            community={
+              community.data
+                ? {
+                    score: community.data.score,
+                    ratingCount: community.data.ratingCount,
+                    minRatings: community.data.minRatings,
+                  }
+                : null
+            }
+          />
+        ) : null}
+
         {/* Notes, called notes. They are not reviews — nobody wrote them as one —
             and the tab that used to say so was one person's private sentence with a
             magazine's word on top of it. */}
@@ -633,15 +670,25 @@ function Detail({ label, value }: { label: string; value: string | null }) {
   );
 }
 
-function IconAction({
+/**
+ * One action in the row under the description.
+ *
+ * Icon first with a word beside it, rather than a bare glyph. The bare version was
+ * what made these read as floating: a bookmark on its own says nothing about whether
+ * it is a state or a button, and "Saved" versus "Watchlist" is the whole difference
+ * the control exists to show.
+ */
+function RowAction({
   icon,
   label,
+  accessibilityLabel,
   onPress,
   disabled = false,
   selected,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
+  accessibilityLabel: string;
   onPress: () => void;
   disabled?: boolean;
   selected?: boolean;
@@ -649,14 +696,21 @@ function IconAction({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled, ...(selected === undefined ? {} : { selected }) }}
       onPress={onPress}
       disabled={disabled}
       hitSlop={theme.space[2]}
-      style={({ pressed }) => [styles.iconAction, (pressed || disabled) && styles.pressed]}
+      style={({ pressed }) => [
+        styles.rowAction,
+        selected && styles.rowActionOn,
+        (pressed || disabled) && styles.pressed,
+      ]}
     >
-      <Ionicons name={icon} size={theme.layout.icon.md} color={theme.semantic.action} />
+      <Ionicons name={icon} size={theme.layout.icon.sm} color={theme.semantic.action} />
+      <Text variant="callout" tone="action">
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -726,14 +780,26 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[4],
     gap: theme.space[1],
   },
-  actions: {
+  actionRow: {
+    flexDirection: 'row',
+    gap: theme.space[3],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[4],
+  },
+  rowAction: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.space[4],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
+    gap: theme.space[2],
+    minHeight: theme.layout.minTapTarget,
+    paddingHorizontal: theme.space[4],
+    borderRadius: theme.radius.control,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
+    backgroundColor: theme.surface.raised,
   },
-  watched: { flex: 1, textAlign: 'right' },
+  // Saved reads as a held state, so it takes the warm surface rather than a second
+  // colour the palette does not have to spend.
+  rowActionOn: { backgroundColor: theme.surface.sunken, borderColor: theme.semantic.action },
   block: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
@@ -745,12 +811,6 @@ const styles = StyleSheet.create({
     gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
-  },
-  iconAction: {
-    width: theme.layout.minTapTarget,
-    height: theme.layout.minTapTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   tabs: {
     marginTop: theme.space[5],

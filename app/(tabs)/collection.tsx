@@ -17,6 +17,7 @@ import { readPref, writePref } from '@/lib/prefs';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
+  HeaderBoundary,
   EmptyState,
   MediumSelector,
   Screen,
@@ -116,6 +117,10 @@ export default function CollectionScreen() {
       <AppHeader />
       <MediumSelector value={medium} onChange={setMedium} />
       <SegmentedTabs options={segments} value={active} onChange={setSegment} />
+      {/* Beneath the Movies/TV and Watched/Watchlist controls, which are both
+          navigation: the same seam Feed and Log use, in the analogous place. The
+          information architecture is untouched. */}
+      <HeaderBoundary />
 
       {active === 'watched' && showNudge ? (
         <View style={styles.nudge}>

@@ -110,6 +110,38 @@ describe('the watchlist action', () => {
   });
 });
 
+/**
+ * American Pie showed in the Feed with no runtime while other films had one.
+ *
+ * The cause is upstream and not a mapping bug: the row came from TMDB *search*, which
+ * returns no runtime, and detail enrichment only runs when someone opens the title
+ * page — which nobody had. `runtime_minutes` is genuinely null for 55 of 440 films.
+ *
+ * What the row owes is that one absent optional field costs exactly that field, and
+ * never a stray separator or a collapsed line.
+ */
+describe('incomplete metadata', () => {
+  it('shows the genre alone when the runtime is missing, with no dangling separator', async () => {
+    const view = await render(<ActivityRow {...props} metadata="Comedy" />);
+
+    expect(view.getByText('Comedy')).toBeTruthy();
+    expect(view.queryByText(/·\s*$/)).toBeNull();
+    expect(view.queryByText(/^\s*·/)).toBeNull();
+  });
+
+  it('renders the row at all when there is no metadata line whatsoever', async () => {
+    const view = await render(<ActivityRow {...props} metadata={null} />);
+
+    expect(view.getByText(/Inception/)).toBeTruthy();
+    expect(view.getByText(/Suraj/)).toBeTruthy();
+  });
+
+  it('keeps the year when the metadata line is empty', async () => {
+    const view = await render(<ActivityRow {...props} metadata={null} year={1999} />);
+    expect(view.getByText(/1999/)).toBeTruthy();
+  });
+});
+
 describe('the share action', () => {
   it('is icon-first and carries no large text button', async () => {
     const onPressShare = jest.fn();

@@ -9,6 +9,18 @@ export type TitleHeroProps = {
   /** Height of the hero when there is no artwork, so the poster still overlaps
    *  something and the page does not become a different design. */
   collapsedHeight?: number;
+  /**
+   * Whether `uri` is a poster standing in for a backdrop (`lib/hero.ts`).
+   *
+   * A season has no backdrop of its own — TMDB does not publish one — so its hero
+   * borrows the series' key art, and where even that is missing it falls back to a
+   * poster. A poster in a 16:9 frame is the wrong shape by definition: cropping it
+   * gives a band of somebody's chin, and fitting it gives two grey bars. Blurring is
+   * what turns it into a *field* rather than a picture, which is all this surface
+   * needs to be — the sharp copy of the same image is already on screen, overlapping
+   * it, at the size it was drawn for.
+   */
+  blurred?: boolean;
 };
 
 /**
@@ -23,13 +35,18 @@ export type TitleHeroProps = {
  * the hero a banner with a page beneath it; the fade makes them one surface,
  * which is what lets the poster and the genre pills straddle the boundary.
  */
-export function TitleHero({ uri, blurhash, collapsedHeight = 72 }: TitleHeroProps) {
+export function TitleHero({
+  uri,
+  blurhash,
+  collapsedHeight = 72,
+  blurred = false,
+}: TitleHeroProps) {
   const { width } = useWindowDimensions();
   const height = width / theme.layout.aspect.backdrop;
 
-  // No backdrop is common — the seed catalogue ships without artwork of any
-  // kind. A short warm band is not a failure state and does not pretend to be
-  // an image: no grey box, and never the poster stretched to fill.
+  // No artwork at all is still common — the seed catalogue ships without any. A short
+  // warm band is not a failure state and does not pretend to be an image: no grey box,
+  // and never a poster stretched to fill.
   if (!uri) return <View style={[styles.collapsed, { height: collapsedHeight }]} />;
 
   return (
@@ -39,13 +56,26 @@ export function TitleHero({ uri, blurhash, collapsedHeight = 72 }: TitleHeroProp
         placeholder={blurhash ? { blurhash } : undefined}
         contentFit="cover"
         transition={theme.duration.navigation}
-        style={styles.fill}
+        // `blurRadius` is expo-image's own, so this costs no new native module and
+        // no fingerprint change. Held down at 0.9 opacity as well: a blurred poster
+        // at full strength is still the most saturated thing on a Paper page, and the
+        // point is a field for the real poster to sit on, not a second subject.
+        blurRadius={blurred ? POSTER_BLUR : 0}
+        style={[styles.fill, blurred && styles.dimmed]}
         accessibilityIgnoresInvertColors
       />
       <Scrim height={height} />
     </View>
   );
 }
+
+/**
+ * Enough to destroy the detail without turning the image to flat colour.
+ *
+ * Below about 20 a face is still legible and the eye reads it as a mistake; far above
+ * it the frame becomes one hue and stops being artwork at all.
+ */
+const POSTER_BLUR = 28;
 
 /**
  * A banded fade standing in for a gradient.
@@ -83,6 +113,7 @@ const SCRIM_SHARE = 0.42;
 const styles = StyleSheet.create({
   frame: { backgroundColor: theme.surface.sunken },
   fill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  dimmed: { opacity: 0.9 },
   scrim: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   collapsed: { backgroundColor: theme.surface.sunken },
 });
