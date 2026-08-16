@@ -2,47 +2,63 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { LogSheet, type LoggableTitle } from '@/features/collection/LogSheet';
+import { useCompanions } from '@/features/collection/use-companions';
 import { useTitleScore } from '@/features/collection/use-score';
+import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { useSeasons } from '@/features/search/use-title-search';
+import { useCommunityScore } from '@/features/title/use-community-score';
 import { useCredits } from '@/features/title/use-credits';
 import { useTitleEnrichment } from '@/features/title/use-enrichment';
-import { backdropUri, posterUri } from '@/lib/images';
+import { useTitleNotes, useTitleVideos } from '@/features/title/use-title-extras';
+import { backdropUri, posterUri, profileUri, videoUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
+import { fullTitle } from '@/lib/titles';
 import {
+  Avatar,
   CastStrip,
   Chip,
   EmptyState,
   LoadingScreen,
   Poster,
   Screen,
-  ScoreBadge,
+  ScorePanel,
+  SectionHeader,
   SegmentedTabs,
+  SpoilerNote,
   Text,
   TitleHero,
   TitleRow,
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
-type Tab = 'cast' | 'details' | 'reviews' | 'seasons';
+type Tab = 'cast' | 'videos' | 'details' | 'seasons';
 
 /**
- * The title page (screens.md §6).
+ * The title page (screens.md §6), rebuilt after the founder's device test.
  *
- * Ordered by what the person opening it is actually asking. Most visits are
- * someone deciding whether they have already seen this, so their own state
- * comes before the catalogue's: hero, identity, their rank and watch date, then
- * metadata, then the long content behind tabs.
+ * What that test rejected, and what replaced it:
  *
- * The hero is the app's one full-bleed surface, and the score badge is one of
- * only two chromatic elements permitted on a content surface (design-system.md
- * §1). Both exceptions are spent here on purpose.
+ *   - genre pills floating over the poster. They are metadata, not artwork, and
+ *     putting them on the hero made them compete with the one image on the screen.
+ *     They now sit under the description, in neutral chips, where genre is a fact
+ *     among facts.
+ *   - initials-only cast as the intended state. `CastStrip` renders TMDB portraits
+ *     and falls back to initials, rather than treating the fallback as the design.
+ *   - a Reviews tab that was one person's private note relabelled. Notes are social
+ *     content now, and they have a section of their own that says what they are.
+ *   - a duplicated Rank affordance — a button beside a badge, both doing the same
+ *     thing. The badge is the control.
+ *
+ * The hero is the app's one full-bleed surface and the score badge one of two
+ * chromatic elements permitted on a content surface (design-system.md §1). Both
+ * exceptions are spent here on purpose.
  */
 export default function TitleScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -70,13 +86,13 @@ export default function TitleScreen() {
         supabase
           .from('media_items')
           .select(
-            'id, kind, title, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language',
+            'id, kind, title, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, parent:parent_id(id, title)',
           )
           .eq('id', id ?? '')
           .single(),
         supabase
           .from('user_media')
-          .select('bucket, watched_on, note')
+          .select('bucket, watched_on, note, note_has_spoilers')
           .eq('user_id', profile.id)
           .eq('media_item_id', id ?? '')
           .maybeSingle(),
@@ -102,8 +118,14 @@ export default function TitleScreen() {
     },
   });
 
-  const credits = useCredits(data?.title?.id ?? null);
+  const titleId = data?.title?.id ?? null;
+  const credits = useCredits(titleId);
   const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
+  const videos = useTitleVideos(titleId);
+  const notes = useTitleNotes(titleId);
+  const community = useCommunityScore(titleId);
+  const watched = useWatched(profile.id);
+  const companions = useCompanions(profile.id, titleId);
   // Seeded rows arrive with no artwork, overview or credits. Opening the screen is
   // what fetches them, unless the bulk pass got there first.
   const { enriching } = useTitleEnrichment(data?.title ?? null);
@@ -121,6 +143,7 @@ export default function TitleScreen() {
         id: person.id,
         name: person.name,
         character: person.character,
+        avatarUri: profileUri(person.profilePath),
       })),
     [credits.data],
   );
@@ -158,6 +181,13 @@ export default function TitleScreen() {
   }
 
   const title = data.title;
+  const parent = Array.isArray(title.parent) ? title.parent[0] : title.parent;
+  // The page shows the series' own name in the hierarchy above the season, so the
+  // heading itself stays short: "Season 2", under "Parks and Recreation".
+  const displayTitle = fullTitle(
+    { kind: title.kind, title: title.title, seriesTitle: parent?.title ?? null },
+    { parentIsVisible: true },
+  );
   const isWatchlisted = Boolean(data.watchlist);
   const watchedDate = data.logged?.watched_on
     ? new Date(`${data.logged.watched_on}T00:00:00Z`).toLocaleDateString(undefined, {
@@ -171,14 +201,16 @@ export default function TitleScreen() {
   const { score, total } = titleScore;
   const rankable = title.kind === 'movie' || title.kind === 'season';
   const isSeries = title.kind === 'series';
-  const note = data.logged?.note ?? null;
+  const year = yearOf(title.release_date);
 
   // A tab whose content does not exist is not rendered. An always-empty tab is
-  // worse than a missing one: it invites a tap that leads nowhere.
+  // worse than a missing one: it invites a tap that leads nowhere. Videos is here
+  // for the same reason it is in the schema — the day the adapter is redeployed the
+  // tab appears by itself, and until then it does not pretend to.
   const tabs = [
     ...(cast.length ? [{ id: 'cast' as const, label: 'Cast' }] : []),
+    ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Videos' }] : []),
     { id: 'details' as const, label: 'Details' },
-    ...(note ? [{ id: 'reviews' as const, label: 'Reviews' }] : []),
     ...(isSeries && seasons.data?.length ? [{ id: 'seasons' as const, label: 'Seasons' }] : []),
   ];
   // The chosen tab may not exist for this title — a film has no Seasons —
@@ -191,9 +223,10 @@ export default function TitleScreen() {
     setLoggingTitle({
       id: title.id,
       title: title.title,
-      year: yearOf(title.release_date),
+      year,
       posterUri: posterUri(title.poster_path, 'card'),
       kind: title.kind,
+      seriesTitle: parent?.title ?? null,
     });
   };
 
@@ -245,38 +278,90 @@ export default function TitleScreen() {
         }}
       />
       <ScrollView contentContainerStyle={styles.content}>
-        <TitleHero
-          uri={backdropUri(title.backdrop_path, 'hero')}
-          collapsedHeight={HERO_COLLAPSED}
-        />
+        <TitleHero uri={backdropUri(title.backdrop_path, 'hero')} collapsedHeight={HERO_COLLAPSED} />
 
-        {/* Straddling the hero's bottom edge, which is what makes the image and
-            the page one object rather than a banner over a page. Genre is also
-            the single most useful fact about a film the user has not seen. */}
-        {title.genres?.length ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.pills}
-            style={styles.pillRow}
-          >
-            {title.genres.slice(0, 4).map((genre: string) => (
-              <Chip key={genre} label={genre} />
-            ))}
-          </ScrollView>
-        ) : null}
-
+        {/* The poster rises into the hero and the score sits opposite it, so the
+            two anchor the same band rather than stacking. Negative margin rather
+            than absolute positioning, so everything below still flows from it. */}
         <View style={styles.identity}>
-          <Poster uri={posterUri(title.poster_path, 'card')} title={title.title} size="lg" />
-          <View style={styles.identityCopy}>
-            <Text variant="title1">{title.title}</Text>
-            {yearOf(title.release_date) ? (
-              <Text variant="body" tone="secondary">
-                {yearOf(title.release_date)}
-              </Text>
-            ) : null}
+          <View style={styles.posterFrame}>
+            <Poster uri={posterUri(title.poster_path, 'card')} title={title.title} size="lg" />
+          </View>
+          <View style={styles.scoreColumn}>
+            <ScorePanel
+              yourScore={score}
+              yourBucket={data.ranked?.bucket ?? null}
+              onRank={rankable ? openLog : undefined}
+              ordinal={
+                data.ranked && total ? `#${data.ranked.position} in ${rankCategory}` : null
+              }
+              community={
+                community.data && !isSeries
+                  ? {
+                      score: community.data.score,
+                      ratingCount: community.data.ratingCount,
+                      minRatings: community.data.minRatings,
+                    }
+                  : null
+              }
+            />
           </View>
         </View>
+
+        <View style={styles.heading}>
+          {/* A season says which show it belongs to, above its own name. The feed
+              writes that as one string because it has no room; here there is a
+              hierarchy to put it in. */}
+          {parent?.title ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${parent.title}, the series this belongs to`}
+              onPress={() => router.push(`/title/${parent.id}`)}
+            >
+              <Text variant="callout" tone="action" numberOfLines={1}>
+                {parent.title}
+              </Text>
+            </Pressable>
+          ) : null}
+          <Text variant="title1">{displayTitle ?? title.title}</Text>
+          <Text variant="footnote" tone="secondary">
+            {[
+              year,
+              title.runtime_minutes ? `${title.runtime_minutes}m` : null,
+              credits.data?.director,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+        </View>
+
+        <View style={styles.actions}>
+          <IconAction
+            icon={isWatchlisted ? 'bookmark' : 'bookmark-outline'}
+            label={isWatchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
+            selected={isWatchlisted}
+            onPress={() => void toggleWatchlist()}
+            disabled={watchlistBusy}
+          />
+          <IconAction
+            icon="share-outline"
+            label={`Share ${title.title}`}
+            onPress={() => void shareTitle()}
+          />
+          {watchedDate ? (
+            <Text variant="footnote" tone="secondary" style={styles.watched}>
+              Watched {watchedDate}
+            </Text>
+          ) : null}
+        </View>
+
+        {companions.data?.length ? (
+          <View style={styles.block}>
+            <Text variant="footnote" tone="secondary">
+              Watched with {companions.data.map((person) => person.name).join(', ')}
+            </Text>
+          </View>
+        ) : null}
 
         {title.overview ? (
           <Pressable
@@ -298,59 +383,15 @@ export default function TitleScreen() {
           </Pressable>
         ) : null}
 
-        {/* One line, in the order a person would say it. Where Luma puts the
-            venue. */}
-        <View style={styles.block}>
-          <Text variant="footnote" tone="secondary">
-            {[
-              title.runtime_minutes ? `${title.runtime_minutes}m` : null,
-              credits.data?.director,
-              cast.slice(0, 2).map((person) => person.name).join(', ') || null,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </Text>
-        </View>
-
-        <View style={styles.state}>
-          <View style={styles.stateMain}>
-            {rankable ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={data.ranked ? 'Ranked. Rank again.' : 'Rank this title'}
-                onPress={openLog}
-                style={({ pressed }) => [styles.rankButton, pressed && styles.pressed]}
-              >
-                <Text variant="callout" tone="inverse">
-                  {data.ranked ? 'Ranked' : 'Rank'}
-                </Text>
-              </Pressable>
-            ) : null}
-            {watchedDate ? (
-              <Text variant="footnote" tone="secondary">
-                Watched {watchedDate}
-              </Text>
-            ) : null}
+        {/* Below the description, never over the artwork. Neutral chips, because
+            genre is a fact among facts here rather than a badge. */}
+        {title.genres?.length ? (
+          <View style={styles.pills}>
+            {title.genres.slice(0, 5).map((genre: string) => (
+              <Chip key={genre} label={genre} />
+            ))}
           </View>
-
-          {/* Dashed when logged but not compared, so the two controls read as
-              one sentence: Rank, then no score yet. Not a failure state. */}
-          {rankable ? (
-            <ScoreBadge score={score} bucket={data.ranked?.bucket ?? null} onPress={openLog} />
-          ) : null}
-
-          <IconAction
-            icon={isWatchlisted ? 'bookmark' : 'bookmark-outline'}
-            label={isWatchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
-            onPress={() => void toggleWatchlist()}
-            disabled={watchlistBusy}
-          />
-          <IconAction
-            icon="share-outline"
-            label={`Share ${title.title}`}
-            onPress={() => void shareTitle()}
-          />
-        </View>
+        ) : null}
 
         {actionError ? (
           <View style={styles.block}>
@@ -368,7 +409,40 @@ export default function TitleScreen() {
           />
         </View>
 
-        {activeTab === 'cast' ? <CastStrip cast={cast} /> : null}
+        {activeTab === 'cast' ? (
+          <CastStrip cast={cast} onPressMember={(member) => router.push(`/person/${member.id}`)} />
+        ) : null}
+
+        {activeTab === 'videos' && videos.data?.length ? (
+          <View style={styles.details}>
+            {videos.data.map((video) => (
+              <Pressable
+                key={video.id}
+                accessibilityRole="link"
+                accessibilityLabel={`Play ${video.name} on YouTube`}
+                onPress={() => {
+                  const uri = videoUri(video.key);
+                  if (uri) void Linking.openURL(uri);
+                }}
+                style={({ pressed }) => [styles.video, pressed && styles.pressed]}
+              >
+                <Ionicons
+                  name="play-circle-outline"
+                  size={theme.layout.icon.lg}
+                  color={theme.semantic.action}
+                />
+                <View style={styles.videoCopy}>
+                  <Text variant="callout" numberOfLines={1}>
+                    {video.name}
+                  </Text>
+                  <Text variant="caption" tone="tertiary">
+                    {video.type}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
 
         {activeTab === 'details' ? (
           <View style={styles.details}>
@@ -380,27 +454,15 @@ export default function TitleScreen() {
             <Detail label="Genres" value={title.genres?.join(', ') || null} />
             <Detail label="Language" value={languageName(title.original_language)} />
             <Detail label="Director" value={credits.data?.director ?? null} />
-            {/* The ordinal, with its denominator. A bare "#2" is unreadable
-                without knowing what it is two of (PRD §10) — and it belongs
-                here rather than beside the score, which is the number that
-                answers the question people actually ask. */}
+            {/* The ordinal with its denominator. The panel above shows the short
+                form, which is the one people read; this is the one that says what
+                it is two of (PRD §10). */}
             <Detail
               label="Your rank"
               value={
                 data.ranked && total ? `#${data.ranked.position} of ${total} in ${rankCategory}` : null
               }
             />
-          </View>
-        ) : null}
-
-        {activeTab === 'reviews' && note ? (
-          <View style={styles.block}>
-            <Text variant="body">{note}</Text>
-            {watchedDate ? (
-              <Text variant="footnote" tone="tertiary">
-                {watchedDate}
-              </Text>
-            ) : null}
           </View>
         ) : null}
 
@@ -415,6 +477,40 @@ export default function TitleScreen() {
                 secondary="Season"
                 onPress={() => router.push(`/title/${season.id}`)}
               />
+            ))}
+          </View>
+        ) : null}
+
+        {/* Notes, called notes. They are not reviews — nobody wrote them as one —
+            and the tab that used to say so was one person's private sentence with a
+            magazine's word on top of it. */}
+        {notes.data?.length ? (
+          <View style={styles.section}>
+            <SectionHeader title="Notes" />
+            {notes.data.map((entry) => (
+              <View key={`${entry.userId}-${entry.updatedAt}`} style={styles.note}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${entry.name}'s profile`}
+                  onPress={() => router.push(`/u/${entry.username}`)}
+                  style={styles.noteHead}
+                >
+                  <Avatar size="sm" uri={entry.avatarUri} name={entry.name} />
+                  <Text variant="callout">{entry.name}</Text>
+                </Pressable>
+                <SpoilerNote
+                  text={entry.note}
+                  hasSpoilers={entry.hasSpoilers}
+                  masked={shouldMask({
+                    hasSpoilers: entry.hasSpoilers,
+                    mediaItemId: title.id,
+                    viewerId: profile.id,
+                    authorId: entry.userId,
+                    watched: watched.data,
+                  })}
+                  titleForLabel={displayTitle}
+                />
+              </View>
             ))}
           </View>
         ) : null}
@@ -482,17 +578,19 @@ function IconAction({
   label,
   onPress,
   disabled = false,
+  selected,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  selected?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled, ...(selected === undefined ? {} : { selected }) }}
       onPress={onPress}
       disabled={disabled}
       hitSlop={theme.space[2]}
@@ -534,53 +632,59 @@ function languageName(code: string | null | undefined) {
 
 /** Tall enough that the poster still overlaps something when there is no
  *  backdrop, so the page does not become a different design. */
-const HERO_COLLAPSED = 72;
-const POSTER_LIFT = 56;
+const HERO_COLLAPSED = 96;
+const POSTER_LIFT = 64;
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
-  pillRow: {
-    // Pulled up onto the hero's bottom edge.
-    marginTop: -theme.layout.control.chipHeight / 2,
-    marginBottom: theme.space[2],
-  },
-  pills: { paddingHorizontal: theme.layout.gutter, gap: theme.space[2] },
   identity: {
     flexDirection: 'row',
+    alignItems: 'flex-end',
     gap: theme.space[4],
     paddingHorizontal: theme.layout.gutter,
-    // The poster rises into the hero. Negative margin rather than absolute
-    // positioning, so everything below still flows from it.
     marginTop: -POSTER_LIFT,
   },
-  identityCopy: {
-    flex: 1,
-    gap: theme.space[1],
-    // Aligned to the poster's lower half, where the hero has already faded to
-    // Paper — the title must never sit on artwork.
-    justifyContent: 'flex-end',
-    paddingBottom: theme.space[2],
+  /**
+   * A Paper mat around the artwork, the way a print is framed.
+   *
+   * The poster straddles the hero's lower edge, and without this it reads as cut out
+   * and dropped on — its own hairline is a millimetre of separation from whatever
+   * happens to be behind it. Four points of the page's own colour, plus the shadow,
+   * makes it an object sitting on the page rather than a hole in it.
+   */
+  posterFrame: {
+    padding: theme.space[1],
+    borderRadius: theme.radius.card + theme.space[1],
+    backgroundColor: theme.surface.base,
+    ...theme.elevation.e2,
   },
+  // Aligned to the poster's lower half, where the hero has already faded to
+  // Paper — nothing here may sit on artwork.
+  scoreColumn: { flex: 1, paddingBottom: theme.space[2] },
+  heading: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[4],
+    gap: theme.space[1],
+  },
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[4],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+  },
+  watched: { flex: 1, textAlign: 'right' },
   block: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
     gap: theme.space[1],
   },
-  state: {
+  pills: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[4],
+    flexWrap: 'wrap',
+    gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[4],
-  },
-  stateMain: { flex: 1, gap: theme.space[1] },
-  rankButton: {
-    alignSelf: 'flex-start',
-    minHeight: theme.layout.minTapTarget,
-    justifyContent: 'center',
-    paddingHorizontal: theme.space[5],
-    borderRadius: theme.radius.control,
-    backgroundColor: theme.semantic.action,
+    paddingTop: theme.space[3],
   },
   iconAction: {
     width: theme.layout.minTapTarget,
@@ -597,6 +701,22 @@ const styles = StyleSheet.create({
   },
   details: { paddingHorizontal: theme.layout.gutter, gap: theme.space[4] },
   detail: { gap: 2 },
+  video: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[3],
+    minHeight: theme.layout.rowMinHeight,
+  },
+  videoCopy: { flex: 1, gap: 2 },
+  section: { paddingTop: theme.space[6], gap: theme.space[2] },
+  note: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingVertical: theme.space[3],
+    gap: theme.space[2],
+    borderBottomWidth: StyleSheet.hairlineWidth * 2,
+    borderBottomColor: theme.border.hairline,
+  },
+  noteHead: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
   footer: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[6],

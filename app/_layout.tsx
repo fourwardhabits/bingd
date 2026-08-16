@@ -105,6 +105,9 @@ function Navigation() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="title/[id]" options={{ headerShown: true, title: 'Title' }} />
         <Stack.Screen name="u/[username]" options={{ headerShown: true, title: 'Profile' }} />
+        {/* Reached from a cast strip. The header title is set by the screen once
+            the person resolves, so it is empty here rather than "Person". */}
+        <Stack.Screen name="person/[id]" options={{ headerShown: true, title: '' }} />
         <Stack.Screen name="lists/[id]" options={{ headerShown: true, title: 'List' }} />
         <Stack.Screen
           name="settings"

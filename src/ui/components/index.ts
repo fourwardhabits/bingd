@@ -23,7 +23,8 @@ export {
 } from './PosterWall';
 export { Screen } from './Screen';
 export { Sheet, SheetRow, type SheetProps, type SheetRowProps } from './Sheet';
-export { ScoreBadge, type ScoreBadgeProps } from './ScoreBadge';
+export { ScoreBadge, type ScoreBadgeProps, type ScoreBadgeSize } from './ScoreBadge';
+export { ScorePanel, type ScorePanelProps } from './ScorePanel';
 export { SearchField, type SearchFieldProps } from './SearchField';
 export { SectionHeader, type SectionHeaderProps } from './SectionHeader';
 export { SegmentedTabs, type SegmentOption } from './SegmentedTabs';

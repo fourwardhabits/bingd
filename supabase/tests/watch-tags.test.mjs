@@ -555,6 +555,32 @@ describe('what the tagged person is told', () => {
     assert.equal(rows[0].n, 1);
   });
 
+  /**
+   * Once per (tagger, tagged, title), for good — including across a genuine untag
+   * and re-tag much later. Review found the function's comment claiming the opposite
+   * while the index enforced this; the index is the behaviour worth keeping, because
+   * a notice that can be re-fired by removing and re-adding somebody is a way to
+   * reach a person who has no way to stop it.
+   */
+  it('does not ring again when somebody is removed and genuinely re-added', async () => {
+    const id = await movie('tag_notify_readd');
+    await logWatch(id);
+    await setTags(id, [bob]);
+    await setTags(id, []);
+    await setTags(id, [bob]);
+
+    const { rows } = await t.sql(
+      `select count(*)::int as n from notifications where subject_id = $1 and type = 'watch_tag'`,
+      [id],
+    );
+    assert.equal(rows[0].n, 1);
+    // The tag itself is back, which is where anybody would actually look.
+    assert.deepEqual(
+      (await tagsOn(id)).map((r) => r.tagged_id),
+      [bob],
+    );
+  });
+
   it('holds the once-per-title inbox rule as a constraint, not only as a query', async () => {
     // Concurrent identical saves both computed the same "which of these are new"
     // before either insert was visible, so the unique constraint stopped the second
