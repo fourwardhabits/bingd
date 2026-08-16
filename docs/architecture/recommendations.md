@@ -43,7 +43,7 @@ Three hard ceilings, applied by one greedy pass in score order. A candidate that
 | Ceiling | Value | Keyed on |
 |---|---|---|
 | Per anchor | ≤ 4 of 20 | every anchor the candidate is attributed to |
-| Per franchise | ≤ 2 of 20 | `franchiseKey`, derived from the title |
+| Per franchise | ≤ 2 of 20 | `franchiseKey(title)`, a documented proxy |
 | Per primary genre | ≤ `ceil(limit × 0.4)` | the candidate's first genre |
 
 All three are absolute counts against the *requested* twenty, never shares of the wall that results.
@@ -52,9 +52,18 @@ All three are absolute counts against the *requested* twenty, never shares of th
 
 **§4's franchise constraint is implemented against a title-derived proxy, not TMDB's collection id.** `belongs_to_collection` appears only on a title's *detail* response, so keying on it would mean one provider request per candidate — several hundred per slate — against an architecture that budgets six. Storing it would mean a column that is null for every catalogue row until something re-enriches it: a ceiling that cannot fire, dressed as one that can.
 
-`franchiseKeys` therefore groups on the shared leading name of a title, and it takes a **set** of titles rather than one, because a trailing number proves nothing on its own. `Iron Man 2` is a sequel; `Apollo 13` is a mission number. The rule is that a bare trailing number is read as a sequel marker only when the unnumbered original is in the same set — so Iron Man 2 and Iron Man 3 group when `Iron Man` is present, and Apollo 11, 13 and 18 stay three franchises. The set is the candidate pool plus the viewer's anchors, so a viewer who ranked the original still gets the grouping although the original is excluded from their own wall. The first version stripped unconditionally and independent review killed it on the Apollo example.
+`franchiseKey(title)` therefore groups on the leading stem of a title: everything before a subtitle separator, minus a leading article, minus a **named** sequel marker — `Part`, `Chapter`, `Volume`, `Vol`, `Episode` — with its number.
 
-`rank.ts` documents exactly which franchises the proxy catches (the numbered sequel with its original in view, the subtitled entry) and which it misses (a shared universe under different names, a renamed entry, a retitled reboot, a sequel whose original is nowhere in the set). Every miss is **under**-grouping, which is the direction to fail in: over-grouping drops a good recommendation to protect against a franchise the code invented. Both directions are held as tests, including the Apollo case.
+**A bare trailing number is never read as a sequel marker**, and getting there cost two review rounds, each with a counterexample:
+
+| Rule | What killed it |
+|---|---|
+| Strip any trailing number | `Apollo 11`, `Apollo 13`, `Apollo 18` → one franchise |
+| Strip one only when the unnumbered original is also present | `Room`, `Room 237`, `Room 203` → one franchise, an unrelated 2015 drama supplying the stem |
+
+A bare number is a sequel index in `Iron Man 2` and part of the name in `Apollo 13`, and nothing available at slate-build time distinguishes them. The second rule reduced the false positives without eliminating them, which is not the same thing — so `Iron Man 2` is a documented **miss**, because a ceiling that drops an unrelated film is worse than one that misses a franchise.
+
+What the proxy misses, all of it under-grouping: the numbered sequel, a shared universe under different names, a renamed entry, a retitled reboot. What it can over-group, stated rather than denied: two unrelated films whose leading names are identical — `Heat` (1995) and `Heat` (2022) — get one key, because at that point the titles genuinely are the same and only the provider's collection id could separate them. At ≤ 2 of 20 that costs a row only when three or more collide. Every case above, in both directions, is held as a test in `rank.test.ts`.
 
 §4's remaining constraints — most-popular band, candidate-family minimum, exploration slots — are **not** implemented in V1, because V1 has no candidate families to count and no exploration slot to reserve. They belong to `recs-builder`.
 
