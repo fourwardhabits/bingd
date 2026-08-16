@@ -394,7 +394,7 @@ export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE)
   // wall. That is the honest outcome and in practice a rare one: the trending
   // fallback contributes twenty candidates with no anchor at all, and a candidate
   // with no lead anchor counts against no anchor's ceiling.
-  pass(byScore, maxPerGenre(limit), MAX_PER_ANCHOR);
+  pass(byScore, maxPerGenre(limit), maxPerAnchor());
 
   return chosen;
 }

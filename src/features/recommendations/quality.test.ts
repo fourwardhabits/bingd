@@ -224,7 +224,7 @@ describe('recommendation quality', () => {
     for (const measured of all) expect(measured.unexplained).toBe(0);
   });
 
-  it('does not let one favourite own the wall', () => {
+  it('lets no one favourite supply more than four of the twenty', () => {
     // "Twenty sequels because of one rating", against the quota the pass applies.
     // A count, not a share: the ceilings are absolute, so a short wall has a higher
     // share of the same allowed number. Independent review caught the documentation
@@ -232,7 +232,7 @@ describe('recommendation quality', () => {
     for (const measured of all) expect(measured.topAnchor).toBeLessThanOrEqual(maxPerAnchor());
   });
 
-  it('does not let one genre own the wall', () => {
+  it('lets no one genre supply more than eight of the twenty', () => {
     for (const measured of all) expect(measured.topGenre).toBeLessThanOrEqual(maxPerGenre());
   });
 
@@ -291,8 +291,11 @@ ${rows}
 
 Universe mean popularity prior: **${universePopularity.toFixed(2)}**.
 
-Every figure in this table is **asserted** in the test that generates it, at the
-threshold quoted below. A metric nobody can fail is a metric nobody reads.
+The **counts** behind the two diversity columns are asserted, as are the cold-start
+overlap, the slate size, the distinctness and the "every item can say why" check — at
+the thresholds quoted below. The *share* columns are shown for reading and are not
+asserted, because the ceilings are quotas against the requested twenty rather than
+proportions of whatever the wall turns out to be; see below.
 
 ## Reading it
 
