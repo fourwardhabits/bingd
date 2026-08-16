@@ -10,18 +10,34 @@ import PublicProfileScreen from '../../../app/u/[username]';
 const mockPush = jest.fn();
 const tableRows: Record<string, unknown[]> = {};
 let mockRpcResults: Record<string, unknown> = {};
+const mockRpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 
+/**
+ * The mock honours its arguments, and that is deliberate.
+ *
+ * Independent review pointed out that a mock ignoring what it is asked returns the
+ * fixture whatever the screen requests — so `useProfileNotes` asking for the
+ * *viewer's* notes instead of the subject's would still pass, which is precisely the
+ * mutation a privacy test exists to catch. `rpc` records its arguments and `in`
+ * filters on the ids it was given.
+ */
 jest.mock('@/lib/supabase', () => ({
   supabase: {
-    rpc: (name: string) => Promise.resolve({ data: mockRpcResults[name] ?? null, error: null }),
+    rpc: (name: string, args: Record<string, unknown>) => {
+      mockRpcCalls.push({ name, args });
+      return Promise.resolve({ data: mockRpcResults[name] ?? null, error: null });
+    },
     from: (table: string) => {
       const filters: Record<string, unknown> = {};
+      const inFilters: Record<string, unknown[]> = {};
       const rows = () =>
-        (tableRows[table] ?? []).filter((row) =>
-          Object.entries(filters).every(
-            ([key, value]) => (row as Record<string, unknown>)[key] === value,
-          ),
-        );
+        (tableRows[table] ?? []).filter((row) => {
+          const object = row as Record<string, unknown>;
+          return (
+            Object.entries(filters).every(([key, value]) => object[key] === value) &&
+            Object.entries(inFilters).every(([key, values]) => values.includes(object[key]))
+          );
+        });
       const answer = () =>
         Promise.resolve({ data: rows(), error: null, count: rows().length });
       const chain = {
@@ -30,7 +46,10 @@ jest.mock('@/lib/supabase', () => ({
           filters[column] = value;
           return chain;
         },
-        in: () => chain,
+        in: (column: string, values: unknown[]) => {
+          inFilters[column] = values;
+          return chain;
+        },
         order: () => chain,
         limit: () => chain,
         maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
@@ -81,6 +100,7 @@ const ranking = (id: string, title: string, position: number, over: Record<strin
 beforeEach(() => {
   mockPush.mockReset();
   mockRpcResults = {};
+  mockRpcCalls.length = 0;
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   tableRows.public_profiles = [anna];
   tableRows.rankings = [];
@@ -245,6 +265,51 @@ describe('their notes', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('He was dead the whole time.')).toBeTruthy());
+  });
+
+  it('asks for the subject’s notes, not the viewer’s', async () => {
+    // A mock that ignored its arguments would pass with the wrong id in the call,
+    // which is the mutation that would quietly show a visitor their own notes on
+    // somebody else's page.
+    mockRpcResults.public_notes = [note];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
+
+    const call = mockRpcCalls.find((entry) => entry.name === 'public_notes');
+    expect(call?.args.p_user_ids).toEqual(['anna-id']);
+  });
+
+  it('masks a spoiler note inside recent activity too', async () => {
+    // The notes section and the activity section mask separately, so each needs
+    // its own assertion — review found this one uncovered, and a `masked={false}`
+    // slipped into the activity row would have leaked without failing anything.
+    tableRows.feed_events = [
+      {
+        id: 'e1',
+        type: 'title_ranked',
+        actor_id: 'anna-id',
+        media_item_id: 'film-1',
+        created_at: '2026-08-15T00:00:00Z',
+        payload: { position: 1, category: 'movies', bucket: 'loved', score: 9.1 },
+        media_items: {
+          kind: 'movie',
+          title: 'Inception',
+          release_date: '2010-01-01',
+          poster_path: null,
+          genres: ['Drama'],
+          runtime_minutes: 148,
+          parent: null,
+        },
+        profiles: { username: 'anna', display_name: 'Anna', avatar_path: null },
+      },
+    ];
+    mockRpcResults.public_notes = [
+      { ...note, note: 'Everyone dies at the end.', has_spoilers: true },
+    ];
+    const view = await open();
+
+    await waitFor(() => expect(view.getAllByText('Contains spoilers').length).toBe(2));
+    expect(view.queryByText('Everyone dies at the end.')).toBeNull();
   });
 
   it('does not let one season unmask another', async () => {

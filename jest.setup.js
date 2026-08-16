@@ -10,12 +10,20 @@ const { configure } = require('@testing-library/react-native');
  * runner.
  *
  * The Log screen adds a real 180ms search debounce on top of that, and it is the
- * suite that surfaced this — `LogScreen › opens title detail from the row` failed
- * once under a full parallel run and passed in isolation every time, which is the
- * signature of a budget set below the work rather than of a race. Five seconds is
- * still far short of the fifteen-second test timeout, so a genuinely stuck `waitFor`
- * fails the run rather than hanging it; what it stops is a slow machine being
- * reported as a broken assertion.
+ * suite that surfaced this: `LogScreen › opens title detail from the row` failed once
+ * under a full parallel run and passed in isolation every time.
+ *
+ * What was actually demonstrated, and what was not. Squeezing this budget to 250ms
+ * fails that test and no other, so the assertion is timeout-sensitive and it is the
+ * first test in its file — the one that pays the whole screen-tree evaluation. That
+ * is consistent with runner contention and it does not *prove* the absence of a race;
+ * independent review made that point and it is right. No race was found — the test
+ * waits for the row before pressing it — but the honest statement is that the budget
+ * was too small for the work, not that a race has been ruled out. Worth watching test
+ * durations rather than treating it as closed.
+ *
+ * Five seconds is still far short of the fifteen-second test timeout, so a genuinely
+ * stuck `waitFor` fails the run rather than hanging it.
  */
 configure({ asyncUtilTimeout: 5000 });
 

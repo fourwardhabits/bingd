@@ -48,10 +48,14 @@ export function usePerson(personId: string | null) {
     staleTime: 10 * 60_000,
     queryFn: async (): Promise<PersonDetail | null> => {
       const numeric = Number(personId);
-      // TMDB person ids are integers. A non-numeric id cannot match anything, and
-      // building a containment filter out of it would be putting unvalidated input
-      // into a query shape for no possible gain.
-      if (!Number.isFinite(numeric)) return null;
+      // A TMDB person id is a positive integer. The filter is built with
+      // `JSON.stringify` and sent as a PostgREST parameter, so nothing here is
+      // interpolated into SQL — but the guard says what the id *is* rather than
+      // merely that it is a number, which rules out the decimals, negatives and
+      // exponent forms `Number.isFinite` would wave through. Independent review
+      // asked for the tighter form and could construct no failure from the looser
+      // one; this is precision rather than a fix.
+      if (!Number.isSafeInteger(numeric) || numeric <= 0) return null;
 
       const [cast, crew] = await Promise.all([
         supabase
