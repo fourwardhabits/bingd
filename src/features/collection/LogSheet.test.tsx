@@ -57,6 +57,35 @@ const stubReads = (
 };
 
 /**
+ * A `user_media` read that fails the way a backend one migration behind fails.
+ *
+ * SQLSTATE 42703 is what PostgREST returns when the client selects a column the
+ * database does not have, and it is exactly what the founder's device hit: the sheet
+ * asks for `note_visibility`, the column is not there, and the row that used to say
+ * `Loading` said it for ever.
+ */
+const stubFailedLogState = () => {
+  mockFrom.mockImplementation((table: string) => ({
+    select: () => ({
+      eq: () => ({
+        eq: () => ({
+          maybeSingle: async () =>
+            table === 'user_media'
+              ? {
+                  data: null,
+                  error: {
+                    code: '42703',
+                    message: 'column user_media.note_visibility does not exist',
+                  },
+                }
+              : { data: null, error: null },
+        }),
+      }),
+    }),
+  }));
+};
+
+/**
  * The same stub, held open until the test releases it.
  *
  * Every other test here awaits the resolved row before touching anything, which is
@@ -598,6 +627,74 @@ describe('the watch date', () => {
     await waitFor(() =>
       expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today'),
     );
+  });
+});
+
+/**
+ * What the rows do when the read behind them fails.
+ *
+ * The founder's device showed `Loading` for ever against a backend one migration
+ * behind the client, because the sheet had two states where it needed three. These
+ * are the properties that matter: it stops saying Loading, it says what is wrong, it
+ * offers a way back, it does not block the thing that still works, and — the one that
+ * is a privacy rule rather than a nicety — it does not open the note editor.
+ */
+describe('when the log state cannot be read', () => {
+  beforeEach(() => {
+    stubFailedLogState();
+  });
+
+  it('stops claiming to be loading', async () => {
+    const sheet = await open(filmA);
+
+    await waitFor(() =>
+      expect(sheet.getByLabelText('Notes').props.accessibilityHint).toBe('Unavailable'),
+    );
+    for (const label of ['Notes', 'Who I watched with', 'Watch date']) {
+      expect(sheet.getByLabelText(label).props.accessibilityHint).not.toBe('Loading');
+    }
+  });
+
+  it('names the failing dependency outside production, and offers a retry', async () => {
+    const sheet = await open(filmA);
+
+    await waitFor(() =>
+      expect(sheet.getByText(/note_visibility does not exist/)).toBeTruthy(),
+    );
+    expect(sheet.getByLabelText('Retry loading your notes and watch date')).toBeTruthy();
+  });
+
+  it('still lets a bucket be chosen and ranking start', async () => {
+    // `set_bucket` needs none of what failed, so gating it would be punishing the
+    // user for a fault in a different query.
+    const sheet = await open(filmA);
+    await waitFor(() =>
+      expect(sheet.getByLabelText('Notes').props.accessibilityHint).toBe('Unavailable'),
+    );
+
+    await fireEvent.press(sheet.bucket('Loved it'));
+    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+  });
+
+  /**
+   * The privacy invariant, restated for the failure path.
+   *
+   * With no answer about what is stored we cannot know whether this title carries a
+   * note written when notes were private-only, so the editor must stay shut. Making
+   * a failed read fall back to the forward-facing `public` default would be the
+   * exact publication the gate exists to prevent, arrived at from a new direction.
+   */
+  it('does not open the note editor, so nothing is decided about a note it cannot see', async () => {
+    const sheet = await open(filmA);
+    await waitFor(() =>
+      expect(sheet.getByLabelText('Notes').props.accessibilityHint).toBe('Unavailable'),
+    );
+
+    await fireEvent.press(sheet.getByLabelText('Notes'));
+
+    expect(sheet.queryByPlaceholderText('What did you think?')).toBeNull();
+    expect(callsTo('save_note')).toHaveLength(0);
+    expect(callsTo('log_watched')).toHaveLength(0);
   });
 });
 

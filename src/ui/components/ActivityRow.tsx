@@ -13,15 +13,18 @@ import { Text } from './Text';
 export type ActivityReaction = {
   /** How many people have reacted at all. */
   count: number;
-  /** Whether the signed-in user is one of them. */
-  mine: boolean;
+  /** The reader's own glyph, or null. Its presence is what fills the control. */
+  mineGlyph?: string | null;
   /** The distinct glyphs present, most common first (PRD §14). */
   glyphs?: string[];
-  /** At most two, for "Jerry and Beth". Never includes the reader. */
-  names?: string[];
-  /** Reactors beyond the named ones, already netted off. */
-  others?: number;
+  /** A plain tap: toggles the default reaction on or off. */
   onPress: () => void;
+  /** A long press: opens the full picker. */
+  onLongPress?: () => void;
+  /** Tapping the summary opens the list of who reacted. */
+  onPressSummary?: () => void;
+  /** Rendered inside the row, above the actions — see `ReactionPill`. */
+  picker?: React.ReactNode;
 };
 
 export type ActivityRowProps = {
@@ -193,42 +196,71 @@ export function ActivityRow({
         </View>
       ) : null}
 
-      {/* PRD §14: the glyphs present, at most two names, then a residual count.
-          Never a per-kind tally, and never anything that could be aggregated onto a
-          person — `disagree` in particular is countable on the activity it belongs
-          to and nowhere else, which is the difference between banter and a
-          scoreboard. */}
+      {/* The glyphs people used and how many there were, and nothing else.
+          Subordinate to the film by construction: footnote size, indented under the
+          poster, no per-kind tally. `disagree` is countable on the activity it
+          belongs to and nowhere else, which is the difference between banter and a
+          scoreboard (PRD §14). The breakdown lives behind the tap. */}
       {reaction && reaction.count > 0 ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={reactionSummaryLabel(reaction)}
-          onPress={reaction.onPress}
+          accessibilityLabel={`${reaction.count} ${reaction.count === 1 ? 'reaction' : 'reactions'}. See who reacted.`}
+          onPress={reaction.onPressSummary}
+          disabled={!reaction.onPressSummary}
           style={({ pressed }) => [styles.reactors, pressed && styles.pressed]}
         >
           {reaction.glyphs?.length ? (
-            <Text variant="footnote" accessibilityElementsHidden>
-              {reaction.glyphs.join(' ')}
-            </Text>
+            <View style={styles.glyphs} accessibilityElementsHidden>
+              {/* Overlapped rather than spaced, so three glyphs read as one object
+                  and cost the width of about two. */}
+              {reaction.glyphs.slice(0, 3).map((glyph, index) => (
+                <View key={glyph} style={[styles.glyph, index > 0 && styles.glyphOverlap]}>
+                  <Text variant="footnote" allowFontScaling={false}>
+                    {glyph}
+                  </Text>
+                </View>
+              ))}
+            </View>
           ) : null}
-          <Text variant="footnote" tone="secondary" numberOfLines={1}>
-            {reactorSummary(reaction)}
+          <Text variant="footnote" tone="secondary">
+            {reaction.count}
           </Text>
         </Pressable>
       ) : null}
 
+      {reaction?.picker ? <View style={styles.picker}>{reaction.picker}</View> : null}
+
       <View style={styles.actions}>
         {reaction ? (
-          <IconAction
-            icon={reaction.mine ? 'heart' : 'heart-outline'}
-            active={reaction.mine}
-            label={
-              reaction.mine
-                ? `You reacted to ${filmName}. Change or remove your reaction.`
-                : `React to ${actorName}'s activity about ${filmName}`
+          /* Tap toggles the default; long press opens the six. The glyph the
+             reader chose replaces the heart, so the control states its own value
+             rather than only that something was chosen. */
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: Boolean(reaction.mineGlyph) }}
+            accessibilityLabel={
+              reaction.mineGlyph
+                ? `You reacted to ${filmName}. Tap to remove, long press to change.`
+                : `React to ${actorName}'s activity about ${filmName}. Long press for more reactions.`
             }
-            badge={reaction.count > 0 ? String(reaction.count) : undefined}
+            accessibilityHint="Long press to choose a different reaction"
             onPress={reaction.onPress}
-          />
+            onLongPress={reaction.onLongPress}
+            hitSlop={theme.space[2]}
+            style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+          >
+            {reaction.mineGlyph ? (
+              <Text variant="footnote" allowFontScaling={false} accessibilityElementsHidden>
+                {reaction.mineGlyph}
+              </Text>
+            ) : (
+              <Ionicons
+                name="heart-outline"
+                size={theme.layout.icon.sm}
+                color={theme.text.secondary}
+              />
+            )}
+          </Pressable>
         ) : null}
 
         {/* Comments are deferred (PRD §14) and a disabled comment icon is worse
@@ -271,27 +303,6 @@ function companionNames(names: string[]) {
   const rest = names.length - 1;
   return `${names[0]} and ${rest} others`;
 }
-
-/**
- * "Jerry and Beth", or "Jerry, Beth and 4 others".
- *
- * Two names then a residual, which is PRD §14 and Messenger's pattern. Naming
- * everyone turns a friendly row into a list, and naming nobody makes a number that
- * says less than one name would.
- */
-function reactorSummary({ names = [], others = 0, count }: ActivityReaction) {
-  // Nobody to name means the only reactor is the reader themselves, or the
-  // reactors' profiles did not resolve. A count is the honest fallback.
-  if (!names.length) return count === 1 ? '1 reaction' : `${count} reactions`;
-
-  const named = names.length === 1 ? names[0] : `${names[0]} and ${names[1]}`;
-  if (others <= 0) return named;
-  return `${named} and ${others} ${others === 1 ? 'other' : 'others'}`;
-}
-
-/** The same sentence, plus what pressing it does. */
-const reactionSummaryLabel = (reaction: ActivityReaction) =>
-  `${reactorSummary(reaction)} reacted. Open reactions.`;
 
 /**
  * An action as an icon.
@@ -356,6 +367,19 @@ const styles = StyleSheet.create({
   // Indented to the poster's right edge, so a note reads as belonging to the row
   // above it rather than starting a new one.
   note: { paddingLeft: theme.poster.xs.width + theme.space[3] },
+  glyphs: { flexDirection: "row", alignItems: "center" },
+  glyph: {
+    width: 18,
+    height: 18,
+    borderRadius: theme.radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.surface.base,
+  },
+  // Half a glyph of overlap: enough to read as a cluster, not so much that the
+  // one underneath becomes unidentifiable.
+  glyphOverlap: { marginLeft: -6 },
+  picker: { paddingLeft: theme.poster.xs.width + theme.space[3] },
   reactors: {
     flexDirection: 'row',
     alignItems: 'center',

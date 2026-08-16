@@ -16,6 +16,7 @@ import { useCommunityScore } from '@/features/title/use-community-score';
 import { useCredits } from '@/features/title/use-credits';
 import { useTitleEnrichment } from '@/features/title/use-enrichment';
 import { useTitleNotes, useTitleVideos } from '@/features/title/use-title-extras';
+import { diagnose } from '@/lib/diagnose';
 import { backdropUri, posterUri, profileUri, videoUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
@@ -73,23 +74,50 @@ export default function TitleScreen() {
   const [loggingTitle, setLoggingTitle] = useState<LoggableTitle | null>(null);
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
 
-  const { data, isPending, isError, refetch } = useQuery({
+  /**
+   * The catalogue row, and only that.
+   *
+   * Split from the viewer's own state on 2026-08-16. They were one `Promise.all`
+   * that rethrew whichever error came back first, so a single missing column in
+   * `user_media` — a backend one migration behind the client — took the whole page
+   * down to "Could not load this title" for a film the catalogue had perfectly well.
+   * Two independent facts were sharing one failure mode.
+   *
+   * This one is genuinely fatal: with no title there is no page.
+   */
+  const {
+    data: titleRow,
+    isPending,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: queryKeys.title(id ?? ''),
     enabled: hasId,
     queryFn: async () => {
-      const [
-        { data: title, error: titleError },
-        { data: logged, error: loggedError },
-        { data: ranked, error: rankedError },
-        { data: watchlist, error: watchlistError },
-      ] = await Promise.all([
-        supabase
-          .from('media_items')
-          .select(
-            'id, kind, title, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, parent:parent_id(id, title)',
-          )
-          .eq('id', id ?? '')
-          .single(),
+      const { data, error: titleError } = await supabase
+        .from('media_items')
+        .select(
+          'id, kind, title, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, parent:parent_id(id, title)',
+        )
+        .eq('id', id ?? '')
+        .single();
+      if (titleError) throw titleError;
+      return data;
+    },
+  });
+
+  /**
+   * What this viewer has already done with it: bucket, position, watchlist.
+   *
+   * Deliberately separate and deliberately non-fatal. Losing it costs the score
+   * badge, the watch date and the watchlist state; it does not cost the film.
+   */
+  const personal = useQuery({
+    queryKey: [...queryKeys.title(id ?? ''), 'personal', profile.id],
+    enabled: hasId,
+    queryFn: async () => {
+      const [logged, ranked, watchlist] = await Promise.all([
         supabase
           .from('user_media')
           .select('bucket, watched_on, note, note_has_spoilers')
@@ -110,13 +138,19 @@ export default function TitleScreen() {
           .maybeSingle(),
       ]);
 
-      if (titleError) throw titleError;
-      if (loggedError) throw loggedError;
-      if (rankedError) throw rankedError;
-      if (watchlistError) throw watchlistError;
-      return { title, logged, ranked, watchlist };
+      if (logged.error) throw logged.error;
+      if (ranked.error) throw ranked.error;
+      if (watchlist.error) throw watchlist.error;
+      return { logged: logged.data, ranked: ranked.data, watchlist: watchlist.data };
     },
   });
+
+  const data = {
+    title: titleRow,
+    logged: personal.data?.logged ?? null,
+    ranked: personal.data?.ranked ?? null,
+    watchlist: personal.data?.watchlist ?? null,
+  };
 
   const titleId = data?.title?.id ?? null;
   const credits = useCredits(titleId);
@@ -173,7 +207,12 @@ export default function TitleScreen() {
         <EmptyState
           kind="couldNotLoad"
           title="Could not load this title"
-          body="Check your connection and try again."
+          // The user gets the sentence they can act on; a developer gets the
+          // dependency that actually failed. "Check your connection" was the only
+          // thing this ever said, and it was wrong every time the cause was a
+          // backend one migration behind the client — which is a connection that
+          // is working perfectly.
+          body={diagnose(error) ?? 'Check your connection and try again.'}
           action={{ label: 'Try again', onPress: () => void refetch() }}
         />
       </Screen>
@@ -398,6 +437,27 @@ export default function TitleScreen() {
             <Text variant="footnote" tone="action">
               {actionError}
             </Text>
+          </View>
+        ) : null}
+
+        {/* The film is on screen and the viewer's own state is not. Said once,
+            quietly, with a way back — rather than either failing the whole page
+            or pretending the score badge means "unranked". */}
+        {personal.isError ? (
+          <View style={styles.block}>
+            <Text variant="footnote" tone="secondary">
+              {diagnose(personal.error) ?? 'Your rating and watchlist state could not be loaded.'}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading your rating"
+              onPress={() => void personal.refetch()}
+              hitSlop={theme.space[2]}
+            >
+              <Text variant="callout" tone="action">
+                Try again
+              </Text>
+            </Pressable>
           </View>
         ) : null}
 

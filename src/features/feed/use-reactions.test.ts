@@ -2,7 +2,7 @@ import { waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { REACTIONS, useReactions } from './use-reactions';
+import { DEFAULT_REACTION, REACTIONS, useReactions } from './use-reactions';
 
 let mockRows: unknown[] = [];
 
@@ -24,7 +24,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   feed_event_id: 'event-1',
   user_id: 'someone',
   kind: 'love',
-  profiles: { display_name: 'Jerry', username: 'jerry' },
+  profiles: { id: 'someone', display_name: 'Jerry', username: 'jerry', avatar_path: null },
   ...over,
 });
 
@@ -65,42 +65,51 @@ describe('useReactions', () => {
     expect((await summaries('me'))?.get('event-1')?.mine).toBeNull();
   });
 
-  it('never names the reader among the reactors', async () => {
-    // "You and Beth reacted" on a row in your own feed reads as being reported to
-    // yourself.
+  it('collects everyone who reacted, the reader included', async () => {
+    // The Feed row shows glyphs and a total; the detail sheet names people. Both
+    // read from this one list, so it holds every reactor the database returned —
+    // and the database has already applied AD-5 to both parties.
     mockRows = [
-      row({ user_id: 'me', profiles: { display_name: 'Me', username: 'me' } }),
-      row({ user_id: 'other', profiles: { display_name: 'Beth', username: 'beth' } }),
+      row({ user_id: 'me', profiles: { id: 'me', display_name: 'Me', username: 'me', avatar_path: null } }),
+      row({ user_id: 'other', kind: 'funny', profiles: { id: 'other', display_name: 'Beth', username: 'beth', avatar_path: null } }),
     ];
 
     const summary = (await summaries('me'))?.get('event-1');
-    expect(summary?.names).toEqual(['Beth']);
     expect(summary?.total).toBe(2);
-    // And not in the residual either. Leaving the reader there only moved the
-    // problem: "Beth and 1 other", where the other one is you.
-    expect(summary?.others).toBe(0);
+    expect(summary?.people.map((p) => p.name)).toEqual(['Me', 'Beth']);
+    expect(summary?.people.find((p) => p.userId === 'other')?.kind).toBe('funny');
   });
 
-  it('keeps the reader out of the residual count as well as out of the names', async () => {
-    mockRows = ['Jerry', 'Beth', 'Morty'].map((name, index) =>
-      row({ user_id: `u${index}`, profiles: { display_name: name, username: name } }),
-    );
-    mockRows.push(row({ user_id: 'me', profiles: { display_name: 'Me', username: 'me' } }));
+  it('puts the reader first, since theirs is the one that can be changed here', async () => {
+    mockRows = [
+      row({ user_id: 'aaa', profiles: { id: 'aaa', display_name: 'Aaron', username: 'aaron', avatar_path: null } }),
+      row({ user_id: 'me', profiles: { id: 'me', display_name: 'Zoe', username: 'zoe', avatar_path: null } }),
+    ];
 
-    const summary = (await summaries('me'))?.get('event-1');
-    expect(summary?.total).toBe(4);
-    expect(summary?.names).toEqual(['Jerry', 'Beth']);
-    expect(summary?.others).toBe(1);
+    expect((await summaries('me'))?.get('event-1')?.people[0]?.name).toBe('Zoe');
   });
 
-  it('names at most two and counts the rest', async () => {
-    mockRows = ['Jerry', 'Beth', 'Morty', 'Summer'].map((name, index) =>
-      row({ user_id: `u${index}`, profiles: { display_name: name, username: name } }),
-    );
+  it('counts a reactor whose profile did not resolve, and does not name them', async () => {
+    // The count comes from the reaction row, which the viewer may read; the name
+    // comes from a profile embed, whose own policy may withhold it. Inventing
+    // "Someone" for the gap is the feed's old bug in a new place.
+    mockRows = [row(), row({ user_id: 'hidden', profiles: null })];
 
     const summary = (await summaries())?.get('event-1');
-    expect(summary?.names).toEqual(['Jerry', 'Beth']);
-    expect(summary?.others).toBe(2);
+    expect(summary?.total).toBe(2);
+    expect(summary?.people).toHaveLength(1);
+  });
+
+  it('counts each reaction kind, for the detail filters', async () => {
+    mockRows = [
+      row({ user_id: 'a', kind: 'love' }),
+      row({ user_id: 'b', kind: 'love' }),
+      row({ user_id: 'c', kind: 'funny' }),
+    ];
+
+    const summary = (await summaries())?.get('event-1');
+    expect(summary?.byKind).toEqual({ love: 2, funny: 1 });
+    expect(summary?.total).toBe(3);
   });
 
   it('orders the glyphs by how common they are', async () => {
@@ -114,13 +123,17 @@ describe('useReactions', () => {
   });
 
   it('reads a profile embed returned as an array', async () => {
-    mockRows = [row({ profiles: [{ display_name: 'Jerry', username: 'jerry' }] })];
-    expect((await summaries())?.get('event-1')?.names).toEqual(['Jerry']);
+    mockRows = [
+      row({ profiles: [{ id: 'someone', display_name: 'Jerry', username: 'jerry', avatar_path: null }] }),
+    ];
+    expect((await summaries())?.get('event-1')?.people.map((p) => p.name)).toEqual(['Jerry']);
   });
 
   it('falls back to the username when there is no display name', async () => {
-    mockRows = [row({ profiles: { display_name: null, username: 'jerry' } })];
-    expect((await summaries())?.get('event-1')?.names).toEqual(['jerry']);
+    mockRows = [
+      row({ profiles: { id: 'someone', display_name: null, username: 'jerry', avatar_path: null } }),
+    ];
+    expect((await summaries())?.get('event-1')?.people.map((p) => p.name)).toEqual(['jerry']);
   });
 });
 
@@ -141,5 +154,13 @@ describe('the reaction set', () => {
       expect(reaction.label.length).toBeGreaterThan(0);
       expect(reaction.glyph.length).toBeGreaterThan(0);
     }
+  });
+
+  it('uses the glyphs the founder chose', async () => {
+    expect(REACTIONS.map((r) => r.glyph)).toEqual(['❤️', '👍', '👎', '😂', '😮', '😢']);
+  });
+
+  it('makes love the default a plain tap gives', async () => {
+    expect(DEFAULT_REACTION).toBe('love');
   });
 });

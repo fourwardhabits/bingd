@@ -14,6 +14,7 @@ import { posterUri } from '@/lib/images';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
+  HeaderBoundary,
   Chip,
   EmptyState,
   Screen,
@@ -129,6 +130,11 @@ export default function LogScreen() {
           ))}
         </View>
       )}
+
+      {/* After the filters, not after the header: on this screen the search field
+          and the kind chips are both controls, so the seam belongs below all of
+          them rather than in the middle of the control region. */}
+      <HeaderBoundary />
 
       <Results
         idle={idle}

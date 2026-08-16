@@ -10,6 +10,7 @@ export { CastStrip, type CastMember } from './CastStrip';
 export { Divider } from './Divider';
 export { EmptyState, type EmptyStateKind } from './EmptyState';
 export { Field, type FieldProps } from './Field';
+export { HeaderBoundary } from './HeaderBoundary';
 export { FeaturedCard, type FeaturedCardProps } from './FeaturedCard';
 export { LoadingScreen, type LoadingScreenProps } from './LoadingScreen';
 export { MediumSelector, type Medium } from './MediumSelector';

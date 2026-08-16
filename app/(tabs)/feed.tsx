@@ -7,9 +7,11 @@ import { useCurrentProfile } from '@/features/auth';
 import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
-import { ReactionPicker } from '@/features/feed/ReactionPicker';
+import { ReactionDetail } from '@/features/feed/ReactionDetail';
+import { ReactionPill } from '@/features/feed/ReactionPill';
 import { useFeed, type FeedItem } from '@/features/feed/use-feed';
 import {
+  DEFAULT_REACTION,
   REACTION_GLYPH,
   useReactions,
   useSetReaction,
@@ -17,7 +19,14 @@ import {
 } from '@/features/feed/use-reactions';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
-import { ActivityRow, AppHeader, EmptyState, Screen, SkeletonRow } from '@/ui/components';
+import {
+  ActivityRow,
+  AppHeader,
+  EmptyState,
+  HeaderBoundary,
+  Screen,
+  SkeletonRow,
+} from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /** PRD §14. Fan-out on read: followed users' activity is queried at read time
@@ -30,20 +39,35 @@ export default function FeedScreen() {
   const watchlist = useWatchlist(profile.id);
   const watched = useWatched(profile.id);
   const [busy, setBusy] = useState<string | null>(null);
-  const [reactingTo, setReactingTo] = useState<string | null>(null);
+  // Which row has the picker open, and which has its detail sheet open. Two
+  // separate ideas: the picker changes your own reaction, the detail shows everyone
+  // else's, and a row can be in neither.
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const [detailFor, setDetailFor] = useState<string | null>(null);
 
   const eventIds = useMemo(() => (feed.data ?? []).map((event) => event.id), [feed.data]);
   const reactions = useReactions(eventIds, profile.id);
   const { setReaction } = useSetReaction(profile.id);
 
-  const choose = async (kind: ReactionKind | null) => {
-    const eventId = reactingTo;
-    if (!eventId) return;
-    setReactingTo(null);
+  const choose = async (eventId: string, kind: ReactionKind | null) => {
+    setPickerFor(null);
     const result = await setReaction(eventId, kind);
     if (!result.ok && result.message) {
       Alert.alert('Could not save your reaction', result.message);
     }
+  };
+
+  /**
+   * A plain tap on the control.
+   *
+   * Toggles the default reaction: nothing becomes a heart, and a heart becomes
+   * nothing. If some *other* reaction is already set, a tap replaces it with the
+   * heart rather than clearing it — the gesture means "react", and the way to remove
+   * a reaction you can see is to tap the one you chose.
+   */
+  const toggleDefault = (eventId: string) => {
+    const mine = reactions.data?.get(eventId)?.mine ?? null;
+    return choose(eventId, mine === DEFAULT_REACTION ? null : DEFAULT_REACTION);
   };
 
   const saved = useMemo(
@@ -89,6 +113,7 @@ export default function FeedScreen() {
   return (
     <Screen>
       <AppHeader />
+      <HeaderBoundary />
       <ScrollView contentContainerStyle={styles.content}>
         {feed.isError ? (
           <View style={styles.pad}>
@@ -156,11 +181,13 @@ export default function FeedScreen() {
         )}
       </ScrollView>
 
-      <ReactionPicker
-        visible={reactingTo !== null}
-        current={reactingTo ? (reactions.data?.get(reactingTo)?.mine ?? null) : null}
-        onClose={() => setReactingTo(null)}
-        onChoose={(kind) => void choose(kind)}
+      <ReactionDetail
+        summary={detailFor ? (reactions.data?.get(detailFor) ?? null) : null}
+        onClose={() => setDetailFor(null)}
+        onPressPerson={(username) => {
+          setDetailFor(null);
+          router.push(`/u/${username}`);
+        }}
       />
     </Screen>
   );
@@ -169,11 +196,19 @@ export default function FeedScreen() {
     const summary = reactions.data?.get(eventId);
     return {
       count: summary?.total ?? 0,
-      mine: Boolean(summary?.mine),
+      mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
       glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
-      names: summary?.names ?? [],
-      others: summary?.others ?? 0,
-      onPress: () => setReactingTo(eventId),
+      onPress: () => void toggleDefault(eventId),
+      onLongPress: () => setPickerFor(eventId),
+      onPressSummary: () => setDetailFor(eventId),
+      picker:
+        pickerFor === eventId ? (
+          <ReactionPill
+            current={summary?.mine ?? null}
+            onChoose={(kind) => void choose(eventId, kind)}
+            onDismiss={() => setPickerFor(null)}
+          />
+        ) : null,
     };
   }
 }

@@ -1,5 +1,7 @@
 import { fireEvent, render } from '@testing-library/react-native';
 
+import { Text } from 'react-native';
+
 import { ActivityRow } from './ActivityRow';
 
 const props = {
@@ -164,65 +166,94 @@ describe('the reaction control', () => {
     expect(view.queryByLabelText(/react/i)).toBeNull();
   });
 
-  it('says whose activity it reacts to, and shows the count', async () => {
+  it('toggles on a plain tap and opens the picker on a long press', async () => {
     const onPress = jest.fn();
+    const onLongPress = jest.fn();
     const view = await render(
-      <ActivityRow {...props} reaction={{ count: 3, mine: false, onPress }} />,
+      <ActivityRow {...props} reaction={{ count: 0, onPress, onLongPress }} />,
     );
 
-    await fireEvent.press(view.getByLabelText("React to Suraj's activity about Inception"));
+    const control = view.getByLabelText(
+      "React to Suraj's activity about Inception. Long press for more reactions.",
+    );
+    await fireEvent.press(control);
     expect(onPress).toHaveBeenCalled();
-    expect(view.getByText('3')).toBeTruthy();
+
+    await fireEvent(control, 'longPress');
+    expect(onLongPress).toHaveBeenCalled();
   });
 
-  it('offers a change once the reaction is the reader’s own', async () => {
+  it('shows the reader their own glyph, and offers to remove it', async () => {
     const view = await render(
-      <ActivityRow {...props} reaction={{ count: 1, mine: true, onPress: jest.fn() }} />,
+      <ActivityRow {...props} reaction={{ count: 1, mineGlyph: '😂', onPress: jest.fn() }} />,
     );
+
     expect(
-      view.getByLabelText('You reacted to Inception. Change or remove your reaction.'),
+      view.getByLabelText('You reacted to Inception. Tap to remove, long press to change.'),
     ).toBeTruthy();
+    // Hidden from the accessibility tree on purpose — the label carries the
+    // meaning, and the glyph would otherwise be announced as raw emoji.
+    expect(view.getAllByText('😂', { includeHiddenElements: true }).length).toBeGreaterThan(0);
   });
 
-  /** PRD §14: the glyphs present, at most two names, then a residual count. */
-  describe('who reacted', () => {
-    const withReactors = (names: string[], others: number, count: number) => (
+  /** The compact summary: glyphs and a total, never a per-kind tally in the row. */
+  describe('the summary', () => {
+    it('shows the glyphs present and the total, and nothing per kind', async () => {
+      const view = await render(
+        <ActivityRow
+          {...props}
+          reaction={{ count: 12, glyphs: ['❤️', '😂', '👍'], onPress: jest.fn(), onPressSummary: jest.fn() }}
+        />,
+      );
+
+      expect(view.getByText('12')).toBeTruthy();
+      // A per-kind breakdown in the row would put a scoreboard beside the film.
+      expect(view.queryByText('❤️ 5')).toBeNull();
+    });
+
+    it('caps the glyph cluster at three', async () => {
+      const view = await render(
+        <ActivityRow
+          {...props}
+          reaction={{
+            count: 20,
+            glyphs: ['❤️', '😂', '👍', '👎', '😮'],
+            onPress: jest.fn(),
+            onPressSummary: jest.fn(),
+          }}
+        />,
+      );
+
+      expect(view.queryByText('😮')).toBeNull();
+    });
+
+    it('opens the detail surface when tapped', async () => {
+      const onPressSummary = jest.fn();
+      const view = await render(
+        <ActivityRow {...props} reaction={{ count: 3, glyphs: ['❤️'], onPress: jest.fn(), onPressSummary }} />,
+      );
+
+      await fireEvent.press(view.getByLabelText('3 reactions. See who reacted.'));
+      expect(onPressSummary).toHaveBeenCalled();
+    });
+
+    it('is absent when nobody has reacted', async () => {
+      const view = await render(
+        <ActivityRow {...props} reaction={{ count: 0, onPress: jest.fn() }} />,
+      );
+      expect(view.queryByLabelText(/See who reacted/)).toBeNull();
+    });
+  });
+
+  it('renders the picker inside the row when it is open', async () => {
+    // Inside the row rather than floating over the screen: no measurement, no
+    // portal, and nothing to clip on Android.
+    const view = await render(
       <ActivityRow
         {...props}
-        reaction={{ count, mine: false, names, others, glyphs: ['❤️'], onPress: jest.fn() }}
-      />
+        reaction={{ count: 0, onPress: jest.fn(), picker: <Text>PICKER</Text> }}
+      />,
     );
-
-    it('names one', async () => {
-      const view = await render(withReactors(['Jerry'], 0, 1));
-      expect(view.getByText('Jerry')).toBeTruthy();
-    });
-
-    it('names two', async () => {
-      const view = await render(withReactors(['Jerry', 'Beth'], 0, 2));
-      expect(view.getByText('Jerry and Beth')).toBeTruthy();
-    });
-
-    it('names two and counts the rest', async () => {
-      const view = await render(withReactors(['Jerry', 'Beth'], 4, 6));
-      expect(view.getByText('Jerry and Beth and 4 others')).toBeTruthy();
-    });
-
-    it('says "other" rather than "others" for one', async () => {
-      const view = await render(withReactors(['Jerry', 'Beth'], 1, 3));
-      expect(view.getByText('Jerry and Beth and 1 other')).toBeTruthy();
-    });
-
-    it('falls back to a count when there is nobody to name', async () => {
-      // The reader's own reaction is never one of the names, so a row only they
-      // have reacted to has a count and no names.
-      const view = await render(withReactors([], 0, 1));
-      expect(view.getByText('1 reaction')).toBeTruthy();
-    });
-
-    it('shows nothing at all when nobody has reacted', async () => {
-      const view = await render(withReactors([], 0, 0));
-      expect(view.queryByText(/reaction/)).toBeNull();
-    });
+    expect(view.getByText('PICKER')).toBeTruthy();
   });
 });

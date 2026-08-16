@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
+import { diagnose } from '@/lib/diagnose';
 import { queryKeys } from '@/lib/query';
 import { useCurrentProfile } from '@/features/auth';
 import { theme } from '@/ui/tokens';
@@ -84,10 +85,24 @@ type Expanded = 'notes' | 'date' | 'who' | null;
 /** PRD §14. Mirrors `watch_tags.max_per_watch`, which is what actually enforces it. */
 const MAX_COMPANIONS = 10;
 
+/**
+ * What a row says while it cannot be opened.
+ *
+ * `undefined` for `ready`, which is what makes the row live — `SheetRow` treats any
+ * reason at all as a disable. "Unavailable" rather than "Failed": the row is not
+ * broken, it is unusable right now, and the retry beneath says what to do about it.
+ */
+const GATE_REASON: Record<'loading' | 'ready' | 'unavailable', string | undefined> = {
+  loading: 'Loading',
+  ready: undefined,
+  unavailable: 'Unavailable',
+};
+
 function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
-  const { data: existing } = useLogState(profile.id, title.id);
+  const logState = useLogState(profile.id, title.id);
+  const { data: existing } = logState;
   const state = existing ?? emptyLogState;
   /**
    * Whether the server has said what is already stored about this title.
@@ -112,6 +127,28 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
    * leaves `existing` defined and must not close the editor under the user.
    */
   const loaded = existing !== undefined;
+
+  /**
+   * Three states, not two.
+   *
+   * The gate above was written as "loaded or not", and on the founder's device that
+   * turned a backend one migration behind the client into a row that said `Loading`
+   * for ever: `useLogState` selects `note_visibility`, the column was not there, the
+   * query failed, and `existing` stayed undefined — which the sheet could not tell
+   * apart from a slow network.
+   *
+   * So a failed read is now its own state, and it keeps the privacy property rather
+   * than trading it away. The editor stays shut, because the reason it is shut has
+   * not changed: with no answer about what is stored, we cannot know whether this
+   * title carries a note written when notes were private, and opening on the
+   * forward-facing `public` is exactly the publication the gate exists to prevent.
+   * What changes is that the row now says so, and offers the retry.
+   */
+  const fieldState: 'loading' | 'ready' | 'unavailable' = loaded
+    ? 'ready'
+    : logState.isError
+      ? 'unavailable'
+      : 'loading';
 
   /**
    * Edits overlay what the server said, rather than being copied out of it.
@@ -480,13 +517,35 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
         ) : null}
 
         <View style={styles.rows}>
+          {/* One line for all three rows, because they share one read and would
+              otherwise repeat the same sentence three times. Bucket selection and
+              ranking are deliberately *not* gated on this: they go through
+              `set_bucket`, which needs none of what failed here. */}
+          {fieldState === 'unavailable' ? (
+            <View style={styles.unavailable}>
+              <Text variant="footnote" tone="secondary" style={styles.unavailableText}>
+                {diagnose(logState.error) ?? 'Notes, companions and the watch date are unavailable.'}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Retry loading your notes and watch date"
+                onPress={() => void logState.refetch()}
+                hitSlop={theme.space[2]}
+              >
+                <Text variant="callout" tone="action">
+                  Try again
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           <SheetRow
             icon="people-outline"
             label="Who I watched with"
             value={loaded ? companionValue : undefined}
             expanded={expanded === 'who'}
             onPress={loaded ? () => setExpanded(expanded === 'who' ? null : 'who') : undefined}
-            disabledReason={loaded ? undefined : 'Loading'}
+            disabledReason={GATE_REASON[fieldState]}
           />
           {loaded && expanded === 'who' ? (
             <View style={styles.expanded}>
@@ -510,7 +569,7 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
             value={loaded ? noteValue : undefined}
             expanded={expanded === 'notes'}
             onPress={loaded ? () => setExpanded(expanded === 'notes' ? null : 'notes') : undefined}
-            disabledReason={loaded ? undefined : 'Loading'}
+            disabledReason={GATE_REASON[fieldState]}
           />
           {loaded && expanded === 'notes' ? (
             <View style={[styles.expanded, styles.noteBox]}>
@@ -566,7 +625,7 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
             value={loaded ? formatWatchDate(effectiveDate) : undefined}
             expanded={expanded === 'date'}
             onPress={loaded ? () => setExpanded(expanded === 'date' ? null : 'date') : undefined}
-            disabledReason={loaded ? undefined : 'Loading'}
+            disabledReason={GATE_REASON[fieldState]}
           />
           {loaded && expanded === 'date' ? (
             <View style={styles.expanded}>
@@ -635,6 +694,12 @@ const styles = StyleSheet.create({
   },
   confirmActions: { gap: theme.space[2] },
   status: { paddingHorizontal: theme.layout.gutter, textAlign: 'center' },
+  unavailable: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingBottom: theme.space[2],
+    gap: theme.space[1],
+  },
+  unavailableText: {},
   rows: {
     borderTopWidth: StyleSheet.hairlineWidth * 2,
     borderTopColor: theme.border.hairline,
