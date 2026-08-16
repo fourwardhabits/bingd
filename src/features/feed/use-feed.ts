@@ -136,73 +136,101 @@ export function useFeed(userId: string) {
         .eq('state', 'approved');
       if (followsError) throw followsError;
 
-      const actorIds = [userId, ...(follows ?? []).map((row) => row.followee_id)];
-      const { data, error } = await supabase
-        .from('feed_events')
-        .select(
-          'id, type, actor_id, media_item_id, created_at, payload, ' +
-            // The parent series, so a season can be named. A self-join through
-            // parent_id, which PostgREST resolves as an embed like any other.
-            'media_items(kind, title, release_date, poster_path, genres, runtime_minutes, ' +
-            'parent:parent_id(title)), ' +
-            'profiles:actor_id(username, display_name, avatar_path)',
-        )
-        .in('actor_id', actorIds)
-        .in('type', ['title_ranked', 'title_logged', 'season_completed'])
-        .order('created_at', { ascending: false })
-        .limit(30);
-      if (error) throw error;
-
-      const rows = (data ?? []) as unknown as FeedRow[];
-
-      const items: FeedItem[] = [];
-
-      for (const row of rows) {
-        const profile = one(row.profiles);
-        const media = one(row.media_items);
-
-        // An activity item whose subject is "Someone" is not an activity item.
-        // An unresolvable actor means a failed join or a policy hiding a row
-        // that should be visible, and absorbing that behind a plausible
-        // fallback is what let the bug above survive to a screenshot. A feed
-        // with three items is honest; five, two of them about nobody, is not.
-        const actorName = profile?.display_name || profile?.username;
-        if (!actorName) continue;
-
-        items.push({
-          id: row.id,
-          type: row.type as FeedItem['type'],
-          actorId: row.actor_id,
-          actorUsername: profile?.username ?? '',
-          actorName,
-          actorAvatarUri: avatarUri(profile?.avatar_path),
-          mediaItemId: row.media_item_id,
-          kind: media?.kind ?? null,
-          title: media
-            ? fullTitle({
-                kind: media.kind,
-                title: media.title,
-                seriesTitle: one(media.parent)?.title ?? null,
-              })
-            : null,
-          year: media?.release_date ? Number(media.release_date.slice(0, 4)) : null,
-          posterPath: media?.poster_path ?? null,
-          genres: media?.genres ?? [],
-          runtimeMinutes: media?.runtime_minutes ?? null,
-          createdAt: row.created_at,
-          position: row.payload?.position ?? null,
-          score: row.payload?.score ?? null,
-          bucket: row.payload?.bucket ?? null,
-          category: row.payload?.category ?? null,
-          note: null,
-          companions: [],
-        });
-      }
-
-      await Promise.all([attachNotes(items), attachCompanions(items)]);
-      return items;
+      return activityBy([userId, ...(follows ?? []).map((row) => row.followee_id)]);
     },
   });
+}
+
+/**
+ * One person's activity, for their profile.
+ *
+ * Deliberately not "filter the viewer's feed down to this actor", which is what the
+ * profile did first and which is wrong in a way that looks like emptiness: the feed
+ * query spans the viewer's *follow set*, so a public account they have not followed
+ * has no rows in it at all, and every such profile would show an empty Recent
+ * activity while the person plainly has some.
+ *
+ * Asking about the actor directly is also no less safe. `feed_events_read` is
+ * `can_i_view(actor_id)`, so a private account the viewer does not follow returns
+ * nothing here exactly as it does anywhere else — the authorisation was never coming
+ * from the follow set, it was coming from the policy.
+ */
+export function useActorActivity(actorId: string | null, limit = 5) {
+  return useQuery({
+    queryKey: ['actor-activity', actorId, limit],
+    enabled: Boolean(actorId),
+    queryFn: () => activityBy([actorId as string], limit),
+  });
+}
+
+/** The shared read. `actorIds` is a filter, never the authorisation. */
+async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
+  if (!actorIds.length) return [];
+
+  const { data, error } = await supabase
+    .from('feed_events')
+    .select(
+      'id, type, actor_id, media_item_id, created_at, payload, ' +
+        // The parent series, so a season can be named. A self-join through
+        // parent_id, which PostgREST resolves as an embed like any other.
+        'media_items(kind, title, release_date, poster_path, genres, runtime_minutes, ' +
+        'parent:parent_id(title)), ' +
+        'profiles:actor_id(username, display_name, avatar_path)',
+    )
+    .in('actor_id', actorIds)
+    .in('type', ['title_ranked', 'title_logged', 'season_completed'])
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+
+  const rows = (data ?? []) as unknown as FeedRow[];
+
+  const items: FeedItem[] = [];
+
+  for (const row of rows) {
+    const profile = one(row.profiles);
+    const media = one(row.media_items);
+
+    // An activity item whose subject is "Someone" is not an activity item.
+    // An unresolvable actor means a failed join or a policy hiding a row
+    // that should be visible, and absorbing that behind a plausible
+    // fallback is what let the bug above survive to a screenshot. A feed
+    // with three items is honest; five, two of them about nobody, is not.
+    const actorName = profile?.display_name || profile?.username;
+    if (!actorName) continue;
+
+    items.push({
+      id: row.id,
+      type: row.type as FeedItem['type'],
+      actorId: row.actor_id,
+      actorUsername: profile?.username ?? '',
+      actorName,
+      actorAvatarUri: avatarUri(profile?.avatar_path),
+      mediaItemId: row.media_item_id,
+      kind: media?.kind ?? null,
+      title: media
+        ? fullTitle({
+            kind: media.kind,
+            title: media.title,
+            seriesTitle: one(media.parent)?.title ?? null,
+          })
+        : null,
+      year: media?.release_date ? Number(media.release_date.slice(0, 4)) : null,
+      posterPath: media?.poster_path ?? null,
+      genres: media?.genres ?? [],
+      runtimeMinutes: media?.runtime_minutes ?? null,
+      createdAt: row.created_at,
+      position: row.payload?.position ?? null,
+      score: row.payload?.score ?? null,
+      bucket: row.payload?.bucket ?? null,
+      category: row.payload?.category ?? null,
+      note: null,
+      companions: [],
+    });
+  }
+
+  await Promise.all([attachNotes(items), attachCompanions(items)]);
+  return items;
 }
 
 /**

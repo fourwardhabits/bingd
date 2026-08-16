@@ -6,7 +6,7 @@ import { useCurrentProfile } from '@/features/auth';
 import { bandSizes, scoreFor } from '@/features/collection/score';
 import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
-import { useFeed } from '@/features/feed/use-feed';
+import { useActorActivity } from '@/features/feed/use-feed';
 import { useProfileNotes, usePublicProfile } from '@/features/profile/use-public-profile';
 import { posterUri } from '@/lib/images';
 import { fullTitle } from '@/lib/titles';
@@ -58,7 +58,7 @@ export default function PublicProfileScreen() {
   const ranked = useRankedCollection(subjectId, category);
   const notes = useProfileNotes(profile.data?.id ?? null);
   const watched = useWatched(viewer.id);
-  const feed = useFeed(viewer.id);
+  const activity = useActorActivity(profile.data?.id ?? null);
 
   const isSelf = profile.data?.id === viewer.id;
   const rows = ranked.data ?? [];
@@ -67,9 +67,10 @@ export default function PublicProfileScreen() {
   // themselves would give all six a 10.
   const sizes = bandSizes(rows);
   const top = rows.slice(0, 6);
-  // Their activity, from the viewer's own feed query — which only ever contains
-  // actors the viewer may see, so no separate authorisation is needed or invented.
-  const recent = (feed.data ?? []).filter((event) => event.actorId === profile.data?.id).slice(0, 5);
+  // Asked about this actor directly. Filtering the viewer's own feed would have
+  // shown nothing for any public account they had not followed, because that query
+  // spans the follow set — the authorisation comes from feed_events_read either way.
+  const recent = activity.data ?? [];
 
   return (
     <Screen includeBottomInset edges={[]}>

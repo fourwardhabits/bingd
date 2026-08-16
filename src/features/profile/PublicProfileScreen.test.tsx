@@ -159,6 +159,38 @@ describe('what this person likes', () => {
 
     await waitFor(() => expect(view.getByText('Nothing ranked yet')).toBeTruthy());
   });
+
+  it('shows their activity without the viewer having to follow them', async () => {
+    // The first version filtered the viewer's own feed, which spans the follow set
+    // — so every public account the viewer had not followed showed an empty Recent
+    // activity while plainly having some. `feed_events_read` was doing the
+    // authorising all along; the follow set was only ever a filter.
+    tableRows.feed_events = [
+      {
+        id: 'e1',
+        type: 'title_ranked',
+        actor_id: 'anna-id',
+        media_item_id: 'a',
+        created_at: '2026-08-15T00:00:00Z',
+        payload: { position: 1, category: 'movies', bucket: 'loved', score: 9.1 },
+        media_items: {
+          kind: 'movie',
+          title: 'Heat',
+          release_date: '1995-01-01',
+          poster_path: null,
+          genres: ['Drama'],
+          runtime_minutes: 170,
+          parent: null,
+        },
+        profiles: { username: 'anna', display_name: 'Anna', avatar_path: null },
+      },
+    ];
+    tableRows.follows = [];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
+    expect(view.getAllByText(/Heat/).length).toBeGreaterThan(0);
+  });
 });
 
 describe('their notes', () => {
