@@ -8,7 +8,7 @@ import { useCurrentProfile } from '@/features/auth';
 import { LogSheet, type LoggableTitle } from '@/features/collection/LogSheet';
 import { useTitleScore } from '@/features/collection/use-score';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
-import { RankingSheet } from '@/features/ranking/RankingSheet';
+import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { useSeasons } from '@/features/search/use-title-search';
 import { useCredits } from '@/features/title/use-credits';
 import { useTitleEnrichment } from '@/features/title/use-enrichment';
@@ -55,12 +55,7 @@ export default function TitleScreen() {
   const [expanded, setExpanded] = useState(false);
   const [tab, setTab] = useState<Tab>('cast');
   const [loggingTitle, setLoggingTitle] = useState<LoggableTitle | null>(null);
-  const [rankingSubject, setRankingSubject] = useState<{
-    id: string;
-    title: string;
-    bucket: 'loved' | 'fine' | 'notForMe';
-    posterUri: string | null;
-  } | null>(null);
+  const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
 
   const { data, isPending, isError, refetch } = useQuery({
     queryKey: queryKeys.title(id ?? ''),
@@ -447,13 +442,14 @@ export default function TitleScreen() {
           setLoggingTitle(null);
           setActionError(null);
         }}
-        onFindWhereItLands={(bucket) => {
+        onRank={(bucket, mode) => {
           if (!loggingTitle) return;
           setRankingSubject({
             id: loggingTitle.id,
             title: loggingTitle.title,
             bucket,
             posterUri: loggingTitle.posterUri,
+            mode,
           });
           setLoggingTitle(null);
         }}

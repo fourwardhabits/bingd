@@ -1,7 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { queryKeys } from '@/lib/query';
 import { useCurrentProfile } from '@/features/auth';
@@ -10,13 +9,17 @@ import {
   BUCKETS,
   BucketChip,
   Button,
-  Field,
   Poster,
+  Sheet,
+  SheetRow,
   Text,
   type BucketId,
 } from '@/ui/components';
 
-import { logWatched, newOperationId, setBucket, today, type WriteResult } from './writes';
+import { formatWatchDate, today } from './dates';
+import { emptyLogState, useLogState } from './use-log-state';
+import { WatchDatePicker } from './WatchDatePicker';
+import { logWatched, newOperationId, saveNote, setBucket, type WriteResult } from './writes';
 
 export type LoggableTitle = {
   id: string;
@@ -33,57 +36,78 @@ export type LogSheetProps = {
   title: LoggableTitle | null;
   onClose: () => void;
   /**
-   * Called once the title is Logged, with the bucket that was chosen. The ranking flow
-   * hangs off this — it is deliberately not started from inside the sheet, because
-   * bucketing and ranking are separate acts (PRD §11) and this is the surface where a
-   * user first sees that.
+   * Called once a bucket is settled and the title can be ranked.
+   *
+   * Fired automatically — there is no longer a "Find where it lands" button. The
+   * founder reversed the separate-acts rule on 2026-08-15; the reasoning is in
+   * `choose` below.
+   *
+   * `mode` decides which RPC opens the session. `start` is a first ranking and the
+   * bucket has already been saved by then. `rebucket` is a *ranked* title changing
+   * bands: `rank_rebucket` does the unrank, the bucket change and the fresh session
+   * in one server call, so the bucket must **not** be written here first — doing so
+   * would hit `set_bucket`'s 55000 refusal.
    */
-  onFindWhereItLands?: (bucket: BucketId) => void;
+  onRank?: (bucket: BucketId, mode: 'start' | 'rebucket') => void;
 };
 
 /**
- * The bucket prompt (screens.md §4).
+ * The log sheet (screens.md §4).
  *
- * A sheet rather than a screen, so what the user was looking at stays visible behind it.
- * The rule the architecture depends on and this component enforces: choosing a bucket
- * saves immediately, and comparisons begin only when the user asks for them.
- *
- * Writes are online-only today. The outbox in offline-sync.md is not built yet, so a
- * failed save says so and stays on screen with the choice intact rather than pretending
- * to have queued. Claiming otherwise would be worse than the gap.
+ * A compact bottom sheet of stacked modules, not a full-height page. Beli 224 is the
+ * structure: a header, the bucket prompt, then rows that state their value and spend
+ * space only when opened. What is borrowed is density and hierarchy; the palette,
+ * the serif and the poster treatment stay Bingd's (PRD §5).
  */
-export function LogSheet({ title, onClose, onFindWhereItLands }: LogSheetProps) {
+export function LogSheet({ title, onClose, onRank }: LogSheetProps) {
   if (!title) return null;
 
   // Keyed by the title, and unmounted entirely when there is none. Both matter: a sheet
-  // that stays mounted between titles inherits the last one's bucket, its "Logged."
-  // message and — worst of all — its unsaved note, which then gets filed against whatever
-  // is on screen now. Clearing state by hand instead only covered the way out through
-  // Close, and the way out through "Find where it lands" is the common one.
-  return (
-    <Sheet key={title.id} title={title} onClose={onClose} onFindWhereItLands={onFindWhereItLands} />
-  );
+  // that stays mounted between titles inherits the last one's bucket, its message and —
+  // worst of all — its unsaved note, which then gets filed against whatever is on screen
+  // now.
+  return <Body key={title.id} title={title} onClose={onClose} onRank={onRank} />;
 }
 
-function Sheet({
-  title,
-  onClose,
-  onFindWhereItLands,
-}: LogSheetProps & { title: LoggableTitle }) {
+type Expanded = 'notes' | 'date' | null;
+
+function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
+  const { data: existing } = useLogState(profile.id, title.id);
+  const state = existing ?? emptyLogState;
 
-  const [bucket, setSelectedBucket] = useState<BucketId | null>(null);
-  const [note, setNote] = useState('');
+  /**
+   * Edits overlay what the server said, rather than being copied out of it.
+   *
+   * `null` means "not touched here yet", so each field falls through to the stored
+   * value until the user changes it. The obvious alternative — seeding local state
+   * from the query in an effect — needs a "have I hydrated" flag, races the first
+   * render (the query resolves *after* it, so the fields flash empty), and discards
+   * whatever is half-typed the next time an invalidation returns. An empty string is
+   * a real edit and `??` passes it through, which is what makes clearing a note work.
+   */
+  const [bucketEdit, setBucketEdit] = useState<BucketId | null>(null);
+  const [noteEdit, setNoteEdit] = useState<string | null>(null);
+  const [dateEdit, setDateEdit] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Expanded>(null);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [confirmRebucket, setConfirmRebucket] = useState<BucketId | null>(null);
 
-  const close = onClose;
+  const bucket = bucketEdit ?? state.bucket;
+  const note = noteEdit ?? state.note;
+  const effectiveDate = dateEdit ?? state.watchedOn ?? today();
+
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.title(title.id) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.logState(title.id) });
+  };
 
   const report = (result: WriteResult) => {
     if (result.outcome === 'ranked') {
-      setProblem('You have already ranked this. Change it from your collection.');
+      setProblem('Ranking owns this one. Change the bucket to re-rank it.');
       return false;
     }
     if (result.outcome === 'failed') {
@@ -93,10 +117,29 @@ function Sheet({
     return true;
   };
 
+  /**
+   * Save the bucket, then go straight into ranking.
+   *
+   * The button that used to sit between these two steps is gone (founder decision,
+   * 2026-08-15, reversing PRD §11). Three cases have to stay distinct:
+   *
+   *   - not ranked yet: save, then hand off to the ranking sheet;
+   *   - ranked, same bucket: do nothing at all. Re-selecting what is already chosen
+   *     is not a change, and `set_bucket` would refuse it with 55000 anyway;
+   *   - ranked, different bucket: ask first. `rank_rebucket` discards the position
+   *     and starts fresh comparisons, so it is destructive and must not happen on a
+   *     stray tap.
+   */
   const choose = async (chosen: BucketId) => {
     if (saving) return;
 
-    setSelectedBucket(chosen);
+    if (state.ranked) {
+      if (chosen === state.bucket) return;
+      setConfirmRebucket(chosen);
+      return;
+    }
+
+    setBucketEdit(chosen);
     setSaving(true);
     setProblem(null);
 
@@ -105,141 +148,294 @@ function Sheet({
     const operationId = newOperationId();
     const result = await setBucket({ operationId, mediaItemId: title.id, bucket: chosen });
 
-    setSaving(false);
     if (!report(result)) {
-      setSelectedBucket(null);
+      setSaving(false);
+      setBucketEdit(null);
       return;
     }
 
-    setSaved(true);
-    // Surgical, per client.md §3: this bucket changed one person's collection and nothing
-    // else. The feed refreshes on its own schedule rather than being blown away by it.
-    void queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) });
+    // The row says "Today", so today is what must be stored. `set_bucket` writes no
+    // date, and leaving it at that meant the sheet displayed a default it had never
+    // saved — reopen it a week later and it would still claim "Today". Only when
+    // there is no date already: a re-log must not overwrite the real one.
+    if (!state.watchedOn) {
+      // Failure here is not worth blocking on. The bucket is saved, the title is in
+      // the collection, and the date is recoverable from this same row.
+      await logWatched({
+        operationId: newOperationId(),
+        mediaItemId: title.id,
+        watchedOn: effectiveDate,
+      });
+    }
+
+    setSaving(false);
+    refresh();
+    onRank?.(chosen, 'start');
   };
 
-  const saveNote = async () => {
-    if (!note.trim()) return;
+  /**
+   * Confirmed re-rank. Nothing is written here — `rank_rebucket` is one server call
+   * that unranks, changes the bucket and opens the new session, and the ranking sheet
+   * is what drives a session. Writing the bucket first would only earn a 55000.
+   */
+  const rebucket = () => {
+    const chosen = confirmRebucket;
+    if (!chosen || saving) return;
+
+    setConfirmRebucket(null);
+    setBucketEdit(chosen);
+    onRank?.(chosen, 'rebucket');
+  };
+
+  /**
+   * The note and the watch date, saved together.
+   *
+   * They travel together because they are one act of logging, but the date no longer
+   * depends on the note. It used to: `log_watched` was called only when a non-empty
+   * note was written, so a user could not record "I watched this last night" without
+   * also typing something (screens.md §4 recorded the gap). Now the date is sent
+   * whenever it has been touched or a note exists.
+   */
+  const saveDetails = async (nextNote: string, nextDate: string | null) => {
+    const trimmed = nextNote.trim();
+    const noteChanged = trimmed !== state.note;
+    const dateChanged = nextDate !== null && nextDate !== state.watchedOn;
+    if (!noteChanged && !dateChanged) return;
 
     setSaving(true);
     setProblem(null);
 
-    // The watch date goes with the note because both are the same act of logging: the
-    // user is recording that they watched this, today, and what they thought.
-    const result = await logWatched({
-      operationId: newOperationId(),
-      mediaItemId: title.id,
-      watchedOn: today(),
-      note: note.trim(),
-    });
+    // The date always goes through log_watched, which upserts — and this may be the
+    // call that creates the row a note then needs.
+    let ok = true;
+    if (dateChanged || (noteChanged && !state.exists)) {
+      const result = await logWatched({
+        operationId: newOperationId(),
+        mediaItemId: title.id,
+        // Omitting a field leaves the stored value alone — the server coalesces — so
+        // an untouched date is not resent and cannot overwrite one already recorded.
+        watchedOn: dateChanged ? nextDate : null,
+        note: noteChanged && !state.exists ? trimmed : null,
+      });
+      ok = report(result);
+    }
+
+    // An existing note goes through save_note, which assigns rather than coalesces.
+    // log_watched cannot clear one: it treats an empty string as "no change", so a
+    // deleted note would reappear on the next read.
+    if (ok && noteChanged && state.exists) {
+      const result = await saveNote({
+        operationId: newOperationId(),
+        mediaItemId: title.id,
+        note: trimmed,
+        baseVersion: state.noteVersion,
+      });
+      ok = report(result);
+    }
 
     setSaving(false);
-    if (report(result)) setNote('');
+    if (ok) refresh();
   };
 
-  const category = title.kind === 'movie' ? 'Movies' : 'TV seasons';
-  const heading = title.seriesTitle ? `${title.seriesTitle}: ${title.title}` : title.title;
+  const category = title.kind === 'movie' ? 'Movies' : 'TV season';
+  const heading = title.seriesTitle ? `${title.seriesTitle} — ${title.title}` : title.title;
+  const noteValue = note.trim() ? `${note.trim().split(/\s+/).length} words` : 'Add';
 
   return (
-    <Modal
-      visible
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={close}
-      accessibilityViewIsModal
-    >
-      <SafeAreaView style={styles.sheet} edges={['top', 'bottom', 'left', 'right']}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <View style={styles.header}>
-            <Poster uri={title.posterUri} title={title.title} size="md" />
-            <View style={styles.headerText}>
-              <Text variant="title2" numberOfLines={3}>
-                {heading}
-              </Text>
-              <Text variant="footnote" tone="tertiary">
-                {[title.year, category].filter(Boolean).join(' · ')}
+    <Sheet visible onClose={onClose} label={`Log ${heading}`}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        bounces={false}
+      >
+        <View style={styles.header}>
+          <Poster uri={title.posterUri} title={title.title} size="xs" />
+          <View style={styles.headerText}>
+            <Text variant="headline" numberOfLines={2}>
+              {heading}
+            </Text>
+            <Text variant="footnote" tone="tertiary">
+              {[title.year, category].filter(Boolean).join(' · ')}
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            onPress={onClose}
+            hitSlop={theme.space[3]}
+          >
+            <Text variant="callout" tone="secondary">
+              Close
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.buckets} accessibilityRole="radiogroup">
+          <Text variant="title2" style={styles.prompt}>
+            How was it?
+          </Text>
+          <View style={styles.chips}>
+            {BUCKETS.map((option) => (
+              <BucketChip
+                key={option.id}
+                bucket={option}
+                selected={bucket === option.id}
+                onPress={() => void choose(option.id)}
+              />
+            ))}
+          </View>
+        </View>
+
+        {confirmRebucket ? (
+          <View style={styles.confirm}>
+            <Text variant="callout">Changing this will re-rank {title.title}.</Text>
+            <Text variant="footnote" tone="secondary">
+              Its current position is discarded and you will compare it again.
+            </Text>
+            <View style={styles.confirmActions}>
+              <Button label="Re-rank" onPress={rebucket} />
+              <Button
+                label="Cancel"
+                kind="secondary"
+                onPress={() => {
+                  setConfirmRebucket(null);
+                  setBucketEdit(null);
+                }}
+              />
+            </View>
+          </View>
+        ) : null}
+
+        {saving ? (
+          <Text variant="footnote" tone="tertiary" style={styles.status}>
+            Saving…
+          </Text>
+        ) : null}
+        {problem ? (
+          <Text variant="footnote" tone="action" style={styles.status}>
+            {problem}
+          </Text>
+        ) : null}
+
+        <View style={styles.rows}>
+          <SheetRow
+            icon="people-outline"
+            label="Who I watched with"
+            disabledReason="Coming soon"
+          />
+
+          <SheetRow
+            icon="create-outline"
+            label="Notes"
+            value={noteValue}
+            expanded={expanded === 'notes'}
+            onPress={() => setExpanded(expanded === 'notes' ? null : 'notes')}
+          />
+          {expanded === 'notes' ? (
+            <View style={[styles.expanded, styles.noteBox]}>
+              <NoteInput
+                value={note}
+                onChangeText={setNoteEdit}
+                onBlur={() => void saveDetails(note, dateEdit)}
+              />
+              <Text variant="caption" tone="tertiary">
+                Only you can read this.
               </Text>
             </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-              onPress={close}
-              hitSlop={theme.space[3]}
-            >
-              <Text variant="headline" tone="secondary">
-                Close
-              </Text>
-            </Pressable>
-          </View>
+          ) : null}
 
-          <View style={styles.section} accessibilityRole="radiogroup">
-            <Text variant="title2">How was it?</Text>
-            <View style={styles.buckets}>
-              {BUCKETS.map((option) => (
-                <BucketChip
-                  key={option.id}
-                  bucket={option}
-                  selected={bucket === option.id}
-                  onPress={() => void choose(option.id)}
-                />
-              ))}
+          <SheetRow icon="image-outline" label="Photos" disabledReason="Coming soon" />
+
+          <SheetRow
+            icon="calendar-outline"
+            label="Watch date"
+            value={formatWatchDate(effectiveDate)}
+            expanded={expanded === 'date'}
+            onPress={() => setExpanded(expanded === 'date' ? null : 'date')}
+          />
+          {expanded === 'date' ? (
+            <View style={styles.expanded}>
+              <WatchDatePicker
+                value={effectiveDate}
+                onChange={(iso) => {
+                  setDateEdit(iso);
+                  void saveDetails(note, iso);
+                }}
+              />
             </View>
-            {saving ? (
-              <Text variant="footnote" tone="tertiary">
-                Saving…
-              </Text>
-            ) : null}
-            {saved && !problem ? (
-              <Text variant="footnote" tone="secondary">
-                Logged. It is in your collection whether or not you rank it.
-              </Text>
-            ) : null}
-            {problem ? (
-              <Text variant="footnote" tone="action">
-                {problem}
-              </Text>
-            ) : null}
-          </View>
+          ) : null}
+        </View>
+      </ScrollView>
+    </Sheet>
+  );
+}
 
-          <View style={styles.section}>
-            <Field
-              label="Private note"
-              hint="Only you can read this."
-              value={note}
-              onChangeText={setNote}
-              multiline
-              maxLength={2000}
-              onBlur={() => void saveNote()}
-            />
-          </View>
-
-          <View style={styles.actions}>
-            <Button
-              label="Find where it lands"
-              disabled={!saved || !bucket}
-              disabledReason="Choose how you felt about it first."
-              onPress={() => bucket && onFindWhereItLands?.(bucket)}
-            />
-            <Button label="Done" kind="secondary" onPress={close} />
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
+/**
+ * Separate so the sheet's own layout stays readable, and because the note is the one
+ * control here that is a text field rather than a row.
+ */
+function NoteInput({
+  value,
+  onChangeText,
+  onBlur,
+}: {
+  value: string;
+  onChangeText: (next: string) => void;
+  onBlur: () => void;
+}) {
+  return (
+    <TextInput
+      accessibilityLabel="Notes"
+      value={value}
+      onChangeText={onChangeText}
+      onBlur={onBlur}
+      multiline
+      maxLength={2000}
+      placeholder="What did you think?"
+      placeholderTextColor={theme.text.tertiary}
+      style={styles.noteInput}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1, backgroundColor: theme.surface.base },
-  content: {
-    padding: theme.layout.gutter,
-    gap: theme.layout.sectionGap,
-  },
+  content: { paddingBottom: theme.space[4], gap: theme.space[4] },
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: theme.space[3],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[2],
   },
-  headerText: { flex: 1, gap: theme.space[1] },
-  section: { gap: theme.space[4] },
-  buckets: { flexDirection: 'row', gap: theme.space[3] },
-  actions: { gap: theme.space[3] },
+  headerText: { flex: 1, gap: 2 },
+  buckets: { gap: theme.space[3] },
+  prompt: { textAlign: 'center' },
+  chips: { flexDirection: 'row', gap: theme.space[3], paddingHorizontal: theme.layout.gutter },
+  confirm: {
+    marginHorizontal: theme.layout.gutter,
+    padding: theme.space[3],
+    borderRadius: theme.radius.card,
+    backgroundColor: theme.surface.sunken,
+    gap: theme.space[2],
+  },
+  confirmActions: { gap: theme.space[2] },
+  status: { paddingHorizontal: theme.layout.gutter, textAlign: 'center' },
+  rows: {
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderTopColor: theme.border.hairline,
+    paddingTop: theme.space[2],
+  },
+  expanded: { paddingBottom: theme.space[2] },
+  noteBox: { paddingHorizontal: theme.layout.gutter, gap: theme.space[1] },
+  noteInput: {
+    minHeight: 88,
+    borderRadius: theme.radius.control,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.strong,
+    backgroundColor: theme.surface.raised,
+    padding: theme.space[3],
+    textAlignVertical: 'top',
+    color: theme.text.primary,
+    ...theme.typography.body,
+  },
 });

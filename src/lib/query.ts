@@ -17,6 +17,10 @@ export const queryKeys = {
   feed: (userId: string, cursor?: string) => ['feed', userId, { cursor }] as const,
   recommendations: (userId: string) => ['recommendations', userId] as const,
   title: (mediaItemId: string) => ['title', mediaItemId] as const,
+  // What the log sheet opens onto: the user's own bucket, note, watch date and
+  // whether the title is ranked. Separate from `title` for the same reason
+  // `comparisonCard` is — a different shape read by a different screen.
+  logState: (mediaItemId: string) => ['log-state', mediaItemId] as const,
   // Deliberately separate from `title`: the comparison card reads three columns, and
   // sharing a key with a full title row would let whichever query ran first serve the
   // other a shape it did not ask for.

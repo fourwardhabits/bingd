@@ -35,7 +35,16 @@ const comparison = (over: Record<string, unknown> = {}) => ({
 });
 
 const placement = {
-  data: { done: true, position: 3, category: 'movies', bucket: 'loved', adjustable: false },
+  data: {
+    done: true,
+    position: 3,
+    category: 'movies',
+    bucket: 'loved',
+    // The reveal's hero number. Computed server-side at finalize (20260815010000),
+    // because the band sizes the client holds predate this insertion.
+    score: 8.7,
+    adjustable: false,
+  },
   error: null,
 };
 
@@ -260,7 +269,7 @@ describe('closing', () => {
     answering(placement);
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A is number 3 in Movies');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 Movies');
     await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
 
     expect(callsTo('rank_cancel')).toHaveLength(0);
@@ -295,13 +304,30 @@ describe('closing', () => {
 });
 
 describe('the reveal', () => {
-  it('shows the position the server gave and refreshes that category', async () => {
+  const REVEAL = 'Film A scored 8.7 out of 10. #3 Movies';
+
+  /**
+   * The score is the hero and the ordinal is context beneath it — founder decision,
+   * 2026-08-15. This screen rendered `#3` at display size until Slice 3; the assertion
+   * to keep is that the *number the user sees* is the score, not that a score exists
+   * somewhere on the page.
+   */
+  it('makes the score the hero and refreshes that category', async () => {
     answering(placement);
     const sheet = await openSheet();
     const invalidate = jest.spyOn(sheet.client, 'invalidateQueries');
 
-    await sheet.findByLabelText('Film A is number 3 in Movies');
-    expect(sheet.getByText('IN MOVIES')).toBeTruthy();
+    await sheet.findByLabelText(REVEAL);
+    // The panel's summary label is what a screen reader reads, so the numeral itself
+    // is hidden from the tree — hence includeHiddenElements. It counts up from the
+    // bottom of its band, so this waits for the value to settle.
+    await waitFor(() =>
+      expect(sheet.getByText('8.7', { includeHiddenElements: true })).toBeTruthy(),
+    );
+    // The ordinal is present, and is not the headline. Also hidden from the tree,
+    // because the panel's summary above already spoke it — reading it twice is worse
+    // than not reading it.
+    expect(sheet.getByText(/#3 Movies/, { includeHiddenElements: true })).toBeTruthy();
 
     // Rendering happened before the spy, so re-run the placement to observe it.
     await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} />);
@@ -317,7 +343,7 @@ describe('the reveal', () => {
     answering(placement);
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A is number 3 in Movies');
+    await sheet.findByLabelText(REVEAL);
     expect(sheet.queryByText(/estimate/)).toBeNull();
   });
 

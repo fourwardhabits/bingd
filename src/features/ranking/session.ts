@@ -44,6 +44,17 @@ export type Placed = {
   category: string;
   bucket: string;
   /**
+   * The 0–10 score, computed server-side by `score_for` at finalize and returned
+   * alongside the position (20260815010000).
+   *
+   * Taken from the server rather than derived here, even though `score.ts` could do
+   * the arithmetic. The band sizes the client holds are the ones it had *before* this
+   * insertion, so deriving locally would either be off by one or need a refetch first
+   * — and the number the reveal shows would be a different number from the one
+   * written into the feed event for the same moment.
+   */
+  score: number;
+  /**
    * The server's word for "this landed at the midpoint because you skipped too often".
    * It comes from the server so that PRD §10's "you can change this from Rankings" line
    * cannot be shown in the wrong circumstances.
@@ -73,6 +84,7 @@ type RankResponse = {
   position?: number;
   category?: string;
   bucket?: string;
+  score?: number;
   adjustable?: boolean;
   cancelled?: boolean;
   skipped?: boolean;
@@ -119,6 +131,7 @@ const step = (data: RankResponse | null, subjectId: string): SessionStep => {
       position: data.position ?? 0,
       category: data.category ?? '',
       bucket: data.bucket ?? '',
+      score: data.score ?? 0,
       adjustable: Boolean(data.adjustable),
     };
   }
@@ -148,6 +161,26 @@ const call = async (fn: string, args: Record<string, unknown>, subjectId: string
  */
 export const rankStart = (mediaItemId: string, bucket: BucketId) =>
   call('rank_start', { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket] }, mediaItemId);
+
+/**
+ * Moves an already-ranked title into a different band, and opens the session that
+ * places it there.
+ *
+ * It lives beside `rankStart` rather than with the collection writes because it *is*
+ * one: the RPC ends with `return rank_start(...)`, so it answers with the same
+ * `SessionStep` shape and the sheet drives it identically from there.
+ *
+ * The position is genuinely discarded — the server unranks first, then recomputes the
+ * band bounds, then inserts fresh. PRD §10 requires that a bucket change re-runs
+ * comparisons rather than estimating a new position, so this cannot be made cheaper.
+ * That is why the caller confirms with the user before reaching it.
+ */
+export const rankRebucket = (mediaItemId: string, bucket: BucketId) =>
+  call(
+    'rank_rebucket',
+    { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket] },
+    mediaItemId,
+  );
 
 export const rankAnswer = (sessionId: string, winnerId: string, subjectId: string) =>
   call('rank_answer', { p_session_id: sessionId, p_winner: winnerId }, subjectId);

@@ -135,22 +135,58 @@ const SHIM = `
  */
 let migratedSnapshot;
 
-const applyMigrations = async (db) => {
-  const files = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
+const migrationFiles = async () =>
+  (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
 
-  for (const file of files) {
-    let sql = await readFile(join(migrationsDir, file), 'utf8');
-    // The shim already defines citext as a domain.
-    sql = sql.replace(/create extension if not exists citext;/g, '');
-    try {
-      await db.exec(sql);
-    } catch (e) {
-      throw new Error(`Migration ${file} failed: ${e.message}`);
-    }
+const applyOne = async (db, file) => {
+  let sql = await readFile(join(migrationsDir, file), 'utf8');
+  // The shim already defines citext as a domain.
+  sql = sql.replace(/create extension if not exists citext;/g, '');
+  try {
+    await db.exec(sql);
+  } catch (e) {
+    throw new Error(`Migration ${file} failed: ${e.message}`);
   }
+};
+
+const applyMigrations = async (db, upTo) => {
+  const all = await migrationFiles();
+  // Filenames are timestamp-prefixed and applied in sort order, so "everything
+  // before file X" is a plain string comparison over that same order.
+  const files = upTo ? all.filter((f) => f < upTo) : all;
+
+  for (const file of files) await applyOne(db, file);
 
   return files;
 };
+
+/**
+ * A database with the migrations applied only up to (and not including) `stopBefore`.
+ *
+ * This exists so a migration that *transforms existing rows* can be tested for what it
+ * does to them. The ordinary `createTestDb` reloads a snapshot in which every migration
+ * has already run, so a backfill has necessarily already executed — against an empty
+ * database, where it is a guaranteed no-op. Asserting anything about it afterwards
+ * measures the triggers instead and passes whether or not the backfill works at all.
+ *
+ * Deliberately uncached: the whole point is a database in a state the snapshot cannot
+ * represent, and one uncached run in one file is a few seconds.
+ */
+export async function createTestDbBefore(stopBefore) {
+  // Checked before any work, and before the filter below silently applies a prefix:
+  // a renamed or mistyped migration would otherwise produce a database missing an
+  // arbitrary tail of the schema, and the failure would surface much later as a
+  // confusing "relation does not exist".
+  if (!(await migrationFiles()).includes(stopBefore)) {
+    throw new Error(`createTestDbBefore: no migration named ${stopBefore}`);
+  }
+
+  const db = await PGlite.create();
+  await db.exec(SHIM);
+  const files = await applyMigrations(db, stopBefore);
+
+  return { ...testApi(db, files), applyMigration: (file) => applyOne(db, file) };
+}
 
 export async function createTestDb() {
   let db;
@@ -166,6 +202,10 @@ export async function createTestDb() {
     migratedSnapshot = { dump: await db.dumpDataDir('none'), files };
   }
 
+  return testApi(db, files);
+}
+
+function testApi(db, files) {
   return {
     db,
     appliedMigrations: files,

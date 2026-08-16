@@ -22,6 +22,7 @@ export {
   type PosterTile,
 } from './PosterWall';
 export { Screen } from './Screen';
+export { Sheet, SheetRow, type SheetProps, type SheetRowProps } from './Sheet';
 export { ScoreBadge, type ScoreBadgeProps } from './ScoreBadge';
 export { SearchField, type SearchFieldProps } from './SearchField';
 export { SectionHeader, type SectionHeaderProps } from './SectionHeader';

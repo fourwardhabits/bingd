@@ -133,6 +133,49 @@ export async function logWatched(input: {
 }
 
 /**
+ * Writes a note, including clearing one.
+ *
+ * Separate from `log_watched` because that one coalesces: it can create a note and can
+ * never erase one, so a user deleting their note through it would watch the old text
+ * come back on the next read. `save_note` assigns directly.
+ *
+ * `baseVersion` is the `note_updated_at` the edit was based on. When it disagrees with
+ * the stored one the server refuses with 55000 rather than overwriting, which is the
+ * mechanism behind offline-sync.md §5's "local drafts are never silently overwritten".
+ * Null skips the check and is only correct where no version was ever issued.
+ *
+ * Requires the row to exist — `P0002` otherwise. Use `logWatched` to create it.
+ */
+export async function saveNote(input: {
+  operationId: string;
+  mediaItemId: string;
+  note: string;
+  baseVersion?: string | null;
+}): Promise<WriteResult & { noteVersion?: string }> {
+  const { data, error } = await supabase.rpc('save_note', {
+    p_operation_id: input.operationId,
+    p_media_item_id: input.mediaItemId,
+    p_note: input.note,
+    p_base_updated_at: input.baseVersion ?? null,
+  });
+
+  if (error) {
+    // save_note reuses 55000 for its conflict, where `interpret` reads it as "ranking
+    // owns this". A note has nothing to do with ranking, so it is mapped here instead.
+    if (error.code === CODES.ranked) {
+      return {
+        outcome: 'failed',
+        message: 'This note changed somewhere else. Reopen it to see the latest.',
+      };
+    }
+    return interpret(error);
+  }
+
+  const result = data as { status?: string; note_version?: string } | null;
+  return { ...statusOf(data), noteVersion: result?.note_version };
+}
+
+/**
  * Adds or removes a title from the watchlist.
  *
  * This accepts movies, series, and seasons. Series are intentionally allowed here:

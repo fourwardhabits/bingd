@@ -6,7 +6,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { LogSheet, type LoggableTitle } from '@/features/collection/LogSheet';
-import { RankingSheet } from '@/features/ranking/RankingSheet';
+import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
 import { useRecentSearches } from '@/features/search/use-recent-searches';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
@@ -23,7 +23,6 @@ import {
   Text,
   TitleMetadata,
   TitleRow,
-  type BucketId,
 } from '@/ui/components';
 
 /** All first, because the filter is a narrowing of a search the user has
@@ -51,12 +50,7 @@ export default function LogScreen() {
   const [filter, setFilter] = useState<Filter>('all');
   const [series, setSeries] = useState<{ id: string; title: string } | null>(null);
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
-  const [ranking, setRanking] = useState<{
-    id: string;
-    title: string;
-    bucket: BucketId;
-    posterUri: string | null;
-  } | null>(null);
+  const [ranking, setRanking] = useState<RankingSubject | null>(null);
 
   const { recent, remember, clear } = useRecentSearches(profile.id);
 
@@ -176,7 +170,7 @@ export default function LogScreen() {
       <LogSheet
         title={logging}
         onClose={() => setLogging(null)}
-        onFindWhereItLands={(bucket) => {
+        onRank={(bucket, mode) => {
           if (!logging) return;
           // The log sheet closes as the comparison opens. screens.md §4 asks for one
           // continuous motion, and two stacked sheets is the opposite of that.
@@ -185,6 +179,7 @@ export default function LogScreen() {
             title: logging.title,
             bucket,
             posterUri: logging.posterUri,
+            mode,
           });
           setLogging(null);
         }}

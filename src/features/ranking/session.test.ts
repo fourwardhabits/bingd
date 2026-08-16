@@ -41,7 +41,16 @@ describe('reading the server\u2019s answer', () => {
     // An empty band inserts directly: there is nothing to compare against, so the first
     // title in a bucket is placed without a single question.
     mockRpc.mockResolvedValue({
-      data: { done: true, position: 1, category: 'movies', bucket: 'loved', adjustable: false },
+      data: {
+        done: true,
+        position: 1,
+        category: 'movies',
+        bucket: 'loved',
+        // The first title in a band scores the top of it (score.ts), and the server
+        // is what says so — the reveal shows this number rather than deriving one.
+        score: 10,
+        adjustable: false,
+      },
       error: null,
     });
 
@@ -50,6 +59,7 @@ describe('reading the server\u2019s answer', () => {
       position: 1,
       category: 'movies',
       bucket: 'loved',
+      score: 10,
       adjustable: false,
     });
   });

@@ -5,9 +5,13 @@ import { renderWithProviders } from '@/test-utils/render';
 import { LogSheet, type LoggableTitle, type LogSheetProps } from './LogSheet';
 
 const mockRpc = jest.fn();
+const mockFrom = jest.fn();
 
 jest.mock('@/lib/supabase', () => ({
-  supabase: { rpc: (...args: unknown[]) => mockRpc(...args) },
+  supabase: {
+    rpc: (...args: unknown[]) => mockRpc(...args),
+    from: (...args: unknown[]) => mockFrom(...args),
+  },
   startSessionRefresh: () => () => {},
 }));
 
@@ -30,203 +34,371 @@ const filmA: LoggableTitle = {
 
 const filmB: LoggableTitle = { ...filmA, id: 'film-b', title: 'Film B' };
 
-const LOGGED = 'Logged. It is in your collection whether or not you rank it.';
-const RANKED = 'You have already ranked this. Change it from your collection.';
+/**
+ * `useLogState` issues two reads. Both are the same chain shape, so one builder
+ * serves either — the table name decides what comes back.
+ */
+const stubReads = (
+  logged: Record<string, unknown> | null,
+  ranked: { bucket: string } | null,
+) => {
+  mockFrom.mockImplementation((table: string) => ({
+    select: () => ({
+      eq: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({
+            data: table === 'user_media' ? logged : ranked,
+            error: null,
+          }),
+        }),
+      }),
+    }),
+  }));
+};
 
 beforeEach(() => {
   issued = 0;
   mockRpc.mockReset();
+  mockFrom.mockReset();
   mockRpc.mockResolvedValue({ data: { status: 'ok' }, error: null });
+  stubReads(null, null);
 });
 
 const callsTo = (fn: string) => mockRpc.mock.calls.filter(([name]) => name === fn);
 
 const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> = {}) => {
-  const view = await renderWithProviders(
-    <LogSheet title={title} onClose={() => {}} {...props} />,
-  );
+  const view = await renderWithProviders(<LogSheet title={title} onClose={() => {}} {...props} />);
 
   return {
     ...view,
     show: (next: LoggableTitle | null) =>
       view.rerender(<LogSheet title={next} onClose={() => {}} {...props} />),
     bucket: (label: string) => view.getByLabelText(label),
-    note: () => view.getByLabelText('Private note'),
-    find: () => view.getByRole('button', { name: 'Find where it lands' }),
+    // The row and the field it discloses share the name "Notes" — which is right for
+    // a screen reader, since one is a button and the other a text field — so the
+    // queries here separate them by role rather than by label.
+    notesRow: () => view.getByRole('button', { name: 'Notes' }),
+    openNotes: async () => fireEvent.press(view.getByRole('button', { name: 'Notes' })),
+    note: () => view.getByPlaceholderText('What did you think?'),
+    dateRow: () => view.getByRole('button', { name: 'Watch date' }),
+    openDate: async () => fireEvent.press(view.getByRole('button', { name: 'Watch date' })),
   };
 };
 
 /**
- * The bucket sheet (screens.md §4).
+ * The log sheet (screens.md §4), after the 2026-08-15 reversal that made ranking
+ * automatic.
  *
- * The case worth the most attention is what happens between two titles. The parent swaps
- * this component's `title` prop, so state that survives the swap shows one film's answer
- * over another film's name — and, because a note saves on blur, writes one film's private
- * note against the other.
+ * The cases worth the most here are the ones where a wrong answer is silent: a note
+ * that does not load and is then overwritten with nothing, a bucket tap that
+ * re-ranks a title without asking, and state surviving a swap between two titles.
  */
 describe('a second title', () => {
-  it('does not inherit the first title\u2019s bucket, message or note', async () => {
+  it('does not inherit the first title’s bucket or note', async () => {
     const sheet = await open(filmA);
 
     await fireEvent.press(sheet.bucket('Loved it'));
-    await waitFor(() => expect(sheet.getByText(LOGGED)).toBeTruthy());
+    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'a private note about Film A');
 
     await sheet.show(filmB);
 
     expect(sheet.getByText('Film B')).toBeTruthy();
     expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(false);
-    expect(sheet.queryByText(LOGGED)).toBeNull();
-    expect(sheet.note().props.value).toBe('');
   });
 
-  it('does not file the first title\u2019s note against the second', async () => {
+  it('does not file the first title’s note against the second', async () => {
     const sheet = await open(filmA);
 
+    await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'a private note about Film A');
     await sheet.show(filmB);
 
-    // Blur is what saves a note, and it is reached by tapping anywhere — including the
-    // buckets of the film now on screen.
-    await fireEvent(sheet.note(), 'blur');
-
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(0));
-    expect(mockRpc).not.toHaveBeenCalled();
-  });
-
-  it('starts clean when the same title is opened again', async () => {
-    // The parent clears its state on close, so this arrives as title -> null -> title. A
-    // key on the title cannot help here; only unmounting can.
-    const sheet = await open(filmA);
-
-    await fireEvent.press(sheet.bucket('It was fine'));
-    await waitFor(() => expect(sheet.getByText(LOGGED)).toBeTruthy());
-
-    await sheet.show(null);
-    await sheet.show(filmA);
-
-    expect(sheet.bucket('It was fine').props.accessibilityState.selected).toBe(false);
-    expect(sheet.queryByText(LOGGED)).toBeNull();
   });
 });
 
 describe('choosing a bucket', () => {
-  it('sends the bucket for the title on screen and says it is logged', async () => {
+  it('saves the bucket for the title on screen', async () => {
     const sheet = await open(filmA);
 
     await fireEvent.press(sheet.bucket('Not for me'));
 
-    await waitFor(() => expect(sheet.getByText(LOGGED)).toBeTruthy());
-    expect(mockRpc).toHaveBeenCalledWith('set_bucket', {
-      p_operation_id: 'operation-1',
-      p_media_item_id: 'film-a',
-      p_bucket: 'not_for_me',
-    });
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('set_bucket', {
+        p_operation_id: 'operation-1',
+        p_media_item_id: 'film-a',
+        p_bucket: 'not_for_me',
+      }),
+    );
+  });
+
+  /** The whole point of the slice: no second tap between bucketing and comparing. */
+  it('enters ranking automatically once the save lands', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await fireEvent.press(sheet.bucket('Loved it'));
+
+    await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
+  });
+
+  it('does not enter ranking when the save was refused', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { code: '22023', message: 'nope' } });
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await fireEvent.press(sheet.bucket('Loved it'));
+
+    await waitFor(() => expect(sheet.getByText('nope')).toBeTruthy());
+    expect(onRank).not.toHaveBeenCalled();
   });
 
   it('carries a new operation id each time, so a change of mind is not read as a retry', async () => {
     const sheet = await open(filmA);
 
     await fireEvent.press(sheet.bucket('Loved it'));
-    await waitFor(() => expect(sheet.getByText(LOGGED)).toBeTruthy());
+    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
     await fireEvent.press(sheet.bucket('It was fine'));
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(2));
 
     const [first, second] = callsTo('set_bucket').map(([, args]) => args.p_operation_id);
     expect(first).not.toBe(second);
   });
-
-  it('reports a refusal as a refusal rather than as a save', async () => {
-    // 55000 from _assert_unranked: the bucket belongs to the ranking now. Showing "Logged."
-    // here would tell the user something happened that did not.
-    mockRpc.mockResolvedValue({ data: null, error: { code: '55000', message: 'title is ranked' } });
-    const sheet = await open(filmA);
-
-    await fireEvent.press(sheet.bucket('Loved it'));
-
-    await waitFor(() => expect(sheet.getByText(RANKED)).toBeTruthy());
-    expect(sheet.queryByText(LOGGED)).toBeNull();
-    expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(false);
-  });
-
-  it('does not start comparisons on its own (PRD \u00a711)', async () => {
-    const onFindWhereItLands = jest.fn();
-    const sheet = await open(filmA, { onFindWhereItLands });
-
-    await fireEvent.press(sheet.bucket('Loved it'));
-    await waitFor(() => expect(sheet.getByText(LOGGED)).toBeTruthy());
-
-    expect(onFindWhereItLands).not.toHaveBeenCalled();
-    expect(callsTo('rank_start')).toHaveLength(0);
-  });
 });
 
-describe('find where it lands', () => {
-  it('waits for a saved bucket, because rank_start would otherwise write one', async () => {
-    // rank_start upserts user_media with whatever bucket it is handed, so an enabled button
-    // before a save is a silent log in a bucket the user never chose for this title.
-    const onFindWhereItLands = jest.fn();
-    const sheet = await open(filmA, { onFindWhereItLands });
-
-    expect(sheet.find().props.accessibilityState.disabled).toBe(true);
-    await fireEvent.press(sheet.find());
-    expect(onFindWhereItLands).not.toHaveBeenCalled();
-
-    await fireEvent.press(sheet.bucket('Loved it'));
-    await waitFor(() => expect(sheet.find().props.accessibilityState.disabled).toBe(false));
-
-    await fireEvent.press(sheet.find());
-    expect(onFindWhereItLands).toHaveBeenCalledWith('loved');
+/**
+ * A ranked title's bucket belongs to the ranking. `set_bucket` refuses it with 55000,
+ * and the only legitimate route is `rank_rebucket`, which discards the position — so
+ * it must never happen on a stray tap, and must not happen at all when nothing changed.
+ */
+describe('a title that is already ranked', () => {
+  beforeEach(() => {
+    stubReads({ bucket: 'loved', watched_on: '2026-08-01', note: '' }, { bucket: 'loved' });
   });
 
-  it('stays shut while the save is still in flight', async () => {
-    // A chosen bucket is not a saved bucket. rank_start would upsert user_media with this
-    // bucket while set_bucket is still on its way, and whichever landed second would win.
-    mockRpc.mockReturnValue(new Promise(() => {}));
-    const onFindWhereItLands = jest.fn();
-    const sheet = await open(filmA, { onFindWhereItLands });
+  it('does nothing when the bucket it already has is tapped again', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
 
+    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
     await fireEvent.press(sheet.bucket('Loved it'));
-    await waitFor(() => expect(sheet.getByText('Saving…')).toBeTruthy());
 
+    expect(onRank).not.toHaveBeenCalled();
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(sheet.queryByText(/will re-rank/)).toBeNull();
+  });
+
+  it('asks before re-ranking when a different bucket is tapped', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
+    await fireEvent.press(sheet.bucket('It was fine'));
+
+    expect(sheet.getByText('Changing this will re-rank Film A.')).toBeTruthy();
+    // Nothing has happened yet — the prompt is the whole point.
+    expect(onRank).not.toHaveBeenCalled();
+    expect(callsTo('set_bucket')).toHaveLength(0);
+  });
+
+  it('cancelling leaves the ranking and the bucket alone', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
+    await fireEvent.press(sheet.bucket('It was fine'));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Cancel' }));
+
+    expect(onRank).not.toHaveBeenCalled();
+    expect(mockRpc).not.toHaveBeenCalled();
     expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true);
-    expect(sheet.find().props.accessibilityState.disabled).toBe(true);
-    await fireEvent.press(sheet.find());
-    expect(onFindWhereItLands).not.toHaveBeenCalled();
   });
 
-  it('stays shut after a refusal', async () => {
-    mockRpc.mockResolvedValue({ data: null, error: { code: '55000', message: 'title is ranked' } });
-    const sheet = await open(filmA, { onFindWhereItLands: jest.fn() });
+  it('confirming hands off in rebucket mode without writing the bucket first', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
 
-    await fireEvent.press(sheet.bucket('Loved it'));
-    await waitFor(() => expect(sheet.getByText(RANKED)).toBeTruthy());
+    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
+    await fireEvent.press(sheet.bucket('It was fine'));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Re-rank' }));
 
-    expect(sheet.find().props.accessibilityState.disabled).toBe(true);
+    expect(onRank).toHaveBeenCalledWith('fine', 'rebucket');
+    // set_bucket would have earned a 55000; rank_rebucket does the bucket change itself.
+    expect(callsTo('set_bucket')).toHaveLength(0);
+  });
+
+  /** Editing anything other than the bucket must not touch the ranking. */
+  it('lets the note be edited without disturbing the ranking', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'still holds up');
+    await fireEvent(sheet.note(), 'blur');
+
+    // A row already exists, so the note is an update — save_note, not log_watched.
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(onRank).not.toHaveBeenCalled();
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('rank_rebucket')).toHaveLength(0);
   });
 });
 
-describe('the private note', () => {
-  it('saves against the title on screen, with today\u2019s date', async () => {
+describe('notes', () => {
+  it('populates an existing note when the sheet is re-opened', async () => {
+    stubReads({ bucket: 'loved', watched_on: null, note: 'watched it on 35mm' }, null);
     const sheet = await open(filmA);
 
+    await sheet.openNotes();
+
+    await waitFor(() => expect(sheet.note().props.value).toBe('watched it on 35mm'));
+  });
+
+  it('does not clear the field after saving', async () => {
+    const sheet = await open(filmA);
+
+    await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'better than I expected');
     await fireEvent(sheet.note(), 'blur');
 
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
-    const [, args] = callsTo('log_watched')[0];
-    expect(args.p_media_item_id).toBe('film-a');
-    expect(args.p_note).toBe('better than I expected');
-    expect(args.p_watched_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(sheet.note().props.value).toBe('better than I expected');
+  });
+
+  it('does not rewrite a note that has not changed', async () => {
+    stubReads({ bucket: null, watched_on: null, note: 'unchanged' }, null);
+    const sheet = await open(filmA);
+
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('unchanged'));
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(0));
+  });
+
+  /**
+   * `log_watched` coalesces, so it can create a note and can never erase one — an
+   * empty string reads as "no change" and the old text comes back on the next read.
+   * Clearing has to go through `save_note`, which assigns.
+   */
+  it('clears a note through save_note, not log_watched', async () => {
+    stubReads(
+      { bucket: 'loved', watched_on: '2026-08-01', note: 'delete me', note_updated_at: 'v1' },
+      null,
+    );
+    const sheet = await open(filmA);
+
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('delete me'));
+    await fireEvent.changeText(sheet.note(), '');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({
+      p_media_item_id: 'film-a',
+      p_note: '',
+      // The version the edit was based on, so a second device's change is refused
+      // rather than silently overwritten.
+      p_base_updated_at: 'v1',
+    });
+    expect(callsTo('log_watched')).toHaveLength(0);
+  });
+
+  it('creates a first note through log_watched, since there is no row to update', async () => {
+    const sheet = await open(filmA);
+
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'first thoughts');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_note).toBe('first thoughts');
+    expect(callsTo('save_note')).toHaveLength(0);
   });
 
   it('does not write an empty note when the field is merely touched', async () => {
     const sheet = await open(filmA);
 
-    await fireEvent(sheet.note(), 'blur');
-    await fireEvent.changeText(sheet.note(), '   ');
+    await sheet.openNotes();
     await fireEvent(sheet.note(), 'blur');
 
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(0));
+  });
+});
+
+describe('the watch date', () => {
+  it('defaults to today', async () => {
+    const sheet = await open(filmA);
+
+    expect(sheet.dateRow().props.accessibilityValue.text).toBe('Today');
+  });
+
+  /**
+   * The gap this closes: `log_watched` used to be called only when a non-empty note
+   * was written, so a user could not record "I watched this last night" without also
+   * typing something (screens.md §4 recorded it as a known omission).
+   */
+  it('saves without a note', async () => {
+    const sheet = await open(filmA);
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: 'Yesterday' }));
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    const [, args] = callsTo('log_watched')[0];
+    expect(args.p_media_item_id).toBe('film-a');
+    expect(args.p_watched_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(args.p_note).toBeNull();
+  });
+
+  /**
+   * The row shows "Today" the moment the sheet opens, so choosing a bucket has to
+   * store that. Otherwise the sheet displays a date it never saved, and reopening it
+   * a week later still claims "Today".
+   */
+  it('stamps today when a bucket is chosen and no date exists', async () => {
+    const sheet = await open(filmA);
+
+    await fireEvent.press(sheet.bucket('Loved it'));
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_watched_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('does not overwrite a date already recorded', async () => {
+    stubReads({ bucket: null, watched_on: '2020-03-04', note: null }, null);
+    const sheet = await open(filmA);
+
+    await waitFor(() =>
+      expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today'),
+    );
+    await fireEvent.press(sheet.bucket('Loved it'));
+
+    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    expect(callsTo('log_watched')).toHaveLength(0);
+  });
+
+  it('shows a stored date rather than today', async () => {
+    stubReads({ bucket: null, watched_on: '2020-03-04', note: null }, null);
+    const sheet = await open(filmA);
+
+    await waitFor(() =>
+      expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today'),
+    );
+  });
+});
+
+describe('rows that are not built yet', () => {
+  it.each([
+    ['Who I watched with'],
+    ['Photos'],
+  ])('renders %s as present but inert, with a reason', async (label) => {
+    const sheet = await open(filmA);
+
+    const row = sheet.getByLabelText(label);
+    expect(row.props.accessibilityState.disabled).toBe(true);
+    expect(row.props.accessibilityHint).toBe('Coming soon');
   });
 });

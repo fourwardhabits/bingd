@@ -169,7 +169,9 @@ describe('a series in the results', () => {
     await fireEvent.press(view.getByLabelText('Season 2, 2009'));
 
     // The series title travels with the season, or the header reads "Season 2" alone.
-    await waitFor(() => expect(view.getByText('Breaking Bad: Season 2')).toBeTruthy());
+    // "Parks and Recreation — Season 2" is the approved season identity (founder
+    // decision D5, 2026-08-15): an em dash, not a colon, and never a bare "Season 2".
+    await waitFor(() => expect(view.getByText('Breaking Bad — Season 2')).toBeTruthy());
 
     await fireEvent.press(view.getByLabelText('Loved it'));
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
@@ -195,17 +197,21 @@ describe('a film in the results', () => {
     });
   });
 
-  it('hands the comparison the same title it just logged', async () => {
+  /**
+   * End to end across the two sheets: the bucket save and the comparison it opens are
+   * separate components wired by the screen, and the title has to survive the hand-off.
+   * Sending `rank_start` a different id than `set_bucket` got would rank the wrong film
+   * and look entirely normal doing it.
+   *
+   * No "Find where it lands" step any more — the comparison opens on the bucket tap.
+   */
+  it('hands the comparison the same title it just logged, with no second tap', async () => {
     const view = await search('inception');
 
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
     await fireEvent.press(view.getByLabelText('Log Inception'));
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
     await fireEvent.press(view.getByLabelText('It was fine'));
-
-    const find = () => view.getByRole('button', { name: 'Find where it lands' });
-    await waitFor(() => expect(find().props.accessibilityState.disabled).toBe(false));
-    await fireEvent.press(find());
 
     await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
     expect(callsTo('rank_start')[0][1]).toEqual({

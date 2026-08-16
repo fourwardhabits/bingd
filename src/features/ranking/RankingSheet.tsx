@@ -1,27 +1,44 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { formatGenreRank, genreRanksFor } from '@/features/collection/genre-rank';
+import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
+import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
+import { useReducedMotion } from '@/ui/motion';
 import { theme } from '@/ui/tokens';
-import { Button, Poster, Text, type BucketId } from '@/ui/components';
+import { Button, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
 import {
   rankAnswer,
   rankBack,
   rankCancel,
+  rankRebucket,
   rankSkip,
   rankStart,
   type SessionStep,
 } from './session';
 
+export type RankingSubject = {
+  id: string;
+  title: string;
+  bucket: BucketId;
+  posterUri?: string | null;
+  /**
+   * `rebucket` when the title already had a position and the user changed its band.
+   * It selects `rank_rebucket`, which unranks and re-opens in one call. Defaults to a
+   * first ranking.
+   */
+  mode?: 'start' | 'rebucket';
+};
+
 export type RankingSheetProps = {
   /** The title being placed, with the bucket the user already chose for it. */
-  subject: { id: string; title: string; bucket: BucketId; posterUri?: string | null } | null;
+  subject: RankingSubject | null;
   onClose: () => void;
   /** "Rank another" — closes this and sends the user back to search. */
   onRankAnother?: () => void;
@@ -83,14 +100,21 @@ function Session({
           queryKey: queryKeys.rankings(profile.id, next.category),
         });
         void queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) });
+        // The title's own key holds a separate watchlist probe, and ranking now takes
+        // the title off the watchlist server-side (20260815040000). Without this the
+        // page the user ranked *from* keeps saying "In watchlist" until the 60s
+        // staleTime lapses — the server rule would be right and the screen wrong,
+        // which is the bug the invariant exists to fix wearing a different hat.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.title(subject.id) });
       }
     },
-    [profile.id, queryClient],
+    [profile.id, queryClient, subject.id],
   );
 
   useEffect(() => {
     let live = true;
-    void rankStart(subject.id, subject.bucket).then((next) => {
+    const open = subject.mode === 'rebucket' ? rankRebucket : rankStart;
+    void open(subject.id, subject.bucket).then((next) => {
       if (live) {
         setBusy(false);
         apply(next);
@@ -128,19 +152,16 @@ function Session({
   };
 
   return (
-    <Modal
-      visible
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={() => void close()}
-      accessibilityViewIsModal
-    >
-      <SafeAreaView style={styles.sheet} edges={['top', 'bottom', 'left', 'right']}>
+    <Sheet visible onClose={() => void close()} label={`Rank ${subject.title}`}>
+      <View style={styles.sheet}>
         {step?.state === 'placed' ? (
           <Reveal
+            score={step.score}
             position={step.position}
             category={step.category}
+            bucket={step.bucket}
             adjustable={step.adjustable}
+            subjectId={subject.id}
             title={subject.title}
             onDone={() => void close()}
             onRankAnother={() => {
@@ -192,8 +213,8 @@ function Session({
             <Button label="Close" kind="secondary" onPress={() => void close()} />
           </Centred>
         )}
-      </SafeAreaView>
-    </Modal>
+      </View>
+    </Sheet>
   );
 }
 
@@ -266,7 +287,7 @@ function Comparison({
   return (
     <View style={styles.comparison}>
       <TopBar onClose={onClose} />
-      <Text variant="title2" style={styles.centre}>
+      <Text variant="headline" style={styles.centre} accessibilityRole="header">
         Which did you like more?
       </Text>
 
@@ -277,6 +298,13 @@ function Comparison({
           disabled={waiting}
           onPress={() => onPick(subject.id)}
         />
+        {/* Beli's device (beli-252). It turns two pictures side by side into a
+            question, and it costs one 32pt circle. */}
+        <View style={styles.or} accessibilityElementsHidden importantForAccessibility="no">
+          <Text variant="caption" tone="secondary">
+            OR
+          </Text>
+        </View>
         <Card
           title={pivot?.title ?? '…'}
           posterUri={posterUri(pivot?.poster_path, 'card')}
@@ -296,6 +324,8 @@ function Comparison({
             : 'Getting closer'}
       </Text>
 
+      {/* One row, and subordinate. Two stacked full-width buttons read as the main
+          event on a screen whose main event is the two posters. */}
       <View style={styles.controls}>
         <Button
           label="Back"
@@ -309,7 +339,7 @@ function Comparison({
             user has to think about for no reason. */}
         <Button
           label="Too tough to call"
-          kind="secondary"
+          kind="tertiary"
           onPress={onSkip}
           disabled={busy}
           disabledReason="Waiting for the last answer to save."
@@ -355,9 +385,9 @@ function Card({
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
-      <Poster uri={posterUri} title={title} width="fill" size="xl" />
+      <Poster uri={posterUri} title={title} width="fill" size="md" />
       <View style={styles.cardTitleBox}>
-        <Text variant="headline" numberOfLines={2} style={styles.centre}>
+        <Text variant="callout" numberOfLines={2} style={styles.centre}>
           {title}
         </Text>
       </View>
@@ -366,46 +396,80 @@ function Card({
 }
 
 /**
- * The reveal (design-system.md §9): an Amber panel, the ordinal in Ink at display size,
- * category and title below.
+ * The reveal (design-system.md §9): an Amber panel with the **score** in Ink at
+ * display size, then the title, then rank context.
+ *
+ * The score is the hero, not the ordinal — founder decision, 2026-08-15. This screen
+ * had not caught up: it rendered `#{position}` at `reveal` size while `score.ts` sat
+ * unused. The reasoning for the swap is worth keeping: `#4` counting up from zero
+ * passes through three numbers that are each a lie about a different film, and `#118`
+ * is an anticlimax where `9.1` is not — and the reveal fires most often for the
+ * people who have ranked the most.
  *
  * Share is absent because share cards are not built. An action that does nothing would be
  * worse than one that is not offered yet.
  */
 function Reveal({
+  score,
   position,
   category,
+  bucket,
   adjustable,
+  subjectId,
   title,
   onDone,
   onRankAnother,
 }: {
+  score: number;
   position: number;
   category: string;
+  bucket: string;
   adjustable: boolean;
+  subjectId: string;
   title: string;
   onDone: () => void;
   onRankAnother: () => void;
 }) {
+  const profile = useCurrentProfile();
   const readableCategory = category === 'tv_seasons' ? 'TV seasons' : 'Movies';
+  const shown = useCountUp(score, bucket);
+
+  // The ranked list for this category, which the collection already caches under the
+  // key `apply` invalidated when the title was placed — so this resolves to the list
+  // *including* it, and no new query or endpoint is needed to derive a genre rank.
+  const { data: ranked } = useRankedCollection(profile.id, category as RankingCategory);
+  const genres = ranked ? genreRanksFor(subjectId, ranked) : [];
+
+  const context = [
+    `#${position} ${readableCategory}`,
+    ...genres.map(formatGenreRank),
+  ].join('  ·  ');
 
   return (
     <View style={styles.reveal}>
       <View
         style={styles.panel}
         accessibilityRole="summary"
-        accessibilityLabel={`${title} is number ${position} in ${readableCategory}`}
+        accessibilityLabel={`${title} scored ${formatScore(score)} out of 10. ${context}`}
       >
         <Text variant="reveal" tone="onFill" accessibilityElementsHidden>
-          #{position}
-        </Text>
-        <Text variant="caption" tone="onFill">
-          IN {readableCategory.toUpperCase()}
+          {formatScore(shown)}
         </Text>
       </View>
 
       <Text variant="title2" style={styles.centre}>
         {title}
+      </Text>
+
+      {/* Secondary by construction: footnote, tertiary, one line. The ordinal is
+          still true and still useful, it is just no longer the claim. */}
+      <Text
+        variant="footnote"
+        tone="tertiary"
+        style={styles.centre}
+        accessibilityElementsHidden
+      >
+        {context}
       </Text>
 
       {adjustable ? (
@@ -417,7 +481,7 @@ function Reveal({
         </Text>
       ) : null}
 
-      <View style={styles.controls}>
+      <View style={styles.revealControls}>
         <Button label="Rank another" onPress={onRankAnother} />
         <Button label="Done" kind="secondary" onPress={onDone} />
       </View>
@@ -425,48 +489,117 @@ function Reveal({
   );
 }
 
+/**
+ * Counts from the low end of the title's own band up to its score.
+ *
+ * Not from zero: a *Not for me* title would sprint through the whole scale to land at
+ * 1.2, which reads as the app deciding the film was better than it was and then
+ * correcting itself. Starting inside the band makes the animation say what actually
+ * happened — the user chose a bucket, and this is where the title landed inside it
+ * (design-system.md §9, `revealFloor` in score.ts).
+ *
+ * Plain state on a timer rather than Reanimated: the value is *text*, and a worklet
+ * cannot drive a string through the JS bridge without re-rendering anyway.
+ */
+function useCountUp(target: number, bucket: string) {
+  const reduced = useReducedMotion();
+  const floor = revealFloor((bucket as Bucket) ?? 'loved');
+
+  // Progress rather than the value itself, so the reduced-motion case is a plain
+  // branch on the way out instead of a state write. Nothing is set during the
+  // effect body — only from the timer — which keeps the render pass clean.
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (reduced) return;
+
+    const started = Date.now();
+    const id = setInterval(() => {
+      const elapsed = Date.now() - started;
+      const next = Math.min(1, elapsed / theme.duration.revealCount);
+      setProgress(next);
+      if (next >= 1) clearInterval(id);
+    }, 16);
+
+    return () => clearInterval(id);
+  }, [reduced]);
+
+  if (reduced) return target;
+
+  // Ease out, so it decelerates into the number rather than stopping dead.
+  const eased = 1 - (1 - progress) ** 3;
+  return floor + (target - floor) * eased;
+}
+
 function Centred({ children }: { children: React.ReactNode }) {
   return <View style={styles.centredBox}>{children}</View>;
 }
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1, backgroundColor: theme.surface.base },
+  // No flex: 1. The Sheet sizes itself to its content, which is the whole point of
+  // moving off a full-height page sheet — a comparison is a small question.
+  sheet: { paddingBottom: theme.space[2] },
+  // No flex anywhere in here. Both halves of the old layout stretched: the screen was
+  // a full-height page sheet, and the card row inside it was `flex: 1` with the posters
+  // pinned to its top — so a tall device reserved ~500pt for ~330pt of content and put
+  // the surplus underneath as blank Paper. The sheet now sizes to this block, and this
+  // block sizes to the posters.
   comparison: {
-    flex: 1,
     padding: theme.layout.gutter,
-    gap: theme.space[4],
+    gap: theme.space[5],
   },
+  // In flow, not absolute. Absolute put it over the question once the sheet stopped
+  // being full height and the content moved up to meet it.
   topBar: { alignItems: 'flex-end' },
   cards: {
-    flex: 1,
     flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'flex-start',
-    gap: theme.space[3],
+    alignItems: 'center',
+    gap: theme.space[2],
   },
   card: {
     flex: 1,
     alignItems: 'center',
-    maxWidth: theme.poster.xl.width,
-    gap: theme.space[3],
+    // poster.md, not poster.xl. At 180×270 two cards plus their gutters overflow a
+    // 375pt screen and the mechanic starts to feel like an event; at 88×132 both
+    // posters stay legible and the answer feels quick, which is the point.
+    maxWidth: theme.poster.md.width,
+    gap: theme.space[2],
+  },
+  or: {
+    width: 32,
+    height: 32,
+    borderRadius: theme.radius.full,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
+    backgroundColor: theme.surface.sunken,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardTitleBox: {
-    height: 44,
+    minHeight: 36,
     justifyContent: 'flex-start',
   },
   pressed: { opacity: 0.85 },
-  controls: { gap: theme.space[3] },
+  // A row, not a stack. Two full-width buttons under the posters read as the primary
+  // action on a screen whose primary action is tapping a poster.
+  controls: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: theme.space[4],
+  },
+  // The reveal is an airy surface (PRD §5) and its two actions are the only thing to
+  // do on it, so they stack full-width rather than sharing a row.
+  revealControls: { gap: theme.space[3], alignSelf: 'stretch' },
   centre: { textAlign: 'center' },
   centredBox: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: theme.space[4],
     padding: theme.space[8],
   },
   reveal: {
-    flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
     gap: theme.space[6],
     padding: theme.layout.gutter,
