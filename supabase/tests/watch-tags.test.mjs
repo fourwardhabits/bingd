@@ -36,9 +36,21 @@ const setTags = async (mediaItemId, tagged) => {
   return rows[0].r;
 };
 
+/** The live list: what the picker shows and what other people see. */
 const tagsOn = async (mediaItemId, tagger = alice) => {
   const { rows } = await t.sql(
     `select id, tagged_id, removed_by_tagged from watch_tags
+      where tagger_id = $1 and media_item_id = $2 and not removed_by_tagger
+      order by created_at`,
+    [tagger, mediaItemId],
+  );
+  return rows;
+};
+
+/** Including the rows the tagger has withdrawn, which is where the memory lives. */
+const allTagRows = async (mediaItemId, tagger = alice) => {
+  const { rows } = await t.sql(
+    `select tagged_id, removed_by_tagged, removed_by_tagger from watch_tags
       where tagger_id = $1 and media_item_id = $2 order by created_at`,
     [tagger, mediaItemId],
   );
@@ -295,6 +307,89 @@ describe('the tagged person’s side', () => {
     assert.equal((await tagsOn(id))[0].removed_by_tagged, true);
   });
 
+  /**
+   * The path independent review found, and the reason removal is a soft delete.
+   *
+   * `on conflict do nothing` protected a row that survived, and this is the sequence
+   * where none did: clearing the list used to delete the row, so re-adding created a
+   * fresh one with the flag at its default. Two taps to undo somebody else's
+   * decision about their own name, through the ordinary use of the picker.
+   */
+  it('survives the tagger removing and re-adding them', async () => {
+    const id = await movie('tag_hide_readd');
+    await logWatch(id);
+    await setTags(id, [bob]);
+    const [tag] = await tagsOn(id);
+    await t.actAs(bob);
+    await t.sql(`select hide_watch_tag(gen_random_uuid(), $1)`, [tag.id]);
+    await t.actAs(alice);
+
+    await setTags(id, []);
+    await setTags(id, [bob]);
+
+    const live = await tagsOn(id);
+    assert.equal(live.length, 1);
+    assert.equal(live[0].removed_by_tagged, true, 'the refusal outlived the untag');
+
+    // And a stranger still cannot see it, which is what the refusal was for.
+    const stranger = await t.createUser({ username: 'nosy_readd_tag' });
+    const seen = await t.asUser(stranger, () =>
+      t.sql(`select id from watch_tags where media_item_id = $1`, [id]),
+    );
+    await t.actAs(alice);
+    assert.equal(seen.rows.length, 0);
+  });
+
+  it('does not notify again when a hidden tag is re-added', async () => {
+    const id = await movie('tag_hide_readd_notify');
+    await logWatch(id);
+    await setTags(id, [bob]);
+    const [tag] = await tagsOn(id);
+    await t.actAs(bob);
+    await t.sql(`select hide_watch_tag(gen_random_uuid(), $1)`, [tag.id]);
+    await t.actAs(alice);
+
+    await setTags(id, []);
+    await setTags(id, [bob]);
+
+    const { rows } = await t.sql(
+      `select count(*)::int as n from notifications where subject_id = $1 and type = 'watch_tag'`,
+      [id],
+    );
+    assert.equal(rows[0].n, 1, 'their answer has not changed, so they are not asked again');
+  });
+
+  it('leaves a withdrawn tag invisible to everyone, including the tagged person', async () => {
+    const id = await movie('tag_withdrawn');
+    await logWatch(id);
+    await setTags(id, [bob]);
+    await setTags(id, []);
+
+    assert.equal((await allTagRows(id)).length, 1, 'the row is kept as the memory');
+    assert.equal((await allTagRows(id))[0].removed_by_tagger, true);
+
+    for (const viewer of [alice, bob]) {
+      const seen = await t.asUser(viewer, () =>
+        t.sql(`select id from watch_tags where media_item_id = $1`, [id]),
+      );
+      await t.actAs(alice);
+      assert.equal(seen.rows.length, 0, 'a retracted statement is nobody’s to read');
+    }
+  });
+
+  it('cannot be hidden once the tagger has withdrawn it', async () => {
+    const id = await movie('tag_withdrawn_hide');
+    await logWatch(id);
+    await setTags(id, [bob]);
+    const [tag] = await tagsOn(id);
+    await setTags(id, []);
+
+    await t.actAs(bob);
+    const error = await t.errorFrom(`select hide_watch_tag(gen_random_uuid(), $1)`, [tag.id]);
+    await t.actAs(alice);
+    assert.equal(error?.code, 'P0002');
+  });
+
   it('cannot hide a tag pointed at somebody else', async () => {
     const kate = await t.createUser({ username: 'kate_tag' });
     await follow(kate, alice);
@@ -458,6 +553,22 @@ describe('what the tagged person is told', () => {
       [id],
     );
     assert.equal(rows[0].n, 1);
+  });
+
+  it('holds the once-per-title inbox rule as a constraint, not only as a query', async () => {
+    // Concurrent identical saves both computed the same "which of these are new"
+    // before either insert was visible, so the unique constraint stopped the second
+    // tag and nothing stopped the second notification.
+    const id = await movie('tag_notify_constraint');
+    await logWatch(id);
+    await setTags(id, [bob]);
+
+    const error = await t.errorFrom(
+      `insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
+       values ($1, 'watch_tag', $2, 'media_item', $3, '{}'::jsonb)`,
+      [bob, alice, id],
+    );
+    assert.equal(error?.code, '23505');
   });
 
   it('rings for a person newly added to an existing list, and not for the others', async () => {

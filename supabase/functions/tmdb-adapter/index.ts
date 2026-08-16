@@ -33,6 +33,7 @@ import {
 } from './store.ts';
 import {
   creditsFacet,
+  videosFacet,
   fromMovieDetail,
   fromSearchResult,
   fromSeasonDetail,
@@ -189,6 +190,7 @@ async function enrichOne(db: Db, mediaItemId: string): Promise<{ enriched: boole
     const detail = await tmdb.seasonDetail(seriesTmdbId, row.season_number);
     await upsertSeasons(db, row.parent_id, [fromSeasonDetail(detail)]);
     if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
+    if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
     return { enriched: true };
   }
 
@@ -198,6 +200,7 @@ async function enrichOne(db: Db, mediaItemId: string): Promise<{ enriched: boole
     const detail = await tmdb.movieDetail(row.tmdb_id);
     await upsertTitles(db, [fromMovieDetail(detail)]);
     if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
+    if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
     return { enriched: true };
   }
 
@@ -205,6 +208,7 @@ async function enrichOne(db: Db, mediaItemId: string): Promise<{ enriched: boole
   const [stored] = await upsertTitles(db, [fromSeriesDetail(detail)]);
   if (stored) await upsertSeasons(db, stored.id, seasonsOf(detail));
   if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
+  if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
   return { enriched: true };
 }
 

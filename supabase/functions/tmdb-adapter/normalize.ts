@@ -186,3 +186,45 @@ export function creditsFacet(credits: { cast?: unknown[]; crew?: unknown[] } | u
 
   return { cast, crew };
 }
+
+/**
+ * Trailers, cut down to the ones a title page would offer.
+ *
+ * YouTube only, because that is the only site the app can open reliably, and
+ * trailers and teasers only — TMDB's `type` also covers featurettes, bloopers and
+ * behind-the-scenes reels, which are not what someone deciding whether to watch
+ * something is looking for.
+ *
+ * Official first, then newest. An unofficial upload of a trailer is usually a
+ * re-encode of the official one, and the studio's is the one that stays up.
+ */
+export function videosFacet(videos: { results?: unknown[] } | undefined) {
+  const results = ((videos?.results ?? []) as {
+    id: string;
+    key: string;
+    name: string;
+    site: string;
+    type: string;
+    official?: boolean;
+    published_at?: string;
+  }[])
+    .filter(
+      (video) =>
+        video.site === 'YouTube' && (video.type === 'Trailer' || video.type === 'Teaser'),
+    )
+    .sort((a, b) => {
+      if (Boolean(a.official) !== Boolean(b.official)) return a.official ? -1 : 1;
+      return (b.published_at ?? '').localeCompare(a.published_at ?? '');
+    })
+    .slice(0, 6)
+    .map((video) => ({
+      id: video.id,
+      key: video.key,
+      name: video.name,
+      site: video.site,
+      type: video.type,
+      official: Boolean(video.official),
+    }));
+
+  return { results };
+}

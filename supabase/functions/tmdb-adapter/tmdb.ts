@@ -152,6 +152,25 @@ export type TmdbCredits = {
   crew?: { id: number; name: string; job?: string; department?: string }[];
 };
 
+/**
+ * Trailers and clips, appended alongside credits since 2026-08-16.
+ *
+ * `key` is a site-specific id rather than a URL — YouTube's watch id, for the
+ * overwhelming majority — for the same reason poster paths are stored as paths: the
+ * URL form is a rendering decision, and storing one freezes it.
+ */
+export type TmdbVideos = {
+  results?: {
+    id: string;
+    key: string;
+    name: string;
+    site: string;
+    type: string;
+    official?: boolean;
+    published_at?: string;
+  }[];
+};
+
 export type TmdbMovieDetail = {
   id: number;
   title: string;
@@ -165,6 +184,7 @@ export type TmdbMovieDetail = {
   genres?: { id: number; name: string }[];
   popularity?: number;
   credits?: TmdbCredits;
+  videos?: TmdbVideos;
 };
 
 export type TmdbSeriesDetail = {
@@ -180,6 +200,7 @@ export type TmdbSeriesDetail = {
   genres?: { id: number; name: string }[];
   popularity?: number;
   credits?: TmdbCredits;
+  videos?: TmdbVideos;
   seasons?: {
     id: number;
     season_number: number;
@@ -198,6 +219,7 @@ export type TmdbSeasonDetail = {
   overview?: string;
   poster_path?: string | null;
   credits?: TmdbCredits;
+  videos?: TmdbVideos;
 };
 
 export function searchMulti(query: string): Promise<{ results: TmdbSearchResult[] }> {
@@ -209,15 +231,15 @@ export function searchMulti(query: string): Promise<{ results: TmdbSearchResult[
 }
 
 export function movieDetail(id: number): Promise<TmdbMovieDetail> {
-  return request(`/movie/${id}`, { append_to_response: 'credits' });
+  return request(`/movie/${id}`, { append_to_response: 'credits,videos' });
 }
 
 export function seriesDetail(id: number): Promise<TmdbSeriesDetail> {
-  return request(`/tv/${id}`, { append_to_response: 'credits' });
+  return request(`/tv/${id}`, { append_to_response: 'credits,videos' });
 }
 
 export function seasonDetail(seriesId: number, seasonNumber: number): Promise<TmdbSeasonDetail> {
   return request(`/tv/${seriesId}/season/${seasonNumber}`, {
-    append_to_response: 'credits',
+    append_to_response: 'credits,videos',
   });
 }

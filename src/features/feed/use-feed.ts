@@ -265,7 +265,11 @@ async function attachCompanions(items: FeedItem[]) {
     .from('watch_tags')
     .select('tagger_id, media_item_id, profiles:tagged_id(display_name, username)')
     .in('tagger_id', taggers)
-    .in('media_item_id', titles);
+    .in('media_item_id', titles)
+    // Belt as well as braces: `watch_tag_visible` already hides a withdrawn tag from
+    // everyone, so this filter changes no result. It is here so that a reader of
+    // this query does not have to know that to know the list is the live one.
+    .eq('removed_by_tagger', false);
   if (error || !data) return;
 
   const byPair = new Map<string, string[]>();

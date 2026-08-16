@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { queryKeys } from '@/lib/query';
@@ -139,6 +139,7 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
   // Same overlay rule as the note: null means untouched, so the stored list shows
   // until the user changes it and an empty selection is a real edit.
   const [companionEdit, setCompanionEdit] = useState<string[] | null>(null);
+  const companionRequest = useRef(0);
   const stored = companions.data?.map((c) => c.id) ?? [];
   const chosen = companionEdit ?? stored;
 
@@ -325,10 +326,21 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
    * from an unmount, which is where writes go to be lost. Each tap is one call that
    * sends the whole list, so a failed one leaves the previous list intact rather
    * than half of a new one.
+   *
+   * `companionRequest` is a sequence number, and it exists because ticking two people
+   * quickly puts two calls in flight with no ordering between them. Independent
+   * review, 2026-08-16: if the second lands first, the first overwrites it and the
+   * database ends at one name while the screen shows two, with nothing left to
+   * correct it. Only the newest request is allowed to touch state — an older one
+   * that returns late is a fact about a list nobody is looking at any more.
    */
   const toggleCompanion = async (id: string) => {
     const next = chosen.includes(id) ? chosen.filter((one) => one !== id) : [...chosen, id];
     if (next.length > MAX_COMPANIONS) return;
+
+    const ticket = companionRequest.current + 1;
+    companionRequest.current = ticket;
+    const stale = () => companionRequest.current !== ticket;
 
     setCompanionEdit(next);
     setProblem(null);
@@ -341,6 +353,7 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
         mediaItemId: title.id,
         watchedOn: effectiveDate,
       });
+      if (stale()) return;
       if (!report(created)) {
         setCompanionEdit(null);
         return;
@@ -348,8 +361,12 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
     }
 
     const result = await saveCompanions(title.id, next);
+    if (stale()) return;
+
     if (!result.ok) {
       setProblem(result.message);
+      // Back to whatever the server last confirmed, rather than to the optimistic
+      // list that was just refused.
       setCompanionEdit(null);
       return;
     }

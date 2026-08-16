@@ -36,6 +36,32 @@ export const backdropUri = (
 ) => (path ? `${BASE}/${BACKDROP_WIDTH[size]}${path}` : null);
 
 /**
+ * A cast member's photograph.
+ *
+ * w185 is TMDB's portrait bucket and is larger than any face this app draws — the
+ * cast strip's is 64pt, so even at 3x there is headroom. There is deliberately no
+ * second size: a bigger one would only be wanted by a person page that shows a
+ * portrait rather than a headshot, and that page does not exist yet.
+ *
+ * Null for a person with no photo, which is common for anyone below the top billing.
+ * The strip falls back to initials, the same treatment `Avatar` gives a user without
+ * one — never a grey silhouette, which reads as a broken image rather than a choice.
+ */
+export const profileUri = (path: string | null | undefined) =>
+  path ? `${BASE}/w185${path}` : null;
+
+/**
+ * A YouTube key into a watch URL.
+ *
+ * `media_cache.videos` stores the key, not a URL, for the same reason poster paths
+ * are stored as paths. This is the one place that turns it back, and it produces a
+ * watch link rather than an embed: opening the app or the browser is what the phone
+ * does well, and an in-app player would be a native dependency for one screen.
+ */
+export const videoUri = (key: string | null | undefined) =>
+  key ? `https://www.youtube.com/watch?v=${key}` : null;
+
+/**
  * An avatar object path into a URL.
  *
  * `profiles.avatar_path` stores `{uuid}/{filename}` and not a URL, because the

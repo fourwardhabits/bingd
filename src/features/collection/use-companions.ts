@@ -97,7 +97,10 @@ export function useCompanions(taggerId: string | null, mediaItemId: string | nul
           'id, removed_by_tagged, profiles:tagged_id(id, username, display_name, avatar_path)',
         )
         .eq('tagger_id', taggerId!)
-        .eq('media_item_id', mediaItemId!);
+        .eq('media_item_id', mediaItemId!)
+        // Rows the tagger took off the list are kept, because they are what
+        // remembers that the tagged person hid the tag. They are not the list.
+        .eq('removed_by_tagger', false);
       if (error) throw error;
 
       const rows = (data ?? []) as unknown as {
