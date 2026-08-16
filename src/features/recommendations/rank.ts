@@ -115,29 +115,120 @@ const POPULARITY_CEILING = 500;
 export const SLATE_SIZE = 20;
 
 /**
- * The two ceilings, and what they are ceilings *on*.
+ * The three ceilings, and what they are ceilings *on*.
  *
- * Both are absolute counts against the requested limit — at most four titles from one
- * anchor, at most `ceil(limit × 0.4)` from one primary genre — and **not** shares of
- * whatever the wall ends up being. The distinction is not pedantry: the ceilings are
- * hard, so a narrow candidate pool produces a short wall, and four of an eight-item
- * wall is half of it while still being the four the quota allowed.
+ * All three are absolute counts against the requested limit — at most four titles from
+ * one anchor, at most two from one franchise, at most `ceil(limit × 0.4)` from one
+ * primary genre — and **not** shares of whatever the wall ends up being. The
+ * distinction is not pedantry: the ceilings are hard, so a narrow candidate pool
+ * produces a short wall, and four of an eight-item wall is half of it while still
+ * being the four the quota allowed.
  *
  * Independent review caught the documentation claiming the share reading while the
  * code enforced the count. The count is the enforceable one — a greedy pass cannot
  * know the final length while it is deciding — so the count is what everything now
- * says, and `maxPerAnchor`/`maxPerGenre` below are exported so a caller can assert on
- * the same numbers the code uses.
+ * says, and the three helpers below are exported so a caller can assert on the same
+ * numbers the code uses.
  */
 const MAX_GENRE_SHARE = 0.4;
 const MAX_PER_ANCHOR = 4;
+const MAX_PER_FRANCHISE = 2;
 
-/** At most this many slate entries may name the same anchor as their lead. */
+/**
+ * At most this many slate entries may be attributed to the same anchor — **by any
+ * attribution, not merely as lead**.
+ *
+ * The distinction is the whole of review 08f's open finding. `explanation.anchors`
+ * lists every anchor whose association list contains the candidate, sorted by
+ * contribution. Counting only `anchors[0]` bounded how often a favourite could be
+ * *quoted* and left its total influence over a wall unbounded: a title carried mostly
+ * by anchor A but attributed to B first counted against B alone, so one favourite
+ * could sit behind twenty rows while appearing to lead four. A quota on how often
+ * something is named is not a quota on how much it decides.
+ */
 export const maxPerAnchor = () => MAX_PER_ANCHOR;
+
+/** At most this many slate entries may share a franchise, per `recommendations.md` §4. */
+export const maxPerFranchise = () => MAX_PER_FRANCHISE;
 
 /** At most this many may share a primary genre, for a wall of `limit`. */
 export const maxPerGenre = (limit: number = SLATE_SIZE) =>
   Math.max(1, Math.ceil(limit * MAX_GENRE_SHARE));
+
+// ---------------------------------------------------------------------------
+// Franchise identity
+// ---------------------------------------------------------------------------
+
+/** `part 2`, `chapter two`, `vol. III` — a sequel marker with its number. */
+const NUMBERED_PART = /\s(?:part|chapter|volume|vol|episode)\s+(?:\d+|[ivx]+|one|two|three|four|five|six|seven|eight|nine|ten)$/;
+
+/**
+ * A bare trailing ordinal: `Iron Man 2`, `The Godfather II`.
+ *
+ * Never a lone `i`, `v` or `x`. Those are far likelier to be a word or a name than a
+ * numeral — `Malcolm X` would otherwise become the franchise `malcolm` and take every
+ * other film beginning with that word down with it.
+ */
+const BARE_ORDINAL = /\s(?:\d+|i{2,3}|iv|vi{1,3}|ix|xi{1,2})$/;
+
+/**
+ * A franchise key derived from the title, or `null` when there is nothing to group on.
+ *
+ * **This is a proxy, and naming what it is not matters more than what it is.** The
+ * real franchise identity is TMDB's `belongs_to_collection`, and V1 cannot have it:
+ * that field appears only on a title's *detail* response, so keying on it would mean
+ * one provider request per candidate — several hundred per slate — against an
+ * architecture that deliberately bounds provider requests to six anchors. Storing it
+ * would mean a column that is null for every catalogue row until something re-enriches
+ * it, which is a cap that does not fire dressed as a cap that does.
+ *
+ * So the key is the leading stem of the title: everything before a subtitle
+ * separator, minus a leading article, minus a trailing sequel marker.
+ *
+ *   Spider-Man: No Way Home  →  spider man
+ *   Spider-Man: Far From Home →  spider man
+ *   The Godfather Part II    →  godfather
+ *   Iron Man 2               →  iron man
+ *   It Chapter Two           →  it
+ *
+ * What it catches is the direct sequel — the case the founder decision names, where
+ * loving one film returns its own numbered siblings. What it does **not** catch:
+ *
+ *   - a shared universe under different names (Iron Man / Thor / Black Panther);
+ *   - a renamed entry (The Dark Knight, in TMDB's Batman collection);
+ *   - a reboot with a distinct title (Fast Five, in the Fast & Furious collection).
+ *
+ * It is deliberately conservative in that direction. Every rule here shortens a stem
+ * only on an explicit marker, so two titles group **only when they genuinely share a
+ * leading name**. The failure mode is therefore under-grouping — a franchise slipping
+ * past the cap — rather than two unrelated films being treated as one and a good
+ * recommendation being dropped. The residual over-grouping case is two unrelated films
+ * with the same name, which costs at most one row of a twenty-row wall.
+ */
+export function franchiseKey(title: string): string | null {
+  // Everything before the first subtitle separator: a colon, a dash with spaces
+  // around it, or an em/en dash. `Spider-Man` keeps its hyphen because it has no
+  // spaces around it, which is what distinguishes a compound name from a subtitle.
+  const lead = title.split(/:|\s[-–—]\s|[–—]/)[0] ?? title;
+
+  let stem = lead
+    .normalize('NFKD')
+    // Combining marks, so `Amélie` and `Amelie` are one franchise rather than two.
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/^(?:the|a|an)\s+/, '');
+
+  // Numbered part first, then a bare ordinal: `Part II` must not lose only its `II`
+  // and leave `part` behind to group every numbered sequel in the catalogue together.
+  const shortened = stem.replace(NUMBERED_PART, '');
+  stem = shortened === stem ? stem.replace(BARE_ORDINAL, '') : shortened;
+  stem = stem.trim();
+
+  // A one-character stem is not an identity — it is a title the rules ate.
+  return stem.length >= 2 ? stem : null;
+}
 
 // ---------------------------------------------------------------------------
 // Taste
@@ -333,7 +424,7 @@ function leadOf(terms: {
 // ---------------------------------------------------------------------------
 
 /**
- * Greedy selection under two hard constraints, in score order.
+ * Greedy selection under three hard constraints, in score order.
  *
  * Greedy rather than an optimiser, for the reason `recommendations.md` §4 gives: when
  * a slate looks wrong you can replay the selection and see which constraint rejected
@@ -346,20 +437,58 @@ function leadOf(terms: {
  * wall" was a claim the code could break and the tests happened not to catch. A cap
  * that yields when it is inconvenient is not a cap.
  *
- * The cost is a short wall for a viewer whose candidate pool is genuinely narrow. In
- * practice that is rare: the trending fallback supplies twenty candidates with no
- * anchor at all, and a candidate with no lead anchor counts against no anchor's
- * ceiling.
+ * ### The three ceilings, and which failure each one is for
+ *
+ * | Ceiling | The wall it prevents |
+ * |---|---|
+ * | Anchor, over **every** attribution | one favourite deciding the wall |
+ * | Franchise | one series' sequels filling the wall |
+ * | Primary genre | one genre filling the wall |
+ *
+ * The anchor ceiling counts a candidate against every anchor in `explanation.anchors`,
+ * not against `anchors[0]` alone. Review 08f's open finding was that the lead-only
+ * count bounded how often a favourite could be *named* and left its total influence
+ * unbounded — a title carried mostly by A but attributed to B first spent B's quota
+ * and none of A's. So a candidate that two anchors both point at spends a slot of
+ * each, and the guarantee is the one the founder decision actually asks for: **no
+ * single ranked title lies behind more than four of the twenty, by any route this
+ * module can see.**
+ *
+ * That is strictly stronger and it is not free. A candidate whose second anchor is
+ * full is dropped even though its lead has room, so a wall built from six anchors that
+ * all point at the same titles is shorter than one built from six that disagree.
+ * Which is the right shape: agreement between anchors is exactly the overfitting the
+ * cap is for, and a short honest wall beats twenty rows of one taste reflected back.
+ *
+ * The franchise ceiling is `recommendations.md` §4's "≤ 2 per 20", implemented against
+ * the title-derived proxy `franchiseKey` documents. Two, not zero: the decision says
+ * to avoid a wall of sequels, not to ban the sequel of a film somebody loved, and a
+ * viewer who adored the first two Dune films should still be shown the third.
+ *
+ * The cost throughout is a short wall for a viewer whose candidate pool is genuinely
+ * narrow. In practice that is rare: the trending fallback supplies twenty candidates
+ * with no anchor at all, and a candidate no anchor points at spends no anchor's quota.
  */
 export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE): Scored[] {
   const byScore = [...scored].sort((a, b) => b.explanation.total - a.explanation.total);
 
   const perGenre = new Map<string, number>();
   const perAnchor = new Map<string, number>();
+  const perFranchise = new Map<string, number>();
   const chosen: Scored[] = [];
 
-  /** One greedy pass. A candidate that would break either ceiling is dropped. */
-  const pass = (pool: readonly Scored[], genreCeiling: number, anchorCeiling: number) => {
+  const atCeiling = (counts: Map<string, number>, key: string, ceiling: number) =>
+    (counts.get(key) ?? 0) >= ceiling;
+  const spend = (counts: Map<string, number>, key: string) =>
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+
+  /** One greedy pass. A candidate that would break any ceiling is dropped. */
+  const pass = (
+    pool: readonly Scored[],
+    genreCeiling: number,
+    anchorCeiling: number,
+    franchiseCeiling: number,
+  ) => {
     for (const candidate of pool) {
       if (chosen.length >= limit) return;
 
@@ -367,15 +496,17 @@ export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE)
       // definitive. Counting every genre would make a three-genre film use up three
       // slots' worth of the ceiling and effectively ban broad titles.
       const primary = candidate.genres[0] ?? null;
-      const leadAnchor = candidate.explanation.anchors[0]?.mediaItemId ?? null;
+      const franchise = franchiseKey(candidate.title);
+      // Every anchor that points at this title, not merely the loudest one.
+      const attributed = candidate.explanation.anchors.map((hit) => hit.mediaItemId);
 
-      const genreFull = primary != null && (perGenre.get(primary) ?? 0) >= genreCeiling;
-      const anchorFull = leadAnchor != null && (perAnchor.get(leadAnchor) ?? 0) >= anchorCeiling;
+      if (primary != null && atCeiling(perGenre, primary, genreCeiling)) continue;
+      if (franchise != null && atCeiling(perFranchise, franchise, franchiseCeiling)) continue;
+      if (attributed.some((id) => atCeiling(perAnchor, id, anchorCeiling))) continue;
 
-      if (genreFull || anchorFull) continue;
-
-      if (primary != null) perGenre.set(primary, (perGenre.get(primary) ?? 0) + 1);
-      if (leadAnchor != null) perAnchor.set(leadAnchor, (perAnchor.get(leadAnchor) ?? 0) + 1);
+      if (primary != null) spend(perGenre, primary);
+      if (franchise != null) spend(perFranchise, franchise);
+      for (const id of attributed) spend(perAnchor, id);
       chosen.push(candidate);
     }
   };
@@ -389,12 +520,7 @@ export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE)
   // boundary, so the assertions passed while production could violate them. A cap
   // that yields when it is inconvenient is not a cap, and a claim the code can break
   // is worse than a weaker claim it cannot.
-  //
-  // The cost is that a viewer whose candidate pool is genuinely narrow gets a shorter
-  // wall. That is the honest outcome and in practice a rare one: the trending
-  // fallback contributes twenty candidates with no anchor at all, and a candidate
-  // with no lead anchor counts against no anchor's ceiling.
-  pass(byScore, maxPerGenre(limit), maxPerAnchor());
+  pass(byScore, maxPerGenre(limit), maxPerAnchor(), maxPerFranchise());
 
   return chosen;
 }

@@ -2,7 +2,10 @@ import {
   buildSlate,
   CONFIDENT_AT,
   diversify,
+  franchiseKey,
   headlineFor,
+  maxPerAnchor,
+  maxPerFranchise,
   scoreCandidate,
   tasteFrom,
   type Anchor,
@@ -275,7 +278,11 @@ describe('diversity', () => {
     expect(slate).toHaveLength(8);
   });
 
-  it('will not let one favourite own the slate', () => {
+  /** How many slate entries any anchor at all lies behind — lead or otherwise. */
+  const attributionsTo = (id: string, slate: readonly { explanation: { anchors: { mediaItemId: string }[] } }[]) =>
+    slate.filter((item) => item.explanation.anchors.some((hit) => hit.mediaItemId === id)).length;
+
+  it('lets no one favourite lie behind more than four of the twenty', () => {
     // "Twenty sequels because of one rating", stated as a constraint.
     const one = anchor({
       mediaItemId: 'marvel',
@@ -291,9 +298,77 @@ describe('diversity', () => {
       limit: 20,
     });
 
-    const led = slate.filter((item) => item.explanation.anchors[0]?.mediaItemId === 'marvel');
+    expect(attributionsTo('marvel', slate)).toBeLessThanOrEqual(maxPerAnchor());
+  });
 
-    expect(led.length).toBeLessThanOrEqual(4);
+  it('counts a favourite that is not the loudest voice on the row', () => {
+    // The failure independent review found at 08f, as a fixture. `favourite` points at
+    // twelve titles; `other` points at eight of them from a better position, so on
+    // those eight `other` is the recorded lead and `favourite` is second.
+    //
+    // Under a lead-only quota the wall is eight rows — four led by `favourite`, four
+    // led by `other` — and `favourite` lies behind every one of them. It was never
+    // named more than four times, and it decided twice that many. Counting only the
+    // lead is a quota on how often a favourite is *quoted*, not on how much it
+    // *decides*, and the founder decision asks for the second.
+    const ids = Array.from({ length: 12 }, (_, index) => `f-${index}`);
+    const slate = buildSlate({
+      candidates: ids.map((id, index) => candidate({ mediaItemId: id, genres: [`Genre ${index}`] })),
+      anchors: [
+        anchor({ mediaItemId: 'favourite', score: 10, similarIds: ids }),
+        anchor({ mediaItemId: 'other', score: 10, similarIds: ids.slice(4) }),
+      ],
+      taste: emptyTaste,
+      exclude: new Set(),
+      limit: 20,
+    });
+
+    // The fixture is only worth anything if `favourite` really is the second voice on
+    // those rows — otherwise this passes for the wrong reason.
+    const secondBilled = slate.filter(
+      (item) => item.explanation.anchors[1]?.mediaItemId === 'favourite',
+    );
+    expect(secondBilled.length).toBeGreaterThan(0);
+
+    expect(attributionsTo('favourite', slate)).toBeLessThanOrEqual(maxPerAnchor());
+  });
+
+  it('will not hand the wall to one franchise', () => {
+    // Six entries of one series, all out-scoring everything else, and a wall with room
+    // for all of them. `recommendations.md` §4 says at most two per twenty.
+    const sequels = [
+      'Spider-Man',
+      'Spider-Man 2',
+      'Spider-Man: Homecoming',
+      'Spider-Man: Far From Home',
+      'Spider-Man: No Way Home',
+      'Spider-Man: Brand New Day',
+    ];
+    const scored = [
+      ...sequels.map((title, index) =>
+        scoreCandidate(
+          candidate({ mediaItemId: `s-${index}`, title, popularity: 500 - index, genres: [`Genre ${index}`] }),
+          [],
+          emptyTaste,
+        ),
+      ),
+      ...Array.from({ length: 6 }, (_, index) =>
+        scoreCandidate(
+          candidate({ mediaItemId: `o-${index}`, title: `Other ${index}`, popularity: 10, genres: [`Other ${index}`] }),
+          [],
+          emptyTaste,
+        ),
+      ),
+    ];
+
+    const slate = diversify(scored, 20);
+    const franchise = slate.filter((item) => franchiseKey(item.title) === 'spider man');
+
+    // Two, and exactly two: the cap holds, and it does not ban the sequel of a film
+    // somebody loved. Banning them outright would be a different product decision and
+    // not the one that was made.
+    expect(franchise).toHaveLength(maxPerFranchise());
+    expect(slate.length).toBeGreaterThan(maxPerFranchise());
   });
 
   it('returns a short wall rather than breaking its own ceiling', () => {
@@ -312,5 +387,62 @@ describe('diversity', () => {
 
     expect(slate[0]?.mediaItemId).toBe('m-0');
     expect(scoreOf('m-0', slate)).toBeGreaterThan(scoreOf('m-4', slate));
+  });
+});
+
+describe('what counts as one franchise', () => {
+  /**
+   * The key is a proxy for TMDB's `belongs_to_collection`, which V1 cannot have: it
+   * lives on a title's detail response, so keying on it would cost one provider
+   * request per candidate against an architecture that budgets six per slate.
+   *
+   * What matters about a proxy is which way it is wrong. These cases fix that: it
+   * groups on a shared leading name and on nothing else, so it under-groups rather
+   * than dropping a good recommendation for a franchise it invented.
+   */
+  const same = (a: string, b: string) => franchiseKey(a) === franchiseKey(b);
+
+  it('groups a numbered sequel with the film it follows', () => {
+    expect(same('Iron Man', 'Iron Man 2')).toBe(true);
+    expect(same('The Godfather', 'The Godfather Part II')).toBe(true);
+    expect(same('It', 'It Chapter Two')).toBe(true);
+    expect(same('Kill Bill: Vol. 1', 'Kill Bill: Vol. 2')).toBe(true);
+  });
+
+  it('groups entries that share a name and differ by subtitle', () => {
+    expect(same('Spider-Man: No Way Home', 'Spider-Man: Brand New Day')).toBe(true);
+    expect(same('Dune', 'Dune: Part Two')).toBe(true);
+    expect(same('Mission: Impossible', 'Mission: Impossible — Fallout')).toBe(true);
+  });
+
+  it('reads through an article and an accent', () => {
+    expect(same('The Matrix', 'Matrix Reloaded')).toBe(false); // different names, not grouped
+    expect(franchiseKey('The Matrix')).toBe('matrix');
+    expect(franchiseKey('Amélie')).toBe('amelie');
+  });
+
+  it('does not invent a franchise out of two unrelated films', () => {
+    expect(same('Heat', 'Inception')).toBe(false);
+    expect(same('The Magnificent Seven', 'The Magnificent Ambersons')).toBe(false);
+    // A lone trailing letter is a word or a name, not a numeral. Stripping it would
+    // make `malcolm` a franchise and take every film beginning with it along.
+    expect(franchiseKey('Malcolm X')).toBe('malcolm x');
+    expect(same('Rogue One', 'Rogue Nation')).toBe(false);
+  });
+
+  it('says so when there is nothing to group on', () => {
+    // One character left after the rules have run is a title they ate, not an identity.
+    expect(franchiseKey('M')).toBeNull();
+    expect(franchiseKey('9')).toBeNull();
+    expect(franchiseKey('   ')).toBeNull();
+  });
+
+  it('misses the franchises it is documented to miss', () => {
+    // Recorded as tests rather than as prose, so the limitation cannot quietly widen:
+    // a shared universe and a renamed entry are invisible to a title-derived key, and
+    // `rank.ts` says so where the key is defined.
+    expect(same('Iron Man', 'Thor')).toBe(false);
+    expect(same('Batman Begins', 'The Dark Knight')).toBe(false);
+    expect(same('The Fast and the Furious', 'Fast Five')).toBe(false);
   });
 });

@@ -5,7 +5,9 @@ import catalogue from '../../../supabase/seed/catalogue.json';
 
 import {
   buildSlate,
+  franchiseKey,
   maxPerAnchor,
+  maxPerFranchise,
   maxPerGenre,
   tasteFrom,
   type Anchor,
@@ -19,8 +21,11 @@ import {
  * The founder brief is explicit that "the API returned items" is not the acceptance
  * test, and names three failures to measure against: twenty sequels from one rating,
  * overfitting one favourite, and generic Trending presented as personalised. Each has
- * a number below, and each number is asserted rather than merely reported — a metric
- * nobody fails is a metric nobody reads.
+ * a number below, and each of those three numbers is asserted rather than merely
+ * reported — a metric nobody fails is a metric nobody reads. The report additionally
+ * prints figures that describe a slate's character without guaranteeing anything, and
+ * it names which are which; the version that claimed everything in it was asserted was
+ * found by independent review and is gone.
  *
  * **What is real and what is synthetic.** The candidate universe is the real seeded
  * catalogue: 382 films with their real genres, languages and years. What is
@@ -75,15 +80,33 @@ const universe: Candidate[] = MOVIES.map((movie) => ({
 
 const byId = new Map(universe.map((item) => [item.mediaItemId, item]));
 
-/** A stand-in for `/movie/{id}/recommendations`: mostly same-genre, partly not. */
+/**
+ * A stand-in for `/movie/{id}/recommendations`: franchise siblings first, then mostly
+ * same-genre, partly not.
+ *
+ * **Franchise siblings lead, and that is not a convenience.** TMDB's list for Iron Man
+ * opens with Iron Man 2 and Iron Man 3, and a model that omitted this could not
+ * produce the failure the founder decision names first — a wall of one series because
+ * of one rating. An earlier version of this file drew only on genre overlap, which
+ * made the franchise ceiling unfalsifiable here: the measured top-franchise count was
+ * 1 for every viewer, and the assertion would have passed with the ceiling deleted.
+ * The fixture has to be able to produce the failure or the number is decoration.
+ */
 function associationsFor(seedId: string, rng: () => number): string[] {
   const source = byId.get(seedId)!;
+  const franchise = franchiseKey(source.title);
   const sameGenre = universe.filter(
     (item) => item.mediaItemId !== seedId && item.genres.some((g) => source.genres.includes(g)),
   );
   const anything = universe.filter((item) => item.mediaItemId !== seedId);
 
-  const picked: string[] = [];
+  const picked: string[] = franchise
+    ? universe
+        .filter((item) => item.mediaItemId !== seedId && franchiseKey(item.title) === franchise)
+        .map((item) => item.mediaItemId)
+        .slice(0, 20)
+    : [];
+
   while (picked.length < 20) {
     const pool = rng() < 0.6 && sameGenre.length > 0 ? sameGenre : anything;
     const choice = pool[Math.floor(rng() * pool.length)]!;
@@ -94,7 +117,7 @@ function associationsFor(seedId: string, rng: () => number): string[] {
 
 type Viewer = { name: string; ranked: { id: string; score: number }[] };
 
-/** Three viewers, each shaped like a real failure mode rather than an average user. */
+/** Four viewers, each shaped like a real failure mode rather than an average user. */
 function viewers(): Viewer[] {
   const rng = prng(7);
   const withGenre = (genre: string, count: number) =>
@@ -102,6 +125,11 @@ function viewers(): Viewer[] {
 
   const drama = withGenre('drama film', 10);
   const comedy = withGenre('comedy film', 4);
+  // Eight Star Wars films are in the seed. Ranking two leaves six in the candidate
+  // pool, each of which the association model above puts at the top of both anchors'
+  // lists — so this viewer's highest-scoring candidates are six entries of one series,
+  // which is the wall the franchise ceiling exists to refuse.
+  const franchise = universe.filter((item) => franchiseKey(item.title) === 'star wars');
 
   return [
     { name: 'Cold start — nothing ranked', ranked: [] },
@@ -119,6 +147,13 @@ function viewers(): Viewer[] {
         ...drama.map((item, index) => ({ id: item.mediaItemId, score: 9.5 - index * 0.3 })),
         ...comedy.map((item, index) => ({ id: item.mediaItemId, score: 8 - index * 0.4 })),
       ],
+    },
+    {
+      name: 'One series — two entries of an eight-film franchise',
+      ranked: franchise.slice(0, 2).map((item, index) => ({
+        id: item.mediaItemId,
+        score: 10 - index * 0.5,
+      })),
     },
   ].map((viewer) => ({ ...viewer, ranked: viewer.ranked.map((r) => ({ ...r })) })).map((viewer) => {
     void rng;
@@ -158,11 +193,18 @@ const measure = (viewer: Viewer) => {
   // ceilings are hard and a rejected candidate is dropped rather than readmitted.
   const perAnchor = new Map<string, number>();
   const perGenre = new Map<string, number>();
+  const perFranchise = new Map<string, number>();
   for (const item of slate) {
-    const lead = item.explanation.anchors[0]?.mediaItemId;
-    if (lead) perAnchor.set(lead, (perAnchor.get(lead) ?? 0) + 1);
+    // Every anchor behind the row, not the one it happens to be quoted as. Measuring
+    // the lead alone is what made the old figure a count of how often a favourite was
+    // *named* rather than of how much of the wall it decided.
+    for (const hit of item.explanation.anchors) {
+      perAnchor.set(hit.mediaItemId, (perAnchor.get(hit.mediaItemId) ?? 0) + 1);
+    }
     const genre = item.genres[0];
     if (genre) perGenre.set(genre, (perGenre.get(genre) ?? 0) + 1);
+    const franchise = franchiseKey(item.title);
+    if (franchise) perFranchise.set(franchise, (perFranchise.get(franchise) ?? 0) + 1);
   }
 
   return {
@@ -176,8 +218,7 @@ const measure = (viewer: Viewer) => {
     distinct: new Set(slate.map((item) => item.mediaItemId)).size,
     topAnchor: Math.max(0, ...perAnchor.values()),
     topGenre: Math.max(0, ...perGenre.values()),
-    topAnchorShare: share(Math.max(0, ...perAnchor.values()), slate.length),
-    topGenreShare: share(Math.max(0, ...perGenre.values()), slate.length),
+    topFranchise: Math.max(0, ...perFranchise.values()),
     anchorLed: share(
       slate.filter((item) => item.explanation.lead === 'anchors').length,
       slate.length,
@@ -224,12 +265,24 @@ describe('recommendation quality', () => {
     for (const measured of all) expect(measured.unexplained).toBe(0);
   });
 
-  it('lets no one favourite supply more than four of the twenty', () => {
+  it('lets no one favourite lie behind more than four of the twenty', () => {
     // "Twenty sequels because of one rating", against the quota the pass applies.
+    //
     // A count, not a share: the ceilings are absolute, so a short wall has a higher
     // share of the same allowed number. Independent review caught the documentation
     // saying share where the code enforced count.
+    //
+    // And *lie behind*, not *lead*: `topAnchor` counts every attribution on the row.
+    // The lead-only reading of this figure was review 08f's open finding, because a
+    // favourite that is second-billed on a row still decided that row.
     for (const measured of all) expect(measured.topAnchor).toBeLessThanOrEqual(maxPerAnchor());
+  });
+
+  it('lets no one franchise supply more than two of the twenty', () => {
+    // `recommendations.md` §4's constraint, against the real seeded catalogue — which
+    // has actual sequels in it, so this is measured against real titles rather than
+    // against a fixture built to satisfy it.
+    for (const measured of all) expect(measured.topFranchise).toBeLessThanOrEqual(maxPerFranchise());
   });
 
   it('lets no one genre supply more than eight of the twenty', () => {
@@ -261,9 +314,9 @@ describe('recommendation quality', () => {
     const rows = all
       .map(
         (m) =>
-          `| ${m.viewer} | ${m.anchors} | ${m.size} | ${pct(m.topAnchorShare)} | ${pct(
-            m.topGenreShare,
-          )} | ${pct(m.anchorLed)} | ${pct(
+          `| ${m.viewer} | ${m.anchors} | ${m.size} | ${m.topAnchor} | ${m.topFranchise} | ${
+            m.topGenre
+          } | ${pct(m.anchorLed)} | ${pct(
             m.popularityLed,
           )} | ${m.meanPopularityPrior.toFixed(2)} | ${pct(overlapWithCold(m))} |`,
       )
@@ -285,27 +338,42 @@ make this circular, since the ranker reads genre too.
 
 ## Results
 
-| Viewer | Anchors | Slate | Top anchor share | Top genre share | Anchor-led | Popularity-led | Mean popularity prior | Overlap with cold start |
-|---|---|---|---|---|---|---|---|---|
+| Viewer | Anchors | Slate | Top anchor | Top franchise | Top genre | Anchor-led | Popularity-led | Mean popularity prior | Overlap with cold start |
+|---|---|---|---|---|---|---|---|---|---|
 ${rows}
 
 Universe mean popularity prior: **${universePopularity.toFixed(2)}**.
 
-The **counts** behind the two diversity columns are asserted, as are the cold-start
-overlap, the slate size, the distinctness and the "every item can say why" check — at
-the thresholds quoted below. The *share* columns are shown for reading and are not
-asserted, because the ceilings are quotas against the requested twenty rather than
-proportions of whatever the wall turns out to be; see below.
+**Which of these are asserted, and which are merely printed.** Asserted, at the
+thresholds quoted below: the three diversity counts, the cold-start overlap, the slate
+size, the distinctness, and the "every item can say why" check. Printed for reading and
+not asserted: anchor-led, popularity-led and the mean popularity prior — they describe
+the character of a slate rather than a guarantee about it, and a threshold on them
+would be a number invented to be met. Every figure here comes from the same
+deterministic measurement the assertions run on.
 
 ## Reading it
 
 **Top anchor** is the failure the brief names first — twenty sequels because of one
-rating. It is a **count, not a share**, and the shares in the table are shown for
-reading rather than asserted. That took three rounds of review to land on: the caps
-are absolute quotas against the requested twenty, a greedy pass cannot know the final
-length while it is deciding, and the ceilings being hard means a narrow pool yields a
-*short* wall — where four of eight is half the wall and still the four the quota
-allowed. Asserted at ≤ 4 per anchor and ≤ 8 per primary genre.
+rating. Two things about how it is counted, both of which took a round of review:
+
+- It is a **count, not a share**. The caps are absolute quotas against the requested
+  twenty, a greedy pass cannot know the final length while it is deciding, and the
+  ceilings being hard means a narrow pool yields a *short* wall — where four of eight
+  is half the wall and still the four the quota allowed.
+- It counts **every attribution, not the lead**. A row is attributed to every anchor
+  whose association list contains it; the figure is the largest number of rows any one
+  anchor lies behind. Counting leads alone bounded how often a favourite was *quoted*
+  and left how much it *decided* unbounded, which is what independent review found.
+
+Asserted at ≤ 4 per anchor, ≤ 2 per franchise and ≤ 8 per primary genre.
+
+**Top franchise** is \`recommendations.md\` §4's constraint. Franchise identity is
+derived from the title — see \`franchiseKey\` — because TMDB's \`belongs_to_collection\`
+lives on a title's detail response and keying on it would cost one provider request per
+candidate. The proxy groups on a shared leading name, so it catches the numbered sequel
+and misses the shared universe; \`rank.ts\` names both cases and \`rank.test.ts\` holds
+them as tests.
 
 **Overlap with cold start** is the one that decides whether this is a recommender at
 all. The cold-start viewer has no anchors, so their wall is the popularity prior and
@@ -331,14 +399,21 @@ popularity term is doing more work than its 10% weight suggests.
   re-derived against real \`similar\` facets before anyone treats them as a baseline.
 - The seeded catalogue has no popularity at all, so the popularity prior is being
   tested against a distribution this file invented.
+- Franchise identity is a title-derived proxy, so a franchise that renames its entries
+  is invisible to the figure above. It under-reports; it does not over-report.
 `;
 
     // Only under `npm run report:recommendations`. A unit test that writes into the
     // workspace on every `npm test` is a side effect nobody asked for, and it can
     // fail outright in a hermetic or read-only sandbox. Independent review raised it
-    // twice. Every number in the report is asserted by the tests above, so the file
-    // is an artefact of the run rather than the check itself, and gating the write
-    // costs nothing.
+    // twice.
+    //
+    // The report is written from the same deterministic measurements the assertions
+    // above run on. It is *not* true that every number in it is asserted — the
+    // anchor-led, popularity-led and mean-popularity figures are printed for reading,
+    // and the report says which is which. That sentence used to be here claiming
+    // otherwise, and independent review was right to call it: the file is an artefact
+    // of the run rather than the check itself, and gating the write costs nothing.
     if (process.env.BINGD_REPORTS === '1') {
       const dir = join(__dirname, '..', '..', '..', '.agent-workflow');
       mkdirSync(dir, { recursive: true });

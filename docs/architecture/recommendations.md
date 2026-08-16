@@ -36,7 +36,25 @@ Two further properties are worth recording because they are what keep the senten
 
 **Anchors are bounded at six.** Each is one provider request the first time it is used and free for every user afterwards, because the answer lands in `media_cache` under the shared facet TTL. A request per ranked title — the obvious implementation — is four hundred TMDB calls for a user with four hundred rankings.
 
-`src/features/recommendations/rank.ts` is the whole rule and carries the reasoning. `src/features/recommendations/quality.test.ts` measures it against the three failures the founder decision names by name, and `npm run report:recommendations` writes `.agent-workflow/recommendation-quality.md` from it.
+### Diversity in V1 — what is enforced, exactly
+
+Three hard ceilings, applied by one greedy pass in score order. A candidate that would breach any of them is **dropped**, so a narrow candidate pool yields a short wall rather than a full wall with a relaxed cap.
+
+| Ceiling | Value | Keyed on |
+|---|---|---|
+| Per anchor | ≤ 4 of 20 | every anchor the candidate is attributed to |
+| Per franchise | ≤ 2 of 20 | `franchiseKey`, derived from the title |
+| Per primary genre | ≤ `ceil(limit × 0.4)` | the candidate's first genre |
+
+All three are absolute counts against the *requested* twenty, never shares of the wall that results.
+
+**The anchor ceiling counts every attribution, not the lead.** Six review rounds landed on the lead-only version, and the seventh found what was wrong with it: it bounded how often a favourite could be *quoted* on the wall, not how much of the wall it *decided*. A title carried mostly by anchor A but recorded against B — because B's list placed it higher — spent B's quota and none of A's, so one rating could sit behind twenty rows while never appearing to lead more than four. Counting every anchor in `explanation.anchors` gives the guarantee the founder decision actually asks for: **no single ranked title lies behind more than four of the twenty, by any route this module can see.** It is strictly stronger and it costs slate length when several anchors point at the same titles — which is the overfitting the ceiling exists for.
+
+**§4's franchise constraint is implemented against a title-derived proxy, not TMDB's collection id.** `belongs_to_collection` appears only on a title's *detail* response, so keying on it would mean one provider request per candidate — several hundred per slate — against an architecture that budgets six. Storing it would mean a column that is null for every catalogue row until something re-enriches it: a ceiling that cannot fire, dressed as one that can. `franchiseKey` therefore groups on the shared leading name of a title, and `rank.ts` documents exactly which franchises that catches (the numbered sequel, the subtitled entry) and which it misses (a shared universe under different names, a renamed entry, a retitled reboot). It under-groups by construction, so its failure is a franchise slipping past the cap rather than an unrelated film being dropped for a franchise the code invented. Both directions are held as tests.
+
+§4's remaining constraints — most-popular band, candidate-family minimum, exploration slots — are **not** implemented in V1, because V1 has no candidate families to count and no exploration slot to reserve. They belong to `recs-builder`.
+
+`src/features/recommendations/rank.ts` is the whole rule and carries the reasoning. `src/features/recommendations/quality.test.ts` measures it against the failures the founder decision names by name, and `npm run report:recommendations` writes `.agent-workflow/recommendation-quality.md` from it. Both diversity assertions there are verified by mutation: removing either ceiling from `diversify` fails the test that names it.
 
 ---
 
@@ -100,6 +118,8 @@ A weighted sum over normalized signals, with weights in `app_config`:
 **Bucket signal is why an importer gets useful recommendations on day one.** A user who imports 400 Letterboxd films and ranks nothing has 118 titles in `loved`, which is ample content-similarity signal. They have no `match_scores` rows yet, so the collaborative families contribute nothing — and the slate is labeled accordingly at stage 5.
 
 ### Stage 4 — Re-ranking
+
+> **What of this V1 implements, and how, is §0.** The franchise and genre constraints are enforced today; the family minimum, popular band and exploration slots are not, because V1 has no candidate families. `belongs_to_collection` is unavailable at slate-build time, so franchise identity is a documented title-derived proxy rather than the provider's collection id.
 
 The scored pool is reduced to 20 under hard constraints. Implemented as greedy selection: take the highest remaining score that violates nothing, repeat.
 
