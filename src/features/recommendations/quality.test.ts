@@ -5,7 +5,7 @@ import catalogue from '../../../supabase/seed/catalogue.json';
 
 import {
   buildSlate,
-  franchiseKey,
+  franchiseKeys,
   maxPerAnchor,
   maxPerFranchise,
   maxPerGenre,
@@ -81,6 +81,18 @@ const universe: Candidate[] = MOVIES.map((movie) => ({
 const byId = new Map(universe.map((item) => [item.mediaItemId, item]));
 
 /**
+ * Franchise keys over the whole catalogue, for building the fixture.
+ *
+ * `franchiseKeys` decides a set of titles together — a trailing number is only read as
+ * a sequel marker when the unnumbered original is in the same set — so it cannot be
+ * asked about one title. Here the set is the entire seeded catalogue, which is the
+ * widest and therefore most generous grouping available. What `diversify` enforces is
+ * measured separately, over exactly the set it was given; see `measure`.
+ */
+const catalogueFranchise = franchiseKeys(universe.map((item) => item.title));
+const franchiseOf = (title: string) => catalogueFranchise.get(title) ?? null;
+
+/**
  * A stand-in for `/movie/{id}/recommendations`: franchise siblings first, then mostly
  * same-genre, partly not.
  *
@@ -94,7 +106,7 @@ const byId = new Map(universe.map((item) => [item.mediaItemId, item]));
  */
 function associationsFor(seedId: string, rng: () => number): string[] {
   const source = byId.get(seedId)!;
-  const franchise = franchiseKey(source.title);
+  const franchise = franchiseOf(source.title);
   const sameGenre = universe.filter(
     (item) => item.mediaItemId !== seedId && item.genres.some((g) => source.genres.includes(g)),
   );
@@ -102,7 +114,7 @@ function associationsFor(seedId: string, rng: () => number): string[] {
 
   const picked: string[] = franchise
     ? universe
-        .filter((item) => item.mediaItemId !== seedId && franchiseKey(item.title) === franchise)
+        .filter((item) => item.mediaItemId !== seedId && franchiseOf(item.title) === franchise)
         .map((item) => item.mediaItemId)
         .slice(0, 20)
     : [];
@@ -129,7 +141,7 @@ function viewers(): Viewer[] {
   // pool, each of which the association model above puts at the top of both anchors'
   // lists — so this viewer's highest-scoring candidates are six entries of one series,
   // which is the wall the franchise ceiling exists to refuse.
-  const franchise = universe.filter((item) => franchiseKey(item.title) === 'star wars');
+  const franchise = universe.filter((item) => franchiseOf(item.title) === 'star wars');
 
   return [
     { name: 'Cold start — nothing ranked', ranked: [] },
@@ -189,6 +201,18 @@ const share = (part: number, whole: number) => (whole === 0 ? 0 : part / whole);
 const measure = (viewer: Viewer) => {
   const { anchors, slate, exclude } = slateFor(viewer);
 
+  // Exactly the set `diversify` keyed on: the eligible candidates it scored, plus the
+  // anchor titles `buildSlate` passes as context. Measuring against a wider set — the
+  // whole catalogue, say — could report a grouping the pass never had, and then the
+  // number would describe this file rather than the code.
+  const anchorIds = new Set(anchors.map((anchor) => anchor.mediaItemId));
+  const franchises = franchiseKeys([
+    ...universe
+      .filter((item) => !exclude.has(item.mediaItemId) && !anchorIds.has(item.mediaItemId))
+      .map((item) => item.title),
+    ...anchors.map((anchor) => anchor.title),
+  ]);
+
   // Measured over the rendered slate, which is now the only slate there is: the
   // ceilings are hard and a rejected candidate is dropped rather than readmitted.
   const perAnchor = new Map<string, number>();
@@ -203,7 +227,7 @@ const measure = (viewer: Viewer) => {
     }
     const genre = item.genres[0];
     if (genre) perGenre.set(genre, (perGenre.get(genre) ?? 0) + 1);
-    const franchise = franchiseKey(item.title);
+    const franchise = franchises.get(item.title) ?? null;
     if (franchise) perFranchise.set(franchise, (perFranchise.get(franchise) ?? 0) + 1);
   }
 
@@ -369,11 +393,14 @@ rating. Two things about how it is counted, both of which took a round of review
 Asserted at ≤ 4 per anchor, ≤ 2 per franchise and ≤ 8 per primary genre.
 
 **Top franchise** is \`recommendations.md\` §4's constraint. Franchise identity is
-derived from the title — see \`franchiseKey\` — because TMDB's \`belongs_to_collection\`
+derived from the title — see \`franchiseKeys\` — because TMDB's \`belongs_to_collection\`
 lives on a title's detail response and keying on it would cost one provider request per
-candidate. The proxy groups on a shared leading name, so it catches the numbered sequel
-and misses the shared universe; \`rank.ts\` names both cases and \`rank.test.ts\` holds
-them as tests.
+candidate. The keys are decided over a set of titles rather than one at a time: a bare
+trailing number is read as a sequel marker only when the unnumbered original is in the
+same set, so \`Iron Man 2\` groups with \`Iron Man\` while \`Apollo 13\` and \`Apollo 11\`
+stay two franchises. The proxy catches the numbered sequel and the subtitled entry and
+misses the shared universe; \`rank.ts\` names every case and \`rank.test.ts\` holds them
+as tests.
 
 **Overlap with cold start** is the one that decides whether this is a recommender at
 all. The cold-start viewer has no anchors, so their wall is the popularity prior and

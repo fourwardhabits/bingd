@@ -2,7 +2,7 @@ import {
   buildSlate,
   CONFIDENT_AT,
   diversify,
-  franchiseKey,
+  franchiseKeys,
   headlineFor,
   maxPerAnchor,
   maxPerFranchise,
@@ -362,7 +362,8 @@ describe('diversity', () => {
     ];
 
     const slate = diversify(scored, 20);
-    const franchise = slate.filter((item) => franchiseKey(item.title) === 'spider man');
+    const keyed = franchiseKeys(scored.map((item) => item.title));
+    const franchise = slate.filter((item) => keyed.get(item.title) === 'spider man');
 
     // Two, and exactly two: the cap holds, and it does not ban the sequel of a film
     // somebody loved. Banning them outright would be a different product decision and
@@ -396,53 +397,86 @@ describe('what counts as one franchise', () => {
    * lives on a title's detail response, so keying on it would cost one provider
    * request per candidate against an architecture that budgets six per slate.
    *
-   * What matters about a proxy is which way it is wrong. These cases fix that: it
-   * groups on a shared leading name and on nothing else, so it under-groups rather
-   * than dropping a good recommendation for a franchise it invented.
+   * What matters about a proxy is which way it is wrong, and these cases fix that: it
+   * under-groups, so it misses a franchise rather than dropping a good recommendation
+   * to protect against one it invented.
    */
-  const same = (a: string, b: string) => franchiseKey(a) === franchiseKey(b);
+  const keys = (titles: string[]) => franchiseKeys(titles);
+  /** Do these two group, judged in the company of the whole list? */
+  const grouped = (titles: string[], a: string, b: string) => {
+    const map = keys(titles);
+    return map.get(a) != null && map.get(a) === map.get(b);
+  };
 
   it('groups a numbered sequel with the film it follows', () => {
-    expect(same('Iron Man', 'Iron Man 2')).toBe(true);
-    expect(same('The Godfather', 'The Godfather Part II')).toBe(true);
-    expect(same('It', 'It Chapter Two')).toBe(true);
-    expect(same('Kill Bill: Vol. 1', 'Kill Bill: Vol. 2')).toBe(true);
+    expect(grouped(['Iron Man', 'Iron Man 2', 'Iron Man 3'], 'Iron Man 2', 'Iron Man 3')).toBe(true);
+    expect(grouped(['The Godfather', 'The Godfather Part II'], 'The Godfather', 'The Godfather Part II')).toBe(true);
+    expect(grouped(['It', 'It Chapter Two'], 'It', 'It Chapter Two')).toBe(true);
+    expect(grouped(['Kill Bill: Vol. 1', 'Kill Bill: Vol. 2'], 'Kill Bill: Vol. 1', 'Kill Bill: Vol. 2')).toBe(true);
   });
 
   it('groups entries that share a name and differ by subtitle', () => {
-    expect(same('Spider-Man: No Way Home', 'Spider-Man: Brand New Day')).toBe(true);
-    expect(same('Dune', 'Dune: Part Two')).toBe(true);
-    expect(same('Mission: Impossible', 'Mission: Impossible — Fallout')).toBe(true);
+    const marvel = ['Spider-Man: No Way Home', 'Spider-Man: Brand New Day'];
+    expect(grouped(marvel, marvel[0]!, marvel[1]!)).toBe(true);
+    expect(grouped(['Dune', 'Dune: Part Two'], 'Dune', 'Dune: Part Two')).toBe(true);
+    expect(
+      grouped(['Mission: Impossible', 'Mission: Impossible — Fallout'], 'Mission: Impossible', 'Mission: Impossible — Fallout'),
+    ).toBe(true);
   });
 
   it('reads through an article and an accent', () => {
-    expect(same('The Matrix', 'Matrix Reloaded')).toBe(false); // different names, not grouped
-    expect(franchiseKey('The Matrix')).toBe('matrix');
-    expect(franchiseKey('Amélie')).toBe('amelie');
+    expect(keys(['The Matrix']).get('The Matrix')).toBe('matrix');
+    expect(keys(['Amélie']).get('Amélie')).toBe('amelie');
+    expect(grouped(['The Matrix', 'Matrix Reloaded'], 'The Matrix', 'Matrix Reloaded')).toBe(false);
+  });
+
+  it('will not turn a number in a name into a franchise', () => {
+    // The failure independent review found at 08g. Three unrelated productions, each
+    // with a mission number in its title. Nothing called `Apollo` is present, so there
+    // is no original for them to be sequels of — and the earlier version that stripped
+    // any trailing number unconditionally declared them one franchise, which would
+    // have dropped one of them to a cap protecting against nothing.
+    const apollo = ['Apollo 11', 'Apollo 13', 'Apollo 18'];
+    const map = keys(apollo);
+
+    expect(new Set(apollo.map((title) => map.get(title))).size).toBe(3);
+    expect(map.get('Apollo 13')).toBe('apollo 13');
+  });
+
+  it('needs the original present before it will read a number as a sequel', () => {
+    // The same rule, from the other side: with `Iron Man` in the set the number is
+    // evidence of a sequel; without it, it is just part of a name.
+    expect(keys(['Iron Man', 'Iron Man 2']).get('Iron Man 2')).toBe('iron man');
+    expect(keys(['Iron Man 2', 'Iron Man 3']).get('Iron Man 2')).toBe('iron man 2');
   });
 
   it('does not invent a franchise out of two unrelated films', () => {
-    expect(same('Heat', 'Inception')).toBe(false);
-    expect(same('The Magnificent Seven', 'The Magnificent Ambersons')).toBe(false);
+    expect(grouped(['Heat', 'Inception'], 'Heat', 'Inception')).toBe(false);
+    expect(
+      grouped(['The Magnificent Seven', 'The Magnificent Ambersons'], 'The Magnificent Seven', 'The Magnificent Ambersons'),
+    ).toBe(false);
     // A lone trailing letter is a word or a name, not a numeral. Stripping it would
     // make `malcolm` a franchise and take every film beginning with it along.
-    expect(franchiseKey('Malcolm X')).toBe('malcolm x');
-    expect(same('Rogue One', 'Rogue Nation')).toBe(false);
+    expect(keys(['Malcolm', 'Malcolm X']).get('Malcolm X')).toBe('malcolm x');
+    expect(grouped(['Rogue One', 'Rogue Nation'], 'Rogue One', 'Rogue Nation')).toBe(false);
+    // A year is not an episode number, and `Blade Runner 2049` is only grouped with
+    // `Blade Runner` because the original is there to make it a sequel — which it is.
+    expect(keys(['Blade Runner 2049']).get('Blade Runner 2049')).toBe('blade runner 2049');
   });
 
   it('says so when there is nothing to group on', () => {
     // One character left after the rules have run is a title they ate, not an identity.
-    expect(franchiseKey('M')).toBeNull();
-    expect(franchiseKey('9')).toBeNull();
-    expect(franchiseKey('   ')).toBeNull();
+    expect(keys(['M']).get('M')).toBeNull();
+    expect(keys(['9']).get('9')).toBeNull();
+    expect(keys(['   ']).get('   ')).toBeNull();
   });
 
   it('misses the franchises it is documented to miss', () => {
     // Recorded as tests rather than as prose, so the limitation cannot quietly widen:
-    // a shared universe and a renamed entry are invisible to a title-derived key, and
-    // `rank.ts` says so where the key is defined.
-    expect(same('Iron Man', 'Thor')).toBe(false);
-    expect(same('Batman Begins', 'The Dark Knight')).toBe(false);
-    expect(same('The Fast and the Furious', 'Fast Five')).toBe(false);
+    // a shared universe, a renamed entry and a retitled reboot are all invisible to a
+    // title-derived key, and `rank.ts` says so where the key is defined.
+    expect(grouped(['Iron Man', 'Thor'], 'Iron Man', 'Thor')).toBe(false);
+    expect(grouped(['Batman Begins', 'The Dark Knight'], 'Batman Begins', 'The Dark Knight')).toBe(false);
+    expect(grouped(['The Fast and the Furious', 'Fast Five'], 'The Fast and the Furious', 'Fast Five')).toBe(false);
   });
 });

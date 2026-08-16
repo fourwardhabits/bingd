@@ -163,16 +163,44 @@ export const maxPerGenre = (limit: number = SLATE_SIZE) =>
 const NUMBERED_PART = /\s(?:part|chapter|volume|vol|episode)\s+(?:\d+|[ivx]+|one|two|three|four|five|six|seven|eight|nine|ten)$/;
 
 /**
- * A bare trailing ordinal: `Iron Man 2`, `The Godfather II`.
+ * A bare trailing number: `Iron Man 2`, `The Godfather II`, `Apollo 13`.
  *
- * Never a lone `i`, `v` or `x`. Those are far likelier to be a word or a name than a
- * numeral — `Malcolm X` would otherwise become the franchise `malcolm` and take every
- * other film beginning with that word down with it.
+ * On its own this proves **nothing**, which is the whole reason `franchiseKeys` below
+ * takes a set of titles rather than one title. A trailing number is a sequel marker in
+ * `Iron Man 2` and part of the name in `Apollo 13`, and no rule reading one title in
+ * isolation can tell those apart. Independent review found exactly that: the version
+ * before this one stripped unconditionally and declared Apollo 11, 13 and 18 to be one
+ * franchise, which would have dropped a good recommendation to a cap protecting
+ * against a franchise that does not exist.
+ *
+ * Never matches a lone `i`, `v` or `x`. Those are far likelier to be a word or a name
+ * than a numeral — `Malcolm X` would otherwise be a candidate for the stem `malcolm`.
  */
 const BARE_ORDINAL = /\s(?:\d+|i{2,3}|iv|vi{1,3}|ix|xi{1,2})$/;
 
+/** The stem of a title, before any reasoning about a trailing number. */
+function baseStem(title: string): string {
+  // Everything before the first subtitle separator: a colon, a dash with spaces
+  // around it, or an em/en dash. `Spider-Man` keeps its hyphen because it has no
+  // spaces around it, which is what distinguishes a compound name from a subtitle.
+  const lead = title.split(/:|\s[-–—]\s|[–—]/)[0] ?? title;
+
+  const stem = lead
+    .normalize('NFKD')
+    // Combining marks, so `Amelie` spelled either way is one franchise, not two.
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/^(?:the|a|an)\s+/, '');
+
+  // `Part II` loses the whole marker. Losing only the `II` would leave `part` behind
+  // to group every numbered sequel in the catalogue under one franchise.
+  return stem.replace(NUMBERED_PART, '').trim();
+}
+
 /**
- * A franchise key derived from the title, or `null` when there is nothing to group on.
+ * Franchise keys for a set of titles, **decided together rather than one at a time**.
  *
  * **This is a proxy, and naming what it is not matters more than what it is.** The
  * real franchise identity is TMDB's `belongs_to_collection`, and V1 cannot have it:
@@ -182,52 +210,65 @@ const BARE_ORDINAL = /\s(?:\d+|i{2,3}|iv|vi{1,3}|ix|xi{1,2})$/;
  * would mean a column that is null for every catalogue row until something re-enriches
  * it, which is a cap that does not fire dressed as a cap that does.
  *
- * So the key is the leading stem of the title: everything before a subtitle
- * separator, minus a leading article, minus a trailing sequel marker.
+ * The key is the leading stem of the title: everything before a subtitle separator,
+ * minus a leading article, minus a named sequel marker.
  *
- *   Spider-Man: No Way Home  →  spider man
+ *   Spider-Man: No Way Home   →  spider man
  *   Spider-Man: Far From Home →  spider man
- *   The Godfather Part II    →  godfather
- *   Iron Man 2               →  iron man
- *   It Chapter Two           →  it
+ *   The Godfather Part II     →  godfather
+ *   It Chapter Two            →  it
  *
- * What it catches is the direct sequel — the case the founder decision names, where
- * loving one film returns its own numbered siblings. What it does **not** catch:
+ * ### Why this takes a set
+ *
+ * A **bare** trailing number is stripped only when some other title in the set is the
+ * unnumbered original. `Iron Man 2` becomes `iron man` when `Iron Man` is present and
+ * stays `iron man 2` when it is not; `Apollo 11`, `Apollo 13` and `Apollo 18` remain
+ * three franchises, because no film called `Apollo` is there to make them one.
+ *
+ * A trailing number means "second in a series" in one title and "the number of the
+ * mission" in another, and nothing inside a single title distinguishes them. The
+ * presence of the original is the evidence, and it is the only evidence available
+ * without a provider request. The version that stripped unconditionally was killed by
+ * independent review on that exact example.
+ *
+ * The set is the candidate pool plus the viewer's anchors — so a viewer who ranked
+ * `Iron Man` and is being recommended `Iron Man 2` and `Iron Man 3` still gets the
+ * grouping, even though the original is excluded from their wall for being in their
+ * collection.
+ *
+ * ### What it still misses, on purpose
  *
  *   - a shared universe under different names (Iron Man / Thor / Black Panther);
  *   - a renamed entry (The Dark Knight, in TMDB's Batman collection);
- *   - a reboot with a distinct title (Fast Five, in the Fast & Furious collection).
+ *   - a reboot with a distinct title (Fast Five, in the Fast & Furious collection);
+ *   - a numbered sequel whose original is nowhere in the set.
  *
- * It is deliberately conservative in that direction. Every rule here shortens a stem
- * only on an explicit marker, so two titles group **only when they genuinely share a
- * leading name**. The failure mode is therefore under-grouping — a franchise slipping
- * past the cap — rather than two unrelated films being treated as one and a good
- * recommendation being dropped. The residual over-grouping case is two unrelated films
- * with the same name, which costs at most one row of a twenty-row wall.
+ * All four are **under**-grouping — a franchise slipping past the cap — which is the
+ * direction to fail in, because over-grouping drops a good recommendation to protect
+ * against a franchise the code invented. The one over-grouping case left is two
+ * unrelated films that share a leading name outright, which costs at most one row of
+ * twenty and cannot be told from a real franchise without the provider's collection id.
  */
-export function franchiseKey(title: string): string | null {
-  // Everything before the first subtitle separator: a colon, a dash with spaces
-  // around it, or an em/en dash. `Spider-Man` keeps its hyphen because it has no
-  // spaces around it, which is what distinguishes a compound name from a subtitle.
-  const lead = title.split(/:|\s[-–—]\s|[–—]/)[0] ?? title;
+export function franchiseKeys(titles: Iterable<string>): Map<string, string | null> {
+  const stems = new Map<string, string>();
+  /** Stems of titles that are not themselves numbered — the possible originals. */
+  const originals = new Set<string>();
 
-  let stem = lead
-    .normalize('NFKD')
-    // Combining marks, so `Amélie` and `Amelie` are one franchise rather than two.
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .replace(/^(?:the|a|an)\s+/, '');
+  for (const title of titles) {
+    if (stems.has(title)) continue;
+    const stem = baseStem(title);
+    stems.set(title, stem);
+    if (!BARE_ORDINAL.test(stem)) originals.add(stem);
+  }
 
-  // Numbered part first, then a bare ordinal: `Part II` must not lose only its `II`
-  // and leave `part` behind to group every numbered sequel in the catalogue together.
-  const shortened = stem.replace(NUMBERED_PART, '');
-  stem = shortened === stem ? stem.replace(BARE_ORDINAL, '') : shortened;
-  stem = stem.trim();
-
-  // A one-character stem is not an identity — it is a title the rules ate.
-  return stem.length >= 2 ? stem : null;
+  const keys = new Map<string, string | null>();
+  for (const [title, stem] of stems) {
+    const withoutOrdinal = stem.replace(BARE_ORDINAL, '').trim();
+    const key = withoutOrdinal !== stem && originals.has(withoutOrdinal) ? withoutOrdinal : stem;
+    // A one-character stem is not an identity — it is a title the rules ate.
+    keys.set(title, key.length >= 2 ? key : null);
+  }
+  return keys;
 }
 
 // ---------------------------------------------------------------------------
@@ -461,16 +502,27 @@ function leadOf(terms: {
  * cap is for, and a short honest wall beats twenty rows of one taste reflected back.
  *
  * The franchise ceiling is `recommendations.md` §4's "≤ 2 per 20", implemented against
- * the title-derived proxy `franchiseKey` documents. Two, not zero: the decision says
+ * the title-derived proxy `franchiseKeys` documents. Two, not zero: the decision says
  * to avoid a wall of sequels, not to ban the sequel of a film somebody loved, and a
  * viewer who adored the first two Dune films should still be shown the third.
+ *
+ * `context` is titles that are not candidates but inform franchise identity — the
+ * viewer's anchors. `Iron Man 2` and `Iron Man 3` are only recognisable as one
+ * franchise if something called `Iron Man` is in view, and for a viewer who loved it
+ * the original is an anchor, excluded from their own wall. Passing nothing is safe and
+ * merely means less grouping; see `franchiseKeys`.
  *
  * The cost throughout is a short wall for a viewer whose candidate pool is genuinely
  * narrow. In practice that is rare: the trending fallback supplies twenty candidates
  * with no anchor at all, and a candidate no anchor points at spends no anchor's quota.
  */
-export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE): Scored[] {
+export function diversify(
+  scored: readonly Scored[],
+  limit: number = SLATE_SIZE,
+  context: readonly string[] = [],
+): Scored[] {
   const byScore = [...scored].sort((a, b) => b.explanation.total - a.explanation.total);
+  const franchises = franchiseKeys([...scored.map((item) => item.title), ...context]);
 
   const perGenre = new Map<string, number>();
   const perAnchor = new Map<string, number>();
@@ -496,7 +548,7 @@ export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE)
       // definitive. Counting every genre would make a three-genre film use up three
       // slots' worth of the ceiling and effectively ban broad titles.
       const primary = candidate.genres[0] ?? null;
-      const franchise = franchiseKey(candidate.title);
+      const franchise = franchises.get(candidate.title) ?? null;
       // Every anchor that points at this title, not merely the loudest one.
       const attributed = candidate.explanation.anchors.map((hit) => hit.mediaItemId);
 
@@ -574,6 +626,10 @@ export function buildSlate({ candidates, anchors, taste, exclude, limit }: Slate
       .filter((candidate) => !anchorIds.has(candidate.mediaItemId))
       .map((candidate) => scoreCandidate(candidate, anchors, taste)),
     limit ?? SLATE_SIZE,
+    // The anchors' titles, as franchise context. A viewer who loved `Iron Man` has it
+    // excluded from their own wall, and without it here `Iron Man 2` and `Iron Man 3`
+    // are two franchises rather than the one the cap is for.
+    anchors.map((anchor) => anchor.title),
   );
 }
 
