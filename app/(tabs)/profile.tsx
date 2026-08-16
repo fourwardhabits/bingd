@@ -82,13 +82,22 @@ export default function ProfileScreen() {
     <Screen>
       <AppHeader right={<Button label="Settings" kind="tertiary" onPress={() => router.push('/settings')} />} />
       <ScrollView contentContainerStyle={styles.content}>
+        {/* A social profile leads with a face, at a size that reads as one. The
+            stacked, centred version put a 44pt avatar above three centred lines and
+            spent the whole first viewport saying very little.
+            "Movie and TV collector" used to sit here. Nobody wrote it — there is no
+            `profiles.bio` column — and a hardcoded phrase in the place a bio goes
+            reads as something the user chose. Blank until there is a real one. */}
         <View style={styles.identity}>
-          <Avatar size="md" uri={profile.avatarUri} name={profile.display_name || profile.username} />
-          <Text variant="title2">{profile.display_name || profile.username}</Text>
-          <Text variant="footnote" tone="secondary">
-            @{profile.username}
-          </Text>
-          <Text variant="footnote" tone="tertiary">Movie and TV collector</Text>
+          <Avatar size="lg" uri={profile.avatarUri} name={profile.display_name || profile.username} />
+          <View style={styles.identityCopy}>
+            <Text variant="title2" numberOfLines={1}>
+              {profile.display_name || profile.username}
+            </Text>
+            <Text variant="footnote" tone="secondary" numberOfLines={1}>
+              @{profile.username}
+            </Text>
+          </View>
         </View>
 
         <StatRow
@@ -190,10 +199,16 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space[10],
   },
   identity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[4],
     paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[2],
     paddingBottom: theme.space[4],
-    gap: theme.space[2],
   },
+  // Name over handle, both hard against the avatar's right edge, so the block has
+  // one left margin rather than a centred axis of its own.
+  identityCopy: { flex: 1, gap: 2 },
   share: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],

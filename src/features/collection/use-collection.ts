@@ -29,6 +29,8 @@ export type RankedEntry = {
    * a request per visible row.
    */
   seriesTitle: string | null;
+  /** ISO 639-1, for the hero's language rank context (`hero-rank.ts`). */
+  language: string | null;
   bucket: 'loved' | 'fine' | 'not_for_me';
   position: number;
   category: RankingCategory;
@@ -57,6 +59,7 @@ type MediaShape = {
   genres: string[] | null;
   runtime_minutes: number | null;
   kind: 'movie' | 'season' | 'series';
+  original_language?: string | null;
   parent?: { title: string } | { title: string }[] | null;
 };
 
@@ -91,7 +94,7 @@ export function useRankedCollection(userId: string, category: RankingCategory) {
         .from('rankings')
         .select(
           'media_item_id, bucket, position, category, ' +
-            'media_items(title, release_date, poster_path, genres, runtime_minutes, kind, parent:parent_id(title))',
+            'media_items(title, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title))',
         )
         .eq('user_id', userId)
         .eq('category', category)
@@ -107,6 +110,7 @@ export function useRankedCollection(userId: string, category: RankingCategory) {
         runtimeMinutes: media(row.media_items).runtime_minutes,
         kind: media(row.media_items).kind,
         seriesTitle: parentTitle(media(row.media_items)),
+        language: media(row.media_items).original_language ?? null,
         bucket: row.bucket,
         position: row.position,
         category: row.category,

@@ -3,16 +3,19 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
-import { bandSizes, scoreFor, type Bucket } from '@/features/collection/score';
 import {
   useLoggedCollection,
   useRankedCollection,
   useWatchlist,
   type LoggedEntry,
-  type RankedEntry,
   type RankingCategory,
 } from '@/features/collection/use-collection';
+import {
+  filterByMedium,
+  mergeWatched,
+} from '@/features/collection/watched-rows';
 import { posterUri } from '@/lib/images';
+import { fullTitle } from '@/lib/titles';
 import { readPref, writePref } from '@/lib/prefs';
 import { theme } from '@/ui/tokens';
 import {
@@ -215,7 +218,8 @@ function Watched({ userId, medium }: { userId: string; medium: Medium }) {
           {rows.map((row) => (
             <TitleRow
               key={row.mediaItemId}
-              title={row.title}
+              // A ranked TV list is otherwise a column of rows called "Season 2".
+              title={fullTitle({ kind: row.seriesTitle ? 'season' : 'movie', title: row.title, seriesTitle: row.seriesTitle }) ?? row.title}
               year={row.year}
               posterUri={posterUri(row.posterPath)}
               secondary={
@@ -313,59 +317,6 @@ function Loading() {
   );
 }
 
-type WatchedRow = {
-  mediaItemId: string;
-  title: string;
-  year: number | null;
-  posterPath: string | null;
-  genres: string[];
-  runtimeMinutes: number | null;
-  score: number | null;
-  bucket: Bucket | null;
-};
-
-/**
- * Ranked titles by score, then the unranked ones.
- *
- * Band sizes are computed from the *whole* category before filtering by medium,
- * which is not an optimisation to skip: `useRankedCollection` is already scoped
- * to one category, and a score is only meaningful against every title in its
- * band. Narrowing the input first would rescale everything.
- */
-function mergeWatched(
-  ranked: RankedEntry[],
-  unranked: LoggedEntry[],
-  medium: Medium,
-): WatchedRow[] {
-  const sizes = bandSizes(ranked);
-
-  const scored: WatchedRow[] = ranked.map((entry) => ({
-    mediaItemId: entry.mediaItemId,
-    title: entry.title,
-    year: entry.year,
-    posterPath: entry.posterPath,
-    genres: entry.genres,
-    runtimeMinutes: entry.runtimeMinutes,
-    score: scoreFor(entry.bucket, entry.position, sizes),
-    bucket: entry.bucket,
-  }));
-
-  const rest: WatchedRow[] = filterByMedium(unranked, medium).map((entry) => ({
-    mediaItemId: entry.mediaItemId,
-    title: entry.title,
-    year: entry.year,
-    posterPath: entry.posterPath,
-    genres: entry.genres,
-    runtimeMinutes: entry.runtimeMinutes,
-    score: null,
-    bucket: null,
-  }));
-
-  // Already in position order from the query, which is score order. Sorting
-  // again would only introduce a way for the two to disagree.
-  return [...scored, ...rest];
-}
-
 const styles = StyleSheet.create({
   nudge: {
     marginHorizontal: theme.layout.gutter,
@@ -423,8 +374,3 @@ function shouldShowUnrankedNudge({
   return rankedCount > pref.rankedCountAtDismissal;
 }
 
-function filterByMedium(entries: LoggedEntry[], medium: Medium) {
-  return entries.filter((entry) =>
-    medium === 'movies' ? entry.kind === 'movie' : entry.kind === 'season' || entry.kind === 'series',
-  );
-}

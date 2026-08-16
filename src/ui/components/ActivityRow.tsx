@@ -232,9 +232,20 @@ export function ActivityRow({
 
       <View style={styles.actions}>
         {reaction ? (
-          /* Tap toggles the default; long press opens the six. The glyph the
-             reader chose replaces the heart, so the control states its own value
-             rather than only that something was chosen. */
+          /**
+           * Tap toggles the default; long press opens the six.
+           *
+           * The control used to render the reader's own glyph, which put the same
+           * emoji on the row twice — once in the summary cluster above, once here —
+           * and read as a duplicate rather than as two different statements. The
+           * summary is social proof; this is a control, and a control's job is to
+           * say whether *I* have acted.
+           *
+           * So it stays an icon and changes state instead: a filled Maroon heart
+           * when I have reacted, an outline when I have not. The glyph I chose is
+           * still visible — it is in the cluster above, where it is counted with
+           * everybody else's, which is the only place it means anything.
+           */
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ selected: Boolean(reaction.mineGlyph) }}
@@ -249,17 +260,16 @@ export function ActivityRow({
             hitSlop={theme.space[2]}
             style={({ pressed }) => [styles.action, pressed && styles.pressed]}
           >
+            <Ionicons
+              name={reaction.mineGlyph ? 'heart' : 'heart-outline'}
+              size={theme.layout.icon.sm}
+              color={reaction.mineGlyph ? theme.semantic.action : theme.text.secondary}
+            />
             {reaction.mineGlyph ? (
-              <Text variant="footnote" allowFontScaling={false} accessibilityElementsHidden>
-                {reaction.mineGlyph}
+              <Text variant="caption" tone="action">
+                You
               </Text>
-            ) : (
-              <Ionicons
-                name="heart-outline"
-                size={theme.layout.icon.sm}
-                color={theme.text.secondary}
-              />
-            )}
+            ) : null}
           </Pressable>
         ) : null}
 

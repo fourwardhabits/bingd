@@ -42,7 +42,17 @@ export function TitleHero({
   blurred = false,
 }: TitleHeroProps) {
   const { width } = useWindowDimensions();
-  const height = width / theme.layout.aspect.backdrop;
+  /**
+   * Taller than the artwork's own 16:9.
+   *
+   * The founder's note was that the image "ends too high". At 16:9 the hero is 219pt
+   * on a 390pt screen, the fade starts almost immediately, and the poster overlaps a
+   * strip that has already become page. Filling to 1:1.4 gives the artwork about
+   * seventy more points, which is what the poster needs to sit *in* rather than
+   * under — and the extra height is spent on the fade, so no more of the image is
+   * legible than before, it simply arrives at the page more slowly.
+   */
+  const height = width / HERO_RATIO;
 
   // No artwork at all is still common — the seed catalogue ships without any. A short
   // warm band is not a failure state and does not pretend to be an image: no grey box,
@@ -77,43 +87,76 @@ export function TitleHero({
  */
 const POSTER_BLUR = 28;
 
+/** The hero's aspect. Deliberately taller than the artwork's own 16:9 — see above. */
+const HERO_RATIO = 1.4;
+
 /**
  * A banded fade standing in for a gradient.
  *
- * `expo-linear-gradient` would draw this in one view, and it is a native module
- * — adding it changes the fingerprint and forces every tester onto a new build,
- * which is a steep price for one fade. Eight bands of increasing Paper over the
- * bottom third are indistinguishable at this size, because each step is under
- * three percent of alpha and the artwork beneath is never flat.
+ * `expo-linear-gradient` would draw this in one view, and it is a native module —
+ * adding it changes the fingerprint and forces every tester onto a new build, which is
+ * a steep price for one fade.
+ *
+ * The first version used eight bands over the bottom 42% with squared alpha, and the
+ * founder saw it for what it was: stripes. Squaring puts almost all of the change at
+ * the *end* of the ramp, so the last two bands stepped 23 points of alpha in one
+ * edge — the one place a hard line is most visible, because it lands on the pale part
+ * of the artwork.
+ *
+ * Three things fix it, and all three are needed:
+ *
+ *   - **bands two points tall**, derived from the fade height rather than fixed at
+ *     eight. Sixty-odd views instead of eight, each stepping about a percent and a
+ *     half, which is below what the eye resolves against photographic content.
+ *   - **smoothstep instead of squared.** `t²(3−2t)` is flat at both ends, so the fade
+ *     begins imperceptibly *and* arrives at full Paper without a final jump.
+ *   - **a full-strength finish.** `smoothstep(1)` is exactly 1, so the final band is
+ *     opaque Paper sitting on the hero's bottom edge. That is the clean cutoff the
+ *     brief asks for, and it needs no extra element — one that claimed to provide it
+ *     would be dead code, since a child with `flex: 1` in an auto-height absolute
+ *     container measures zero.
  */
 function Scrim({ height }: { height: number }) {
-  const band = Math.ceil((height * SCRIM_SHARE) / SCRIM_BANDS);
+  const fade = Math.round(height * SCRIM_SHARE);
+  const count = Math.max(Math.ceil(fade / BAND_HEIGHT), 1);
 
   return (
     <View pointerEvents="none" style={styles.scrim}>
-      {Array.from({ length: SCRIM_BANDS }, (_, index) => (
-        <View
-          key={index}
-          style={{
-            height: band,
-            // Squared, so the fade starts almost imperceptibly and accelerates
-            // into the page. Linear alpha reads as a visible grey ramp.
-            backgroundColor: paperAlpha(((index + 1) / SCRIM_BANDS) ** 2),
-          }}
-        />
-      ))}
+      {Array.from({ length: count }, (_, index) => {
+        const t = (index + 1) / count;
+        return (
+          <View
+            key={index}
+            style={{
+              height: BAND_HEIGHT,
+              backgroundColor: paperAlpha(smoothstep(t)),
+            }}
+          />
+        );
+      })}
     </View>
   );
 }
 
-const SCRIM_BANDS = 8;
-/** How much of the hero's height the fade occupies. */
-const SCRIM_SHARE = 0.42;
+/** Flat at both ends: no visible start to the fade and no step at the finish. */
+const smoothstep = (t: number) => t * t * (3 - 2 * t);
+
+/** Two points per band puts the alpha step below what the eye picks out. */
+const BAND_HEIGHT = 2;
+
+/**
+ * How much of the hero the fade occupies.
+ *
+ * Well over half, because the founder's note was that the transition felt abrupt as
+ * well as striped. A short ramp is a hard edge however many bands it has.
+ */
+const SCRIM_SHARE = 0.62;
 
 const styles = StyleSheet.create({
   frame: { backgroundColor: theme.surface.sunken },
   fill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   dimmed: { opacity: 0.9 },
+  // Anchored to the bottom, so the ramp finishes exactly where the artwork does.
   scrim: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   collapsed: { backgroundColor: theme.surface.sunken },
 });

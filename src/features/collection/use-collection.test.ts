@@ -105,6 +105,7 @@ describe('the ranked list', () => {
       // Null for a film, and the parent show's name for a season — a ranked TV
       // list is otherwise a column of rows called "Season 2".
       seriesTitle: null,
+      language: null,
       bucket: 'loved',
       position: 1,
       category: 'movies',

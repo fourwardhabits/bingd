@@ -240,17 +240,23 @@ describe('the reaction control', () => {
     expect(onLongPress).toHaveBeenCalled();
   });
 
-  it('shows the reader their own glyph, and offers to remove it', async () => {
+  it('marks the control as mine without repeating the glyph beside the summary', async () => {
+    // The same emoji appeared twice — once counted in the cluster, once on the
+    // control — and read as a duplicate rather than as two different statements.
+    // The control says whether I acted; the cluster says what everyone chose.
     const view = await render(
-      <ActivityRow {...props} reaction={{ count: 1, mineGlyph: '😂', onPress: jest.fn() }} />,
+      <ActivityRow
+        {...props}
+        reaction={{ count: 1, mineGlyph: '😂', glyphs: ['😂'], onPress: jest.fn(), onPressSummary: jest.fn() }}
+      />,
     );
 
     expect(
       view.getByLabelText('You reacted to Inception. Tap to remove, long press to change.'),
     ).toBeTruthy();
-    // Hidden from the accessibility tree on purpose — the label carries the
-    // meaning, and the glyph would otherwise be announced as raw emoji.
-    expect(view.getAllByText('😂', { includeHiddenElements: true }).length).toBeGreaterThan(0);
+    expect(view.getByText('You')).toBeTruthy();
+    // Exactly once on the row: in the summary cluster.
+    expect(view.getAllByText('😂', { includeHiddenElements: true })).toHaveLength(1);
   });
 
   /** The compact summary: glyphs and a total, never a per-kind tally in the row. */

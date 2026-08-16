@@ -94,7 +94,16 @@ export function PersonalState({
 }
 
 const styles = StyleSheet.create({
-  column: { alignItems: 'center', gap: theme.space[1] },
+  /**
+   * Left-aligned, not centred.
+   *
+   * Centred, the cluster floated in whatever width was left over beside the poster
+   * and lined up with nothing — which is most of what made the hero look accidental.
+   * A left edge one gutter clear of the poster gives the badge, the label, the rank
+   * line and the control a shared spine, and the poster's own edge is what they are
+   * aligned to.
+   */
+  column: { alignItems: 'flex-start', gap: theme.space[1] },
   control: {
     flexDirection: 'row',
     alignItems: 'center',

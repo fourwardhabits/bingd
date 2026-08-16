@@ -6,7 +6,9 @@ import { Alert, Linking, Pressable, ScrollView, Share, StyleSheet, View } from '
 
 import { useCurrentProfile } from '@/features/auth';
 import { LogSheet, type LoggableTitle } from '@/features/collection/LogSheet';
+import { heroRankFor } from '@/features/collection/hero-rank';
 import { useCompanions } from '@/features/collection/use-companions';
+import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
 import { useTitleScore } from '@/features/collection/use-score';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
@@ -169,11 +171,17 @@ export default function TitleScreen() {
   const { enriching } = useTitleEnrichment(data?.title ?? null);
   // The score is derived from the band, so this needs the whole category's
   // bucket counts — not just this title's row (ranking.md §11).
-  const titleScore = useTitleScore(
-    profile.id,
-    data?.ranked?.category === 'tv_seasons' ? 'tv_seasons' : 'movies',
-    data?.ranked ?? null,
-  );
+  const rankCategory: RankingCategory =
+    data?.ranked?.category === 'tv_seasons' ? 'tv_seasons' : 'movies';
+  const titleScore = useTitleScore(profile.id, rankCategory, data?.ranked ?? null);
+  /**
+   * The ranked list this title sits in, for the hero's one rank line.
+   *
+   * Already cached — Collection and Profile read the same key — so on the ordinary
+   * path this costs nothing, and it is what lets the rank context be derived rather
+   * than fetched. Only fetched at all once we know the title is ranked.
+   */
+  const rankedList = useRankedCollection(profile.id, rankCategory);
 
   const cast = useMemo(
     () =>
@@ -248,7 +256,12 @@ export default function TitleScreen() {
         year: 'numeric',
       })
     : null;
-  const rankCategory = data.ranked?.category === 'tv_seasons' ? 'TV seasons' : 'Movies';
+  const rankCategoryLabel = data.ranked?.category === 'tv_seasons' ? 'TV seasons' : 'Movies';
+  // One line only, chosen by the founder's rule: top ten overall, else the
+  // strongest category placement. Derived from rows already cached.
+  const heroRank = data.ranked
+    ? heroRankFor(title.id, rankedList.data ?? [], rankCategory, languageName)
+    : null;
   const { score, total } = titleScore;
   const rankable = title.kind === 'movie' || title.kind === 'season';
   const isSeries = title.kind === 'series';
@@ -350,7 +363,7 @@ export default function TitleScreen() {
             <PersonalState
               score={score}
               bucket={data.ranked?.bucket ?? null}
-              ordinal={data.ranked && total ? `#${data.ranked.position} in ${rankCategory}` : null}
+              ordinal={heroRank?.label ?? null}
               onPress={openLog}
               rankable={rankable}
             />
@@ -540,7 +553,7 @@ export default function TitleScreen() {
             <Detail
               label="Your rank"
               value={
-                data.ranked && total ? `#${data.ranked.position} of ${total} in ${rankCategory}` : null
+                data.ranked && total ? `#${data.ranked.position} of ${total} in ${rankCategoryLabel}` : null
               }
             />
           </View>
@@ -747,12 +760,24 @@ function languageName(code: string | null | undefined) {
 /** Tall enough that the poster still overlaps something when there is no
  *  backdrop, so the page does not become a different design. */
 const HERO_COLLAPSED = 96;
-const POSTER_LIFT = 64;
+
+/**
+ * How far the poster rises into the hero.
+ *
+ * Raised from 64 with the taller hero. The founder's note was that the poster sat
+ * "beneath a separate strip" rather than in the artwork, and at 64 against the old
+ * 16:9 frame its top landed where the fade had already reached the page — so it
+ * overlapped Paper, not an image. At 96 against the taller frame it sits on artwork
+ * that is still visibly artwork, which is what makes the two read as one object.
+ */
+const POSTER_LIFT = 96;
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   identity: {
     flexDirection: 'row',
+    // Baselines, not centres: the poster is the dominant object and everything
+    // beside it hangs from its lower edge, which is where the page resumes.
     alignItems: 'flex-end',
     gap: theme.space[4],
     paddingHorizontal: theme.layout.gutter,
@@ -772,9 +797,9 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface.base,
     ...theme.elevation.e2,
   },
-  // Aligned to the poster's lower half, where the hero has already faded to
-  // Paper — nothing here may sit on artwork.
-  scoreColumn: { flex: 1, paddingBottom: theme.space[2] },
+  // Sits in the poster's lower half, where the hero has already faded to Paper —
+  // nothing legible may sit on artwork.
+  scoreColumn: { flex: 1, paddingBottom: theme.space[3] },
   heading: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],
