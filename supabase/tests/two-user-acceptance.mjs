@@ -185,6 +185,14 @@ const created = [];
  * fail to parse — a truncated body, a proxy that ate it — and then nothing knows the
  * id. The email is chosen by this file before the request is made, so it is the one
  * handle that exists no matter what comes back.
+ *
+ * **Registered only once the create call has succeeded**, which review 15c was right to
+ * insist on: an address is registered for deletion, not merely used. If `POST
+ * /admin/users` conflicts because that address already exists — a reused stamp, a
+ * previous run, somebody's real account — an eagerly registered email would make this
+ * file delete an account it did not create. `response.ok` is checked before the push
+ * and the body is parsed after it, so a successful creation with an unreadable response
+ * is still covered.
  */
 const emails = [];
 
@@ -223,9 +231,6 @@ async function sweepByEmail(email) {
 async function createAccount(label) {
   const email = `bingd_accept_${label}_${stamp}@example.com`;
   const password = `Accept-${uuid()}`;
-  // Before the request, not after. This is the handle that survives a response nobody
-  // can parse.
-  emails.push(email);
 
   const response = await fetch(`${url}/auth/v1/admin/users`, {
     method: 'POST',
@@ -237,6 +242,9 @@ async function createAccount(label) {
     body: JSON.stringify({ email, password, email_confirm: true }),
   });
   if (!response.ok) throw new Error(`could not create ${label}: ${await response.text()}`);
+  // Between the status check and the parse. After it, so this file only ever sweeps an
+  // address it was given; before it, so a body nobody can read still leaves a handle.
+  emails.push(email);
   const user = await response.json();
   created.push(user.id);
 
@@ -710,8 +718,18 @@ try {
   // that throws used to abort every cleanup after it, so one network blip could leave
   // an account behind in a project two people are about to test against — which is
   // worse than any failing check in this file.
-  await attempt('delete A', () => destroyAccount(a));
-  await attempt('delete B', () => destroyAccount(b));
+  // The result is inspected rather than discarded. `destroyAccount` reports a non-200
+  // by returning rather than throwing, so an `attempt` that ignored it would let a
+  // failed self-delete be quietly repaired by the sweep below and never reach the exit
+  // code — review 15c's second Minor.
+  const destroy = async (label, account) => {
+    const outcome = await destroyAccount(account);
+    if (outcome && !outcome.deleted) {
+      throw new Error(`delete_account returned ${outcome.result?.status}`);
+    }
+  };
+  await attempt('delete A', () => destroy('A', a));
+  await attempt('delete B', () => destroy('B', b));
 
   // By id, for everything whose creation response was readable.
   for (const id of created) {

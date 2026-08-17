@@ -63,6 +63,7 @@ const admin = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
 // clean it up.
 let user = null;
 let auth = null;
+let createdEmail = null;
 
 try {
   const response = await fetch(`${url}/auth/v1/admin/users`, {
@@ -71,6 +72,9 @@ try {
     body: JSON.stringify({ email, password, email_confirm: true }),
   });
   if (!response.ok) throw new Error(`could not create the probe account: ${await response.text()}`);
+  // Between the status check and the parse: only an address this run was given, and
+  // still recorded when the body turns out to be unreadable.
+  createdEmail = email;
   user = await response.json();
 
   const session = await fetch(`${url}/auth/v1/token?grant_type=password`, {
@@ -237,18 +241,24 @@ const rest = async (path) => {
   };
 
   if (auth) {
-    await attempt('delete the probe account', () =>
-      fetch(`${url}/rest/v1/rpc/delete_account`, {
+    // `fetch` resolves for a 4xx, so the status is checked rather than assumed —
+    // review 15c's first Minor. The sweep below would repair it either way; what would
+    // not happen is anybody finding out.
+    await attempt('delete the probe account', async () => {
+      const res = await fetch(`${url}/rest/v1/rpc/delete_account`, {
         method: 'POST',
         headers: auth,
         body: JSON.stringify({ p_confirmation: `adp_${stamp}` }),
-      }),
-    );
+      });
+      if (!res.ok) throw new Error(`delete_account returned ${res.status}`);
+    });
   }
 
-  // By email rather than by id, so this also reaches an account whose creation
-  // response was never parseable. The email is chosen before the request is made.
-  await attempt('sweep the probe account', async () => {
+  // By email rather than by id, so this also reaches an account whose creation response
+  // was never parseable — but only when this run is known to have created it. Review
+  // 15c: an address used is not an address owned, and a conflicting create would
+  // otherwise make this delete somebody else's account.
+  if (user?.id || createdEmail) await attempt('sweep the probe account', async () => {
     const res = await fetch(`${url}/auth/v1/admin/users?filter=${encodeURIComponent(email)}`, {
       headers: admin,
     });
