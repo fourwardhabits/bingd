@@ -3,13 +3,13 @@ import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
-import { bandSizes, scoreFor } from '@/features/collection/score';
-import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { useActorActivity } from '@/features/feed/use-feed';
 import { FollowControl } from '@/features/profile/FollowControl';
+import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
+import { TopRanked } from '@/features/profile/TopRanked';
 import { useProfileNotes, usePublicProfile } from '@/features/profile/use-public-profile';
 import { useMyBlocks, useRelationships, useSocialWrites } from '@/features/profile/use-social';
 import { tasteMatchCopy, useTasteMatch } from '@/features/profile/use-taste-match';
@@ -17,17 +17,11 @@ import { posterUri } from '@/lib/images';
 import { fullTitle } from '@/lib/titles';
 import {
   ActivityRow,
-  Avatar,
   EmptyState,
   LoadingScreen,
-  PosterGrid,
   Screen,
-  ScoreBadge,
   SectionHeader,
-  SegmentedTabs,
-  SkeletonRow,
   SpoilerNote,
-  StatRow,
   Text,
   TitleRow,
 } from '@/ui/components';
@@ -56,12 +50,10 @@ export default function PublicProfileScreen() {
   const { username } = useLocalSearchParams<{ username: string }>();
   const viewer = useCurrentProfile();
   const router = useRouter();
-  const [category, setCategory] = useState<RankingCategory>('movies');
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
 
   const profile = usePublicProfile(username ?? null);
   const subjectId = profile.data?.id ?? '';
-  const ranked = useRankedCollection(subjectId, category);
   const notes = useProfileNotes(profile.data?.id ?? null);
   const watched = useWatched(viewer.id);
   const activity = useActorActivity(profile.data?.id ?? null);
@@ -87,12 +79,6 @@ export default function PublicProfileScreen() {
   const { unblock, busy: unblocking } = useSocialWrites(viewer.id);
 
   const isSelf = profile.data?.id === viewer.id;
-  const rows = ranked.data ?? [];
-  // Band sizes come from the whole category, never from a slice: a score is only
-  // meaningful against every title in its band, so scoring the top six against
-  // themselves would give all six a 10.
-  const sizes = bandSizes(rows);
-  const top = rows.slice(0, 6);
   // Asked about this actor directly. Filtering the viewer's own feed would have
   // shown nothing for any public account they had not followed, because that query
   // spans the follow set — the authorisation comes from feed_events_read either way.
@@ -153,134 +139,54 @@ export default function PublicProfileScreen() {
         />
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
-          <View style={styles.identity}>
-            <Avatar size="lg" uri={profile.data.avatarUri} name={profile.data.name} />
-            <Text variant="title2">{profile.data.name}</Text>
-            <Text variant="footnote" tone="secondary">
-              @{profile.data.username}
-            </Text>
-
-            {/* Directly under the handle, which is where the founder placed it:
-                "Display Name / @handle / 84% Taste Match / 12 titles in common".
-                Absent entirely on the viewer's own profile, and absent while the
-                answer is still loading rather than showing a placeholder number that
-                then changes. */}
-            {!isSelf && tasteCopy ? (
-              <View style={styles.taste}>
-                <Text variant="callout" tone="action">
-                  {tasteCopy.headline}
-                </Text>
-                <Text variant="caption" tone="tertiary">
-                  {tasteCopy.detail}
-                </Text>
-              </View>
-            ) : null}
-
-            {/* Under the identity rather than beside it: the founder's approved
-                profile design is a large avatar with the name and handle, and a
-                control tucked into that group competes with the name. */}
-            <FollowControl
-              userId={subjectId}
-              name={profile.data.name}
-              viewerId={viewer.id}
-              relationship={relationships.data?.get(subjectId)}
-              isSelf={isSelf}
-            />
-          </View>
-
-          <StatRow
-            stats={[
-              { label: 'Followers', value: profile.data.followers },
-              { label: 'Following', value: profile.data.following },
-              { label: 'Movies', value: profile.data.rankedMovies },
-              { label: 'Seasons', value: profile.data.rankedSeasons },
-            ]}
+          {/* The same component the viewer's own profile draws. The founder's
+              correction: the two had become two designs, and a reader could not tell
+              that what they see here is what other people see on them. What differs is
+              `controls` and `badge`, which is exactly the set of things that depend on
+              who is looking. */}
+          <ProfileIdentity
+            name={profile.data.name}
+            username={profile.data.username}
+            bio={profile.data.bio}
+            avatarUri={profile.data.avatarUri}
+            stats={{
+              followers: profile.data.followers,
+              following: profile.data.following,
+              movies: profile.data.rankedMovies,
+              seasons: profile.data.rankedSeasons,
+            }}
+            badge={
+              /* Directly under the handle, which is where the founder placed it.
+                 Absent entirely on the viewer's own profile, and absent while the
+                 answer is still loading rather than showing a placeholder number that
+                 then changes. */
+              !isSelf && tasteCopy ? (
+                <View style={styles.taste}>
+                  <Text variant="callout" tone="action">
+                    {tasteCopy.headline}
+                  </Text>
+                  <Text variant="caption" tone="tertiary">
+                    {tasteCopy.detail}
+                  </Text>
+                </View>
+              ) : null
+            }
+            controls={
+              <FollowControl
+                userId={subjectId}
+                name={profile.data.name}
+                viewerId={viewer.id}
+                relationship={relationships.data?.get(subjectId)}
+                isSelf={isSelf}
+              />
+            }
           />
 
-          <View style={styles.section}>
-            {ranked.isPending ? (
-              <>
-                <SectionHeader title="Top ranked" />
-                <SkeletonRow count={3} />
-              </>
-            ) : top.length === 0 ? (
-              <>
-                <SectionHeader title="Top ranked" />
-                <EmptyState
-                  kind="nothingYet"
-                  compact
-                  title="Nothing ranked yet"
-                  body={
-                    isSelf
-                      ? 'Rank a few titles and they will show up here.'
-                      : `${profile.data.name} has not ranked anything here yet.`
-                  }
-                />
-              </>
-            ) : (
-              <PosterGrid
-                title="Top ranked"
-                tiles={top.map((entry) => ({
-                  id: entry.mediaItemId,
-                  title:
-                    fullTitle({
-                      kind: entry.kind,
-                      title: entry.title,
-                      seriesTitle: entry.seriesTitle,
-                    }) ?? entry.title,
-                  year: entry.year,
-                  posterUri: posterUri(entry.posterPath, 'card'),
-                  score: scoreFor(entry.bucket, entry.position, sizes),
-                  bucket: entry.bucket,
-                }))}
-                onPressTile={(tile) => router.push(`/title/${tile.id}`)}
-              />
-            )}
-          </View>
-
-          {/* Movies and seasons are separate rankings and are never merged — a
-              position only means anything inside its category (PRD §11) — so this
-              is a switch between two lists rather than a filter over one. */}
-          <View style={styles.section}>
-            <SegmentedTabs
-              options={[
-                { id: 'movies' as const, label: 'Movies' },
-                { id: 'tv_seasons' as const, label: 'TV seasons' },
-              ]}
-              value={category}
-              onChange={setCategory}
-            />
-            {rows.map((entry) => (
-              <TitleRow
-                key={entry.mediaItemId}
-                title={
-                  fullTitle({
-                    kind: entry.kind,
-                    title: entry.title,
-                    seriesTitle: entry.seriesTitle,
-                  }) ?? entry.title
-                }
-                year={entry.year}
-                posterUri={posterUri(entry.posterPath)}
-                onPress={() => router.push(`/title/${entry.mediaItemId}`)}
-                trailing={
-                  <ScoreBadge
-                    score={scoreFor(entry.bucket, entry.position, sizes)}
-                    bucket={entry.bucket}
-                    size="sm"
-                  />
-                }
-              />
-            ))}
-            {!ranked.isPending && rows.length === 0 ? (
-              <EmptyState
-                kind="nothingYet"
-                compact
-                title={category === 'movies' ? 'No ranked movies' : 'No ranked seasons'}
-                body="Nothing here yet."
-              />
-            ) : null}
-          </View>
+          <TopRanked
+            userId={subjectId}
+            otherName={isSelf ? null : profile.data.name}
+            onPressTitle={(id: string) => router.push(`/title/${id}`)}
+          />
 
           {notes.data?.length ? (
             <View style={styles.section}>

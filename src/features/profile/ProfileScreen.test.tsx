@@ -99,24 +99,29 @@ const stat = async (view: Awaited<ReturnType<typeof open>>, label: string) => {
   return String(node.props.accessibilityLabel).split(': ')[1];
 };
 
-describe('the Watchlist stat', () => {
-  it('counts the watchlist, not the top-ranked slice', async () => {
-    // The bug: this read `top.length`, the length of the top-six ranked slice,
-    // so an account with six rankings and an empty watchlist reported six.
-    mockTables.rankings = [1, 2, 3, 4, 5, 6].map((n) => rankedRow(`film-${n}`, n));
-    mockTables.watchlist = [{ user_id: 'user-1', media_item_id: 'w1', media_items: movie('w1', 'Saved') }];
-
-    const view = await open();
-    await waitFor(async () => expect(await stat(view, 'Watchlist')).toBe('1'));
-  });
-
-  it('reads zero with rankings and nothing saved', async () => {
+/**
+ * The Watchlist stat is gone, and its two tests with it.
+ *
+ * It read `top.length` — the length of the top-six ranked slice — so an account with
+ * six rankings and an empty watchlist reported six. That was fixed; the founder's
+ * acceptance pass then removed the stat itself. Five columns cram a three-digit number
+ * into a wrap, and Watched and Watchlist are the reader's own working state rather than
+ * a description of their collection: they belong in Collection, where they can be acted
+ * on. The four that remain are the four a visitor already saw, which is what makes the
+ * two profiles one product.
+ */
+describe('the stat row', () => {
+  it('shows the four that describe the collection, and no more', async () => {
     mockTables.rankings = [1, 2, 3].map((n) => rankedRow(`film-${n}`, n));
 
     const view = await open();
-    // The bug's signature exactly: three rankings and an empty watchlist used
-    // to read three, because the stat was the length of the ranked slice.
-    await waitFor(async () => expect(await stat(view, 'Watchlist')).toBe('0'));
+
+    await waitFor(async () => expect(await stat(view, 'Movies')).toBe('3'));
+    expect(await stat(view, 'Followers')).toBeDefined();
+    expect(await stat(view, 'Following')).toBeDefined();
+    expect(await stat(view, 'TV seasons')).toBeDefined();
+    expect(view.queryByLabelText(/^Watchlist: /)).toBeNull();
+    expect(view.queryByLabelText(/^Watched: /)).toBeNull();
   });
 });
 
@@ -180,6 +185,6 @@ describe('top ranked', () => {
 
   it('invites a first ranking when there are none', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByText('No rankings yet')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Nothing ranked yet')).toBeTruthy());
   });
 });

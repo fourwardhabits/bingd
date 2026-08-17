@@ -37,7 +37,6 @@ import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { fullTitle } from '@/lib/titles';
 import {
-  Avatar,
   CastStrip,
   Chip,
   DetailHeaderBackground,
@@ -48,10 +47,8 @@ import {
   Poster,
   Screen,
   ScoresSection,
-  SectionHeader,
   SegmentedTabs,
   SkeletonRow,
-  SpoilerNote,
   Text,
   TitleHero,
   TitleRow,

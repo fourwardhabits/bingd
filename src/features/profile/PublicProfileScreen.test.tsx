@@ -144,14 +144,21 @@ describe('what this person likes', () => {
     await waitFor(() => expect(view.getAllByLabelText(/10\.0 out of 10/).length).toBeGreaterThan(0));
   });
 
-  it('offers both ranked lists, because a position only means anything in its category', async () => {
+  it('shows one wall rather than a wall and then the same list again', async () => {
+    // The founder's correction. This screen used to draw a poster wall of six, then a
+    // Movies / TV control, then the whole ranked list *again* as rows with a score on
+    // each — the same six titles twice before a reader reached anything new.
+    //
+    // The filter now changes the wall. It is offered only where both halves have
+    // something, so a fixture with films alone is not asked to choose, which is what
+    // this asserts: the wall is there and the control is not.
     const view = await open();
 
-    await waitFor(() => expect(view.getByRole('tab', { name: 'Movies' })).toBeTruthy());
-    expect(view.getByRole('tab', { name: 'TV seasons' })).toBeTruthy();
+    await waitFor(() => expect(view.getByLabelText('Top ranked')).toBeTruthy());
+    expect(view.queryByRole('tab', { name: 'TV seasons' })).toBeNull();
   });
 
-  it('names a ranked season with its show', async () => {
+  it('names a ranked season with its show, where a name is rendered at all', async () => {
     tableRows.rankings = [
       ranking('s2', 'Season 2', 1, {
         category: 'movies',
@@ -168,8 +175,11 @@ describe('what this person likes', () => {
     ];
     const view = await open();
 
+    // The wall is artwork and a score, so the season's full name reaches a reader
+    // through the tile's accessibility label — which is where a picture has to say
+    // what it is, and is the only place it was ever legible to a screen reader.
     await waitFor(() =>
-      expect(view.getAllByText(/Parks and Recreation — Season 2/).length).toBeGreaterThan(0),
+      expect(view.getAllByLabelText(/Parks and Recreation — Season 2/).length).toBeGreaterThan(0),
     );
   });
 

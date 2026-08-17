@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, before, beforeEach, describe, it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 
 import { createTestDb } from './harness.mjs';
 

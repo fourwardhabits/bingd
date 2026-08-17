@@ -8,6 +8,8 @@ export type PublicProfile = {
   id: string;
   username: string;
   name: string;
+  /** The line they wrote about themselves, under the handle. Null until they do. */
+  bio: string | null;
   avatarUri: string | null;
   memberSince: string | null;
   followers: number;
@@ -46,7 +48,7 @@ export function usePublicProfile(username: string | null) {
     queryFn: async (): Promise<PublicProfile | null> => {
       const { data: profile, error } = await supabase
         .from('public_profiles')
-        .select('id, username, display_name, avatar_path, created_at')
+        .select('id, username, display_name, bio, avatar_path, created_at')
         .eq('username', username!)
         .maybeSingle();
       if (error) throw error;
@@ -81,6 +83,7 @@ export function usePublicProfile(username: string | null) {
         id,
         username: profile.username as string,
         name: (profile.display_name as string | null) || (profile.username as string),
+        bio: (profile.bio as string | null) ?? null,
         avatarUri: avatarUri(profile.avatar_path as string | null),
         memberSince: (profile.created_at as string | null) ?? null,
         followers: followers.count ?? 0,
@@ -165,6 +168,62 @@ export function useProfileNotes(userId: string | null) {
           };
         })
         .filter(Boolean) as ProfileNote[];
+    },
+  });
+}
+
+/**
+ * The four numbers a profile header shows, for the viewer's own account.
+ *
+ * `usePublicProfile` reads them through `public_profiles` for somebody else. The own
+ * profile cannot use that path — it already has the identity from the session and
+ * looking itself up by handle would be a round trip to learn what it knows — so this
+ * fetches the counts alone, in the same shape, and `ProfileIdentity` cannot tell which
+ * screen it is on.
+ *
+ * Four rather than the five the own profile used to show. Followers, Following, Movies
+ * and TV seasons describe the account as a collection; Watched and Watchlist are the
+ * reader's own working state and belong in Collection, where they can be acted on. At
+ * five columns a three-digit number wrapped.
+ */
+export function useProfileStats(userId: string) {
+  return useQuery({
+    queryKey: ['profile-stats', userId],
+    queryFn: async () => {
+      const [followers, following, movies, seasons] = await Promise.all([
+        supabase
+          .from('follows')
+          .select('*', { count: 'exact', head: true })
+          .eq('followee_id', userId)
+          .eq('state', 'approved'),
+        supabase
+          .from('follows')
+          .select('*', { count: 'exact', head: true })
+          .eq('follower_id', userId)
+          .eq('state', 'approved'),
+        supabase
+          .from('rankings')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .eq('category', 'movies'),
+        supabase
+          .from('rankings')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .eq('category', 'tv_seasons'),
+      ]);
+
+      if (followers.error) throw followers.error;
+      if (following.error) throw following.error;
+      if (movies.error) throw movies.error;
+      if (seasons.error) throw seasons.error;
+
+      return {
+        followers: followers.count ?? 0,
+        following: following.count ?? 0,
+        rankedMovies: movies.count ?? 0,
+        rankedSeasons: seasons.count ?? 0,
+      };
     },
   });
 }

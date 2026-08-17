@@ -141,33 +141,6 @@ const videos = {
   },
 };
 
-/**
- * Reviews written by TMDB's own site users, as the adapter stores them.
- *
- * The `truncated` flag is the one field worth explaining: the adapter keeps a
- * generous excerpt rather than an unbounded body, and the flag travels with it so the
- * screen offers a link to TMDB only when there is genuinely more to read there.
- */
-const reviews = {
-  media_item_id: 'film-1',
-  facet: 'reviews',
-  payload: {
-    results: [
-      {
-        id: 'r1',
-        author: 'wandering_cinephile',
-        avatar_path: null,
-        rating: 8,
-        content: 'A film that rewards a second viewing.',
-        truncated: false,
-        created_at: '2011-02-04T12:00:00.000Z',
-        url: 'https://www.themoviedb.org/review/r1',
-      },
-    ],
-    total: 1,
-  },
-};
-
 beforeEach(() => {
   mockHeaderOptions = {};
   mockOpenId = 'film-1';

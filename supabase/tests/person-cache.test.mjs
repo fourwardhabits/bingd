@@ -4,8 +4,7 @@ import { after, before, describe, it } from 'node:test';
 import { createTestDb } from './harness.mjs';
 
 /**
- * `person_cache`, `tmdb_put_person`, `tmdb_claim_person` and the `reviews` facet —
- * 20260817000500.
+ * `person_cache`, `tmdb_put_person` and `tmdb_claim_person` — 20260817000500.
  *
  * The properties under test are the ones a person page depends on and the ones a
  * mistake here would silently break:
@@ -54,48 +53,20 @@ after(async () => {
   await t?.close();
 });
 
-describe('the reviews facet', () => {
-  it('is accepted by media_cache', async () => {
-    // The whole reason 20260817000500 touches media_cache: the facet set is closed,
-    // so a write of an unlisted facet is a failure rather than a row nothing reads.
-    await t.sql(`select tmdb_put_facet($1, 'reviews', $2::jsonb)`, [
-      film,
-      JSON.stringify({ results: [], total: 0 }),
-    ]);
-
-    const { rows } = await t.sql(
-      `select payload from media_cache where media_item_id = $1 and facet = 'reviews'`,
-      [film],
-    );
-    assert.deepEqual(rows[0].payload, { results: [], total: 0 });
-  });
-
-  it('still refuses a facet outside the closed set', async () => {
-    const error = await t.errorFrom(`select tmdb_put_facet($1, 'horoscope', '{}'::jsonb)`, [film]);
-
-    assert.equal(error?.code, '23514');
-  });
-
-  it('is readable signed out, because a published review is catalogue data', async () => {
-    const rows = await t.asAnon(() =>
-      t.sql(`select facet from media_cache where media_item_id = $1 and facet = 'reviews'`, [film]),
-    );
-
-    assert.equal(rows.rows.length, 1);
-  });
-
-  it('expires on a day rather than on the default', async () => {
-    // A cast list is settled once a film is out; a review list grows for as long as
-    // people keep watching. The TTL is configured rather than inherited, and this is
-    // what would catch the config row being lost in a later merge.
-    const { rows } = await t.sql(
-      `select (value ->> 'reviews')::integer as hours
-         from app_config where key = 'tmdb.cache_ttl_hours'`,
-    );
-
-    assert.equal(rows[0].hours, 24);
-  });
-});
+/**
+ * The reviews facet had a suite here for one day.
+ *
+ * It asserted that `media_cache` accepted the facet, that a published review was
+ * readable signed out, and that the TTL was a day. All true, and all describing
+ * something the founder's acceptance pass removed: a tab called Reviews on a social
+ * product should be Bingd's own, so TMDB's left the primary UX and
+ * `20260817001000` deleted the rows and narrowed the facet set back.
+ *
+ * What replaced the behaviour is `title_reviews`, tested in
+ * `profile-reviews.test.mjs`. The two assertions worth keeping moved with it: that a
+ * private author's writing does not leak, and that a note the author made private does
+ * not appear.
+ */
 
 describe('writing a person', () => {
   it('stores the payload whole and dates it from app_config', async () => {
