@@ -58,9 +58,28 @@ export default function PersonScreen() {
   const queryClient = useQueryClient();
 
   const person = usePerson(id ?? null);
-  // Fetched when the cache had nothing at all. A stale row still renders a complete
-  // page, and the adapter's own TTL is what refreshes it for whoever opens it next.
-  const { fetching } = usePersonFetch(id ?? null, !person.isPending && !person.data);
+  const state = person.data;
+  const detail = state?.detail ?? null;
+
+  /**
+   * Two reasons to ask the adapter, and one reason not to.
+   *
+   * Nothing cached, or something cached that has lapsed — the second is what makes
+   * the seven-day TTL real rather than a number in a migration nothing acts on
+   * (independent review 13). A stale filmography still renders in full; the refresh
+   * happens behind the reader.
+   *
+   * The reason not to is `claimed`: somebody else's request is already in flight, and
+   * a second one is exactly what `tmdb_claim_person` exists to prevent. `usePerson`
+   * polls in that state instead.
+   */
+  const needsFetch = !person.isPending && !state?.claimed && (!detail || state?.stale === true);
+  const { fetching, retry } = usePersonFetch(id ?? null, needsFetch);
+
+  const tryAgain = () => {
+    retry();
+    void person.refetch();
+  };
 
   const [filter, setFilter] = useState<Filter>('all');
   const [shown, setShown] = useState(PAGE);
@@ -69,7 +88,7 @@ export default function PersonScreen() {
   const header = useDetailHeader();
   // Read once, so the header's render callback closes over a value rather than over a
   // query result that could be refetched to null between renders.
-  const name = person.data?.name ?? null;
+  const name = detail?.name ?? null;
 
   /**
    * The reader's own state, from queries the rest of the app has already warmed.
@@ -91,7 +110,7 @@ export default function PersonScreen() {
     [rankedMovies.data],
   );
 
-  const credits = person.data?.credits ?? [];
+  const credits = detail?.credits ?? [];
   const counts = {
     movie: credits.filter((credit) => credit.kind === 'movie').length,
     series: credits.filter((credit) => credit.kind === 'series').length,
@@ -148,23 +167,30 @@ export default function PersonScreen() {
         }}
       />
 
-      {person.isPending || (fetching && !person.data) ? (
+      {/* `claimed` counts as loading, and that is the point of carrying it up here:
+          somebody else's request is in flight, `usePerson` is polling for its result,
+          and showing "nothing here yet" in the meantime is what independent review 13
+          found two concurrent readers stuck on. */}
+      {person.isPending || state?.claimed || (fetching && !detail) ? (
         <LoadingScreen />
       ) : person.isError ? (
         <EmptyState
           kind="couldNotLoad"
           title="Could not load this person"
           body="Check your connection and try again."
-          action={{ label: 'Try again', onPress: () => void person.refetch() }}
+          action={{ label: 'Try again', onPress: tryAgain }}
         />
-      ) : !person.data ? (
-        // Reached when the provider had nothing for this id, or the fetch failed.
-        // Honest about which it cannot be: both look the same from here.
+      ) : !detail ? (
+        // Reached when the provider had nothing for this id, or the fetch failed, or
+        // somebody else's claim lapsed without an answer. Honest about which it
+        // cannot be: they look the same from here. `tryAgain` clears the one-attempt
+        // guard, so this control genuinely asks again rather than re-reading a cache
+        // that has not changed.
         <EmptyState
           kind="nothingYet"
           title="Nothing here yet"
           body="We could not load this person's work. Try again in a moment."
-          action={{ label: 'Try again', onPress: () => void person.refetch() }}
+          action={{ label: 'Try again', onPress: tryAgain }}
         />
       ) : (
         <ScrollView
@@ -175,27 +201,27 @@ export default function PersonScreen() {
           <View style={styles.identity} onLayout={header.onIdentityLayout}>
             <Avatar
               size="lg"
-              uri={profileUri(person.data.profilePath)}
-              name={person.data.name}
+              uri={profileUri(detail.profilePath)}
+              name={detail.name}
             />
             <Text variant="title1" style={styles.centred}>
-              {person.data.name}
+              {detail.name}
             </Text>
             {/* Known-for and the life dates, on one line, because each on its own is
                 a fragment and together they place somebody. Absent entirely rather
                 than shown as a dash: TMDB genuinely does not have a birthday for
                 everybody, and an em dash where a date goes reads as a failure. */}
-            {metaLine(person.data) ? (
+            {metaLine(detail) ? (
               <Text variant="footnote" tone="secondary" style={styles.centred}>
-                {metaLine(person.data)}
+                {metaLine(detail)}
               </Text>
             ) : null}
           </View>
 
-          {person.data.biography ? (
+          {detail.biography ? (
             <Biography
-              text={person.data.biography}
-              truncated={person.data.biographyTruncated}
+              text={detail.biography}
+              truncated={detail.biographyTruncated}
             />
           ) : null}
 
@@ -257,7 +283,7 @@ export default function PersonScreen() {
               <View style={styles.more}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`Show more of ${person.data.name}'s work`}
+                  accessibilityLabel={`Show more of ${detail.name}'s work`}
                   onPress={() => setShown((count) => count + PAGE)}
                   hitSlop={theme.space[2]}
                 >
@@ -271,10 +297,10 @@ export default function PersonScreen() {
             {/* What is not being shown, said rather than implied. The adapter keeps
                 the forty most popular credits; somebody with three hundred should not
                 be presented as somebody with forty. */}
-            {person.data.creditTotal > credits.length ? (
+            {detail.creditTotal > credits.length ? (
               <View style={styles.more}>
                 <Text variant="caption" tone="tertiary">
-                  Showing {credits.length} of {person.data.creditTotal} credits TMDB lists.
+                  Showing {credits.length} of {detail.creditTotal} credits TMDB lists.
                 </Text>
               </View>
             ) : null}

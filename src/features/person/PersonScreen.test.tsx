@@ -73,8 +73,12 @@ jest.mock('@/features/collection/writes', () => ({
  * The titles themselves live in `media_items`, which is the whole point — a credit
  * here is a real catalogue row, not a provider id waiting to be imported.
  */
+const FRESH = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
+const LAPSED = new Date(Date.now() - 60_000).toISOString();
+
 const cached = {
   tmdb_person_id: 6193,
+  expires_at: FRESH,
   payload: {
     person: {
       name: 'Leonardo DiCaprio',
@@ -289,5 +293,71 @@ describe('a person the cache has never held', () => {
     await renderWithProviders(<PersonScreen />);
 
     await waitFor(() => expect(mockCachePerson).not.toHaveBeenCalled());
+  });
+});
+
+/**
+ * Both findings of independent review 13, which were the same omission seen twice:
+ * the hook read `payload` and not `expires_at`, so it could distinguish neither a
+ * lapsed filmography from a current one nor a claim placeholder from an empty cache.
+ */
+describe('a cached person that has gone stale', () => {
+  it('is still rendered in full rather than replaced by a spinner', async () => {
+    tableRows.person_cache = [{ ...cached, expires_at: LAPSED }];
+    const view = await open();
+
+    expect(view.getByText('Inception (2010)')).toBeTruthy();
+  });
+
+  it('is refreshed behind the reader, which is what makes the TTL real', async () => {
+    // Without this the seven-day expiry in `20260817000500` is a number in a
+    // migration that no code path can act on, and a filmography cached once is
+    // cached for good.
+    tableRows.person_cache = [{ ...cached, expires_at: LAPSED }];
+    await open();
+
+    await waitFor(() => expect(mockCachePerson).toHaveBeenCalledWith(6193));
+  });
+
+  it('is not refreshed while it is fresh', async () => {
+    await open();
+
+    expect(mockCachePerson).not.toHaveBeenCalled();
+  });
+});
+
+describe('a person somebody else is already fetching', () => {
+  // `tmdb_claim_person` writes a two-minute placeholder carrying `claimed_at` and no
+  // credits. The loser of that race must wait for the winner's answer, not spend a
+  // second provider request and not give up.
+  const claim = {
+    tmdb_person_id: 6193,
+    expires_at: FRESH,
+    payload: { claimed_at: new Date().toISOString() },
+  };
+
+  it('waits rather than reporting the person as missing', async () => {
+    tableRows.person_cache = [claim];
+    const view = await renderWithProviders(<PersonScreen />);
+
+    await waitFor(() => expect(view.queryByText('Nothing here yet')).toBeNull());
+  });
+
+  it('spends no second provider request on them', async () => {
+    tableRows.person_cache = [claim];
+    await renderWithProviders(<PersonScreen />);
+
+    // The whole point of the claim. A second request here is what it exists to stop.
+    await waitFor(() => expect(mockCachePerson).not.toHaveBeenCalled());
+  });
+
+  it('asks again once the claim has lapsed without an answer', async () => {
+    // A claim is a promise to fetch, and a promise can be broken — the isolate can be
+    // killed mid-request. An expired placeholder is "nobody is coming back", not
+    // "somebody is still working".
+    tableRows.person_cache = [{ ...claim, expires_at: LAPSED }];
+    await renderWithProviders(<PersonScreen />);
+
+    await waitFor(() => expect(mockCachePerson).toHaveBeenCalledWith(6193));
   });
 });
