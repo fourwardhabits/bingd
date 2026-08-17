@@ -284,6 +284,48 @@ expectRefused(
   'anon cannot execute delete_comment',
   await rpc('delete_comment', { p_operation_id: NIL, p_comment_id: NIL }),
 );
+// Added 2026-08-17 with the social graph writers. These are the first writers this
+// database has ever had for `follows` and `blocks` — the two tables `can_view_profile`
+// consults — so an anon caller reaching any of them would be able to manufacture the
+// relationships every visibility decision is made from.
+expectRefused(
+  'anon cannot execute follow',
+  await rpc('follow', { p_operation_id: NIL, p_followee_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute unfollow',
+  await rpc('unfollow', { p_operation_id: NIL, p_followee_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute respond_follow_request',
+  await rpc('respond_follow_request', {
+    p_operation_id: NIL,
+    p_requester_id: NIL,
+    p_approve: true,
+  }),
+);
+expectRefused(
+  'anon cannot execute remove_follower',
+  await rpc('remove_follower', { p_operation_id: NIL, p_follower_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute block',
+  await rpc('block', { p_operation_id: NIL, p_blocked_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute unblock',
+  await rpc('unblock', { p_operation_id: NIL, p_blocked_id: NIL }),
+);
+expectRefused('anon cannot execute follow_state_with', await rpc('follow_state_with', { p_user_ids: [NIL] }));
+// No argument at all, so it cannot hide behind a 404 the way an argument mismatch can
+// — which makes this one of the few probes here whose refusal is unambiguous.
+expectRefused('anon cannot execute my_blocks', await rpc('my_blocks', {}));
+// Added 2026-08-17 with user discovery. A people search reachable without an account
+// would be an enumeration endpoint over every public profile in the database.
+expectRefused('anon cannot execute search_users', await rpc('search_users', { p_query: 'a', p_limit: 5 }));
+// Added 2026-08-17 with Taste Match. auth.uid() is one half of the pair, so anon has
+// no catalogue to compare — but the grant is what makes that a decision.
+expectRefused('anon cannot execute taste_match', await rpc('taste_match', { p_user_id: NIL }));
 
 // Own-read only, and a stranger is not the owner. An empty array is the correct
 // answer under RLS; a row would mean the policy is not doing its job.

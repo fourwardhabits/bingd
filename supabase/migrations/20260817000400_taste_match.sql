@@ -188,8 +188,14 @@ as $$
     select
       stats.n,
       threshold.k,
-      -- Proximity, clamped. A mean gap above five is possible and means "as unalike as
-      -- the scale can express"; without the clamp it would go negative.
+      -- Proximity. Seven is the measured gap between opposite opinions, so the clamp
+      -- should never fire on real data — it is a guard, not part of the arithmetic.
+      -- That distinction is the whole of the bug the first draft had: with a
+      -- denominator of five the clamp *was* part of the arithmetic, and it folded the
+      -- bottom third of the range flat.
+      --
+      -- The `coalesce` is the no-overlap case: `avg` over no rows is null, and seven
+      -- makes it a proximity of zero, which the threshold above discards anyway.
       greatest(0, least(100, 100 * (1 - coalesce(stats.mean_gap, 7) / 7))) as proximity,
       -- Null rho contributes nothing rather than zero. It arises when one side's
       -- common scores are all equal, which is an absence of information and not a
