@@ -1,0 +1,122 @@
+import { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+
+import { newOperationId, setBucket } from '@/features/collection/writes';
+import { theme } from '@/ui/tokens';
+import { BUCKETS, BucketChip, Poster, Sheet, Text, type BucketId } from '@/ui/components';
+
+export type TasteSubject = {
+  id: string;
+  title: string;
+  year: number | null;
+  posterUri?: string | null;
+};
+
+/**
+ * "How was it?", and nothing else.
+ *
+ * This is deliberately **not** `LogSheet`, which asks the same question. LogSheet is the
+ * logging surface, and logging means "I watched this": when it saves a bucket for a title
+ * with no date, it follows up with `log_watched` for today, because the row it is showing
+ * says "Today" and a sheet must not display a date it never stored.
+ *
+ * That is right for the Log tab and wrong here. The founder's decision is explicit — the
+ * first five films may be anything the person has ever seen, and stamping them as watched
+ * today would put five films they saw years ago into this year's Goals. `set_bucket`
+ * writes no date, `goals.ts` refuses to count a null one, so going straight to it is what
+ * makes the rule true rather than a promise. Nothing about the *ranking* is duplicated:
+ * the comparisons that follow are the real `RankingSheet`.
+ *
+ * No note, no date field, no companions. Somebody four films from having an account they
+ * can use is not writing a review, and every field offered here is a reason to stop.
+ */
+export function TasteBucketSheet({
+  subject,
+  onClose,
+  onChosen,
+}: {
+  subject: TasteSubject | null;
+  onClose: () => void;
+  /** Fired once the bucket is saved, to hand the title to the comparison sheet. */
+  onChosen: (bucket: BucketId) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  if (!subject) return null;
+
+  const choose = async (bucket: BucketId) => {
+    if (saving) return;
+    setSaving(true);
+    setProblem(null);
+
+    const result = await setBucket({
+      operationId: newOperationId(),
+      mediaItemId: subject.id,
+      bucket,
+    });
+
+    setSaving(false);
+
+    if (result.outcome === 'failed') {
+      // Kept on screen rather than closed. The title is still the one they picked, and
+      // the retry is one tap on the same three buttons.
+      setProblem(result.message);
+      return;
+    }
+
+    onChosen(bucket);
+  };
+
+  return (
+    <Sheet visible onClose={onClose} label="How was it?">
+      <View style={styles.body}>
+        <Text variant="title2">How was it?</Text>
+
+        <View style={styles.subject}>
+          <Poster uri={subject.posterUri} title={subject.title} size="sm" />
+          <View style={styles.subjectText}>
+            <Text variant="headline" numberOfLines={2}>
+              {subject.title}
+            </Text>
+            {subject.year ? (
+              <Text variant="footnote" tone="secondary">
+                {subject.year}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={styles.buckets}>
+          {BUCKETS.map((bucket) => (
+            <BucketChip
+              key={bucket.id}
+              bucket={bucket}
+              selected={false}
+              onPress={() => void choose(bucket.id)}
+            />
+          ))}
+        </View>
+
+        {problem ? (
+          <Text variant="footnote" tone="secondary">
+            {problem}
+          </Text>
+        ) : null}
+
+        {/* Said once, here, because it is the thing a new user is most likely to be
+            wrong about — and being wrong about it makes them pick only recent films. */}
+        <Text variant="footnote" tone="tertiary">
+          Anything you have ever seen. It does not have to be recent.
+        </Text>
+      </View>
+    </Sheet>
+  );
+}
+
+const styles = StyleSheet.create({
+  body: { gap: theme.space[5], paddingBottom: theme.space[4] },
+  subject: { flexDirection: 'row', gap: theme.space[3], alignItems: 'center' },
+  subjectText: { flex: 1, gap: theme.space[1] },
+  buckets: { gap: theme.space[2] },
+});

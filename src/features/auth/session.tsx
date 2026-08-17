@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import { useRouter, useSegments } from 'expo-router';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import { useTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
 import { identify } from '@/lib/analytics';
 import { avatarUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
@@ -143,6 +144,19 @@ export function useAuthRouting() {
   const segments = useSegments();
   const router = useRouter();
 
+  /**
+   * Whether this account has never ranked or logged anything.
+   *
+   * Asked only once a profile exists, because it is a question about a collection and
+   * an account without a profile has none. It resolves to `needed: false` on failure,
+   * so a flaky connection sends somebody to the feed rather than into a five-step flow
+   * they have already completed — see `use-taste-onboarding.ts`.
+   */
+  const taste = useTasteOnboarding(
+    auth.status === 'ready' ? auth.userId : null,
+    auth.status === 'ready',
+  );
+
   useEffect(() => {
     // Not knowing where the user belongs is not a reason to move them.
     if (auth.status === 'loading' || auth.status === 'error') return;
@@ -163,11 +177,36 @@ export function useAuthRouting() {
       return;
     }
 
+    const inOnboarding = group === 'onboarding';
+
+    /**
+     * A brand-new account is sent to build its taste before it is sent anywhere else.
+     *
+     * Still pending is not a reason to move anyone: the flow's own screen would be
+     * mounted and then replaced, and the feed would flash behind it. So this waits,
+     * which costs one count query on a cold start and nothing afterwards
+     * (`staleTime: Infinity`).
+     *
+     * The decision is deliberately taken from a query that the ranking writes do *not*
+     * invalidate. If it followed them it would flip to "no longer needed" as soon as
+     * the first film was placed, and the user would be thrown out of the flow they were
+     * three films into. Leaving it is an explicit act — finishing, or "Not now".
+     */
+    if (taste.isPending) return;
+
+    if (taste.data?.needed) {
+      if (!inOnboarding) router.replace('/onboarding/taste');
+      return;
+    }
+
     // `/` is the other route a ready user does not belong on. `(tabs)` is a group and
     // contributes no path segment, so nothing serves `/` and `app/index.tsx` only waits
     // here. At the root index `segments` is empty, which is what the undefined group
     // means. Redirecting from that screen instead would mount the feed before this
     // state resolves, and the feed calls useCurrentProfile, which throws.
-    if (inAuthGroup || group === undefined) router.replace('/(tabs)/feed');
-  }, [auth, segments, router]);
+    //
+    // `onboarding` joins that list: somebody who has finished or declined it is a
+    // ready user standing on a screen with nothing left to do.
+    if (inAuthGroup || inOnboarding || group === undefined) router.replace('/(tabs)/feed');
+  }, [auth, segments, router, taste.isPending, taste.data?.needed]);
 }

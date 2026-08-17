@@ -47,6 +47,11 @@ export const queryKeys = {
   // reachable from a second account signed in on the same device.
   goals: (userId: string, year: number) => ['goals', userId, year] as const,
   notifications: () => ['notifications'] as const,
+  // Whether this account has ever ranked or logged anything, read once on arrival.
+  // Deliberately *not* under `collection`, which the ranking flow invalidates: sharing
+  // that prefix would answer "no longer new" the moment the first film was placed and
+  // evict the user from the flow they were in the middle of.
+  tasteOnboarding: (userId: string) => ['taste-onboarding', userId] as const,
 } as const;
 
 export const createQueryClient = () =>

@@ -109,6 +109,10 @@ function Navigation() {
             the person resolves, so it is empty here rather than "Person". */}
         <Stack.Screen name="person/[id]" options={{ headerShown: true, title: '' }} />
         <Stack.Screen name="lists/[id]" options={{ headerShown: true, title: 'List' }} />
+        {/* No header and no back: it is the first thing a new account sees, and there
+            is nowhere behind it to return to. Leaving is an explicit choice made on
+            the screen itself. */}
+        <Stack.Screen name="onboarding/taste" options={{ headerShown: false }} />
         <Stack.Screen
           name="settings"
           options={{ presentation: 'modal', headerShown: true, title: 'Settings' }}
