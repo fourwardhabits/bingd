@@ -96,19 +96,45 @@ export async function removeAvatar(previousPath: string | null): Promise<AvatarR
  * look", because only one of those is safe to describe as having deleted anything.
  */
 export async function deleteAllAvatars(userId: string): Promise<number | null> {
-  const { data, error } = await supabase.storage.from('avatars').list(userId, { limit: 100 });
-  if (error) return null;
+  const PAGE = 100;
+  // A ceiling, so a listing that never shortens cannot loop forever. Ten thousand
+  // objects is far past anything a real account produces and far short of a hang.
+  const MAX_PAGES = 100;
 
-  const paths = (data ?? [])
-    // A folder placeholder has no id. Passing one to `remove` is a no-op that
-    // reports success, which would inflate the count this returns.
-    .filter((object) => Boolean(object.name) && object.id !== null)
-    .map((object) => `${userId}/${object.name}`);
-  if (!paths.length) return 0;
+  let removed = 0;
 
-  const { error: removeError } = await supabase.storage.from('avatars').remove(paths);
-  if (removeError) return null;
-  return paths.length;
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    // Always offset zero, because the previous pass deleted what it listed — paging
+    // forward through a shrinking list would skip a page for every page removed.
+    const { data, error } = await supabase.storage
+      .from('avatars')
+      .list(userId, { limit: PAGE, offset: 0 });
+    if (error) return null;
+
+    const objects = (data ?? []).filter(
+      // A folder placeholder has no id. Passing one to `remove` is a no-op that
+      // reports success, which would inflate the count this returns.
+      (object) => Boolean(object.name) && object.id !== null,
+    );
+    if (!objects.length) return removed;
+
+    const { error: removeError } = await supabase.storage
+      .from('avatars')
+      .remove(objects.map((object) => `${userId}/${object.name}`));
+    if (removeError) return null;
+    removed += objects.length;
+
+    // A short page means the listing had nothing more to give. Independent review
+    // 14b: the first version stopped after one page of a hundred and reported
+    // success, so an account with more uploads than that had its remaining bytes
+    // orphaned by the metadata sweep with nobody told.
+    if (objects.length < PAGE) return removed;
+  }
+
+  // Ran out of passes with the folder still non-empty. Null rather than the count,
+  // because the caller's whole use for this is telling "everything is gone" from
+  // "something may be left", and this is the second.
+  return null;
 }
 
 async function upload(userId: string, sourceUri: string) {

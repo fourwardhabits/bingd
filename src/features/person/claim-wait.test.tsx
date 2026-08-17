@@ -1,4 +1,4 @@
-import { waitFor } from '@testing-library/react-native';
+import { act, waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
@@ -97,6 +97,56 @@ describe('waiting on somebody else’s claim', () => {
 
     // Two further poll intervals with nothing asked.
     expect(mockReads).toBe(settled);
+  });
+
+  it('stops waiting after thirty seconds even while the reads keep answering', async () => {
+    // The Review 13c finding, and the one bound the two error tests above cannot
+    // reach: every read succeeds, every read returns the same live claim, and the
+    // winner simply never writes. Nothing in the data will ever change its mind, so
+    // the only thing that can end this is a clock — and it has to be a *local* one,
+    // because comparing the database's `expires_at` against `Date.now()` on the
+    // device is a comparison a skewed clock gets wrong in the dangerous direction.
+    //
+    // Fake timers, because the bound is thirty seconds of wall time and the whole
+    // assertion is that it arrives. At hook level there is no component tree to fight
+    // and the microtask flushes are explicit.
+    jest.useFakeTimers();
+    try {
+      const { result } = await renderHookWithProviders(() => usePerson('6193'));
+
+      // React Query's notify manager batches through `setTimeout(fn, 0)`, so under
+      // fake timers the first read does not land until the clock is nudged. A few
+      // alternating nudges and microtask drains is what settles it.
+      for (let i = 0; i < 6; i += 1) {
+        await act(async () => {
+          jest.advanceTimersByTime(1);
+          await Promise.resolve();
+        });
+      }
+
+      expect(result.current.data?.claimed).toBe(true);
+      expect(result.current.awaitingClaim).toBe(true);
+
+      await act(async () => {
+        jest.advanceTimersByTime(31_000);
+        await Promise.resolve();
+      });
+
+      expect(result.current.awaitingClaim).toBe(false);
+      // And the data still insists it is claimed, and no read ever failed — which is
+      // what makes this a bound neither the payload nor the error state could give.
+      expect(result.current.data?.claimed).toBe(true);
+      expect(result.current.isError).toBe(false);
+
+      const settled = mockReads;
+      await act(async () => {
+        jest.advanceTimersByTime(10_000);
+        await Promise.resolve();
+      });
+      expect(mockReads).toBe(settled);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('does not wait at all on a claim that has already lapsed', async () => {
