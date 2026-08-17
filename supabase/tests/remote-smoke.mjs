@@ -269,6 +269,21 @@ expectRefused(
   'anon cannot execute following_score',
   await rpc('following_score', { p_media_item_id: NIL }),
 );
+// Added 2026-08-17 with Comments V1. Three writers on the first table in this schema
+// that holds free text somebody else wrote. Each probe doubles as an assertion that
+// the migration is on the deployed database: `refused` means the signature resolved.
+expectRefused(
+  'anon cannot execute add_comment',
+  await rpc('add_comment', { p_operation_id: NIL, p_feed_event_id: NIL, p_body: 'x', p_has_spoilers: false }),
+);
+expectRefused(
+  'anon cannot execute edit_comment',
+  await rpc('edit_comment', { p_operation_id: NIL, p_comment_id: NIL, p_body: 'x', p_has_spoilers: false }),
+);
+expectRefused(
+  'anon cannot execute delete_comment',
+  await rpc('delete_comment', { p_operation_id: NIL, p_comment_id: NIL }),
+);
 
 // Own-read only, and a stranger is not the owner. An empty array is the correct
 // answer under RLS; a row would mean the policy is not doing its job.
@@ -278,6 +293,26 @@ expectRefused(
   report(
     'anon cannot read anyone’s goals',
     ok ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
+// The revoke, checked on the running database rather than in the migration.
+//
+// `comments` is the first table here that holds free text somebody else wrote, and the
+// RLS policy alone would *admit* an anonymous reader for a public author on a public
+// actor's event — which is right for feed_events and reactions and wrong for this.
+// The grant is what makes the difference, and a grant revoked in a migration and a
+// grant revoked on the running database are different claims.
+//
+// A 200 with `[]` would be a FAIL here, not a pass: that is what a policy denial looks
+// like through PostgREST, and the whole point is that the refusal happens a layer
+// earlier. So this asserts a refusal, not an empty result.
+{
+  const res = await get('comments?select=body&limit=1');
+  report(
+    'anon is refused comments at the grant, not the policy',
+    classify(res) === 'refused' ? 'pass' : 'fail',
     `${res.status} ${res.body.slice(0, 200)}`,
   );
 }
