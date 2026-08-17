@@ -65,9 +65,21 @@ export function invalidateAfterCollectionChange(
   // about it, so a title logged now must stop being masked now.
   invalidate(['watched', userId]);
 
-  // The community aggregate for this exact title: the reader's own new rating is part
-  // of it, and a score that excludes the rating you just gave reads as broken.
-  invalidate(['community-score', mediaItemId]);
+  /**
+   * The community aggregate for this exact title: the reader's own new rating is part
+   * of it, and a score that excludes the rating you just gave reads as broken.
+   *
+   * The account is in the key because the aggregate is viewer-relative — it excludes
+   * accounts blocked in either direction — and this line was left at
+   * `['community-score', mediaItemId]` when the key gained its account, which prefix
+   * matching then matched against nothing at all. Silent, because the test seeded the
+   * obsolete shape too. Independent review found it at 10b.
+   *
+   * The Following score is deliberately **not** invalidated here. It is the mean over
+   * other people's rankings, and nothing the reader does to their own collection can
+   * move it.
+   */
+  invalidate(['community-score', userId, mediaItemId]);
 
   // Yearly goal progress. Keyed by prefix rather than by `queryKeys.goals(userId,
   // year)`, because the year the user just logged is not necessarily the year on

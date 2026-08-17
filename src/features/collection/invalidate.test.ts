@@ -51,7 +51,13 @@ const KEYS = {
   feed: ['feed', USER, { cursor: undefined }],
   actorActivity: ['actor-activity', USER, 5],
   watched: ['watched', USER],
-  community: ['community-score', TITLE],
+  // The real hook key, account first. It was seeded here without the account while
+  // the hook had gained one, so the assertion below passed against a key nothing uses.
+  community: ['community-score', USER, TITLE],
+  // Another account's aggregate for the same film, which must be left alone.
+  otherUserCommunity: ['community-score', OTHER, TITLE],
+  // Other people's rankings, which nothing this reader does can move.
+  following: ['following-score', USER, TITLE],
   goalsThisYear: ['goals', USER, 2026],
   goalsLastYear: ['goals', USER, 2025],
   // Left alone on purpose.
@@ -108,6 +114,13 @@ describe('after a ranking completes', () => {
     expect(has(touched(), KEYS.community)).toBe(true);
   });
 
+  it('leaves the following score alone, which the reader cannot move', async () => {
+    // It is the mean over other people's rankings. Nothing this reader does to their
+    // own collection changes it, and refetching it here would spend a round trip to be
+    // told the same number.
+    expect(has(touched(), KEYS.following)).toBe(false);
+  });
+
   it('refreshes goal progress for every year, not just the current one', async () => {
     // A film logged today can carry a watch date from last December, which moves that
     // year's bar and not this one's. The caller does not know which, so both go.
@@ -128,6 +141,7 @@ describe('after a ranking completes', () => {
       KEYS.otherUserFeed,
       KEYS.otherUserCollection,
       KEYS.otherUserGoals,
+      KEYS.otherUserCommunity,
     ]) {
       expect(has(set, key)).toBe(false);
     }
