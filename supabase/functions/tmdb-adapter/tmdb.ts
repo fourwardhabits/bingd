@@ -204,35 +204,6 @@ export type TmdbVideos = {
 };
 
 /**
- * Reviews written by TMDB's own site users, appended alongside credits and videos.
- *
- * They are **not** critic reviews and TMDB does not publish any. `author_details`
- * carries an optional 0–10 rating the author chose to attach; most have none, which
- * is why it is optional here rather than defaulted to something.
- *
- * `content` is unbounded — TMDB's site imposes no ceiling and some of these run to
- * several thousand words — so `normalize.ts` truncates before storage rather than
- * putting a thesis into `media_cache` to render four lines of it.
- */
-export type TmdbReviews = {
-  results?: {
-    id: string;
-    author: string;
-    author_details?: {
-      name?: string | null;
-      username?: string | null;
-      avatar_path?: string | null;
-      rating?: number | null;
-    };
-    content: string;
-    created_at?: string;
-    updated_at?: string;
-    url?: string;
-  }[];
-  total_results?: number;
-};
-
-/**
  * What a title is rated, which TMDB publishes in two entirely different shapes.
  *
  * A **movie** has `release_dates`, a list per country of *release events* — theatrical,
@@ -270,7 +241,6 @@ export type TmdbMovieDetail = {
   popularity?: number;
   credits?: TmdbCredits;
   videos?: TmdbVideos;
-  reviews?: TmdbReviews;
   release_dates?: TmdbReleaseDates;
 };
 
@@ -288,7 +258,6 @@ export type TmdbSeriesDetail = {
   popularity?: number;
   credits?: TmdbCredits;
   videos?: TmdbVideos;
-  reviews?: TmdbReviews;
   content_ratings?: TmdbContentRatings;
   seasons?: {
     id: number;
@@ -368,7 +337,7 @@ export function movieDetail(id: number, charge?: Charge): Promise<TmdbMovieDetai
   // will hand over for free.
   return request(
     `/movie/${id}`,
-    { append_to_response: 'credits,videos,reviews,release_dates' },
+    { append_to_response: 'credits,videos,release_dates' },
     charge,
   );
 }
@@ -379,7 +348,7 @@ export function seriesDetail(id: number, charge?: Charge): Promise<TmdbSeriesDet
   // `normalize.ts` reads each with its own function rather than a union.
   return request(
     `/tv/${id}`,
-    { append_to_response: 'credits,videos,reviews,content_ratings' },
+    { append_to_response: 'credits,videos,content_ratings' },
     charge,
   );
 }

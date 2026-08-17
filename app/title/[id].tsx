@@ -27,8 +27,9 @@ import { useCommunityScore } from '@/features/title/use-community-score';
 import { useFollowingScore } from '@/features/title/use-following-score';
 import { useCredits } from '@/features/title/use-credits';
 import { useTitleEnrichment } from '@/features/title/use-enrichment';
-import { TmdbReviews } from '@/features/title/TmdbReviews';
-import { useTitleNotes, useTitleReviews, useTitleVideos } from '@/features/title/use-title-extras';
+import { TitleReviews } from '@/features/title/TitleReviews';
+import { useTitleVideos } from '@/features/title/use-title-extras';
+import { useTitleReviews, type ReviewSort } from '@/features/title/use-title-reviews';
 import { diagnose } from '@/lib/diagnose';
 import { heroArtwork } from '@/lib/hero';
 import { posterUri, profileUri, videoUri } from '@/lib/images';
@@ -58,7 +59,7 @@ import {
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
-type Tab = 'cast' | 'videos' | 'details' | 'seasons';
+type Tab = 'cast' | 'reviews' | 'videos' | 'details' | 'seasons';
 
 /**
  * The title page (screens.md §6), rebuilt after the founder's device test.
@@ -98,6 +99,9 @@ export default function TitleScreen() {
   const [tab, setTab] = useState<Tab | null>(null);
   const [loggingTitle, setLoggingTitle] = useState<LoggableTitle | null>(null);
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
+  // Top by default, which is the founder's choice: a first-time reader wants the
+  // review other people found worth reacting to, not the one written most recently.
+  const [reviewSort, setReviewSort] = useState<ReviewSort>('top');
 
   /**
    * The catalogue row, and only that.
@@ -125,7 +129,7 @@ export default function TitleScreen() {
         .select(
           // The parent's artwork comes with it: a season has no backdrop of its own
           // (TMDB publishes none) and borrows the series' — see `lib/hero.ts`.
-          'id, kind, title, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, parent:parent_id(id, title, poster_path, backdrop_path)',
+          'id, kind, title, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, certification, parent:parent_id(id, title, poster_path, backdrop_path)',
         )
         .eq('id', id ?? '')
         .single();
@@ -183,11 +187,19 @@ export default function TitleScreen() {
   const credits = useCredits(titleId);
   const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
   const videos = useTitleVideos(titleId);
-  const notes = useTitleNotes(titleId);
-  // Never fetched for a season: TMDB has no season-level reviews and /tv/{id}/reviews
-  // is about the series, so the adapter writes no facet and this would be a query
-  // that can only ever return nothing. See the header of 20260817000500.
-  const reviews = useTitleReviews(data?.title?.kind === 'season' ? null : titleId);
+  /**
+   * Reviews are Bingd's own public Notes on this exact title.
+   *
+   * What this replaced fetched TMDB's reviews from a `media_cache` facet. They were
+   * labelled honestly and they were still another site's members writing about a film,
+   * which is the wrong content for a tab called Reviews on a social product. The
+   * founder's correction moves the tab to Bingd's own, and the alternative —
+   * relabelling somebody else's user-generated content as critic writing — was never
+   * on the table.
+   *
+   * Not fetched for a series, which cannot be ranked and so cannot be reviewed.
+   */
+  const reviews = useTitleReviews(data?.title?.kind === 'series' ? null : titleId, reviewSort);
   const community = useCommunityScore(titleId, profile.id);
   const following = useFollowingScore(titleId, profile.id);
   const watched = useWatched(profile.id);
@@ -342,6 +354,19 @@ export default function TitleScreen() {
      */
     ...(isSeries ? [{ id: 'seasons' as const, label: 'Seasons' }] : []),
     ...(cast.length ? [{ id: 'cast' as const, label: 'Cast' }] : []),
+    /**
+     * Reviews is **always** present, unlike Cast and Videos.
+     *
+     * The rule against permanently-empty tabs is about a tab that can only ever have
+     * nothing — a film TMDB publishes no trailer for. Reviews can always have
+     * something, because the reader can write the first one, and its empty state is
+     * the invitation to. Removing it until somebody else has written would mean the
+     * only way to leave the first review of a film is to already have left it.
+     *
+     * A series is the exception and is excluded below: a series cannot be ranked, so
+     * nobody can have a score to review it with.
+     */
+    ...(isSeries ? [] : [{ id: 'reviews' as const, label: 'Reviews' }]),
     ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Videos' }] : []),
     { id: 'details' as const, label: 'Details' },
   ];
@@ -492,10 +517,21 @@ export default function TitleScreen() {
               </Text>
             </Pressable>
           ) : null}
-          <Text variant="title1">{displayTitle ?? title.title}</Text>
+          {/* The year sits *inside* the heading, muted, rather than starting the line
+              below it. The founder's hierarchy is "The Dark Tower  2017" on one line
+              and "PG-13 · 95m · Nikolaj Arcel" on the next — which separates what the
+              thing is called from what it is, instead of running a year, a runtime and
+              a director together as one undifferentiated string. */}
+          <Text variant="title1">
+            {displayTitle ?? title.title}
+            {year ? <Text variant="title1" tone="tertiary">{`  ${year}`}</Text> : null}
+          </Text>
           <Text variant="footnote" tone="secondary">
             {[
-              year,
+              // Certification first. It is the fact somebody scans for before deciding
+              // whether to put a film on, and TMDB only started supplying it here on
+              // 2026-08-17 — before that the line began with a runtime.
+              title.certification,
               title.runtime_minutes ? `${title.runtime_minutes}m` : null,
               credits.data?.director,
             ]
@@ -519,6 +555,18 @@ export default function TitleScreen() {
           </View>
         ) : null}
 
+        {/* Above the description, and still never over the artwork. The founder's
+            order is metadata → genres → description, which reads outward from what the
+            thing *is* to what it is *about*; underneath the description they were a
+            footnote to a paragraph nobody had finished reading. */}
+        {title.genres?.length ? (
+          <View style={styles.pills}>
+            {title.genres.slice(0, 5).map((genre: string) => (
+              <Chip key={genre} label={genre} />
+            ))}
+          </View>
+        ) : null}
+
         {title.overview ? (
           <Pressable
             accessibilityRole="button"
@@ -537,16 +585,6 @@ export default function TitleScreen() {
               </Text>
             )}
           </Pressable>
-        ) : null}
-
-        {/* Below the description, never over the artwork. Neutral chips, because
-            genre is a fact among facts here rather than a badge. */}
-        {title.genres?.length ? (
-          <View style={styles.pills}>
-            {title.genres.slice(0, 5).map((genre: string) => (
-              <Chip key={genre} label={genre} />
-            ))}
-          </View>
         ) : null}
 
         {/* A deliberate row rather than two glyphs floating under the title.
@@ -601,6 +639,44 @@ export default function TitleScreen() {
           </View>
         ) : null}
 
+        {/* **Above the tabs, and never inside them.** The founder's correction: scores
+            are core Bingd data, and putting them below a tab row meant they appeared
+            and disappeared as somebody looked at the cast. The page order is fixed now
+            — hero, metadata, genres, description, actions, scores, tabs — so a reader
+            scrolling to the number finds it in the same place every time.
+
+            A series has no aggregate of its own, because it cannot be ranked
+            (PRD §10), so it gets no section rather than a permanent "No ratings yet".
+
+            The reader's own score is deliberately absent: it is already opposite the
+            poster, at the top of the page, and repeating it here is the duplication
+            the founder rejected once already. */}
+        {!isSeries ? (
+          <ScoresSection
+            community={
+              community.data
+                ? {
+                    score: community.data.score,
+                    ratingCount: community.data.ratingCount,
+                    minRatings: community.data.minRatings,
+                  }
+                : null
+            }
+            // The reader's own people, above everybody's. Omitted by the component
+            // when none of them have ranked it — that silence is about the reader's
+            // following list rather than about the film.
+            following={
+              following.data
+                ? {
+                    score: following.data.score,
+                    ratingCount: following.data.ratingCount,
+                    followingCount: following.data.followingCount,
+                  }
+                : null
+            }
+          />
+        ) : null}
+
         <View style={styles.tabs}>
           <SegmentedTabs
             options={tabs}
@@ -633,15 +709,46 @@ export default function TitleScreen() {
                 />
                 <View style={styles.videoCopy}>
                   <Text variant="callout" numberOfLines={1}>
-                    {video.name}
+                    {videoTitle(video)}
                   </Text>
+                  {/* Where it plays and what kind of thing it is, in that order.
+                      "Trailer" alone said neither: three rows reading "Trailer 1",
+                      "Teaser", "Trailer" tell a reader nothing about which to tap. */}
                   <Text variant="caption" tone="tertiary">
-                    {video.type}
+                    {[SITE_LABEL[video.site] ?? video.site, video.type].filter(Boolean).join(' · ')}
                   </Text>
                 </View>
               </Pressable>
             ))}
           </View>
+        ) : null}
+
+        {activeTab === 'reviews' ? (
+          <TitleReviews
+            reviews={reviews.data ?? []}
+            loading={reviews.isPending}
+            sort={reviewSort}
+            onChangeSort={setReviewSort}
+            // Against this viewer's watched set and this exact media item: having seen
+            // Season 1 does not unmask Season 2.
+            maskedFor={(review) =>
+              shouldMask({
+                hasSpoilers: review.hasSpoilers,
+                mediaItemId: title.id,
+                viewerId: profile.id,
+                authorId: review.userId,
+                watched: watched.data,
+              })
+            }
+            onPressAuthor={(handle) => router.push(`/u/${handle}`)}
+            viewerRanked={Boolean(data.ranked)}
+            viewerHasReview={(reviews.data ?? []).some((review) => review.userId === profile.id)}
+            // One composer. A note has always been written in the log sheet, where the
+            // spoiler flag and the visibility are chosen beside it; a second one here
+            // would be a second content model wearing a different button.
+            onWrite={openLog}
+            noun={title.kind === 'season' ? 'season' : 'movie'}
+          />
         ) : null}
 
         {activeTab === 'details' ? (
@@ -697,75 +804,6 @@ export default function TitleScreen() {
             />
           )
         ) : null}
-
-        {/* Everyone else's number, well below the reader's own. A series has no
-            aggregate of its own — it cannot be ranked (PRD §10) — so it gets no
-            section rather than a permanent "No ratings yet". */}
-        {!isSeries ? (
-          <ScoresSection
-            community={
-              community.data
-                ? {
-                    score: community.data.score,
-                    ratingCount: community.data.ratingCount,
-                    minRatings: community.data.minRatings,
-                  }
-                : null
-            }
-            // The reader's own people, above everybody's. Omitted by the component
-            // when none of them have ranked it — that silence is about the reader's
-            // following list rather than about the film.
-            following={
-              following.data
-                ? {
-                    score: following.data.score,
-                    ratingCount: following.data.ratingCount,
-                    followingCount: following.data.followingCount,
-                  }
-                : null
-            }
-          />
-        ) : null}
-
-        {/* Notes, called notes. They are not reviews — nobody wrote them as one —
-            and the tab that used to say so was one person's private sentence with a
-            magazine's word on top of it. */}
-        {notes.data?.length ? (
-          <View style={styles.section}>
-            <SectionHeader title="Notes" />
-            {notes.data.map((entry) => (
-              <View key={`${entry.userId}-${entry.updatedAt}`} style={styles.note}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${entry.name}'s profile`}
-                  onPress={() => router.push(`/u/${entry.username}`)}
-                  style={styles.noteHead}
-                >
-                  <Avatar size="sm" uri={entry.avatarUri} name={entry.name} />
-                  <Text variant="callout">{entry.name}</Text>
-                </Pressable>
-                <SpoilerNote
-                  text={entry.note}
-                  hasSpoilers={entry.hasSpoilers}
-                  masked={shouldMask({
-                    hasSpoilers: entry.hasSpoilers,
-                    mediaItemId: title.id,
-                    viewerId: profile.id,
-                    authorId: entry.userId,
-                    watched: watched.data,
-                  })}
-                  titleForLabel={displayTitle}
-                />
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {/* Below Notes, deliberately. The page walks outward from the reader — their
-            own score, then the people they follow, then everybody on Bingd, then what
-            Bingd users wrote — and this is the last step, which is somebody else's
-            website. Omitted entirely when there are none, like the Videos tab. */}
-        <TmdbReviews reviews={reviews.data ?? []} />
 
         <View style={styles.footer}>
           {enriching ? (
@@ -868,6 +906,41 @@ function RowAction({
       </Text>
     </Pressable>
   );
+}
+
+
+/**
+ * Where a video plays, as a word rather than a hostname.
+ *
+ * A map rather than the raw value so an unrecognised site still renders — TMDB's `site`
+ * is already a proper noun and the fallback is to print it.
+ */
+const SITE_LABEL: Record<string, string> = { YouTube: 'YouTube', Vimeo: 'Vimeo' };
+
+/**
+ * The name TMDB publishes, and what to do when it says nothing.
+ *
+ * A studio names its own uploads — "Official Trailer #2", "Final Trailer" — and those
+ * are exactly what a reader wants. But TMDB also carries a great many named literally
+ * "Trailer", "Teaser" or "Trailer 1", and the founder's screenshot was three rows
+ * reading Trailer 1 / Teaser / Trailer, which tell a reader nothing about which to tap.
+ *
+ * So a name that is *only* the type, with or without a number, is replaced by one that
+ * at least separates the studio's upload from the rest. Anything with real words in it
+ * is left exactly as it was written: the fallback exists for the empty case, not to
+ * improve on somebody's title.
+ */
+function videoTitle(video: { name: string; type: string; official: boolean }) {
+  const name = video.name?.trim() ?? '';
+  const generic = new RegExp(String.raw`^(official\s+)?${video.type}(\s*\d+)?$`, 'i');
+
+  if (name && !generic.test(name)) return name;
+
+  // The type's own casing, so a video already named "Official Trailer" comes back
+  // spelled exactly as it arrived rather than re-cased for no reason — and one named
+  // bare "Trailer" that TMDB marks official gains the word that distinguishes it from
+  // the fan uploads beside it.
+  return video.official ? `Official ${video.type}` : video.type;
 }
 
 function yearOf(date: string | null) {

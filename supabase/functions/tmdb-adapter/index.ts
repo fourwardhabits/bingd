@@ -6,7 +6,7 @@
  *   search    signed-in user   Titles TMDB knows and the local catalogue does not.
  *                              Writes them through, returns them Bingd-shaped.
  *   detail    signed-in user   Fills one title in: runtime, overview, artwork,
- *                              seasons, credits, trailers, TMDB reviews.
+ *                              seasons, credits, trailers, certification.
  *   similar   signed-in user   Caches what TMDB associates with one title, as the
  *                              `similar` facet. The candidate source behind For You.
  *   person    signed-in user   Caches one person and the titles TMDB credits them
@@ -44,7 +44,6 @@ import {
 import {
   creditsFacet,
   videosFacet,
-  reviewsFacet,
   fromMovieDetail,
   fromSearchResult,
   fromSeasonDetail,
@@ -386,10 +385,6 @@ async function enrichOne(
     await upsertTitles(db, [fromMovieDetail(detail)]);
     if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
     if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
-    // Written even when the list is empty, which is the difference between "nobody
-    // has reviewed this" and "we have not looked". The screen shows nothing either
-    // way; the cache is what stops it asking again for a day.
-    if (detail.reviews) await putFacet(db, row.id, 'reviews', reviewsFacet(detail.reviews));
     return { enriched: true };
   }
 
@@ -398,7 +393,6 @@ async function enrichOne(
   if (stored) await upsertSeasons(db, stored.id, seasonsOf(detail));
   if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
   if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
-  if (detail.reviews) await putFacet(db, row.id, 'reviews', reviewsFacet(detail.reviews));
   return { enriched: true };
 }
 

@@ -134,6 +134,7 @@ const videos = {
         key: 'YoHD9XEInc0',
         name: 'Official Trailer',
         type: 'Trailer',
+        site: 'YouTube',
         official: true,
       },
     ],
@@ -186,7 +187,7 @@ beforeEach(() => {
 
 const open = async () => {
   const view = await renderWithProviders(<TitleScreen />);
-  await waitFor(() => expect(view.getByText('Inception')).toBeTruthy());
+  await waitFor(() => expect(view.getByText(/^Inception/)).toBeTruthy());
   return view;
 };
 
@@ -200,7 +201,10 @@ describe('a title nobody has ranked', () => {
     expect(view.queryByLabelText('Ranked. Change your rating.')).toBeNull();
   });
 
-  it('puts the genres under the description rather than over the artwork', async () => {
+  it('puts the genres above the description and never over the artwork', async () => {
+    // The founder's order is metadata → genres → description: outward from what the
+    // thing *is* to what it is *about*. Underneath the description they were a
+    // footnote to a paragraph nobody had finished reading.
     const view = await open();
     expect(view.getByText('Science Fiction')).toBeTruthy();
   });
@@ -343,13 +347,14 @@ describe('the cast', () => {
 });
 
 describe('tabs that have nothing behind them', () => {
-  it('has no Reviews tab, because nobody wrote a review', async () => {
-    tableRows.user_media = [
-      { user_id: 'user-1', media_item_id: 'film-1', note: 'A note, not a review.' },
-    ];
+  it('always offers Reviews, because the reader can write the first one', async () => {
+    // The rule against permanently-empty tabs is about a tab that can only ever have
+    // nothing — a film TMDB publishes no trailer for. Reviews can always have
+    // something, and removing it until somebody else had written would mean the only
+    // way to leave the first review of a film is to already have left it.
     const view = await open();
 
-    expect(view.queryByRole('tab', { name: 'Reviews' })).toBeNull();
+    expect(view.getByRole('tab', { name: 'Reviews' })).toBeTruthy();
   });
 
   it('does not render a Videos tab until there are videos', async () => {
@@ -428,154 +433,146 @@ describe('tabs that have nothing behind them', () => {
  * critics, and the word "community" already means Bingd's community two sections up.
  */
 /**
- * The half of the Phase E deployment that nearly did not happen.
+ * Reviews are Bingd's, not TMDB's.
  *
- * `isThin` decides whether to ask TMDB, and it asks about artwork, an overview and a
- * runtime — everything a title screen was made of before videos and TMDB reviews
- * existed. Every row already enriched on the deployed database passes that test, so the
- * new facets would have reached only titles discovered after the deployment, and a film
- * somebody ranked last week would have had no trailer for ever.
+ * The founder's correction: a tab called Reviews on a social product should be Bingd's
+ * own. TMDB's review endpoint is another site's members writing about a film — it was
+ * labelled scrupulously and it was still the wrong content — so it left the primary
+ * title UX entirely rather than being relabelled as critic writing, which was never on
+ * the table.
  *
- * The trigger is "has this title's videos facet been *written*", which is a different
- * question from "does it have videos" — and the adapter writes the facet even when the
- * list is empty, which is what stops this becoming a request per mount.
+ * A review **is** a public Note. One source of truth with the Feed, one composer in the
+ * log sheet, one spoiler flag, one visibility setting.
  */
-describe('a title enriched before the facets existed', () => {
-  it('is asked again, even though nothing about it looks thin', async () => {
-    // No `videos` row at all: `useTitleVideos` returns null rather than [].
-    tableRows.media_cache = [credits];
-    await open();
-
-    await waitFor(() => expect(mockEnrichmentArgs.at(-1)?.[1]).toBe(true));
-  });
-
-  it('is left alone once TMDB has answered, even with nothing to show', async () => {
-    // An empty facet is an answer. Asking again would be a provider request per mount
-    // for every film that has no trailer, which is most of the catalogue.
-    tableRows.media_cache = [{ ...videos, payload: { results: [] } }];
-    await open();
-
-    await waitFor(() => expect(mockEnrichmentArgs.at(-1)?.[1]).toBe(false));
-  });
-
-  it('is left alone when it has videos', async () => {
-    tableRows.media_cache = [videos];
-    await open();
-
-    await waitFor(() => expect(mockEnrichmentArgs.at(-1)?.[1]).toBe(false));
-  });
-});
-
-describe('TMDB reviews', () => {
-  it('renders under its own name, and says whose words they are', async () => {
-    tableRows.media_cache = [reviews];
-    const view = await open();
-
-    await waitFor(() => expect(view.getByLabelText('TMDB Reviews')).toBeTruthy());
-    expect(view.getByText('Written by members of themoviedb.org, not by Bingd users.')).toBeTruthy();
-    expect(view.getByText('A film that rewards a second viewing.')).toBeTruthy();
-  });
-
-  it('never calls them critic, professional or community reviews', async () => {
-    tableRows.media_cache = [reviews];
-    const view = await open();
-
-    await waitFor(() => expect(view.getByLabelText('TMDB Reviews')).toBeTruthy());
-    expect(view.queryByText(/critic/i)).toBeNull();
-    expect(view.queryByText(/professional/i)).toBeNull();
-    expect(view.queryByText(/community review/i)).toBeNull();
-  });
-
-  it('labels a rating as TMDB’s, because it looks exactly like a Bingd score', async () => {
-    // One is an opinion the author typed; the other is a position in somebody's
-    // ordered list. A bare "8" beside a review on this page would be read as the
-    // second.
-    tableRows.media_cache = [reviews];
-    const view = await open();
-
-    await waitFor(() => expect(view.getByText(/Rated 8 on TMDB/)).toBeTruthy());
-  });
-
-  it('is absent entirely when nobody has reviewed it', async () => {
-    // The same rule the Videos tab follows: a section that may have nothing is
-    // omitted rather than shown empty.
-    const view = await open();
-
-    await waitFor(() => expect(view.getByText('Inception')).toBeTruthy());
-    expect(view.queryByLabelText('TMDB Reviews')).toBeNull();
-  });
-
-  it('is never shown on a season, which TMDB has no reviews for', async () => {
-    // /tv/{id}/reviews is about the series. Attributing those to "Season 2" would put
-    // somebody's words about a whole show under a heading they did not write them for,
-    // so the adapter writes no facet and the screen does not ask.
-    mockOpenId = 'season-1';
-    tableRows.media_items = [
-      { ...film, id: 'season-1', kind: 'season', title: 'Season 1', season_number: 1 },
-    ];
-    tableRows.media_cache = [{ ...reviews, media_item_id: 'season-1' }];
-
-    const view = await renderWithProviders(<TitleScreen />);
-    await waitFor(() => expect(view.getByText('Season 1')).toBeTruthy());
-
-    expect(view.queryByLabelText('TMDB Reviews')).toBeNull();
-  });
-});
-
-describe('notes on the title', () => {
-  const note = {
+describe('reviews', () => {
+  const review = {
     user_id: 'user-2',
-    media_item_id: 'film-1',
+    username: 'ada',
+    display_name: 'Ada',
+    avatar_path: null,
     note: 'The last twenty minutes are the whole film.',
     has_spoilers: false,
-    updated_at: '2026-08-15T00:00:00Z',
+    updated_at: '2026-08-16T10:00:00.000Z',
+    score: '8.4',
+    reaction_count: 3,
   };
 
-  beforeEach(() => {
-    tableRows.public_profiles = [
-      { id: 'user-2', username: 'anna', display_name: 'Anna', avatar_path: null },
-    ];
-  });
-
-  it('shows someone else’s note under their name', async () => {
-    mockRpcResults.public_notes = [note];
+  it('shows a Bingd reader’s note, under their name and beside their score', async () => {
+    mockRpcResults.title_reviews = [review];
     const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
-    await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
     expect(view.getByText('The last twenty minutes are the whole film.')).toBeTruthy();
+    // The author's own number, in the app's one chromatic element. A review without it
+    // is half the opinion.
+    expect(view.getByText('8.4')).toBeTruthy();
   });
 
-  it('masks a spoiler note from someone who has not watched this exact title', async () => {
-    mockRpcResults.public_notes = [{ ...note, note: 'He was dead the whole time.', has_spoilers: true }];
+  it('names nothing of TMDB’s, because none of it is here any more', async () => {
+    mockRpcResults.title_reviews = [review];
     const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
-    await waitFor(() => expect(view.getByText('Contains spoilers')).toBeTruthy());
-    expect(view.queryByText('He was dead the whole time.')).toBeNull();
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.queryByText(/themoviedb/i)).toBeNull();
+    expect(view.queryByText(/critic/i)).toBeNull();
+    expect(view.queryByText(/on TMDB/i)).toBeNull();
   });
 
-  it('shows it once the viewer has watched the title', async () => {
-    tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1', bucket: 'loved' }];
-    mockRpcResults.public_notes = [{ ...note, note: 'He was dead the whole time.', has_spoilers: true }];
+  it('opens the reviewer’s profile', async () => {
+    mockRpcResults.title_reviews = [review];
     const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
-    await waitFor(() => expect(view.getByText('He was dead the whole time.')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Ada, @ada'));
+    expect(mockPush).toHaveBeenCalledWith('/u/ada');
   });
 
-  it('drops a note whose author cannot be named rather than showing an anonymous one', async () => {
-    tableRows.public_profiles = [];
-    mockRpcResults.public_notes = [note];
+  it('masks a spoiler from somebody who has not watched this exact title', async () => {
+    mockRpcResults.title_reviews = [{ ...review, has_spoilers: true }];
     const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
 
-    await waitFor(() => expect(view.getByText('Inception')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
     expect(view.queryByText('The last twenty minutes are the whole film.')).toBeNull();
+  });
+
+  it('shows it once they have watched it, rather than making them reveal it', async () => {
+    // The founder's correction: somebody who has seen the film should not have to tap
+    // through every spoiler on the page.
+    mockRpcResults.title_reviews = [{ ...review, has_spoilers: true }];
+    tableRows.user_media = [{ user_id: 'user-1', media_item_id: 'film-1' }];
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
+
+    await waitFor(() =>
+      expect(view.getByText('The last twenty minutes are the whole film.')).toBeTruthy(),
+    );
+  });
+
+  it('offers the sort only when there is something to sort', async () => {
+    mockRpcResults.title_reviews = [review];
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.queryByRole('tab', { name: 'Top' })).toBeNull();
+  });
+
+  it('sorts by Top first, which is what a first-time reader wants', async () => {
+    mockRpcResults.title_reviews = [review, { ...review, user_id: 'user-3', username: 'bo', display_name: 'Bo' }];
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
+
+    await waitFor(() => expect(view.getByRole('tab', { name: 'Top' })).toBeTruthy());
+    expect(view.getByRole('tab', { name: 'Top' }).props.accessibilityState.selected).toBe(true);
+  });
+
+  it('invites the first one rather than showing an empty box', async () => {
+    mockRpcResults.title_reviews = [];
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
+
+    await waitFor(() => expect(view.getByText('No reviews yet')).toBeTruthy());
+    expect(view.getByText('Be the first to leave a review of this movie.')).toBeTruthy();
+  });
+
+  it('asks an unranked reader to rank first, because a review carries a score', async () => {
+    mockRpcResults.title_reviews = [];
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
+
+    await waitFor(() => expect(view.getByText('Rank to leave a review')).toBeTruthy());
+  });
+
+  it('offers a ranked reader the one composer there has ever been', async () => {
+    // The log sheet, where the spoiler flag and the visibility are chosen beside the
+    // text. A second composer here would be a second content model wearing a button.
+    mockRpcResults.title_reviews = [];
+    tableRows.rankings = [
+      { user_id: 'user-1', media_item_id: 'film-1', position: 1, category: 'movies', bucket: 'loved' },
+    ];
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
+
+    await waitFor(() => expect(view.getByText('Write a review')).toBeTruthy());
+  });
+
+  it('is absent on a series, which cannot be ranked and so cannot be reviewed', async () => {
+    mockOpenId = 'series-1';
+    tableRows.media_items = [
+      { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
+    ];
+
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
+
+    expect(view.queryByRole('tab', { name: 'Reviews' })).toBeNull();
   });
 });
 
-/**
- * The founder's report: title pages and person pages disagreed about their headers,
- * and neither disagreement was a decision. The shared rule is in `useDetailHeader`;
- * this is the title page holding to it.
- */
 describe('the header', () => {
   it('carries the back control and no title while the heading is on screen', async () => {
     await open();
@@ -597,7 +594,7 @@ describe('the header', () => {
     // block that wraps it, and `scroll` finds the scroll view above that. Reaching
     // for either by type would mean asserting on the screen's element tree, which is
     // not what this test is about.
-    const heading = view.getByText('Inception');
+    const heading = view.getByText(/^Inception/);
     await fireEvent(heading, 'layout', {
       nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 200 } },
     });
@@ -651,7 +648,7 @@ describe('a series', () => {
 
   const openSeries = async () => {
     const view = await renderWithProviders(<TitleScreen />);
-    await waitFor(() => expect(view.getByText('Breaking Bad')).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
     return view;
   };
 
@@ -774,7 +771,7 @@ describe('the following score', () => {
     ];
 
     const view = await renderWithProviders(<TitleScreen />);
-    await waitFor(() => expect(view.getByText('Breaking Bad')).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
     expect(view.queryByText('Following')).toBeNull();
     expect(view.queryByText('Community')).toBeNull();

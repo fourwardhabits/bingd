@@ -1,10 +1,10 @@
 /**
  * The two normalizers Phase E added, and the one existing one they lean on.
  *
- * `reviewsFacet` and `personCredits` are pure functions of a provider payload, and
- * both do something a reader of the calling code cannot verify by eye: one truncates
- * and flags, the other deduplicates and re-ranks a list that arrives with duplicates
- * in it by design. The deduplication in particular is a correctness requirement
+ * `personCredits` and the two certification readers are pure functions of a provider
+ * payload, and each does something a reader of the calling code cannot verify by eye:
+ * one deduplicates and re-ranks a list that arrives with duplicates in it by design,
+ * and the others walk a shape whose empty entries outnumber its useful ones. The deduplication in particular is a correctness requirement
  * rather than tidiness — a repeated title makes `tmdb_upsert_titles` fail outright
  * with "ON CONFLICT DO UPDATE command cannot affect row a second time" — and that is
  * a failure the client would see as a person with no credits at all.
@@ -21,7 +21,6 @@ import {
   personCredits,
   personRecord,
   ratingOf,
-  reviewsFacet,
 } from './normalize.ts';
 import type { TmdbPersonDetail } from './tmdb.ts';
 
@@ -29,127 +28,6 @@ const GENRES = new Map<number, string>([
   [28, 'Action'],
   [18, 'Drama'],
 ]);
-
-// ---------------------------------------------------------------------------
-// reviewsFacet
-// ---------------------------------------------------------------------------
-
-Deno.test('a review keeps its author, rating and body', () => {
-  const { results, total } = reviewsFacet({
-    results: [
-      {
-        id: 'r1',
-        author: 'wandering_cinephile',
-        author_details: { rating: 8, avatar_path: '/a.jpg' },
-        content: 'Rewards a second viewing.',
-        created_at: '2011-02-04T12:00:00.000Z',
-        url: 'https://www.themoviedb.org/review/r1',
-      },
-    ],
-    total_results: 1,
-  });
-
-  assertEquals(results.length, 1);
-  assertEquals(results[0].author, 'wandering_cinephile');
-  assertEquals(results[0].rating, 8);
-  assertEquals(results[0].content, 'Rewards a second viewing.');
-  assertEquals(results[0].truncated, false);
-  assertEquals(total, 1);
-});
-
-Deno.test('a review with no rating keeps none rather than being given one', () => {
-  // A review with no rating and a review rated zero are different things, and
-  // deriving a number for the first would be inventing an opinion.
-  const { results } = reviewsFacet({
-    results: [{ id: 'r1', author: 'someone', content: 'No stars from me.' }],
-  });
-
-  assertEquals(results[0].rating, null);
-});
-
-Deno.test('a long review is truncated, and says so', () => {
-  const { results } = reviewsFacet({
-    results: [{ id: 'r1', author: 'someone', content: 'x'.repeat(5000) }],
-  });
-
-  assertEquals(results[0].content.length, 2000);
-  assertEquals(results[0].truncated, true);
-});
-
-Deno.test('an empty review is dropped rather than rendered as a blank card', () => {
-  const { results } = reviewsFacet({
-    results: [
-      { id: 'r1', author: 'someone', content: '   ' },
-      { id: 'r2', author: 'someone else', content: 'Actual words.' },
-    ],
-  });
-
-  assertEquals(results.length, 1);
-  assertEquals(results[0].id, 'r2');
-});
-
-Deno.test('at most eight reviews are stored', () => {
-  const { results, total } = reviewsFacet({
-    results: Array.from({ length: 20 }, (_, index) => ({
-      id: `r${index}`,
-      author: 'someone',
-      content: 'Words.',
-    })),
-    total_results: 137,
-  });
-
-  assertEquals(results.length, 8);
-  // What TMDB actually had travels alongside, so nothing downstream mistakes eight
-  // for the whole count.
-  assertEquals(total, 137);
-});
-
-Deno.test('a Gravatar avatar path is unwrapped rather than pasted onto the CDN base', () => {
-  // TMDB sends `/https://secure.gravatar.com/avatar/…` — a leading slash in front of
-  // an absolute URL. Left alone it 404s for a large fraction of authors.
-  const { results } = reviewsFacet({
-    results: [
-      {
-        id: 'r1',
-        author: 'someone',
-        author_details: { avatar_path: '/https://secure.gravatar.com/avatar/abc' },
-        content: 'Words.',
-      },
-    ],
-  });
-
-  assertEquals(results[0].avatar_path, 'https://secure.gravatar.com/avatar/abc');
-});
-
-Deno.test('a TMDB avatar path stays a path', () => {
-  const { results } = reviewsFacet({
-    results: [
-      {
-        id: 'r1',
-        author: 'someone',
-        author_details: { avatar_path: '/portrait.jpg' },
-        content: 'Words.',
-      },
-    ],
-  });
-
-  assertEquals(results[0].avatar_path, '/portrait.jpg');
-});
-
-Deno.test('an author with no display name falls back to their handle', () => {
-  const { results } = reviewsFacet({
-    results: [
-      {
-        id: 'r1',
-        author: '',
-        author_details: { username: 'handle_only' },
-        content: 'Words.',
-      },
-    ],
-  });
-
-  assertEquals(results[0].author, 'handle_only');
-});
 
 // ---------------------------------------------------------------------------
 // personCredits
