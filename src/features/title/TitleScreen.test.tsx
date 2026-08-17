@@ -515,3 +515,73 @@ describe('a series', () => {
     expect(view.getByText('Seasons are still loading')).toBeTruthy();
   });
 });
+
+/**
+ * The Following score (20260816001100) — what the people this reader follows made of
+ * this title, above what everybody did.
+ *
+ * The server owns every rule that matters: approved followees only, `can_view_profile`
+ * from the caller's own side, the exact media item, live rankings. `following-score.test.mjs`
+ * is where those are asserted. What is asserted here is the screen's part — that it
+ * shows the number, names the population honestly, and says nothing at all when the
+ * reader's following list has nothing to say.
+ */
+describe('the following score', () => {
+  it('shows it above the community score, with the sample named', async () => {
+    mockRpcResults.following_score = [{ score: '8.6', rating_count: 3 }];
+    mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
+    expect(view.getByText('8.6')).toBeTruthy();
+    // "3 people you follow" rather than "3 ratings": the population is the whole point
+    // of the number, and it is a different population from the row underneath.
+    expect(view.getByText('3 people you follow')).toBeTruthy();
+    expect(view.getByText('Community')).toBeTruthy();
+  });
+
+  it('shows a single followee, which community would withhold', async () => {
+    mockRpcResults.following_score = [{ score: '9.1', rating_count: 1 }];
+    const view = await open();
+
+    // One account you chose to follow is not a weak estimate of a crowd; it is their
+    // opinion, and it is the only case a new account can produce at all.
+    await waitFor(() => expect(view.getByText('1 person you follow')).toBeTruthy());
+    expect(view.getByText('9.1')).toBeTruthy();
+  });
+
+  it('says nothing when nobody the reader follows has ranked it', async () => {
+    mockRpcResults.following_score = [{ score: null, rating_count: 0 }];
+    mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Community')).toBeTruthy());
+    // Not "No ratings yet". That silence is a fact about the reader's own following
+    // list rather than about the film, and it would appear on every title page a new
+    // account ever opened.
+    expect(view.queryByText('Following')).toBeNull();
+  });
+
+  it('never calls it a friend score, because following is not mutual', async () => {
+    mockRpcResults.following_score = [{ score: '8.6', rating_count: 3 }];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
+    expect(view.queryByText(/friend/i)).toBeNull();
+  });
+
+  it('asks for nothing on a series, which cannot be ranked', async () => {
+    mockOpenId = 'series-1';
+    tableRows.media_items = [
+      { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
+    ];
+
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByText('Breaking Bad')).toBeTruthy());
+
+    expect(view.queryByText('Following')).toBeNull();
+    expect(view.queryByText('Community')).toBeNull();
+  });
+});

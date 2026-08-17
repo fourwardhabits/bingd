@@ -285,6 +285,13 @@ describe('the guard is wired in, not merely present', () => {
     // suspended *subject*, which is the direction that matters.
     'public_notes',
     'community_score',
+    // 20260816001100. A stable read whose entire population is the caller's own
+    // approved followees, filtered by can_view_profile from the caller's side. A
+    // suspended account calling it learns nothing new: can_view_profile already
+    // refuses a suspended *subject*, so a suspended followee is absent from anybody's
+    // number, and a suspended *caller* only ever sees their own following list — which
+    // suspension does not hide from the person it was applied to.
+    'following_score',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

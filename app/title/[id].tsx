@@ -15,6 +15,7 @@ import { newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { useSeasons } from '@/features/search/use-title-search';
 import { useCommunityScore } from '@/features/title/use-community-score';
+import { useFollowingScore } from '@/features/title/use-following-score';
 import { useCredits } from '@/features/title/use-credits';
 import { useTitleEnrichment } from '@/features/title/use-enrichment';
 import { useTitleNotes, useTitleVideos } from '@/features/title/use-title-extras';
@@ -174,6 +175,7 @@ export default function TitleScreen() {
   const videos = useTitleVideos(titleId);
   const notes = useTitleNotes(titleId);
   const community = useCommunityScore(titleId);
+  const following = useFollowingScore(titleId, profile.id);
   const watched = useWatched(profile.id);
   const companions = useCompanions(profile.id, titleId);
   // Seeded rows arrive with no artwork, overview or credits. Opening the screen is
@@ -674,6 +676,14 @@ export default function TitleScreen() {
                     ratingCount: community.data.ratingCount,
                     minRatings: community.data.minRatings,
                   }
+                : null
+            }
+            // The reader's own people, above everybody's. Omitted by the component
+            // when none of them have ranked it — that silence is about the reader's
+            // following list rather than about the film.
+            following={
+              following.data
+                ? { score: following.data.score, ratingCount: following.data.ratingCount }
                 : null
             }
           />

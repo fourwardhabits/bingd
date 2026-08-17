@@ -91,6 +91,13 @@ const ALLOWED = {
   'public_notes(uuid[],uuid[],integer)': ['authenticated'],
   'community_score(uuid)': ['authenticated'],
 
+  // Added 2026-08-16 with the Following score (20260816001100). A definer read taking
+  // a title rather than a viewer: the population is `auth.uid()`'s own approved
+  // followees, so it cannot be pointed at somebody else's perspective, which is
+  // 20260813001900's rule. Not anon — `auth.uid()` is the whole population filter, so
+  // an anon caller could only ever get the empty answer.
+  'following_score(uuid)': ['authenticated'],
+
   // Added 2026-08-16 with reactions (PRD §14). The only writer for a table that has
   // a select policy and, deliberately, no insert policy: a policy cannot express
   // "and only on an event you are allowed to see", which is the check that stops a
