@@ -50,9 +50,31 @@ export type PersonState = {
   detail: PersonDetail | null;
   /** Somebody else holds the claim. Poll; do not spend a second request. */
   claimed: boolean;
+  /**
+   * When that claim runs out, as epoch milliseconds.
+   *
+   * Carried rather than recomputed because it is what **bounds the poll**, and the
+   * bound has to survive the reads failing. Independent review 13b: React Query keeps
+   * the last successful `data` when a refetch errors, so an interval that asks only
+   * "is it still claimed" goes on asking every 1.5 seconds for the life of the screen
+   * once the network drops. A deadline captured from the row itself expires whether or
+   * not another read ever succeeds.
+   */
+  claimedUntil: number | null;
   /** Past its TTL. Render it, and refresh behind the reader. */
   stale: boolean;
 };
+
+/**
+ * Whether somebody else's request is still worth waiting for.
+ *
+ * In one place because two callers need the same answer and would drift: the query's
+ * `refetchInterval`, which decides whether to look again, and the screen, which
+ * decides between a spinner and an empty state. A claim whose two minutes have passed
+ * is not a claim, however recently it was read.
+ */
+export const isAwaitingClaim = (state: PersonState | undefined): boolean =>
+  Boolean(state?.claimed && state.claimedUntil !== null && Date.now() < state.claimedUntil);
 
 /** A TMDB person id is a positive integer, and nothing else is worth a request. */
 function personIdOf(value: string | null): number | null {
@@ -79,7 +101,7 @@ type CachedPayload = {
   credit_total?: number;
 };
 
-const NOTHING: PersonState = { detail: null, claimed: false, stale: false };
+const NOTHING: PersonState = { detail: null, claimed: false, claimedUntil: null, stale: false };
 
 /** How often to look again while somebody else is fetching this person. */
 const CLAIM_POLL_MS = 1_500;
@@ -125,11 +147,12 @@ export function usePerson(personId: string | null) {
     queryKey: ['person', numeric],
     enabled: numeric !== null,
     staleTime: 10 * 60_000,
-    // While somebody else's request is in flight, look again shortly. The claim is a
-    // two-minute placeholder, so this polls a handful of times at most and stops the
-    // moment the winner's payload lands — which is the only way a losing caller ever
-    // sees the answer, since nothing invalidates this query on their behalf.
-    refetchInterval: (query) => (query.state.data?.claimed ? CLAIM_POLL_MS : false),
+    // While somebody else's request is in flight, look again shortly — the only way a
+    // losing caller ever sees the answer, since nothing invalidates this query on
+    // their behalf. Bounded by the claim's **own** two-minute deadline rather than by
+    // the next read agreeing that it is still claimed, so a network that has stopped
+    // answering ends the poll instead of extending it forever.
+    refetchInterval: (query) => (isAwaitingClaim(query.state.data) ? CLAIM_POLL_MS : false),
     queryFn: async (): Promise<PersonState> => {
       const { data, error } = await supabase
         .from('person_cache')
@@ -140,7 +163,11 @@ export function usePerson(personId: string | null) {
       if (!data) return NOTHING;
 
       const row = data as { payload: CachedPayload | null; expires_at: string | null };
-      const expired = row.expires_at ? new Date(row.expires_at).getTime() <= Date.now() : true;
+      const expiresAt = row.expires_at ? new Date(row.expires_at).getTime() : null;
+      // A null or unparseable expiry reads as expired. The column is `not null`, so
+      // this is unreachable through the writers — and treating an unknown expiry as
+      // fresh would be the one mistake that cannot be recovered from.
+      const expired = expiresAt === null || Number.isNaN(expiresAt) || expiresAt <= Date.now();
 
       const payload = row.payload ?? undefined;
       const person = payload?.person;
@@ -150,7 +177,9 @@ export function usePerson(personId: string | null) {
       // work. An *unexpired* one means somebody is fetching them right now; an expired
       // one means that somebody never came back, and the right answer is to ask again.
       if (!person || !name || !Array.isArray(payload?.credits)) {
-        return expired ? NOTHING : { detail: null, claimed: true, stale: false };
+        return expired
+          ? NOTHING
+          : { detail: null, claimed: true, claimedUntil: expiresAt, stale: false };
       }
 
       const entries = payload.credits;
@@ -208,6 +237,7 @@ export function usePerson(personId: string | null) {
           creditTotal: payload.credit_total ?? credits.length,
         },
         claimed: false,
+        claimedUntil: null,
         stale: expired,
       };
     },

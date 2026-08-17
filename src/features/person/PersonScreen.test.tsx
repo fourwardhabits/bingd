@@ -336,25 +336,50 @@ describe('a person somebody else is already fetching', () => {
     payload: { claimed_at: new Date().toISOString() },
   };
 
-  it('waits rather than reporting the person as missing', async () => {
+  it('renders the winner’s filmography when it lands, without being told', async () => {
+    // The finding at review 13, and the assertion 13b asked for: the loser has nothing
+    // invalidating this query on their behalf, so the only way they ever see the answer
+    // is the poll. The row is swapped underneath exactly as the winner's write would.
     tableRows.person_cache = [claim];
     const view = await renderWithProviders(<PersonScreen />);
 
-    await waitFor(() => expect(view.queryByText('Nothing here yet')).toBeNull());
+    await waitFor(() => expect(view.queryByText('Leonardo DiCaprio')).toBeNull());
+    tableRows.person_cache = [cached];
+
+    await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy(), {
+      timeout: 6000,
+    });
+    // And it got there by waiting, not by spending a request the claim exists to stop.
+    expect(mockCachePerson).not.toHaveBeenCalled();
   });
 
-  it('spends no second provider request on them', async () => {
+  it('spends no second provider request while the claim is live', async () => {
     tableRows.person_cache = [claim];
     await renderWithProviders(<PersonScreen />);
 
-    // The whole point of the claim. A second request here is what it exists to stop.
-    await waitFor(() => expect(mockCachePerson).not.toHaveBeenCalled());
+    // Held long enough for two poll intervals, so this is a property of the state
+    // rather than of the first render happening to be quick.
+    await new Promise((resolve) => setTimeout(resolve, 3200));
+    expect(mockCachePerson).not.toHaveBeenCalled();
   });
 
-  it('asks again once the claim has lapsed without an answer', async () => {
-    // A claim is a promise to fetch, and a promise can be broken — the isolate can be
-    // killed mid-request. An expired placeholder is "nobody is coming back", not
-    // "somebody is still working".
+  it('stops waiting when the claim runs out, and offers a way on', async () => {
+    // A claim is a promise to fetch, and the promise can be broken — the isolate can
+    // be killed mid-request. Bounded by the claim's own deadline rather than by the
+    // next read agreeing it is still held, so a database that has stopped answering
+    // ends the wait instead of extending it (independent review 13b).
+    const nearly = { ...claim, expires_at: new Date(Date.now() + 1200).toISOString() };
+    tableRows.person_cache = [nearly];
+    const view = await renderWithProviders(<PersonScreen />);
+
+    await waitFor(() => expect(view.getByText('Nothing here yet')).toBeTruthy(), {
+      timeout: 8000,
+    });
+    // `Button` exposes its label as text rather than as an accessibility label.
+    expect(view.getByText('Try again')).toBeTruthy();
+  });
+
+  it('asks again immediately when the claim has already lapsed', async () => {
     tableRows.person_cache = [{ ...claim, expires_at: LAPSED }];
     await renderWithProviders(<PersonScreen />);
 

@@ -8,7 +8,12 @@ import { useCurrentProfile } from '@/features/auth';
 import { useRankedCollection, useWatchlist } from '@/features/collection/use-collection';
 import { useWatched } from '@/features/collection/use-watched';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
-import { usePerson, usePersonFetch, type PersonCredit } from '@/features/person/use-person';
+import {
+  isAwaitingClaim,
+  usePerson,
+  usePersonFetch,
+  type PersonCredit,
+} from '@/features/person/use-person';
 import { posterUri, profileUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import {
@@ -73,7 +78,8 @@ export default function PersonScreen() {
    * a second one is exactly what `tmdb_claim_person` exists to prevent. `usePerson`
    * polls in that state instead.
    */
-  const needsFetch = !person.isPending && !state?.claimed && (!detail || state?.stale === true);
+  const awaitingClaim = isAwaitingClaim(state);
+  const needsFetch = !person.isPending && !awaitingClaim && (!detail || state?.stale === true);
   const { fetching, retry } = usePersonFetch(id ?? null, needsFetch);
 
   const tryAgain = () => {
@@ -171,7 +177,7 @@ export default function PersonScreen() {
           somebody else's request is in flight, `usePerson` is polling for its result,
           and showing "nothing here yet" in the meantime is what independent review 13
           found two concurrent readers stuck on. */}
-      {person.isPending || state?.claimed || (fetching && !detail) ? (
+      {person.isPending || awaitingClaim || (fetching && !detail) ? (
         <LoadingScreen />
       ) : person.isError ? (
         <EmptyState
