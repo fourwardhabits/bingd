@@ -21,12 +21,26 @@ const url = env.EXPO_PUBLIC_SUPABASE_URL;
 const anonKey = env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
 
-// The same guard rail the two-user file carries. This creates and deletes an account
-// and spends provider quota, and it must never be pointed anywhere but nonprod.
-const NONPROD = 'abheeqyjzekiowkztfxv';
-if (!url.includes(NONPROD)) {
-  console.error(`Refusing to run: ${url} is not the nonprod project (${NONPROD}).`);
-  process.exit(1);
+// The one guard rail that matters. These scripts create and delete accounts and send
+// the service-role key to whatever `url` says, so the check has to be on the *host* and
+// not on the string. Independent review 15: `url.includes(ref)` passes for
+// `https://<ref>.example.com`, which is a hostname anybody can register — and the next
+// thing that happens is the service-role key being posted to it.
+const NONPROD_HOST = 'abheeqyjzekiowkztfxv.supabase.co';
+{
+  let host = null;
+  let protocol = null;
+  try {
+    const parsed = new URL(url);
+    host = parsed.host;
+    protocol = parsed.protocol;
+  } catch {
+    host = null;
+  }
+  if (protocol !== 'https:' || host !== NONPROD_HOST) {
+    console.error(`Refusing to run: ${url} is not https://${NONPROD_HOST}.`);
+    process.exit(1);
+  }
 }
 
 let passed = 0;
@@ -43,31 +57,42 @@ const password = `Adapter-${crypto.randomUUID()}`;
 
 const admin = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
 
-const created = await fetch(`${url}/auth/v1/admin/users`, {
-  method: 'POST',
-  headers: { ...admin, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email, password, email_confirm: true }),
-});
-const user = await created.json();
+// Recorded the instant the account exists, and everything that can fail happens after.
+// Independent review 15: the setup used to sit outside the try/finally entirely, so a
+// failed sign-in or a refused profile left an account in the project with nothing to
+// clean it up.
+let user = null;
+let auth = null;
 
-const session = await fetch(`${url}/auth/v1/token?grant_type=password`, {
-  method: 'POST',
-  headers: { apikey: anonKey, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email, password }),
-});
-const { access_token: token } = await session.json();
+try {
+  const response = await fetch(`${url}/auth/v1/admin/users`, {
+    method: 'POST',
+    headers: { ...admin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, email_confirm: true }),
+  });
+  if (!response.ok) throw new Error(`could not create the probe account: ${await response.text()}`);
+  user = await response.json();
 
-const auth = { apikey: anonKey, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const session = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { apikey: anonKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!session.ok) throw new Error(`could not sign the probe account in: ${await session.text()}`);
+  const { access_token: token } = await session.json();
 
-await fetch(`${url}/rest/v1/rpc/create_profile`, {
-  method: 'POST',
-  headers: auth,
-  body: JSON.stringify({
-    p_username: `adp_${stamp}`,
-    p_display_name: 'Adapter probe',
-    p_date_of_birth: '1990-01-01',
-  }),
-});
+  auth = { apikey: anonKey, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+  const profile = await fetch(`${url}/rest/v1/rpc/create_profile`, {
+    method: 'POST',
+    headers: auth,
+    body: JSON.stringify({
+      p_username: `adp_${stamp}`,
+      p_display_name: 'Adapter probe',
+      p_date_of_birth: '1990-01-01',
+    }),
+  });
+  if (!profile.ok) throw new Error(`could not create the probe profile: ${await profile.text()}`);
 
 const invoke = async (body) => {
   const res = await fetch(`${url}/functions/v1/tmdb-adapter`, {
@@ -84,7 +109,6 @@ const rest = async (path) => {
   return res.ok ? res.json() : null;
 };
 
-try {
   // ---- search -------------------------------------------------------------
   const search = await invoke({ action: 'search', query: 'inception', limit: 5 });
   const film = (search.body?.results ?? [])[0];
@@ -200,12 +224,24 @@ try {
   failed += 1;
   console.log(`FAIL          the run itself — ${cause.message}`);
 } finally {
-  await fetch(`${url}/rest/v1/rpc/delete_account`, {
-    method: 'POST',
-    headers: auth,
-    body: JSON.stringify({ p_confirmation: `adp_${stamp}` }),
-  });
-  await fetch(`${url}/auth/v1/admin/users/${user.id}`, { method: 'DELETE', headers: admin });
+  if (auth) {
+    await fetch(`${url}/rest/v1/rpc/delete_account`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ p_confirmation: `adp_${stamp}` }),
+    });
+  }
+  if (user?.id) {
+    const res = await fetch(`${url}/auth/v1/admin/users/${user.id}`, {
+      method: 'DELETE',
+      headers: admin,
+    });
+    // 404 is the ordinary case: `delete_account` already removed it.
+    if (!res.ok && res.status !== 404) {
+      failed += 1;
+      console.log(`FAIL          could not clean up the probe account — ${res.status}`);
+    }
+  }
 }
 
 console.log(`\n${passed}/${passed + failed} passed, ${failed} failed`);

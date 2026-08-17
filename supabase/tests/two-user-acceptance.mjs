@@ -58,12 +58,26 @@ if (!url || !anonKey || !serviceKey) {
   process.exit(1);
 }
 
-// The one guard rail that matters. This file creates and deletes accounts, and it must
-// never be pointed anywhere but the nonprod project.
-const NONPROD = 'abheeqyjzekiowkztfxv';
-if (!url.includes(NONPROD)) {
-  console.error(`Refusing to run: ${url} is not the nonprod project (${NONPROD}).`);
-  process.exit(1);
+// The one guard rail that matters. These scripts create and delete accounts and send
+// the service-role key to whatever `url` says, so the check has to be on the *host* and
+// not on the string. Independent review 15: `url.includes(ref)` passes for
+// `https://<ref>.example.com`, which is a hostname anybody can register — and the next
+// thing that happens is the service-role key being posted to it.
+const NONPROD_HOST = 'abheeqyjzekiowkztfxv.supabase.co';
+{
+  let host = null;
+  let protocol = null;
+  try {
+    const parsed = new URL(url);
+    host = parsed.host;
+    protocol = parsed.protocol;
+  } catch {
+    host = null;
+  }
+  if (protocol !== 'https:' || host !== NONPROD_HOST) {
+    console.error(`Refusing to run: ${url} is not https://${NONPROD_HOST}.`);
+    process.exit(1);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -154,11 +168,21 @@ const rankToCompletion = async (token, mediaItemId, bucket) => {
 
 const stamp = Date.now().toString(36).slice(-6);
 
+/**
+ * Every auth user this run has created, recorded the instant it exists.
+ *
+ * Independent review 15: `a` and `b` were assigned only after sign-in and profile
+ * creation succeeded, so a failure in between left an account in the project that the
+ * `finally` block had no id for. The id is the only thing needed to clean up, and it is
+ * known before any of the steps that can fail.
+ */
+const created = [];
+
 async function createAccount(label) {
   const email = `bingd_accept_${label}_${stamp}@example.com`;
   const password = `Accept-${uuid()}`;
 
-  const created = await fetch(`${url}/auth/v1/admin/users`, {
+  const response = await fetch(`${url}/auth/v1/admin/users`, {
     method: 'POST',
     headers: {
       apikey: serviceKey,
@@ -167,8 +191,9 @@ async function createAccount(label) {
     },
     body: JSON.stringify({ email, password, email_confirm: true }),
   });
-  if (!created.ok) throw new Error(`could not create ${label}: ${await created.text()}`);
-  const user = await created.json();
+  if (!response.ok) throw new Error(`could not create ${label}: ${await response.text()}`);
+  const user = await response.json();
+  created.push(user.id);
 
   const session = await fetch(`${url}/auth/v1/token?grant_type=password`, {
     method: 'POST',
@@ -197,15 +222,10 @@ async function destroyAccount(account) {
   const result = await rpc(account.token, 'delete_account', {
     p_confirmation: account.username,
   });
-  if (result.status !== 200) {
-    // The admin API is the fallback, so a failure here leaks no test account into the
-    // project even when the thing being tested is what failed.
-    await fetch(`${url}/auth/v1/admin/users/${account.id}`, {
-      method: 'DELETE',
-      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
-    });
-    return { deleted: false, result };
-  }
+  // No admin fallback here. The loop in the `finally` block below sweeps every id this
+  // run created, checks the response, and reports a failure to clean up as a failure —
+  // which the fallback that used to live here did not.
+  if (result.status !== 200) return { deleted: false, result };
   return { deleted: true, result };
 }
 
@@ -643,6 +663,21 @@ try {
 } finally {
   await destroyAccount(a);
   await destroyAccount(b);
+
+  // The backstop, from the ids rather than from the objects. Anything still standing
+  // here is an account a failure left behind, and a leaked test account in a project
+  // two people are about to test against is worse than a failing check.
+  for (const id of created) {
+    const res = await fetch(`${url}/auth/v1/admin/users/${id}`, {
+      method: 'DELETE',
+      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+    });
+    // 404 is the ordinary case: `delete_account` already removed it.
+    if (!res.ok && res.status !== 404) {
+      failed += 1;
+      failures.push(`could not clean up auth user ${id}: ${res.status} ${await res.text()}`);
+    }
+  }
 }
 
 console.log(`\n${passed}/${passed + failed} passed, ${failed} failed`);
