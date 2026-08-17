@@ -1,15 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  View,
-} from 'react-native';
+import { Alert, StyleSheet, TextInput, View } from 'react-native';
 
 import {
   clearPendingDisplayName,
@@ -21,7 +13,7 @@ import {
 } from '@/features/auth';
 import { track } from '@/lib/analytics';
 import { queryKeys } from '@/lib/query';
-import { Button, Field, Screen, Text } from '@/ui/components';
+import { Button, Field, KeyboardScreen, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -205,126 +197,123 @@ export default function CreateProfileScreen() {
 
   return (
     <Screen includeBottomInset>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.select({ ios: 'padding', android: undefined })}
-      >
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.intro}>
-            <Text variant="title1">Pick your name</Text>
-            <Text variant="body" tone="secondary">
-              Your username is how friends find you. You can change it later, once a
-              month.
+      {/* What this replaced was `KeyboardAvoidingView` with `behavior: undefined` on
+          Android — which is not a behaviour, it is a deferral to
+          `windowSoftInputMode=adjustResize`. Under edge-to-edge the window does not
+          resize, so on the platform this app ships to first the component did nothing
+          at all, and the birthday fields in the lower half of this form were behind
+          the keyboard that had just been opened to fill them in. */}
+      <KeyboardScreen contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.intro}>
+          <Text variant="title1">Pick your name</Text>
+          <Text variant="body" tone="secondary">
+            Your username is how friends find you. You can change it later, once a
+            month.
+          </Text>
+        </View>
+
+        <View style={styles.form}>
+          <Field
+            label="Username"
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="username-new"
+            maxLength={24}
+            editable={!busy}
+            error={usernameError()}
+            hint={
+              checking
+                ? 'Checking…'
+                : available === true
+                  ? 'Available.'
+                  : settled && available === null
+                    ? 'Could not check just now. You can still continue.'
+                    : 'Lowercase letters, numbers, and underscores.'
+            }
+          />
+
+          <Field
+            label="Display name"
+            value={displayName}
+            onChangeText={setDisplayName}
+            autoCapitalize="words"
+            maxLength={50}
+            editable={!busy}
+            hint="Optional. We will use your username if you leave this empty."
+          />
+
+          <View style={styles.birth}>
+            <Text variant="caption" tone="secondary">
+              Date of birth
             </Text>
-          </View>
-
-          <View style={styles.form}>
-            <Field
-              label="Username"
-              value={username}
-              onChangeText={setUsername}
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="username-new"
-              maxLength={24}
-              editable={!busy}
-              error={usernameError()}
-              hint={
-                checking
-                  ? 'Checking…'
-                  : available === true
-                    ? 'Available.'
-                    : settled && available === null
-                      ? 'Could not check just now. You can still continue.'
-                      : 'Lowercase letters, numbers, and underscores.'
-              }
-            />
-
-            <Field
-              label="Display name"
-              value={displayName}
-              onChangeText={setDisplayName}
-              autoCapitalize="words"
-              maxLength={50}
-              editable={!busy}
-              hint="Optional. We will use your username if you leave this empty."
-            />
-
-            <View style={styles.birth}>
-              <Text variant="caption" tone="secondary">
-                Date of birth
-              </Text>
-              <View style={styles.birthRow}>
-                <View style={styles.birthDay}>
-                  <Field
-                    ref={monthRef}
-                    label="Month"
-                    value={birth.month}
-                    onChangeText={setMonth}
-                    keyboardType="number-pad"
-                    inputMode="numeric"
-                    maxLength={2}
-                    editable={!busy}
-                    returnKeyType="next"
-                    onSubmitEditing={() => dayRef.current?.focus()}
-                    error={birthError}
-                  />
-                </View>
-                <View style={styles.birthDay}>
-                  <Field
-                    ref={dayRef}
-                    label="Day"
-                    value={birth.day}
-                    onChangeText={setDay}
-                    keyboardType="number-pad"
-                    inputMode="numeric"
-                    maxLength={2}
-                    editable={!busy}
-                    returnKeyType="next"
-                    onSubmitEditing={() => yearRef.current?.focus()}
-                    error={birthError}
-                  />
-                </View>
-                <View style={styles.birthYear}>
-                  <Field
-                    ref={yearRef}
-                    label="Year"
-                    value={birth.year}
-                    onChangeText={setYear}
-                    keyboardType="number-pad"
-                    inputMode="numeric"
-                    maxLength={4}
-                    editable={!busy}
-                    returnKeyType="done"
-                    error={birthError}
-                  />
-                </View>
+            <View style={styles.birthRow}>
+              <View style={styles.birthDay}>
+                <Field
+                  ref={monthRef}
+                  label="Month"
+                  value={birth.month}
+                  onChangeText={setMonth}
+                  keyboardType="number-pad"
+                  inputMode="numeric"
+                  maxLength={2}
+                  editable={!busy}
+                  returnKeyType="next"
+                  onSubmitEditing={() => dayRef.current?.focus()}
+                  error={birthError}
+                />
+              </View>
+              <View style={styles.birthDay}>
+                <Field
+                  ref={dayRef}
+                  label="Day"
+                  value={birth.day}
+                  onChangeText={setDay}
+                  keyboardType="number-pad"
+                  inputMode="numeric"
+                  maxLength={2}
+                  editable={!busy}
+                  returnKeyType="next"
+                  onSubmitEditing={() => yearRef.current?.focus()}
+                  error={birthError}
+                />
+              </View>
+              <View style={styles.birthYear}>
+                <Field
+                  ref={yearRef}
+                  label="Year"
+                  value={birth.year}
+                  onChangeText={setYear}
+                  keyboardType="number-pad"
+                  inputMode="numeric"
+                  maxLength={4}
+                  editable={!busy}
+                  returnKeyType="done"
+                  error={birthError}
+                />
               </View>
             </View>
-
-            {error ? (
-              <Text variant="caption" tone="action">
-                {error}
-              </Text>
-            ) : null}
-
-            <Button
-              label={busy ? 'Creating…' : 'Create my account'}
-              onPress={submit}
-              disabled={!ready}
-              disabledReason={
-                busy
-                  ? 'Creating your account.'
-                  : 'Choose an available username and enter your date of birth.'
-              }
-            />
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+
+          {error ? (
+            <Text variant="caption" tone="action">
+              {error}
+            </Text>
+          ) : null}
+
+          <Button
+            label={busy ? 'Creating…' : 'Create my account'}
+            onPress={submit}
+            disabled={!ready}
+            disabledReason={
+              busy
+                ? 'Creating your account.'
+                : 'Choose an available username and enter your date of birth.'
+            }
+          />
+        </View>
+      </KeyboardScreen>
     </Screen>
   );
 }

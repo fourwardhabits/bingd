@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import {
-  Keyboard,
   Platform,
   ScrollView,
-  StyleSheet,
   type ScrollViewProps,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+
+import { useKeyboardHeight } from './use-keyboard-height';
 
 export type KeyboardScreenProps = Omit<ScrollViewProps, 'children'> & {
   children: ReactNode;
@@ -50,9 +50,8 @@ export type KeyboardScreenProps = Omit<ScrollViewProps, 'children'> & {
  *     keyboard, and the user has to tap Save twice. That is the "primary action is
  *     reachable" half of the requirement, and it is invisible in a screenshot.
  *
- * `keyboardDidShow` rather than `keyboardWillShow` on Android, because Android does not
- * emit the `will` events at all — subscribing to them there produces a component that
- * compiles, renders, and never adjusts.
+ * The measurement itself is `useKeyboardHeight`, which `Sheet` uses for the same reason
+ * on a surface that cannot scroll its way clear.
  */
 export function KeyboardScreen({
   children,
@@ -60,25 +59,8 @@ export function KeyboardScreen({
   extraOffset = 24,
   ...rest
 }: KeyboardScreenProps) {
-  const [keyboard, setKeyboard] = useState(0);
+  const keyboard = useKeyboardHeight();
   const scroll = useRef<ScrollView>(null);
-
-  useEffect(() => {
-    // Android emits only the `did` pair. Subscribing to `will` there is a component
-    // that never adjusts and looks correct in review.
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const shown = Keyboard.addListener(showEvent, (event) => {
-      setKeyboard(event.endCoordinates?.height ?? 0);
-    });
-    const hidden = Keyboard.addListener(hideEvent, () => setKeyboard(0));
-
-    return () => {
-      shown.remove();
-      hidden.remove();
-    };
-  }, []);
 
   return (
     <ScrollView
@@ -107,6 +89,3 @@ export function KeyboardScreen({
     </ScrollView>
   );
 }
-
-/** Nothing of its own to style; the ScrollView is the whole component. */
-export const keyboardScreenStyles = StyleSheet.create({});

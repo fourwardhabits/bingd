@@ -391,21 +391,6 @@ describe('tabs that have nothing behind them', () => {
 });
 
 /**
- * Notes are social content now, in a section that says what they are. The tab that
- * used to say "Reviews" was one person's private sentence with a magazine's word on
- * top of it.
- */
-/**
- * TMDB Reviews — Phase E2.
- *
- * The naming is the specification and it is worth a test rather than a code comment,
- * because the four things this section must never be confused with all exist on this
- * same screen: the Community score, the Following score, Bingd users' Notes, and Feed
- * comments. The founder's words were "never call them critic reviews, professional
- * reviews or community reviews", and the reason is not fussiness — TMDB publishes no
- * critics, and the word "community" already means Bingd's community two sections up.
- */
-/**
  * Reviews are Bingd's, not TMDB's.
  *
  * The founder's correction: a tab called Reviews on a social product should be Bingd's

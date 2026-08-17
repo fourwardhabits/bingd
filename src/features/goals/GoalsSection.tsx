@@ -8,6 +8,7 @@ import { theme } from '@/ui/tokens';
 
 import { GoalBar } from './GoalBar';
 import { GoalSheet } from './GoalSheet';
+import { GoalTitlesSheet } from './GoalTitlesSheet';
 import { currentYear, setWatchGoal, useWatchGoals } from './use-goals';
 import type { GoalCategory } from './goals';
 
@@ -16,6 +17,14 @@ export type GoalsSectionProps = {
   /** Overridable so a test — or a later year-in-review screen — can ask about another
    *  year without this component reaching for the clock itself. */
   year?: number;
+  /**
+   * Opens a title from the drill-down.
+   *
+   * Passed rather than routed here, because this section is rendered inside a screen
+   * that already owns navigation — and a public profile could one day render it, where
+   * "open my watch" is not the same destination.
+   */
+  onPressTitle?: (mediaItemId: string) => void;
 };
 
 /**
@@ -27,11 +36,19 @@ export type GoalsSectionProps = {
  * is optional, and an apologetic block about a thing the user has chosen not to do
  * would take more of the profile than the feature is worth.
  */
-export function GoalsSection({ userId, year = currentYear() }: GoalsSectionProps) {
+export function GoalsSection({
+  userId,
+  year = currentYear(),
+  onPressTitle,
+}: GoalsSectionProps) {
   const queryClient = useQueryClient();
   const goals = useWatchGoals(userId, year);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Which bar has been opened into its titles. Null is closed; the two sheets on this
+  // section are independent states rather than one enum, because editing a target and
+  // reading what counted are different questions about the same row.
+  const [inspecting, setInspecting] = useState<GoalCategory | null>(null);
 
   const save = async (changes: { category: GoalCategory; target: number | null }[]) => {
     if (saving) return;
@@ -93,7 +110,13 @@ export function GoalsSection({ userId, year = currentYear() }: GoalsSectionProps
       ) : (
         <View style={[styles.body, styles.bars]}>
           {statuses.map((status) => (
-            <GoalBar key={status.category} status={status} />
+            <GoalBar
+              key={status.category}
+              status={status}
+              // Only where the screen can act on a tap. Without a destination the sheet
+              // would be a list of titles that lead nowhere.
+              onPress={onPressTitle ? () => setInspecting(status.category) : undefined}
+            />
           ))}
         </View>
       )}
@@ -109,6 +132,21 @@ export function GoalsSection({ userId, year = currentYear() }: GoalsSectionProps
           saving={saving}
           onSave={(changes) => void save(changes)}
           onClose={() => setEditing(false)}
+        />
+      ) : null}
+
+      {/* The titles behind a number, from the same read that produced it — so the sheet
+          cannot be open against a count it does not match. */}
+      {inspecting && onPressTitle ? (
+        <GoalTitlesSheet
+          category={inspecting}
+          year={year}
+          titles={goals.data?.qualifying[inspecting] ?? []}
+          onPressTitle={(mediaItemId) => {
+            setInspecting(null);
+            onPressTitle(mediaItemId);
+          }}
+          onClose={() => setInspecting(null)}
         />
       ) : null}
     </View>

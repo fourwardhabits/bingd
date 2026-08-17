@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { inkAlpha, theme } from '../tokens';
 import { Text } from './Text';
+import { useKeyboardHeight } from './use-keyboard-height';
 
 export type SheetProps = {
   visible: boolean;
@@ -28,8 +29,19 @@ export type SheetProps = {
  *
  * The backdrop is capped at 40% per §8: a warm light ground under a heavy scrim turns
  * muddy rather than dark.
+ *
+ * **It rises with the keyboard, which is the founder's device finding answered at the
+ * one place that fixes every sheet at once.** A bottom-anchored sheet with a composer
+ * at its foot — comments, the note in the log sheet, a goal's target — is covered by
+ * the keyboard *by construction* on Android, where edge-to-edge means the window never
+ * resizes and `adjustResize` has nothing to adjust. The measured height goes on the
+ * root's padding rather than the sheet's margin, which does two things with one value:
+ * it lifts the sheet clear, and it re-resolves `maxHeight: '90%'` against the space
+ * that is actually left, so a tall sheet shrinks instead of running off the top.
  */
 export function Sheet({ visible, onClose, label, children }: SheetProps) {
+  const keyboard = useKeyboardHeight();
+
   return (
     <Modal
       visible={visible}
@@ -39,7 +51,7 @@ export function Sheet({ visible, onClose, label, children }: SheetProps) {
       accessibilityViewIsModal
       statusBarTranslucent
     >
-      <View style={styles.root}>
+      <View style={[styles.root, keyboard > 0 && { paddingBottom: keyboard }]}>
         {/* Tapping away closes.
 
             Hidden from the accessibility tree on purpose. Every sheet in the app
@@ -55,7 +67,11 @@ export function Sheet({ visible, onClose, label, children }: SheetProps) {
           importantForAccessibility="no"
         />
         <SafeAreaView edges={['bottom']} style={styles.sheet} accessibilityLabel={label}>
-          <View style={styles.handle} accessibilityElementsHidden importantForAccessibility="no" />
+          <View
+            style={styles.handle}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          />
           {children}
         </SafeAreaView>
       </View>

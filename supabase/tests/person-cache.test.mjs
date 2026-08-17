@@ -22,7 +22,6 @@ import { createTestDb } from './harness.mjs';
  */
 
 let t;
-let film;
 
 const PAYLOAD = {
   person: { name: 'Test Person', profile_path: '/p.jpg', known_for: 'Acting' },
@@ -46,7 +45,6 @@ const row = async (personId) => {
 
 before(async () => {
   t = await createTestDb();
-  film = await t.createMovie('Reviewed Film', 990001);
 });
 
 after(async () => {

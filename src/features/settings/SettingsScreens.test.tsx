@@ -57,6 +57,15 @@ jest.mock('@/features/auth', () => ({
 // are about, and it would otherwise reach expo-image-picker.
 jest.mock('@/features/profile/AvatarPicker', () => ({ AvatarPicker: () => null }));
 
+// A release build, because that is the reader the diagnostics question is about: the
+// detailed block is gated on `variant !== 'production'`, so asserting its absence in a
+// development test would assert nothing at all.
+jest.mock('@/lib/env', () => ({
+  env: { variant: 'production' },
+  isProduction: true,
+  showEnvironmentBadge: false,
+}));
+
 const request = {
   id: 'n1',
   kind: 'follow_request',
@@ -147,6 +156,31 @@ describe('the Settings hub', () => {
     await waitFor(() => expect(view.getByLabelText('Notifications')).toBeTruthy());
     expect(view.queryByText(/waiting/)).toBeNull();
   });
+
+  it('signs out from here, in its own group, without touching anything', async () => {
+    // The founder's correction: sign-out used to live inside Account & Data, one row
+    // from permanent deletion. One is how you finish for the day and the other cannot
+    // be undone, and a screen offering them together invites the wrong tap.
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    await fireEvent.press(view.getByLabelText('Sign out'));
+
+    await waitFor(() => expect(mockSignOut).toHaveBeenCalled());
+    expect(mockRpc).not.toHaveBeenCalledWith('delete_account', expect.anything());
+    // Replaced rather than pushed, so Settings is not behind a back gesture on a
+    // session that no longer exists.
+    expect(mockReplace).toHaveBeenCalledWith('/');
+  });
+
+  it('shows a version a person can read aloud, and no fingerprints', async () => {
+    // What this replaced put six rows of release identity — runtime fingerprint,
+    // update id, channel, download time — in front of every reader. A support
+    // conversation starts with a version and a build number.
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    expect(view.getByText(/^Bingd .+ \(.+\)$/)).toBeTruthy();
+    expect(view.queryByText(/^runtime /)).toBeNull();
+  });
 });
 
 /**
@@ -201,7 +235,7 @@ describe('follow requests', () => {
     const view = await renderWithProviders(<NotificationsScreen />);
 
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
-    await fireEvent.press(view.getByLabelText('Ada, @ada, wants to follow you'));
+    await fireEvent.press(view.getByLabelText('Unread. Ada, @ada, wants to follow you'));
 
     expect(mockPush).toHaveBeenCalledWith('/u/ada');
   });
@@ -215,11 +249,37 @@ describe('follow requests', () => {
     expect(view.getByText(' · Inception')).toBeTruthy();
   });
 
-  it('marks the inbox read on opening it, which is what read means for a list', async () => {
+  it('leaves unread rows unread until the reader says otherwise', async () => {
+    // What this replaced marked the whole inbox read on its first render, which made
+    // `read_at` a column with one observable value — by the time anybody could look,
+    // nothing was ever unread. The founder asked for read/unread *and* a Mark all read
+    // control, and neither means anything without the other.
     mockRpcResults.my_notifications = [comment];
-    await renderWithProviders(<NotificationsScreen />);
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('1 unread')).toBeTruthy());
+    expect(mockRpc).not.toHaveBeenCalledWith('mark_notifications_read', expect.anything());
+    expect(view.getByLabelText(/^Unread\. Bo/)).toBeTruthy();
+  });
+
+  it('marks everything read when the reader asks', async () => {
+    mockRpcResults.my_notifications = [comment];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Mark all read')).toBeTruthy());
+    await fireEvent.press(view.getByText('Mark all read'));
 
     await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('mark_notifications_read', undefined));
+  });
+
+  it('offers nothing to mark when nothing is unread', async () => {
+    // A control that cannot change anything is the dead control this run keeps out.
+    mockRpcResults.my_notifications = [{ ...comment, read_at: '2026-08-17T11:00:00.000Z' }];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Bo')).toBeTruthy());
+    expect(view.queryByText('Mark all read')).toBeNull();
+    expect(view.queryByText(/unread/)).toBeNull();
   });
 
   it('says so plainly when there is nothing', async () => {
@@ -307,13 +367,13 @@ describe('deleting an account', () => {
     expect(view.getByText(/There is no deactivation/)).toBeTruthy();
   });
 
-  it('signs out without touching anything', async () => {
+  it('offers no sign-out beside the irreversible thing', async () => {
+    // It moved to the Settings hub, and the assertion moved with it. What is left on
+    // this screen is only the thing that cannot be undone, with the whole inventory of
+    // what goes and what stays above it.
     const view = await renderWithProviders(<AccountScreen />);
 
-    await fireEvent.press(view.getByText('Sign out'));
-
-    await waitFor(() => expect(mockSignOut).toHaveBeenCalled());
-    expect(mockRpc).not.toHaveBeenCalledWith('delete_account', expect.anything());
-    expect(mockReplace).toHaveBeenCalledWith('/');
+    expect(view.queryByText('Sign out')).toBeNull();
+    expect(view.getByRole('button', { name: 'Delete my account' })).toBeTruthy();
   });
 });

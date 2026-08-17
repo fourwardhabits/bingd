@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
@@ -49,6 +50,7 @@ export default function ProfileScreen() {
   const feed = useFeed(profile.id);
   const watched = useWatched(profile.id);
   const stats = useProfileStats(profile.id);
+  const notifications = useNotifications(profile.id);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
 
   // Own activity only. The feed query spans everyone this user follows, and a
@@ -63,6 +65,10 @@ export default function ProfileScreen() {
   return (
     <Screen>
       <AppHeader
+        notifications={{
+          count: unreadCount(notifications.data),
+          onPress: () => router.push('/settings/notifications'),
+        }}
         right={
           <Button label="Settings" kind="tertiary" onPress={() => router.push('/settings')} />
         }
@@ -107,7 +113,10 @@ export default function ProfileScreen() {
         {/* Above Top ranked, below the stats. A goal is about the year in progress
             and the stats are about all time, so this is where the page stops being a
             summary and starts being about now. */}
-        <GoalsSection userId={profile.id} />
+        <GoalsSection
+          userId={profile.id}
+          onPressTitle={(id) => router.push(`/title/${id}`)}
+        />
 
         <TopRanked userId={profile.id} onPressTitle={(id) => router.push(`/title/${id}`)} />
 

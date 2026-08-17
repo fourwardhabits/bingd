@@ -77,12 +77,17 @@ export function SpoilerNote({
   return (
     <View style={styles.note}>
       {/* Kept after revealing, and shown to the author too. The claim is part of
-          what the note says about itself, not merely the lock on the door. */}
+          what the note says about itself, not merely the lock on the door.
+
+          The same three words the mask above uses, and the same three the ranking
+          sheet, the note control and the comment composer use. One word was a
+          category; three are the claim the author actually made, and the founder's
+          correction is that all four places should say it identically. */}
       {hasSpoilers ? (
         <View style={styles.marker}>
           <Ionicons name="eye-off" size={theme.layout.icon.sm} color={theme.text.tertiary} />
           <Text variant="caption" tone="tertiary">
-            Spoilers
+            Contains spoilers
           </Text>
         </View>
       ) : null}

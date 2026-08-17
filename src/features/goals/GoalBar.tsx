@@ -1,4 +1,5 @@
-import { StyleSheet, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -7,6 +8,14 @@ import { GOAL_LABEL, goalSentence, type GoalStatus } from './goals';
 
 export type GoalBarProps = {
   status: GoalStatus;
+  /**
+   * Opens the titles behind the number.
+   *
+   * Optional, because the bar is also a plain readout in places that have nothing to
+   * open — and a row that looks tappable and is not is worse than one that never
+   * offered.
+   */
+  onPress?: () => void;
 };
 
 /**
@@ -23,25 +32,28 @@ export type GoalBarProps = {
  * Sage is "watched, completed, progress" and is what the bar is measuring until then.
  * Neither is ever text.
  */
-export function GoalBar({ status }: GoalBarProps) {
+export function GoalBar({ status, onPress }: GoalBarProps) {
   const sentence = goalSentence(status);
   const percent = Math.round(status.fraction * 100);
 
-  return (
-    <View
-      style={styles.root}
-      accessibilityRole="progressbar"
-      // Spoken as one thing: "Movies, 12 of 52". Without an explicit label a screen
-      // reader reads the two Text children as separate items and the value loses the
-      // medium it belongs to.
-      accessibilityLabel={`${GOAL_LABEL[status.category]}, ${sentence}`}
-      accessibilityValue={{ min: 0, max: status.target, now: status.count, text: sentence }}
-    >
+  const body = (
+    <>
       <View style={styles.heading}>
-        <Text variant="callout">{GOAL_LABEL[status.category]}</Text>
+        <Text variant="callout" style={styles.label}>
+          {GOAL_LABEL[status.category]}
+        </Text>
         <Text variant="footnote" tone="secondary">
           {sentence}
         </Text>
+        {/* Only where there is something to open, and small: the bar is the content
+            and the chevron is a hint about it. */}
+        {onPress ? (
+          <Ionicons
+            name="chevron-forward"
+            size={theme.layout.icon.sm}
+            color={theme.text.tertiary}
+          />
+        ) : null}
       </View>
 
       <View style={styles.track} accessibilityElementsHidden importantForAccessibility="no">
@@ -49,15 +61,52 @@ export function GoalBar({ status }: GoalBarProps) {
             a goal with nothing against it should show an empty track instead. */}
         {percent > 0 ? (
           <View
-            style={[
-              styles.fill,
-              { width: `${percent}%` },
-              status.complete && styles.fillComplete,
-            ]}
+            style={[styles.fill, { width: `${percent}%` }, status.complete && styles.fillComplete]}
           />
         ) : null}
       </View>
-    </View>
+    </>
+  );
+
+  // Spoken as one thing: "Movies, 12 of 52". Without an explicit label a screen reader
+  // reads the two Text children as separate items and the value loses the medium it
+  // belongs to.
+  const label = `${GOAL_LABEL[status.category]}, ${sentence}`;
+
+  if (!onPress) {
+    return (
+      <View
+        style={styles.root}
+        accessibilityRole="progressbar"
+        accessibilityLabel={label}
+        accessibilityValue={{ min: 0, max: status.target, now: status.count, text: sentence }}
+      >
+        {body}
+      </View>
+    );
+  }
+
+  /**
+   * The founder's correction: the progress row opens the titles behind it.
+   *
+   * `button` rather than `progressbar` once it is tappable, because a progressbar with
+   * an action is a control a screen reader will not offer to activate. The value moves
+   * into the label, which is where a button's state has to live — the sentence "Movies,
+   * 12 of 52" is already the whole readout.
+   *
+   * The bar itself is unchanged and still not the only signal: the number is beside it
+   * in words, and the hint says what a tap does rather than leaving it to the chevron.
+   */
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint="Shows the titles that counted"
+      onPress={onPress}
+      style={({ pressed }) => [styles.root, pressed && styles.pressed]}
+    >
+      {body}
+    </Pressable>
   );
 }
 
@@ -65,10 +114,13 @@ const styles = StyleSheet.create({
   root: { gap: theme.space[2] },
   heading: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: theme.space[3],
   },
+  // Takes the slack, so the count and the chevron sit together on the right rather
+  // than the count drifting to the middle when the label is short.
+  label: { flex: 1 },
+  pressed: { opacity: 0.7 },
   track: {
     height: 8,
     borderRadius: theme.radius.full,

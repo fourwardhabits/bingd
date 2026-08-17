@@ -202,7 +202,7 @@ describe('the note', () => {
     expect(view.getByText(note)).toBeTruthy();
     // The claim survives the reveal — it is part of what the note says about
     // itself, not just the lock.
-    expect(view.getByText('Spoilers')).toBeTruthy();
+    expect(view.getAllByText('Contains spoilers')[0]).toBeTruthy();
   });
 
   it('shows a spoiler note unmasked, with its marker, to someone who has seen it', async () => {
@@ -212,8 +212,13 @@ describe('the note', () => {
     );
 
     expect(view.getByText(note)).toBeTruthy();
-    expect(view.getByText('Spoilers')).toBeTruthy();
-    expect(view.queryByText('Contains spoilers')).toBeNull();
+    // The founder's "subtle spoiler indicator": somebody who has seen the film reads
+    // the words rather than tapping through to them, and the claim the author made is
+    // still part of what the note says about itself. The three words are the same ones
+    // the mask, the ranking sheet, the note control and the comment composer use.
+    expect(view.getByText('Contains spoilers')).toBeTruthy();
+    // And no "Show", because there is nothing hidden to reveal.
+    expect(view.queryByText('Show')).toBeNull();
   });
 });
 

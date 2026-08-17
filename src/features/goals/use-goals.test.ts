@@ -89,7 +89,10 @@ describe('reading a year of goals', () => {
     const { result } = await renderHookWithProviders(() => useWatchGoals(USER, 2026));
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(readOf('user_media')?.columns).toContain('media_items!inner(kind)');
+    // The title and the poster come with it, because the drill-down lists exactly the
+    // rows this read counted — a second query for the same titles is how a list and
+    // the number above it start to disagree.
+    expect(readOf('user_media')?.columns).toContain('media_items!inner(kind, title, poster_path)');
   });
 
   it('reports a status only for a medium with a goal', async () => {

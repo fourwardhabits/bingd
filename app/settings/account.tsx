@@ -1,11 +1,11 @@
 import { Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 
 import { signOut, useCurrentProfile } from '@/features/auth';
 import { deleteAllAvatars } from '@/features/profile/avatar';
 import { useAccountWrites } from '@/features/settings/use-account';
-import { Button, Field, Screen, SectionHeader, Text } from '@/ui/components';
+import { Button, Field, KeyboardScreen, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -37,14 +37,6 @@ export default function AccountScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const matches = confirmation.trim().toLowerCase() === profile.username.toLowerCase();
-
-  const leave = async () => {
-    await signOut();
-    // Back to the root, which the auth routing resolves to the sign-in flow. Replaced
-    // rather than pushed so the account screen is not behind a back gesture on a
-    // session that no longer exists.
-    router.replace('/');
-  };
 
   const destroy = () => {
     setError(null);
@@ -110,18 +102,23 @@ export default function AccountScreen() {
         options={{ headerShown: true, title: 'Account & Data', headerBackTitle: 'Back' }}
       />
 
-      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+      {/* The confirmation field is the last thing on a long page, which on Android
+          edge-to-edge means the keyboard covers the field the moment it is focused and
+          the Delete control under it with the same gesture. `KeyboardScreen` measures
+          the keyboard rather than relying on a window resize that does not happen. */}
+      <KeyboardScreen contentContainerStyle={styles.page}>
+        {/* Sign out used to live here, beside permanent deletion. The founder's
+            correction moved it to Settings' own list: one is how you finish for the
+            day and the other cannot be undone, and a screen that offers them together
+            invites the wrong tap. What is left here is only the irreversible thing,
+            with the whole inventory above it — and the name of the account it will
+            happen to, which is the one thing worth stating before an irreversible act. */}
         <View style={styles.section}>
           <SectionHeader title="Signed in as" />
           <View style={styles.body}>
             <Text variant="body">
               {profile.display_name || profile.username}
               <Text tone="secondary">{`  @${profile.username}`}</Text>
-            </Text>
-            <Button label="Sign out" kind="secondary" onPress={() => void leave()} />
-            <Text variant="caption" tone="tertiary">
-              Signing out leaves everything where it is. Sign back in on this or any
-              other device and your collection is exactly as you left it.
             </Text>
           </View>
         </View>
@@ -130,8 +127,8 @@ export default function AccountScreen() {
           <SectionHeader title="Delete your account" />
           <View style={styles.body}>
             <Text variant="body">
-              This is permanent. There is no deactivation and nothing is held in
-              reserve — once it is done, none of it can be recovered by you or by us.
+              This is permanent. There is no deactivation and nothing is held in reserve — once
+              it is done, none of it can be recovered by you or by us.
             </Text>
 
             <View style={styles.inventory}>
@@ -147,7 +144,7 @@ export default function AccountScreen() {
                 'Your goals, every picture you have uploaded, and anything derived about you',
               ].map((line) => (
                 <Text key={line} variant="caption" tone="tertiary">
-                  ·  {line}
+                  · {line}
                 </Text>
               ))}
             </View>
@@ -161,7 +158,7 @@ export default function AccountScreen() {
                 'How many people joined through an invite, without naming who invited them',
               ].map((line) => (
                 <Text key={line} variant="caption" tone="tertiary">
-                  ·  {line}
+                  · {line}
                 </Text>
               ))}
             </View>
@@ -177,9 +174,9 @@ export default function AccountScreen() {
                 Kept as a safety record, and not anonymous:
               </Text>
               <Text variant="caption" tone="tertiary">
-                ·  Reports made about you or by you, including what was written in
-                them, and any action taken. An account that could delete the reports
-                against it by closing itself would make reporting worthless.
+                · Reports made about you or by you, including what was written in them, and any
+                action taken. An account that could delete the reports against it by closing
+                itself would make reporting worthless.
               </Text>
             </View>
 
@@ -203,7 +200,7 @@ export default function AccountScreen() {
             />
           </View>
         </View>
-      </ScrollView>
+      </KeyboardScreen>
     </Screen>
   );
 }

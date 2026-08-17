@@ -110,7 +110,7 @@ describe('spoilers', () => {
 
     const view = await open({ watched: new Set() });
 
-    await waitFor(() => expect(view.getByText('Contains spoilers')).toBeTruthy());
+    await waitFor(() => expect(view.getAllByText('Contains spoilers').length).toBeGreaterThan(0));
     // Not "is clipped", not "is behind an overlay". Absent. A string in the tree is
     // read aloud by a screen reader and copied by a selection whatever is drawn on
     // top of it.
@@ -121,7 +121,7 @@ describe('spoilers', () => {
     mockCommentRows = [comment({ has_spoilers: true })];
 
     const view = await open({ watched: new Set() });
-    await waitFor(() => expect(view.getByText('Contains spoilers')).toBeTruthy());
+    await waitFor(() => expect(view.getAllByText('Contains spoilers').length).toBeGreaterThan(0));
 
     await fireEvent.press(view.getByText('Show'));
 
@@ -137,10 +137,11 @@ describe('spoilers', () => {
 
     await waitFor(() => expect(view.getByText(/recontextualises/)).toBeTruthy());
     // The founder's "subtle spoiler indication" — the claim is still part of what the
-    // comment says about itself. Two matches: the marker on the comment, and the
-    // composer's own toggle, which is always present.
-    expect(view.getAllByText('Spoilers')).toHaveLength(2);
-    expect(view.queryByText('Contains spoilers')).toBeNull();
+    // comment says about itself, and somebody who has seen the film reads the words
+    // rather than tapping through to them. Two matches: the marker on the comment, and
+    // the composer's own toggle, which is always present. Both now say the same three
+    // words the ranking sheet and the note control say.
+    expect(view.getAllByText('Contains spoilers')).toHaveLength(2);
   });
 
   it('masks a season comment for somebody who has only watched another season', async () => {
@@ -150,7 +151,7 @@ describe('spoilers', () => {
 
     const view = await open({ mediaItemId: SEASON_2, watched: new Set([SEASON_1]) });
 
-    await waitFor(() => expect(view.getByText('Contains spoilers')).toBeTruthy());
+    await waitFor(() => expect(view.getAllByText('Contains spoilers').length).toBeGreaterThan(0));
     expect(view.queryByText(/recontextualises/)).toBeNull();
   });
 
@@ -170,7 +171,7 @@ describe('spoilers', () => {
 
     const view = await open({ watched: undefined });
 
-    await waitFor(() => expect(view.getByText('Contains spoilers')).toBeTruthy());
+    await waitFor(() => expect(view.getAllByText('Contains spoilers').length).toBeGreaterThan(0));
     expect(view.queryByText(/recontextualises/)).toBeNull();
   });
 });

@@ -6,6 +6,7 @@ import {
   useWatchlist,
   type RankedEntry,
 } from '@/features/collection/use-collection';
+import { applyFilters, emptyFilters, type CollectionFilters, type CollectionItem } from '@/features/collection/filters';
 import { useWatched } from '@/features/collection/use-watched';
 import { supabase } from '@/lib/supabase';
 import { AdapterError, cacheSimilar } from '@/lib/tmdb-adapter';
@@ -45,8 +46,43 @@ export type ForYouItem = Scored & {
   saved: boolean;
 };
 
+/**
+ * A candidate as the collection filter sheet sees it.
+ *
+ * The sheet was written for `CollectionItem` and its own header says the For You page
+ * "is meant to reuse it rather than grow a second one". This is that reuse: a candidate
+ * already carries the four facets the sheet filters on — genres, language, year and the
+ * kind that decides anime — so the mapping is a widening rather than a translation.
+ *
+ * The three fields a candidate cannot have are null, and they are exactly the ones the
+ * sheet is told not to offer here: nothing on a For You wall has been ranked, so there
+ * is no bucket, no score and no watch date to filter by.
+ */
+export const asCollectionItem = (candidate: Candidate): CollectionItem => ({
+  mediaItemId: candidate.mediaItemId,
+  title: candidate.title,
+  seriesTitle: null,
+  kind: candidate.kind,
+  year: candidate.year,
+  posterPath: candidate.posterPath,
+  genres: [...candidate.genres],
+  language: candidate.language,
+  runtimeMinutes: null,
+  score: null,
+  bucket: null,
+  watchedOn: null,
+});
+
 export type ForYouSlate = {
   items: ForYouItem[];
+  /**
+   * Every candidate considered, *before* the reader's filters.
+   *
+   * The filter sheet builds its options from this, so a wall filtered to Comedy still
+   * offers Horror — the sheet's own rule is that the options describe the whole set
+   * rather than what is currently on screen.
+   */
+  candidatePool: CollectionItem[];
   /** How many anchors actually had a cached list. Zero means popularity-only. */
   anchorsUsed: number;
   /** True when the slate is popularity-only — no personalisation to claim. */
@@ -236,7 +272,7 @@ export function rankingFingerprint(...lists: readonly (readonly RankedEntry[])[]
   return (hash >>> 0).toString(36);
 }
 
-export function useForYou(userId: string, medium: Medium) {
+export function useForYou(userId: string, medium: Medium, filters?: CollectionFilters) {
   // Taste spans both media. Someone who ranks Japanese cinema highly means that about
   // television too, and splitting the affinity vector by medium would halve the
   // evidence behind every genre for no reason anybody could state.
@@ -273,7 +309,10 @@ export function useForYou(userId: string, medium: Medium) {
   ].join('|');
 
   return useQuery({
-    queryKey: ['for-you', userId, medium, inputs],
+    // The filters are part of the key: the same anchors and the same candidates with
+    // a different genre picked are a different slate, and a shared key would serve
+    // whichever the reader asked for first.
+    queryKey: ['for-you', userId, medium, inputs, filters ?? emptyFilters()],
     enabled:
       Boolean(userId) &&
       movies.isSuccess &&
@@ -345,10 +384,27 @@ export function useForYou(userId: string, medium: Medium) {
       const exclude = watched.data ?? new Set<string>();
       const saved = new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId));
 
-      const slate = buildSlate({ candidates, anchors, taste, exclude });
+      /**
+       * Filtered **before** scoring, not after.
+       *
+       * The difference matters and it is the founder's constraint. `buildSlate` is
+       * where the diversity rules live — the franchise ceiling, the genre spread, the
+       * saturating anchor term — and they operate over whatever it is given. Filtering
+       * its *output* would take a slate those rules had balanced and cut it to whatever
+       * survived, leaving four titles that might all be from one series. Filtering the
+       * candidates lets the same rules do the same job inside the narrower pool.
+       */
+      const pool = filters
+        ? candidates.filter((candidate) =>
+            applyFilters([asCollectionItem(candidate)], filters).length > 0,
+          )
+        : candidates;
+
+      const slate = buildSlate({ candidates: pool, anchors, taste, exclude });
 
       return {
         items: slate.map((item) => ({ ...item, saved: saved.has(item.mediaItemId) })),
+        candidatePool: candidates.map(asCollectionItem),
         anchorsUsed,
         lowData: anchorsUsed === 0,
         taste,

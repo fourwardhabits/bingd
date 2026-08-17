@@ -4,7 +4,7 @@ import * as Updates from 'expo-updates';
 import { Stack, useRouter } from 'expo-router';
 import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { useCurrentProfile } from '@/features/auth';
+import { signOut, useCurrentProfile } from '@/features/auth';
 import { pendingRequestCount, useNotifications } from '@/features/notifications/use-notifications';
 import { env } from '@/lib/env';
 import { Button, Screen, SectionHeader, Text } from '@/ui/components';
@@ -34,6 +34,13 @@ export default function SettingsScreen() {
   const profile = useCurrentProfile();
   const notifications = useNotifications(profile.id);
   const pending = pendingRequestCount(notifications.data);
+
+  const leave = async () => {
+    await signOut();
+    // Replaced rather than pushed, so Settings is not behind a back gesture on a
+    // session that no longer exists.
+    router.replace('/');
+  };
 
   return (
     <Screen includeBottomInset>
@@ -70,6 +77,16 @@ export default function SettingsScreen() {
             onPress={() => router.push('/settings/account')}
             last
           />
+        </View>
+
+        {/* Its own group, one gap below the rest.
+            The founder's correction: signing out was inside Account & Data, beside
+            permanent deletion, and the two are not the same kind of thing at all — one
+            is how you finish for the day and the other cannot be undone. Separating
+            them visually says that without dressing sign-out up as destructive, which
+            it also is not. */}
+        <View style={styles.group}>
+          <Row icon="log-out-outline" label="Sign out" onPress={() => void leave()} last />
         </View>
 
         <About />
@@ -135,6 +152,12 @@ function Row({
  * this ships now rather than with the commercial plan: it is cheap in an empty
  * settings screen and expensive to retrofit across a shipped app.
  *
+ * The line under the link changed on 2026-08-17. It used to explain that reviews on a
+ * title were TMDB members' rather than Bingd users', which was true then and is the
+ * opposite of true now: the Reviews tab is Bingd's own public Notes and TMDB's left the
+ * app entirely. It now says which half of a title page is theirs, which is the thing a
+ * reader would actually wonder.
+ *
  * Two obligations are met elsewhere and one is still owed. The per-title source line
  * is on the title screen and now on the person screen too; artwork is served from
  * TMDB's CDN and never rehosted (`src/lib/images.ts`). Still owed is the approved TMDB
@@ -164,7 +187,8 @@ function About() {
           <Text tone="action">themoviedb.org</Text>
         </Pressable>
         <Text variant="caption" tone="tertiary">
-          Reviews shown on a title are written by TMDB members, not by Bingd users.
+          Artwork, cast and title details come from TMDB. Reviews and scores are Bingd
+          users&apos; own.
         </Text>
       </View>
     </View>
@@ -172,44 +196,46 @@ function About() {
 }
 
 /**
- * Which build, and which JavaScript inside it.
+ * The version, for somebody reporting a problem.
  *
- * Over-the-air updates make the second question real: two testers on the same APK can be
- * running different code, and "have you got the fix yet?" is otherwise unanswerable except
- * by describing symptoms. The update id answers it. It is also the only way to see an
- * update actually land — the app reloads on returning to the foreground, and without
- * something on screen that changes, a successful update is indistinguishable from nothing
- * having happened.
+ * **What this replaced put six rows of release identity in front of every user**:
+ * runtime fingerprint, update id, channel, download time, the environment badge. All
+ * of it genuinely useful — the update id is the only way to answer "have you got the
+ * fix yet?" without describing symptoms — and none of it anything a person opening
+ * Settings has a use for. The founder's correction is that a normal reader gets a
+ * version and a build number, which is what a support conversation actually starts
+ * with.
  *
- * Hidden in production, like the environment badge: a paying user has no use for a build
- * fingerprint, and PRD §23 keeps identifiers out of anything user-facing.
+ * The rest is not deleted, it is moved: `env.variant !== 'production'` still gates the
+ * detailed block, so a preview build carries the diagnostics for Beta Hardening and a
+ * release build shows one line. That is the same rule as before with the *default*
+ * inverted — it used to show everything outside production, and now it shows the line
+ * everywhere and the detail only where somebody is testing.
  */
 function BuildDetails() {
-  if (env.variant === 'production') return null;
-
-  const rows: [string, string][] = [
-    ['Variant', env.variant],
-    ['Version', `${Constants.expoConfig?.version ?? '?'} (${Constants.expoConfig?.android?.versionCode ?? '—'})`],
-    ['Channel', Updates.channel ?? 'none'],
-    // The fingerprint of everything native. An update is only offered to builds whose
-    // fingerprint matches, so when a tester stops receiving updates, this is why.
-    ['Runtime', short(Updates.runtimeVersion)],
-    ['Update', Updates.isEmbeddedLaunch ? 'embedded (no update yet)' : short(Updates.updateId)],
-    ['Downloaded', Updates.createdAt?.toLocaleString() ?? '—'],
-  ];
+  const version = Constants.expoConfig?.version ?? '?';
+  const build = Constants.expoConfig?.android?.versionCode ?? '—';
 
   return (
     <View style={styles.block}>
-      <SectionHeader title="Build" />
       <View style={styles.blockBody}>
-        {rows.map(([label, value]) => (
-          <View key={label} style={styles.detailRow}>
-            <Text tone="secondary" style={styles.detailLabel}>
-              {label}
+        <Text variant="caption" tone="tertiary">
+          Bingd {version} ({build})
+        </Text>
+
+        {/* Only where somebody is testing. PRD §23 keeps identifiers out of anything
+            user-facing, and a fingerprint is an identifier. */}
+        {env.variant !== 'production' ? (
+          <>
+            <Text variant="caption" tone="tertiary">
+              {env.variant} · {Updates.channel ?? 'no channel'}
             </Text>
-            <Text style={styles.detailValue}>{value}</Text>
-          </View>
-        ))}
+            <Text variant="caption" tone="tertiary">
+              runtime {short(Updates.runtimeVersion)} ·{' '}
+              {Updates.isEmbeddedLaunch ? 'embedded' : `update ${short(Updates.updateId)}`}
+            </Text>
+          </>
+        ) : null}
       </View>
     </View>
   );
@@ -251,12 +277,5 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.card,
     backgroundColor: theme.surface.raised,
   },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: theme.space[4],
-  },
-  detailLabel: { flexShrink: 0 },
-  detailValue: { flexShrink: 1, textAlign: 'right' },
   pressed: { opacity: 0.7 },
 });

@@ -106,25 +106,51 @@ export function watchedInYear(watchedOn: string | null, year: number): boolean {
 }
 
 /**
+ * Exactly which watches counted, per medium.
+ *
+ * **This is the function, and `countWatched` is now a `.length` of it.** The founder's
+ * correction is that a progress row should open into the titles behind it, and the
+ * failure mode of adding that as a second query is a list that disagrees with the
+ * number above it — four rules applied twice, in two places, drifting apart at the
+ * first edit. One traversal, one set of rules, and the count is derived from the list
+ * rather than computed beside it.
+ *
+ * Generic over the row so a caller carrying artwork and a title gets those back: the
+ * rules only look at `kind` and `watchedOn`, and nothing here needs to know what else
+ * is on the row.
+ *
+ * Rule 4 lives here as the `seen` set — a media item counts once however many rows
+ * name it, and the *first* row for an id is the one kept, so the list is stable under
+ * a re-fetch that returns the same rows in the same order.
+ */
+export function qualifyingWatches<T extends CountableWatch>(
+  rows: readonly T[],
+  year: number,
+): Record<GoalCategory, T[]> {
+  const out: Record<GoalCategory, T[]> = { movies: [], tv_seasons: [] };
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    if (!watchedInYear(row.watchedOn, year)) continue;
+    const category = goalCategoryOf(row.kind);
+    if (!category) continue;
+    if (seen.has(row.mediaItemId)) continue;
+    seen.add(row.mediaItemId);
+    out[category].push(row);
+  }
+
+  return out;
+}
+
+/**
  * How many distinct things the viewer watched in `year`, per medium.
  *
  * Always returns both keys, including zeroes: a medium with a goal and no watches
  * yet has to render `0 of 52`, and an absent key would render nothing at all.
  */
 export function countWatched(rows: readonly CountableWatch[], year: number): GoalCounts {
-  const seen: Record<GoalCategory, Set<string>> = {
-    movies: new Set(),
-    tv_seasons: new Set(),
-  };
-
-  for (const row of rows) {
-    if (!watchedInYear(row.watchedOn, year)) continue;
-    const category = goalCategoryOf(row.kind);
-    if (!category) continue;
-    seen[category].add(row.mediaItemId);
-  }
-
-  return { movies: seen.movies.size, tv_seasons: seen.tv_seasons.size };
+  const qualifying = qualifyingWatches(rows, year);
+  return { movies: qualifying.movies.length, tv_seasons: qualifying.tv_seasons.length };
 }
 
 export type GoalStatus = {

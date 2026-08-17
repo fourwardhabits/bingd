@@ -100,13 +100,20 @@ export function useNotifications(viewerId: string) {
  *
  * Only follow requests count. A reaction is not a task and a comment is not a task;
  * a request is somebody waiting on the reader, and it is the one thing in this inbox
- * that stays true until they act. A badge over the other kinds would be a number that
- * means "we have news", which nobody can act on.
+ * that stays true until they act — which is why Settings' row says "3 waiting" rather
+ * than repeating the bell's number.
  */
 export function pendingRequestCount(notifications: Notification[] | undefined) {
   return (notifications ?? []).filter((row) => row.kind === 'follow_request').length;
 }
 
+/**
+ * How much has not been read, which is what the bell carries.
+ *
+ * It only became a usable number when read state became the reader's to change: while
+ * the inbox marked itself read on open, this was zero every time anybody could have
+ * looked at it.
+ */
 export function unreadCount(notifications: Notification[] | undefined) {
   return (notifications ?? []).filter((row) => !row.readAt).length;
 }
@@ -138,9 +145,10 @@ export function verbFor(kind: NotificationKind): string {
 /**
  * Marks the whole inbox read.
  *
- * All at once because there is no per-row surface and the useful meaning of "read" on
- * a list somebody opens is "has seen this screen". `read_at` and the partial index
- * behind it were declared with the notifications table and had no writer until now.
+ * All at once, from one control the reader presses. There is no per-row marking and no
+ * mark-on-open: the first would be six taps to clear six rows, and the second is what
+ * this replaced — it made `read_at` a column whose value nobody could ever observe as
+ * anything but "read".
  */
 export function useMarkNotificationsRead(viewerId: string) {
   const queryClient = useQueryClient();

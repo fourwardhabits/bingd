@@ -1,5 +1,4 @@
 import { Stack, useRouter } from 'expo-router';
-import { useEffect } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -38,6 +37,13 @@ import { theme } from '@/ui/tokens';
  * it; there is one delivery channel, it cannot be switched off without making requests
  * unanswerable, and a screen of switches over a table nothing reads is exactly the
  * dead control this run was told not to ship.
+ *
+ * **Read is something the reader does, not something opening the screen does to them.**
+ * This screen used to mark everything read on its first render, which made `read_at` a
+ * column with exactly one observable value: by the time anybody could look, nothing was
+ * unread. The founder's correction asks for read/unread *and* a Mark all read control,
+ * and the two only mean anything together — so the rows now say which they are, and the
+ * control is the only thing that changes it.
  */
 export default function NotificationsScreen() {
   const profile = useCurrentProfile();
@@ -49,22 +55,7 @@ export default function NotificationsScreen() {
   const rows = notifications.data ?? [];
   const requests = rows.filter((row) => row.kind === 'follow_request');
   const rest = rows.filter((row) => row.kind !== 'follow_request');
-  const unread = rows.some((row) => !row.readAt);
-
-  /**
-   * Opening the screen is what "read" means here.
-   *
-   * There is no per-row control and no useful meaning for one: this is a list somebody
-   * opens, and the honest reading of `read_at` on it is "has seen this". Fired once,
-   * on the first render that has something unread — `mutate` is stable and the guard
-   * is the flag itself, which the invalidation clears.
-   */
-  useEffect(() => {
-    if (unread && !markRead.isPending) markRead.mutate();
-    // Deliberately not depending on the mutation object, which is a new identity each
-    // render. `unread` going false after the invalidation is what stops this.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unread]);
+  const unreadCount = rows.filter((row) => !row.readAt).length;
 
   const answer = async (row: Notification, approve: boolean) => {
     if (!row.actorId) return;
@@ -83,7 +74,11 @@ export default function NotificationsScreen() {
   return (
     <Screen includeBottomInset>
       <Stack.Screen
-        options={{ headerShown: true, title: 'Notifications', headerBackTitle: 'Back' }}
+        options={{
+          headerShown: true,
+          title: 'Notifications',
+          headerBackTitle: 'Back',
+        }}
       />
 
       {notifications.isPending ? (
@@ -103,14 +98,32 @@ export default function NotificationsScreen() {
         />
       ) : (
         <ScrollView contentContainerStyle={styles.page}>
+          {/* In the list rather than in the navigation bar, and only while it would do
+              something. A control that clears a state has to sit where that state is
+              visible, or the reader cannot tell what they just changed. */}
+          {unreadCount > 0 ? (
+            <View style={styles.markAll}>
+              <Text variant="footnote" tone="secondary" style={styles.markAllCount}>
+                {unreadCount === 1 ? '1 unread' : `${unreadCount} unread`}
+              </Text>
+              <Button
+                label={markRead.isPending ? 'Marking…' : 'Mark all read'}
+                kind="tertiary"
+                onPress={() => markRead.mutate()}
+                disabled={markRead.isPending}
+                disabledReason="Marking your notifications read."
+              />
+            </View>
+          ) : null}
+
           {requests.length ? (
             <View style={styles.section}>
               <SectionHeader title="Follow requests" />
               {requests.map((row) => (
-                <View key={row.id} style={styles.request}>
+                <View key={row.id} style={[styles.request, !row.readAt && styles.unread]}>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={`${row.actorName}, @${row.actorUsername}, wants to follow you`}
+                    accessibilityLabel={`${row.readAt ? '' : 'Unread. '}${row.actorName}, @${row.actorUsername}, wants to follow you`}
                     accessibilityHint="Opens their profile"
                     onPress={() => openActor(row)}
                     style={styles.person}
@@ -124,6 +137,7 @@ export default function NotificationsScreen() {
                         @{row.actorUsername} · wants to follow you
                       </Text>
                     </View>
+                    <UnreadDot show={!row.readAt} />
                   </Pressable>
                   <View style={styles.answers}>
                     <Button
@@ -155,12 +169,16 @@ export default function NotificationsScreen() {
                 <Pressable
                   key={row.id}
                   accessibilityRole="button"
-                  accessibilityLabel={`${row.actorName} ${verbFor(row.kind)}${
-                    row.mediaTitle ? `, ${row.mediaTitle}` : ''
-                  }`}
+                  accessibilityLabel={`${row.readAt ? '' : 'Unread. '}${row.actorName} ${verbFor(
+                    row.kind,
+                  )}${row.mediaTitle ? `, ${row.mediaTitle}` : ''}`}
                   accessibilityHint="Opens their profile"
                   onPress={() => openActor(row)}
-                  style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                  style={({ pressed }) => [
+                    styles.row,
+                    !row.readAt && styles.unread,
+                    pressed && styles.pressed,
+                  ]}
                 >
                   <Avatar size="sm" uri={row.actorAvatarUri} name={row.actorName ?? ''} />
                   <View style={styles.rowCopy}>
@@ -178,6 +196,7 @@ export default function NotificationsScreen() {
                       {new Date(row.createdAt).toLocaleDateString()}
                     </Text>
                   </View>
+                  <UnreadDot show={!row.readAt} />
                 </Pressable>
               ))}
             </View>
@@ -188,8 +207,35 @@ export default function NotificationsScreen() {
   );
 }
 
+/**
+ * Unread, as a mark rather than as a colour alone.
+ *
+ * The tinted row is the thing somebody notices while scanning; the dot is what makes it
+ * readable for anyone who cannot see the tint, and the word "Unread" opens the label
+ * for anyone who is listening rather than looking. Three signals for one bit of state,
+ * which is the accessibility rule the score system already follows.
+ */
+function UnreadDot({ show }: { show: boolean }) {
+  if (!show) return null;
+  return <View style={styles.dot} accessibilityElementsHidden importantForAccessibility="no" />;
+}
+
 const styles = StyleSheet.create({
   page: { paddingBottom: theme.space[10] },
+  unread: { backgroundColor: theme.surface.raised },
+  markAll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+  },
+  markAllCount: { flex: 1 },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: theme.radius.full,
+    backgroundColor: theme.semantic.action,
+  },
   section: { paddingTop: theme.space[4], gap: theme.space[1] },
   request: {
     paddingHorizontal: theme.layout.gutter,

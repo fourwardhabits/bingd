@@ -208,3 +208,98 @@ describe('with no goal set', () => {
     expect(screen.queryByText('Edit')).toBeNull();
   });
 });
+
+/**
+ * The founder's correction: a progress row opens into the titles behind the number.
+ *
+ * The property worth testing is not that a sheet opens — it is that the sheet shows
+ * *exactly* what was counted. `qualifyingWatches` is the one traversal that produces
+ * both, so the fixture below deliberately includes every kind of row the rules throw
+ * away and asserts that the list and the count agree about all of them.
+ */
+describe('opening a goal into the titles behind it', () => {
+  const watch = (
+    id: string,
+    title: string,
+    kind: 'movie' | 'season' | 'series',
+    watchedOn: string | null,
+  ) => ({
+    media_item_id: id,
+    watched_on: watchedOn,
+    media_items: { kind, title, poster_path: null },
+  });
+
+  beforeEach(() => {
+    mockTables.watch_goals = [
+      { category: 'movies', target: 52 },
+      { category: 'tv_seasons', target: 10 },
+    ];
+    mockTables.user_media = [
+      watch('m1', 'Sinners', 'movie', '2026-03-04'),
+      watch('m2', 'Heat', 'movie', '2026-01-20'),
+      // Rule 2: no watch date, so it counts for nothing and must not be listed.
+      watch('m3', 'Undated Film', 'movie', null),
+      // Rule 1: the watch date is the only clock, and this one is last year's.
+      watch('m4', 'Last Year Film', 'movie', '2025-12-31'),
+      // Rule 3: a series is neither a movie nor a season.
+      watch('s1', 'Severance', 'series', '2026-02-02'),
+      watch('s2', 'Severance — Season 2', 'season', '2026-02-03'),
+    ];
+  });
+
+  const openMovies = async (onPressTitle = jest.fn()) => {
+    await renderWithProviders(
+      <GoalsSection userId="user-1" year={2026} onPressTitle={onPressTitle} />,
+    );
+    await waitFor(() => expect(screen.getByText('2 of 52 movies')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('Movies, 2 of 52 movies'));
+    return onPressTitle;
+  };
+
+  it('lists exactly the titles that counted, and nothing the rules refused', async () => {
+    await openMovies();
+
+    expect(screen.getByText('Sinners')).toBeTruthy();
+    expect(screen.getByText('Heat')).toBeTruthy();
+    // Each of these is one of the four rules, and each would be a number the reader
+    // could not reconcile with the list under it.
+    expect(screen.queryByText('Undated Film')).toBeNull();
+    expect(screen.queryByText('Last Year Film')).toBeNull();
+    expect(screen.queryByText('Severance')).toBeNull();
+    expect(screen.queryByText('Severance — Season 2')).toBeNull();
+  });
+
+  it('counts the seasons goal from seasons alone', async () => {
+    await renderWithProviders(
+      <GoalsSection userId="user-1" year={2026} onPressTitle={jest.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByText('1 of 10 seasons')).toBeTruthy());
+
+    await fireEvent.press(screen.getByLabelText('TV seasons, 1 of 10 seasons'));
+
+    expect(screen.getByText('Severance — Season 2')).toBeTruthy();
+    expect(screen.queryByText('Sinners')).toBeNull();
+  });
+
+  it('leads to the title, which is the only place a watch can be changed', async () => {
+    // There are no exclusions on the sheet itself. The way to change what counted is
+    // to change the watch, and every row goes to where that is done.
+    const onPressTitle = await openMovies();
+
+    await fireEvent.press(screen.getByText('Sinners'));
+
+    expect(onPressTitle).toHaveBeenCalledWith('m1');
+  });
+
+  it('does not offer the drill-down where there is nowhere to go', async () => {
+    await renderWithProviders(<GoalsSection userId="user-1" year={2026} />);
+    await waitFor(() => expect(screen.getByText('2 of 52 movies')).toBeTruthy());
+
+    // A row that looks tappable and is not is worse than one that never offered. It
+    // stays a progressbar, which is what it is when it does nothing.
+    expect(screen.queryByRole('button', { name: 'Movies, 2 of 52 movies' })).toBeNull();
+    expect(screen.getByLabelText('Movies, 2 of 52 movies').props.accessibilityRole).toBe(
+      'progressbar',
+    );
+  });
+});

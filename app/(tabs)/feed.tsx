@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
@@ -40,6 +41,7 @@ export default function FeedScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const feed = useFeed(profile.id);
+  const notifications = useNotifications(profile.id);
   const watchlist = useWatchlist(profile.id);
   const watched = useWatched(profile.id);
   const [busy, setBusy] = useState<string | null>(null);
@@ -121,7 +123,12 @@ export default function FeedScreen() {
 
   return (
     <Screen>
-      <AppHeader />
+      <AppHeader
+        notifications={{
+          count: unreadCount(notifications.data),
+          onPress: () => router.push('/settings/notifications'),
+        }}
+      />
       <HeaderBoundary />
       {/* Pull to refresh, which the app did not have anywhere and which a feed of
           other people's activity is the one screen that genuinely needs: nothing

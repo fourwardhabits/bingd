@@ -4,8 +4,8 @@ import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 
 import {
-  countWatched,
   goalStatus,
+  qualifyingWatches,
   yearRange,
   type CountableWatch,
   type GoalCategory,
@@ -29,6 +29,12 @@ import {
  * that disagree for a frame every time either lands.
  */
 
+/** One title that counted toward a goal, with enough to draw a row for it. */
+export type QualifyingWatch = CountableWatch & {
+  title: string;
+  posterPath: string | null;
+};
+
 export type YearGoals = {
   year: number;
   /** Only the media the user actually set a goal for. Absence is "no goal". */
@@ -36,19 +42,29 @@ export type YearGoals = {
   counts: GoalCounts;
   /** One per goal that exists, in a stable order. Empty when no goal is set. */
   statuses: GoalStatus[];
+  /**
+   * The titles behind each number, in the order the query returned them.
+   *
+   * The same traversal that produced `counts`, so a drill-down cannot show a different
+   * set from the bar it was opened from. Present for both media whether or not a goal
+   * exists — the list is a fact about the year, not about the target.
+   */
+  qualifying: Record<GoalCategory, QualifyingWatch[]>;
 };
 
 /** The kinds a goal can count. `series` is fetched and then refused, never filtered
  *  out in the query — the refusal belongs with the rule, in `goals.ts`. */
+type Embedded = { kind: CountableWatch['kind']; title: string | null; poster_path: string | null };
+
 type WatchRow = {
   media_item_id: string;
   watched_on: string | null;
-  media_items: { kind: CountableWatch['kind'] } | { kind: CountableWatch['kind'] }[] | null;
+  media_items: Embedded | Embedded[] | null;
 };
 
 /** PostgREST returns an embedded row as an object but types it as an array. */
-const kindOf = (value: WatchRow['media_items']): CountableWatch['kind'] =>
-  (Array.isArray(value) ? value[0] : value)?.kind ?? 'movie';
+const embedded = (value: WatchRow['media_items']): Embedded | null =>
+  (Array.isArray(value) ? value[0] : value) ?? null;
 
 export function useWatchGoals(userId: string, year: number) {
   return useQuery({
@@ -69,7 +85,7 @@ export function useWatchGoals(userId: string, year: number) {
         // nothing; it means the fallback can never decide a goal.
         supabase
           .from('user_media')
-          .select('media_item_id, watched_on, media_items!inner(kind)')
+          .select('media_item_id, watched_on, media_items!inner(kind, title, poster_path)')
           .eq('user_id', userId)
           // Bounds the transfer to one year. The year is *also* checked in
           // `countWatched`, which is where the rule is tested — this filter is an
@@ -86,14 +102,27 @@ export function useWatchGoals(userId: string, year: number) {
         targets[row.category as GoalCategory] = row.target as number;
       }
 
-      const counts = countWatched(
-        ((watched.data ?? []) as unknown as WatchRow[]).map((row) => ({
-          mediaItemId: row.media_item_id,
-          kind: kindOf(row.media_items),
-          watchedOn: row.watched_on,
-        })),
+      const qualifying = qualifyingWatches<QualifyingWatch>(
+        ((watched.data ?? []) as unknown as WatchRow[]).map((row) => {
+          const item = embedded(row.media_items);
+          return {
+            mediaItemId: row.media_item_id,
+            // The `!inner` join means the embed is present; the fallback exists so a
+            // null `kind` cannot silently become a movie. `series` is refused by the
+            // rule rather than here.
+            kind: item?.kind ?? 'series',
+            watchedOn: row.watched_on,
+            title: item?.title ?? 'Untitled',
+            posterPath: item?.poster_path ?? null,
+          };
+        }),
         year,
       );
+
+      const counts: GoalCounts = {
+        movies: qualifying.movies.length,
+        tv_seasons: qualifying.tv_seasons.length,
+      };
 
       // Movies first, always, so the two bars do not swap places between renders
       // depending on which goal was set first.
@@ -101,7 +130,7 @@ export function useWatchGoals(userId: string, year: number) {
         .filter((category) => targets[category] != null)
         .map((category) => goalStatus(category, targets[category]!, counts[category]));
 
-      return { year, targets, counts, statuses };
+      return { year, targets, counts, statuses, qualifying };
     },
   });
 }

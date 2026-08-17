@@ -51,9 +51,11 @@ export type CommentSheetProps = {
  * in the tree at all — not clipped, not blurred, not behind an overlay. Revealing is
  * local to this mount and writes nothing.
  *
- * A viewer who *has* watched sees the comment normally, with the quiet "Spoilers"
- * marker `SpoilerNote` keeps after revealing. That is the founder's "subtle spoiler
- * indication", and it costs the reader nothing.
+ * A viewer who *has* watched sees the comment normally, with the quiet "Contains
+ * spoilers" marker `SpoilerNote` keeps after revealing — the same three words the
+ * composer's own control uses. That is the founder's "subtle spoiler indication", and
+ * it costs a reader who has already seen the film nothing: no second reveal tap for
+ * content they are entitled to.
  */
 export function CommentSheet({
   eventId,
@@ -294,8 +296,12 @@ export function CommentSheet({
               size={theme.layout.icon.sm}
               color={spoilers ? theme.semantic.action : theme.text.secondary}
             />
+            {/* The ranking sheet and the note control both say "Contains spoilers",
+                and the founder's correction is that this should too: one word is a
+                category and three are a claim the author is making about what they
+                wrote. The same control, the same words, in all three places. */}
             <Text variant="caption" tone={spoilers ? 'action' : 'secondary'}>
-              Spoilers
+              Contains spoilers
             </Text>
           </Pressable>
 
