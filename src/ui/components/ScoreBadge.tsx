@@ -166,8 +166,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  filled: { backgroundColor: theme.semantic.action },
-  ink: { color: theme.semantic.actionText },
+  filled: { backgroundColor: theme.semantic.score },
+  ink: { color: theme.semantic.scoreInk },
   unranked: {
     borderWidth: 1,
     borderStyle: 'dashed',

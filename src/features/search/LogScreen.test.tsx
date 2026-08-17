@@ -249,15 +249,6 @@ describe('before anything is typed', () => {
     await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
   });
 
-  it('remembers a search that found something', async () => {
-    const view = await search('breaking');
-    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
-
-    // Recorded on results, not on keystrokes, so the history is searches that
-    // worked rather than every prefix typed on the way to one.
-    await waitFor(() => expect(mockPrefs.get('user-1.search.recent')).toEqual(['breaking']));
-  });
-
   it('clears the history', async () => {
     mockPrefs.set('user-1.search.recent', ['breaking bad']);
     const view = await renderWithProviders(<LogScreen />);
@@ -266,6 +257,76 @@ describe('before anything is typed', () => {
     await fireEvent.press(view.getByRole('button', { name: 'Clear' }));
 
     await waitFor(() => expect(view.getByText('What did you watch?')).toBeTruthy());
+  });
+});
+
+/**
+ * The founder's device showed five entries — `100%`, `100% l`, `100% lo`, `100% lov`,
+ * `100% love` — which is one search recorded five times, once per keystroke that
+ * happened to return rows. These tests type the way a person types, one character at a
+ * time, and assert on what storage holds at the end of it.
+ */
+describe('recent search history', () => {
+  const type = async (view: Awaited<ReturnType<typeof renderWithProviders>>, term: string) => {
+    const field = view.getByLabelText('Search');
+    for (let length = 1; length <= term.length; length += 1) {
+      await fireEvent.changeText(field, term.slice(0, length));
+    }
+  };
+
+  const stored = () => mockPrefs.get('user-1.search.recent');
+
+  it('writes nothing while the user is still typing', async () => {
+    const view = await renderWithProviders(<LogScreen />);
+    await type(view, 'breaking');
+
+    // Every one of those eight prefixes returns rows from the stub, which is exactly
+    // the condition the old implementation recorded on.
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+    expect(stored()).toBeUndefined();
+  });
+
+  it('records the submitted query, and only it', async () => {
+    const view = await renderWithProviders(<LogScreen />);
+    await type(view, 'breaking');
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+
+    await fireEvent(view.getByLabelText('Search'), 'submitEditing');
+
+    // One entry. Not `b`, `br`, `bre` … and not `breaking` seven times over.
+    await waitFor(() => expect(stored()).toEqual(['breaking']));
+  });
+
+  it('records the title when a result is opened, not the query that found it', async () => {
+    const view = await renderWithProviders(<LogScreen />);
+    await type(view, 'breaking');
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText(SERIES_ROW));
+
+    await waitFor(() => expect(stored()).toEqual(['Breaking Bad']));
+  });
+
+  it('records the title when logging starts from a result', async () => {
+    const view = await renderWithProviders(<LogScreen />);
+    await type(view, 'inception');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Log Inception'));
+
+    await waitFor(() => expect(stored()).toEqual(['Inception']));
+  });
+
+  it('does not list one title twice when it is opened twice', async () => {
+    const view = await renderWithProviders(<LogScreen />);
+    await type(view, 'breaking');
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText(SERIES_ROW));
+    await waitFor(() => expect(stored()).toEqual(['Breaking Bad']));
+    await fireEvent.press(view.getByLabelText(SERIES_ROW));
+
+    await waitFor(() => expect(stored()).toEqual(['Breaking Bad']));
   });
 });
 

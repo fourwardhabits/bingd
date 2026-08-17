@@ -78,7 +78,20 @@ export const text = {
 export const semantic = {
   action: brand.maroon,
   actionText: brand.parchment,
-  /** Milestone fills and the reveal surface. Never text. */
+  /**
+   * The score system: one deep Maroon carrying Parchment, everywhere a derived
+   * 0–10 score is stated (founder decision, 2026-08-16).
+   *
+   * Named rather than reusing `action`, which is the same hex today. A score
+   * surface and a button are not the same thing, and a future change to either
+   * must not silently repaint the other — the reveal panel is the proof, having
+   * spent months Amber because nothing named the score treatment for it to miss.
+   *
+   * `scoreInk` on `score` is 7.4:1, the same certified pair as `bucketInk.loved`.
+   */
+  score: brand.maroon,
+  scoreInk: brand.parchment,
+  /** Milestone fills. Never text. */
   emphasis: brand.amber,
   /** Watched, completed, sync success. Never text. */
   progress: brand.sage,

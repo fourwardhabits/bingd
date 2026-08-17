@@ -30,7 +30,7 @@ Amber and Sage are mid-luminance colors sitting on a light background. No text s
 
 This caught one already-written instruction. [`client.md`](../architecture/client.md) §5 specified the ranking reveal as "Antique Amber for the ordinal," which would have rendered the single most important number in the product at 2.1:1 — effectively invisible in daylight and to anyone with low vision. That section has been corrected.
 
-**Resolution.** Amber and Sage are **fill colors, never ink**. Where the PRD calls for amber emphasis, amber becomes the surface and Ink sits on top of it, which measures 7.0:1. The reveal is specified accordingly in §9. Both remain available for non-text use — rings, bars, dots, illustration — but at 2.4:1 and 2.1:1 they fail the 3:1 non-text threshold too, so even there they need an Ink hairline to define their edge.
+**Resolution.** Amber and Sage are **fill colors, never ink**. Where the PRD calls for amber emphasis, amber becomes the surface and Ink sits on top of it, which measures 7.0:1 — the goal bar's completed fill is the remaining instance. The reveal was specified this way too until 2026-08-16, when it moved to the Maroon score pair for the reason in §9; the rule did not change, only which certified pair that one panel uses. Both remain available for non-text use — rings, bars, dots, illustration — but at 2.4:1 and 2.1:1 they fail the 3:1 non-text threshold too, so even there they need an Ink hairline to define their edge.
 
 ### Posters fought Parchment, and Parchment lost
 
@@ -116,7 +116,9 @@ There is no lighter tertiary. A fourth text tone would fall below 4.5:1 on Parch
 export const semantic = {
   action:        brand.maroon,      // primary buttons, links, selected
   actionText:    '#F5EBDD',
-  emphasis:      brand.amber,       // milestone fills, reveal surface
+  score:         brand.maroon,      // every stated 0–10 score: badge, community, reveal
+  scoreInk:      '#F5EBDD',         // 7.4:1 on score
+  emphasis:      brand.amber,       // milestone fills
   progress:      brand.sage,        // watched, completed, sync success
   danger:        brand.maroon,      // destructive confirmation
   focusRing:     brand.maroon,
@@ -145,7 +147,7 @@ Three deliberate choices here.
 
 **Not red, yellow, green.** That triad is Beli's, borrowed from food safety, and it says "bad, mediocre, good" about the film rather than about the viewer's response to it. It also fails for the roughly one in twelve men with red-green color vision deficiency, and green and red are both absent from Bingd's palette.
 
-**Amber is excluded**, even though it is the obvious middle color. Amber's job in this system is milestones, awards, and the reveal. Using it for "it was fine" would spend the product's celebration color on its most neutral state, and after a few weeks of use amber would read as *unremarkable* everywhere it appears.
+**Amber is excluded**, even though it is the obvious middle color. Amber's job in this system is milestones and awards. Using it for "it was fine" would spend the product's celebration color on its most neutral state, and after a few weeks of use amber would read as *unremarkable* everywhere it appears.
 
 **Color is never the only signal.** Every bucket indicator carries its label, or a number that states the same thing. The score badge in §8 satisfies this without a label because the score itself encodes the bucket — the ranges do not overlap, so `8.7` *is* "Loved it" whether or not the fill is visible. A bare colored dot with nothing in it is never acceptable.
 
@@ -341,7 +343,11 @@ PRD §5 grants exactly one surface real animation, and [`client.md`](../architec
 
 The composition, revised for the contrast finding in §1:
 
-An **Amber panel** fills the center of a Paper screen. The **score** sits on that panel in DM Serif Display at `reveal` size in **Ink**, measuring 7.0:1 rather than the 2.1:1 that Amber-on-Paper would have produced. Title and bucket sit below in `title2`. The panel is the only place in the app where Amber appears at that scale, which is what makes it feel like an award.
+A **deep Maroon panel** fills the center of a Paper screen. The **score** sits on that panel in DM Serif Display at `reveal` size in **Parchment**, measuring 7.4:1. Title and rank context sit below in `title2` and `footnote`. The panel is the only place in the app where Maroon appears at that scale, which is what makes it feel like an award.
+
+**Maroon since 2026-08-16, on a founder device report.** It was Amber, which is the milestone colour — so the one moment the app states a score at its largest was the only place that did not use the score system. `ScoreBadge` has been Maroon in every list and on every title page since 2026-08-16; a reveal in a different colour reads as a different *kind* of number, and the badge the user meets a second later then looks like a demotion. Amber keeps the milestone fills it was always for, and §1's fills-never-ink rule is unchanged — the panel simply moved from one certified pair to another.
+
+The number still carries the whole meaning. There is deliberately no red/yellow/green grading, for the reason in §3: that triad judges the film rather than the viewer's response, and it fails for red-green colour vision deficiency.
 
 The sequence: the comparison screen clears, the panel scales up from 92% while fading in over roughly 280ms, and the score counts up to its final value over roughly 500ms, settling with a small overshoot. Total under a second. It resolves to a still composition that is worth screenshotting, because it will be.
 

@@ -61,7 +61,21 @@ describe('the certified fills', () => {
     expect(round(ratio)).toBe(documented);
   });
 
-  it('Ink on the Amber reveal panel reaches 7.0:1', () => {
+  /**
+   * The score system, which is one pair used in three places: the badge in every
+   * list, the community figure on a title page, and the ranking reveal. They were
+   * not one pair until 2026-08-16 — the reveal was Amber — and this asserts they
+   * cannot drift apart again while still both clearing AA.
+   */
+  it('the score pair reaches 7.4:1, the same as Loved it', () => {
+    const ratio = contrastRatio(semantic.scoreInk, semantic.score);
+    expect(ratio).toBeGreaterThanOrEqual(WCAG.AA_BODY);
+    expect(round(ratio)).toBe(7.4);
+  });
+
+  it('Amber is still a certified fill, for the milestones that kept it', () => {
+    // GoalBar's completed fill. The reveal no longer uses it; the pair is still
+    // real and still measured, so this is the only remaining claim about it.
     const ratio = contrastRatio(text.onFill, brand.amber);
     expect(ratio).toBeGreaterThanOrEqual(WCAG.AA_BODY);
     expect(round(ratio)).toBe(7);

@@ -28,6 +28,8 @@ import {
   Avatar,
   CastStrip,
   Chip,
+  DetailHeaderBackground,
+  DetailHeaderTitle,
   EmptyState,
   LoadingScreen,
   PersonalState,
@@ -36,10 +38,12 @@ import {
   ScoresSection,
   SectionHeader,
   SegmentedTabs,
+  SkeletonRow,
   SpoilerNote,
   Text,
   TitleHero,
   TitleRow,
+  useDetailHeader,
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -74,7 +78,13 @@ export default function TitleScreen() {
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [tab, setTab] = useState<Tab>('cast');
+  // Null until the reader picks one, so the default is whatever the tab row leads with
+  // rather than a name fixed before the title is known. It was `'cast'`, which meant a
+  // series settled on Cast the moment its credits arrived — after briefly showing the
+  // seasons, because the fallback below had nothing else to choose while cast was empty.
+  // A page that changes tab by itself a second after opening is worse than one that
+  // opens on the wrong tab.
+  const [tab, setTab] = useState<Tab | null>(null);
   const [loggingTitle, setLoggingTitle] = useState<LoggableTitle | null>(null);
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
 
@@ -183,6 +193,26 @@ export default function TitleScreen() {
    */
   const rankedList = useRankedCollection(profile.id, rankCategory);
 
+  /**
+   * The viewer's ranked seasons, for the series page only.
+   *
+   * A series page's real question is "where am I up to", and the answer is which of
+   * these seasons this person has already ranked. Fetched only for a series, so a film
+   * page does not pay for a list it has no use for.
+   */
+  const isSeriesTitle = data?.title?.kind === 'series';
+  const rankedSeasons = useRankedCollection(profile.id, 'tv_seasons', {
+    enabled: isSeriesTitle,
+  });
+  const rankedSeasonIds = useMemo(
+    () => new Set((rankedSeasons.data ?? []).map((entry) => entry.mediaItemId)),
+    [rankedSeasons.data],
+  );
+
+  // Above the early returns, because the empty and loading states below are also
+  // renders and a hook cannot be called from only some of them.
+  const header = useDetailHeader();
+
   const cast = useMemo(
     () =>
       (credits.data?.cast ?? []).map((person) => ({
@@ -272,10 +302,27 @@ export default function TitleScreen() {
   // for the same reason it is in the schema — the day the adapter is redeployed the
   // tab appears by itself, and until then it does not pretend to.
   const tabs = [
+    /**
+     * Seasons first, and first only for a series — where it is not one section among
+     * several but the entire point of the page.
+     *
+     * A series cannot be ranked (AD-1), so everything a reader came to do lives one
+     * level down. It used to sit last, after Cast, Videos and Details, which meant a
+     * series opened on Cast and the only route to the rankable unit was a tab at the
+     * end of a row. That is the founder's dead-end report: not that the flow was
+     * missing, but that it was the least prominent thing on a page that has nothing
+     * else to offer.
+     *
+     * Unlike every other tab here it is rendered even when its list is empty. The rule
+     * against permanently-empty tabs is about tabs that *may* have nothing — a film
+     * with no trailer. A series always has seasons; an empty list means they have not
+     * been fetched yet, and the honest thing is to say which of those it is rather than
+     * to remove the page's only exit.
+     */
+    ...(isSeries ? [{ id: 'seasons' as const, label: 'Seasons' }] : []),
     ...(cast.length ? [{ id: 'cast' as const, label: 'Cast' }] : []),
     ...(videos.data?.length ? [{ id: 'videos' as const, label: 'Videos' }] : []),
     { id: 'details' as const, label: 'Details' },
-    ...(isSeries && seasons.data?.length ? [{ id: 'seasons' as const, label: 'Seasons' }] : []),
   ];
   // The chosen tab may not exist for this title — a film has no Seasons —
   // so it falls back rather than rendering nothing under a live tab row.
@@ -335,13 +382,34 @@ export default function TitleScreen() {
         options={{
           title: title.title,
           headerShown: true,
-          // Transparent, so the hero runs under it. Without this the app's one
-          // full-bleed image starts below a solid bar and is not full-bleed.
+          // Transparent, and transparent in both states. Toggling it once the title
+          // appears would change the content inset and jog the whole page at exactly
+          // the moment the reader is looking at it, so the opaque ground arrives as a
+          // background view instead. Without transparency at all, the app's one
+          // full-bleed image would start below a solid bar and not be full-bleed.
           headerTransparent: true,
-          headerTitle: '',
+          // Empty until the heading below has scrolled under the bar. See
+          // `useDetailHeader` for why both detail routes now behave this way.
+          headerTitle: header.revealed
+            ? () => (
+                <DetailHeaderTitle
+                  // The same pair the heading shows, in the same relationship: a season
+                  // is "Season 2" under "Parks and Recreation", never the flattened
+                  // "Parks and Recreation — Season 2", which would not fit a bar and
+                  // would say the series name twice on the way past.
+                  title={displayTitle ?? title.title}
+                  subtitle={parent?.title ?? null}
+                />
+              )
+            : '',
+          headerBackground: header.revealed ? () => <DetailHeaderBackground /> : undefined,
         }}
       />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        onScroll={header.onScroll}
+        scrollEventThrottle={header.scrollEventThrottle}
+      >
         <TitleHero
           uri={hero.uri}
           blurred={hero.treatment === 'poster'}
@@ -370,7 +438,10 @@ export default function TitleScreen() {
           </View>
         </View>
 
-        <View style={styles.heading}>
+        {/* The identity, for the header's purposes: everything down to and including
+            the title itself. Once its bottom edge passes under the bar, the bar says
+            the title instead. */}
+        <View style={styles.heading} onLayout={header.onIdentityLayout}>
           {/* A season says which show it belongs to, above its own name. The feed
               writes that as one string because it has no room; here there is a
               hierarchy to put it in. */}
@@ -559,19 +630,36 @@ export default function TitleScreen() {
           </View>
         ) : null}
 
-        {activeTab === 'seasons' && seasons.data?.length ? (
-          <View>
-            {seasons.data.map((season) => (
-              <TitleRow
-                key={season.id}
-                title={season.title}
-                year={yearOf(season.release_date)}
-                posterUri={posterUri(season.poster_path)}
-                secondary="Season"
-                onPress={() => router.push(`/title/${season.id}`)}
-              />
-            ))}
-          </View>
+        {activeTab === 'seasons' ? (
+          seasons.data?.length ? (
+            <View>
+              {seasons.data.map((season) => (
+                <TitleRow
+                  key={season.id}
+                  title={season.title}
+                  year={yearOf(season.release_date)}
+                  posterUri={posterUri(season.poster_path)}
+                  // Not the word "Season" — the title beside it already reads
+                  // "Season 2". What a returning reader wants from this list is where
+                  // they are up to, so the row says whether they have ranked it.
+                  secondary={rankedSeasonIds.has(season.id) ? 'Ranked' : 'Not ranked yet'}
+                  onPress={() => router.push(`/title/${season.id}`)}
+                />
+              ))}
+            </View>
+          ) : seasons.isPending || enriching ? (
+            <SkeletonRow count={3} />
+          ) : (
+            // A series with no seasons is a series nobody has looked up yet, not a
+            // series without seasons. Saying so is better than an empty box, and far
+            // better than removing the tab and leaving the page with no way onward.
+            <EmptyState
+              kind="nothingYet"
+              compact
+              title="Seasons are still loading"
+              body="Pull down to try again in a moment."
+            />
+          )
         ) : null}
 
         {/* Everyone else's number, well below the reader's own. A series has no

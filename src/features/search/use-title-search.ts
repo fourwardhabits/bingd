@@ -39,15 +39,16 @@ const PROVIDER_DEBOUNCE_MS = 500;
 const MIN_QUERY_LENGTH = 2;
 
 /**
- * How many local results count as having answered the question.
+ * How many titles to take from the provider.
  *
- * Not zero. The alpha catalogue is a few hundred Wikidata titles, so a search for
- * "dune" finds one film and misses the other, the series, and every season — and
- * a user who sees a single plausible row has no way to know the rest exist. Asking
- * the provider whenever the local answer is thin is the difference between a
- * catalogue that looks small and one that looks broken.
+ * Twenty, which is both the server's cap and the size of one TMDB page — so this is
+ * the number that discards nothing. It was twelve, and `/search/multi` returns twenty
+ * results of which some are people; the adapter dropped the people and then threw away
+ * everything past the twelfth of what remained. Those rows had already been fetched and
+ * already been charged against the hourly ceiling. Nothing was bought by discarding
+ * them.
  */
-const LOCAL_RESULTS_ENOUGH = 6;
+const PROVIDER_RESULTS = 20;
 
 export function useDebounced<T>(value: T, delay = DEBOUNCE_MS): T {
   const [settled, setSettled] = useState(value);
@@ -69,8 +70,10 @@ export function useDebounced<T>(value: T, delay = DEBOUNCE_MS): T {
  * of a round trip, and a list that blinks between states reads as slower than one that lags
  * slightly behind.
  *
- * The second runs only when the first came back thin, and asks `tmdb-adapter` for titles
- * the local catalogue has never heard of. The adapter writes them into `media_items`
+ * The second runs once the typing has settled, and asks `tmdb-adapter` for titles the
+ * local catalogue has never heard of. It used to run only when the first came back thin;
+ * see `providerEnabled` for why a row count turned out to be the wrong thing to gate on.
+ * The adapter writes them into `media_items`
  * before answering, so what arrives is an ordinary catalogue row with an ordinary Bingd
  * id — there is no import step, and nothing downstream can tell the two apart. That is
  * also why the merge below can dedupe on `id`: a title that exists in both really is one
@@ -136,20 +139,34 @@ export function useTitleSearch(input: string) {
   const providerQuery = useDebounced(input.trim(), PROVIDER_DEBOUNCE_MS);
 
   /**
-   * Three conditions, and each one is load-bearing.
+   * Two conditions. Both are about *when* to ask, and neither is about the local answer.
    *
-   * The two debounced values must agree, or the provider is asked about a prefix the
-   * user has already typed past. The local pass must have settled on real data rather
-   * than the previous query's rows, which `keepPreviousData` would otherwise let stand
-   * in for an answer. And it must have come back thin — a search that already worked
-   * has no reason to spend a provider request.
+   * The debounced values must agree, which is true once the user has paused for the
+   * provider's half second — so the provider is never asked about a prefix somebody has
+   * already typed past. And the query must clear the length floor.
+   *
+   * **There used to be a third: ask only when the local catalogue came back with fewer
+   * than six rows.** That is the founder's `spiderman` report, and it is Bingd's bug
+   * rather than TMDB's. The seeded catalogue held six Spider-Man films whose squashed
+   * titles begin "spiderman" — enough to satisfy the gate exactly — so the provider was
+   * never asked, and `Spider-Man: Brand New Day` was invisible no matter how popular it
+   * was. Typing more of the name found it, because a narrower query matched nothing
+   * locally and so was allowed through to TMDB. A search that gets *worse* as the user
+   * types less of what they remember is precisely backwards.
+   *
+   * The gate's mistake was treating a count as evidence. The local catalogue is a cache
+   * of TMDB, not a second opinion about it: six rows is not a statement that there are
+   * six, and no row count can be, because the catalogue only ever holds what somebody
+   * has already searched for. So the local pass now does what it is actually good at —
+   * putting rows on screen in one round trip — and stops deciding whether the wider
+   * search happens.
+   *
+   * What bounds the cost is not this gate and never was: the 500ms debounce, the
+   * half-hour cache on the query string, and `tmdb.max_requests_per_hour` at 120 per
+   * account, against which one settled query costs one request.
    */
   const providerEnabled =
-    providerQuery === query &&
-    providerQuery.length >= MIN_QUERY_LENGTH &&
-    !result.isPending &&
-    !result.isPlaceholderData &&
-    (result.data?.length ?? 0) < LOCAL_RESULTS_ENOUGH;
+    providerQuery === query && providerQuery.length >= MIN_QUERY_LENGTH;
 
   const provider = useQuery({
     queryKey: queryKeys.providerSearch(providerQuery),
@@ -160,7 +177,7 @@ export function useTitleSearch(input: string) {
     // A provider failure is not worth three attempts: the local results are already on
     // screen, and the ceiling in api.md §9 counts every try.
     retry: false,
-    queryFn: () => searchProvider(providerQuery, 12),
+    queryFn: () => searchProvider(providerQuery, PROVIDER_RESULTS),
   });
 
   const merged = useMemo(() => {

@@ -391,8 +391,18 @@ function Card({
 }
 
 /**
- * The reveal (design-system.md §9): an Amber panel with the **score** in Ink at
- * display size, then the title, then rank context.
+ * The reveal (design-system.md §9): a deep Maroon panel with the **score** in Parchment
+ * at display size, then the title, then rank context.
+ *
+ * Maroon since 2026-08-16, on the founder's device report. It was Amber, which is the
+ * milestone colour — so the one moment the app states a score at its largest was the
+ * one place that did not use the score system. `ScoreBadge` has been Maroon in every
+ * list and on every title page for weeks; a reveal in a different colour reads as a
+ * different kind of number, and then the badge the user meets a second later looks
+ * like a demotion. Both are now `semantic.score`, and the pair is asserted at 7.4:1.
+ *
+ * The number keeps carrying the meaning. There is deliberately still no red/yellow/green
+ * grading here — that reasoning is in `color.ts` and survives the colour change intact.
  *
  * The score is the hero, not the ordinal — founder decision, 2026-08-15. This screen
  * had not caught up: it rendered `#{position}` at `reveal` size while `score.ts` sat
@@ -447,7 +457,7 @@ function Reveal({
         accessibilityRole="summary"
         accessibilityLabel={`${title} scored ${formatScore(score)} out of 10. ${context}`}
       >
-        <Text variant="reveal" tone="onFill" accessibilityElementsHidden>
+        <Text variant="reveal" tone="inverse" accessibilityElementsHidden>
           {formatScore(shown)}
         </Text>
       </View>
@@ -600,7 +610,7 @@ const styles = StyleSheet.create({
     padding: theme.layout.gutter,
   },
   panel: {
-    backgroundColor: theme.semantic.emphasis,
+    backgroundColor: theme.semantic.score,
     borderRadius: theme.radius.card,
     paddingVertical: theme.space[8],
     paddingHorizontal: theme.space[12],

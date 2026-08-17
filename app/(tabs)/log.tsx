@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -68,14 +68,6 @@ export default function LogScreen() {
     providerFailed,
   } = useTitleSearch(input);
 
-  // Recorded on results rather than on keystrokes, so the history holds searches
-  // that found something instead of every prefix typed on the way there.
-  const settledQuery = input.trim();
-  const hasResults = results.length > 0;
-  useEffect(() => {
-    if (hasResults) remember(settledQuery);
-  }, [hasResults, settledQuery, remember]);
-
   const filtered = useMemo(() => {
     if (filter === 'all') return results;
     return results.filter((result) =>
@@ -83,7 +75,32 @@ export default function LogScreen() {
     );
   }, [results, filter]);
 
+  /**
+   * History is written on commitment, never on typing.
+   *
+   * The two commitments are submitting the field and choosing a result; nothing else
+   * writes. This used to record whatever the debounced field held whenever that query
+   * returned rows, and since every prefix of a real title returns rows, the history
+   * filled with the keystrokes on the way to one search — `100%`, `100% l`, `100% lo`.
+   * A prefix is not a search someone made, it is a search they were interrupted in the
+   * middle of, and offering it back is offering back the interruption.
+   *
+   * Choosing a result records the *title*, not the query that found it. The stored
+   * strings are re-run as searches rather than restored from a cache, so a title is a
+   * query that finds itself, and it is the thing the person was actually looking for —
+   * "spiderman" is what they could remember, "Spider-Man: Brand New Day" is what they
+   * meant.
+   */
+  const commitSelection = (title: string) => remember(title);
+
+  const openTitle = (result: SearchResult) => {
+    commitSelection(result.title);
+    router.push(`/title/${result.id}`);
+  };
+
   const openLog = (result: SearchResult) => {
+    commitSelection(result.title);
+
     if (result.kind === 'series') {
       setSeries({ id: result.id, title: result.title });
       return;
@@ -116,6 +133,7 @@ export default function LogScreen() {
           autoCorrect={false}
           autoCapitalize="none"
           returnKeyType="search"
+          onSubmitEditing={() => remember(input)}
           accessibilityHint="Results appear as you type"
         />
       </View>
@@ -150,7 +168,7 @@ export default function LogScreen() {
         rateLimited={providerRateLimited}
         providerFailed={providerFailed}
         onRetry={() => void refetch()}
-        onOpenTitle={(result) => router.push(`/title/${result.id}`)}
+        onOpenTitle={openTitle}
         onOpenLog={openLog}
       />
 

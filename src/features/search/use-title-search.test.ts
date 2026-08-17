@@ -243,21 +243,34 @@ describe('useTitleSearch reaching past the local catalogue', () => {
     await renderHook(() => useTitleSearch('inception'));
     await settle();
 
-    expect(mockSearchProvider).toHaveBeenCalledWith('inception', 12);
+    // Twenty, which is one TMDB page and the adapter's own cap. Asking for twelve
+    // fetched a page of twenty and threw eight of it away after paying for them.
+    expect(mockSearchProvider).toHaveBeenCalledWith('inception', 20);
   });
 
-  it('leaves the provider alone when the local catalogue already answered', async () => {
-    // Six is the threshold. A search that worked must not spend a provider request, or
-    // the quota in api.md §9 is consumed by the queries that needed no help.
+  /**
+   * The founder's `spiderman` report, as a test.
+   *
+   * The catalogue held six Spider-Man films and the provider gate let anything with six
+   * or more local rows through unasked, so the one title the user was looking for — the
+   * newest, most popular entry in the franchise — could not appear at any position.
+   * Typing *more* of the name found it, because a narrower query matched nothing locally
+   * and was therefore allowed out to TMDB.
+   *
+   * Deliberately no Spider-Man in this test. The bug is not about that franchise; it is
+   * about a row count being treated as evidence that the catalogue had answered, when
+   * the catalogue only ever holds what somebody already searched for.
+   */
+  it('still asks the provider when the local catalogue answered in full', async () => {
     mockRpc.mockResolvedValue({
-      data: Array.from({ length: 6 }, (_, i) => localRow(`local-${i}`, `Film ${i}`)),
+      data: Array.from({ length: 9 }, (_, i) => localRow(`local-${i}`, `Film ${i}`)),
       error: null,
     });
 
     await renderHook(() => useTitleSearch('inception'));
     await settle();
 
-    expect(mockSearchProvider).not.toHaveBeenCalled();
+    expect(mockSearchProvider).toHaveBeenCalledWith('inception', 20);
   });
 
   it('waits longer than the local pass before spending a provider request', async () => {

@@ -7,6 +7,12 @@ export { BrandMark, type BrandMarkProps } from './BrandMark';
 export { BUCKETS, BucketChip, Chip, type BucketId, type ChipProps } from './BucketChip';
 export { Button } from './Button';
 export { CastStrip, type CastMember } from './CastStrip';
+export {
+  DetailHeaderBackground,
+  DetailHeaderTitle,
+  useDetailHeader,
+  type DetailHeaderState,
+} from './DetailHeader';
 export { Divider } from './Divider';
 export { EmptyState, type EmptyStateKind } from './EmptyState';
 export { Field, type FieldProps } from './Field';

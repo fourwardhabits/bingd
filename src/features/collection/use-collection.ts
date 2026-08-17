@@ -99,8 +99,16 @@ const parentTitle = (shape: MediaShape): string | null => {
  * meaningful within its category (PRD §11), and a combined list would imply an ordering
  * across the two that nobody ever expressed.
  */
-export function useRankedCollection(userId: string, category: RankingCategory) {
+export function useRankedCollection(
+  userId: string,
+  category: RankingCategory,
+  // Off by default nowhere, but a caller that only wants this list under a condition —
+  // a series page reading the viewer's ranked seasons — would otherwise pay for it on
+  // every title page in the app.
+  options: { enabled?: boolean } = {},
+) {
   return useQuery({
+    enabled: options.enabled ?? true,
     queryKey: queryKeys.rankings(userId, category),
     queryFn: async (): Promise<RankedEntry[]> => {
       const { data, error } = await supabase

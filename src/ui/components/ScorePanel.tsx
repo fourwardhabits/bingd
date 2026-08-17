@@ -127,9 +127,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: theme.semantic.action,
+    borderColor: theme.semantic.score,
     backgroundColor: theme.surface.sunken,
   },
   thin: { borderWidth: 1, borderColor: theme.border.strong },
-  communityNumber: { color: theme.semantic.action, fontSize: 19, lineHeight: 22 },
+  communityNumber: { color: theme.semantic.score, fontSize: 19, lineHeight: 22 },
 });

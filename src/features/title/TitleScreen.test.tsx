@@ -47,10 +47,23 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
+// The header is a decision this screen makes, so the mock records it rather than
+// discarding it. `Stack.Screen` renders nothing either way; the difference is that the
+// options it was handed can now be asserted on.
+let mockHeaderOptions: Record<string, unknown> = {};
+// Which title the screen is opened on. A series and a film are the same route, and the
+// difference between them is most of what the seasons flow is about.
+let mockOpenId = 'film-1';
+
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
-  useLocalSearchParams: () => ({ id: 'film-1' }),
-  Stack: { Screen: () => null },
+  useLocalSearchParams: () => ({ id: mockOpenId }),
+  Stack: {
+    Screen: ({ options }: { options?: Record<string, unknown> }) => {
+      if (options) mockHeaderOptions = options;
+      return null;
+    },
+  },
 }));
 
 jest.mock('@/features/auth', () => ({
@@ -92,6 +105,8 @@ const credits = {
 };
 
 beforeEach(() => {
+  mockHeaderOptions = {};
+  mockOpenId = 'film-1';
   mockPush.mockReset();
   mockRpcResults = {};
   for (const key of Object.keys(tableRows)) delete tableRows[key];
@@ -358,5 +373,145 @@ describe('notes on the title', () => {
 
     await waitFor(() => expect(view.getByText('Inception')).toBeTruthy());
     expect(view.queryByText('The last twenty minutes are the whole film.')).toBeNull();
+  });
+});
+
+/**
+ * The founder's report: title pages and person pages disagreed about their headers,
+ * and neither disagreement was a decision. The shared rule is in `useDetailHeader`;
+ * this is the title page holding to it.
+ */
+describe('the header', () => {
+  it('carries the back control and no title while the heading is on screen', async () => {
+    await open();
+
+    // Not "the header is empty" — `title` is still set, because iOS draws it as the
+    // back label on the next screen and screen readers announce it as the route.
+    // `headerTitle` is what is drawn here, and it is nothing.
+    expect(mockHeaderOptions.title).toBe('Inception');
+    expect(mockHeaderOptions.headerTitle).toBe('');
+    // No opaque ground either, so the hero stays full-bleed under the bar.
+    expect(mockHeaderOptions.headerBackground).toBeUndefined();
+    expect(mockHeaderOptions.headerTransparent).toBe(true);
+  });
+
+  it('names the title once the heading has scrolled under the bar', async () => {
+    const view = await open();
+
+    // Fired on the title itself and allowed to bubble: `layout` finds the heading
+    // block that wraps it, and `scroll` finds the scroll view above that. Reaching
+    // for either by type would mean asserting on the screen's element tree, which is
+    // not what this test is about.
+    const heading = view.getByText('Inception');
+    await fireEvent(heading, 'layout', {
+      nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 200 } },
+    });
+    await fireEvent.scroll(heading, {
+      nativeEvent: { contentOffset: { x: 0, y: 600 } },
+    });
+
+    await waitFor(() => expect(typeof mockHeaderOptions.headerTitle).toBe('function'));
+    // And it gains a ground to sit on rather than floating over the artwork, without
+    // the transparency ever being toggled — toggling it would move the content inset
+    // and jog the page at the moment of the reveal.
+    expect(typeof mockHeaderOptions.headerBackground).toBe('function');
+    expect(mockHeaderOptions.headerTransparent).toBe(true);
+  });
+});
+
+/**
+ * The founder's report: tapping a series in search led to a page with nothing to do.
+ *
+ * A series cannot be ranked (AD-1), so everything a reader came for is one level down,
+ * on a season. The flow has to be Search → Series → season list → Season → log. What
+ * made it read as a dead end was that Seasons was the *last* tab, behind Cast, Videos
+ * and Details, and disappeared entirely when the list had not arrived — so a series
+ * opened on Cast and offered no route onward at all.
+ */
+describe('a series', () => {
+  const series = {
+    ...film,
+    id: 'series-1',
+    kind: 'series',
+    title: 'Breaking Bad',
+    release_date: '2008-01-20',
+    runtime_minutes: null,
+  };
+
+  const season = (n: number) => ({
+    id: `season-${n}`,
+    parent_id: 'series-1',
+    kind: 'season',
+    season_number: n,
+    title: `Season ${n}`,
+    release_date: `${2007 + n}-01-20`,
+    poster_path: null,
+  });
+
+  beforeEach(() => {
+    mockOpenId = 'series-1';
+    tableRows.media_items = [series, season(1), season(2)];
+    tableRows.media_cache = [{ ...credits, media_item_id: 'series-1' }];
+  });
+
+  const openSeries = async () => {
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByText('Breaking Bad')).toBeTruthy());
+    return view;
+  };
+
+  it('opens on its seasons rather than on its cast', async () => {
+    const view = await openSeries();
+
+    // Selected, not merely present. The series page has one job and this is it.
+    await waitFor(() => expect(view.getByText(/Season 1/)).toBeTruthy());
+    expect(view.getByText(/Season 2/)).toBeTruthy();
+  });
+
+  it('leads from a season to that season, which is the rankable unit', async () => {
+    const view = await openSeries();
+
+    await waitFor(() => expect(view.getByText(/Season 2/)).toBeTruthy());
+    await fireEvent.press(view.getByText(/Season 2/));
+
+    expect(mockPush).toHaveBeenCalledWith('/title/season-2');
+  });
+
+  it('says which seasons the reader has already ranked', async () => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'season-1',
+        position: 1,
+        category: 'tv_seasons',
+        bucket: 'loved',
+      },
+    ];
+
+    const view = await openSeries();
+
+    // "Where am I up to" is the question a series page is opened to answer. Saying
+    // "Season" beside a row already titled "Season 1" answered nothing.
+    await waitFor(() => expect(view.getByText('Ranked')).toBeTruthy());
+    expect(view.getByText('Not ranked yet')).toBeTruthy();
+  });
+
+  it('offers no way to rank the series itself', async () => {
+    const view = await openSeries();
+
+    await waitFor(() => expect(view.getByText(/Season 1/)).toBeTruthy());
+    expect(view.queryByLabelText('Rank this title')).toBeNull();
+    expect(view.queryByLabelText('Ranked. Change your rating.')).toBeNull();
+  });
+
+  it('keeps a route onward even before the seasons have arrived', async () => {
+    // The list is empty because nothing has enriched this series yet — not because a
+    // series has no seasons. Dropping the tab here is what left the page with no exit.
+    tableRows.media_items = [series];
+
+    const view = await openSeries();
+
+    await waitFor(() => expect(view.getByRole('tab', { name: 'Seasons' })).toBeTruthy());
+    expect(view.getByText('Seasons are still loading')).toBeTruthy();
   });
 });

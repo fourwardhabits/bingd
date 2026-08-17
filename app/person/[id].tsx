@@ -6,12 +6,14 @@ import { posterUri, profileUri } from '@/lib/images';
 import { fullTitle } from '@/lib/titles';
 import {
   Avatar,
+  DetailHeaderTitle,
   EmptyState,
   LoadingScreen,
   Screen,
   SectionHeader,
   Text,
   TitleRow,
+  useDetailHeader,
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -32,13 +34,24 @@ export default function PersonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const person = usePerson(id ?? null);
+  const header = useDetailHeader();
+  // Read once, so the header's render callback closes over a value rather than over
+  // a query result that could be refetched to null between renders.
+  const name = person.data?.name ?? null;
 
   return (
     <Screen includeBottomInset edges={[]}>
       <Stack.Screen
         options={{
           headerShown: true,
-          title: person.data?.name ?? '',
+          // `title` still carries the name for the iOS back label and for screen
+          // readers announcing the route; `headerTitle` is what is drawn, and it is
+          // empty while the portrait and the name below it are on screen. This page
+          // used to print the name in the bar directly above the same name in
+          // `title1` — see `useDetailHeader` for the shared rule.
+          title: name ?? '',
+          headerTitle:
+            header.revealed && name ? () => <DetailHeaderTitle title={name} /> : '',
           headerBackTitle: 'Back',
         }}
       />
@@ -59,8 +72,12 @@ export default function PersonScreen() {
           body="Open a film or season they appear in, and their credits will fill in."
         />
       ) : (
-        <ScrollView contentContainerStyle={styles.content}>
-          <View style={styles.identity}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          onScroll={header.onScroll}
+          scrollEventThrottle={header.scrollEventThrottle}
+        >
+          <View style={styles.identity} onLayout={header.onIdentityLayout}>
             <Avatar
               size="lg"
               uri={profileUri(person.data.profilePath)}
