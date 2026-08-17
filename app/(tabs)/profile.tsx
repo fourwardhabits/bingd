@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import { Alert, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -9,6 +10,9 @@ import {
   useRankedCollection,
   useWatchlist,
 } from '@/features/collection/use-collection';
+import { useWatched } from '@/features/collection/use-watched';
+import { CommentSheet } from '@/features/feed/CommentSheet';
+import { useCommentCounts } from '@/features/feed/use-comments';
 import { useFeed } from '@/features/feed/use-feed';
 import { GoalsSection } from '@/features/goals/GoalsSection';
 import { posterUri } from '@/lib/images';
@@ -37,6 +41,8 @@ export default function ProfileScreen() {
   const logged = useLoggedCollection(profile.id);
   const watchlist = useWatchlist(profile.id);
   const feed = useFeed(profile.id);
+  const watched = useWatched(profile.id);
+  const [commentsFor, setCommentsFor] = useState<string | null>(null);
   const follows = useQuery({
     queryKey: ['profile-follows', profile.id],
     queryFn: async () => {
@@ -69,6 +75,13 @@ export default function ProfileScreen() {
   // Own activity only. The feed query spans everyone this user follows, and a
   // friend's ranking under a heading on *your* profile is a different claim.
   const recent = (feed.data ?? []).filter((event) => event.actorId === profile.id).slice(0, 3);
+  // Your own activity is where you look for what people said about it, so the
+  // comment control belongs here too — reading them is the point, more than writing.
+  const commentCounts = useCommentCounts(
+    recent.map((event) => event.id),
+    profile.id,
+  );
+  const openComments = commentsFor ? (recent.find((e) => e.id === commentsFor) ?? null) : null;
   const shareProfile = async () => {
     const url = `https://bingd.app/u/${profile.username}`;
     try {
@@ -184,6 +197,8 @@ export default function ProfileScreen() {
               bucket={event.bucket}
               timeLabel={new Date(event.createdAt).toLocaleDateString()}
               onPressTitle={() => event.mediaItemId && router.push(`/title/${event.mediaItemId}`)}
+              onPressComments={() => setCommentsFor(event.id)}
+              commentCount={commentCounts.data?.get(event.id) ?? 0}
             />
           ))}
         </View>
@@ -196,6 +211,19 @@ export default function ProfileScreen() {
           />
         ) : null}
       </ScrollView>
+
+      <CommentSheet
+        eventId={commentsFor}
+        mediaItemId={openComments?.mediaItemId ?? null}
+        title={openComments?.title ?? null}
+        viewerId={profile.id}
+        watched={watched.data}
+        onClose={() => setCommentsFor(null)}
+        onPressPerson={(handle) => {
+          setCommentsFor(null);
+          router.push(`/u/${handle}`);
+        }}
+      />
     </Screen>
   );
 }

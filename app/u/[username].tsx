@@ -6,6 +6,8 @@ import { useCurrentProfile } from '@/features/auth';
 import { bandSizes, scoreFor } from '@/features/collection/score';
 import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
+import { CommentSheet } from '@/features/feed/CommentSheet';
+import { useCommentCounts } from '@/features/feed/use-comments';
 import { useActorActivity } from '@/features/feed/use-feed';
 import { useProfileNotes, usePublicProfile } from '@/features/profile/use-public-profile';
 import { posterUri } from '@/lib/images';
@@ -52,6 +54,7 @@ export default function PublicProfileScreen() {
   const viewer = useCurrentProfile();
   const router = useRouter();
   const [category, setCategory] = useState<RankingCategory>('movies');
+  const [commentsFor, setCommentsFor] = useState<string | null>(null);
 
   const profile = usePublicProfile(username ?? null);
   const subjectId = profile.data?.id ?? '';
@@ -71,6 +74,15 @@ export default function PublicProfileScreen() {
   // shown nothing for any public account they had not followed, because that query
   // spans the follow set — the authorisation comes from feed_events_read either way.
   const recent = activity.data ?? [];
+  // Comments reach this page as well as the Feed, because this is where somebody
+  // arrives after finding a person in Search — the Feed only carries activity by
+  // accounts they already follow. Reactions deliberately stay Feed-only for now:
+  // they were built there and moving them is a product decision, not a wiring one.
+  const commentCounts = useCommentCounts(
+    recent.map((event) => event.id),
+    viewer.id,
+  );
+  const openComments = commentsFor ? (recent.find((e) => e.id === commentsFor) ?? null) : null;
 
   return (
     <Screen includeBottomInset edges={[]}>
@@ -267,12 +279,27 @@ export default function PublicProfileScreen() {
                   })}
                   timeLabel={new Date(event.createdAt).toLocaleDateString()}
                   onPressTitle={() => event.mediaItemId && router.push(`/title/${event.mediaItemId}`)}
+                  onPressComments={() => setCommentsFor(event.id)}
+                  commentCount={commentCounts.data?.get(event.id) ?? 0}
                 />
               ))}
             </View>
           ) : null}
         </ScrollView>
       )}
+
+      <CommentSheet
+        eventId={commentsFor}
+        mediaItemId={openComments?.mediaItemId ?? null}
+        title={openComments?.title ?? null}
+        viewerId={viewer.id}
+        watched={watched.data}
+        onClose={() => setCommentsFor(null)}
+        onPressPerson={(handle) => {
+          setCommentsFor(null);
+          router.push(`/u/${handle}`);
+        }}
+      />
     </Screen>
   );
 }

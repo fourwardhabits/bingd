@@ -54,6 +54,18 @@ export type ActivityRowProps = {
   inWatchlist?: boolean;
   onPressShare?: () => void;
   reaction?: ActivityReaction;
+  /**
+   * Opens the comment sheet. Absent means the surface has not wired comments up,
+   * which is different from an activity with none.
+   */
+  onPressComments?: () => void;
+  /**
+   * How many comments this viewer may see. Deliberately a count and never a preview:
+   * a comment can be marked as spoiling the title, and the only version of "no text
+   * preview may leak a masked spoiler" that cannot be got wrong is one where the row
+   * never holds a body at all. The bodies are fetched when the sheet opens.
+   */
+  commentCount?: number;
 };
 
 /**
@@ -97,6 +109,8 @@ export function ActivityRow({
   inWatchlist = false,
   onPressShare,
   reaction,
+  onPressComments,
+  commentCount = 0,
 }: ActivityRowProps) {
   const filmName = title ?? 'a title';
 
@@ -273,8 +287,26 @@ export function ActivityRow({
           </Pressable>
         ) : null}
 
-        {/* Comments are deferred (PRD §14) and a disabled comment icon is worse
-            than none, so there is no placeholder for one here. */}
+        {/* Comments V1, 2026-08-17. The rule that kept a placeholder off this row
+            still holds — the icon appears only where a surface has actually wired the
+            sheet up, so it is never a control that does nothing.
+
+            The badge is the count and there is no preview beside it. See the prop's
+            comment: a body on this row would be a body to mask, and the mask that
+            gets forgotten is always the preview. */}
+        {onPressComments ? (
+          <IconAction
+            icon={commentCount > 0 ? 'chatbubble' : 'chatbubble-outline'}
+            active={commentCount > 0}
+            label={
+              commentCount > 0
+                ? `${commentCount} ${commentCount === 1 ? 'comment' : 'comments'} on ${actorName}'s activity about ${filmName}. Open them.`
+                : `Comment on ${actorName}'s activity about ${filmName}`
+            }
+            onPress={onPressComments}
+            badge={commentCount > 0 ? String(commentCount) : undefined}
+          />
+        ) : null}
 
         {onPressWatchlist ? (
           <IconAction

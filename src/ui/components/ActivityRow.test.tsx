@@ -320,3 +320,39 @@ describe('the reaction control', () => {
     expect(view.getByText('PICKER')).toBeTruthy();
   });
 });
+
+describe('the comment control', () => {
+  it('is absent unless the surface has wired it up', async () => {
+    // The rule that kept a placeholder off this row while comments were deferred.
+    // An icon that does nothing is worse than no icon.
+    const view = await render(<ActivityRow {...props} />);
+    expect(view.queryByLabelText(/[Cc]omment/)).toBeNull();
+  });
+
+  it('shows the count and never a preview of what was said', async () => {
+    // The founder's rule: no text preview may leak masked spoiler content. The row
+    // is not given a body to leak — it takes a number, and the bodies are fetched
+    // when the sheet opens. This asserts the prop shape as much as the render.
+    const view = await render(
+      <ActivityRow {...props} onPressComments={jest.fn()} commentCount={2} />,
+    );
+
+    expect(view.getByText('2')).toBeTruthy();
+    expect(
+      view.getByLabelText("2 comments on Suraj's activity about Inception. Open them."),
+    ).toBeTruthy();
+  });
+
+  it('invites the first comment rather than showing a zero', async () => {
+    const onPressComments = jest.fn();
+    const view = await render(
+      <ActivityRow {...props} onPressComments={onPressComments} commentCount={0} />,
+    );
+
+    expect(view.queryByText('0')).toBeNull();
+    await fireEvent.press(
+      view.getByLabelText("Comment on Suraj's activity about Inception"),
+    );
+    expect(onPressComments).toHaveBeenCalled();
+  });
+});

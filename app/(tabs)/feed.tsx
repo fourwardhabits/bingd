@@ -7,8 +7,10 @@ import { useCurrentProfile } from '@/features/auth';
 import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
+import { CommentSheet } from '@/features/feed/CommentSheet';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
+import { useCommentCounts } from '@/features/feed/use-comments';
 import { useFeed, type FeedItem } from '@/features/feed/use-feed';
 import {
   DEFAULT_REACTION,
@@ -45,9 +47,13 @@ export default function FeedScreen() {
   // else's, and a row can be in neither.
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const [detailFor, setDetailFor] = useState<string | null>(null);
+  // The event whose comments are open. A third independent idea, for the same reason
+  // the first two are separate: a row can be in any, all or none of these states.
+  const [commentsFor, setCommentsFor] = useState<string | null>(null);
 
   const eventIds = useMemo(() => (feed.data ?? []).map((event) => event.id), [feed.data]);
   const reactions = useReactions(eventIds, profile.id);
+  const commentCounts = useCommentCounts(eventIds, profile.id);
   const { setReaction } = useSetReaction(profile.id);
 
   const choose = async (eventId: string, kind: ReactionKind | null) => {
@@ -110,6 +116,7 @@ export default function FeedScreen() {
   };
 
   const events = feed.data ?? [];
+  const openComments = commentsFor ? (events.find((e) => e.id === commentsFor) ?? null) : null;
 
   return (
     <Screen>
@@ -187,6 +194,8 @@ export default function FeedScreen() {
               inWatchlist={event.mediaItemId ? saved.has(event.mediaItemId) : false}
               onPressShare={event.mediaItemId ? () => void shareTitle(event) : undefined}
               reaction={reactionFor(event.id)}
+              onPressComments={() => setCommentsFor(event.id)}
+              commentCount={commentCounts.data?.get(event.id) ?? 0}
             />
           ))
         )}
@@ -197,6 +206,24 @@ export default function FeedScreen() {
         onClose={() => setDetailFor(null)}
         onPressPerson={(username) => {
           setDetailFor(null);
+          router.push(`/u/${username}`);
+        }}
+      />
+
+      {/* The media item and the title come from the event, so spoiler masking is
+          against the exact thing the activity is about — a season, never its parent
+          series. `openComments` resolves the event once rather than letting the sheet
+          look it up, so there is one place that decides what "this activity is about"
+          means. */}
+      <CommentSheet
+        eventId={commentsFor}
+        mediaItemId={openComments?.mediaItemId ?? null}
+        title={openComments?.title ?? null}
+        viewerId={profile.id}
+        watched={watched.data}
+        onClose={() => setCommentsFor(null)}
+        onPressPerson={(username) => {
+          setCommentsFor(null);
           router.push(`/u/${username}`);
         }}
       />

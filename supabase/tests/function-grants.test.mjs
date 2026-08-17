@@ -105,6 +105,18 @@ const ALLOWED = {
   // activity.
   'set_reaction(uuid,uuid,text)': ['authenticated'],
 
+  // Added 2026-08-17 with Comments V1 (20260817000100). Same shape as set_reaction
+  // and for the same reason: `comments` has a select policy and no insert policy,
+  // because a policy cannot express "and only on an event you are allowed to see".
+  //
+  // All three refuse with P0002 for a row that is missing *and* for one the caller
+  // may not touch, so a comment id or an event id learned from a screenshot or a
+  // crash report confirms nothing. `_assert_comment_length` is deliberately absent:
+  // nothing outside these three needs it.
+  'add_comment(uuid,uuid,text,boolean)': ['authenticated'],
+  'edit_comment(uuid,uuid,text,boolean)': ['authenticated'],
+  'delete_comment(uuid,uuid)': ['authenticated'],
+
   // Added 2026-08-16 with watch tagging (PRD §14). `set_watch_tags` replaces the
   // whole companion list for one of the caller's own watches; `hide_watch_tag` is
   // the tagged person's side of it.
