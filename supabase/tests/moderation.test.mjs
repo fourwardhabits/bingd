@@ -307,6 +307,23 @@ describe('the guard is wired in, not merely present', () => {
     // 20260817000400. A stable pairwise read, filtered by can_view_profile from the
     // caller's own side. A suspended *subject* is already absent from it.
     'taste_match',
+    // 20260817000600. The caller's own inbox and nothing else. Suspension is about
+    // what an account may do *to other people*; it does not make somebody unable to
+    // read what was sent to them, and hiding a pending follow request from a
+    // suspended account would leave it unanswerable if the suspension is lifted.
+    'my_notifications',
+    // 20260817000600, and the one entry here that is not a read.
+    //
+    // `delete_account` skips the guard **deliberately**, which is why it is declared
+    // here rather than fixed. Suspension is a moderation state about what somebody may
+    // do to other people; erasure is not that. Refusing it would mean the accounts
+    // most likely to want out are precisely the ones that cannot leave, and it would
+    // make a suspension into an indefinite hold on somebody's data.
+    //
+    // It is the only writer in the schema that skips it, and it is safe to: it takes
+    // no target, acts only on auth.uid(), and its effect is to remove the account
+    // rather than to reach anybody else.
+    'delete_account',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

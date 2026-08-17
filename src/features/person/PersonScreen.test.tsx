@@ -13,12 +13,30 @@ const mockSetWatchlist = jest.fn(() => Promise.resolve({ outcome: 'applied' as c
 
 const tableRows: Record<string, unknown[]> = {};
 let mockPersonId = '6193';
+/**
+ * Reads of one table start failing after N successes.
+ *
+ * The regression at review 13b was specifically "a successful read returned a live
+ * claim, and every read after it failed" — React Query keeps the last good `data`, so
+ * the screen went on believing somebody was fetching. A mock that always succeeds
+ * cannot express that, which is why the first four claim tests could not tell the
+ * broken implementation from the fixed one.
+ */
+let mockFailAfter: { table: string; successes: number } | null = null;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: () => Promise.resolve({ data: null, error: null }),
     from: (table: string) => {
       const filters: Record<string, unknown> = {};
+      const failing = () => {
+        if (!mockFailAfter || mockFailAfter.table !== table) return false;
+        if (mockFailAfter.successes > 0) {
+          mockFailAfter.successes -= 1;
+          return false;
+        }
+        return true;
+      };
       const rows = () => {
         const source = tableRows[table] ?? [];
         return source.filter((row) => {
@@ -35,7 +53,10 @@ jest.mock('@/lib/supabase', () => ({
         in: () => chain,
         order: () => Promise.resolve({ data: rows(), error: null }),
         limit: () => chain,
-        maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
+        maybeSingle: () =>
+          failing()
+            ? Promise.resolve({ data: null, error: { message: 'network down' } })
+            : Promise.resolve({ data: rows()[0] ?? null, error: null }),
         single: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
         then: (resolve: (value: unknown) => unknown) =>
           resolve({ data: rows(), error: null, count: rows().length }),
@@ -115,6 +136,7 @@ beforeEach(() => {
   mockPush.mockReset();
   mockCachePerson.mockClear();
   mockSetWatchlist.mockClear();
+  mockFailAfter = null;
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   tableRows.person_cache = [cached];
   tableRows.media_items = items;
@@ -363,20 +385,31 @@ describe('a person somebody else is already fetching', () => {
     expect(mockCachePerson).not.toHaveBeenCalled();
   });
 
-  it('stops waiting when the claim runs out, and offers a way on', async () => {
-    // A claim is a promise to fetch, and the promise can be broken — the isolate can
-    // be killed mid-request. Bounded by the claim's own deadline rather than by the
-    // next read agreeing it is still held, so a database that has stopped answering
-    // ends the wait instead of extending it (independent review 13b).
-    const nearly = { ...claim, expires_at: new Date(Date.now() + 1200).toISOString() };
-    tableRows.person_cache = [nearly];
+  it('stops waiting when the reads stop answering, rather than spinning forever', async () => {
+    // The regression at review 13b, made testable: one successful read returns a live
+    // claim and every read after it fails. React Query keeps the last good `data`, so
+    // the screen went on believing somebody was fetching — and an interval asking only
+    // "is it still claimed" went on asking every 1.5 seconds for the life of the
+    // screen. The one state that could not resolve itself was the one that polled
+    // hardest, and the reader saw a spinner that never ended.
+    //
+    tableRows.person_cache = [claim];
+    mockFailAfter = { table: 'person_cache', successes: 1 };
     const view = await renderWithProviders(<PersonScreen />);
 
-    await waitFor(() => expect(view.getByText('Nothing here yet')).toBeTruthy(), {
-      timeout: 8000,
+    // Three failed polls at 1.5s each, plus the render that observes the third. The
+    // *other* bound on this wait is a thirty-second timer, which covers a request that
+    // hangs rather than failing; this is the one an outage reaches first, and it is the
+    // one the defect was about.
+    // The assertion is that the spinner ends and there is a way on, rather than which
+    // of the two honest terminal states it lands in — "could not load" and "nothing
+    // here yet" are both true of a database that has stopped answering, and which one
+    // React Query reports depends on whether it kept the last good read.
+    await waitFor(() => expect(view.getByText('Try again')).toBeTruthy(), {
+      timeout: 12_000,
     });
-    // `Button` exposes its label as text rather than as an accessibility label.
-    expect(view.getByText('Try again')).toBeTruthy();
+    // And it never fell back to spending the request the claim exists to prevent.
+    expect(mockCachePerson).not.toHaveBeenCalled();
   });
 
   it('asks again immediately when the claim has already lapsed', async () => {

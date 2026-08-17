@@ -50,31 +50,9 @@ export type PersonState = {
   detail: PersonDetail | null;
   /** Somebody else holds the claim. Poll; do not spend a second request. */
   claimed: boolean;
-  /**
-   * When that claim runs out, as epoch milliseconds.
-   *
-   * Carried rather than recomputed because it is what **bounds the poll**, and the
-   * bound has to survive the reads failing. Independent review 13b: React Query keeps
-   * the last successful `data` when a refetch errors, so an interval that asks only
-   * "is it still claimed" goes on asking every 1.5 seconds for the life of the screen
-   * once the network drops. A deadline captured from the row itself expires whether or
-   * not another read ever succeeds.
-   */
-  claimedUntil: number | null;
   /** Past its TTL. Render it, and refresh behind the reader. */
   stale: boolean;
 };
-
-/**
- * Whether somebody else's request is still worth waiting for.
- *
- * In one place because two callers need the same answer and would drift: the query's
- * `refetchInterval`, which decides whether to look again, and the screen, which
- * decides between a spinner and an empty state. A claim whose two minutes have passed
- * is not a claim, however recently it was read.
- */
-export const isAwaitingClaim = (state: PersonState | undefined): boolean =>
-  Boolean(state?.claimed && state.claimedUntil !== null && Date.now() < state.claimedUntil);
 
 /** A TMDB person id is a positive integer, and nothing else is worth a request. */
 function personIdOf(value: string | null): number | null {
@@ -101,10 +79,33 @@ type CachedPayload = {
   credit_total?: number;
 };
 
-const NOTHING: PersonState = { detail: null, claimed: false, claimedUntil: null, stale: false };
+const NOTHING: PersonState = { detail: null, claimed: false, stale: false };
 
 /** How often to look again while somebody else is fetching this person. */
 const CLAIM_POLL_MS = 1_500;
+
+/**
+ * How long this device waits for somebody else's in-flight fetch before giving up.
+ *
+ * **Measured locally, from the moment this device first saw the claim** — not derived
+ * from the row's `expires_at`. The first attempt at bounding this compared the
+ * database's absolute timestamp against `Date.now()` on the phone, and independent
+ * review 13c was right that this is the wrong comparison to build a guarantee on: a
+ * device whose clock runs ahead would read a live claim as lapsed and ask for a fetch
+ * the claim exists to prevent.
+ *
+ * A local elapsed-time wait cannot be skewed, because both ends of the subtraction
+ * come from the same clock. And the guarantee it gives up — knowing exactly when the
+ * server's claim lapses — was never this side's to enforce: `tmdb_claim_person`
+ * re-checks with the *database's* clock and refuses. The worst a wrong clock here can
+ * do is make the client ask; the server still decides whether anything is spent.
+ *
+ * Thirty seconds is well inside the claim's two minutes, so a wait that ends has
+ * genuinely outlasted a normal fetch, and short enough that a reader is not staring at
+ * a spinner while an isolate that died two seconds in fails to come back.
+ */
+const CLAIM_WAIT_MS = 30_000;
+
 
 /**
  * A person, and everything TMDB credits them on.
@@ -142,17 +143,29 @@ const CLAIM_POLL_MS = 1_500;
  */
 export function usePerson(personId: string | null) {
   const numeric = personIdOf(personId);
+  /**
+   * Whether this device has waited long enough.
+   *
+   * A separate piece of state rather than a comparison inside the render, because the
+   * render is not what has to end the wait. Independent review 13c: if the last poll
+   * is issued and never settles, nothing re-renders, `Date.now()` is never re-read,
+   * and the spinner stays up for the life of the screen — the poll was bounded and
+   * the *reader* was not. A timer ends it on its own.
+   */
+  const [waited, setWaited] = useState(false);
 
-  return useQuery({
+  const query = useQuery({
     queryKey: ['person', numeric],
     enabled: numeric !== null,
     staleTime: 10 * 60_000,
     // While somebody else's request is in flight, look again shortly — the only way a
     // losing caller ever sees the answer, since nothing invalidates this query on
-    // their behalf. Bounded by the claim's **own** two-minute deadline rather than by
-    // the next read agreeing that it is still claimed, so a network that has stopped
-    // answering ends the poll instead of extending it forever.
-    refetchInterval: (query) => (isAwaitingClaim(query.state.data) ? CLAIM_POLL_MS : false),
+    // their behalf. Stops when the local wait ends, so a network that has stopped
+    // answering ends the poll rather than extending it: React Query keeps the last
+    // successful `data`, so an interval asking only "is it still claimed" would go on
+    // asking forever once the reads began to fail.
+    refetchInterval: (q) =>
+      q.state.data?.claimed && !waited && q.state.status !== 'error' ? CLAIM_POLL_MS : false,
     queryFn: async (): Promise<PersonState> => {
       const { data, error } = await supabase
         .from('person_cache')
@@ -177,9 +190,7 @@ export function usePerson(personId: string | null) {
       // work. An *unexpired* one means somebody is fetching them right now; an expired
       // one means that somebody never came back, and the right answer is to ask again.
       if (!person || !name || !Array.isArray(payload?.credits)) {
-        return expired
-          ? NOTHING
-          : { detail: null, claimed: true, claimedUntil: expiresAt, stale: false };
+        return expired ? NOTHING : { detail: null, claimed: true, stale: false };
       }
 
       const entries = payload.credits;
@@ -237,11 +248,53 @@ export function usePerson(personId: string | null) {
           creditTotal: payload.credit_total ?? credits.length,
         },
         claimed: false,
-        claimedUntil: null,
         stale: expired,
       };
     },
   });
+
+  const claimed = Boolean(query.data?.claimed);
+
+  useEffect(() => {
+    if (!claimed) return;
+    const timer = setTimeout(() => setWaited(true), CLAIM_WAIT_MS);
+    // The reset lives in the cleanup rather than in the body, so this effect never
+    // sets state synchronously — the body only starts a timer, and only the timer and
+    // the teardown change anything. It matters for the rare case of a second claim on
+    // the same person in one mount: the row lapses, somebody re-claims it, and a
+    // `waited` left true from the first wait would make the second one instant.
+    return () => {
+      clearTimeout(timer);
+      setWaited(false);
+    };
+    // Deliberately keyed on `claimed` alone. Restarting the wait on every poll would
+    // make it unbounded again, which is the defect this timer exists to close.
+  }, [claimed]);
+
+  /**
+   * Whether somebody else's request is still worth waiting for.
+   *
+   * Returned alongside the query rather than derived at the call site, because two
+   * places need the same answer — the screen's choice between a spinner and an empty
+   * state, and the poll's decision to look again — and two copies of it would drift.
+   *
+   * Two bounds, and they cover different failures.
+   *
+   * `isError` ends it the moment the reads stop answering, which is the 13b defect
+   * exactly: React Query keeps the last successful `data`, so a claim observed once
+   * goes on reading as claimed for as long as the reads keep failing — the read that
+   * would change its mind is the one that is failing. There is no waiting on a claim
+   * we cannot see; there is only a database we cannot reach, and the screen should say
+   * so. (`failureCount` looks like the right signal and is not: it counts retries
+   * *within* one fetch and resets on the next, so it never accumulates across polls.
+   * The app's own client retries twice, so a single dropped request does not trip
+   * this.)
+   *
+   * The timer ends it when the reads are answering perfectly well and the winner
+   * simply never writes — including a request that hangs rather than failing, which no
+   * error state would ever see.
+   */
+  return { ...query, awaitingClaim: claimed && !waited && !query.isError };
 }
 
 /**

@@ -184,23 +184,46 @@ So attribution and acceptance are separated. **First inviter wins the attributio
 
 ## 6. Notifications, capabilities, account
 
-| Function | Purpose |
-|---|---|
-| `mark_notifications_read(ids uuid[])` | Mark read. Empty array marks all |
-| `set_notification_preference(category, enabled)` | Per-category toggle |
-| `set_all_notifications(enabled)` | Master switch |
-| `register_device_token(token, platform)` | Register for push. Called in v1 even though delivery is off |
-| `my_capabilities()` | The caller's capability set, **for presentation only** |
-| `update_profile(display_name?, visibility?)` | Profile edits |
-| `set_avatar(object_path)` | Points `profiles.avatar_path` at an object in the public `avatars` bucket. Takes a path, not a URL |
-| `change_username(new_username)` | Enforces the 30-day rule and writes `username_history` |
-| `delete_account()` | Cascading delete, token invalidation, web-page removal |
+| Function | Purpose | Built |
+|---|---|---|
+| `my_notifications(limit)` | The caller's own inbox, with the actor named and the subject title resolved | 2026-08-17 |
+| `mark_notifications_read()` | Marks every unread row of the caller's read, and returns how many | 2026-08-17 |
+| `my_capabilities()` | The caller's capability set, **for presentation only** | 2026-08-13 |
+| `update_profile(operation_id, display_name)` | The display name, 1–50 characters on one line | 2026-08-17 |
+| `set_profile_visibility(operation_id, visibility)` | Public or private. Going public approves everybody waiting | 2026-08-17 |
+| `set_avatar(object_path)` | Points `profiles.avatar_path` at an object in the public `avatars` bucket. Takes a path, not a URL | 2026-08-15 |
+| `change_username(operation_id, username)` | 30-day cooldown; the triggers write `username_history` | 2026-08-17 |
+| `delete_account(confirmation)` | Removes the avatar objects, then the `auth.users` row, and lets the cascade do the rest | 2026-08-17 |
+| `set_notification_preference(category, enabled)` | Per-category toggle | **not built** |
+| `set_all_notifications(enabled)` | Master switch | **not built** |
+| `register_device_token(token, platform)` | Register for push | **not built** |
+
+**Three rows are marked not built and stay that way for V1.** `notification_preferences` and `device_tokens` exist and nothing writes either. There is one delivery channel — the inbox — it cannot be switched off without making follow requests unanswerable, and a screen of switches over a table nothing reads is a control that does nothing. Push delivery is off by AD-10, so a token registry would collect credentials for a channel that does not exist. Both wait for a push architecture, which is Beta Hardening.
+
+**`update_profile` lost its `visibility` parameter and gained an operation id.** Splitting the two is not cosmetic: a display name is an edit and visibility is a permission, they belong on different screens, and folding them into one call would mean every name change re-asserted a privacy setting the caller had not touched. `mark_notifications_read` lost its `ids` array for the opposite reason — there is no per-row surface, and the useful meaning of "read" on a list somebody opens is "has seen this screen".
+
+**`set_profile_visibility` approves pending requests when the account goes public, and does so silently.** Leaving them pending produces a state nothing else in the schema can reach: a public account where a new follower is approved instantly and the ones who asked first are still queued. It is silent because `respond_follow_request` sends `follow_approved` when somebody makes a decision about a specific person, and nobody made one here — the account stopped requiring one. Firing that notification would attribute an act the user did not perform. Going *private* deliberately does not remove existing followers; that is `remove_follower`'s job, and a retroactive revocation would sever relationships the user never named.
+
+**`my_notifications` is `security definer`, and it has to be.** A private account requesting to follow another private account fails `can_view_profile`, so an invoker-rights query returns the request with no name attached and the one control that resolves it cannot be drawn — the request would be permanently unanswerable, which makes the private setting a trap rather than a choice. It is the same shape as `my_blocks`: the filter is `recipient_id = auth.uid()`, it is not a parameter, and it cannot be made one. Suspended actors drop out, like everywhere else. The subject join for a `feed_event` is constrained to `actor_id = auth.uid()`, so it resolves the recipient's own activity and can never be pointed at anybody else's.
 
 `my_capabilities()` exists so the client can render a gate as *Coming soon* rather than as a broken button. **It is never the enforcement point.** Every guarded write re-resolves capabilities server-side, so a modified client that lies about its capability set still cannot create a fourth list.
 
 `set_avatar` takes an object path rather than a URL for two reasons. Storing whatever URL a client sends would let any account point its avatar at an off-site address — a tracker that fires once per feed impression, or an image that is one thing during review and another after it. And the origin belongs to the deployment, not to the row, so a dump restored into a second project would otherwise leave every face pointing at the first. The path is validated to begin with the caller's own uuid folder, which is the same rule the storage policy applies to the upload; both are stated, because the two are enforced by different subsystems and neither can see the other. Resolve to a URL with `avatarUri` in `src/lib/images.ts`.
 
-`delete_account()` deletes the caller's `auth.users` row and lets the cascade do the rest. Two things deliberately survive it, both by detaching rather than deleting: the **username reservation**, so the name cannot be claimed by an impersonator, and any **invite attribution** naming the caller as inviter, so growth provenance stays intact. Both are enforced in the schema rather than in this function, so a deletion performed from the Supabase console behaves identically (`data-model.md` §2, §11).
+`delete_account(confirmation)` deletes the caller's `auth.users` row and lets the cascade do the rest. **Four** things deliberately survive it, all by detaching rather than deleting, and all through the foreign key's own rule rather than through this function — so a deletion performed from the Supabase console behaves identically (`data-model.md` §2, §11):
+
+- the **username reservation**, so the name cannot be claimed by an impersonator inheriting old links (the INF-2 outcome `20260813002000` exists to prevent);
+- any **invite attribution** naming the caller as inviter, so growth provenance stays intact — `20260813001500` §2 made this SET NULL deliberately;
+- `profiles.invited_by` on accounts the caller invited, which are somebody else's rows;
+- **moderation reports**, in both directions. Deleting a report because the reporter left would let an account erase every complaint it made by closing itself, and deleting one because the subject left would erase the record of why an account was removed.
+
+Two things the function does itself, and both are load-bearing. It removes the caller's objects from the `avatars` bucket first — the only user data no foreign key reaches, and a public bucket URL contains nothing but the account's uuid, so an avatar left behind is a face that stays fetchable by anybody who kept a link. It is also the table `20260813002200` names as the likely *blocker* of a `delete from auth.users`, so clearing it is what keeps the delete possible at all. And it requires the caller's own handle as `confirmation`: a yes/no dialog is a mistap, and this is the one action in the app that cannot be undone by any means.
+
+It is **idempotent without an operation id**, deliberately. `_claim_operation` writes to `processed_operations`, which this operation deletes by cascade — the claim is destroyed by the thing it was meant to make repeatable. A second call finds no profile and returns `already_applied`.
+
+It is also the **only writer in the schema that does not call `assert_can_write()`**. A suspended account may delete itself: suspension is a moderation state about what somebody may do to other people, erasure is not that, and refusing it would mean the accounts most likely to want out are the ones that cannot leave. `moderation.test.mjs` declares it read-only-by-exception with that reasoning rather than letting the sweep pass silently.
+
+**There is no `deactivated` status and none is planned for V1.** `profile_status` is (`active`, `suspended`). Temporary deactivation is a third value every filter in the schema would have to learn about, and the store-required external deletion page is Beta Hardening rather than this run.
 
 ---
 

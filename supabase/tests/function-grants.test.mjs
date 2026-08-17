@@ -157,6 +157,33 @@ const ALLOWED = {
   // select individually, which is the same safety argument following_score records.
   'taste_match(uuid)': ['authenticated'],
 
+  // Added 2026-08-17 with Settings (20260817000600). Every one of these is about the
+  // caller's own account and none takes a target, which is 20260813001900's rule in
+  // its strongest form: there is nothing to point at anybody else.
+  //
+  // `update_profile` and `set_profile_visibility` write columns `profiles` has no
+  // update policy for by design (20260813000200: writes go through definer functions),
+  // so definer is the mechanism rather than an escalation.
+  //
+  // `change_username` is the first writer for the 90-day redirect machinery declared
+  // in 20260813002000 and unreachable until now. Its cooldown is not a rate limit but
+  // a scarcity one: every rename retires a handle permanently.
+  //
+  // `my_notifications` is definer for the reason `my_blocks` is, and the reason is
+  // sharper here — a private account requesting to follow another private account
+  // fails can_view_profile, so an invoker query could not name the one person whose
+  // request the caller has to answer. The filter is `recipient_id = auth.uid()` and it
+  // is not a parameter.
+  //
+  // `delete_account` takes only a confirmation string. It deletes `auth.uid()` and
+  // there is no signature by which it could delete anybody else.
+  'update_profile(uuid,text)': ['authenticated'],
+  'change_username(uuid,text)': ['authenticated'],
+  'set_profile_visibility(uuid,profile_visibility)': ['authenticated'],
+  'my_notifications(integer)': ['authenticated'],
+  'mark_notifications_read()': ['authenticated'],
+  'delete_account(text)': ['authenticated'],
+
   // Added 2026-08-16 with watch tagging (PRD §14). `set_watch_tags` replaces the
   // whole companion list for one of the caller's own watches; `hide_watch_tag` is
   // the tagged person's side of it.

@@ -9,7 +9,6 @@ import { useRankedCollection, useWatchlist } from '@/features/collection/use-col
 import { useWatched } from '@/features/collection/use-watched';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
 import {
-  isAwaitingClaim,
   usePerson,
   usePersonFetch,
   type PersonCredit,
@@ -78,8 +77,13 @@ export default function PersonScreen() {
    * a second one is exactly what `tmdb_claim_person` exists to prevent. `usePerson`
    * polls in that state instead.
    */
-  const awaitingClaim = isAwaitingClaim(state);
-  const needsFetch = !person.isPending && !awaitingClaim && (!detail || state?.stale === true);
+  const awaitingClaim = person.awaitingClaim;
+  // `!person.isError` matters as much as the rest of it. A read that failed tells us
+  // nothing about what is cached, and "we could not ask the database" is not a reason
+  // to spend a provider request — least of all while somebody else's claim may still
+  // be live and simply unobservable from here.
+  const needsFetch =
+    !person.isPending && !person.isError && !awaitingClaim && (!detail || state?.stale === true);
   const { fetching, retry } = usePersonFetch(id ?? null, needsFetch);
 
   const tryAgain = () => {

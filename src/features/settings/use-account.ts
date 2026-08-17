@@ -1,0 +1,104 @@
+import { useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+
+import { newOperationId } from '@/features/collection/writes';
+import { diagnose } from '@/lib/diagnose';
+import { supabase } from '@/lib/supabase';
+
+export type AccountWriteResult = { ok: true } | { ok: false; message: string };
+
+/**
+ * The writers behind Settings.
+ *
+ * Every one of them is an entry point to machinery that already existed and had none
+ * (20260817000600): the rename triggers, the visibility column `can_view_profile` has
+ * read since day one, the `read_at` column declared with the notifications table, and
+ * a cascade every foreign key was given a deliberate rule for. Nothing here decides
+ * anything the database has not already decided.
+ *
+ * One `busy` for all of them rather than a `useMutation` each, following
+ * `useSocialWrites`: they are mutually exclusive by construction — each sits behind a
+ * control this flag disables — so separate pending flags would be several ways to
+ * express one fact.
+ *
+ * No optimism anywhere, for the same reason the social writes have none. A handle that
+ * shows as changed and silently reverts is worse than one that takes a beat, and
+ * `deleteAccount` reporting success it did not have is the one statement this surface
+ * must never make.
+ */
+export function useAccountWrites() {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  const run = async (
+    fn: () => PromiseLike<{ error: unknown }>,
+    invalidate: unknown[][] = [],
+  ): Promise<AccountWriteResult> => {
+    if (busy) return { ok: false, message: 'One at a time.' };
+    setBusy(true);
+    try {
+      const { error } = await fn();
+      if (error) {
+        const message =
+          diagnose(error) ??
+          (error instanceof Error ? error.message : 'Something went wrong. Try again.');
+        return { ok: false, message };
+      }
+      await Promise.all(
+        invalidate.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+      );
+      return { ok: true };
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return {
+    busy,
+
+    updateProfile: (displayName: string) =>
+      run(
+        () =>
+          supabase.rpc('update_profile', {
+            p_operation_id: newOperationId(),
+            p_display_name: displayName,
+          }),
+        // The name renders on every social surface, so the invalidation is broad for
+        // the same reason a follow's is: enumerating the surfaces precisely would be a
+        // list to keep in step with every future feature.
+        [['profile'], ['feed'], ['actor-activity'], ['user-search'], ['comments']],
+      ),
+
+    changeUsername: (username: string) =>
+      run(
+        () =>
+          supabase.rpc('change_username', {
+            p_operation_id: newOperationId(),
+            p_username: username,
+          }),
+        [['profile'], ['user-search']],
+      ),
+
+    setVisibility: (visibility: 'public' | 'private') =>
+      run(
+        () =>
+          supabase.rpc('set_profile_visibility', {
+            p_operation_id: newOperationId(),
+            p_visibility: visibility,
+          }),
+        // Going public approves everybody waiting, so the relationship caches and the
+        // inbox both change even though the caller only touched a switch.
+        [['profile'], ['relationships'], ['notifications'], ['profile-follows']],
+      ),
+
+    /**
+     * Permanent, and it takes the caller's own handle to prove they meant it.
+     *
+     * Nothing is invalidated afterwards, deliberately: the account is gone, the session
+     * is about to be ended by the caller, and warming a cache for a profile that no
+     * longer exists would only produce a screen full of errors on the way out.
+     */
+    deleteAccount: (confirmation: string) =>
+      run(() => supabase.rpc('delete_account', { p_confirmation: confirmation })),
+  };
+}
