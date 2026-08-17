@@ -1,4 +1,5 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -22,12 +23,15 @@ const SEASON_2 = 'season-2';
 let mockCommentRows: Record<string, unknown>[] = [];
 const mockRpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 let mockRpcError: unknown = null;
+/** Held open to keep a write in flight while the sheet moves on. */
+let mockRpcGate: Promise<void> | null = null;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
-    rpc: (name: string, args: Record<string, unknown>) => {
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      if (mockRpcGate) await mockRpcGate;
       mockRpcCalls.push({ name, args });
-      return Promise.resolve({ data: null, error: mockRpcError });
+      return { data: null, error: mockRpcError };
     },
     from: () => {
       const chain = {
@@ -73,10 +77,29 @@ const open = (over: Partial<React.ComponentProps<typeof CommentSheet>> = {}) =>
     />,
   );
 
+/**
+ * Alert is a native module, so the confirmation button has to be invoked directly.
+ * Recording the buttons is also the only way to assert that a destructive action was
+ * *not* taken — a spy on the RPC alone cannot tell 'refused' from 'never confirmed'.
+ */
+const alertButtons: { text?: string; onPress?: () => void }[] = [];
+jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+  alertButtons.length = 0;
+  for (const button of buttons ?? []) alertButtons.push(button);
+});
+
+const confirmLastAlert = (text: string) => {
+  const button = alertButtons.find((b) => b.text === text);
+  if (!button?.onPress) throw new Error(`no "${text}" button on the last alert`);
+  button.onPress();
+};
+
 beforeEach(() => {
   mockCommentRows = [];
   mockRpcCalls.length = 0;
   mockRpcError = null;
+  mockRpcGate = null;
+  alertButtons.length = 0;
 });
 
 // ---------------------------------------------------------------------------
@@ -337,5 +360,87 @@ describe('the composer belongs to one activity', () => {
     await view.rerender(<CommentSheet eventId="e1" {...props} />);
 
     expect(view.queryByDisplayValue('unsent')).toBeNull();
+  });
+});
+
+describe('work already in flight belongs to the activity that started it', () => {
+  // Independent review 11b. Resetting state on a change of event does nothing for
+  // callbacks made before the change: a slow write and a native confirmation both
+  // outlive the render that created them.
+
+  const sheet = (eventId: string | null) => (
+    <CommentSheet
+      eventId={eventId}
+      mediaItemId={FILM}
+      title="Sinners"
+      viewerId={VIEWER}
+      watched={new Set([FILM])}
+      onClose={jest.fn()}
+      onPressPerson={jest.fn()}
+    />
+  );
+
+  it('does not let a slow post clear the next activity’s draft', async () => {
+    let release: (() => void) | null = null;
+    mockRpcGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const view = await open({ watched: new Set([FILM]) });
+    await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());
+
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'about event A');
+    await fireEvent.press(view.getByText('Post'));
+
+    // Still in flight. Move to another activity and start typing.
+    await view.rerender(sheet('e2'));
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'about event B');
+
+    release!();
+    mockRpcGate = null;
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
+
+    // A's write happened, against A. B's draft survived it.
+    expect(mockRpcCalls[0]!.args.p_feed_event_id).toBe('e1');
+    expect(view.getByDisplayValue('about event B')).toBeTruthy();
+  });
+
+  it('abandons a delete confirmed against an activity that is no longer on screen', async () => {
+    mockCommentRows = [comment({ author_id: VIEWER, body: 'from event A' })];
+
+    const view = await open({ watched: new Set([FILM]) });
+    await waitFor(() => expect(view.getByText('from event A')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Delete your comment'));
+    // The alert is up. The sheet moves underneath it, which a native modal allows.
+    await view.rerender(sheet('e2'));
+
+    // Now the user confirms.
+    confirmLastAlert('Delete');
+
+    // Deliberately not `waitFor(() => expect(mockRpcCalls).toHaveLength(0))`, which
+    // is vacuous: waitFor returns the moment its assertion passes, and an empty array
+    // passes before the continuation has had a chance to run. It was written that way
+    // first and did not fail when the guard was removed. This drains the queue.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(mockRpcCalls).toHaveLength(0);
+  });
+
+  it('still deletes when the sheet has not moved', async () => {
+    // The other half: the guard must not break the ordinary path.
+    mockCommentRows = [comment({ author_id: VIEWER, body: 'from event A' })];
+
+    const view = await open({ watched: new Set([FILM]) });
+    await waitFor(() => expect(view.getByText('from event A')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Delete your comment'));
+    confirmLastAlert('Delete');
+
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
+    expect(mockRpcCalls[0]!.name).toBe('delete_comment');
+    expect(mockRpcCalls[0]!.args.p_comment_id).toBe('c1');
   });
 });

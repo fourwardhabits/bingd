@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { shouldMask } from '@/features/collection/use-watched';
@@ -91,6 +91,30 @@ export function CommentSheet({
    * is a rule the fourth will not.
    */
   const [composerFor, setComposerFor] = useState<string | null>(eventId);
+  /**
+   * The same fact, readable from a closure that outlives the render that made it.
+   *
+   * Review 11b found the second half of the same defect: resetting the *state* on a
+   * change of event does nothing for work already in flight. A submit awaiting its
+   * round trip, and a delete confirmation waiting on a native alert, both hold
+   * callbacks created when the sheet belonged to another activity — so one could clear
+   * the new event's draft on completion, and the other could issue a delete for a
+   * comment that is no longer on screen.
+   *
+   * A ref rather than reading `composerFor`, because a closure captures the *value* of
+   * a state variable at the render that created it, which is precisely the stale thing
+   * being guarded against.
+   *
+   * Synced in an effect and not during render, which is what `react-hooks` requires
+   * and is also correct here: everything that reads it is a callback the user has to
+   * trigger, and effects flush before the frame the user could tap. The state reset
+   * below still happens during render, because that one *is* about what gets painted.
+   */
+  const composerRef = useRef<string | null>(eventId);
+  useEffect(() => {
+    composerRef.current = eventId;
+  }, [eventId]);
+
   if (composerFor !== eventId) {
     setComposerFor(eventId);
     setDraft('');
@@ -106,19 +130,32 @@ export function CommentSheet({
     setEditing(null);
   };
 
+  /** Whether the sheet is still showing the activity this closure was made for. */
+  const stillHere = (forEvent: string | null) => composerRef.current === forEvent;
+
   const submit = async () => {
     const body = draft.trim();
     if (!body || busy) return;
 
-    const result = editing
-      ? await edit({ commentId: editing.id, body, hasSpoilers: spoilers })
-      : await add({ eventId, body, hasSpoilers: spoilers });
+    const forEvent = eventId;
+    const wasEditing = editing;
+
+    const result = wasEditing
+      ? await edit({ commentId: wasEditing.id, body, hasSpoilers: spoilers })
+      : await add({ eventId: forEvent, body, hasSpoilers: spoilers });
 
     if (!result.ok) {
-      Alert.alert(editing ? 'Could not save your edit' : 'Could not post your comment', result.message);
+      // Reported even if the sheet has moved on. The write did not happen and the
+      // author believes it did; that is worth interrupting for wherever they are.
+      Alert.alert(
+        wasEditing ? 'Could not save your edit' : 'Could not post your comment',
+        result.message,
+      );
       return;
     }
-    reset();
+    // But the composer is only cleared if it is still the same one. Otherwise a slow
+    // post against the previous activity wipes the draft being typed against this one.
+    if (stillHere(forEvent)) reset();
   };
 
   const beginEdit = (comment: Comment) => {
@@ -128,6 +165,8 @@ export function CommentSheet({
   };
 
   const confirmDelete = (comment: Comment) => {
+    const forEvent = eventId;
+
     Alert.alert('Delete this comment?', 'It will be removed for everyone.', [
       { text: 'Keep', style: 'cancel' },
       {
@@ -135,6 +174,13 @@ export function CommentSheet({
         style: 'destructive',
         onPress: () => {
           void (async () => {
+            // The confirmation belonged to a screen that may no longer be there. A
+            // native alert sits above the sheet, so the sheet can close or move to
+            // another activity underneath it — and a destructive write confirmed
+            // against a context the user can no longer see is not a confirmed write.
+            // Abandoning is the safe direction: the comment is still there, and one
+            // more tap deletes it.
+            if (!stillHere(forEvent)) return;
             // If the comment being deleted is the one open in the composer, the
             // composer has to let go of it or the next save would edit a row that
             // is gone and report P0002 as "no such comment".
