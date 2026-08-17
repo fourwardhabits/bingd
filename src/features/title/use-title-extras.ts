@@ -29,7 +29,7 @@ export function useTitleVideos(mediaItemId: string | null) {
     queryKey: ['videos', mediaItemId],
     enabled: Boolean(mediaItemId),
     staleTime: 60 * 60_000,
-    queryFn: async (): Promise<TitleVideo[]> => {
+    queryFn: async (): Promise<TitleVideo[] | null> => {
       const { data, error } = await supabase
         .from('media_cache')
         .select('payload')
@@ -38,7 +38,22 @@ export function useTitleVideos(mediaItemId: string | null) {
         .maybeSingle();
       if (error) throw error;
 
-      const payload = data?.payload as { results?: TitleVideo[] } | undefined;
+      // **Null and empty are different answers**, and the difference is what makes the
+      // Phase E deployment reach titles that were enriched before it.
+      //
+      // Null means no facet row: nobody has asked TMDB about this title's videos since
+      // the adapter learned to store them. Empty means TMDB was asked and had none —
+      // the adapter writes the facet either way, which is what stops the check below
+      // from asking forever about a film with no trailer.
+      //
+      // Without this the deployment would have been almost inert. `isThin` decides
+      // whether to enrich, and it asks about artwork, overview and runtime — all of
+      // which the five hundred already-enriched rows have. They would have been
+      // complete by that measure and permanently without trailers or reviews, and the
+      // only titles ever to get either would have been ones discovered afterwards.
+      if (!data) return null;
+
+      const payload = data.payload as { results?: TitleVideo[] } | undefined;
       return payload?.results ?? [];
     },
   });

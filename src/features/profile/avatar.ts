@@ -112,8 +112,11 @@ export async function deleteAllAvatars(userId: string): Promise<number | null> {
     if (error) return null;
 
     const listed = data ?? [];
-    // A folder placeholder has no id. Passing one to `remove` is a no-op that reports
-    // success, so counting it would overstate what was deleted.
+    // `list` returns two kinds of thing: objects, which carry an id, and *prefixes* —
+    // subfolders — which do not. Passing a prefix to `remove` is a no-op that reports
+    // success, so counting one would overstate what was deleted. (Supabase's
+    // `.emptyFolderPlaceholder` is a real object with a real id and is removed like
+    // any other; it is not what this filter is about.)
     const objects = listed.filter((object) => Boolean(object.name) && object.id !== null);
 
     // **Anything that is not a removable object stops this.** Independent review 14c:

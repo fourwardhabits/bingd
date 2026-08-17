@@ -5,7 +5,9 @@ import { newOperationId } from '@/features/collection/writes';
 import { diagnose } from '@/lib/diagnose';
 import { supabase } from '@/lib/supabase';
 
-export type AccountWriteResult = { ok: true } | { ok: false; message: string };
+export type AccountWriteResult =
+  | { ok: true; avatarsRemaining?: number }
+  | { ok: false; message: string };
 
 /**
  * The writers behind Settings.
@@ -31,13 +33,13 @@ export function useAccountWrites() {
   const [busy, setBusy] = useState(false);
 
   const run = async (
-    fn: () => PromiseLike<{ error: unknown }>,
+    fn: () => PromiseLike<{ data?: unknown; error: unknown }>,
     invalidate: unknown[][] = [],
   ): Promise<AccountWriteResult> => {
     if (busy) return { ok: false, message: 'One at a time.' };
     setBusy(true);
     try {
-      const { error } = await fn();
+      const { data, error } = await fn();
       if (error) {
         const message =
           diagnose(error) ??
@@ -47,7 +49,12 @@ export function useAccountWrites() {
       await Promise.all(
         invalidate.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
       );
-      return { ok: true };
+      // Only `delete_account` returns this, and only it needs to: it cannot remove
+      // storage objects — Supabase refuses direct deletion from storage tables — so it
+      // counts what is left and the screen tells the person rather than claiming a
+      // completeness nothing could deliver.
+      const remaining = (data as { avatars_remaining?: number } | null)?.avatars_remaining;
+      return { ok: true, avatarsRemaining: typeof remaining === 'number' ? remaining : undefined };
     } finally {
       setBusy(false);
     }

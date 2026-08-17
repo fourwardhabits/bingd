@@ -94,8 +94,25 @@ function useEnrichOnce(id: string | null | undefined, needed: boolean) {
  * on-demand half of that; `tmdb-adapter`'s `enrich` action is the bulk half, and a
  * title someone has already visited will have been filled by whichever ran first.
  */
-export function useTitleEnrichment(title: EnrichableTitle | null | undefined) {
-  return useEnrichOnce(title?.id, title ? isThin(title) : false);
+export function useTitleEnrichment(
+  title: EnrichableTitle | null | undefined,
+  /**
+   * A second reason to ask, independent of whether the row looks thin.
+   *
+   * It exists for the Phase E deployment. `isThin` asks about artwork, an overview and
+   * a runtime — everything a title screen was made of before videos and TMDB reviews
+   * existed — so the five hundred rows already enriched on nonprod were complete by
+   * that measure and would never have been asked about the two new facets. The
+   * deployment would have reached only titles discovered after it.
+   *
+   * The caller passes "no videos facet row at all", which is a question about whether
+   * TMDB has *been asked*, not about whether it had anything to say. The adapter writes
+   * the facet even when the list is empty, so one enrichment settles it permanently and
+   * this cannot become a request per mount for a film with no trailer.
+   */
+  alsoWhen = false,
+) {
+  return useEnrichOnce(title?.id, title ? isThin(title) || alsoWhen : false);
 }
 
 /**

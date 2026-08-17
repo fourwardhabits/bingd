@@ -82,7 +82,13 @@ export default function AccountScreen() {
                 Alert.alert('Could not delete your account', result.message);
                 return;
               }
-              if (removed === null) {
+
+              // Two independent ways to learn the pictures did not all go: the client's
+              // own uncertainty, and the server's count of what is still there. The
+              // second exists because `delete_account` cannot remove them — Supabase
+              // refuses direct deletion from storage tables — so counting is the only
+              // thing it can honestly do, and saying nothing would be the lie.
+              if (removed === null || (result.avatarsRemaining ?? 0) > 0) {
                 Alert.alert(
                   'Account deleted',
                   'Your account and everything in it is gone. One thing is not certain: your stored pictures could not be fully cleared, so some may still exist in storage even though nothing links to them any more.',

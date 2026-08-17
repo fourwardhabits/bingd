@@ -115,6 +115,39 @@ const get = async (token, path) => {
 
 const uuid = () => crypto.randomUUID();
 
+/**
+ * Ranks one title to completion, the way the app does.
+ *
+ * `set_bucket` puts a title in a band; it is **`_rank_finalize` that writes the feed
+ * event**, and that only runs when an insertion session converges. The first version of
+ * this file seeded buckets and then failed three checks downstream on an empty feed,
+ * which is the same lesson the whole run keeps relearning: a write that was not asserted
+ * is a write that did not happen.
+ *
+ * `decide` picks the winner of each comparison. Always choosing the new title inserts
+ * it at the top of its band, which is deterministic and enough for two accounts to
+ * overlap on eight films.
+ */
+const rankToCompletion = async (token, mediaItemId, bucket) => {
+  let result = await rpc(token, 'rank_start', {
+    p_media_item_id: mediaItemId,
+    p_bucket: bucket,
+  });
+  if (result.status !== 200) return { ok: false, result };
+
+  let state = result.body;
+  for (let comparisons = 0; state && !state.done; comparisons += 1) {
+    if (comparisons > 64) return { ok: false, result: { body: 'did not converge' } };
+    const answer = await rpc(token, 'rank_answer', {
+      p_session_id: state.session_id,
+      p_winner: mediaItemId,
+    });
+    if (answer.status !== 200) return { ok: false, result: answer };
+    state = answer.body;
+  }
+  return { ok: Boolean(state?.done), result: state };
+};
+
 // ---------------------------------------------------------------------------
 // Two accounts, created and destroyed by this run
 // ---------------------------------------------------------------------------
@@ -231,6 +264,8 @@ try {
 
   // Enough shared titles for Taste Match, which needs five in common.
   const shared = films.slice(0, 8);
+  let seeded = 0;
+  const seededErrors = [];
   for (const [index, film] of shared.entries()) {
     await rpc(b.token, 'log_watched', {
       p_operation_id: uuid(),
@@ -238,27 +273,31 @@ try {
       p_watched_on: '2026-08-01',
       p_note: index === 0 ? 'A note of B’s, public.' : null,
       p_note_visibility: 'public',
-      p_note_has_spoilers: false,
+      p_note_spoilers: false,
     });
-    await rpc(b.token, 'set_bucket', {
-      p_operation_id: uuid(),
-      p_media_item_id: film.id,
-      p_bucket: index < 4 ? 'loved' : 'fine',
-    });
+    const rankedByB = await rankToCompletion(b.token, film.id, index < 4 ? 'loved' : 'fine');
+    if (!rankedByB.ok) seededErrors.push(JSON.stringify(rankedByB.result).slice(0, 120));
     await rpc(a.token, 'log_watched', {
       p_operation_id: uuid(),
       p_media_item_id: film.id,
       p_watched_on: '2026-08-02',
       p_note: null,
       p_note_visibility: 'private',
-      p_note_has_spoilers: false,
+      p_note_spoilers: false,
     });
-    await rpc(a.token, 'set_bucket', {
-      p_operation_id: uuid(),
-      p_media_item_id: film.id,
-      p_bucket: index < 5 ? 'loved' : 'fine',
-    });
+    // Counted rather than assumed. PostgREST answers an argument-name mismatch with a
+    // 404, so a fire-and-forget seed is indistinguishable from one that wrote nothing
+    // — which is precisely how the first run of this file reported an empty feed
+    // three checks later instead of a broken call here.
+    const rankedByA = await rankToCompletion(a.token, film.id, index < 5 ? 'loved' : 'fine');
+    if (rankedByA.ok) seeded += 1;
+    else seededErrors.push(JSON.stringify(rankedByA.result).slice(0, 120));
   }
+  check(
+    'the seed ranked what it meant to, on both sides',
+    seeded === shared.length && seededErrors.length === 0,
+    `${seeded}/${shared.length}; ${seededErrors.slice(0, 2).join(' | ')}`,
+  );
 
   const feed = await get(
     a.token,
@@ -290,7 +329,7 @@ try {
   const comment = await rpc(a.token, 'add_comment', {
     p_operation_id: uuid(),
     p_feed_event_id: event.id,
-    p_text: 'A said something.',
+    p_body: 'A said something.',
     p_has_spoilers: false,
   });
   const commentId = comment.body?.comment_id;
@@ -299,7 +338,7 @@ try {
   const edited = await rpc(a.token, 'edit_comment', {
     p_operation_id: uuid(),
     p_comment_id: commentId,
-    p_text: 'A said something else.',
+    p_body: 'A said something else.',
     p_has_spoilers: false,
   });
   check('A edits their own comment', edited.status === 200);
@@ -331,7 +370,7 @@ try {
   const bComment = await rpc(b.token, 'add_comment', {
     p_operation_id: uuid(),
     p_feed_event_id: event.id,
-    p_text: 'And B replied on their own activity.',
+    p_body: 'And B replied on their own activity.',
     p_has_spoilers: false,
   });
   check('B comments on their own activity', bComment.status === 200);
@@ -460,7 +499,7 @@ try {
   const commentAfterBlock = await rpc(a.token, 'add_comment', {
     p_operation_id: uuid(),
     p_feed_event_id: visibleEvent?.id ?? uuid(),
-    p_text: 'Should not land.',
+    p_body: 'Should not land.',
     p_has_spoilers: false,
   });
   check(
@@ -472,7 +511,7 @@ try {
   const commentOnNothing = await rpc(a.token, 'add_comment', {
     p_operation_id: uuid(),
     p_feed_event_id: uuid(),
-    p_text: 'Should not land either.',
+    p_body: 'Should not land either.',
     p_has_spoilers: false,
   });
   check(
@@ -493,7 +532,6 @@ try {
 
   const followingAfterBlock = await rpc(a.token, 'following_score', {
     p_media_item_id: shared[0].id,
-    p_user_id: a.id,
   });
   const score = (followingAfterBlock.body ?? [])[0] ?? followingAfterBlock.body;
   check(
@@ -558,7 +596,7 @@ try {
   const suspendedWrite = await rpc(b.token, 'add_comment', {
     p_operation_id: uuid(),
     p_feed_event_id: event.id,
-    p_text: 'Suspended accounts do not write.',
+    p_body: 'Suspended accounts do not write.',
     p_has_spoilers: false,
   });
   check('and cannot write', suspendedWrite.status >= 400, JSON.stringify(suspendedWrite.body)?.slice(0, 120));

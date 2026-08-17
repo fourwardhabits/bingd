@@ -418,6 +418,52 @@ expectAllowed(
   );
 }
 
+// Added 2026-08-17 with Phase E. `person_cache` is a third sibling of `media_cache`
+// and `provider_list_cache`, and its two writers are service_role only for the same
+// reasons the facet writers are: one could write any filmography onto any person id
+// and every viewer of that page would render it, and the other could keep any person
+// blank indefinitely, two minutes at a time. Each probe also asserts the migration is
+// on the deployed database rather than merely on disk -- `refused` means the signature
+// resolved.
+expectRefused(
+  'anon cannot execute tmdb_put_person',
+  await rpc('tmdb_put_person', { p_person_id: 1, p_payload: { person: {}, credits: [] } }),
+);
+expectRefused(
+  'anon cannot execute tmdb_claim_person',
+  await rpc('tmdb_claim_person', { p_person_id: 1 }),
+);
+
+// The person cache is world-readable, like every other catalogue table. A filmography
+// is what TMDB publishes on a public page and nothing viewer-relative is stored in it.
+{
+  const res = await get('person_cache?select=tmdb_person_id&limit=1');
+  report(
+    'anon can read the person cache, by design',
+    res.status === 200 ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 160)}`,
+  );
+}
+
+// Added 2026-08-17 with Settings. Every one of these is about the caller's own account
+// and `auth.uid()` is null for anon, so a grant would buy nothing but a surface --
+// and `delete_account` reaching an unauthenticated caller would be the worst of them.
+expectRefused(
+  'anon cannot execute update_profile',
+  await rpc('update_profile', { p_operation_id: NIL, p_display_name: 'x' }),
+);
+expectRefused(
+  'anon cannot execute change_username',
+  await rpc('change_username', { p_operation_id: NIL, p_username: 'nobody_at_all' }),
+);
+expectRefused(
+  'anon cannot execute set_profile_visibility',
+  await rpc('set_profile_visibility', { p_operation_id: NIL, p_visibility: 'public' }),
+);
+expectRefused('anon cannot execute my_notifications', await rpc('my_notifications', { p_limit: 1 }));
+expectRefused('anon cannot execute mark_notifications_read', await rpc('mark_notifications_read', {}));
+expectRefused('anon cannot execute delete_account', await rpc('delete_account', { p_confirmation: 'x' }));
+
 // Maintenance actions are service_role only. The anon key is a valid JWT, so
 // verify_jwt lets it through and resolveCaller is what stops it — which means this
 // probe is testing the function's own logic rather than the platform's.

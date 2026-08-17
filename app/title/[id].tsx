@@ -194,7 +194,12 @@ export default function TitleScreen() {
   const companions = useCompanions(profile.id, titleId);
   // Seeded rows arrive with no artwork, overview or credits. Opening the screen is
   // what fetches them, unless the bulk pass got there first.
-  const { enriching } = useTitleEnrichment(data?.title ?? null);
+  // The second condition is about the Phase E deployment rather than about this title:
+  // a null videos facet means nobody has asked TMDB about its trailers since the
+  // adapter learned to store them, which is true of every row enriched before
+  // 2026-08-17 and of nothing else. `useTitleVideos` explains why null and empty are
+  // different answers.
+  const { enriching } = useTitleEnrichment(data?.title ?? null, videos.data === null);
   // The score is derived from the band, so this needs the whole category's
   // bucket counts — not just this title's row (ranking.md §11).
   const rankCategory: RankingCategory =

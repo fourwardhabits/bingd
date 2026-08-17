@@ -70,10 +70,15 @@ jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({ id: 'user-1', username: 'sai', display_name: 'Sai' }),
 }));
 
-// The screen fetches missing metadata on open. Not what these tests are about,
-// and it would otherwise reach the adapter.
+// The screen fetches missing metadata on open. Not what these tests are about, and it
+// would otherwise reach the adapter — but *whether* it asks is a decision the screen
+// makes, so the mock records the arguments rather than discarding them.
+const mockEnrichmentArgs: unknown[][] = [];
 jest.mock('@/features/title/use-enrichment', () => ({
-  useTitleEnrichment: () => ({ enriching: false }),
+  useTitleEnrichment: (...args: unknown[]) => {
+    mockEnrichmentArgs.push(args);
+    return { enriching: false };
+  },
 }));
 
 // Opening a trailer and opening a review are both handovers to the operating system,
@@ -167,6 +172,7 @@ beforeEach(() => {
   mockOpenId = 'film-1';
   mockPush.mockReset();
   mockOpenURL.mockReset();
+  mockEnrichmentArgs.length = 0;
   mockRpcResults = {};
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   tableRows.media_items = [film];
@@ -421,6 +427,45 @@ describe('tabs that have nothing behind them', () => {
  * reviews or community reviews", and the reason is not fussiness — TMDB publishes no
  * critics, and the word "community" already means Bingd's community two sections up.
  */
+/**
+ * The half of the Phase E deployment that nearly did not happen.
+ *
+ * `isThin` decides whether to ask TMDB, and it asks about artwork, an overview and a
+ * runtime — everything a title screen was made of before videos and TMDB reviews
+ * existed. Every row already enriched on the deployed database passes that test, so the
+ * new facets would have reached only titles discovered after the deployment, and a film
+ * somebody ranked last week would have had no trailer for ever.
+ *
+ * The trigger is "has this title's videos facet been *written*", which is a different
+ * question from "does it have videos" — and the adapter writes the facet even when the
+ * list is empty, which is what stops this becoming a request per mount.
+ */
+describe('a title enriched before the facets existed', () => {
+  it('is asked again, even though nothing about it looks thin', async () => {
+    // No `videos` row at all: `useTitleVideos` returns null rather than [].
+    tableRows.media_cache = [credits];
+    await open();
+
+    await waitFor(() => expect(mockEnrichmentArgs.at(-1)?.[1]).toBe(true));
+  });
+
+  it('is left alone once TMDB has answered, even with nothing to show', async () => {
+    // An empty facet is an answer. Asking again would be a provider request per mount
+    // for every film that has no trailer, which is most of the catalogue.
+    tableRows.media_cache = [{ ...videos, payload: { results: [] } }];
+    await open();
+
+    await waitFor(() => expect(mockEnrichmentArgs.at(-1)?.[1]).toBe(false));
+  });
+
+  it('is left alone when it has videos', async () => {
+    tableRows.media_cache = [videos];
+    await open();
+
+    await waitFor(() => expect(mockEnrichmentArgs.at(-1)?.[1]).toBe(false));
+  });
+});
+
 describe('TMDB reviews', () => {
   it('renders under its own name, and says whose words they are', async () => {
     tableRows.media_cache = [reviews];

@@ -22,7 +22,9 @@
     "functions:lint": "deno lint --config supabase/functions/tmdb-adapter/deno.json supabase/functions/tmdb-adapter",
     "functions:test": "deno test --config supabase/functions/tmdb-adapter/deno.json --allow-net supabase/functions/tmdb-adapter",
     "brand:render": "node assets/brand/render.mjs",
-    "build:web": "node web/build.mjs"
+    "build:web": "node web/build.mjs",
+    "test:adapter": "node supabase/tests/adapter-smoke.mjs",
+    "test:acceptance": "node supabase/tests/two-user-acceptance.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/dm-serif-display": "^0.4.2",
