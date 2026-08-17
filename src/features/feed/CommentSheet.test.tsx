@@ -444,3 +444,45 @@ describe('work already in flight belongs to the activity that started it', () =>
     expect(mockRpcCalls[0]!.args.p_comment_id).toBe('c1');
   });
 });
+
+describe('an opening, not an activity id', () => {
+  // Independent review 11c, Minor. Open A, close, reopen A: two different composers
+  // that share an event id, so comparing ids alone let the first one's slow write
+  // clear the second one's draft.
+
+  const sheet = (eventId: string | null) => (
+    <CommentSheet
+      eventId={eventId}
+      mediaItemId={FILM}
+      title="Sinners"
+      viewerId={VIEWER}
+      watched={new Set([FILM])}
+      onClose={jest.fn()}
+      onPressPerson={jest.fn()}
+    />
+  );
+
+  it('does not let a slow post survive a close and reopen of the same activity', async () => {
+    let release: (() => void) | null = null;
+    mockRpcGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const view = await open({ watched: new Set([FILM]) });
+    await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());
+
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'first attempt');
+    await fireEvent.press(view.getByText('Post'));
+
+    // Same activity, but a different opening of it.
+    await view.rerender(sheet(null));
+    await view.rerender(sheet('e1'));
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'second attempt');
+
+    release!();
+    mockRpcGate = null;
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
+
+    expect(view.getByDisplayValue('second attempt')).toBeTruthy();
+  });
+});

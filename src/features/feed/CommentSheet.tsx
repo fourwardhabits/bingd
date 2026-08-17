@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { shouldMask } from '@/features/collection/use-watched';
@@ -90,33 +90,38 @@ export function CommentSheet({
    * call sites would also work and was rejected: a rule three callers have to remember
    * is a rule the fourth will not.
    */
-  const [composerFor, setComposerFor] = useState<string | null>(eventId);
-  /**
-   * The same fact, readable from a closure that outlives the render that made it.
-   *
-   * Review 11b found the second half of the same defect: resetting the *state* on a
-   * change of event does nothing for work already in flight. A submit awaiting its
-   * round trip, and a delete confirmation waiting on a native alert, both hold
-   * callbacks created when the sheet belonged to another activity — so one could clear
-   * the new event's draft on completion, and the other could issue a delete for a
-   * comment that is no longer on screen.
-   *
-   * A ref rather than reading `composerFor`, because a closure captures the *value* of
-   * a state variable at the render that created it, which is precisely the stale thing
-   * being guarded against.
-   *
-   * Synced in an effect and not during render, which is what `react-hooks` requires
-   * and is also correct here: everything that reads it is a callback the user has to
-   * trigger, and effects flush before the frame the user could tap. The state reset
-   * below still happens during render, because that one *is* about what gets painted.
-   */
-  const composerRef = useRef<string | null>(eventId);
-  useEffect(() => {
-    composerRef.current = eventId;
-  }, [eventId]);
+  const [composer, setComposer] = useState({ eventId, opening: 0 });
 
-  if (composerFor !== eventId) {
-    setComposerFor(eventId);
+  /**
+   * The composer's identity, readable from a closure that outlives its render.
+   *
+   * Review 11b found that resetting the *state* on a change of event does nothing for
+   * work already in flight: a submit awaiting a round trip, and a delete confirmation
+   * waiting on a native alert, both hold callbacks made when the sheet belonged to
+   * another activity. One could clear the new event's draft on completion; the other
+   * could delete a comment that is no longer on screen.
+   *
+   * Review 11c then found two things wrong with the first fix, and both are in here:
+   *
+   * **It is an opening, not an event id.** Open A, close, reopen A: two different
+   * composers with the same event id, so a slow post from the first still wiped the
+   * second's draft. `opening` increments on every change including the one through
+   * null, which is what makes the two distinguishable.
+   *
+   * **`useLayoutEffect`, not `useEffect`.** A passive effect is not guaranteed to
+   * flush before React yields, and the native alert exists independently of this
+   * component — so its destructive callback could arrive in the window after the
+   * commit and before the sync, read the previous opening, and be allowed through.
+   * A layout effect runs synchronously in the commit phase, which closes it. (The ref
+   * cannot simply be assigned during render: `react-hooks` forbids it, correctly.)
+   */
+  const openingRef = useRef(composer.opening);
+  useLayoutEffect(() => {
+    openingRef.current = composer.opening;
+  }, [composer.opening]);
+
+  if (composer.eventId !== eventId) {
+    setComposer({ eventId, opening: composer.opening + 1 });
     setDraft('');
     setSpoilers(false);
     setEditing(null);
@@ -130,19 +135,19 @@ export function CommentSheet({
     setEditing(null);
   };
 
-  /** Whether the sheet is still showing the activity this closure was made for. */
-  const stillHere = (forEvent: string | null) => composerRef.current === forEvent;
+  /** Whether this is still the composer the closure was made in. */
+  const stillHere = (opening: number) => openingRef.current === opening;
 
   const submit = async () => {
     const body = draft.trim();
     if (!body || busy) return;
 
-    const forEvent = eventId;
+    const opening = composer.opening;
     const wasEditing = editing;
 
     const result = wasEditing
       ? await edit({ commentId: wasEditing.id, body, hasSpoilers: spoilers })
-      : await add({ eventId: forEvent, body, hasSpoilers: spoilers });
+      : await add({ eventId, body, hasSpoilers: spoilers });
 
     if (!result.ok) {
       // Reported even if the sheet has moved on. The write did not happen and the
@@ -155,7 +160,7 @@ export function CommentSheet({
     }
     // But the composer is only cleared if it is still the same one. Otherwise a slow
     // post against the previous activity wipes the draft being typed against this one.
-    if (stillHere(forEvent)) reset();
+    if (stillHere(opening)) reset();
   };
 
   const beginEdit = (comment: Comment) => {
@@ -165,7 +170,7 @@ export function CommentSheet({
   };
 
   const confirmDelete = (comment: Comment) => {
-    const forEvent = eventId;
+    const opening = composer.opening;
 
     Alert.alert('Delete this comment?', 'It will be removed for everyone.', [
       { text: 'Keep', style: 'cancel' },
@@ -180,7 +185,7 @@ export function CommentSheet({
             // against a context the user can no longer see is not a confirmed write.
             // Abandoning is the safe direction: the comment is still there, and one
             // more tap deletes it.
-            if (!stillHere(forEvent)) return;
+            if (!stillHere(opening)) return;
             // If the comment being deleted is the one open in the composer, the
             // composer has to let go of it or the next save would edit a row that
             // is gone and report P0002 as "no such comment".
