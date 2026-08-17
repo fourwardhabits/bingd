@@ -53,17 +53,29 @@
 -- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------
--- The rate limiter gains a window
+-- The rate limiter gains a window — and keeps its lock
 --
 -- `_assert_operation_rate` hardcoded `interval '1 day'`, which is right for reactions,
 -- comments and tags. api.md §11 specifies follows are limited **per hour** — a
--- mass-follow script is a burst, and a daily ceiling that a burst fits inside is not a
+-- mass-follow script is a burst, and a daily ceiling a burst fits inside is not a
 -- limit on the thing being limited.
 --
 -- Dropped and recreated with a defaulted fourth parameter rather than overloaded: two
 -- functions whose argument sets are a subset of one another make a three-argument call
--- ambiguous, and the existing three-argument callers must keep resolving. This is the
+-- ambiguous, and the existing three-argument callers must keep resolving. That is the
 -- shape 20260816000000 used for the note writers, for the same reason.
+--
+-- **The advisory lock and `volatile` are carried over deliberately, and the first
+-- draft of this migration lost both.** Independent review 12 found it: this function
+-- was defined in 20260816000300 without a lock and *redefined* in 20260816000600 with
+-- one, because counting committed claims means N concurrent transactions each see zero
+-- and each pass. Rebuilding from the older body silently reverted that — for follows,
+-- and for reactions, tags and comments with them. A regression by copying the wrong
+-- ancestor is the failure mode of `create or replace` in a schema with a history, and
+-- it is invisible in a diff against the previous migration.
+--
+-- `volatile`, not `stable`, for the reason 20260816000600 gives: an advisory lock is a
+-- side effect, and a stable function may be folded or skipped by the planner.
 -- ---------------------------------------------------------------------------
 
 drop function if exists _assert_operation_rate(text, text, integer);
@@ -75,13 +87,18 @@ create or replace function _assert_operation_rate(
   p_window     interval default interval '1 day'
 )
 returns void
-language plpgsql stable security definer
+language plpgsql
+security definer
 set search_path = public
 as $$
 declare
   v_max  integer;
   v_used integer;
 begin
+  -- Taken before the count, and keyed per account and kind, so one account is
+  -- serialised against itself and nobody against anyone else.
+  perform pg_advisory_xact_lock(hashtextextended(coalesce(auth.uid()::text, '') || p_kind, 0));
+
   select coalesce((select (value)::integer from app_config where key = p_config_key), p_fallback)
     into v_max;
 
@@ -100,7 +117,44 @@ end;
 $$;
 
 comment on function _assert_operation_rate(text, text, integer, interval) is
-  'Per-window ceiling on one kind of operation, counted from processed_operations rather than from the rows the operation creates -- so a follow-and-unfollow loop is bounded, which counting follows would not be. Window defaults to a day; follows use an hour (api.md §11). Internal: exposing it would report another account''s activity level.';
+  'Per-window ceiling on one kind of operation, counted from processed_operations rather than from the rows the operation creates -- so a follow-and-unfollow loop is bounded, which counting follows would not be. Takes a per-account advisory lock first, or concurrent callers each read a count that does not include the others. Window defaults to a day; follows use an hour (api.md §11). Internal: exposing it would report another account''s activity level.';
+
+-- ---------------------------------------------------------------------------
+-- Serialising the pair
+--
+-- Independent review 12, second Major. `block` deletes both follow rows and then
+-- inserts the block; `follow` checks reachability and then inserts an edge. Run
+-- concurrently, B's follow can clear `_assert_reachable` before A's block is visible
+-- and insert its row *after* A's deletions have run — leaving a database that holds a
+-- block **and** a follow, plus the notification the block was supposed to remove. A
+-- later `unblock` then resurrects a relationship blocking had promised to sever, which
+-- is the one guarantee a safety action must not lose.
+--
+-- The per-account lock above cannot help: these are two different accounts, so they
+-- hash to two different keys and never contend.
+--
+-- So every writer that mutates the edges *between a pair* takes a lock on the pair,
+-- ordered by uuid so that A-blocks-B and B-follows-A take the same key and cannot
+-- deadlock by taking two locks in opposite orders. Transaction-scoped, so it releases
+-- on commit or rollback with no cleanup path to get wrong — the same mechanism
+-- `_rank_finalize` and the rate limiter already use.
+-- ---------------------------------------------------------------------------
+
+create or replace function _lock_pair(p_a uuid, p_b uuid)
+returns void
+language sql
+set search_path = public
+as $$
+  select pg_advisory_xact_lock(
+    hashtextextended(
+      least(p_a::text, p_b::text) || ':' || greatest(p_a::text, p_b::text),
+      0
+    )
+  );
+$$;
+
+comment on function _lock_pair(uuid, uuid) is
+  'Transaction-scoped advisory lock over an unordered pair of accounts, so that follow, unfollow, block and the request writers cannot interleave on the same two people. Ordered by uuid, so the same pair always hashes to the same key whichever direction the call comes from -- which is also what makes two opposite-direction callers unable to deadlock. Internal.';
 
 -- ---------------------------------------------------------------------------
 -- The shared gate
@@ -171,6 +225,10 @@ begin
   -- Per hour, not per day (api.md §11). A mass-follow script is a burst.
   perform _assert_operation_rate('follow', 'follow.max_per_hour', 60, interval '1 hour');
 
+  -- Before the reachability check, not after: the check is what reads `blocks`, and a
+  -- block committing between the check and the insert is precisely the race.
+  perform _lock_pair(auth.uid(), p_followee_id);
+
   v_visibility := _assert_reachable(p_followee_id);
 
   -- A public account is followed outright; a private one receives a request. This is
@@ -225,6 +283,8 @@ begin
     return jsonb_build_object('status', 'already_applied');
   end if;
 
+  perform _lock_pair(auth.uid(), p_followee_id);
+
   -- No reachability check, deliberately. Unfollowing is withdrawal, and it must work
   -- against an account that has since been suspended or has blocked the caller —
   -- otherwise a block would trap the follow row in place, and the blocked person would
@@ -272,6 +332,8 @@ begin
   if not _claim_operation(p_operation_id, 'respond_follow_request') then
     return jsonb_build_object('status', 'already_applied');
   end if;
+
+  perform _lock_pair(auth.uid(), p_requester_id);
 
   if p_approve then
     update follows
@@ -332,6 +394,8 @@ begin
     return jsonb_build_object('status', 'already_applied');
   end if;
 
+  perform _lock_pair(auth.uid(), p_follower_id);
+
   -- The caller's own inbound edge, so no reachability check and nothing to disclose.
   -- Silent to the removed follower, for the same reason declining is silent.
   delete from follows
@@ -384,6 +448,12 @@ begin
     raise exception 'no such account' using errcode = 'P0002';
   end if;
 
+  -- Taken before the first deletion, so a follow arriving concurrently either happens
+  -- entirely before this block (and is deleted below) or entirely after it (and is
+  -- refused by `_assert_reachable`). Without it the two interleave and the database
+  -- ends up holding both.
+  perform _lock_pair(auth.uid(), p_blocked_id);
+
   delete from follows
    where (follower_id = auth.uid() and followee_id = p_blocked_id)
       or (follower_id = p_blocked_id and followee_id = auth.uid());
@@ -427,6 +497,8 @@ begin
   if not _claim_operation(p_operation_id, 'unblock') then
     return jsonb_build_object('status', 'already_applied');
   end if;
+
+  perform _lock_pair(auth.uid(), p_blocked_id);
 
   -- Deliberately does not restore the follows the block removed (api.md §3).
   -- Recreating a relationship somebody severed would be surprising, and following
@@ -480,7 +552,51 @@ comment on function follow_state_with(uuid[]) is
   'The caller''s relationship with each of a set of accounts: outgoing follow state, incoming follow state, and whether the caller has blocked them. security invoker, so it can only ever report what follows_read and blocks_read already let the caller select -- it cannot be pointed at somebody else''s graph.';
 
 -- ---------------------------------------------------------------------------
--- 5. Privileges and configuration
+-- 5. Reading back who you have blocked
+--
+-- Independent review 12, third Major, and it is a good illustration of a feature
+-- closing the door behind itself.
+--
+-- Blocking works. `can_view_profile` then returns false in both directions, so the
+-- blocked account's profile row disappears from `profiles_read`, `public_profiles`
+-- and `search_users` — correctly, and including for the person who did the blocking.
+-- Which means the Unblock control, which lives on that profile, became unreachable
+-- the moment it was needed. A user could block somebody and never undo it.
+--
+-- `blocks_read` already lets the blocker select their own block rows, so the *edge*
+-- was never hidden from them; what was hidden is the handle and the name needed to
+-- draw a row. So this projects exactly those, for the caller's own blocks and nothing
+-- else, and it is definer for precisely that reason — it must read past
+-- `profiles_read` to name an account the caller has deliberately made invisible.
+--
+-- The filter is `blocker_id = auth.uid()`, which is not a parameter and cannot be
+-- made one. It answers "who have I blocked" and there is no way to ask it about
+-- anybody else, which is 20260813001900's rule.
+-- ---------------------------------------------------------------------------
+
+create or replace function my_blocks()
+returns table (
+  user_id      uuid,
+  username     text,
+  display_name text,
+  avatar_path  text,
+  created_at   timestamptz
+)
+language sql stable security definer
+set search_path = public
+as $$
+  select p.id, p.username::text, p.display_name, p.avatar_path, b.created_at
+    from blocks b
+    join profiles p on p.id = b.blocked_id
+   where b.blocker_id = auth.uid()
+   order by b.created_at desc;
+$$;
+
+comment on function my_blocks() is
+  'The accounts the caller has blocked, with the handle and name needed to draw a row and offer Unblock. Definer, because blocking makes the profile unreadable to the blocker too -- which is correct, and which would otherwise make the only unblock surface unreachable. Takes no argument: it answers "who have I blocked" and cannot be asked about anybody else.';
+
+-- ---------------------------------------------------------------------------
+-- 6. Privileges and configuration
 -- ---------------------------------------------------------------------------
 
 grant execute on function follow(uuid, uuid)                          to authenticated;
@@ -490,6 +606,7 @@ grant execute on function remove_follower(uuid, uuid)                 to authent
 grant execute on function block(uuid, uuid)                           to authenticated;
 grant execute on function unblock(uuid, uuid)                         to authenticated;
 grant execute on function follow_state_with(uuid[])                   to authenticated;
+grant execute on function my_blocks()                                 to authenticated;
 
 insert into app_config (key, value)
 values ('follow.max_per_hour', '60'::jsonb)

@@ -333,3 +333,140 @@ describe('their notes', () => {
     expect(view.queryByText('Ben leaves.')).toBeNull();
   });
 });
+
+describe('the relationship controls', () => {
+  it('offers Follow on a public profile the viewer does not follow', async () => {
+    mockRpcResults.follow_state_with = [
+      { user_id: 'anna-id', following: null, followed_by: null, blocked: false },
+    ];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Follow')).toBeTruthy());
+  });
+
+  it('says Following once there is an approved edge', async () => {
+    mockRpcResults.follow_state_with = [
+      { user_id: 'anna-id', following: 'approved', followed_by: null, blocked: false },
+    ];
+
+    const view = await open();
+    // Two matches: the stat row's "Following" count label, and the button. Asserting
+    // the count is what keeps this honest — a single match would mean the button had
+    // vanished and the stat label was standing in for it.
+    await waitFor(() => expect(view.getAllByText('Following')).toHaveLength(2));
+    // And the unrelated state is gone. Exact matching, so "Following" is not "Follow".
+    expect(view.queryByText('Follow')).toBeNull();
+  });
+
+  it('says Requested while a private account has not answered', async () => {
+    // `pending` means two different things depending on direction, which is why the
+    // label lives in one place. From this side it is "waiting on them".
+    mockRpcResults.follow_state_with = [
+      { user_id: 'anna-id', following: 'pending', followed_by: null, blocked: false },
+    ];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Requested')).toBeTruthy());
+  });
+
+  it('offers no controls on the viewer’s own profile', async () => {
+    tableRows.public_profiles = [{ ...anna, id: 'viewer' }];
+    mockRpcResults.follow_state_with = [
+      { user_id: 'viewer', following: null, followed_by: null, blocked: false },
+    ];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
+
+    expect(view.queryByText('Follow')).toBeNull();
+    expect(view.queryByText('Block')).toBeNull();
+  });
+
+  it('reaches Unblock after blocking, though the profile itself is gone', async () => {
+    // Independent review 12, third Major. Blocking makes can_view_profile false in
+    // *both* directions, so the account leaves public_profiles for the blocker too —
+    // and the only Unblock control lived on the profile that had just disappeared.
+    // This is the state a real blocker lands in: no profile row, but a block of
+    // their own that names the account.
+    tableRows.public_profiles = [];
+    mockRpcResults.my_blocks = [
+      { user_id: 'anna-id', username: 'anna', display_name: 'Anna', avatar_path: null },
+    ];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('You blocked @anna')).toBeTruthy());
+    expect(view.getByText('Unblock')).toBeTruthy();
+    // And not the generic wording, which would leave the user with no way back.
+    expect(view.queryByText('This profile is not available.')).toBeNull();
+  });
+
+  it('still says nothing about an account the viewer has not blocked', async () => {
+    // The other half: `my_blocks` returning nothing must leave the private/nonexistent
+    // answer exactly as it was, or the new branch becomes a disclosure of its own.
+    tableRows.public_profiles = [];
+    mockRpcResults.my_blocks = [];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('This profile is not available.')).toBeTruthy());
+    expect(view.queryByText(/You blocked/)).toBeNull();
+  });
+});
+
+describe('Taste Match', () => {
+  it('shows the score and the count under the handle', async () => {
+    mockRpcResults.taste_match = [{ score: 84, common_count: 12, min_common: 5 }];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('84% Taste Match')).toBeTruthy());
+    expect(view.getByText('12 titles in common')).toBeTruthy();
+  });
+
+  it('says there is not enough overlap rather than showing a low number', async () => {
+    // An absence of evidence is not a low score. "0% match" over three shared films
+    // would be the feature's first lie.
+    mockRpcResults.taste_match = [{ score: null, common_count: 3, min_common: 5 }];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Not enough overlap yet')).toBeTruthy());
+    // The count is still shown, or the reader cannot tell whether they are one film
+    // away or five.
+    expect(view.getByText('3 titles in common — 5 needed.')).toBeTruthy();
+    expect(view.queryByText(/0% Taste Match/)).toBeNull();
+  });
+
+  it('says something sensible when they have nothing in common at all', async () => {
+    mockRpcResults.taste_match = [{ score: null, common_count: 0, min_common: 5 }];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Nothing you have both ranked.')).toBeTruthy());
+  });
+
+  it('is absent on the viewer’s own profile', async () => {
+    // Both halves: the hook does not fire, and `taste_match` refuses the self case
+    // too — one is a display decision and the other is what a modified client hits.
+    tableRows.public_profiles = [{ ...anna, id: 'viewer' }];
+    mockRpcResults.taste_match = [{ score: 100, common_count: 40, min_common: 5 }];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
+
+    expect(view.queryByText(/Taste Match/)).toBeNull();
+    expect(mockRpcCalls.some((call) => call.name === 'taste_match')).toBe(false);
+  });
+
+  it('shows nothing at all while the answer is still unknown', async () => {
+    // No placeholder number that then changes. A match percentage that moves after
+    // the reader has seen it is worse than one that arrives a moment later.
+    mockRpcResults.taste_match = undefined;
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
+
+    expect(view.queryByText(/Taste Match/)).toBeNull();
+  });
+});

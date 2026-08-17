@@ -301,6 +301,12 @@ describe('the guard is wired in, not merely present', () => {
     // through follows_read and blocks_read. Suspension does not hide a person's own
     // follow list from them, and this reports nothing else.
     'follow_state_with',
+    // 20260817000200. Reads the caller's own block rows and projects the handle. A
+    // suspended account can still see who it blocked, which is its own data.
+    'my_blocks',
+    // 20260817000400. A stable pairwise read, filtered by can_view_profile from the
+    // caller's own side. A suspended *subject* is already absent from it.
+    'taste_match',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

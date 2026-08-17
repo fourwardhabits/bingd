@@ -145,6 +145,18 @@ const ALLOWED = {
   // than precede it, which is the rule public_notes set.
   'search_users(text,integer)': ['authenticated'],
 
+  // Added 2026-08-17 with the social graph writers. Definer, and it must be: blocking
+  // makes the profile unreadable to the blocker as well, so naming the account
+  // requires reading past profiles_read. It takes no argument at all, which is the
+  // strongest form of 20260813001900's rule — there is nothing to point elsewhere.
+  'my_blocks()': ['authenticated'],
+
+  // Added 2026-08-17 with Taste Match (20260817000400). A definer read taking a
+  // subject rather than a viewer: one half of the pair is always auth.uid(). Every
+  // ranking it folds in belongs to an account rankings_read already lets the caller
+  // select individually, which is the same safety argument following_score records.
+  'taste_match(uuid)': ['authenticated'],
+
   // Added 2026-08-16 with watch tagging (PRD §14). `set_watch_tags` replaces the
   // whole companion list for one of the caller's own watches; `hide_watch_tag` is
   // the tagged person's side of it.

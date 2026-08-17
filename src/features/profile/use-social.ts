@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { newOperationId } from '@/features/collection/writes';
+import { avatarUri } from '@/lib/images';
 import { diagnose } from '@/lib/diagnose';
 import { supabase } from '@/lib/supabase';
 
@@ -67,6 +68,48 @@ export function useRelationships(userIds: string[], viewerId: string) {
   });
 }
 
+export type BlockedAccount = {
+  id: string;
+  username: string;
+  name: string;
+  avatarUri: string | null;
+};
+
+/**
+ * The accounts this viewer has blocked.
+ *
+ * Exists because blocking closes the door behind itself, which independent review 12
+ * found: `can_view_profile` goes false in both directions, so the blocked account
+ * disappears from `public_profiles` and from search *including for the person who
+ * blocked them* — and the Unblock control lives on that profile. Blocking was a
+ * one-way trip.
+ *
+ * `my_blocks` is definer for exactly that reason: it must read past `profiles_read` to
+ * name an account the caller deliberately made invisible. It takes no argument and can
+ * only ever answer "who have I blocked".
+ */
+export function useMyBlocks(viewerId: string) {
+  return useQuery({
+    queryKey: ['my-blocks', viewerId],
+    queryFn: async (): Promise<BlockedAccount[]> => {
+      const { data, error } = await supabase.rpc('my_blocks');
+      if (error) throw error;
+
+      return ((data ?? []) as {
+        user_id: string;
+        username: string;
+        display_name: string | null;
+        avatar_path: string | null;
+      }[]).map((row) => ({
+        id: row.user_id,
+        username: row.username,
+        name: row.display_name || row.username,
+        avatarUri: avatarUri(row.avatar_path),
+      }));
+    },
+  });
+}
+
 export type SocialWriteResult = { ok: true } | { ok: false; message: string };
 
 /**
@@ -89,6 +132,7 @@ export function useSocialWrites(viewerId: string) {
     await Promise.all(
       [
         ['relationships', viewerId],
+        ['my-blocks', viewerId],
         ['feed', viewerId],
         ['profile'],
         ['profile-follows'],

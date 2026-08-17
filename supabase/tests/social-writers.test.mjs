@@ -503,3 +503,135 @@ describe('the ceiling', () => {
     assert.match(rows[0].args, /p_window interval DEFAULT '1 day'/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Independent review 12. Three findings, all accepted.
+
+describe('the rate limiter kept its lock', () => {
+  it('is volatile and takes a per-account advisory lock', async () => {
+    // The regression this asserts is invisible in a diff. `_assert_operation_rate` was
+    // defined without a lock in 20260816000300 and *redefined* with one in
+    // 20260816000600; rebuilding it here from the older body silently reverted the
+    // concurrency guard for follows, reactions, tags and comments at once.
+    //
+    // PGlite is single-connection, so a genuine concurrency test is not available in
+    // this harness — asserting the mechanism is the honest substitute, and it is the
+    // half that a future `create or replace` would drop.
+    const { rows } = await t.sql(
+      `select p.provolatile, p.prosrc
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = '_assert_operation_rate'`,
+    );
+
+    assert.equal(rows.length, 1, 'exactly one, or a three-argument call is ambiguous');
+    // 'v' is volatile. A stable function may be folded or skipped by the planner, and
+    // then the lock never happens.
+    assert.equal(rows[0].provolatile, 'v');
+    assert.match(rows[0].prosrc, /pg_advisory_xact_lock/);
+  });
+
+  it('locks every writer that touches the edges between two people', async () => {
+    // The pair lock, which is a different lock from the one above: that one is keyed
+    // per account, so A blocking B and B following A hash to two different keys and
+    // never contend. Without this, the two interleave and the database ends up
+    // holding a block *and* a follow.
+    const { rows } = await t.sql(
+      `select p.proname, p.prosrc
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and p.proname in ('follow', 'unfollow', 'block', 'unblock',
+                            'respond_follow_request', 'remove_follower')`,
+    );
+
+    assert.equal(rows.length, 6);
+    for (const row of rows) {
+      assert.match(row.prosrc, /_lock_pair\(/, `${row.proname} does not lock the pair`);
+    }
+  });
+
+  it('takes the pair lock before follow reads the block table', async () => {
+    // Order is the whole of it. `_assert_reachable` is what reads `blocks`, so a lock
+    // taken after it leaves exactly the window the race needs.
+    const { rows } = await t.sql(
+      `select prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'follow'`,
+    );
+    const source = rows[0].prosrc;
+    assert.ok(
+      source.indexOf('_lock_pair(') < source.indexOf('_assert_reachable('),
+      'the pair lock must precede the reachability check',
+    );
+  });
+
+  it('hashes a pair the same way from either side, so two callers cannot deadlock', async () => {
+    // The key, not the call: `_lock_pair` returns void, so the two directions have to
+    // be compared through the expression the function computes. If A-blocks-B and
+    // B-follows-A took different keys they would never contend, and the pair lock
+    // would be decoration.
+    const key = async (a, b) => {
+      const { rows } = await t.sql(
+        `select hashtextextended(
+                  least($1::text, $2::text) || ':' || greatest($1::text, $2::text), 0
+                ) as k`,
+        [a, b],
+      );
+      return rows[0].k;
+    };
+
+    assert.equal(await key(alice, bob), await key(bob, alice));
+    // And two different pairs do not collide onto one key, or unrelated people would
+    // serialise against each other.
+    assert.notEqual(await key(alice, bob), await key(alice, alice));
+  });
+});
+
+describe('blocking does not close the door behind itself', () => {
+  it('still names an account the caller blocked, so Unblock is reachable', async () => {
+    // The third Major. can_view_profile goes false in *both* directions, so the
+    // blocked account leaves public_profiles and search for the blocker too — and the
+    // only unblock control lived on the profile that had just disappeared.
+    const other = await t.createUser({ username: 'block_reachable' });
+    await doBlock(other);
+
+    const { rows: profileRows } = await t.asUser(alice, () =>
+      t.sql(`select id from public_profiles where id = $1`, [other]),
+    );
+    await t.actAs(alice);
+    assert.deepEqual(profileRows, [], 'the profile really is hidden from the blocker');
+
+    const { rows } = await t.sql(`select user_id, username from my_blocks()`);
+    const found = rows.find((r) => r.user_id === other);
+    assert.ok(found, 'my_blocks must name the blocked account');
+    assert.equal(found.username, 'block_reachable');
+  });
+
+  it('lists nobody else’s blocks', async () => {
+    const stranger = await t.createUser({ username: 'block_stranger' });
+    const theirTarget = await t.createUser({ username: 'block_their_target' });
+    await t.actAs(stranger);
+    await doBlock(theirTarget);
+    await t.actAs(alice);
+
+    const { rows } = await t.sql(`select user_id from my_blocks()`);
+    assert.ok(!rows.some((r) => r.user_id === theirTarget));
+  });
+
+  it('drops the row again once unblocked', async () => {
+    const other = await t.createUser({ username: 'block_then_not' });
+    await doBlock(other);
+    await doUnblock(other);
+
+    const { rows } = await t.sql(`select user_id from my_blocks()`);
+    assert.ok(!rows.some((r) => r.user_id === other));
+  });
+
+  it('cannot be asked about anybody else', async () => {
+    // It answers "who have I blocked" and there is no argument to point elsewhere.
+    const { rows } = await t.sql(
+      `select pg_get_function_arguments(p.oid) as args
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'my_blocks'`,
+    );
+    assert.equal(rows[0].args, '');
+  });
+});

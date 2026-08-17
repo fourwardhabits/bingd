@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { bandSizes, scoreFor } from '@/features/collection/score';
@@ -11,7 +11,8 @@ import { useCommentCounts } from '@/features/feed/use-comments';
 import { useActorActivity } from '@/features/feed/use-feed';
 import { FollowControl } from '@/features/profile/FollowControl';
 import { useProfileNotes, usePublicProfile } from '@/features/profile/use-public-profile';
-import { useRelationships } from '@/features/profile/use-social';
+import { useMyBlocks, useRelationships, useSocialWrites } from '@/features/profile/use-social';
+import { tasteMatchCopy, useTasteMatch } from '@/features/profile/use-taste-match';
 import { posterUri } from '@/lib/images';
 import { fullTitle } from '@/lib/titles';
 import {
@@ -66,6 +67,25 @@ export default function PublicProfileScreen() {
   const activity = useActorActivity(profile.data?.id ?? null);
   const relationships = useRelationships(subjectId ? [subjectId] : [], viewer.id);
 
+  /**
+   * The one case where an unavailable profile is not the end of the page.
+   *
+   * Blocking closes the door behind itself: `can_view_profile` goes false in both
+   * directions, so the account leaves `public_profiles` and search *for the person who
+   * blocked them too* — and the Unblock control lived on the profile that just
+   * vanished. Independent review 12 found it; blocking was a one-way trip.
+   *
+   * `my_blocks` is the caller's own list and is the only read here that can name an
+   * account the caller has deliberately made invisible. Matched on the handle, because
+   * the handle is all this route has.
+   */
+  // Not on your own profile. The hook refuses it and so does the function, because a
+  // 100% match with your own catalogue is a tautology the founder asked to be absent.
+  const taste = useTasteMatch(subjectId || null, viewer.id);
+  const blocks = useMyBlocks(viewer.id);
+  const blockedMatch = (blocks.data ?? []).find((account) => account.username === username);
+  const { unblock, busy: unblocking } = useSocialWrites(viewer.id);
+
   const isSelf = profile.data?.id === viewer.id;
   const rows = ranked.data ?? [];
   // Band sizes come from the whole category, never from a slice: a score is only
@@ -86,6 +106,7 @@ export default function PublicProfileScreen() {
     viewer.id,
   );
   const openComments = commentsFor ? (recent.find((e) => e.id === commentsFor) ?? null) : null;
+  const tasteCopy = tasteMatchCopy(taste.data);
 
   return (
     <Screen includeBottomInset edges={[]}>
@@ -106,6 +127,22 @@ export default function PublicProfileScreen() {
           body="Check your connection and try again."
           action={{ label: 'Try again', onPress: () => void profile.refetch() }}
         />
+      ) : !profile.data && blockedMatch ? (
+        // Named, deliberately. This is not a disclosure — the viewer is the one who
+        // blocked them, so they already know the account exists.
+        <EmptyState
+          kind="nothingYet"
+          title={`You blocked @${blockedMatch.username}`}
+          body="You will not see each other on Bingd. Unblocking does not restore any follow between you."
+          action={{
+            label: unblocking ? 'Unblocking…' : 'Unblock',
+            onPress: () =>
+              void (async () => {
+                const result = await unblock({ userId: blockedMatch.id });
+                if (!result.ok) Alert.alert('Could not unblock', result.message);
+              })(),
+          }}
+        />
       ) : !profile.data ? (
         // The same answer for a private account and for a name nobody has taken.
         // Distinguishing them would disclose that the account exists.
@@ -122,6 +159,22 @@ export default function PublicProfileScreen() {
             <Text variant="footnote" tone="secondary">
               @{profile.data.username}
             </Text>
+
+            {/* Directly under the handle, which is where the founder placed it:
+                "Display Name / @handle / 84% Taste Match / 12 titles in common".
+                Absent entirely on the viewer's own profile, and absent while the
+                answer is still loading rather than showing a placeholder number that
+                then changes. */}
+            {!isSelf && tasteCopy ? (
+              <View style={styles.taste}>
+                <Text variant="callout" tone="action">
+                  {tasteCopy.headline}
+                </Text>
+                <Text variant="caption" tone="tertiary">
+                  {tasteCopy.detail}
+                </Text>
+              </View>
+            ) : null}
 
             {/* Under the identity rather than beside it: the founder's approved
                 profile design is a large avatar with the name and handle, and a
@@ -326,6 +379,7 @@ const VERB = {
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
+  taste: { alignItems: 'center', gap: 2, paddingTop: theme.space[1] },
   identity: {
     alignItems: 'center',
     gap: theme.space[2],
