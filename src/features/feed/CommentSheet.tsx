@@ -74,6 +74,30 @@ export function CommentSheet({
   // focused is how a draft ends up submitted against the wrong comment.
   const [editing, setEditing] = useState<Comment | null>(null);
 
+  /**
+   * The composer belongs to one event, and this is what makes that true.
+   *
+   * Found by independent review 11, as a Major. This component is rendered by the
+   * screen and stays *mounted* — closing it sets `eventId` to null and the early
+   * return below draws nothing, but the state survives. So a draft written against one
+   * activity reappeared on the next one, and an edit left open did something worse:
+   * `editing` still held a comment from the first event, so pressing Save while
+   * looking at the second rewrote a comment that was not on screen.
+   *
+   * Reset during render rather than in an effect, because an effect runs *after* the
+   * first paint — which would show the stale draft, and would leave a window in which
+   * Save was still wired to the old comment. Keying the element from each of the three
+   * call sites would also work and was rejected: a rule three callers have to remember
+   * is a rule the fourth will not.
+   */
+  const [composerFor, setComposerFor] = useState<string | null>(eventId);
+  if (composerFor !== eventId) {
+    setComposerFor(eventId);
+    setDraft('');
+    setSpoilers(false);
+    setEditing(null);
+  }
+
   if (!eventId) return null;
 
   const reset = () => {

@@ -201,13 +201,13 @@ describe('writing one', () => {
     await fireEvent.press(view.getByText('Post'));
 
     await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
-    expect(mockRpcCalls[0].name).toBe('add_comment');
+    expect(mockRpcCalls[0]!.name).toBe('add_comment');
     // Trimmed here as well as in the database, so what is sent is what was meant.
-    expect(mockRpcCalls[0].args.p_body).toBe('Loved it');
-    expect(mockRpcCalls[0].args.p_has_spoilers).toBe(true);
-    expect(mockRpcCalls[0].args.p_feed_event_id).toBe('e1');
+    expect(mockRpcCalls[0]!.args.p_body).toBe('Loved it');
+    expect(mockRpcCalls[0]!.args.p_has_spoilers).toBe(true);
+    expect(mockRpcCalls[0]!.args.p_feed_event_id).toBe('e1');
     // Idempotency is not optional on a write that creates a row.
-    expect(mockRpcCalls[0].args.p_operation_id).toBeTruthy();
+    expect(mockRpcCalls[0]!.args.p_operation_id).toBeTruthy();
   });
 
   it('will not post an empty comment', async () => {
@@ -233,9 +233,9 @@ describe('writing one', () => {
     await fireEvent.press(view.getByText('Save'));
 
     await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
-    expect(mockRpcCalls[0].name).toBe('edit_comment');
-    expect(mockRpcCalls[0].args.p_comment_id).toBe('c1');
-    expect(mockRpcCalls[0].args.p_body).toBe('first');
+    expect(mockRpcCalls[0]!.name).toBe('edit_comment');
+    expect(mockRpcCalls[0]!.args.p_comment_id).toBe('c1');
+    expect(mockRpcCalls[0]!.args.p_body).toBe('first');
   });
 
   it('keeps the draft when the write fails, so nothing the user typed is lost', async () => {
@@ -259,5 +259,83 @@ describe('writing one', () => {
     await fireEvent.press(view.getByText('Post'));
 
     await waitFor(() => expect(view.queryByDisplayValue('said it')).toBeNull());
+  });
+});
+
+describe('the composer belongs to one activity', () => {
+  // Independent review 11, Major. The sheet stays mounted between openings, so its
+  // state outlived the event it was written against.
+
+  it('drops a draft when the sheet moves to another activity', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());
+
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'about event A');
+    await view.rerender(
+      <CommentSheet
+        eventId="e2"
+        mediaItemId={FILM}
+        title="Sinners"
+        viewerId={VIEWER}
+        watched={new Set()}
+        onClose={jest.fn()}
+        onPressPerson={jest.fn()}
+      />,
+    );
+
+    expect(view.queryByDisplayValue('about event A')).toBeNull();
+  });
+
+  it('does not carry an open edit onto the next activity', async () => {
+    // The dangerous half. `editing` held a comment from the first event, so Save on
+    // the second rewrote a comment that was not on screen.
+    mockCommentRows = [comment({ author_id: VIEWER, body: 'from event A' })];
+
+    const view = await open({ watched: new Set([FILM]) });
+    await waitFor(() => expect(view.getByText('from event A')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Edit your comment'));
+    expect(view.getByText('Editing your comment')).toBeTruthy();
+
+    mockCommentRows = [];
+    await view.rerender(
+      <CommentSheet
+        eventId="e2"
+        mediaItemId={FILM}
+        title="Sinners"
+        viewerId={VIEWER}
+        watched={new Set([FILM])}
+        onClose={jest.fn()}
+        onPressPerson={jest.fn()}
+      />,
+    );
+
+    expect(view.queryByText('Editing your comment')).toBeNull();
+    // And what the composer would now send is an add against the new event, not an
+    // edit of the old comment.
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'about event B');
+    await fireEvent.press(view.getByText('Post'));
+
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
+    expect(mockRpcCalls[0]!.name).toBe('add_comment');
+    expect(mockRpcCalls[0]!.args.p_feed_event_id).toBe('e2');
+  });
+
+  it('clears the draft when the sheet is closed and reopened', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'unsent');
+
+    const props = {
+      mediaItemId: FILM,
+      title: 'Sinners',
+      viewerId: VIEWER,
+      watched: new Set<string>(),
+      onClose: jest.fn(),
+      onPressPerson: jest.fn(),
+    };
+    await view.rerender(<CommentSheet eventId={null} {...props} />);
+    await view.rerender(<CommentSheet eventId="e1" {...props} />);
+
+    expect(view.queryByDisplayValue('unsent')).toBeNull();
   });
 });
