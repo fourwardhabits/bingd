@@ -61,10 +61,25 @@
 -- version that stays cheap as somebody's following list grows.
 -- ---------------------------------------------------------------------------
 
+-- WHY IT ALSO RETURNS HOW MANY PEOPLE THE CALLER FOLLOWS
+--
+-- Without it the surface cannot tell two silences apart, and they are not the same
+-- silence. "You follow nobody" is a row that would never say anything and should not
+-- be drawn; "you follow eleven people and none of them have seen this" is a real and
+-- useful answer, and it is also the only way somebody learns the feature exists before
+-- their following list happens to overlap a film they open.
+--
+-- It is not filtered by `can_view_profile`, deliberately. This is a count of the
+-- caller's own follows — their own data, which they can read directly from `follows` —
+-- and it decides only whether a row is drawn. Applying the visibility predicate would
+-- cost one function call per followee on every title page to make a number slightly
+-- smaller in a case nobody can observe.
+
 create or replace function following_score(p_media_item_id uuid)
 returns table (
-  score        numeric,
-  rating_count integer
+  score           numeric,
+  rating_count    integer,
+  following_count integer
 )
 -- definer, like `community_score`, for the same reason: it reads `rankings` rows
 -- across accounts and must apply its own authorisation rather than inherit the
@@ -92,13 +107,19 @@ as $$
        -- a private account that has since revoked approval — none of which delete
        -- the `follows` row, so none of which would be caught by `state` alone.
        and can_view_profile(auth.uid(), f.followee_id)
+  ),
+  followed as (
+    select count(*)::integer as n
+      from follows f
+     where f.follower_id = auth.uid()
+       and f.state = 'approved'
   )
   -- `count(*)` over no rows is 0 and `avg` is null, so an unauthenticated caller —
   -- who follows nobody, `auth.uid()` being null — gets exactly the same answer as
   -- somebody whose followees have not seen the film: no score, no raters. There is
   -- no branch here that could be got wrong for the anon case, which is why there
   -- is no branch.
-  select rated.avg_score, rated.n from rated;
+  select rated.avg_score, rated.n, followed.n from rated, followed;
 $$;
 
 comment on function following_score(uuid) is

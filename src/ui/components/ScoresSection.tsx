@@ -17,6 +17,8 @@ export type ScoresSectionProps = {
   following?: {
     score: number | null;
     ratingCount: number;
+    /** Drawn only for a reader who follows somebody — see the note below. */
+    followingCount: number;
   } | null;
 };
 
@@ -42,11 +44,13 @@ export type ScoresSectionProps = {
  *   one person you deliberately follow is not a weak estimate of a crowd, it is their
  *   opinion, and it is the only case a new account can produce at all.
  *
- *   It is **omitted entirely** when nobody the viewer follows has ranked the title,
- *   rather than shown as "No ratings yet". That silence is a fact about the reader's
- *   own following list rather than about the film, and printing it on every title page
- *   of a new account is a row that never says anything. Community is different: there,
- *   "no ratings yet" is a true and useful statement about the title.
+ *   Two silences, told apart. A reader who **follows nobody** gets no row at all: it
+ *   could only ever be empty, and drawing it on every title page of a new account is a
+ *   row that never says anything. A reader who **follows people, none of whom have seen
+ *   this** is told exactly that — which is a real answer, and is also how anybody finds
+ *   out the feature exists before their following list happens to overlap a film they
+ *   open. The first version omitted both cases and independent review was right that it
+ *   made the feature undiscoverable for precisely the people it is meant to recruit.
  *
  * Deliberately absent, and worth naming so the absence reads as a decision:
  *
@@ -59,7 +63,7 @@ export type ScoresSectionProps = {
  * a thing to put on a page.
  */
 export function ScoresSection({ community, following }: ScoresSectionProps) {
-  const showFollowing = Boolean(following && following.ratingCount > 0 && following.score != null);
+  const showFollowing = Boolean(following && following.followingCount > 0);
   if (!community && !showFollowing) return null;
 
   return (
@@ -71,9 +75,11 @@ export function ScoresSection({ community, following }: ScoresSectionProps) {
           score={following.score}
           label="Following"
           detail={
-            following.ratingCount === 1
-              ? '1 person you follow'
-              : `${following.ratingCount} people you follow`
+            following.ratingCount === 0
+              ? 'Nobody you follow has ranked this'
+              : following.ratingCount === 1
+                ? '1 person you follow'
+                : `${following.ratingCount} people you follow`
           }
         />
       ) : null}

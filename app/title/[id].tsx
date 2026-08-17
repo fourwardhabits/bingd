@@ -174,7 +174,7 @@ export default function TitleScreen() {
   const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
   const videos = useTitleVideos(titleId);
   const notes = useTitleNotes(titleId);
-  const community = useCommunityScore(titleId);
+  const community = useCommunityScore(titleId, profile.id);
   const following = useFollowingScore(titleId, profile.id);
   const watched = useWatched(profile.id);
   const companions = useCompanions(profile.id, titleId);
@@ -683,7 +683,11 @@ export default function TitleScreen() {
             // following list rather than about the film.
             following={
               following.data
-                ? { score: following.data.score, ratingCount: following.data.ratingCount }
+                ? {
+                    score: following.data.score,
+                    ratingCount: following.data.ratingCount,
+                    followingCount: following.data.followingCount,
+                  }
                 : null
             }
           />

@@ -528,7 +528,7 @@ describe('a series', () => {
  */
 describe('the following score', () => {
   it('shows it above the community score, with the sample named', async () => {
-    mockRpcResults.following_score = [{ score: '8.6', rating_count: 3 }];
+    mockRpcResults.following_score = [{ score: '8.6', rating_count: 3, following_count: 9 }];
     mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
 
     const view = await open();
@@ -542,7 +542,7 @@ describe('the following score', () => {
   });
 
   it('shows a single followee, which community would withhold', async () => {
-    mockRpcResults.following_score = [{ score: '9.1', rating_count: 1 }];
+    mockRpcResults.following_score = [{ score: '9.1', rating_count: 1, following_count: 4 }];
     const view = await open();
 
     // One account you chose to follow is not a weak estimate of a crowd; it is their
@@ -552,7 +552,7 @@ describe('the following score', () => {
   });
 
   it('says nothing when nobody the reader follows has ranked it', async () => {
-    mockRpcResults.following_score = [{ score: null, rating_count: 0 }];
+    mockRpcResults.following_score = [{ score: null, rating_count: 0, following_count: 0 }];
     mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
 
     const view = await open();
@@ -565,7 +565,7 @@ describe('the following score', () => {
   });
 
   it('never calls it a friend score, because following is not mutual', async () => {
-    mockRpcResults.following_score = [{ score: '8.6', rating_count: 3 }];
+    mockRpcResults.following_score = [{ score: '8.6', rating_count: 3, following_count: 9 }];
     const view = await open();
 
     await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
@@ -583,5 +583,36 @@ describe('the following score', () => {
 
     expect(view.queryByText('Following')).toBeNull();
     expect(view.queryByText('Community')).toBeNull();
+  });
+});
+
+/**
+ * Independent review, 10: omitting the Following row whenever it had no ratings made
+ * the feature undiscoverable for precisely the people it is meant to recruit — a new
+ * account sees every title page look exactly as it did before following anybody.
+ *
+ * Two silences, and they are not the same silence.
+ */
+describe('the following score with nothing to say', () => {
+  it('says so, for a reader who follows people', async () => {
+    mockRpcResults.following_score = [{ score: null, rating_count: 0, following_count: 11 }];
+    mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
+    expect(view.getByText('Nobody you follow has ranked this')).toBeTruthy();
+  });
+
+  it('draws no row at all for a reader who follows nobody', async () => {
+    mockRpcResults.following_score = [{ score: null, rating_count: 0, following_count: 0 }];
+    mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
+
+    const view = await open();
+
+    // It could only ever be empty, and drawing it on every title page of a brand-new
+    // account is a row that never says anything.
+    await waitFor(() => expect(view.getByText('Community')).toBeTruthy());
+    expect(view.queryByText('Following')).toBeNull();
   });
 });

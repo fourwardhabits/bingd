@@ -6,6 +6,12 @@ export type FollowingScore = {
   /** Null when nobody the viewer follows has ranked this title. */
   score: number | null;
   ratingCount: number;
+  /**
+   * How many accounts the viewer follows at all, which is what tells two silences
+   * apart: a reader who follows nobody gets no row, and a reader who follows eleven
+   * people none of whom have seen the film is told exactly that.
+   */
+  followingCount: number;
 };
 
 /**
@@ -54,7 +60,7 @@ export function useFollowingScore(mediaItemId: string | null, userId: string) {
 
       // A set-returning function comes back as an array of one.
       const row = (Array.isArray(data) ? data[0] : data) as
-        | { score: number | string | null; rating_count: number }
+        | { score: number | string | null; rating_count: number; following_count: number }
         | undefined;
       if (!row) return null;
 
@@ -63,6 +69,7 @@ export function useFollowingScore(mediaItemId: string | null, userId: string) {
         // would silently produce 0 — which is a real score and a wrong one.
         score: row.score == null ? null : Number(row.score),
         ratingCount: row.rating_count ?? 0,
+        followingCount: row.following_count ?? 0,
       };
     },
   });

@@ -30,9 +30,22 @@ export type CommunityScore = {
  * All four live in `community_score` (20260816000000, 20260816000100). This hook
  * exists to call it, and deliberately computes nothing.
  */
-export function useCommunityScore(mediaItemId: string | null) {
+export function useCommunityScore(mediaItemId: string | null, userId: string) {
   return useQuery({
-    queryKey: ['community-score', mediaItemId],
+    /**
+     * Keyed by the account, because this number is viewer-relative too.
+     *
+     * It looks like a fact about the title and is not: `community_score` excludes
+     * accounts blocked in either direction (20260816000100), so two people genuinely
+     * see different means for the same film. A key on the title alone would let one
+     * account on a shared device read the other's aggregate for five minutes.
+     *
+     * `queryClient.clear()` on sign-out has been covering this in the ordinary flow,
+     * which is the same "a lifecycle is doing a key's job" shape review 6 found in
+     * `logState` — and the same fix. Independent review found this one at 10, from the
+     * inconsistency with `useFollowingScore` beside it.
+     */
+    queryKey: ['community-score', userId, mediaItemId],
     enabled: Boolean(mediaItemId),
     // A community average moves when other people rank, not when this user does, so
     // it does not need the freshness the user's own score does.

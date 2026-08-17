@@ -218,6 +218,45 @@ describe('authorisation', () => {
   });
 });
 
+describe('telling two silences apart', () => {
+  it('reports how many people the caller follows, so a row can be drawn at all', async () => {
+    // Without this the surface cannot distinguish "you follow nobody" — a row that
+    // could only ever be empty — from "you follow people and none of them have seen
+    // this", which is a real answer and the way anybody discovers the feature.
+    const seen = await movie('fs_count_seen');
+    const bob = await rater(seen);
+    await follow(alice, bob);
+
+    const unseen = await movie('fs_count_unseen');
+    const row = await scoreOf(unseen);
+
+    assert.equal(row.rating_count, 0);
+    assert.equal(row.score, null);
+    assert.ok(row.following_count >= 1, 'the caller does follow somebody');
+  });
+
+  it('reports zero for a reader with no following list', async () => {
+    const loner = await t.createUser({ username: 'fs_loner' });
+    const id = await movie('fs_loner_title');
+
+    const row = await scoreOf(id, loner);
+    assert.equal(row.following_count, 0);
+    assert.equal(row.rating_count, 0);
+  });
+
+  it('counts follows regardless of whether they rated this title', async () => {
+    const id = await movie('fs_count_shape');
+    const one = await rater(id);
+    const two = await rater(null);
+    await follow(alice, one);
+    await follow(alice, two);
+
+    const row = await scoreOf(id);
+    assert.equal(row.rating_count, 1, 'only one of them ranked it');
+    assert.ok(row.following_count >= 2, 'both are followed');
+  });
+});
+
 describe('what is compared', () => {
   it('never folds a season into its series, or the reverse', async () => {
     const seriesId = await t.createSeries('fs_series', seq++);
