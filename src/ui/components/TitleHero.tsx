@@ -65,6 +65,20 @@ export function TitleHero({
         source={{ uri }}
         placeholder={blurhash ? { blurhash } : undefined}
         contentFit="cover"
+        /**
+         * **Top centre, not centre.**
+         *
+         * The founder's screenshots showed heads cropped off. A 16:9 backdrop in a
+         * 1:1.4 frame has to lose about a third of its height, and `cover` takes that
+         * from both edges equally — so a poster-style composition with the subject in
+         * the upper third loses the subject. Publicity stills are framed with the
+         * faces high and the empty half at the bottom; anchoring to the top keeps the
+         * part somebody composed and throws away the part they left spare.
+         *
+         * It also happens to be where the fade is: the bottom third becomes Paper, so
+         * anything sacrificed there was going to be invisible anyway.
+         */
+        contentPosition="top center"
         transition={theme.duration.navigation}
         // `blurRadius` is expo-image's own, so this costs no new native module and
         // no fingerprint change. Held down at 0.9 opacity as well: a blurred poster
@@ -91,72 +105,77 @@ const POSTER_BLUR = 28;
 const HERO_RATIO = 1.4;
 
 /**
- * A banded fade standing in for a gradient.
+ * One continuous gradient, drawn by the platform.
  *
- * `expo-linear-gradient` would draw this in one view, and it is a native module —
- * adding it changes the fingerprint and forces every tester onto a new build, which is
- * a steep price for one fade.
+ * **The banded implementation this replaced is the thing the founder rejected twice.**
+ * It stacked opaque-ish views down the bottom of the hero, and the last version had
+ * sixty of them at two points each with a smoothstep ramp — every step about one and a
+ * half percent of alpha, which by any arithmetic should have been invisible. It was
+ * not, and the reason is not the step size: eight-bit alpha on a large smooth ramp
+ * produces contour bands that the eye finds precisely because the ramp *is* smooth.
+ * More, thinner bands make that worse rather than better. No amount of tuning was going
+ * to fix it, because the technique was the defect.
  *
- * The first version used eight bands over the bottom 42% with squared alpha, and the
- * founder saw it for what it was: stripes. Squaring puts almost all of the change at
- * the *end* of the ramp, so the last two bands stepped 23 points of alpha in one
- * edge — the one place a hard line is most visible, because it lands on the pale part
- * of the artwork.
+ * A real gradient has the same eight-bit destination and does not band, because the
+ * compositor interpolates and dithers it in hardware. So the answer had to be a real
+ * one, and there were two ways to get one:
  *
- * Three things fix it, and all three are needed:
+ *   - **`expo-linear-gradient`**, which is a native module. Adding it changes the
+ *     runtime fingerprint, which means every tester on the current build stops
+ *     receiving over-the-air updates until they install a new APK. A steep price for
+ *     one fade, and the reason the bands existed in the first place.
+ *   - **`experimental_backgroundImage`**, which is React Native's own — landed in 0.76,
+ *     typed in the 0.86 this app is on, implemented in the New Architecture that Expo
+ *     SDK 57 enables by default. No new module, no fingerprint change, one view.
  *
- *   - **bands two points tall**, derived from the fade height rather than fixed at
- *     eight. Sixty-odd views instead of eight, each stepping about a percent and a
- *     half, which is below what the eye resolves against photographic content.
- *   - **smoothstep instead of squared.** `t²(3−2t)` is flat at both ends, so the fade
- *     begins imperceptibly *and* arrives at full Paper without a final jump.
- *   - **a full-strength finish.** `smoothstep(1)` is exactly 1, so the final band is
- *     opaque Paper sitting on the hero's bottom edge. That is the clean cutoff the
- *     brief asks for, and it needs no extra element — one that claimed to provide it
- *     would be dead code, since a child with `flex: 1` in an auto-height absolute
- *     container measures zero.
+ * The second, obviously. The `experimental_` prefix is React Native's, not a comment on
+ * the stability of gradients; the API is a CSS `linear-gradient` string.
+ *
+ * FIVE STOPS, NOT TWO
+ *
+ * A two-stop ramp from transparent to Paper over the bottom 38% is linear, and linear
+ * is the one curve that reads as a *ramp* rather than as a fade — you can see where it
+ * starts. The stops below are an eased curve sampled at four points: almost nothing for
+ * the first third of the fade, most of the change in the middle, and full Paper arriving
+ * before the edge rather than at it. That is the same shape the smoothstep was going
+ * for, expressed as something the compositor can interpolate rather than as sixty views.
  */
 function Scrim({ height }: { height: number }) {
-  const fade = Math.round(height * SCRIM_SHARE);
-  const count = Math.max(Math.ceil(fade / BAND_HEIGHT), 1);
+  void height;
 
   return (
-    <View pointerEvents="none" style={styles.scrim}>
-      {Array.from({ length: count }, (_, index) => {
-        const t = (index + 1) / count;
-        return (
-          <View
-            key={index}
-            style={{
-              height: BAND_HEIGHT,
-              backgroundColor: paperAlpha(smoothstep(t)),
-            }}
-          />
-        );
-      })}
-    </View>
+    <View
+      pointerEvents="none"
+      style={[styles.scrim, { experimental_backgroundImage: SCRIM_GRADIENT }]}
+    />
   );
 }
 
-/** Flat at both ends: no visible start to the fade and no step at the finish. */
-const smoothstep = (t: number) => t * t * (3 - 2 * t);
-
-/** Two points per band puts the alpha step below what the eye picks out. */
-const BAND_HEIGHT = 2;
-
 /**
- * How much of the hero the fade occupies.
+ * Where the fade begins, as a share of the hero.
  *
- * Well over half, because the founder's note was that the transition felt abrupt as
- * well as striped. A short ramp is a hard edge however many bands it has.
+ * The founder's range is "approximately the bottom 30–40%". Sixty-two per cent of the
+ * hero is now untouched artwork, against thirty-eight before — the old banded version
+ * had it the other way round, and more than half the image spent under a scrim is why
+ * the artwork "ended too high" even after the frame was made taller.
  */
-const SCRIM_SHARE = 0.62;
+const SCRIM_GRADIENT = [
+  'linear-gradient(to bottom,',
+  `${paperAlpha(0)} 0%,`,
+  `${paperAlpha(0)} 62%,`,
+  `${paperAlpha(0.08)} 71%,`,
+  `${paperAlpha(0.42)} 82%,`,
+  `${paperAlpha(0.86)} 93%,`,
+  `${paperAlpha(1)} 100%)`,
+].join(' ');
 
 const styles = StyleSheet.create({
   frame: { backgroundColor: theme.surface.sunken },
   fill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   dimmed: { opacity: 0.9 },
-  // Anchored to the bottom, so the ramp finishes exactly where the artwork does.
-  scrim: { position: 'absolute', left: 0, right: 0, bottom: 0 },
+  // The whole frame now, not a band anchored to the bottom: the gradient's own stops
+  // decide where the fade starts, so the view it is drawn on has to span the height
+  // those percentages are measured against.
+  scrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   collapsed: { backgroundColor: theme.surface.sunken },
 });

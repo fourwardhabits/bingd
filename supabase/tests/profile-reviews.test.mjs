@@ -388,6 +388,45 @@ describe('reviews on a title', () => {
     assert.equal(rows.find((row) => row.username === 'erin_rev').reaction_count, 0);
   });
 
+  it('counts only the latest ranking’s reactions, not every one they ever had', async () => {
+    // Independent review 16's Major. `_rank_finalize` writes a *new* `title_ranked`
+    // event every time a ranking completes, and unranking, reranking and rebucketing
+    // all complete one — so the old event stays and so do its reactions. Summing across
+    // all of them is a lifetime total that a rebucket inflates, and under `top` those
+    // stale reactions push a review above one that earned its own.
+    const { rows: reranked } = await t.sql(
+      `insert into feed_events (actor_id, type, media_item_id, created_at)
+       values ($1, 'title_ranked', $2, now() + interval '1 minute') returning id`,
+      [frank, film],
+    );
+
+    const before = await t.asUser(viewer, async () => {
+      const { rows } = await t.sql(`select * from title_reviews($1, 'recent', 25)`, [film]);
+      return rows.find((row) => row.username === 'frank_rev').reaction_count;
+    });
+    await t.actAs(null);
+
+    // Nobody has reacted to the new activity yet, so the count is zero rather than the
+    // two the previous ranking collected.
+    assert.equal(before, 0);
+
+    await t.sql(`insert into reactions (user_id, feed_event_id, kind) values ($1, $2, 'love')`, [
+      erin,
+      reranked[0].id,
+    ]);
+
+    const after = await t.asUser(viewer, async () => {
+      const { rows } = await t.sql(`select * from title_reviews($1, 'recent', 25)`, [film]);
+      return rows.find((row) => row.username === 'frank_rev').reaction_count;
+    });
+    await t.actAs(null);
+
+    assert.equal(after, 1, 'the new activity’s own reaction, and not the old two as well');
+
+    // Put it back, so the ordering tests below read the state they were written for.
+    await t.sql(`delete from feed_events where id = $1`, [reranked[0].id]);
+  });
+
   it('puts the most-reacted review first under Top', async () => {
     const rows = await t.asUser(viewer, async () => {
       const { rows } = await t.sql(`select * from title_reviews($1, 'top', 25)`, [film]);

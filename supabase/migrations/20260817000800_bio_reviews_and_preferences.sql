@@ -244,7 +244,12 @@ comment on function save_profile(uuid, text, text, text) is
 --
 -- WHERE THE REACTION COUNT COMES FROM
 --
--- `reactions` on the author's own `title_ranked` feed event for that title. That is the
+-- `reactions` on the author's **latest** `title_ranked` feed event for that title.
+-- The word latest is load-bearing and independent review 16 found its absence:
+-- `_rank_finalize` writes a new event every time a ranking completes, and unranking,
+-- reranking and rebucketing all complete one. Summing across every event a pair has
+-- ever had is a lifetime total that a rebucket inflates, which under `top` pushes a
+-- review above one that earned its own reactions. That is the
 -- only interaction model in this schema that safely supports it — the founder's
 -- wording — and it is a real signal rather than an invented one. It is **not** a
 -- reaction to the note: a reader reacting to somebody's activity is reacting to the
@@ -294,16 +299,37 @@ as $$
             join lateral band_bounds(r.user_id, r.category, r.bucket) bb on true
            where r.user_id = um.user_id
              and r.media_item_id = um.media_item_id),
-         coalesce((
-           select count(*)::integer
-             from feed_events fe
-             join reactions re on re.feed_event_id = fe.id
-            where fe.actor_id = um.user_id
-              and fe.media_item_id = um.media_item_id
-              and fe.type = 'title_ranked'
-         ), 0)
+         reacted.n
     from user_media um
     join profiles p on p.id = um.user_id
+    -- **The latest event, not every event.** Independent review 16, and it is a real
+    -- defect rather than a nicety: `_rank_finalize` writes a *new* `title_ranked` row
+    -- every time a ranking completes, and `rank_unrank`, reranking and rebucketing all
+    -- complete one. The old rows stay, and so do the reactions on them. Summing across
+    -- all of them is therefore not "the reaction count of the activity this note
+    -- belongs to" -- it is a lifetime total that a rebucket can inflate, and under
+    -- `top` those stale reactions push a review above one that earned its own.
+    --
+    -- One event, chosen by recency, which is the activity the note is attached to now.
+    -- `id` breaks a tie so two events written in the same statement resolve the same
+    -- way on every call.
+    left join lateral (
+      select fe.id
+        from feed_events fe
+       where fe.actor_id = um.user_id
+         and fe.media_item_id = um.media_item_id
+         and fe.type = 'title_ranked'
+       order by fe.created_at desc, fe.id desc
+       limit 1
+    ) latest on true
+    -- Computed once, in a join, rather than as a correlated subquery repeated in the
+    -- select list and again in the order by. The repetition was only a cost, but a
+    -- metric written twice is a metric that can disagree with itself after one edit.
+    left join lateral (
+      select count(*)::integer as n
+        from reactions re
+       where re.feed_event_id = latest.id
+    ) reacted on true
    where um.media_item_id = p_media_item_id
      and um.note is not null
      and um.note_visibility = 'public'
@@ -311,14 +337,7 @@ as $$
      -- suspension, blocks, private accounts and approved follows in one place.
      and can_view_profile(auth.uid(), um.user_id)
    order by
-     case when p_sort = 'top' then coalesce((
-       select count(*)
-         from feed_events fe
-         join reactions re on re.feed_event_id = fe.id
-        where fe.actor_id = um.user_id
-          and fe.media_item_id = um.media_item_id
-          and fe.type = 'title_ranked'
-     ), 0) end desc nulls last,
+     case when p_sort = 'top' then coalesce(reacted.n, 0) end desc nulls last,
      um.note_updated_at desc nulls last,
      -- Stable, so two calls with the same data return the same order. Without it two
      -- unreacted notes with equal timestamps swap places and the list reorders under a
@@ -328,7 +347,7 @@ as $$
 $$;
 
 comment on function title_reviews(uuid, text, integer) is
-  'The Bingd Reviews tab for one title: every public Note on it the caller may read, with the author named, their live Bingd score, and how many people reacted to the activity it belongs to. Not a second content model -- a review is a public Note, which is the same text the Feed shows. Reuses public_notes'' visibility predicate verbatim. Sorted by reactions then recency for `top`, recency alone for `recent`, with a stable tiebreak either way. The score is derived from live rankings rather than from the feed event''s snapshot, which drifts.';
+  'The Bingd Reviews tab for one title: every public Note on it the caller may read, with the author named, their live Bingd score, and how many people reacted to the activity it belongs to -- the *latest* title_ranked event for that pair, because reranking writes a new one and the old reactions stay behind. Not a second content model -- a review is a public Note, which is the same text the Feed shows. Reuses public_notes'' visibility predicate verbatim. Sorted by reactions then recency for `top`, recency alone for `recent`, with a stable tiebreak either way. The score is derived from live rankings rather than from the feed event''s snapshot, which drifts.';
 
 -- ===========================================================================
 -- 4. Notification preferences that alter behaviour
