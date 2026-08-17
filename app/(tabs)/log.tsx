@@ -10,6 +10,8 @@ import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingShe
 import { SeasonPicker } from '@/features/search/SeasonPicker';
 import { useRecentSearches } from '@/features/search/use-recent-searches';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
+import { meaningfulMatch, useUserSearch, type UserResult } from '@/features/search/use-user-search';
+import { followLabel, noRelationship, useRelationships } from '@/features/profile/use-social';
 import { posterUri } from '@/lib/images';
 import { theme } from '@/ui/tokens';
 import {
@@ -24,6 +26,7 @@ import {
   Text,
   TitleMetadata,
   TitleRow,
+  UserRow,
 } from '@/ui/components';
 
 /** All first, because the filter is a narrowing of a search the user has
@@ -32,6 +35,10 @@ const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'movies', label: 'Movies' },
   { id: 'tv', label: 'TV' },
+  // Last, and after the two media filters, because Bingd is a film and television app
+  // first: somebody looking for a title should never have to pass a people tab to
+  // reach one (founder addendum, 2026-08-16).
+  { id: 'users', label: 'Users' },
 ] as const;
 
 type Filter = (typeof FILTERS)[number]['id'];
@@ -70,10 +77,39 @@ export default function LogScreen() {
 
   const filtered = useMemo(() => {
     if (filter === 'all') return results;
+    // The Users tab is people and nothing else. Leaving the titles in and hiding them
+    // in the renderer would make every empty-state branch below wrong.
+    if (filter === 'users') return [];
     return results.filter((result) =>
       filter === 'movies' ? result.kind === 'movie' : result.kind !== 'movie',
     );
   }, [results, filter]);
+
+  const users = useUserSearch(input, profile.id, filter === 'users' ? 30 : 10);
+  const userResults = useMemo(() => users.data ?? [], [users.data]);
+  const relationships = useRelationships(
+    useMemo(() => userResults.map((user) => user.id), [userResults]),
+    profile.id,
+  );
+
+  /**
+   * Who appears under **All**.
+   *
+   * Titles stay dominant, which the founder asked for and which this enforces twice:
+   * the section is capped at three, and it holds only people whose handle or name the
+   * query actually *starts*. `search_users` matches substrings, so without that gate
+   * typing "the" would put three strangers above a page of films.
+   *
+   * Under Users there is no gate and no cap beyond the server's — everything the viewer
+   * is allowed to see, which is what a dedicated tab is for. So the gate never hides
+   * anybody; it only decides which tab they lead with.
+   */
+  const usersUnderAll = useMemo(
+    () => userResults.filter((user) => meaningfulMatch(user, input)).slice(0, 3),
+    [userResults, input],
+  );
+
+  const shownUsers = filter === 'users' ? userResults : filter === 'all' ? usersUnderAll : [];
 
   /**
    * History is written on commitment, never on typing.
@@ -92,6 +128,29 @@ export default function LogScreen() {
    * meant.
    */
   const commitSelection = (title: string) => remember(title);
+
+  const openUser = (user: UserResult) => {
+    commitSelection(user.name);
+    router.push(`/u/${user.username}`);
+  };
+
+  /**
+   * The word beside a person's name, or nothing.
+   *
+   * A label, never a control — the founder's row is "[avatar] Display Name / @handle /
+   * follow state where appropriate", and a Follow button inside a search result is one
+   * mis-tap from a relationship the user did not mean to start, which the other person
+   * is notified about either way. The action lives on the profile the row opens.
+   */
+  const relationshipLabel = (user: UserResult) => {
+    // Your own row: "Follow" against yourself is a control that cannot exist, and the
+    // profile it opens is your own.
+    if (user.id === profile.id) return 'You';
+    const label = followLabel(relationships.data?.get(user.id) ?? noRelationship());
+    // "Follow" is the *absence* of a relationship. Printing it would describe an
+    // action nothing on this row performs.
+    return label === 'Follow' ? null : label;
+  };
 
   const openTitle = (result: SearchResult) => {
     commitSelection(result.title);
@@ -155,6 +214,11 @@ export default function LogScreen() {
 
       <Results
         idle={idle}
+        users={shownUsers}
+        usersLoading={users.isPending && !idle}
+        usersOnly={filter === 'users'}
+        relationshipLabel={relationshipLabel}
+        onOpenUser={openUser}
         loading={isPending && !idle}
         error={isError}
         stale={isPlaceholderData}
@@ -224,6 +288,11 @@ export default function LogScreen() {
  */
 function Results({
   idle,
+  users,
+  usersLoading,
+  usersOnly,
+  relationshipLabel,
+  onOpenUser,
   loading,
   error,
   stale,
@@ -241,6 +310,11 @@ function Results({
   onOpenLog,
 }: {
   idle: boolean;
+  users: UserResult[];
+  usersLoading: boolean;
+  usersOnly: boolean;
+  relationshipLabel: (user: UserResult) => string | null;
+  onOpenUser: (user: UserResult) => void;
   loading: boolean;
   error: boolean;
   stale: boolean;
@@ -304,6 +378,41 @@ function Results({
     );
   }
 
+  /**
+   * The Users tab, answered before any of the title states below.
+   *
+   * Every branch after this one is written about the catalogue — "Looking further
+   * afield", "the wider search did not answer", "try the original title" — and all of
+   * them are wrong about people. There is no provider pass for accounts and nothing to
+   * be exhausted; either somebody matched or nobody did.
+   */
+  if (usersOnly) {
+    if (usersLoading) return <SkeletonRow count={4} />;
+    if (users.length === 0) {
+      return (
+        <EmptyState
+          kind="nothingMatches"
+          title="Nobody by that name"
+          body="Try their exact handle. Private accounts do not appear in search."
+        />
+      );
+    }
+    return (
+      <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+        {users.map((user) => (
+          <UserRow
+            key={user.id}
+            name={user.name}
+            username={user.username}
+            avatarUri={user.avatarUri}
+            relationship={relationshipLabel(user)}
+            onPress={() => onOpenUser(user)}
+          />
+        ))}
+      </ScrollView>
+    );
+  }
+
   if (error) {
     return (
       <EmptyState
@@ -317,7 +426,52 @@ function Results({
 
   if (loading) return <SkeletonRow count={6} />;
 
+  /**
+   * People, above the titles and visibly not among them.
+   *
+   * A labelled section with its own divider, so a profile row is never mistaken for a
+   * result in the title ranking — which is the founder's rule, and which the round
+   * avatar against a rectangular poster already signals before the label is read.
+   *
+   * Above rather than below, because a section under a page of films is a section
+   * nobody reaches, and the gate on `usersUnderAll` is what keeps it from appearing
+   * when the query was plainly about a title. It renders nothing at all when empty,
+   * so All looks exactly as it did before whenever nobody matched.
+   */
+  const people =
+    users.length > 0 ? (
+      <View style={styles.people}>
+        <SectionHeader title="People" />
+        {users.map((user) => (
+          <UserRow
+            key={user.id}
+            name={user.name}
+            username={user.username}
+            avatarUri={user.avatarUri}
+            relationship={relationshipLabel(user)}
+            onPress={() => onOpenUser(user)}
+          />
+        ))}
+      </View>
+    ) : null;
+
   if (results.length === 0) {
+    // Somebody matched and no title did. The title empty states below would all be
+    // saying "nothing matches that" over a list that plainly has somebody in it.
+    if (people) {
+      return (
+        <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+          {people}
+          <EmptyState
+            kind="nothingMatches"
+            compact
+            title="No titles match that"
+            body="Nothing in the catalogue by that name."
+          />
+        </ScrollView>
+      );
+    }
+
     // Several different silences, and saying the wrong one is worse than saying
     // nothing. Still looking is not the same as having looked and found nothing;
     // being rate limited is not a statement about the catalogue at all; and a
@@ -370,8 +524,15 @@ function Results({
   }
 
   return (
-    <FlashList
-      data={results}
+    // The People section is a *sibling* of the list, not its header. That is the
+    // founder's "never intermix profile rows into the title ranking" expressed
+    // structurally: a header row inside a FlashList is still an item in the list that
+    // ranks titles, and the next person to add sticky headers or a section index would
+    // find people in it.
+    <View style={styles.list}>
+      {people}
+      <FlashList
+        data={results}
       // The wider search runs after the local one and adds to it, so its progress is
       // a footer rather than a state: the rows already found stay put and usable.
       ListFooterComponent={
@@ -451,10 +612,11 @@ function Results({
               <Ionicons name="add-circle" size={theme.layout.icon.lg} color={theme.semantic.action} />
             </Pressable>
           }
-          onPress={() => onOpenTitle(item)}
-        />
-      )}
-    />
+            onPress={() => onOpenTitle(item)}
+          />
+        )}
+      />
+    </View>
   );
 }
 
@@ -466,6 +628,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[2],
   },
+  // A rule under the section, so the boundary between people and titles is drawn
+  // rather than implied by spacing alone.
+  people: {
+    paddingBottom: theme.space[2],
+    borderBottomWidth: StyleSheet.hairlineWidth * 2,
+    borderBottomColor: theme.border.hairline,
+  },
+  list: { flex: 1 },
   status: { padding: theme.layout.gutter, gap: theme.space[2], alignItems: 'flex-start' },
   stale: { opacity: 0.6 },
   idle: { paddingTop: theme.space[2], paddingBottom: theme.space[8] },

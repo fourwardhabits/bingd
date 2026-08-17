@@ -117,6 +117,34 @@ const ALLOWED = {
   'edit_comment(uuid,uuid,text,boolean)': ['authenticated'],
   'delete_comment(uuid,uuid)': ['authenticated'],
 
+  // Added 2026-08-17 with the social graph writers (20260817000200). `follows` and
+  // `blocks` had read policies and no writers at all until this migration, so the
+  // whole visibility architecture rested on edges no user could create.
+  //
+  // `follow` is the one writer in this schema that deliberately does **not** gate on
+  // can_view_profile — a private account fails it by definition, and gating would make
+  // the pending state unreachable. `_assert_reachable` is its gate instead, and it is
+  // deliberately absent from this list: it answers "does this account exist, is it
+  // active, is there a block" about a named third party, which is exactly what
+  // 20260813001900 revoked can_view_profile for.
+  'follow(uuid,uuid)': ['authenticated'],
+  'unfollow(uuid,uuid)': ['authenticated'],
+  'respond_follow_request(uuid,uuid,boolean)': ['authenticated'],
+  'remove_follower(uuid,uuid)': ['authenticated'],
+  'block(uuid,uuid)': ['authenticated'],
+  'unblock(uuid,uuid)': ['authenticated'],
+
+  // security invoker, so it can only report what follows_read and blocks_read already
+  // admit — the caller's own edges. It cannot be pointed at a pair the caller is not
+  // part of, which is why a function that takes a list of user ids is safe here.
+  'follow_state_with(uuid[])': ['authenticated'],
+
+  // Added 2026-08-17 with user discovery (20260817000300). Definer, and takes no
+  // viewer: the perspective is always auth.uid()'s own. Not anon — there is no
+  // signed-out surface that lists people, and a grant should follow a surface rather
+  // than precede it, which is the rule public_notes set.
+  'search_users(text,integer)': ['authenticated'],
+
   // Added 2026-08-16 with watch tagging (PRD §14). `set_watch_tags` replaces the
   // whole companion list for one of the caller's own watches; `hide_watch_tag` is
   // the tagged person's side of it.

@@ -292,6 +292,15 @@ describe('the guard is wired in, not merely present', () => {
     // number, and a suspended *caller* only ever sees their own following list — which
     // suspension does not hide from the person it was applied to.
     'following_score',
+    // 20260817000300. A stable read filtered through can_view_profile from the
+    // caller's own side. A suspended account calling it learns nothing new — and a
+    // suspended *subject* is already absent from everybody's results, which is the
+    // direction that matters.
+    'search_users',
+    // 20260817000200. security invoker, so it reads only the caller's own edges
+    // through follows_read and blocks_read. Suspension does not hide a person's own
+    // follow list from them, and this reports nothing else.
+    'follow_state_with',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

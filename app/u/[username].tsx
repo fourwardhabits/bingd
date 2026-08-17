@@ -9,7 +9,9 @@ import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { useActorActivity } from '@/features/feed/use-feed';
+import { FollowControl } from '@/features/profile/FollowControl';
 import { useProfileNotes, usePublicProfile } from '@/features/profile/use-public-profile';
+import { useRelationships } from '@/features/profile/use-social';
 import { posterUri } from '@/lib/images';
 import { fullTitle } from '@/lib/titles';
 import {
@@ -62,6 +64,7 @@ export default function PublicProfileScreen() {
   const notes = useProfileNotes(profile.data?.id ?? null);
   const watched = useWatched(viewer.id);
   const activity = useActorActivity(profile.data?.id ?? null);
+  const relationships = useRelationships(subjectId ? [subjectId] : [], viewer.id);
 
   const isSelf = profile.data?.id === viewer.id;
   const rows = ranked.data ?? [];
@@ -119,6 +122,17 @@ export default function PublicProfileScreen() {
             <Text variant="footnote" tone="secondary">
               @{profile.data.username}
             </Text>
+
+            {/* Under the identity rather than beside it: the founder's approved
+                profile design is a large avatar with the name and handle, and a
+                control tucked into that group competes with the name. */}
+            <FollowControl
+              userId={subjectId}
+              name={profile.data.name}
+              viewerId={viewer.id}
+              relationship={relationships.data?.get(subjectId)}
+              isSelf={isSelf}
+            />
           </View>
 
           <StatRow

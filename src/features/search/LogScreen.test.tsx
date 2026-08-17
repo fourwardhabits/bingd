@@ -465,3 +465,132 @@ describe('when the wider search cannot answer', () => {
     expect(view.queryByLabelText('Search wider again')).toBeNull();
   });
 });
+
+/**
+ * Users in Search (founder addendum 2026-08-16 §2).
+ *
+ * The rules being asserted, in the founder's words: filters become All | Movies | TV |
+ * Users; a user row is visually distinct from a title row; under All titles stay
+ * dominant and a compact Users *section* appears only for meaningful matches; never
+ * intermix profile rows into the title ranking; tap opens the authorized profile.
+ *
+ * What is deliberately **not** asserted here is who may be found. That is
+ * `search_users`' job and it is tested against a real database in
+ * `supabase/tests/user-search.test.mjs` — a client-side test of a privacy rule would
+ * only be asserting the fixture.
+ */
+describe('finding people', () => {
+  const anna = {
+    id: 'user-anna',
+    username: 'anna',
+    display_name: 'Anna Rivers',
+    avatar_path: null,
+    visibility: 'public',
+  };
+  const deanna = {
+    id: 'user-deanna',
+    username: 'deanna',
+    display_name: 'Deanna Troi',
+    avatar_path: null,
+    visibility: 'public',
+  };
+
+  const withPeople = (people: unknown[], relationships: unknown[] = []) => {
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn === 'search_titles') return Promise.resolve({ data: [series, film], error: null });
+      if (fn === 'search_users') return Promise.resolve({ data: people, error: null });
+      if (fn === 'follow_state_with') {
+        return Promise.resolve({ data: relationships, error: null });
+      }
+      return Promise.resolve({ data: { status: 'ok' }, error: null });
+    });
+  };
+
+  it('offers a Users filter, after the two media ones', async () => {
+    withPeople([]);
+    const view = await search('anna');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
+    for (const label of ['All', 'Movies', 'TV', 'Users']) {
+      expect(view.getByText(label)).toBeTruthy();
+    }
+  });
+
+  it('shows a compact People section above the titles under All', async () => {
+    withPeople([anna]);
+    const view = await search('anna');
+
+    await waitFor(() => expect(view.getByLabelText('People')).toBeTruthy());
+    expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy();
+    // Titles are still there and still the body of the list.
+    expect(view.getByLabelText(FILM_ROW)).toBeTruthy();
+  });
+
+  it('keeps a middle-of-the-handle match out of All, and shows it under Users', async () => {
+    // `deanna` genuinely matches "ann" and the server genuinely returns it. Under All
+    // it would be a stranger above a page of films; under Users it is the answer.
+    withPeople([deanna]);
+    const view = await search('ann');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
+    expect(view.queryByLabelText('People')).toBeNull();
+
+    await fireEvent.press(view.getByText('Users'));
+    await waitFor(() => expect(view.getByLabelText('Deanna Troi, @deanna')).toBeTruthy());
+  });
+
+  it('shows only people under Users, never titles', async () => {
+    withPeople([anna]);
+    const view = await search('anna');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Users'));
+
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
+    expect(view.queryByLabelText(FILM_ROW)).toBeNull();
+    // And no "People" header: on a tab that is only people, it names nothing.
+    expect(view.queryByLabelText('People')).toBeNull();
+  });
+
+  it('says the right thing when nobody matches', async () => {
+    withPeople([]);
+    const view = await search('anna');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Users'));
+
+    // Not a catalogue message. There is no provider pass for accounts and nothing to
+    // be exhausted, so "try the original title" would be nonsense.
+    await waitFor(() => expect(view.getByText('Nobody by that name')).toBeTruthy());
+  });
+
+  it('names the relationship on the row, and offers no control there', async () => {
+    withPeople(
+      [anna],
+      [{ user_id: 'user-anna', following: 'approved', followed_by: null, blocked: false }],
+    );
+    const view = await search('anna');
+
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna, Following')).toBeTruthy());
+    // A Follow button in a search result is one mis-tap from a relationship the user
+    // did not mean to start, and the other person is notified either way.
+    expect(view.queryByText('Follow')).toBeNull();
+  });
+
+  it('says nothing where there is no relationship yet', async () => {
+    withPeople([anna], [{ user_id: 'user-anna', following: null, followed_by: null, blocked: false }]);
+    const view = await search('anna');
+
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
+  });
+
+  it('opens the profile when a person is tapped', async () => {
+    withPeople([anna]);
+    const view = await search('anna');
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Anna Rivers, @anna'));
+
+    expect(mockPush).toHaveBeenCalledWith('/u/anna');
+  });
+});
