@@ -1,94 +1,111 @@
-import { Stack } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { AvatarPicker } from '@/features/profile/AvatarPicker';
 import { useAccountWrites } from '@/features/settings/use-account';
-import { Button, Field, Screen, SectionHeader, Text } from '@/ui/components';
+import { queryKeys } from '@/lib/query';
+import { Button, Field, KeyboardScreen, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
+/** The bio's ceiling, matching `profiles.bio_shape`. */
+const BIO_MAX = 120;
+
 /**
- * Edit Profile.
+ * Edit Profile — one form, one save.
  *
- * The approved profile header is preserved exactly — a large avatar with the name and
- * handle beside it — and this is the screen that changes what it says. Two fields,
- * because there are two editable identity fields in the model and no more.
+ * What this replaced had a Save button for the name and a separate control for the
+ * handle, and told the reader about ninety-day redirects and reserved names underneath.
+ * Two things were wrong with it, and the founder named both.
  *
- * **There is no bio, and its absence is the decision rather than an omission.** There
- * is no `profiles.bio` column, and adding one is not a column: it is free text on a
- * public page, which means a moderation surface, a length rule, a control-character
- * rule, a report subject and a spoiler question. The founder's instruction was to
- * implement it only if backed by real persisted storage and reviewed writes, and
- * otherwise to ship no fake one — the hardcoded "Movie and TV collector" that used to
- * sit in the place a bio goes was removed when it was found. Blank until there is a
- * real one is the honest state.
+ * **It exposed a seam a reader does not have.** "My profile" is one thing. A screen
+ * with two saves can leave the name written and the handle refused, which is a
+ * half-saved profile somebody has to reason about. `save_profile` is one transaction,
+ * so the screen can be one form.
  *
- * The handle is the field that costs something, so it says so before it is changed
- * rather than after: every rename permanently retires the old name
- * (`username_history` keeps the row so it can never be taken by anybody else), and
- * there is a thirty-day cooldown behind it.
+ * **It explained the implementation.** Redirect windows, reservations, what happens to
+ * old links — all true, all backend behaviour, and none of it a decision the person
+ * typing a handle is making. What they need to know is the rule that binds them: the
+ * shape, and that they can do it again in thirty days. The protections stay; the
+ * lecture goes.
+ *
+ * The Bio is the founder's subheading concept as real data. There is a column now, it
+ * is one line under the handle on every profile, and nothing here is hardcoded.
  */
 export default function EditProfileScreen() {
   const profile = useCurrentProfile();
-  const { updateProfile, changeUsername, busy } = useAccountWrites();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { saveProfile, busy } = useAccountWrites();
 
   const [name, setName] = useState(profile.display_name || '');
   const [handle, setHandle] = useState(profile.username);
-  const [nameError, setNameError] = useState<string | null>(null);
-  const [handleError, setHandleError] = useState<string | null>(null);
+  const [bio, setBio] = useState(profile.bio ?? '');
+  const [error, setError] = useState<string | null>(null);
 
-  const nameChanged = name.trim() !== (profile.display_name || '');
-  const handleChanged = handle.trim().toLowerCase() !== profile.username.toLowerCase();
+  const trimmedName = name.trim();
+  const trimmedHandle = handle.trim().toLowerCase();
+  const trimmedBio = bio.trim();
 
-  const saveName = async () => {
-    setNameError(null);
-    const result = await updateProfile(name.trim());
-    if (!result.ok) {
-      setNameError(result.message);
+  const nameChanged = trimmedName !== (profile.display_name || '');
+  const handleChanged = trimmedHandle !== profile.username.toLowerCase();
+  const bioChanged = trimmedBio !== (profile.bio ?? '');
+  const changed = nameChanged || handleChanged || bioChanged;
+
+  const valid = trimmedName.length > 0 && trimmedHandle.length >= 3 && trimmedBio.length <= BIO_MAX;
+
+  const save = async () => {
+    setError(null);
+
+    const commit = async () => {
+      const result = await saveProfile({
+        // Only what changed. Undefined leaves a field alone, which is what keeps a bio
+        // edit from being charged the handle's thirty-day cooldown.
+        displayName: nameChanged ? trimmedName : undefined,
+        username: handleChanged ? trimmedHandle : undefined,
+        // `''` rather than undefined when it has been emptied: null already means "do
+        // not touch", so clearing needs a value of its own.
+        bio: bioChanged ? trimmedBio : undefined,
+      });
+
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+
+      await queryClient.invalidateQueries({ queryKey: queryKeys.myProfile(profile.id) });
+      router.back();
+    };
+
+    // Asked once, and only for the part that cannot be undone. A name and a bio are
+    // edits; a handle is a decision, because the old one does not come back into
+    // circulation and thirty days have to pass before the next one.
+    if (handleChanged) {
+      Alert.alert(
+        `Change your handle to @${trimmedHandle}?`,
+        'You can change it again in 30 days.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Save changes', onPress: () => void commit() },
+        ],
+      );
       return;
     }
-    Alert.alert('Name updated');
-  };
 
-  const saveHandle = async () => {
-    setHandleError(null);
-    const next = handle.trim().toLowerCase();
-
-    // Asked before the write rather than explained after it. The cost is not
-    // reversible and is not obvious: the old handle is retired for good, and anyone
-    // holding a link to it gets a redirect for ninety days and nothing after that.
-    Alert.alert(
-      `Change your handle to @${next}?`,
-      `@${profile.username} will be retired — nobody else can take it, so your old links cannot end up pointing at a stranger. They redirect here for 90 days. You can change your handle again in 30 days.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Change handle',
-          style: 'destructive',
-          onPress: () =>
-            void (async () => {
-              const result = await changeUsername(next);
-              if (!result.ok) {
-                setHandleError(result.message);
-                return;
-              }
-              Alert.alert('Handle updated', `You are now @${next}.`);
-            })(),
-        },
-      ],
-    );
+    await commit();
   };
 
   return (
     <Screen includeBottomInset>
       <Stack.Screen options={{ headerShown: true, title: 'Edit Profile', headerBackTitle: 'Back' }} />
 
-      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+      <KeyboardScreen contentContainerStyle={styles.page}>
         <AvatarPicker />
 
         <View style={styles.section}>
-          <SectionHeader title="Name" />
+          <SectionHeader title="About you" />
           <View style={styles.body}>
             <Field
               label="Display name"
@@ -97,23 +114,9 @@ export default function EditProfileScreen() {
               maxLength={50}
               autoCapitalize="words"
               autoCorrect={false}
-              hint="What people see beside your picture. Up to 50 characters."
-              error={nameError ?? undefined}
+              hint="What people see beside your picture."
             />
-            <Button
-              label={busy ? 'Saving…' : 'Save name'}
-              onPress={() => void saveName()}
-              disabled={busy || !nameChanged || name.trim().length === 0}
-              disabledReason={
-                name.trim().length === 0 ? 'Enter a name first' : 'Nothing has changed yet'
-              }
-            />
-          </View>
-        </View>
 
-        <View style={styles.section}>
-          <SectionHeader title="Handle" />
-          <View style={styles.body}>
             <Field
               label="Handle"
               value={handle}
@@ -122,29 +125,47 @@ export default function EditProfileScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               autoComplete="off"
-              hint="3 to 24 characters: lowercase letters, numbers and underscores."
-              error={handleError ?? undefined}
-            />
-            <Text variant="caption" tone="tertiary">
-              Changing your handle retires the old one: nobody else can ever take it, so an
-              old link cannot end up pointing at a stranger. Links redirect here for 90
-              days. You can change it again after 30 days, and you can always take a
-              handle back that was yours.
-            </Text>
-            <Button
-              label={busy ? 'Working…' : 'Change handle'}
-              kind="secondary"
-              onPress={() => void saveHandle()}
-              disabled={busy || !handleChanged || handle.trim().length < 3}
-              disabledReason={
-                handle.trim().length < 3
-                  ? 'A handle is at least 3 characters'
-                  : 'Nothing has changed yet'
+              // The rule that binds them, and nothing about how it is enforced.
+              hint={
+                '3–24 characters.\nLowercase letters, numbers, and underscores.\nYou can change your handle every 30 days.'
               }
             />
+
+            <Field
+              label="Bio"
+              value={bio}
+              onChangeText={setBio}
+              maxLength={BIO_MAX}
+              multiline
+              autoCapitalize="sentences"
+              hint="A short line about you and your taste."
+            />
+            {/* Only once it is worth knowing. A counter from zero is a target. */}
+            {bio.length > BIO_MAX - 30 ? (
+              <Text variant="caption" tone={bio.length > BIO_MAX ? 'action' : 'tertiary'}>
+                {BIO_MAX - bio.length} characters left
+              </Text>
+            ) : null}
+
+            {error ? (
+              <Text variant="footnote" tone="action">
+                {error}
+              </Text>
+            ) : null}
           </View>
         </View>
-      </ScrollView>
+
+        <View style={styles.body}>
+          <Button
+            label={busy ? 'Saving…' : 'Save changes'}
+            onPress={() => void save()}
+            disabled={busy || !changed || !valid}
+            disabledReason={
+              !valid ? 'Fill in a name and a handle first' : 'Nothing has changed yet'
+            }
+          />
+        </View>
+      </KeyboardScreen>
     </Screen>
   );
 }
@@ -152,5 +173,5 @@ export default function EditProfileScreen() {
 const styles = StyleSheet.create({
   page: { paddingBottom: theme.space[10] },
   section: { paddingTop: theme.space[5], gap: theme.space[1] },
-  body: { paddingHorizontal: theme.layout.gutter, gap: theme.space[3] },
+  body: { paddingHorizontal: theme.layout.gutter, gap: theme.space[3], paddingTop: theme.space[3] },
 });

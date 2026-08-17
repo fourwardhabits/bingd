@@ -312,6 +312,13 @@ describe('the guard is wired in, not merely present', () => {
     // read what was sent to them, and hiding a pending follow request from a
     // suspended account would leave it unanswerable if the suspension is lifted.
     'my_notifications',
+    // 20260817000800. A stable read of public notes on one title, filtered through
+    // can_view_profile from the caller's own side. A suspended *author* is already
+    // absent from it, which is the direction that matters.
+    'title_reviews',
+    // 20260817000800. The caller's own two switches, defaulted on. Suspension does not
+    // hide somebody's own settings from them.
+    'my_notification_preferences',
     // 20260817000600, and the one entry here that is not a read.
     //
     // `delete_account` skips the guard **deliberately**, which is why it is declared

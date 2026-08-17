@@ -13,6 +13,8 @@ export type Profile = {
   id: string;
   username: string;
   display_name: string;
+  /** The line they wrote about themselves, under the handle. Null until they do. */
+  bio: string | null;
   /** The object path as stored. Pass to `set_avatar` and to the delete of the
    *  previous file; use `avatarUri` for anything that renders. */
   avatar_path: string | null;
@@ -105,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryFn: async (): Promise<Profile | null> => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, username, display_name, avatar_path, visibility')
+        .select('id, username, display_name, bio, avatar_path, visibility')
         .eq('id', userId!)
         .maybeSingle();
       if (error) throw error;

@@ -232,6 +232,30 @@ export type TmdbReviews = {
   total_results?: number;
 };
 
+/**
+ * What a title is rated, which TMDB publishes in two entirely different shapes.
+ *
+ * A **movie** has `release_dates`, a list per country of *release events* — theatrical,
+ * digital, physical — each of which may carry a certification, and several of which
+ * routinely carry an empty one. So finding a film's rating means walking a country's
+ * releases and taking the first that has anything.
+ *
+ * A **series** has `content_ratings`, one flat rating per country. Simpler, and
+ * deliberately a different type here rather than a union: the two are not the same
+ * thing wearing different clothes, and a single type would need a comment explaining
+ * which half applies.
+ */
+export type TmdbReleaseDates = {
+  results?: {
+    iso_3166_1: string;
+    release_dates?: { certification?: string; type?: number; release_date?: string }[];
+  }[];
+};
+
+export type TmdbContentRatings = {
+  results?: { iso_3166_1: string; rating?: string }[];
+};
+
 export type TmdbMovieDetail = {
   id: number;
   title: string;
@@ -247,6 +271,7 @@ export type TmdbMovieDetail = {
   credits?: TmdbCredits;
   videos?: TmdbVideos;
   reviews?: TmdbReviews;
+  release_dates?: TmdbReleaseDates;
 };
 
 export type TmdbSeriesDetail = {
@@ -264,6 +289,7 @@ export type TmdbSeriesDetail = {
   credits?: TmdbCredits;
   videos?: TmdbVideos;
   reviews?: TmdbReviews;
+  content_ratings?: TmdbContentRatings;
   seasons?: {
     id: number;
     season_number: number;
@@ -340,11 +366,22 @@ export function movieDetail(id: number, charge?: Charge): Promise<TmdbMovieDetai
   // why reviews arrive here rather than through a `reviews` action of their own —
   // a separate endpoint would be a second charged request for data the first one
   // will hand over for free.
-  return request(`/movie/${id}`, { append_to_response: 'credits,videos,reviews' }, charge);
+  return request(
+    `/movie/${id}`,
+    { append_to_response: 'credits,videos,reviews,release_dates' },
+    charge,
+  );
 }
 
 export function seriesDetail(id: number, charge?: Charge): Promise<TmdbSeriesDetail> {
-  return request(`/tv/${id}`, { append_to_response: 'credits,videos,reviews' }, charge);
+  // `content_ratings` rather than `release_dates`: a series is rated once per country
+  // and a film is rated per release event. Different shapes, different endpoints, and
+  // `normalize.ts` reads each with its own function rather than a union.
+  return request(
+    `/tv/${id}`,
+    { append_to_response: 'credits,videos,reviews,content_ratings' },
+    charge,
+  );
 }
 
 export function seasonDetail(

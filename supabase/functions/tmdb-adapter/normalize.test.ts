@@ -14,7 +14,15 @@
 
 import { assert, assertEquals } from '@std/assert';
 
-import { personCredits, personRecord, reviewsFacet } from './normalize.ts';
+import {
+  certificationOf,
+  fromMovieDetail,
+  fromSearchResult,
+  personCredits,
+  personRecord,
+  ratingOf,
+  reviewsFacet,
+} from './normalize.ts';
 import type { TmdbPersonDetail } from './tmdb.ts';
 
 const GENRES = new Map<number, string>([
@@ -321,4 +329,72 @@ Deno.test('an empty biography is null rather than an empty string', () => {
 
   assertEquals(record.biography, null);
   assert(!record.biography_truncated);
+});
+
+// ---------------------------------------------------------------------------
+// Certification
+// ---------------------------------------------------------------------------
+
+Deno.test('a film’s certification is the first non-empty one in the US list', () => {
+  // TMDB lists a *release event* per country — theatrical, digital, physical — and
+  // each carries its own certification, most of them empty. Taking `results[0]` or the
+  // first entry gives '' for a great many films that are rated perfectly well.
+  const value = certificationOf({
+    results: [
+      { iso_3166_1: 'GB', release_dates: [{ certification: '15' }] },
+      {
+        iso_3166_1: 'US',
+        release_dates: [
+          { certification: '', type: 1 },
+          { certification: '', type: 2 },
+          { certification: 'PG-13', type: 3 },
+        ],
+      },
+    ],
+  });
+
+  assertEquals(value, 'PG-13');
+});
+
+Deno.test('a film with no US entry has no certification, rather than another country’s', () => {
+  const value = certificationOf({ results: [{ iso_3166_1: 'FR', release_dates: [{ certification: '12' }] }] });
+
+  assertEquals(value, null);
+});
+
+Deno.test('a film TMDB has not rated is null, never a fabricated NR', () => {
+  // An invented rating is a claim about a film's content that nobody made.
+  assertEquals(certificationOf({ results: [{ iso_3166_1: 'US', release_dates: [{ certification: '' }] }] }), null);
+  assertEquals(certificationOf({ results: [] }), null);
+  assertEquals(certificationOf(undefined), null);
+});
+
+Deno.test('a series is rated once per country, so it is a lookup rather than a walk', () => {
+  const value = ratingOf({
+    results: [
+      { iso_3166_1: 'AU', rating: 'MA15+' },
+      { iso_3166_1: 'US', rating: 'TV-MA' },
+    ],
+  });
+
+  assertEquals(value, 'TV-MA');
+});
+
+Deno.test('a series with an empty US rating is null', () => {
+  assertEquals(ratingOf({ results: [{ iso_3166_1: 'US', rating: '' }] }), null);
+  assertEquals(ratingOf(undefined), null);
+});
+
+Deno.test('a detail row carries the certification and a search row carries none', () => {
+  // The asymmetry is load-bearing: the upsert coalesces, so a search running after a
+  // detail call must not blank what the detail wrote.
+  const movie = fromMovieDetail({
+    id: 1,
+    title: 'Rated',
+    release_dates: { results: [{ iso_3166_1: 'US', release_dates: [{ certification: 'R' }] }] },
+  });
+  assertEquals(movie.certification, 'R');
+
+  const searched = fromSearchResult({ id: 1, media_type: 'movie', title: 'Rated' }, GENRES);
+  assertEquals(searched?.certification, null);
 });

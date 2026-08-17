@@ -161,13 +161,17 @@ const ALLOWED = {
   // caller's own account and none takes a target, which is 20260813001900's rule in
   // its strongest form: there is nothing to point at anybody else.
   //
-  // `update_profile` and `set_profile_visibility` write columns `profiles` has no
+  // `save_profile` and `set_profile_visibility` write columns `profiles` has no
   // update policy for by design (20260813000200: writes go through definer functions),
   // so definer is the mechanism rather than an escalation.
   //
-  // `change_username` is the first writer for the 90-day redirect machinery declared
-  // in 20260813002000 and unreachable until now. Its cooldown is not a rate limit but
-  // a scarcity one: every rename retires a handle permanently.
+  // `save_profile` replaced `update_profile` and `change_username` on 2026-08-17. One
+  // transaction, because a screen with two saves can leave the name written and the
+  // handle refused; the two it replaced are **dropped** rather than overloaded, since
+  // PostgREST resolves by argument name and nesting argument sets resolve ambiguously.
+  // It carries the 90-day redirect machinery's only entry point with it, and the
+  // cooldown fires only when the handle actually changes — a rename is a scarcity
+  // limit, not a rate limit, because every one retires a handle permanently.
   //
   // `my_notifications` is definer for the reason `my_blocks` is, and the reason is
   // sharper here — a private account requesting to follow another private account
@@ -177,12 +181,29 @@ const ALLOWED = {
   //
   // `delete_account` takes only a confirmation string. It deletes `auth.uid()` and
   // there is no signature by which it could delete anybody else.
-  'update_profile(uuid,text)': ['authenticated'],
-  'change_username(uuid,text)': ['authenticated'],
+  'save_profile(uuid,text,text,text)': ['authenticated'],
   'set_profile_visibility(uuid,profile_visibility)': ['authenticated'],
   'my_notifications(integer)': ['authenticated'],
   'mark_notifications_read()': ['authenticated'],
   'delete_account(text)': ['authenticated'],
+
+  // Added 2026-08-17 with Bingd Reviews (20260817000800). Definer, and it reuses
+  // `public_notes`' own visibility predicate rather than a second copy of it — getting
+  // that wrong is how a private account's writing leaks, and there is exactly one
+  // correct expression of it in this schema. Not anon, following the rule public_notes
+  // set: a grant follows a surface, and there is no signed-out title page.
+  'title_reviews(uuid,text,integer)': ['authenticated'],
+
+  // Added 2026-08-17. The first writer and the first reader for a table that has
+  // existed since 20260813000900 with nothing consulting it. Both are about the
+  // caller's own settings and neither takes a target.
+  //
+  // `_notifies` and `_apply_notification_preference` are deliberately absent. The first
+  // answers whether a *named third party* has muted you, which is exactly what
+  // 20260813001900 revoked can_view_profile for; the second is a trigger function and a
+  // client holding it could suppress anybody's inbox row.
+  'set_notification_preference(text,boolean)': ['authenticated'],
+  'my_notification_preferences()': ['authenticated'],
 
   // Added 2026-08-16 with watch tagging (PRD §14). `set_watch_tags` replaces the
   // whole companion list for one of the caller's own watches; `hide_watch_tag` is

@@ -63,27 +63,31 @@ export function useAccountWrites() {
   return {
     busy,
 
-    updateProfile: (displayName: string) =>
+    /**
+     * The whole editable profile, in one call because it is one transaction.
+     *
+     * It replaced `updateProfile` and `changeUsername`, which were two calls behind two
+     * buttons — and the founder's correction is that this exposes a seam a reader does
+     * not have: "my profile" is one thing, and a screen with two saves can leave the
+     * name written and the handle refused. `save_profile` cannot.
+     *
+     * `undefined` leaves a field alone, which is what lets the screen send only what
+     * changed. The bio is the exception: `''` clears it, because null already means
+     * "do not touch" and there is no third value.
+     */
+    saveProfile: (fields: { displayName?: string; username?: string; bio?: string }) =>
       run(
         () =>
-          supabase.rpc('update_profile', {
+          supabase.rpc('save_profile', {
             p_operation_id: newOperationId(),
-            p_display_name: displayName,
+            p_display_name: fields.displayName ?? null,
+            p_username: fields.username ?? null,
+            p_bio: fields.bio ?? null,
           }),
-        // The name renders on every social surface, so the invalidation is broad for
-        // the same reason a follow's is: enumerating the surfaces precisely would be a
-        // list to keep in step with every future feature.
-        [['profile'], ['feed'], ['actor-activity'], ['user-search'], ['comments']],
-      ),
-
-    changeUsername: (username: string) =>
-      run(
-        () =>
-          supabase.rpc('change_username', {
-            p_operation_id: newOperationId(),
-            p_username: username,
-          }),
-        [['profile'], ['user-search']],
+        // The name and the bio render on every social surface, so the invalidation is
+        // broad for the same reason a follow's is: enumerating the surfaces precisely
+        // would be a list to keep in step with every future feature.
+        [['profile'], ['feed'], ['actor-activity'], ['user-search'], ['comments'], ['public-profile']],
       ),
 
     setVisibility: (visibility: 'public' | 'private') =>

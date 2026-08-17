@@ -17,6 +17,7 @@ export { Divider } from './Divider';
 export { EmptyState, type EmptyStateKind } from './EmptyState';
 export { Field, type FieldProps } from './Field';
 export { HeaderBoundary } from './HeaderBoundary';
+export { KeyboardScreen, type KeyboardScreenProps } from './KeyboardScreen';
 export { FeaturedCard, type FeaturedCardProps } from './FeaturedCard';
 export { LoadingScreen, type LoadingScreenProps } from './LoadingScreen';
 export { MediumSelector, type Medium } from './MediumSelector';

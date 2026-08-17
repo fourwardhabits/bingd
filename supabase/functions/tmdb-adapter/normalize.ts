@@ -12,9 +12,11 @@
  */
 
 import type {
+  TmdbContentRatings,
   TmdbMovieDetail,
   TmdbPersonCreditEntry,
   TmdbPersonDetail,
+  TmdbReleaseDates,
   TmdbReviews,
   TmdbSearchResult,
   TmdbSeasonDetail,
@@ -35,6 +37,14 @@ export type TitleRow = {
   original_language: string | null;
   genres: string[];
   popularity: number | null;
+  /**
+   * The US content certification, where TMDB has one.
+   *
+   * Present on a detail row and null on a search row, and the asymmetry is
+   * load-bearing: `tmdb_upsert_titles` coalesces, so a search running after a detail
+   * call must not blank what the detail wrote.
+   */
+  certification: string | null;
 };
 
 /** The payload `tmdb_upsert_seasons` accepts. */
@@ -101,7 +111,62 @@ export function fromSearchResult(
       .map((id) => genreNames.get(id))
       .filter((name): name is string => Boolean(name)),
     popularity: result.popularity ?? null,
+    // A search response has no certification at all. Null rather than absent so the
+    // shape is one thing, and the upsert coalesces so this cannot blank a detail write.
+    certification: null,
   };
+}
+
+/**
+ * The region whose certification Bingd shows.
+ *
+ * One region, chosen here rather than at read time, because V1 has one environment and
+ * the adapter already hardcodes `language=en-US` on every request. The column that
+ * stores this says the same thing (`20260817000900`), and both say it in the same
+ * place a future regional Bingd would have to change.
+ */
+const CERTIFICATION_REGION = 'US';
+
+/**
+ * A film's certification, out of TMDB's `release_dates`.
+ *
+ * The shape is the awkward part and it is worth being explicit about. TMDB lists, per
+ * country, a set of *release events* — theatrical, limited, digital, physical, TV —
+ * and each event carries its own `certification` field. Most of them are `''`. A film
+ * rated PG-13 typically has the rating on one or two of its five US events and an
+ * empty string on the rest, so "take the first" is wrong and "take `results[0]`" is
+ * wrong; the answer is the first **non-empty** certification in the region's list.
+ *
+ * Null when the region has no entry, or has one with nothing rated on it. Never a
+ * fabricated `NR`: that is a claim about a film's content that nobody made.
+ */
+export function certificationOf(releases: TmdbReleaseDates | undefined): string | null {
+  const region = (releases?.results ?? []).find(
+    (entry) => entry.iso_3166_1 === CERTIFICATION_REGION,
+  );
+
+  for (const release of region?.release_dates ?? []) {
+    const value = textOrNull(release.certification);
+    if (value) return value;
+  }
+
+  return null;
+}
+
+/**
+ * A series' certification, out of TMDB's `content_ratings`.
+ *
+ * One rating per country, so this is a lookup rather than a walk — which is why it is
+ * its own function rather than a branch inside the one above. The two endpoints have
+ * genuinely different shapes and a shared reader would be a union with a comment
+ * explaining which half applies.
+ */
+export function ratingOf(ratings: TmdbContentRatings | undefined): string | null {
+  const region = (ratings?.results ?? []).find(
+    (entry) => entry.iso_3166_1 === CERTIFICATION_REGION,
+  );
+
+  return textOrNull(region?.rating);
 }
 
 export function fromMovieDetail(detail: TmdbMovieDetail): TitleRow {
@@ -118,6 +183,7 @@ export function fromMovieDetail(detail: TmdbMovieDetail): TitleRow {
     original_language: textOrNull(detail.original_language),
     genres: (detail.genres ?? []).map((genre) => genre.name),
     popularity: detail.popularity ?? null,
+    certification: certificationOf(detail.release_dates),
   };
 }
 
@@ -137,6 +203,7 @@ export function fromSeriesDetail(detail: TmdbSeriesDetail): TitleRow {
     original_language: textOrNull(detail.original_language),
     genres: (detail.genres ?? []).map((genre) => genre.name),
     popularity: detail.popularity ?? null,
+    certification: ratingOf(detail.content_ratings),
   };
 }
 
