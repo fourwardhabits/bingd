@@ -50,7 +50,7 @@ export function PersonalState({
   const ranked = score != null;
 
   return (
-    <View style={styles.column}>
+    <View style={[styles.column, ranked ? styles.ranked_ : styles.unrankedColumn]}>
       {ranked ? (
         <>
           <ScoreBadge score={score} bucket={bucket} size="lg" />
@@ -58,7 +58,7 @@ export function PersonalState({
             Your score
           </Text>
           {ordinal ? (
-            <Text variant="caption" tone="tertiary" numberOfLines={1}>
+            <Text variant="caption" tone="tertiary" numberOfLines={1} style={styles.ordinal}>
               {ordinal}
             </Text>
           ) : null}
@@ -95,15 +95,40 @@ export function PersonalState({
 
 const styles = StyleSheet.create({
   /**
-   * Left-aligned, not centred.
+   * Right-aligned when ranked; left-aligned when not.
    *
-   * Centred, the cluster floated in whatever width was left over beside the poster
-   * and lined up with nothing — which is most of what made the hero look accidental.
-   * A left edge one gutter clear of the poster gives the badge, the label, the rank
-   * line and the control a shared spine, and the poster's own edge is what they are
-   * aligned to.
+   * The two states want opposite things and it took the founder's screenshots to see
+   * why. **Ranked**, the column is a badge, a label and an ordinal — a block of
+   * information whose natural spine is the screen's right edge, opposite the poster.
+   * Centred it floated in whatever width was left over and lined up with nothing;
+   * left-aligned it sat a gutter from the poster with a ragged right edge and a wide
+   * empty channel beside it.
+   *
+   * **Unranked**, there is only a button, and a button pinned to the right edge of a
+   * mostly-empty band reads as an afterthought. Left, hard against the poster, it reads
+   * as the thing to do next — which it is.
+   *
+   * The two states no longer occupy the same height, and that is also deliberate: see
+   * `unrankedColumn`.
    */
-  column: { alignItems: 'flex-start', gap: theme.space[1] },
+  column: { gap: theme.space[1] },
+  ranked_: { alignItems: 'flex-end' },
+  /**
+   * The unranked state stops reserving room for a score that is not there.
+   *
+   * It used to hold the ranked layout's height so the region would not reflow when a
+   * title went from one state to the other. The founder's screenshots of Ant-Man and
+   * The Dark Tower are what that costs: a tall empty channel beside the poster with one
+   * small button at the bottom of it, on every title nobody has ranked — which is most
+   * of them, and all of them for a new account.
+   *
+   * A reflow when somebody ranks something is a reflow they caused, on a screen they
+   * are looking at, immediately after an action. Dead space is on every page for ever.
+   */
+  unrankedColumn: { alignItems: 'flex-start', justifyContent: 'flex-start' },
+  // The ordinal can be the widest thing in the column, so it is allowed to use the
+  // full width rather than pushing the badge's alignment around.
+  ordinal: { alignSelf: 'stretch', textAlign: 'right' },
   control: {
     flexDirection: 'row',
     alignItems: 'center',

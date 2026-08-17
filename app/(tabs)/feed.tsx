@@ -28,6 +28,7 @@ import {
   EmptyState,
   HeaderBoundary,
   Screen,
+  SectionHeader,
   SkeletonRow,
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -151,6 +152,27 @@ export default function FeedScreen() {
             userId={profile.id}
             onPressTitle={(mediaItemId) => router.push(`/title/${mediaItemId}`)}
           />
+        </View>
+
+        {/**
+          * Where discovery ends and the social feed begins.
+          *
+          * The founder's note: Trending stays at the top, must **not** be sticky, and a
+          * reader should scroll naturally past it into activity — but there was nothing
+          * marking the boundary, so the first activity row read as one more thing in
+          * the shelf's section.
+          *
+          * A hairline and a heading, which is the app's existing vocabulary for exactly
+          * this. **ACTIVITY** rather than "From your network": the feed also carries the
+          * reader's own rankings, so "your network" would be false on the row somebody
+          * is most likely to recognise.
+          *
+          * Drawn even while the feed is loading or empty, because its job is to say
+          * what the rest of the screen is — and an empty state under a heading is
+          * legible where the same empty state floating below a shelf is not.
+          */}
+        <View style={styles.boundary}>
+          <SectionHeader title="Activity" />
         </View>
 
         {feed.isError ? (
@@ -283,6 +305,19 @@ const styles = StyleSheet.create({
   // Collapses to nothing when the shelf renders null, so an absent shelf costs no
   // space rather than an empty band above the first activity row.
   trending: { gap: theme.space[2] },
+  /**
+   * The rule between discovery and activity.
+   *
+   * Full-bleed rather than inset to the text column, unlike a row divider: this
+   * separates two *sections*, and a rule that stops short would read as belonging to
+   * whichever one it touched.
+   */
+  boundary: {
+    marginTop: theme.space[4],
+    paddingTop: theme.space[2],
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderTopColor: theme.border.hairline,
+  },
 });
 
 /** `148m · Sci-fi`, the same line the compact row uses everywhere else. */

@@ -1014,7 +1014,17 @@ const styles = StyleSheet.create({
   },
   // Sits in the poster's lower half, where the hero has already faded to Paper —
   // nothing legible may sit on artwork.
-  scoreColumn: { flex: 1, paddingBottom: theme.space[3] },
+  /**
+   * Sits in the poster's lower half, where the hero has already faded to Paper —
+   * nothing legible may sit on artwork.
+   *
+   * `justifyContent: 'flex-end'` is what stops the unranked state leaving a tall empty
+   * channel. The row aligns on the poster's baseline, so a short column now hangs from
+   * the bottom of the band with the button beside the poster's lower edge, rather than
+   * starting at the top and leaving the gap the founder's Ant-Man and Dark Tower
+   * screenshots showed.
+   */
+  scoreColumn: { flex: 1, justifyContent: 'flex-end', paddingBottom: theme.space[3] },
   heading: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],

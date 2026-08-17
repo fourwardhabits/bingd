@@ -274,16 +274,22 @@ export function ActivityRow({
             hitSlop={theme.space[2]}
             style={({ pressed }) => [styles.action, pressed && styles.pressed]}
           >
+            {/* A filled Maroon heart and nothing else.
+
+                The word "You" sat beside it until the founder's acceptance pass, and it
+                was redundant twice over: the filled state already says the reaction is
+                mine, and the aggregate above already counts it among everybody else's.
+                A label that repeats what a colour has already said is a third thing in
+                a row that is mostly artwork, and it made the reacted state wider than
+                the unreacted one so the whole action row shifted on a tap.
+
+                Screen readers keep the ownership — it is in the label above, where it
+                is a sentence rather than a word. */}
             <Ionicons
               name={reaction.mineGlyph ? 'heart' : 'heart-outline'}
               size={theme.layout.icon.sm}
               color={reaction.mineGlyph ? theme.semantic.action : theme.text.secondary}
             />
-            {reaction.mineGlyph ? (
-              <Text variant="caption" tone="action">
-                You
-              </Text>
-            ) : null}
           </Pressable>
         ) : null}
 

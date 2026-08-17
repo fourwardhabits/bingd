@@ -254,7 +254,7 @@ describe('the reaction control', () => {
     expect(
       view.getByLabelText('You reacted to Inception. Tap to remove, long press to change.'),
     ).toBeTruthy();
-    expect(view.getByText('You')).toBeTruthy();
+    expect(view.queryByText('You')).toBeNull();
     // Exactly once on the row: in the summary cluster.
     expect(view.getAllByText('😂', { includeHiddenElements: true })).toHaveLength(1);
   });
