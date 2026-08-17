@@ -74,6 +74,43 @@ export async function removeAvatar(previousPath: string | null): Promise<AvatarR
   return { outcome: 'ok', path: '' };
 }
 
+/**
+ * Every picture this account has ever uploaded, deleted through the Storage API.
+ *
+ * **Through the API, and this is the whole point of the function.** Deleting a row
+ * from `storage.objects` in SQL removes the metadata and leaves the file itself in
+ * the bucket — Supabase says so explicitly, and independent review 14 raised it as a
+ * Blocker against an account deletion that claimed to remove the picture and only
+ * removed the row pointing at it. The API call is the only thing that removes bytes.
+ *
+ * Every upload writes a fresh filename (`upload` above says why), so an account that
+ * has changed its picture three times has three objects and only the current one is
+ * named by `profiles.avatar_path`. Listing the folder is what finds the other two.
+ *
+ * The storage policies key on the path's first segment being the caller's own uuid,
+ * so this can only ever reach the caller's own folder — the same rule `set_avatar`
+ * restates where the profile row is touched.
+ *
+ * Returns how many were removed, or null when the listing itself failed. Null is not
+ * zero: the caller has to be able to tell "there was nothing" from "we could not
+ * look", because only one of those is safe to describe as having deleted anything.
+ */
+export async function deleteAllAvatars(userId: string): Promise<number | null> {
+  const { data, error } = await supabase.storage.from('avatars').list(userId, { limit: 100 });
+  if (error) return null;
+
+  const paths = (data ?? [])
+    // A folder placeholder has no id. Passing one to `remove` is a no-op that
+    // reports success, which would inflate the count this returns.
+    .filter((object) => Boolean(object.name) && object.id !== null)
+    .map((object) => `${userId}/${object.name}`);
+  if (!paths.length) return 0;
+
+  const { error: removeError } = await supabase.storage.from('avatars').remove(paths);
+  if (removeError) return null;
+  return paths.length;
+}
+
 async function upload(userId: string, sourceUri: string) {
   const context = ImageManipulator.manipulate(sourceUri).resize({ width: EDGE, height: EDGE });
   const image = await context.renderAsync();

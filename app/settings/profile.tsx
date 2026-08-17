@@ -60,7 +60,7 @@ export default function EditProfileScreen() {
     // holding a link to it gets a redirect for ninety days and nothing after that.
     Alert.alert(
       `Change your handle to @${next}?`,
-      `@${profile.username} will be retired for good — nobody can take it, including you. Links to it redirect here for 90 days. You can change your handle again in 30 days.`,
+      `@${profile.username} will be retired — nobody else can take it, so your old links cannot end up pointing at a stranger. They redirect here for 90 days. You can change your handle again in 30 days.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -126,9 +126,10 @@ export default function EditProfileScreen() {
               error={handleError ?? undefined}
             />
             <Text variant="caption" tone="tertiary">
-              Changing your handle retires the old one permanently — nobody can take it
-              afterwards, including you. Links to it redirect here for 90 days. You can
-              change it again after 30 days.
+              Changing your handle retires the old one: nobody else can ever take it, so an
+              old link cannot end up pointing at a stranger. Links redirect here for 90
+              days. You can change it again after 30 days, and you can always take a
+              handle back that was yours.
             </Text>
             <Button
               label={busy ? 'Working…' : 'Change handle'}

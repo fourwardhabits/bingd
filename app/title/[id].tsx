@@ -2,7 +2,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Linking, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import {
+  Alert,
+  Linking,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  Share,
+  StyleSheet,
+  View,
+} from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { LogSheet, type LoggableTitle } from '@/features/collection/LogSheet';
@@ -416,6 +425,21 @@ export default function TitleScreen() {
         contentContainerStyle={styles.content}
         onScroll={header.onScroll}
         scrollEventThrottle={header.scrollEventThrottle}
+        // The Seasons empty state has said "pull down to try again in a moment"
+        // since the series redesign, and until now that was a gesture the app did
+        // not have. Copy that names a gesture is a promise; this is the gesture.
+        refreshControl={
+          <RefreshControl
+            refreshing={seasons.isRefetching || personal.isRefetching}
+            onRefresh={() => {
+              void refetch();
+              void seasons.refetch();
+              void personal.refetch();
+            }}
+            tintColor={theme.semantic.action}
+            colors={[theme.semantic.action]}
+          />
+        }
       >
         <TitleHero
           uri={hero.uri}

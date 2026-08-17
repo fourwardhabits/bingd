@@ -58,7 +58,21 @@ export default function PrivacyScreen() {
     },
   });
 
-  const isPrivate = visibility.data === 'private';
+  /**
+   * Only ever a value that has been read.
+   *
+   * `visibility.data === 'private'` looked right and was not: while the query is in
+   * flight it is `undefined`, which reads as false and draws the switch in the public
+   * position — a privacy control showing a state nobody has confirmed. Worse after an
+   * error, where the switch was left *enabled* and still showing public, so a tap
+   * could set the account to the value it was already displaying as if that were a
+   * change. Independent review 14 found both.
+   *
+   * Now the row says it does not know, and the switch is unavailable until it does.
+   */
+  const known = visibility.data;
+  const isPrivate = known === 'private';
+  const unavailable = visibility.isPending || visibility.isError || known === undefined;
 
   const toggle = async (next: boolean) => {
     const target = next ? 'private' : 'public';
@@ -99,24 +113,45 @@ export default function PrivacyScreen() {
               <View style={styles.switchCopy}>
                 <Text variant="body">Private account</Text>
                 <Text variant="footnote" tone="secondary">
-                  {isPrivate
-                    ? 'People have to ask before they can follow you.'
-                    : 'Anyone can follow you and see your activity.'}
+                  {unavailable
+                    ? visibility.isError
+                      ? 'We could not read your current setting.'
+                      : 'Checking your current setting…'
+                    : isPrivate
+                      ? 'People have to ask before they can follow you.'
+                      : 'Anyone can follow you and see your activity.'}
                 </Text>
               </View>
               <Switch
                 value={isPrivate}
                 onValueChange={(next) => void toggle(next)}
-                disabled={busy || visibility.isPending}
+                disabled={busy || unavailable}
                 accessibilityLabel="Private account"
+                accessibilityState={{ disabled: busy || unavailable }}
                 accessibilityHint={
-                  isPrivate
-                    ? 'Turn off to let anyone follow you without asking'
-                    : 'Turn on to approve followers yourself'
+                  unavailable
+                    ? 'Unavailable until your current setting has been read'
+                    : isPrivate
+                      ? 'Turn off to let anyone follow you without asking'
+                      : 'Turn on to approve followers yourself'
                 }
                 trackColor={{ true: theme.semantic.action, false: theme.border.strong }}
               />
             </View>
+
+            {visibility.isError ? (
+              <View style={styles.explain}>
+                <Text
+                  variant="callout"
+                  tone="action"
+                  accessibilityRole="button"
+                  accessibilityLabel="Try reading your privacy setting again"
+                  onPress={() => void visibility.refetch()}
+                >
+                  Try again
+                </Text>
+              </View>
+            ) : null}
 
             <View style={styles.explain}>
               <Text variant="caption" tone="tertiary">

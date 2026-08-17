@@ -742,13 +742,17 @@ describe('two accounts on one device', () => {
   });
 });
 
-describe('rows that are not built yet', () => {
-  it('renders Photos as present but inert, with a reason', async () => {
+describe('rows that lead nowhere', () => {
+  it('offers none, because a permanently inert row is an invitation with nothing behind it', async () => {
+    // A "Photos — Coming soon" row sat in the middle of the primary logging flow
+    // for a feature nothing in the schema, the API or the PRD plans for V1. The
+    // argument for keeping it was that a row for something unbuilt tells the user it
+    // is coming; the argument against is that it had been telling them that for as
+    // long as the app has existed. Phase G removed it.
     const sheet = await open(filmA);
 
-    const row = sheet.getByLabelText('Photos');
-    expect(row.props.accessibilityState.disabled).toBe(true);
-    expect(row.props.accessibilityHint).toBe('Coming soon');
+    expect(sheet.queryByLabelText('Photos')).toBeNull();
+    expect(sheet.queryByText(/coming soon/i)).toBeNull();
   });
 });
 

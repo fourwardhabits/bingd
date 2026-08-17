@@ -613,7 +613,12 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
             </View>
           ) : null}
 
-          <SheetRow icon="image-outline" label="Photos" disabledReason="Coming soon" />
+          {/* A "Photos — Coming soon" row used to sit here. It was the last dead
+              control in the app: permanently disabled, in the middle of the primary
+              logging flow, for a feature nothing in the schema, the API or the PRD
+              plans for V1. A row that can never be tapped is worse than no row —
+              it is an invitation with nothing behind it, and it had been read as a
+              promise for long enough. */}
 
           {/* Gated for the same reason, and for one of its own: `log_watched`
               assigns the watch date rather than coalescing it, so a date picked

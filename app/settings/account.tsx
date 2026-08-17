@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
 import { signOut, useCurrentProfile } from '@/features/auth';
+import { deleteAllAvatars } from '@/features/profile/avatar';
 import { useAccountWrites } from '@/features/settings/use-account';
 import { Button, Field, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -57,12 +58,37 @@ export default function AccountScreen() {
           style: 'destructive',
           onPress: () =>
             void (async () => {
+              /**
+               * The pictures go first, and through the Storage API.
+               *
+               * Deleting a `storage.objects` row in SQL removes the metadata and
+               * leaves the file in the bucket — Supabase says so, and independent
+               * review 14 raised an earlier version of this flow as a Blocker for
+               * claiming otherwise. This call is the only thing that removes bytes;
+               * `delete_account` sweeps whatever rows are left as a backstop.
+               *
+               * A failure here does not stop the deletion. Refusing to delete an
+               * account because an object store did not answer would be the worse
+               * outcome by a wide margin, and the sweep still makes the picture
+               * unreachable. The person is told, because "we removed everything" and
+               * "we removed everything except one file we could not reach" are
+               * different sentences and only one of them is true.
+               */
+              const removed = await deleteAllAvatars(profile.id);
+
               const result = await deleteAccount(confirmation.trim());
               if (!result.ok) {
                 setError(result.message);
                 Alert.alert('Could not delete your account', result.message);
                 return;
               }
+              if (removed === null) {
+                Alert.alert(
+                  'Account deleted',
+                  'Your account and everything in it is gone. One thing did not answer: your stored pictures could not be reached, so they may still exist in storage even though nothing links to them any more.',
+                );
+              }
+
               // The account is gone; the session is the last thing pointing at it.
               await signOut();
               router.replace('/');
@@ -112,7 +138,7 @@ export default function AccountScreen() {
                 'Your follows, followers and blocks, in both directions',
                 'Your activity, reactions and comments — including comments on other people’s activity',
                 'Companion tags naming you, and everything in your notifications',
-                'Your goals, your profile picture, and anything derived about you',
+                'Your goals, every picture you have uploaded, and anything derived about you',
               ].map((line) => (
                 <Text key={line} variant="caption" tone="tertiary">
                   ·  {line}
@@ -122,17 +148,33 @@ export default function AccountScreen() {
 
             <View style={styles.inventory}>
               <Text variant="caption" tone="secondary">
-                Kept, with nothing left that points at you:
+                Kept, with nothing left that names you:
               </Text>
               {[
                 'Your handle stays reserved, so nobody else can take it and inherit your old links',
-                'Moderation reports, so a record of why an account was removed survives the account',
                 'How many people joined through an invite, without naming who invited them',
               ].map((line) => (
                 <Text key={line} variant="caption" tone="tertiary">
                   ·  {line}
                 </Text>
               ))}
+            </View>
+
+            {/* Said in its own category rather than folded into the one above, which
+                is where it used to sit and where it was not true. A report holds free
+                text somebody typed and, when it is about an account, that account's
+                identifier — and both have to survive, or closing an account would be
+                a way to erase every complaint made about it. Independent review 14
+                found the earlier copy claiming otherwise. */}
+            <View style={styles.inventory}>
+              <Text variant="caption" tone="secondary">
+                Kept as a safety record, and not anonymous:
+              </Text>
+              <Text variant="caption" tone="tertiary">
+                ·  Reports made about you or by you, including what was written in
+                them, and any action taken. An account that could delete the reports
+                against it by closing itself would make reporting worthless.
+              </Text>
             </View>
 
             <Field

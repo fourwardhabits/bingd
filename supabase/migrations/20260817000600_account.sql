@@ -181,8 +181,20 @@ begin
       using errcode = '22023';
   end if;
 
+  -- `for update`, and this is the whole of the cooldown's integrity.
+  --
+  -- Independent review 14, second Major: without it two concurrent calls both read
+  -- the same `username_changed_at`, both pass the check, and serialise only at the
+  -- UPDATE — where the second one no longer re-reads the timestamp the first just
+  -- wrote. Two different operation ids therefore perform two successful "first"
+  -- renames seconds apart, and each of them retires a handle for good.
+  --
+  -- A row lock rather than an advisory one: the contended resource *is* this row,
+  -- there is exactly one row per caller so nobody contends with anybody else, and the
+  -- lock is held by the same statement that reads the value it protects.
   select p.username, p.username_changed_at into v_current, v_changed
-    from profiles p where p.id = auth.uid();
+    from profiles p where p.id = auth.uid()
+    for update;
 
   if v_current is null then
     raise exception 'no profile to rename' using errcode = '42704';
@@ -278,7 +290,24 @@ begin
     raise exception 'visibility is required' using errcode = '22023';
   end if;
 
-  select p.visibility into v_current from profiles p where p.id = auth.uid();
+  -- `for update`, for a race that the pair lock cannot reach.
+  --
+  -- Independent review 14, third Major. `follow` takes `_lock_pair(caller, target)`,
+  -- which serialises it against other writers *on that pair* — and the account going
+  -- public is not one of them. So a follower can read `private`, be told to wait
+  -- while this transaction promotes everybody it can see, and then insert a `pending`
+  -- row and a `follow_request` notification into a profile that is now public. The
+  -- committed state is exactly the inconsistency this function exists to prevent, and
+  -- neither party did anything wrong.
+  --
+  -- The pair lock cannot help because the second party is not known: a follower who
+  -- does not exist yet hashes to a key this transaction has no reason to take. What
+  -- both sides *do* touch is this one profile row, so that is where they meet —
+  -- `follow` takes `for share` on it (20260817000600 amends it below) and this takes
+  -- `for update`. The two conflict, so whichever arrives second sees the other's
+  -- committed answer rather than a stale one.
+  select p.visibility into v_current from profiles p where p.id = auth.uid()
+    for update;
   if v_current is null then
     raise exception 'no profile to update' using errcode = '42704';
   end if;
@@ -310,6 +339,99 @@ begin
   return jsonb_build_object('status', 'ok', 'visibility', p_visibility, 'approved', v_approved);
 end;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- `follow` learns to read the visibility under a lock
+--
+-- The other half of the race above. `follow` decides `approved` versus `pending`
+-- from `profiles.visibility`, and it read that value under no lock at all — so the
+-- decision could be made against a setting that had already changed by the time the
+-- row was inserted.
+--
+-- Rebuilt in full rather than patched, and the whole body is carried over unchanged
+-- apart from the two lines marked below. That is deliberate: `create or replace` in a
+-- schema with a history is the trap 20260817000200 records — `_assert_operation_rate`
+-- lost its advisory lock that way, invisibly, because the diff against the *previous*
+-- migration showed nothing. Reproducing the body here means the diff against
+-- 20260817000200 is the thing a reviewer reads.
+--
+-- `for share` rather than `for update`: several people may be following the same
+-- account at once and they do not contend with each other, only with a change to the
+-- row they are all reading. `for key share` would be weaker still and is not enough —
+-- it does not conflict with `for update`.
+-- ---------------------------------------------------------------------------
+
+create or replace function follow(p_operation_id uuid, p_followee_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_visibility profile_visibility;
+  v_state      follow_state;
+  v_existing   follow_state;
+begin
+  perform assert_can_write();
+
+  if not _claim_operation(p_operation_id, 'follow') then
+    return jsonb_build_object('status', 'already_applied');
+  end if;
+
+  -- Per hour, not per day (api.md §11). A mass-follow script is a burst.
+  perform _assert_operation_rate('follow', 'follow.max_per_hour', 60, interval '1 hour');
+
+  -- Before the reachability check, not after: the check is what reads `blocks`, and a
+  -- block committing between the check and the insert is precisely the race.
+  perform _lock_pair(auth.uid(), p_followee_id);
+
+  -- NEW (20260817000600). The followee's own row, shared, so that a concurrent
+  -- `set_profile_visibility` on that account either commits before this reads it or
+  -- waits until after this has inserted. Without it, a follow can decide `pending`
+  -- against a setting that has since become public, and land after the promotion
+  -- sweep that would have caught it.
+  perform 1 from profiles where id = p_followee_id for share;
+
+  v_visibility := _assert_reachable(p_followee_id);
+
+  -- A public account is followed outright; a private one receives a request. This is
+  -- the only place in the schema that decides which, and it decides it from the
+  -- target's own setting rather than from anything the caller sends.
+  v_state := case when v_visibility = 'private' then 'pending' else 'approved' end;
+
+  select f.state into v_existing
+    from follows f
+   where f.follower_id = auth.uid() and f.followee_id = p_followee_id;
+
+  -- Already there. Return the state rather than raising: following someone you follow
+  -- is a tap that reached the state it meant, and a retry after a dropped response
+  -- must not be an error.
+  --
+  -- Critically, an existing row is **never downgraded**. If an approved follow exists
+  -- and the account has since become private, re-following must not demote it to
+  -- pending — that would let anyone revoke their own approved access by tapping twice,
+  -- and worse, would fire a fresh request notification at the followee.
+  if v_existing is not null then
+    return jsonb_build_object('status', 'ok', 'state', v_existing);
+  end if;
+
+  insert into follows (follower_id, followee_id, state, approved_at)
+  values (auth.uid(), p_followee_id, v_state,
+          case when v_state = 'approved' then now() end);
+
+  -- PRD §15's inbox row. Two types, because they are two different things to be
+  -- told: somebody followed you, or somebody is waiting on you.
+  insert into notifications (recipient_id, type, actor_id, subject_type, subject_id)
+  values (p_followee_id,
+          case when v_state = 'approved' then 'follow' else 'follow_request' end,
+          auth.uid(), 'profile', auth.uid());
+
+  return jsonb_build_object('status', 'ok', 'state', v_state);
+end;
+$$;
+
+comment on function follow(uuid, uuid) is
+  'Follows a public account outright and files a request against a private one. Refuses a missing, suspended or blocked target with the same P0002, because telling them apart tells a blocked caller they are blocked. Never downgrades an existing approved follow to pending. Takes a share lock on the followee''s profile row so that a concurrent visibility change cannot leave a public account holding a pending request (20260817000600). Rate-limited per hour (api.md §11).';
 
 comment on function set_profile_visibility(uuid, profile_visibility) is
   'Sets the caller''s profile visibility, first writer for a column can_view_profile has read since day one. Going public approves every pending request *silently* -- nobody decided about those people, the account stopped requiring a decision, and a follow_approved notification would attribute an act the user did not perform. Going private does not remove existing followers: that is remove_follower''s job, and a retroactive revocation would sever relationships the user did not name.';
@@ -499,13 +621,37 @@ comment on function mark_notifications_read() is
 --   match_scores, recommendation_*               everything derived about them
 --   tmdb_request_log                             their provider quota window
 --
--- WHAT IS DELETED EXPLICITLY, BECAUSE NO FOREIGN KEY REACHES IT
+-- THE AVATARS, WHICH TAKE TWO STEPS AND ONLY ONE OF THEM IS HERE
 --
---   storage.objects under `{id}/` in the avatars bucket. The bucket is public and the
---   URL contains only the account's uuid, so an avatar left behind is a face that stays
---   fetchable by anybody who kept a link — which is precisely the bargain
---   20260815030000 §2 says the delete policy exists to close. Deleting the row is what
---   makes the public URL stop resolving.
+--   `storage.objects` under `{id}/` in the avatars bucket. The bucket is public and
+--   the URL contains only the account's uuid, so an avatar left behind is a face that
+--   stays fetchable by anybody who kept a link — precisely the bargain 20260815030000
+--   §2 says the delete policy exists to close.
+--
+--   **Deleting the row here does not delete the file.** Supabase is explicit that
+--   objects must be removed through the Storage API and that a SQL delete leaves the
+--   stored object orphaned. Independent review 14 raised this as a Blocker against an
+--   earlier version of this function that removed the row and described it as removing
+--   the picture. It was not the same thing and the difference is bytes on a disk.
+--
+--   So the removal is two steps and they are in the right order:
+--
+--     1. The client calls the Storage API (`deleteAllAvatars`), which removes every
+--        object in the account's folder — every picture it has ever uploaded, since
+--        each upload writes a fresh filename. That is the step that removes bytes.
+--     2. This function deletes any `storage.objects` rows still standing.
+--
+--   Step 2 is a backstop rather than the mechanism, and it does two things worth
+--   having even when step 1 succeeded: it makes the deletion correct for a caller
+--   whose storage request failed after the confirmation, and it is what keeps the
+--   `delete from auth.users` below possible at all — `20260813002200` names
+--   `storage.objects` as the likely blocker of exactly that statement.
+--
+--   What can survive both: an object file whose metadata row this removed but whose
+--   bytes the API never reached. Nothing resolves it — the public URL is served from
+--   the metadata — but it exists in the bucket until an operator prunes it. That is
+--   stated rather than hidden, and it is the honest limit of what a database function
+--   can promise about an object store.
 --
 -- WHAT IS ANONYMISED RATHER THAN DELETED, AND WHY
 --
@@ -526,10 +672,32 @@ comment on function mark_notifications_read() is
 --       identifier of the departed account.
 --
 --   reports.reporter_id / subject_owner -> null   (the FK's own rule)
---       A moderation record. Deleting a report because the reporter left would let an
---       account erase every complaint made about somebody else by closing their own,
---       and deleting one because the *subject* left would erase the record of why an
---       account was removed. Both point at nobody now.
+--       Deleting a report because the reporter left would let an account erase every
+--       complaint it made by closing itself, and deleting one because the *subject*
+--       left would erase the record of why an account was removed.
+--
+-- WHAT IS KEPT AS A SAFETY RECORD, AND IS NOT ANONYMOUS
+--
+-- Independent review 14, fourth Major, and the correction is to the claim rather than
+-- to the behaviour. The two nulled columns above are not the whole of a report:
+--
+--   reports.subject_id      still holds the deleted account's uuid when the report was
+--                           *about a profile*, because that is what the report is about
+--                           and nulling it would leave a complaint about nobody.
+--   reports.note            free text somebody typed, which may name or describe the
+--                           account.
+--   moderation_actions.subject_id, .rationale
+--                           no foreign key reaches either. The operator's own record of
+--                           what was done and why.
+--
+-- These are retained **deliberately and knowingly**, and the reason is the one thing a
+-- deletion right cannot be allowed to buy: an account that is the subject of reports
+-- must not be able to erase them by closing itself and opening another. A safety record
+-- that any subject can delete is not a safety record.
+--
+-- What matters is that this is said rather than glossed. An earlier version of the
+-- Account & Data screen listed reports under "kept, with nothing left that points at
+-- you", which was false. It now says what is kept and why, in its own category.
 --
 -- WHAT SURVIVES AND IS NOT ABOUT THEM
 --
@@ -595,10 +763,16 @@ begin
     raise exception 'type your username to confirm' using errcode = '22023';
   end if;
 
-  -- Before the cascade, for two reasons. It is the only user data no foreign key
-  -- reaches, so nothing else would remove it; and `storage.objects` is the table
-  -- 20260813002200 names as the likely blocker of a `delete from auth.users`, so
-  -- clearing it first is also what keeps the delete itself possible.
+  -- The metadata rows, as the second of the two steps described in the header. The
+  -- client has already asked the Storage API to remove the objects themselves, which
+  -- is the step that removes bytes; this is what makes the deletion correct when that
+  -- request failed after the confirmation, and it is what keeps the
+  -- `delete from auth.users` below possible — 20260813002200 names `storage.objects`
+  -- as its likely blocker.
+  --
+  -- The count returned is rows removed *here*, so it is normally zero on the happy
+  -- path and non-zero exactly when the client's request did not land. It is reported
+  -- rather than swallowed for that reason.
   --
   -- Guarded, because the storage schema is Supabase's rather than ours and the test
   -- harness has none. On a database without it this is inert rather than fatal.
@@ -629,12 +803,12 @@ begin
     raise exception 'account deletion did not remove the profile' using errcode = 'P0001';
   end if;
 
-  return jsonb_build_object('status', 'ok', 'avatars_removed', v_avatars);
+  return jsonb_build_object('status', 'ok', 'avatar_rows_swept', v_avatars);
 end;
 $$;
 
 comment on function delete_account(text) is
-  'Permanently deletes the caller''s account. Removes their avatar objects first -- the only user data no foreign key reaches, and the usual blocker of a delete from auth.users -- then deletes the auth user, from which every cascade in the schema follows. Requires the caller''s own handle as confirmation. Deliberately does not call assert_can_write: a suspended account may still leave. Idempotent by nature rather than by operation id, because the ledger that would record the claim is deleted by the operation itself. The full retain/anonymise inventory is in the header of 20260817000600.';
+  'Permanently deletes the caller''s account. Sweeps any remaining avatar metadata rows -- the objects themselves are removed by the client through the Storage API, because a SQL delete leaves the file orphaned -- then deletes the auth user, from which every cascade in the schema follows. Requires the caller''s own handle as confirmation. Deliberately does not call assert_can_write: a suspended account may still leave. Idempotent by nature rather than by operation id, because the ledger that would record the claim is deleted by the operation itself. Moderation reports and actions are retained and are not anonymous, so that a reported account cannot erase the record by closing itself. The full inventory is in the header of 20260817000600.';
 
 -- ===========================================================================
 -- 6. Privileges

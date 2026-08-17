@@ -275,12 +275,27 @@ describe('deleting an account', () => {
 
   it('says what survives, rather than claiming everything goes', async () => {
     // A tester deciding whether to trust this app with a year of their viewing
-    // deserves the actual answer. Four things are anonymised rather than removed and
-    // the screen lists them in the same words the migration uses.
+    // deserves the actual answer.
     const view = await renderWithProviders(<AccountScreen />);
 
     expect(view.getByText(/handle stays reserved/)).toBeTruthy();
-    expect(view.getByText(/Moderation reports/)).toBeTruthy();
+  });
+
+  it('does not describe a moderation report as anonymous, because it is not', async () => {
+    // Independent review 14, fourth Major: reports were listed under "kept with
+    // nothing left that points at you", and that was false — `reports.subject_id`
+    // still names the account when the report was about a profile, and `reports.note`
+    // is free text somebody typed. They survive deliberately, because an account that
+    // could delete the complaints against it by closing itself makes reporting
+    // worthless. The screen now says so in its own category.
+    const view = await renderWithProviders(<AccountScreen />);
+
+    expect(view.getByText('Kept as a safety record, and not anonymous:')).toBeTruthy();
+    expect(view.getByText(/Reports made about you or by you/)).toBeTruthy();
+
+    const anonymousList = view.getByText('Kept, with nothing left that names you:');
+    expect(anonymousList).toBeTruthy();
+    expect(view.queryByText(/Moderation reports, so a record/)).toBeNull();
   });
 
   it('offers no deactivation, because there is no such state', async () => {

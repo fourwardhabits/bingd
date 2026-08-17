@@ -210,19 +210,21 @@ describe('changing a handle', () => {
     assert.ok(carol);
   });
 
-  it('refuses a name reserved by somebody’s history, with the same code', async () => {
-    // One code for both, carried over from create_profile: the caller's next action is
-    // the same either way, and distinguishing them would say whether a name once
-    // belonged to a deleted account.
+  it('lets you take back a handle that was yours', async () => {
+    // `assert_username_available` refuses history belonging to *somebody else* and
+    // deliberately admits your own, which 20260813002000 called out explicitly. The
+    // test used to be titled as a refusal while asserting a success — independent
+    // review 14 caught the mismatch, and the behaviour is the one worth keeping: a
+    // handle you retired yesterday is still yours to take back.
     const error = await t.asUser(bob, async () =>
       t.errorFrom(`select change_username($1, 'bob_rename')`, [await nextOp()]),
     );
     await t.actAs(null);
 
-    // `bob_rename` is bob's own history, so this one is allowed — the reservation
-    // names himself. The assertion is that it succeeded, which is the case
-    // 20260813002000 called out explicitly.
     assert.equal(error, null);
+
+    const { rows } = await t.sql(`select username::text from profiles where id = $1`, [bob]);
+    assert.equal(rows[0].username, 'bob_rename');
   });
 });
 
@@ -501,6 +503,7 @@ describe('deleting an account', () => {
   let heidi;
   let ivan;
   let film;
+  let event;
 
   /** Everything one account can leave behind, so the cascade has something to clear. */
   const populate = async (user, other, mediaItem) => {
@@ -558,7 +561,7 @@ describe('deleting an account', () => {
     heidi = await t.createUser({ username: 'heidi_gone' });
     ivan = await t.createUser({ username: 'ivan_stays' });
     film = await t.createMovie('Deletion Film', 880100);
-    await populate(heidi, ivan, film);
+    event = await populate(heidi, ivan, film);
   });
 
   it('refuses without the caller’s own handle', async () => {
@@ -593,33 +596,48 @@ describe('deleting an account', () => {
     assert.equal(rows[0].n, 0);
   });
 
-  it('leaves nothing of theirs in any table that cascades', async () => {
-    // Swept from information_schema rather than enumerated, because the failure mode
-    // is *a table nobody remembered*. A table added later with a CASCADE rule is
-    // covered the day it is created; one added without a delete rule fails the delete
-    // itself, loudly, which is the other half of the same guarantee.
+  it('leaves nothing of theirs in any table that references an account', async () => {
+    // Swept from the catalogue rather than enumerated, because the failure mode is
+    // *a table nobody remembered*. A table added later with a CASCADE rule is covered
+    // the day it is created; one added without a delete rule fails the delete itself,
+    // loudly, which is the other half of the same guarantee.
+    //
+    // `pg_constraint` rather than `information_schema`: the latter's
+    // `constraint_column_usage` does not distinguish `public.users` from
+    // `auth.users`, so the first version of this matched any table called users in
+    // any schema. Independent review 14 raised the missing schema filter.
     const { rows: keys } = await t.sql(`
-      select tc.table_name as child, kcu.column_name as child_column
-        from information_schema.table_constraints tc
-        join information_schema.key_column_usage kcu
-          on kcu.constraint_name = tc.constraint_name
-         and kcu.constraint_schema = tc.constraint_schema
-        join information_schema.constraint_column_usage ccu
-          on ccu.constraint_name = tc.constraint_name
-         and ccu.constraint_schema = tc.constraint_schema
-        join information_schema.referential_constraints rc
-          on rc.constraint_name = tc.constraint_name
-         and rc.constraint_schema = tc.constraint_schema
-       where tc.constraint_type = 'FOREIGN KEY'
-         and tc.table_schema = 'public'
-         and ccu.table_name in ('profiles', 'users')
-         and rc.delete_rule = 'CASCADE'
+      select child.relname       as child,
+             att.attname         as child_column,
+             parent_ns.nspname || '.' || parent.relname as parent,
+             c.confdeltype       as rule
+        from pg_constraint c
+        join pg_class     child     on child.oid = c.conrelid
+        join pg_namespace child_ns  on child_ns.oid = child.relnamespace
+        join pg_class     parent    on parent.oid = c.confrelid
+        join pg_namespace parent_ns on parent_ns.oid = parent.relnamespace
+        join lateral unnest(c.conkey) as k(attnum) on true
+        join pg_attribute att on att.attrelid = child.oid and att.attnum = k.attnum
+       where c.contype = 'f'
+         and child_ns.nspname = 'public'
+         and (   (parent_ns.nspname = 'public' and parent.relname = 'profiles')
+              or (parent_ns.nspname = 'auth'   and parent.relname = 'users'))
     `);
 
-    assert.ok(keys.length > 20, 'the sweep should find the whole graph');
+    assert.ok(keys.length > 30, 'the sweep should find the whole graph');
+    // The delete rule is checked rather than assumed: a future key added with NO
+    // ACTION would block the deletion outright, and one added with SET NULL would
+    // silently retain a row this loop then wrongly reports as a survivor.
+    const cascading = keys.filter((key) => key.rule === 'c');
+    const detaching = keys.filter((key) => key.rule === 'n');
+    assert.equal(
+      cascading.length + detaching.length,
+      keys.length,
+      'every key to an account is either CASCADE or SET NULL; anything else blocks deletion',
+    );
 
     const survivors = [];
-    for (const key of keys) {
+    for (const key of cascading) {
       const { rows } = await t.sql(
         `select count(*)::int as n from ${key.child} where ${key.child_column} = $1`,
         [heidi],
@@ -628,6 +646,45 @@ describe('deleting an account', () => {
     }
 
     assert.deepEqual(survivors, [], 'no row referencing a deleted account may survive');
+
+    // And every detaching key really did detach rather than retain the id.
+    const attached = [];
+    for (const key of detaching) {
+      const { rows } = await t.sql(
+        `select count(*)::int as n from ${key.child} where ${key.child_column} = $1`,
+        [heidi],
+      );
+      if (rows[0].n > 0) attached.push(`${key.child}.${key.child_column}`);
+    }
+    assert.deepEqual(attached, [], 'a SET NULL key must not still name the deleted account');
+  });
+
+  it('takes the rows that hang off theirs, one table further out', async () => {
+    // The direct sweep above cannot see these: `comments` and `reactions` reference
+    // `feed_events`, not `profiles`, so a transitive failure would not appear in it.
+    // Independent review 14 was right that the catalogue sweep does not prove the
+    // whole closure — this is the part of the closure the fixture actually populated,
+    // asserted by id rather than by catalogue walk.
+    const { rows: comments } = await t.sql(
+      `select count(*)::int as n from comments where feed_event_id = $1`,
+      [event],
+    );
+    const { rows: reactions } = await t.sql(
+      `select count(*)::int as n from reactions where feed_event_id = $1`,
+      [event],
+    );
+    const { rows: events } = await t.sql(
+      `select count(*)::int as n from feed_events where id = $1`,
+      [event],
+    );
+
+    assert.equal(events[0].n, 0, 'the event itself');
+    assert.equal(comments[0].n, 0, 'their comment, which referenced the event and not them');
+    assert.equal(
+      reactions[0].n,
+      0,
+      'somebody else’s reaction to their activity, which is about an event that no longer exists',
+    );
   });
 
   it('leaves the other account entirely alone', async () => {

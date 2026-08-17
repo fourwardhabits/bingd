@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { useWatchlist } from '@/features/collection/use-collection';
@@ -122,7 +122,27 @@ export default function FeedScreen() {
     <Screen>
       <AppHeader />
       <HeaderBoundary />
-      <ScrollView contentContainerStyle={styles.content}>
+      {/* Pull to refresh, which the app did not have anywhere and which a feed of
+          other people's activity is the one screen that genuinely needs: nothing
+          invalidates this query when somebody else ranks something, so a reader
+          looking at a quiet feed had no way to ask whether it was still quiet.
+          Reactions and comment counts come with it — they are read alongside the
+          events and are the part most likely to have moved. */}
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={feed.isRefetching}
+            onRefresh={() => {
+              void feed.refetch();
+              void reactions.refetch();
+              void commentCounts.refetch();
+            }}
+            tintColor={theme.semantic.action}
+            colors={[theme.semantic.action]}
+          />
+        }
+      >
         {/* One shelf, above the activity. It renders nothing at all when there is
             nothing to show, so the social feed keeps the top of the screen whenever
             discovery has nothing to add — which is the ordering PRD §14 wants. */}
