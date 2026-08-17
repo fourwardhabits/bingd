@@ -111,11 +111,24 @@ export async function deleteAllAvatars(userId: string): Promise<number | null> {
       .list(userId, { limit: PAGE, offset: 0 });
     if (error) return null;
 
-    const objects = (data ?? []).filter(
-      // A folder placeholder has no id. Passing one to `remove` is a no-op that
-      // reports success, which would inflate the count this returns.
-      (object) => Boolean(object.name) && object.id !== null,
-    );
+    const listed = data ?? [];
+    // A folder placeholder has no id. Passing one to `remove` is a no-op that reports
+    // success, so counting it would overstate what was deleted.
+    const objects = listed.filter((object) => Boolean(object.name) && object.id !== null);
+
+    // **Anything that is not a removable object stops this.** Independent review 14c:
+    // the storage insert policy checks only that the *first* path segment is the
+    // caller's uuid, so a modified client could have written `{id}/nested/file.jpg`
+    // — and Storage lists `nested` as an entry with no id. Filtering it away and then
+    // deciding the page was short would report success while those bytes stayed in
+    // the bucket. `20260817000600` narrows the policy so nothing new can nest; this
+    // is what makes the answer honest about anything that already did.
+    //
+    // Null rather than a recursive walk: the app has never written a nested path, so
+    // finding one means something unexpected is in the folder, and "we could not be
+    // sure" is the true statement rather than a best effort dressed as completion.
+    if (objects.length !== listed.length) return null;
+
     if (!objects.length) return removed;
 
     const { error: removeError } = await supabase.storage
@@ -124,11 +137,12 @@ export async function deleteAllAvatars(userId: string): Promise<number | null> {
     if (removeError) return null;
     removed += objects.length;
 
-    // A short page means the listing had nothing more to give. Independent review
-    // 14b: the first version stopped after one page of a hundred and reported
+    // A short page means the listing had nothing more to give. Measured on the raw
+    // listing, which is now the same set — the check above guarantees it. Independent
+    // review 14b: the first version stopped after one page of a hundred and reported
     // success, so an account with more uploads than that had its remaining bytes
     // orphaned by the metadata sweep with nobody told.
-    if (objects.length < PAGE) return removed;
+    if (listed.length < PAGE) return removed;
   }
 
   // Ran out of passes with the folder still non-empty. Null rather than the count,

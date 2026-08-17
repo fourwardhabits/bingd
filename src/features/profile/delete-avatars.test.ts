@@ -77,13 +77,31 @@ describe('removing every picture an account uploaded', () => {
     expect(mockRemove).not.toHaveBeenCalled();
   });
 
-  it('ignores a folder placeholder, which has no id', async () => {
-    // Passing one to `remove` is a no-op that reports success, so counting it would
-    // overstate what was deleted.
-    mockList.mockResolvedValueOnce({ data: [{ name: '.emptyFolderPlaceholder', id: null }], error: null });
+  it('refuses to claim success when something in the folder is not an object', async () => {
+    // Independent review 14c. Storage lists a nested folder as an entry with no id,
+    // and the insert policy in 20260815030000 checked only the *first* path segment —
+    // so `{id}/nested/file.jpg` was possible, invisible to the app, and sitting in a
+    // public bucket. Filtering the entry away and calling the page short would report
+    // everything gone while those bytes stayed.
+    //
+    // `20260817000600` narrows the policy so nothing new can nest. This is what keeps
+    // the answer honest about anything that already did.
+    mockList.mockResolvedValueOnce({ data: [{ name: 'nested', id: null }], error: null });
 
-    expect(await deleteAllAvatars('user-1')).toBe(0);
+    expect(await deleteAllAvatars('user-1')).toBeNull();
     expect(mockRemove).not.toHaveBeenCalled();
+  });
+
+  it('refuses even when the rest of the page removed cleanly', async () => {
+    // The dangerous shape: a real object and a folder in the same listing. Removing
+    // the object and reporting the count would be a partial deletion described as a
+    // complete one.
+    mockList.mockResolvedValueOnce({
+      data: [{ name: '1.jpg', id: 'id-1' }, { name: 'nested', id: null }],
+      error: null,
+    });
+
+    expect(await deleteAllAvatars('user-1')).toBeNull();
   });
 
   it('says it could not be sure when the listing fails', async () => {

@@ -85,7 +85,7 @@ export default function AccountScreen() {
               if (removed === null) {
                 Alert.alert(
                   'Account deleted',
-                  'Your account and everything in it is gone. One thing did not answer: your stored pictures could not be reached, so they may still exist in storage even though nothing links to them any more.',
+                  'Your account and everything in it is gone. One thing is not certain: your stored pictures could not be fully cleared, so some may still exist in storage even though nothing links to them any more.',
                 );
               }
 

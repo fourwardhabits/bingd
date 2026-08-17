@@ -811,7 +811,68 @@ comment on function delete_account(text) is
   'Permanently deletes the caller''s account. Sweeps any remaining avatar metadata rows -- the objects themselves are removed by the client through the Storage API, because a SQL delete leaves the file orphaned -- then deletes the auth user, from which every cascade in the schema follows. Requires the caller''s own handle as confirmation. Deliberately does not call assert_can_write: a suspended account may still leave. Idempotent by nature rather than by operation id, because the ledger that would record the claim is deleted by the operation itself. Moderation reports and actions are retained and are not anonymous, so that a reported account cannot erase the record by closing itself. The full inventory is in the header of 20260817000600.';
 
 -- ===========================================================================
--- 6. Privileges
+-- 6. An avatar path may not nest
+--
+-- Independent review 14c. `set_avatar` has always validated the pointer as
+-- `{uuid}/<filename>` — one segment, no slash — but the *storage* insert policy in
+-- 20260815030000 checks only `(storage.foldername(name))[1] = auth.uid()::text`. The
+-- two rules were meant to say the same thing in the two places they are enforced by
+-- different subsystems, and they did not: a modified client could write
+-- `{uuid}/nested/file.jpg`, which the profile column would never point at and which
+-- nothing in the app would ever render — but which would sit in a public bucket, and
+-- which the deletion sweep would see only as a folder entry.
+--
+-- So the policy is narrowed to what `set_avatar` already required. The regex is the
+-- same shape: the caller's own uuid, one slash, and a filename that cannot contain
+-- another. `storage.foldername` is left out of it deliberately — the whole failure was
+-- that asking about the first segment says nothing about the rest.
+--
+-- The client half is `deleteAllAvatars`, which now refuses to report success when it
+-- meets anything that is not a plain object. This closes the door; that one is honest
+-- about whatever came through it before.
+-- ===========================================================================
+
+do $$
+begin
+  if to_regclass('storage.objects') is null then
+    raise notice 'no storage schema; skipping the avatars path narrowing';
+    return;
+  end if;
+
+  drop policy if exists avatars_insert on storage.objects;
+  drop policy if exists avatars_update on storage.objects;
+
+  create policy avatars_insert on storage.objects for insert
+    with check (
+      bucket_id = 'avatars'
+      and auth.uid() is not null
+      and name ~ ('^' || auth.uid()::text || '/[A-Za-z0-9._-]{1,80}$')
+    );
+
+  -- Present so overwriting one's own avatar at a stable path works. The client does
+  -- not do that -- it writes a fresh name each time so the CDN cannot keep serving the
+  -- previous face -- but a policy set that forbids update while allowing insert and
+  -- delete is a trap for the next person. Narrowed alongside insert, or the same
+  -- nested path could arrive by renaming into it.
+  create policy avatars_update on storage.objects for update
+    using (
+      bucket_id = 'avatars'
+      and name ~ ('^' || auth.uid()::text || '/[A-Za-z0-9._-]{1,80}$')
+    )
+    with check (
+      bucket_id = 'avatars'
+      and name ~ ('^' || auth.uid()::text || '/[A-Za-z0-9._-]{1,80}$')
+    );
+
+  -- `avatars_delete` is deliberately **not** narrowed. It is the policy that lets an
+  -- account remove its own objects, and an object that predates this narrowing must
+  -- stay removable by the person it belongs to. Keying it on the first segment is
+  -- correct there for exactly the reason it was wrong above.
+end;
+$$;
+
+-- ===========================================================================
+-- 7. Privileges
 --
 -- Explicit, following the convention in data-model.md: the allow-list is the artefact
 -- that gets reviewed, and a function whose grants are implicit is one nobody checks.
