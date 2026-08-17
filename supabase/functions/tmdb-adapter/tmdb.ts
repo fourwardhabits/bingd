@@ -330,11 +330,14 @@ export function recommendations(
 }
 
 export function movieDetail(id: number, charge?: Charge): Promise<TmdbMovieDetail> {
-  // One HTTP request, not four: `append_to_response` is TMDB's own mechanism for
-  // exactly that, so credits, videos and reviews cost nothing extra. That is also
-  // why reviews arrive here rather than through a `reviews` action of their own —
-  // a separate endpoint would be a second charged request for data the first one
-  // will hand over for free.
+  // One HTTP request, not three: `append_to_response` is TMDB's own mechanism for
+  // exactly that, so credits, videos and the certification cost nothing beyond the
+  // detail call that was being made anyway. A separate endpoint would be a second
+  // charged request for data the first one hands over for free.
+  //
+  // `reviews` was appended here until 2026-08-17 and is not any more: the Reviews tab
+  // is Bingd's own public Notes now, so TMDB's had no reader, and asking for data
+  // nothing renders is a retention obligation for nothing (`20260817001000`).
   return request(
     `/movie/${id}`,
     { append_to_response: 'credits,videos,release_dates' },

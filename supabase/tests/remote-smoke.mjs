@@ -168,6 +168,26 @@ for (const table of ['profiles', 'user_media', 'rankings', 'follows', 'reactions
   expectRefused(`anon cannot insert into ${table}`, await insert(table, {}));
 }
 
+// `public_profiles` is **dropped and recreated** by `20260817000800`, and a `drop view`
+// takes its grants with it — the `grant select ... to anon, authenticated` that
+// `20260813001400` made is against an object that no longer exists. Nothing in the founder
+// pass re-grants it, so what the deployed view actually permits depends on the project's
+// default privileges rather than on anything written in a migration.
+//
+// That is precisely the kind of thing the local suite cannot answer: it builds its schema
+// from the files as the table owner, for whom the question never arises. Independent
+// review 17i asked for the recreated boundary to be asserted rather than assumed, and this
+// is that assertion — the view must still be readable, because the public profile route
+// and user search both read it.
+{
+  const res = await get('public_profiles?select=username&limit=1');
+  report(
+    'the recreated public_profiles view is still readable, grants and all',
+    res.status === 200 ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
 // Private columns live in their own table with no read policy, so a future
 // permissive policy on profiles cannot expose a date of birth.
 {
@@ -448,13 +468,63 @@ expectRefused(
 // Added 2026-08-17 with Settings. Every one of these is about the caller's own account
 // and `auth.uid()` is null for anon, so a grant would buy nothing but a surface --
 // and `delete_account` reaching an unauthenticated caller would be the worst of them.
+// `update_profile` and `change_username` were **dropped** by `20260817000800` and replaced
+// by one `save_profile` -- the founder's "one Save" correction, which made a name, a handle
+// and a bio a single atomic write rather than three buttons that could half-succeed.
+//
+// Their probes were left behind, and this run's `test:remote` is what exposed it: both came
+// back `inconclusive` with PGRST202, which is the suite correctly reporting that it had
+// verified *nothing*. Two probes aimed at functions that no longer exist, while the function
+// that replaced them -- the one that can now rename an account and rewrite its bio -- had no
+// deployed anon probe at all. That is the more serious half, and it is why these are
+// replaced rather than deleted.
 expectRefused(
-  'anon cannot execute update_profile',
-  await rpc('update_profile', { p_operation_id: NIL, p_display_name: 'x' }),
+  'anon cannot execute save_profile',
+  await rpc('save_profile', {
+    p_operation_id: NIL,
+    p_display_name: 'x',
+    p_username: 'nobody_at_all',
+    p_bio: 'x',
+  }),
 );
+// The rest of what `20260817000800` added, none of which had a boundary probe until
+// independent review 17h swept for the same rot that left the two dead ones behind.
+//
+// `title_reviews` matters most of the three. It is the function this entire deployment was
+// about, it was **recreated** by `20260817001100`, and `create or replace` is precisely the
+// operation that has silently dropped a guarantee in this schema before -- so a probe that
+// resolves its signature *and* finds anon refused is worth more here than anywhere else in
+// this file. It follows `public_notes`' rule: a note is readable by people, not by the
+// internet.
 expectRefused(
-  'anon cannot execute change_username',
-  await rpc('change_username', { p_operation_id: NIL, p_username: 'nobody_at_all' }),
+  'anon cannot execute title_reviews',
+  await rpc('title_reviews', { p_media_item_id: NIL, p_sort: 'top', p_limit: 1 }),
+);
+// `social`, not an invented category. The function accepts only `social` and `follows`,
+// and a rejected *input* would be classified `executed` and fail this probe rather than
+// pass it — so the value cannot manufacture a false pass either way. It is correct here so
+// that the probe would reach normal behaviour if the grant ever regressed, which is the
+// only state in which the argument matters. Independent review 17i.
+expectRefused(
+  'anon cannot execute set_notification_preference',
+  await rpc('set_notification_preference', { p_category: 'social', p_enabled: true }),
+);
+// The two definer helpers the same migration added. `_notifies` is the sensitive one: it
+// answers a question about a *named third party's* settings, so an execute grant reaching
+// anon would be a disclosure about somebody who never called anything.
+expectRefused(
+  'anon cannot execute _notifies',
+  await rpc('_notifies', { p_recipient: NIL, p_category: 'social' }),
+);
+// `_apply_notification_preference()` is the third object `20260817000800` revoked, and it
+// is **deliberately not probed here**: it returns `trigger`, which PostgREST cannot expose
+// as an RPC at all, so a probe would resolve nothing and report `inconclusive` forever.
+// The limitation is written down rather than left as a silent omission, because a missing
+// probe and an unprobeable object look identical in a passing run — which is how the two
+// dead probes above survived. Its grant is covered locally by `function-grants.test.mjs`.
+expectRefused(
+  'anon cannot execute my_notification_preferences',
+  await rpc('my_notification_preferences', {}),
 );
 expectRefused(
   'anon cannot execute set_profile_visibility',

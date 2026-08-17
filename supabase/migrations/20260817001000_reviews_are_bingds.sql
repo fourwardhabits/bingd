@@ -23,7 +23,32 @@
 --
 -- The order matters: the rows first, then the constraint. A check constraint cannot be
 -- narrowed while a row violates it.
+--
+-- ---------------------------------------------------------------------------
+-- AND THE ORDER ALONE IS NOT ENOUGH, WHICH IS INDEPENDENT REVIEW 17'S FINDING
+--
+-- Deleting before narrowing guarantees no violating row *survives* a successful
+-- migration. It does not guarantee the migration succeeds. The `tmdb-adapter` deployed
+-- to nonprod writes this facet on every `detail`, `enrich` and `refresh` of a movie or
+-- series, so a write committing between the delete and the `add constraint` leaves a
+-- `reviews` row in front of a constraint that forbids it, and the whole migration rolls
+-- back. The window is small and a live adapter is exactly the thing aimed at it.
+--
+-- So take the table first. `add constraint` acquires `access exclusive` anyway when it
+-- runs; acquiring it up front closes the window rather than opening it late, and doing
+-- it in one step rather than escalating from a weaker lock avoids the upgrade that can
+-- deadlock. Readers are blocked for the length of one delete against a table with a few
+-- hundred rows.
+--
+-- **This lock does not make the migration independently deployable.** It closes the race
+-- during the push; it does nothing about the minutes after it, where an adapter that
+-- still writes `reviews` meets a constraint that refuses it and every enrichment fails.
+-- The adapter at HEAD, which no longer writes the facet, must be deployed **before** this
+-- migration is applied. That ordering is the deployment's, not the file's, and it is
+-- recorded here because the file cannot enforce it.
 -- ===========================================================================
+
+lock table media_cache in access exclusive mode;
 
 delete from media_cache where facet = 'reviews';
 

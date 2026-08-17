@@ -264,27 +264,34 @@ Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may
 | Action | Caller | Purpose |
 |---|---|---|
 | `search` | signed-in user | Searches TMDB, writes the results into `media_items`, returns them Bingd-shaped |
-| `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits, trailers, TMDB reviews |
+| `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits, trailers, certification |
 | `similar` | signed-in user | Caches what TMDB associates with one title as the `similar` facet. The candidate source behind For You. Added 2026-08-16 |
 | `person` | signed-in user | Caches one person and the titles TMDB credits them on, writing those titles into the catalogue first. Added 2026-08-17 |
 | `trending` | `service_role` | Refreshes the four `provider_list_cache` lists. Added 2026-08-16 |
 | `enrich` | `service_role` | Drains `tmdb_enrich_due` — rows carrying a tmdb id that have never been fetched |
 | `refresh` | `service_role` | Drains `media_refresh_due` — the retention window in §AD-8 |
 
-**`detail` fetches three appended responses in one request.** `credits`, `videos` and
-`reviews` all arrive through TMDB's `append_to_response`, so trailers and reviews cost nothing
-beyond the detail call that was already being made — which is also why there is no `reviews`
-action. A season is the exception: it appends only `credits,videos`, because TMDB has no
-season-level reviews endpoint and `/tv/{id}/reviews` returns reviews of the *series*.
-Attributing those to "Season 2" would put somebody's words about a whole show under a heading
-they did not write them for, so a season simply has no `reviews` facet and the screen omits
-the section.
+**`detail` fetches its appended responses in one request.** `credits`, `videos` and the
+certification source (`release_dates` for a movie, `content_ratings` for a series) all arrive
+through TMDB's `append_to_response`, so trailers and the certificate cost nothing beyond the
+detail call that was already being made. A season appends only `credits,videos`.
 
-**These are TMDB Reviews and nothing else is ever called that.** They are written by users of
-themoviedb.org — not critics, not professionals, and not Bingd's community, which has its own
-signal in `community_score` two sections up the same screen. The facet, the type, the section
-heading and the tests all use the one name, and `TitleScreen.test.tsx` asserts the words
-"critic", "professional" and "community review" never appear near them.
+**TMDB Reviews were built on 2026-08-17 and removed the same day**, and the removal is the
+more useful thing to record. A `reviews` facet was added by `20260817000500`, filled from
+TMDB's `/reviews` endpoint and labelled with some care — heading, caption, ratings shown as
+"Rated 8 on TMDB" and a test asserting the words *critic*, *professional* and *community
+review* never appeared near them.
+
+The founder's correction was that scrupulous labelling was solving the wrong problem: a tab
+called Reviews on a social product should be **Bingd's** reviews. So the tab is now
+`title_reviews` over Bingd's own public Notes, the adapter no longer requests or stores
+TMDB's, and `20260817001000` deletes the facet and narrows `media_cache_known_facet` back to
+its previous set. Provider data with no reader is not free — PRD §19 puts every TMDB-derived
+row under a six-month retention obligation, and nothing sweeps `media_cache`.
+
+**The removal needed the adapter deployed first**, which independent review 17 caught and the
+session checkpoint had got wrong: the constraint forbids a facet the running adapter was still
+writing, so narrowing it before redeploying breaks every enrichment. Deploy, then push.
 
 **`person` is a user action for the same reason `similar` is.** Somebody tapped a face and no
 schedule knows which. Bounded on the same three sides: one page opens one person,

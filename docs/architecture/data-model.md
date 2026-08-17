@@ -256,7 +256,7 @@ Two known blemishes in the data, both from the source rather than the pipeline: 
 ```sql
 create table media_cache (
   media_item_id uuid not null references media_items(id) on delete cascade,
-  facet         text not null,          -- 'credits' | 'keywords' | 'providers' | 'similar' | 'videos' | 'reviews'
+  facet         text not null,          -- 'credits' | 'keywords' | 'providers' | 'similar' | 'videos'
   payload       jsonb not null,
   fetched_at    timestamptz not null default now(),
   expires_at    timestamptz not null,

@@ -96,7 +96,9 @@ Also required:
 
 Bingd needs two slots: the About section in Settings, and the attribution line on title detail ([`../design/screens.md`](../design/screens.md) §6). Both are cheap now and expensive to retrofit across a shipped app.
 
-**Two provider surfaces added 2026-08-17 carry their own naming obligation**, over and above the notice. TMDB Reviews are written by users of themoviedb.org; they are not critics and TMDB publishes none, so Bingd never calls them critic, professional or community reviews — "community" already means Bingd's own aggregate on the same screen. The section names TMDB in its heading and again in a line beneath it, and a review's rating is always shown as "Rated 8 on TMDB" rather than as a bare number that would read as a Bingd score. The person page carries the same source line the title page does. A truncated review links to its page on themoviedb.org rather than presenting an excerpt as the whole thing.
+**The person page added 2026-08-17 carries its own naming obligation**, over and above the notice: it shows the same source line the title page does, because a filmography is provider metadata like any other.
+
+**TMDB Reviews are no longer a surface**, and the reason is worth keeping. They were built the same day with careful naming — never called critic, professional or community reviews, since TMDB publishes no criticism and "community" already means Bingd's own aggregate on the same screen. The founder's correction was that the careful naming was solving the wrong problem: a tab called Reviews on a social product should be Bingd's own. The adapter no longer requests them and `20260817001000` deletes the facet, which also retires the retention obligation §19 would otherwise put on somebody else's users' writing. **If TMDB reviews ever return, the naming rules above return with them** — they were right, they were tested, and nothing about them was the reason the surface went.
 
 **There is no SLA.** TMDB publishes a status page and makes reasonable efforts but commits to nothing. Worth knowing, since the catalog is a hard dependency.
 

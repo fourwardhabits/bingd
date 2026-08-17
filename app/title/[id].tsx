@@ -327,6 +327,17 @@ export default function TitleScreen() {
   const isSeries = title.kind === 'series';
   const year = yearOf(title.release_date);
 
+  // Certification first. It is the fact somebody scans for before deciding whether to put
+  // a film on, and TMDB only started supplying it here on 2026-08-17 — before that the
+  // line began with a runtime.
+  const metaLine = [
+    title.certification,
+    title.runtime_minutes ? `${title.runtime_minutes}m` : null,
+    credits.data?.director,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   // A tab whose content does not exist is not rendered. An always-empty tab is
   // worse than a missing one: it invites a tap that leads nowhere. Videos is here
   // for the same reason it is in the schema — the day the adapter is redeployed the
@@ -523,18 +534,17 @@ export default function TitleScreen() {
             {displayTitle ?? title.title}
             {year ? <Text variant="title1" tone="tertiary">{`  ${year}`}</Text> : null}
           </Text>
-          <Text variant="footnote" tone="secondary">
-            {[
-              // Certification first. It is the fact somebody scans for before deciding
-              // whether to put a film on, and TMDB only started supplying it here on
-              // 2026-08-17 — before that the line began with a runtime.
-              title.certification,
-              title.runtime_minutes ? `${title.runtime_minutes}m` : null,
-              credits.data?.director,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </Text>
+          {/* Built before it is rendered, because all three parts can be missing at once
+              — an obscure title with no certification, no runtime and no director credit
+              — and an empty `Text` is not nothing on screen. It is a line box with the
+              footnote's height, which reads as a gap under the title and is the same
+              defect as the dead score space the founder's corrections removed from the
+              hero. Independent review 17e. */}
+          {metaLine ? (
+            <Text testID="title-meta" variant="footnote" tone="secondary">
+              {metaLine}
+            </Text>
+          ) : null}
         </View>
 
         {watchedDate || companions.data?.length ? (

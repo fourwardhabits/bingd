@@ -108,9 +108,17 @@ const invoke = async (body) => {
   return { status: res.status, body: text ? JSON.parse(text) : null };
 };
 
+// Throws rather than returning null, which independent review 17c found the hard way.
+// Every caller here reads the result through `?? []` or `Object.fromEntries`, so a failed
+// request used to arrive as "no rows" -- and an *absence* assertion cannot tell those
+// apart. A gate that reports PASS because its query failed is worse than no gate, so a
+// non-2xx is a thrown error the outer catch reports as a failed run.
 const rest = async (path) => {
   const res = await fetch(`${url}/rest/v1/${path}`, { headers: auth });
-  return res.ok ? res.json() : null;
+  if (!res.ok) {
+    throw new Error(`GET /rest/v1/${path} -> ${res.status} ${(await res.text()).slice(0, 200)}`);
+  }
+  return res.json();
 };
 
   // ---- search -------------------------------------------------------------
@@ -118,7 +126,7 @@ const rest = async (path) => {
   const film = (search.body?.results ?? [])[0];
   report('search returns catalogue rows', search.status === 200 && Boolean(film), JSON.stringify(search.body)?.slice(0, 160));
 
-  // ---- detail, and the three facets it now writes -------------------------
+  // ---- detail, and the two facets it now writes ---------------------------
   const detail = await invoke({ action: 'detail', mediaItemId: film.id });
   report('detail enriches the title', detail.status === 200 && detail.body?.enriched === true, JSON.stringify(detail.body));
 
@@ -131,16 +139,20 @@ const rest = async (path) => {
     Array.isArray(byFacet.videos?.results) && byFacet.videos.results.length > 0,
     JSON.stringify(byFacet.videos)?.slice(0, 160),
   );
+  // Where "TMDB reviews are written" used to be. The founder's correction is that a tab
+  // called Reviews on a social product should be Bingd's own, so the adapter no longer
+  // requests or stores TMDB's and `20260817001000` deletes the facet.
+  //
+  // **What this proves, stated accurately**, because review 17c caught the comment here
+  // claiming more: once the migration is applied the constraint alone guarantees absence,
+  // so this line does *not* discriminate the old adapter from the new one. An old adapter
+  // still writing the facet is rejected by the constraint and fails the `enriched === true`
+  // assertion above, which is where that failure actually surfaces. This is a check that
+  // the invariant holds end to end, not a check of which function is deployed.
   report(
-    'TMDB reviews are written',
-    Array.isArray(byFacet.reviews?.results),
+    'and no TMDB reviews, because the Reviews tab is Bingd’s own Notes now',
+    byFacet.reviews === undefined,
     JSON.stringify(byFacet.reviews)?.slice(0, 160),
-  );
-  const review = byFacet.reviews?.results?.[0];
-  report(
-    'and a review carries an author and a body',
-    !review || (Boolean(review.author) && Boolean(review.content)),
-    JSON.stringify(review)?.slice(0, 160),
   );
 
   // ---- similar ------------------------------------------------------------
@@ -215,10 +227,16 @@ const rest = async (path) => {
   const seasonFacets = await rest(`media_cache?media_item_id=eq.${season.id}&select=facet`);
   const seasonHas = new Set((seasonFacets ?? []).map((r) => r.facet));
   report('a season gets credits and videos', seasonHas.has('credits') && seasonHas.has('videos'), [...seasonHas].join(','));
+  // This used to read "and never reviews, because TMDB has none for a season", which was
+  // a real asymmetry while the facet existed. `20260817001000` removes the facet from
+  // every kind, so that assertion now passes because nothing anywhere can be `reviews` --
+  // it would hold with the season logic deleted. Asserting the thing that is actually
+  // true keeps a passing line honest about what it proves.
+  const anyReviews = await rest(`media_cache?facet=eq.reviews&select=media_item_id&limit=1`);
   report(
-    'and never reviews, because TMDB has none for a season',
-    !seasonHas.has('reviews'),
-    [...seasonHas].join(','),
+    'no title of any kind carries a reviews facet — the Reviews tab is Bingd’s own Notes',
+    (anyReviews ?? []).length === 0,
+    JSON.stringify(anyReviews),
   );
 
   // ---- trending -----------------------------------------------------------

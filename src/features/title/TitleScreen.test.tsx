@@ -190,6 +190,62 @@ describe('a title nobody has ranked', () => {
   });
 });
 
+/**
+ * The metadata line is `certification · runtime · director`, and all three can be absent
+ * at once — an obscure title TMDB has not rated, has no runtime for, and credits no
+ * director on.
+ *
+ * Independent review 17e: the line used to be a `Text` that was always rendered with a
+ * filtered-and-joined string inside it, so "all three missing" produced an *empty* text
+ * node rather than nothing. An empty `Text` is not nothing on screen — it is a line box
+ * with the footnote's height, which reads as an unexplained gap under the title. That is
+ * the same defect as the dead score space the founder's corrections removed from the
+ * hero, which is why it is worth a test rather than a shrug.
+ */
+describe('the metadata line', () => {
+  it('reads certification · runtime · director when it has all three', async () => {
+    tableRows.media_items = [{ ...film, certification: 'PG-13' }];
+    tableRows.media_cache = [credits];
+
+    const view = await open();
+
+    await waitFor(() =>
+      expect(view.getByTestId('title-meta')).toHaveTextContent('PG-13 · 148m · Christopher Nolan'),
+    );
+  });
+
+  it('drops only the missing parts, without a stray separator', async () => {
+    // No certification on the fixture. The line must not begin with a separator or
+    // double one up where the missing value was.
+    //
+    // This one is **not** independently discriminating and the pair is what covers the
+    // case: an implementation that dropped certification unconditionally would pass here,
+    // because this fixture has none to lose. The test above is what fails that mutation.
+    tableRows.media_cache = [credits];
+
+    const view = await open();
+
+    await waitFor(() =>
+      expect(view.getByTestId('title-meta')).toHaveTextContent('148m · Christopher Nolan'),
+    );
+    expect(view.getByTestId('title-meta')).not.toHaveTextContent(/^\s*·/);
+    expect(view.getByTestId('title-meta')).not.toHaveTextContent(/·\s*·/);
+  });
+
+  it('renders no line at all when it would be empty, rather than an empty one', async () => {
+    // Every part gone: no certification, no runtime, and no credits facet to name a
+    // director. Under the original implementation the `Text` was rendered
+    // unconditionally around a joined string, so this produced an empty line box and
+    // `title-meta` was present. Restoring that shape fails exactly this assertion.
+    tableRows.media_items = [{ ...film, certification: null, runtime_minutes: null }];
+    tableRows.media_cache = [];
+
+    const view = await open();
+
+    expect(view.queryByTestId('title-meta')).toBeNull();
+  });
+});
+
 describe('a title this user has ranked', () => {
   beforeEach(() => {
     tableRows.rankings = [
