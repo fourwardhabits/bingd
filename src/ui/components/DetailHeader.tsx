@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  Platform,
   StyleSheet,
   View,
   type LayoutChangeEvent,
@@ -44,6 +45,24 @@ import { Text } from './Text';
  */
 const HYSTERESIS = 12;
 
+/**
+ * How tall the navigation bar itself is, above the status bar.
+ *
+ * Per platform, because it genuinely differs: iOS draws a 44pt bar and Android's
+ * toolbar convention is 56dp. `theme.layout.control.headerHeight` is 44 and describes
+ * Bingd's *own* header, which is not this one — using it on both platforms put the
+ * crossing point 12 points early on Android, revealing the compact title while the
+ * bottom of the identity was still visible under the real bar. Independent review found
+ * that; the hysteresis was absorbing it rather than the threshold being right.
+ *
+ * Still a constant rather than a measurement. The navigation library's own header
+ * metrics are not exported from `expo-router`'s public surface, and reaching into its
+ * build output for them would tie this to an internal path that moves between versions.
+ * A wrong constant costs a few points of timing on a fade; a broken import costs the
+ * screen.
+ */
+const NAV_BAR_HEIGHT = Platform.select({ android: 56, default: 44 }) as number;
+
 export type DetailHeaderState = {
   /** True once the identity block has passed under the header bar. */
   revealed: boolean;
@@ -60,7 +79,7 @@ export function useDetailHeader(): DetailHeaderState {
   // page's header is transparent, so its content is still visible underneath — the
   // reveal has to wait for the identity to pass the *bottom* of the bar, not the top
   // of the screen, or the two titles overlap for the height of the header.
-  const headerHeight = insets.top + theme.layout.control.headerHeight;
+  const headerHeight = insets.top + NAV_BAR_HEIGHT;
 
   // Refs rather than state: both values change while a finger is down, and only their
   // comparison is worth a render. Storing the offset in state would re-render the

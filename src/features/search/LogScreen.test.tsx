@@ -67,6 +67,28 @@ jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
+// The wider search, which is a real network call in production and must be a decision
+// here. Without this it failed by accident in every test, which is not the same as
+// failing deliberately in one.
+const mockSearchProvider = jest.fn();
+
+jest.mock('@/lib/tmdb-adapter', () => {
+  class MockAdapterError extends Error {
+    code: string;
+    constructor(code: string, message: string) {
+      super(message);
+      this.code = code;
+    }
+    get isRateLimit() {
+      return this.code === 'BG429';
+    }
+  }
+  return {
+    AdapterError: MockAdapterError,
+    searchProvider: (...args: unknown[]) => mockSearchProvider(...args),
+  };
+});
+
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({ id: 'user-1', username: 'sai', display_name: 'Sai' }),
 }));
@@ -96,6 +118,8 @@ const film = {
 
 beforeEach(() => {
   issued = 0;
+  mockSearchProvider.mockReset();
+  mockSearchProvider.mockResolvedValue([]);
   mockRpc.mockReset();
   mockPush.mockReset();
   mockPrefs.clear();
@@ -364,5 +388,62 @@ describe('the kind filter', () => {
     // "Nothing matches that" would be a lie: the search worked and the user is
     // looking at their own filter.
     await waitFor(() => expect(view.getByText('Nothing in this filter')).toBeTruthy());
+  });
+});
+
+/**
+ * A short list has to say when it is a short list.
+ *
+ * Independent review's finding on the search change: the rate-limit and failure
+ * messages were only reachable when the results list was *empty*, so the one case that
+ * most needed them was the one they missed. Rows found locally, the wider lookup
+ * refused, and a reader taking six results as the whole catalogue — which is the
+ * founder's original `spiderman` complaint reappearing one step further along, with
+ * the app now silent about why.
+ */
+describe('when the wider search cannot answer', () => {
+  const AdapterError = jest.requireMock('@/lib/tmdb-adapter').AdapterError;
+
+  /** Long enough for the 800ms provider debounce to settle. */
+  const settle = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  };
+
+  it('says the list may be incomplete rather than showing it as final', async () => {
+    mockSearchProvider.mockRejectedValue(new AdapterError('BG500', 'upstream failed'));
+
+    const view = await search('breaking');
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+    await settle();
+
+    await waitFor(() =>
+      expect(view.getByText('The wider search did not answer, so this may not be everything.')).toBeTruthy(),
+    );
+    // The local rows are still there and still usable — the message is a footer, not a
+    // replacement for the answer the app does have.
+    expect(view.getByLabelText(SERIES_ROW)).toBeTruthy();
+    expect(view.getByLabelText('Search wider again')).toBeTruthy();
+  });
+
+  it('names a rate limit as a rate limit, so it does not read as an empty catalogue', async () => {
+    mockSearchProvider.mockRejectedValue(new AdapterError('BG429', 'too many'));
+
+    const view = await search('breaking');
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+    await settle();
+
+    await waitFor(() =>
+      expect(
+        view.getByText('Too many searches to look wider just now — these are from your catalogue only.'),
+      ).toBeTruthy(),
+    );
+  });
+
+  it('says nothing when the wider search worked and had nothing to add', async () => {
+    const view = await search('breaking');
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+    await settle();
+
+    expect(view.queryByLabelText('Search wider again')).toBeNull();
   });
 });

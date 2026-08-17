@@ -30,10 +30,23 @@ const DEBOUNCE_MS = 180;
  * A local query is a table read on a server Bingd owns and costs a round trip. A
  * provider query costs a TMDB request against a quota shared by every user, and
  * spends one for each intermediate word a fast typist passes through on the way to
- * the one they meant. Half a second is past the point where someone is still
- * typing the same word.
+ * the one they meant.
+ *
+ * **800ms, raised from 500 on 2026-08-16.** With the local-row gate gone (see
+ * `providerEnabled`), this debounce is the main thing standing between exploratory
+ * typing and the hourly ceiling, and independent review was right that at 500ms a
+ * pause between words costs a request each: "spider" then "spiderman" was two. The
+ * budget, stated rather than assumed — `tmdb.max_requests_per_hour` is 120, a settled
+ * query costs one outbound attempt, and two more on an isolate cold enough to have
+ * lost its genre map. So a session spending the whole allowance is one making a
+ * distinct settled search roughly every thirty seconds for an hour without repeating
+ * one. That is a real ceiling rather than a comfortable one, which is why hitting it
+ * is now *visible* — see `providerFailed` and what the Log screen does with it.
+ *
+ * Tuning the allowance itself is an `app_config` row, not a deploy, and it is a
+ * founder call: the quota it protects is shared by every account.
  */
-const PROVIDER_DEBOUNCE_MS = 500;
+const PROVIDER_DEBOUNCE_MS = 800;
 
 /** Below this every query matches half the catalogue and none of it is useful. */
 const MIN_QUERY_LENGTH = 2;
@@ -181,8 +194,21 @@ export function useTitleSearch(input: string) {
   });
 
   const merged = useMemo(() => {
-    const local = result.data ?? [];
     const remote = provider.data ?? [];
+
+    /**
+     * Stale local rows are dropped the moment the provider answers *this* query.
+     *
+     * `keepPreviousData` deliberately leaves the previous query's rows on screen while
+     * the new local pass runs, which is what stops the list blinking on every keystroke.
+     * With the provider no longer waiting for the local pass, though, it can answer for
+     * query B while `result.data` still holds A's rows — and the merge would then put
+     * A's films above B's under the heading of a search for B. Independent review found
+     * this; it is not merely a reordering, because the A rows are wrong rather than
+     * early. Once B's own local rows arrive, `isPlaceholderData` clears and they come
+     * back in their proper place at the top.
+     */
+    const local = result.isPlaceholderData && remote.length ? [] : result.data ?? [];
     if (!remote.length) return local;
 
     // Local ordering wins, because search_titles ranks exact and prefix matches
@@ -198,7 +224,7 @@ export function useTitleSearch(input: string) {
       ...local.map((row) => remoteById.get(row.id) ?? row),
       ...remote.filter((row) => !seen.has(row.id)),
     ];
-  }, [result.data, provider.data]);
+  }, [result.data, result.isPlaceholderData, provider.data]);
 
   return {
     ...result,

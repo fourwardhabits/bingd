@@ -381,6 +381,35 @@ function Results({
               Looking further afield…
             </Text>
           </View>
+        ) : providerFailed ? (
+          /**
+           * A partial list has to say it is partial.
+           *
+           * This message used to appear only when the list was *empty*, which meant
+           * the one case it most needed to cover was the one it missed: rows found
+           * locally, wider search refused, and a user reading a short list as the
+           * whole answer. That is the founder's `spiderman` failure wearing a
+           * different hat — the catalogue looking complete when it is not — so
+           * fixing the gate without fixing this would have left the same silence
+           * one step further along.
+           */
+          <View style={styles.status}>
+            <Text variant="footnote" tone="secondary">
+              {rateLimited
+                ? 'Too many searches to look wider just now — these are from your catalogue only.'
+                : 'The wider search did not answer, so this may not be everything.'}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Search wider again"
+              onPress={onRetry}
+              hitSlop={theme.space[2]}
+            >
+              <Text variant="callout" tone="action">
+                Try again
+              </Text>
+            </Pressable>
+          </View>
         ) : null
       }
       // Stale results stay legible rather than disappearing: a list that blinks on every
@@ -437,7 +466,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[2],
   },
-  status: { padding: theme.layout.gutter },
+  status: { padding: theme.layout.gutter, gap: theme.space[2], alignItems: 'flex-start' },
   stale: { opacity: 0.6 },
   idle: { paddingTop: theme.space[2], paddingBottom: theme.space[8] },
   recentRow: {
