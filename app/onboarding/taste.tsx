@@ -1,5 +1,5 @@
 import { Stack, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -17,6 +17,7 @@ import { theme } from '@/ui/tokens';
 import {
   Button,
   EmptyState,
+  LoadingScreen,
   Screen,
   SearchField,
   SkeletonRow,
@@ -58,13 +59,39 @@ export default function TasteOnboardingScreen() {
   const complete = useCompleteTasteOnboarding(profile.id);
   const begin = useBeginTasteOnboarding(profile.id);
   const ranked = state.data?.ranked ?? 0;
-  const done = ranked >= FIRST_FIVE;
+  // A ref, not state: the effect below only needs it to avoid enrolling twice, and
+  // setting state inside an effect is what `react-hooks/set-state-in-effect` forbids.
+  // Nothing renders from it — `done` reads the answer instead.
+  const settled = useRef(false);
+  // `needed` is true for the whole of an active flow and false for an account that does
+  // not belong here, so it distinguishes "five placed just now" from "twelve placed over
+  // six months" without a second flag.
+  const done = state.data?.needed === true && ranked >= FIRST_FIVE;
 
-  // Records that this account is in the flow, so that bucketing the first film — which
-  // makes the collection non-empty — does not make the account stop looking new.
+  /**
+   * Enrol, or leave — the screen decides, because routing deliberately will not.
+   *
+   * Routing sends people here and never takes them away again, which is what stopped
+   * the flow ejecting somebody after their first film. The cost, which independent
+   * review found, is that *this screen* is now the only thing standing between an
+   * established account and enrolment: someone opening `/onboarding/taste` from a deep
+   * link used to be sent to the feed by routing, and would otherwise now be marked
+   * `active` and held here until they ranked five films or declined.
+   *
+   * So `begin` is gated on the answer rather than on arrival. An account that does not
+   * need the flow is sent on to the feed by the screen itself.
+   */
   useEffect(() => {
+    if (settled.current || !state.data) return;
+    settled.current = true;
+
+    if (!state.data.needed) {
+      router.replace('/(tabs)/feed');
+      return;
+    }
+
     void begin();
-  }, [begin]);
+  }, [state.data, begin, router]);
 
   const { results, idle, isPending, isError, retry, providerSearching } = useTitleSearch(input);
   // Films only. A series cannot be ranked at all, so offering one here is offering a
@@ -75,6 +102,18 @@ export default function TasteOnboardingScreen() {
     await complete({ skipped });
     router.replace('/(tabs)/feed');
   };
+
+  // Nothing until the answer arrives. Rendering the flow first and then deciding shows
+  // "Build your taste" for a beat to somebody who is about to be sent to the feed —
+  // which is the wrong first thing to say to an account that has been in use for months.
+  if (!state.data) {
+    return (
+      <Screen>
+        <Stack.Screen options={{ headerShown: false }} />
+        <LoadingScreen />
+      </Screen>
+    );
+  }
 
   return (
     <Screen>

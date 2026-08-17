@@ -78,13 +78,25 @@ async function readState(userId: string): Promise<TasteOnboarding> {
 
   const ranked = rankedCount ?? 0;
   const logged = loggedCount ?? 0;
-  const phase = await readPref<TastePhase>(phaseKey(userId));
+  // Memory first: a decision taken in this process outranks whatever the disk holds,
+  // because the write that would have updated the disk may have failed.
+  const phase = intent.get(userId) ?? (await readPref<TastePhase>(phaseKey(userId)));
 
   if (phase === 'done' || phase === 'skipped') return { ranked, needed: false };
 
-  // Already in it: stay until five are placed. Read live, so a film ranked in an
-  // earlier session counts and a failed placement does not.
-  if (phase === 'active') return { ranked, needed: ranked < FIRST_FIVE };
+  /**
+   * Already in it: stay until they *leave*, which is an explicit act and not a count.
+   *
+   * Deliberately not `ranked < FIRST_FIVE`. Tying it to the count gives the fifth
+   * placement two jobs — completing the flow and dismissing it — and the second one
+   * fires first: the screen would be sent to the feed at the moment it had a summary to
+   * show. That is the same shape as the blocker review found in routing, one layer down,
+   * and it is why leaving is `complete()` and nothing else.
+   *
+   * Somebody who force-quits on the summary reopens on the summary. That is the right
+   * answer rather than an oversight: they have not yet said where they wanted to go.
+   */
+  if (phase === 'active') return { ranked, needed: true };
 
   // Never decided. This is the only place the collection decides, and it decides once:
   // any ranking or any logged title at all means an account that has been used, and
@@ -118,26 +130,59 @@ export function useTasteOnboarding(userId: string | null, enabled = true) {
 }
 
 /**
+ * What this process has decided, whatever storage managed to record.
+ *
+ * `writePref` is SecureStore and can fail. Independent review found what that cost when
+ * the decision lived only on disk: "Not now" wrote nothing, the query refetched, the
+ * account still looked new, and routing sent the user straight back to the screen they
+ * had just declined — a loop produced by a failure to persist a preference.
+ *
+ * So an intent recorded here is authoritative for the life of the process, and the write
+ * is how it *outlives* the process. A failed write no longer breaks the current session;
+ * it only means the flow may be offered once more on a future launch, which is the same
+ * class of limitation as the device-local storage itself.
+ *
+ * Module-level rather than a ref, because `complete` and `begin` are called from
+ * different components and both must see it. Keyed by account, so two accounts on one
+ * device cannot read each other's.
+ */
+const intent = new Map<string, TastePhase>();
+
+/** Exported for tests, which must not inherit a decision from the previous one. */
+export function resetTasteIntent() {
+  intent.clear();
+}
+
+/**
  * Ends the flow, from either exit: five films placed, or "not now".
  *
- * The skip is recorded on the device rather than in the database, which is a real
+ * The phase is recorded on the device rather than in the database, which is a real
  * limitation and a deliberate one. A column would be the durable answer and would cost a
  * migration, an RLS write path and a review, for a flag whose only job is to stop one
  * screen reappearing. The consequence of getting it wrong on this side is small and
- * recoverable: a user who skipped and then reinstalls is offered the flow once more, and
- * can skip it again. The consequence on the other side — a schema change to the account
- * table this late — is not proportionate to that.
- *
- * A user who *completed* the flow needs no flag at all: they have five rankings, so the
- * ordinary "has anything in it" test already answers for them on every device.
+ * recoverable: somebody who skipped and then reinstalls is offered the flow once more,
+ * and can skip it again. The consequence on the other side — a schema change to the
+ * account table this late — is not proportionate to that.
  */
 export function useCompleteTasteOnboarding(userId: string) {
   const queryClient = useQueryClient();
 
   return useCallback(
     async ({ skipped }: { skipped: boolean }) => {
-      await writePref<TastePhase>(phaseKey(userId), skipped ? 'skipped' : 'done').catch(() => {});
-      await queryClient.invalidateQueries({ queryKey: queryKeys.tasteOnboarding(userId) });
+      const phase: TastePhase = skipped ? 'skipped' : 'done';
+      // Synchronously, and before the write is awaited. `begin` checks this immediately
+      // before its own write, which is what closes the race review found: begin reads an
+      // absent phase, the user presses "Not now", complete writes `skipped`, and begin's
+      // in-flight write then puts `active` back on top of it.
+      intent.set(userId, phase);
+
+      // The session honours the choice whether or not the disk does.
+      queryClient.setQueryData(queryKeys.tasteOnboarding(userId), (previous?: TasteOnboarding) => ({
+        ranked: previous?.ranked ?? 0,
+        needed: false,
+      }));
+
+      await writePref<TastePhase>(phaseKey(userId), phase).catch(() => {});
     },
     [queryClient, userId],
   );
@@ -147,13 +192,21 @@ export function useCompleteTasteOnboarding(userId: string) {
  * Marks the account as in the flow, on arrival.
  *
  * Written from the screen rather than from `readState`, so the query stays a read. It is
- * what makes the rest of the flow — and a resume after the app is closed — independent
- * of the "has nothing in it" test that the first film invalidates.
+ * what makes the rest of the flow — and a resume after the app is closed — independent of
+ * the "has nothing in it" test that the first film invalidates.
+ *
+ * It refuses to write over a decision that has already been taken, in memory or on disk.
+ * Both checks are needed: disk is what survives a launch, and memory is what survives the
+ * gap between this function's own read and its own write.
  */
 export function useBeginTasteOnboarding(userId: string) {
   return useCallback(async () => {
-    const phase = await readPref<TastePhase>(phaseKey(userId)).catch(() => null);
-    if (phase) return;
+    if (intent.has(userId)) return;
+
+    const stored = await readPref<TastePhase>(phaseKey(userId)).catch(() => null);
+    if (stored || intent.has(userId)) return;
+
+    intent.set(userId, 'active');
     await writePref<TastePhase>(phaseKey(userId), 'active').catch(() => {});
   }, [userId]);
 }

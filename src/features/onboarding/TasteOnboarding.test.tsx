@@ -2,6 +2,8 @@ import { fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
+import { resetTasteIntent } from './use-taste-onboarding';
+
 // Not colocated with the route: everything under app/ is bundled by expo-router's
 // require.context. See app-directory.test.ts.
 import TasteScreen from '../../../app/onboarding/taste';
@@ -9,6 +11,7 @@ import TasteScreen from '../../../app/onboarding/taste';
 const mockRpc = jest.fn();
 const mockReplace = jest.fn();
 const mockPrefs = new Map<string, unknown>();
+let mockWriteFails = false;
 const mockTableRows: Record<string, unknown[]> = {};
 /** Rows a `count: 'exact', head: true` select should report, keyed by table. */
 const mockCounts: Record<string, number> = {};
@@ -16,6 +19,7 @@ const mockCounts: Record<string, number> = {};
 jest.mock('@/lib/prefs', () => ({
   readPref: (name: string) => Promise.resolve(mockPrefs.get(name) ?? null),
   writePref: (name: string, value: unknown) => {
+    if (mockWriteFails) return Promise.reject(new Error('secure store unavailable'));
     mockPrefs.set(name, value);
     return Promise.resolve();
   },
@@ -92,6 +96,11 @@ beforeEach(() => {
   mockTableRows.user_media = [];
   mockCounts.rankings = 0;
   mockCounts.user_media = 0;
+  // In the flow. The screen enrols only an account the state says is new, and sends
+  // anyone else to the feed — so a test that wants the screen has to say which it is.
+  mockPrefs.set('user-1.onboarding.taste.phase', 'active');
+  mockWriteFails = false;
+  resetTasteIntent();
 });
 
 const callsTo = (fn: string) => mockRpc.mock.calls.filter(([name]) => name === fn);
@@ -190,6 +199,51 @@ describe('the first five', () => {
     // characterise a person, and inventing that in the first minute would undermine
     // every honest number the app shows afterwards.
     expect(view.queryByText(/you are a/i)).toBeNull();
+  });
+
+  /**
+   * Independent review, 09c. Routing sends people here and never takes them away —
+   * which is what stopped the flow ejecting somebody after their first film, and which
+   * makes this screen the only thing between an established account and enrolment.
+   * Somebody opening the route from a deep link used to be sent to the feed by routing.
+   */
+  it('sends an established account away instead of enrolling it', async () => {
+    mockPrefs.clear();
+    mockCounts.rankings = 12;
+    mockCounts.user_media = 12;
+
+    await renderWithProviders(<TasteScreen />);
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)/feed'));
+    // And it must not have marked them as in the flow on the way past.
+    expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBeUndefined();
+  });
+
+  /**
+   * Independent review, 09c. `writePref` is SecureStore and can fail. When the decision
+   * lived only on disk, "Not now" wrote nothing, the query refetched, the account still
+   * looked new, and routing sent the user straight back to the screen they had just
+   * declined — a loop produced by a failed preference write.
+   */
+  it('honours Not now for the session even when the write fails', async () => {
+    mockWriteFails = true;
+
+    const view = await open();
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)/feed'));
+    // Nothing was persisted, so the flow may be offered again on a future launch. What
+    // must not happen is this session deciding they still need it — the process holds
+    // the decision even when the disk refused it.
+    mockReplace.mockReset();
+    await renderWithProviders(<TasteScreen />);
+
+    // Sent straight back out rather than enrolled again. (The component keeps rendering
+    // until navigation unmounts it, so the assertion is on the decision, not the tree.)
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)/feed'));
+    // The disk still says they are in the flow, because the write failed. Memory is what
+    // beat it — which is the whole point of holding the decision in the process.
+    expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('active');
   });
 
   it('lets somebody leave who cannot think of five, and remembers that', async () => {

@@ -126,13 +126,17 @@ describe('useTasteOnboarding', () => {
     expect(result.current.data?.needed).toBe(true);
   });
 
-  it('stops being needed once five are placed', async () => {
+  it('stays needed at five, because leaving is an act and not a count', async () => {
     mockPrefs.set('user-1.onboarding.taste.phase', 'active');
     mockCounts.rankings = 5;
     mockCounts.user_media = 5;
 
-    const result = await read();
-    expect(result.current.data?.needed).toBe(false);
+    // Tying this to the count would give the fifth placement two jobs — completing the
+    // flow and dismissing it — and the second fires first, so the screen would be sent
+    // away at the moment it had a summary to show. Somebody who force-quits on the
+    // summary reopens on the summary, which is right: they have not said where they
+    // wanted to go.
+    expect((await read()).current.data?.needed).toBe(true);
   });
 
   it('reports how many films are already placed, which is the progress', async () => {
