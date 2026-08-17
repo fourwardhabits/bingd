@@ -58,8 +58,17 @@ export const profileUri = (path: string | null | undefined) =>
  * watch link rather than an embed: opening the app or the browser is what the phone
  * does well, and an in-app player would be a native dependency for one screen.
  */
-export const videoUri = (key: string | null | undefined) =>
-  key ? `https://www.youtube.com/watch?v=${key}` : null;
+export const videoUri = (key: string | null | undefined) => {
+  if (!key) return null;
+  // A YouTube video id is eleven characters of `[A-Za-z0-9_-]`. Anything else is not
+  // a key, and the app is about to hand it to `Linking.openURL` — so it is checked
+  // rather than escaped. Encoding a bad key would produce a valid YouTube URL for a
+  // video that does not exist, which fails silently on the device; refusing it lets
+  // the row simply not be tappable, and the shape is provider-owned data that has
+  // never varied.
+  if (!/^[A-Za-z0-9_-]{11}$/.test(key)) return null;
+  return `https://www.youtube.com/watch?v=${key}`;
+};
 
 /**
  * An avatar object path into a URL.

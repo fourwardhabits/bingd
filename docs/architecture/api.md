@@ -224,7 +224,7 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 
 | Function | Trigger | Role |
 |---|---|---|
-| `tmdb-adapter` | User request, and an operator for the three maintenance actions | Search and detail. Sole holder of the TMDB key (AD-8). Writes through to `media_items`, `media_cache` and `provider_list_cache`. **Built 2026-08-15** |
+| `tmdb-adapter` | User request, and an operator for the three maintenance actions | Search and detail. Sole holder of the TMDB key (AD-8). Writes through to `media_items`, `media_cache`, `provider_list_cache` and `person_cache`. **Built 2026-08-15** |
 | `import-worker` | Queue, after upload | Parse, match, build the preview, apply on confirmation, delete the source file |
 | `recs-builder` | Schedule + on significant ranking change | Generate a slate per user. See [`recommendations.md`](./recommendations.md) |
 | `match-builder` | Schedule | Materialize `match_scores` (AD-7) |
@@ -234,18 +234,45 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 
 `nudge-scheduler` is worth calling out. PRD §15 makes the nudge conditional on real content, so the function's first action is a query for qualifying activity, and its most common outcome is to send nothing. That is the intended behavior, not a failure mode, and the metric to watch is the ratio of evaluations to sends.
 
-### `tmdb-adapter` — the five actions
+### `tmdb-adapter` — the seven actions
 
 Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may call it.
 
 | Action | Caller | Purpose |
 |---|---|---|
 | `search` | signed-in user | Searches TMDB, writes the results into `media_items`, returns them Bingd-shaped |
-| `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits |
+| `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits, trailers, TMDB reviews |
 | `similar` | signed-in user | Caches what TMDB associates with one title as the `similar` facet. The candidate source behind For You. Added 2026-08-16 |
+| `person` | signed-in user | Caches one person and the titles TMDB credits them on, writing those titles into the catalogue first. Added 2026-08-17 |
 | `trending` | `service_role` | Refreshes the four `provider_list_cache` lists. Added 2026-08-16 |
 | `enrich` | `service_role` | Drains `tmdb_enrich_due` — rows carrying a tmdb id that have never been fetched |
 | `refresh` | `service_role` | Drains `media_refresh_due` — the retention window in §AD-8 |
+
+**`detail` fetches three appended responses in one request.** `credits`, `videos` and
+`reviews` all arrive through TMDB's `append_to_response`, so trailers and reviews cost nothing
+beyond the detail call that was already being made — which is also why there is no `reviews`
+action. A season is the exception: it appends only `credits,videos`, because TMDB has no
+season-level reviews endpoint and `/tv/{id}/reviews` returns reviews of the *series*.
+Attributing those to "Season 2" would put somebody's words about a whole show under a heading
+they did not write them for, so a season simply has no `reviews` facet and the screen omits
+the section.
+
+**These are TMDB Reviews and nothing else is ever called that.** They are written by users of
+themoviedb.org — not critics, not professionals, and not Bingd's community, which has its own
+signal in `community_score` two sections up the same screen. The facet, the type, the section
+heading and the tests all use the one name, and `TitleScreen.test.tsx` asserts the words
+"critic", "professional" and "community review" never appear near them.
+
+**`person` is a user action for the same reason `similar` is.** Somebody tapped a face and no
+schedule knows which. Bounded on the same three sides: one page opens one person,
+`tmdb_claim_person` (`20260817000500`) lets exactly one caller in the world refresh a given
+person at a time using `person_cache`'s primary key as the lock, and every provider request is
+charged to the caller's hourly ceiling. It writes every credited title through
+`tmdb_upsert_titles` **before** it writes the cache row, which is what makes the person page a
+discovery surface rather than a filtered view of the reader's own catalogue: a credit is a
+real `media_items` row, so opening, ranking or saving one is the ordinary action. At most
+forty credits are kept, ordered by provider popularity, with the count TMDB actually had
+carried alongside so the screen can say what it is not showing.
 
 **`similar` is a user action, and bounded on three sides.** It spends provider quota, which
 normally argues for `service_role` — but what a slate needs depends on which titles *this*

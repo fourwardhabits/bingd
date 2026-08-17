@@ -1,141 +1,218 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
 
+import { cachePerson } from '@/lib/tmdb-adapter';
 import { supabase } from '@/lib/supabase';
 
 export type PersonCredit = {
   mediaItemId: string;
   title: string;
-  kind: 'movie' | 'series' | 'season';
+  /** Movie or series. Never a season — TMDB credits people on shows, not seasons. */
+  kind: 'movie' | 'series';
   year: number | null;
   posterPath: string | null;
-  seriesTitle: string | null;
   /** What they did in it — a character, or a crew job. */
   role: string | null;
+  /** Which list TMDB had them in, which is the difference between acting and crew. */
+  as: 'cast' | 'crew';
 };
 
 export type PersonDetail = {
+  /** TMDB's person id, as a string, because that is what the route carries. */
   id: string;
   name: string;
   profilePath: string | null;
+  /** TMDB's `known_for_department` — "Acting", "Directing", "Writing". */
+  knownFor: string | null;
+  biography: string | null;
+  biographyTruncated: boolean;
+  birthday: string | null;
+  deathday: string | null;
+  placeOfBirth: string | null;
   credits: PersonCredit[];
+  /** How many credits TMDB had, which is usually more than were kept. */
+  creditTotal: number;
 };
 
-type CastEntry = { id: number | string; name: string; character?: string | null; profile_path?: string | null };
-type CrewEntry = { id: number | string; name: string; job?: string | null; department?: string | null };
+/** A TMDB person id is a positive integer, and nothing else is worth a request. */
+function personIdOf(value: string | null): number | null {
+  const numeric = Number(value);
+  // `Number.isSafeInteger` rather than `isFinite`, which waves through decimals,
+  // negatives and exponent forms. Carried over from the previous implementation,
+  // where independent review asked for the tighter form.
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) return null;
+  return numeric;
+}
+
+type CachedPayload = {
+  person?: {
+    name?: string;
+    profile_path?: string | null;
+    known_for?: string | null;
+    biography?: string | null;
+    biography_truncated?: boolean;
+    birthday?: string | null;
+    deathday?: string | null;
+    place_of_birth?: string | null;
+  };
+  credits?: { id: string; kind: 'movie' | 'series'; role: string | null; as: 'cast' | 'crew' }[];
+  credit_total?: number;
+};
 
 /**
- * A person, assembled from the credits the app already holds.
+ * A person, and everything TMDB credits them on.
  *
- * There is no `people` table, and this deliberately does not add one. The only person
- * data in the database lives inside `media_cache.credits`, which the provider owns
- * and refreshes; a table would be a second copy of it to keep in step, and the page
- * has exactly one useful question to answer — what else of theirs is here.
+ * **This is no longer a view of the reader's own catalogue, and that is the change.**
+ * The previous implementation answered "which titles already in this database mention
+ * this person" by scanning `media_cache.credits` payloads for their id. The query was
+ * sound and the index served it, but the question was wrong: somebody who has just
+ * tapped a face wants to know what else that person has worked on, and answering with
+ * a filter over the local catalogue meant a fresh install showed an actor with no
+ * credits and an enriched one showed them with two.
  *
- * So the question is asked of the credits payloads directly, as a jsonb containment
- * match served by the partial GIN index in `20260816000500`. `media_cache` is
- * world-readable (`media_cache_read` is `using (true)`), which is right: a cast list
- * is catalogue metadata, not anybody's private data.
+ * So the filmography comes from TMDB, cached in `person_cache` (20260817000500), and
+ * every credited title is written into `media_items` by the adapter before the cache
+ * row is written. That second half is what makes the page a discovery surface rather
+ * than a list of names: a film the reader has never heard of is a real catalogue row
+ * by the time it appears here, so opening it, ranking it or saving it is the same
+ * action it would be anywhere else in the app. There is no import step and no id that
+ * means something only to TMDB.
  *
- * The name and photograph come from whichever credit mentions them, because that is
- * where TMDB puts them and there is nowhere else to look. If the catalogue has never
- * been enriched, this returns null and the screen says so rather than inventing a
- * person out of an id in a URL.
+ * `person_cache` is world-readable, like `media_items` and `media_cache` — a public
+ * filmography is catalogue metadata and says nothing about any account — so this is a
+ * plain select. Nothing viewer-relative is stored in it; whether the reader has
+ * ranked, watched or saved a credit is answered by the tables that already answer it.
+ *
+ * The credits are returned in the cache's own order, which is the provider's
+ * popularity ranking. Re-sorting here would derive a worse copy of an ordering that
+ * was already applied where the popularity numbers were.
  */
 export function usePerson(personId: string | null) {
+  const numeric = personIdOf(personId);
+
   return useQuery({
-    queryKey: ['person', personId],
-    enabled: Boolean(personId),
+    queryKey: ['person', numeric],
+    enabled: numeric !== null,
     staleTime: 10 * 60_000,
     queryFn: async (): Promise<PersonDetail | null> => {
-      const numeric = Number(personId);
-      // A TMDB person id is a positive integer. The filter is built with
-      // `JSON.stringify` and sent as a PostgREST parameter, so nothing here is
-      // interpolated into SQL — but the guard says what the id *is* rather than
-      // merely that it is a number, which rules out the decimals, negatives and
-      // exponent forms `Number.isFinite` would wave through. Independent review
-      // asked for the tighter form and could construct no failure from the looser
-      // one; this is precision rather than a fix.
-      if (!Number.isSafeInteger(numeric) || numeric <= 0) return null;
+      const { data, error } = await supabase
+        .from('person_cache')
+        .select('payload')
+        .eq('tmdb_person_id', numeric!)
+        .maybeSingle();
+      if (error) throw error;
 
-      const [cast, crew] = await Promise.all([
-        supabase
-          .from('media_cache')
-          .select('media_item_id, payload')
-          .eq('facet', 'credits')
-          .filter('payload', 'cs', JSON.stringify({ cast: [{ id: numeric }] }))
-          .limit(50),
-        supabase
-          .from('media_cache')
-          .select('media_item_id, payload')
-          .eq('facet', 'credits')
-          .filter('payload', 'cs', JSON.stringify({ crew: [{ id: numeric }] }))
-          .limit(50),
-      ]);
+      const payload = data?.payload as CachedPayload | undefined;
+      // A payload with no `credits` array is a claim placeholder, not a person with
+      // no work — somebody else is fetching them right now. Treated as absent, which
+      // is what makes the screen show its loading state rather than an empty
+      // filmography under a real name.
+      const person = payload?.person;
+      const name = person?.name;
+      if (!person || !name || !Array.isArray(payload?.credits)) return null;
 
-      if (cast.error) throw cast.error;
-      if (crew.error) throw crew.error;
+      const entries = payload.credits;
+      const ids = entries.map((credit) => credit.id);
 
-      const rows = [...(cast.data ?? []), ...(crew.data ?? [])] as {
-        media_item_id: string;
-        payload: { cast?: CastEntry[]; crew?: CrewEntry[] };
-      }[];
-      if (!rows.length) return null;
+      const rows = ids.length
+        ? await supabase
+            .from('media_items')
+            .select('id, kind, title, release_date, poster_path')
+            .in('id', ids)
+        : { data: [], error: null };
+      if (rows.error) throw rows.error;
 
-      // One entry per title, and the acting credit wins where somebody both wrote
-      // and appeared in something — it is the one a viewer recognises them for.
-      const roleByMedia = new Map<string, string | null>();
-      let name: string | null = null;
-      let profilePath: string | null = null;
+      const byId = new Map(
+        ((rows.data ?? []) as {
+          id: string;
+          kind: PersonCredit['kind'];
+          title: string;
+          release_date: string | null;
+          poster_path: string | null;
+        }[]).map((row) => [row.id, row]),
+      );
 
-      for (const row of rows) {
-        const castEntry = (row.payload.cast ?? []).find((p) => String(p.id) === String(numeric));
-        const crewEntry = (row.payload.crew ?? []).find((p) => String(p.id) === String(numeric));
-        const entry = castEntry ?? crewEntry;
-        if (!entry) continue;
-
-        name ??= entry.name;
-        profilePath ??= castEntry?.profile_path ?? null;
-
-        const role = castEntry?.character ?? crewEntry?.job ?? crewEntry?.department ?? null;
-        if (!roleByMedia.has(row.media_item_id) || castEntry) {
-          roleByMedia.set(row.media_item_id, role);
-        }
-      }
-
-      if (!name) return null;
-
-      const ids = [...roleByMedia.keys()];
-      const { data: media, error: mediaError } = await supabase
-        .from('media_items')
-        .select('id, kind, title, release_date, poster_path, parent:parent_id(title)')
-        .in('id', ids);
-      if (mediaError) throw mediaError;
-
-      const credits: PersonCredit[] = ((media ?? []) as unknown as {
-        id: string;
-        kind: PersonCredit['kind'];
-        title: string;
-        release_date: string | null;
-        poster_path: string | null;
-        parent: { title: string } | { title: string }[] | null;
-      }[])
-        .map((item) => {
-          const parent = Array.isArray(item.parent) ? item.parent[0] : item.parent;
+      const credits: PersonCredit[] = entries
+        .map((credit) => {
+          const row = byId.get(credit.id);
+          // A credit whose catalogue row has gone is dropped rather than rendered as
+          // a title-less tile. It should not happen — the adapter writes the rows
+          // before the payload — but a cached payload outlives one deletion.
+          if (!row) return null;
           return {
-            mediaItemId: item.id,
-            title: item.title,
-            kind: item.kind,
-            year: item.release_date ? Number(item.release_date.slice(0, 4)) : null,
-            posterPath: item.poster_path,
-            seriesTitle: parent?.title ?? null,
-            role: roleByMedia.get(item.id) ?? null,
+            mediaItemId: row.id,
+            title: row.title,
+            kind: credit.kind,
+            year: row.release_date ? Number(row.release_date.slice(0, 4)) : null,
+            posterPath: row.poster_path,
+            role: credit.role,
+            as: credit.as,
           };
         })
-        // Newest first, and undated last rather than first — an unenriched row
-        // sorting above someone's best-known film reads as a bug.
-        .sort((a, b) => (b.year ?? -Infinity) - (a.year ?? -Infinity));
+        .filter((credit): credit is PersonCredit => credit !== null);
 
-      return { id: String(personId), name, profilePath, credits };
+      return {
+        id: String(numeric),
+        name,
+        profilePath: person.profile_path ?? null,
+        knownFor: person.known_for ?? null,
+        biography: person.biography ?? null,
+        biographyTruncated: Boolean(person.biography_truncated),
+        birthday: person.birthday ?? null,
+        deathday: person.deathday ?? null,
+        placeOfBirth: person.place_of_birth ?? null,
+        credits,
+        creditTotal: payload.credit_total ?? credits.length,
+      };
     },
   });
+}
+
+/**
+ * Fetches a person the first time somebody opens them, at most once per mount.
+ *
+ * The same shape as `useTitleEnrichment` and for the same reason: the fetch
+ * invalidates the query that decides whether a fetch is needed, so without the
+ * attempted-set guard a person TMDB has nothing useful for would be requested on
+ * every render and spend the api.md §9 ceiling doing it.
+ *
+ * `needed` is "the cache had nothing" rather than "the cache is stale". A stale row
+ * still renders a complete page, and a background refresh that replaces one
+ * filmography with a nearly identical one while somebody is reading it is worse than
+ * a week-old credit list — the adapter's seven-day TTL is what handles the staleness,
+ * on whoever opens the page after it lapses.
+ *
+ * A failure is deliberately silent past the empty state the screen already shows. An
+ * error banner would be a second thing on a page whose first thing is already "we do
+ * not have this person".
+ */
+export function usePersonFetch(personId: string | null, needed: boolean) {
+  const queryClient = useQueryClient();
+  const numeric = personIdOf(personId);
+  const [fetching, setFetching] = useState(false);
+  const attempted = useRef(new Set<number>());
+
+  useEffect(() => {
+    if (numeric === null || !needed || attempted.current.has(numeric)) return;
+    attempted.current.add(numeric);
+
+    let cancelled = false;
+    setFetching(true);
+
+    cachePerson(numeric)
+      .then(async () => {
+        if (cancelled) return;
+        await queryClient.invalidateQueries({ queryKey: ['person', numeric] });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setFetching(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [numeric, needed, queryClient]);
+
+  return { fetching };
 }

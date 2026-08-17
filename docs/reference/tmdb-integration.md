@@ -96,6 +96,8 @@ Also required:
 
 Bingd needs two slots: the About section in Settings, and the attribution line on title detail ([`../design/screens.md`](../design/screens.md) §6). Both are cheap now and expensive to retrofit across a shipped app.
 
+**Two provider surfaces added 2026-08-17 carry their own naming obligation**, over and above the notice. TMDB Reviews are written by users of themoviedb.org; they are not critics and TMDB publishes none, so Bingd never calls them critic, professional or community reviews — "community" already means Bingd's own aggregate on the same screen. The section names TMDB in its heading and again in a line beneath it, and a review's rating is always shown as "Rated 8 on TMDB" rather than as a bare number that would read as a Bingd score. The person page carries the same source line the title page does. A truncated review links to its page on themoviedb.org rather than presenting an excerpt as the whole thing.
+
 **There is no SLA.** TMDB publishes a status page and makes reasonable efforts but commits to nothing. Worth knowing, since the catalog is a hard dependency.
 
 ---

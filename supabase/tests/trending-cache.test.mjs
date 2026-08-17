@@ -162,6 +162,12 @@ describe('the expiry comes from configuration', () => {
    * The migration merges its key into whatever the object already holds. Both
    * deployed projects have a `tmdb.cache_ttl_hours` row with the original four
    * keys, and losing those would silently re-TTL every facet in media_cache.
+   *
+   * Asserted as an exact object rather than as "these keys are still present",
+   * deliberately: the failure this guards against is a later migration writing the
+   * whole value instead of merging into it, and a subset assertion would not see it.
+   * The cost is that every migration adding a TTL updates this fixture — which is
+   * the point. `reviews` and `person` were added by 20260817000500.
    */
   it('leaves the existing facet TTLs alone', async () => {
     const t = await createTestDb();
@@ -173,6 +179,8 @@ describe('the expiry comes from configuration', () => {
         availability: 12,
         credits: 720,
         keywords: 720,
+        person: 168,
+        reviews: 24,
         similar: 168,
         trending: 6,
       });

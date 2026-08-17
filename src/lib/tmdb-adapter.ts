@@ -117,3 +117,27 @@ export async function cacheSimilar(mediaItemId: string) {
     mediaItemId,
   });
 }
+
+/**
+ * Caches one person and the titles TMDB credits them on.
+ *
+ * `personId` is TMDB's, not a Bingd uuid — there is no Bingd person, deliberately
+ * (20260817000500). It is what a `credits` payload carries and what `/person/{id}`
+ * already routes on.
+ *
+ * Every credited title is written into `media_items` as a side effect, which is what
+ * makes the person page a discovery surface rather than a filtered view of the
+ * reader's own catalogue: a film they have never heard of is a real catalogue row by
+ * the time it appears, so opening it, ranking it or saving it needs no import step.
+ *
+ * The client reads `person_cache` directly — it is catalogue data and world-readable
+ * — and only calls this when the row is missing or expired. The adapter re-checks
+ * before spending a provider request anyway, because a client's guard is an
+ * optimisation and the server's is a limit.
+ */
+export async function cachePerson(personId: number) {
+  return invoke<{ id: number; written: number; total?: number; reason?: string }>({
+    action: 'person',
+    personId,
+  });
+}

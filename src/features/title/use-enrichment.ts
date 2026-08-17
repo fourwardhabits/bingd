@@ -65,6 +65,12 @@ function useEnrichOnce(id: string | null | undefined, needed: boolean) {
           queryClient.invalidateQueries({ queryKey: queryKeys.title(id) }),
           queryClient.invalidateQueries({ queryKey: ['credits', id] }),
           queryClient.invalidateQueries({ queryKey: queryKeys.seasons(id) }),
+          // Both facets the same call writes. Without these the Videos tab and the
+          // TMDB Reviews section stay absent until the screen is left and re-entered,
+          // because the query that decides whether to render them was resolved
+          // against a `media_cache` that had no row yet.
+          queryClient.invalidateQueries({ queryKey: ['videos', id] }),
+          queryClient.invalidateQueries({ queryKey: ['tmdb-reviews', id] }),
         ]);
       })
       .catch(() => {})

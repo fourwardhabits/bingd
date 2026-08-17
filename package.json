@@ -20,6 +20,7 @@
     "trending:refresh": "node supabase/seed/refresh-trending.mjs",
     "functions:check": "deno check --config supabase/functions/tmdb-adapter/deno.json supabase/functions/tmdb-adapter/index.ts",
     "functions:lint": "deno lint --config supabase/functions/tmdb-adapter/deno.json supabase/functions/tmdb-adapter",
+    "functions:test": "deno test --config supabase/functions/tmdb-adapter/deno.json --allow-net supabase/functions/tmdb-adapter",
     "brand:render": "node assets/brand/render.mjs",
     "build:web": "node web/build.mjs"
   },

@@ -256,7 +256,7 @@ Two known blemishes in the data, both from the source rather than the pipeline: 
 ```sql
 create table media_cache (
   media_item_id uuid not null references media_items(id) on delete cascade,
-  facet         text not null,          -- 'credits' | 'keywords' | 'providers' | 'similar'
+  facet         text not null,          -- 'credits' | 'keywords' | 'providers' | 'similar' | 'videos' | 'reviews'
   payload       jsonb not null,
   fetched_at    timestamptz not null default now(),
   expires_at    timestamptz not null,
@@ -282,6 +282,22 @@ create table provider_list_cache (
 
 The payload holds `media_items` ids and nothing else. The titles are written through `tmdb_upsert_titles` before the list row is, so a trending poster comes from `media_items` and expires on the retention clock rather than on this six-hour one — one copy, one expiry. Replacing the row whole is what keeps a refreshed list free of the previous generation, which is the property a facet row per trending title could not have offered.
 
+**A person is neither.** Added 2026-08-17 with the person page (`20260817000500`). A person is the first provider entity here that is not a title and not a global list: `media_cache` has no id to key it on, and `provider_list_cache` has a closed set of four literal keys and a writer that enforces `{"ids": [...]}`. Widening either would leave one table whose contract is "anything", which is how a cache stops being checkable. So a third sibling, with the same lifecycle again and TMDB's own person id as the key — there is no Bingd person, deliberately, because minting one would be a second identity to reconcile with the provider on every refresh:
+
+```sql
+create table person_cache (
+  tmdb_person_id bigint not null check (tmdb_person_id > 0),
+  payload        jsonb not null,      -- {"person": {...}, "credits": [{"id", "kind", "role", "as"}], "credit_total": n}
+  fetched_at     timestamptz not null default now(),
+  expires_at     timestamptz not null,
+  primary key (tmdb_person_id)
+);
+```
+
+Same rule as trending: the credited titles are written through `tmdb_upsert_titles` first, so the payload holds `media_items` ids plus the two facts a title row cannot hold — which Bingd id it is, and what this person did in it. A character name is a property of the pairing, not of the film. Seven-day TTL from `app_config`, capped at the same six-month window; the credits are ordered by provider popularity and capped at forty, with `credit_total` recording how many TMDB had.
+
+Nothing viewer-relative is stored in it. Whether the reader has ranked, watched or saved a credited title is answered by the tables that already answer it, under the policies that already gate them — which is why this table can be world-readable alongside the other two.
+
 > **Corrected 2026-08-13.** `media_cache` had an expiry; `media_items` did not. Title, overview, poster path, and genres are the bulk of the provider-derived data, and they carried only `fetched_at` — with no index on it and no job defined to act on it. A row referenced by somebody's ranking and untouched for seven months was retained provider data that nothing could find.
 >
 > `title` is also `not null`, so the "reduce to a bare identifier" fallback described in the integration note was not actually available without a schema change.
@@ -290,7 +306,7 @@ The payload holds `media_items` ids and nothing else. The titles are written thr
 
 
 
-> **Read access is public** on `media_items` and `media_cache`. Catalog metadata is not user data. This is the only unrestricted read in the schema.
+> **Read access is public** on `media_items`, `media_cache`, `provider_list_cache` and `person_cache`. Catalog metadata is not user data. These are the only unrestricted reads in the schema.
 
 ### Search — added 2026-08-14
 

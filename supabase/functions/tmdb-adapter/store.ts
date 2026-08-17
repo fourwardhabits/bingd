@@ -106,6 +106,27 @@ export async function putFacet(db: Db, mediaItemId: string, facet: string, paylo
 }
 
 /**
+ * The person equivalents of `claimFacet` and `putFacet`.
+ *
+ * Separate functions rather than a widened facet writer because `person_cache` is a
+ * separate table with a key of its own — a person is not a facet of any title. The
+ * mechanism is identical and 20260817000500 records why the table had to be.
+ */
+export async function claimPerson(db: Db, personId: number) {
+  const { data, error } = await db.rpc('tmdb_claim_person', { p_person_id: personId });
+  if (error) throw new Error(`tmdb_claim_person: ${error.message}`);
+  return data === true;
+}
+
+export async function putPerson(db: Db, personId: number, payload: unknown) {
+  const { error } = await db.rpc('tmdb_put_person', {
+    p_person_id: personId,
+    p_payload: payload,
+  });
+  if (error) throw new Error(`tmdb_put_person: ${error.message}`);
+}
+
+/**
  * Counts requests against the caller's hourly ceiling.
  *
  * 53400 is `configuration_limit_exceeded`, which api.md §8 maps to BG429 — and

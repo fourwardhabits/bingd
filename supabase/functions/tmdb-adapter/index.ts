@@ -1,14 +1,16 @@
 /**
  * tmdb-adapter — the sole holder of the TMDB key and the sole caller of TMDB (AD-8).
  *
- * Six actions, split by who may call them:
+ * Seven actions, split by who may call them:
  *
  *   search    signed-in user   Titles TMDB knows and the local catalogue does not.
  *                              Writes them through, returns them Bingd-shaped.
  *   detail    signed-in user   Fills one title in: runtime, overview, artwork,
- *                              seasons, credits.
+ *                              seasons, credits, trailers, TMDB reviews.
  *   similar   signed-in user   Caches what TMDB associates with one title, as the
  *                              `similar` facet. The candidate source behind For You.
+ *   person    signed-in user   Caches one person and the titles TMDB credits them
+ *                              on, writing those titles into the catalogue first.
  *   trending  service_role     Refreshes the four provider_list_cache lists. The
  *                              client reads that table directly; this only fills it.
  *   enrich    service_role     Drains tmdb_enrich_due. The Wikidata seed has ids
@@ -27,9 +29,11 @@ import {
   dueForEnrichment,
   dueForRefresh,
   claimFacet,
+  claimPerson,
   noteRequest,
   putFacet,
   putList,
+  putPerson,
   RateLimited,
   searchResultsFor,
   tmdbIdOf,
@@ -40,10 +44,13 @@ import {
 import {
   creditsFacet,
   videosFacet,
+  reviewsFacet,
   fromMovieDetail,
   fromSearchResult,
   fromSeasonDetail,
   fromSeriesDetail,
+  personCredits,
+  personRecord,
   seasonsOf,
   type TitleRow,
 } from './normalize.ts';
@@ -379,6 +386,10 @@ async function enrichOne(
     await upsertTitles(db, [fromMovieDetail(detail)]);
     if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
     if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
+    // Written even when the list is empty, which is the difference between "nobody
+    // has reviewed this" and "we have not looked". The screen shows nothing either
+    // way; the cache is what stops it asking again for a day.
+    if (detail.reviews) await putFacet(db, row.id, 'reviews', reviewsFacet(detail.reviews));
     return { enriched: true };
   }
 
@@ -387,7 +398,66 @@ async function enrichOne(
   if (stored) await upsertSeasons(db, stored.id, seasonsOf(detail));
   if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
   if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
+  if (detail.reviews) await putFacet(db, row.id, 'reviews', reviewsFacet(detail.reviews));
   return { enriched: true };
+}
+
+// ---------------------------------------------------------------------------
+// person
+// ---------------------------------------------------------------------------
+
+/**
+ * One person and the titles TMDB credits them on, cached in `person_cache`.
+ *
+ * A **user** action, like `detail` and `similar` and for the same reason: it is
+ * triggered by somebody opening a screen, and no schedule knows which face they
+ * tapped. Bounded on the same three sides — one page opens one person, the claim
+ * lets exactly one caller in the world refresh a given person at a time, and every
+ * provider request it makes is charged to the caller's hourly ceiling.
+ *
+ * The credited titles are written through `tmdb_upsert_titles` first, so the page
+ * renders posters, years and titles out of `media_items` like every other surface in
+ * the app, and a credit is a real catalogue row the reader can open, rank and add to
+ * their watchlist. That write is the whole reason the person page stops being a view
+ * of the reader's own catalogue: what it lists is now what TMDB knows, and opening
+ * one of them is not an import step.
+ */
+async function handlePerson(db: Db, personId: number, userId: string) {
+  // Atomic, and it subsumes the freshness check: losing means either the row is
+  // already good or somebody else is fetching it, and neither wants a second request.
+  if (!(await claimPerson(db, personId))) {
+    return { id: personId, written: 0, reason: 'cached' as const };
+  }
+
+  const charge = chargeTo(db, userId);
+  const detail = await tmdb.personDetail(personId, charge);
+  const genres = await tmdb.genreNames(charge);
+
+  const { credits, total } = personCredits(detail, genres);
+
+  // Paired by key rather than by index. `storeInOrder` filters out rows that failed
+  // to store, so its output is shorter than its input exactly when something went
+  // wrong — and a positional join would then attach every later credit's character
+  // name to the wrong film rather than dropping one.
+  const stored = await upsertTitles(db, credits.map((credit) => credit.row));
+  const idByKey = new Map(stored.map((row) => [`${row.kind}:${row.tmdbId}`, row.id]));
+
+  const rows = credits
+    .map((credit) => ({ credit, id: idByKey.get(`${credit.row.kind}:${credit.row.tmdb_id}`) }))
+    .filter((entry): entry is { credit: (typeof credits)[number]; id: string } => Boolean(entry.id));
+
+  await putPerson(db, personId, {
+    person: personRecord(detail),
+    credits: rows.map(({ credit, id }) => ({
+      id,
+      kind: credit.row.kind,
+      role: credit.role,
+      as: credit.as,
+    })),
+    credit_total: total,
+  });
+
+  return { id: personId, written: rows.length, total };
 }
 
 // ---------------------------------------------------------------------------
@@ -482,6 +552,21 @@ Deno.serve(async (req) => {
         const result = await handleSimilar(db, id, caller.id);
         if (result.reason === 'not_found') return fail('BG404', 'No such title', 404);
         return json(result);
+      }
+
+      // A user action, like detail and similar: somebody tapped a face, and no
+      // schedule knows which. The person id is TMDB's own, which is what the cast
+      // payload carries and what the route already uses.
+      case 'person': {
+        if (caller.kind !== 'user') return fail('BG403', 'person is a user action', 403);
+        const personId = Number(body.personId);
+        // A positive integer, not merely a finite number — which rules out the
+        // decimals, negatives and exponent forms `Number.isFinite` waves through and
+        // TMDB would 404 on after a charged request.
+        if (!Number.isSafeInteger(personId) || personId <= 0) {
+          return fail('BG400', 'personId must be a positive integer', 400);
+        }
+        return json(await handlePerson(db, personId, caller.id));
       }
 
       // service_role for the same reason enrich and refresh are: it spends four

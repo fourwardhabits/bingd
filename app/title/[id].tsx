@@ -18,7 +18,8 @@ import { useCommunityScore } from '@/features/title/use-community-score';
 import { useFollowingScore } from '@/features/title/use-following-score';
 import { useCredits } from '@/features/title/use-credits';
 import { useTitleEnrichment } from '@/features/title/use-enrichment';
-import { useTitleNotes, useTitleVideos } from '@/features/title/use-title-extras';
+import { TmdbReviews } from '@/features/title/TmdbReviews';
+import { useTitleNotes, useTitleReviews, useTitleVideos } from '@/features/title/use-title-extras';
 import { diagnose } from '@/lib/diagnose';
 import { heroArtwork } from '@/lib/hero';
 import { posterUri, profileUri, videoUri } from '@/lib/images';
@@ -174,6 +175,10 @@ export default function TitleScreen() {
   const seasons = useSeasons(data?.title?.kind === 'series' ? data.title.id : null);
   const videos = useTitleVideos(titleId);
   const notes = useTitleNotes(titleId);
+  // Never fetched for a season: TMDB has no season-level reviews and /tv/{id}/reviews
+  // is about the series, so the adapter writes no facet and this would be a query
+  // that can only ever return nothing. See the header of 20260817000500.
+  const reviews = useTitleReviews(data?.title?.kind === 'season' ? null : titleId);
   const community = useCommunityScore(titleId, profile.id);
   const following = useFollowingScore(titleId, profile.id);
   const watched = useWatched(profile.id);
@@ -726,6 +731,12 @@ export default function TitleScreen() {
             ))}
           </View>
         ) : null}
+
+        {/* Below Notes, deliberately. The page walks outward from the reader — their
+            own score, then the people they follow, then everybody on Bingd, then what
+            Bingd users wrote — and this is the last step, which is somebody else's
+            website. Omitted entirely when there are none, like the Videos tab. */}
+        <TmdbReviews reviews={reviews.data ?? []} />
 
         <View style={styles.footer}>
           {enriching ? (

@@ -76,6 +76,20 @@ jest.mock('@/features/title/use-enrichment', () => ({
   useTitleEnrichment: () => ({ enriching: false }),
 }));
 
+// Opening a trailer and opening a review are both handovers to the operating system,
+// and what is handed over is the assertion.
+const mockOpenURL = jest.fn();
+// `default`, because react-native's index re-exports this module's default rather
+// than the module itself — a named-export-only mock leaves `Linking` undefined.
+jest.mock('react-native/Libraries/Linking/Linking', () => ({
+  __esModule: true,
+  default: {
+    openURL: (...args: unknown[]) => mockOpenURL(...args),
+    addEventListener: () => ({ remove: () => {} }),
+    getInitialURL: () => Promise.resolve(null),
+  },
+}));
+
 const film = {
   id: 'film-1',
   kind: 'movie',
@@ -104,10 +118,55 @@ const credits = {
   },
 };
 
+/** A real eleven-character YouTube key, because `videoUri` checks the shape. */
+const videos = {
+  media_item_id: 'film-1',
+  facet: 'videos',
+  payload: {
+    results: [
+      {
+        id: 'v1',
+        key: 'YoHD9XEInc0',
+        name: 'Official Trailer',
+        type: 'Trailer',
+        official: true,
+      },
+    ],
+  },
+};
+
+/**
+ * Reviews written by TMDB's own site users, as the adapter stores them.
+ *
+ * The `truncated` flag is the one field worth explaining: the adapter keeps a
+ * generous excerpt rather than an unbounded body, and the flag travels with it so the
+ * screen offers a link to TMDB only when there is genuinely more to read there.
+ */
+const reviews = {
+  media_item_id: 'film-1',
+  facet: 'reviews',
+  payload: {
+    results: [
+      {
+        id: 'r1',
+        author: 'wandering_cinephile',
+        avatar_path: null,
+        rating: 8,
+        content: 'A film that rewards a second viewing.',
+        truncated: false,
+        created_at: '2011-02-04T12:00:00.000Z',
+        url: 'https://www.themoviedb.org/review/r1',
+      },
+    ],
+    total: 1,
+  },
+};
+
 beforeEach(() => {
   mockHeaderOptions = {};
   mockOpenId = 'film-1';
   mockPush.mockReset();
+  mockOpenURL.mockReset();
   mockRpcResults = {};
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   tableRows.media_items = [film];
@@ -293,22 +352,47 @@ describe('tabs that have nothing behind them', () => {
   });
 
   it('renders Videos once the facet has something in it', async () => {
-    tableRows.media_cache = [
-      {
-        media_item_id: 'film-1',
-        facet: 'videos',
-        payload: {
-          results: [
-            { id: 'v1', key: 'abc123', name: 'Official Trailer', type: 'Trailer', official: true },
-          ],
-        },
-      },
-    ];
+    tableRows.media_cache = [videos];
     const view = await open();
 
     await waitFor(() => expect(view.getByRole('tab', { name: 'Videos' })).toBeTruthy());
     await fireEvent.press(view.getByRole('tab', { name: 'Videos' }));
     await waitFor(() => expect(view.getByText('Official Trailer')).toBeTruthy());
+  });
+
+  it('opens a trailer on YouTube rather than playing it in the app', async () => {
+    // The stored value is a site key, not a URL, so this is the one place the two are
+    // joined — and the join is what has to be safe. `Linking.mockOpenURL` hands it to the
+    // YouTube app where one is installed and to the browser where one is not; an
+    // in-app player would be a native dependency for a single screen.
+    tableRows.media_cache = [videos];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByRole('tab', { name: 'Videos' })).toBeTruthy());
+    await fireEvent.press(view.getByRole('tab', { name: 'Videos' }));
+    await fireEvent.press(view.getByLabelText('Play Official Trailer on YouTube'));
+
+    expect(mockOpenURL).toHaveBeenCalledWith('https://www.youtube.com/watch?v=YoHD9XEInc0');
+  });
+
+  it('refuses to build a link out of something that is not a video key', async () => {
+    // A key is eleven characters of a known alphabet. Anything else is provider data
+    // that has changed shape, and the app is about to hand it to the operating
+    // system — so the row simply does not open rather than opening something else.
+    tableRows.media_cache = [
+      {
+        ...videos,
+        payload: {
+          results: [{ ...videos.payload.results[0], key: 'https://evil.example/x' }],
+        },
+      },
+    ];
+    const view = await open();
+
+    await fireEvent.press(view.getByRole('tab', { name: 'Videos' }));
+    await fireEvent.press(view.getByLabelText('Play Official Trailer on YouTube'));
+
+    expect(mockOpenURL).not.toHaveBeenCalled();
   });
 
   it('does not render a Seasons tab for a film', async () => {
@@ -327,6 +411,72 @@ describe('tabs that have nothing behind them', () => {
  * used to say "Reviews" was one person's private sentence with a magazine's word on
  * top of it.
  */
+/**
+ * TMDB Reviews — Phase E2.
+ *
+ * The naming is the specification and it is worth a test rather than a code comment,
+ * because the four things this section must never be confused with all exist on this
+ * same screen: the Community score, the Following score, Bingd users' Notes, and Feed
+ * comments. The founder's words were "never call them critic reviews, professional
+ * reviews or community reviews", and the reason is not fussiness — TMDB publishes no
+ * critics, and the word "community" already means Bingd's community two sections up.
+ */
+describe('TMDB reviews', () => {
+  it('renders under its own name, and says whose words they are', async () => {
+    tableRows.media_cache = [reviews];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('TMDB Reviews')).toBeTruthy());
+    expect(view.getByText('Written by members of themoviedb.org, not by Bingd users.')).toBeTruthy();
+    expect(view.getByText('A film that rewards a second viewing.')).toBeTruthy();
+  });
+
+  it('never calls them critic, professional or community reviews', async () => {
+    tableRows.media_cache = [reviews];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('TMDB Reviews')).toBeTruthy());
+    expect(view.queryByText(/critic/i)).toBeNull();
+    expect(view.queryByText(/professional/i)).toBeNull();
+    expect(view.queryByText(/community review/i)).toBeNull();
+  });
+
+  it('labels a rating as TMDB’s, because it looks exactly like a Bingd score', async () => {
+    // One is an opinion the author typed; the other is a position in somebody's
+    // ordered list. A bare "8" beside a review on this page would be read as the
+    // second.
+    tableRows.media_cache = [reviews];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText(/Rated 8 on TMDB/)).toBeTruthy());
+  });
+
+  it('is absent entirely when nobody has reviewed it', async () => {
+    // The same rule the Videos tab follows: a section that may have nothing is
+    // omitted rather than shown empty.
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Inception')).toBeTruthy());
+    expect(view.queryByLabelText('TMDB Reviews')).toBeNull();
+  });
+
+  it('is never shown on a season, which TMDB has no reviews for', async () => {
+    // /tv/{id}/reviews is about the series. Attributing those to "Season 2" would put
+    // somebody's words about a whole show under a heading they did not write them for,
+    // so the adapter writes no facet and the screen does not ask.
+    mockOpenId = 'season-1';
+    tableRows.media_items = [
+      { ...film, id: 'season-1', kind: 'season', title: 'Season 1', season_number: 1 },
+    ];
+    tableRows.media_cache = [{ ...reviews, media_item_id: 'season-1' }];
+
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByText('Season 1')).toBeTruthy());
+
+    expect(view.queryByLabelText('TMDB Reviews')).toBeNull();
+  });
+});
+
 describe('notes on the title', () => {
   const note = {
     user_id: 'user-2',

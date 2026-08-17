@@ -2,6 +2,7 @@
   "//": "Bingd's package.json sits three directories up, and without this Deno treats it as the dependency manifest for this function — then fails to resolve the npm: specifier in store.ts because supabase-js is installed for React Native, not for Deno. 'none' tells it to fetch npm dependencies itself, which is also what the deployed function does.",
   "nodeModulesDir": "none",
   "imports": {
-    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.58.0"
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.58.0",
+    "@std/assert": "jsr:@std/assert@1"
   }
 }

@@ -203,6 +203,35 @@ export type TmdbVideos = {
   }[];
 };
 
+/**
+ * Reviews written by TMDB's own site users, appended alongside credits and videos.
+ *
+ * They are **not** critic reviews and TMDB does not publish any. `author_details`
+ * carries an optional 0–10 rating the author chose to attach; most have none, which
+ * is why it is optional here rather than defaulted to something.
+ *
+ * `content` is unbounded — TMDB's site imposes no ceiling and some of these run to
+ * several thousand words — so `normalize.ts` truncates before storage rather than
+ * putting a thesis into `media_cache` to render four lines of it.
+ */
+export type TmdbReviews = {
+  results?: {
+    id: string;
+    author: string;
+    author_details?: {
+      name?: string | null;
+      username?: string | null;
+      avatar_path?: string | null;
+      rating?: number | null;
+    };
+    content: string;
+    created_at?: string;
+    updated_at?: string;
+    url?: string;
+  }[];
+  total_results?: number;
+};
+
 export type TmdbMovieDetail = {
   id: number;
   title: string;
@@ -217,6 +246,7 @@ export type TmdbMovieDetail = {
   popularity?: number;
   credits?: TmdbCredits;
   videos?: TmdbVideos;
+  reviews?: TmdbReviews;
 };
 
 export type TmdbSeriesDetail = {
@@ -233,6 +263,7 @@ export type TmdbSeriesDetail = {
   popularity?: number;
   credits?: TmdbCredits;
   videos?: TmdbVideos;
+  reviews?: TmdbReviews;
   seasons?: {
     id: number;
     season_number: number;
@@ -304,13 +335,16 @@ export function recommendations(
 }
 
 export function movieDetail(id: number, charge?: Charge): Promise<TmdbMovieDetail> {
-  // One HTTP request, not three: `append_to_response` is TMDB's own mechanism for
-  // exactly that, so credits and videos cost nothing extra.
-  return request(`/movie/${id}`, { append_to_response: 'credits,videos' }, charge);
+  // One HTTP request, not four: `append_to_response` is TMDB's own mechanism for
+  // exactly that, so credits, videos and reviews cost nothing extra. That is also
+  // why reviews arrive here rather than through a `reviews` action of their own —
+  // a separate endpoint would be a second charged request for data the first one
+  // will hand over for free.
+  return request(`/movie/${id}`, { append_to_response: 'credits,videos,reviews' }, charge);
 }
 
 export function seriesDetail(id: number, charge?: Charge): Promise<TmdbSeriesDetail> {
-  return request(`/tv/${id}`, { append_to_response: 'credits,videos' }, charge);
+  return request(`/tv/${id}`, { append_to_response: 'credits,videos,reviews' }, charge);
 }
 
 export function seasonDetail(
@@ -318,9 +352,54 @@ export function seasonDetail(
   seasonNumber: number,
   charge?: Charge,
 ): Promise<TmdbSeasonDetail> {
+  // No reviews. TMDB has no season-level reviews endpoint, and /tv/{id}/reviews
+  // returns reviews of the *series* — attributing those to "Season 2" would put
+  // somebody's words about a whole show under the wrong heading. See the header of
+  // 20260817000500.
   return request(
     `/tv/${seriesId}/season/${seasonNumber}`,
     { append_to_response: 'credits,videos' },
     charge,
   );
+}
+
+/**
+ * A person and everything TMDB credits them on.
+ *
+ * `combined_credits` is one appended response rather than the two separate
+ * /person/{id}/movie_credits and /tv_credits calls, for the same reason detail
+ * appends credits: it is free where they would be two more charged requests.
+ *
+ * The entries are search-shaped — `media_type`, `genre_ids`, `poster_path`,
+ * `release_date` or `first_air_date` — so `fromSearchResult` normalizes them
+ * unchanged. What they carry *in addition* is the part that belongs to the pairing
+ * rather than to the film: `character` for a cast credit, `job` for a crew one.
+ */
+export type TmdbPersonCreditEntry = TmdbSearchResult & {
+  credit_id?: string;
+  character?: string | null;
+  job?: string | null;
+  department?: string | null;
+  episode_count?: number | null;
+  vote_count?: number | null;
+};
+
+export type TmdbPersonDetail = {
+  id: number;
+  name: string;
+  biography?: string | null;
+  birthday?: string | null;
+  deathday?: string | null;
+  place_of_birth?: string | null;
+  known_for_department?: string | null;
+  profile_path?: string | null;
+  popularity?: number;
+  combined_credits?: {
+    cast?: TmdbPersonCreditEntry[];
+    crew?: TmdbPersonCreditEntry[];
+  };
+};
+
+export function personDetail(id: number, charge?: Charge): Promise<TmdbPersonDetail> {
+  return request(`/person/${id}`, { append_to_response: 'combined_credits' }, charge);
 }
