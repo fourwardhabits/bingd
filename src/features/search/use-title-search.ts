@@ -197,18 +197,29 @@ export function useTitleSearch(input: string) {
     const remote = provider.data ?? [];
 
     /**
-     * Stale local rows are dropped the moment the provider answers *this* query.
+     * Stale local rows are dropped the moment the provider *settles* on this query.
      *
      * `keepPreviousData` deliberately leaves the previous query's rows on screen while
      * the new local pass runs, which is what stops the list blinking on every keystroke.
-     * With the provider no longer waiting for the local pass, though, it can answer for
+     * With the provider no longer waiting for the local pass, though, it can settle on
      * query B while `result.data` still holds A's rows — and the merge would then put
-     * A's films above B's under the heading of a search for B. Independent review found
-     * this; it is not merely a reordering, because the A rows are wrong rather than
-     * early. Once B's own local rows arrive, `isPlaceholderData` clears and they come
-     * back in their proper place at the top.
+     * A's films under the heading of a search for B. They are wrong rather than early.
+     *
+     * Settled means answered *or* failed, not "answered with rows". The first version of
+     * this checked `remote.length`, which left A's films on screen whenever B's provider
+     * request came back empty or errored — and in the error case the new footer would
+     * then describe A's films as B's catalogue results. Independent review found that
+     * second case after finding the first.
+     *
+     * The cost is a possible blink to empty in the window between the provider settling
+     * and B's local rows arriving. That window is pathological rather than ordinary: the
+     * local pass debounces at 180ms and the provider at 800, so local has almost always
+     * answered first. Showing nothing briefly is in any case better than showing another
+     * query's films as though they were this one's.
      */
-    const local = result.isPlaceholderData && remote.length ? [] : result.data ?? [];
+    const providerSettled =
+      providerEnabled && !provider.isFetching && (provider.isFetched || provider.isError);
+    const local = result.isPlaceholderData && providerSettled ? [] : result.data ?? [];
     if (!remote.length) return local;
 
     // Local ordering wins, because search_titles ranks exact and prefix matches
@@ -224,13 +235,37 @@ export function useTitleSearch(input: string) {
       ...local.map((row) => remoteById.get(row.id) ?? row),
       ...remote.filter((row) => !seen.has(row.id)),
     ];
-  }, [result.data, result.isPlaceholderData, provider.data]);
+  }, [
+    result.data,
+    result.isPlaceholderData,
+    provider.data,
+    provider.isFetching,
+    provider.isFetched,
+    provider.isError,
+    providerEnabled,
+  ]);
 
   return {
     ...result,
     /** True while the user has typed too little to search, which is not an empty result. */
     idle: !enabled,
     results: merged,
+    /**
+     * Retries **both** passes, which is what "Try again" has to mean.
+     *
+     * The screen used to call `refetch` from the spread above — the local query's, and
+     * only the local query's. Every failure the retry button is offered for is a
+     * *provider* failure: the local pass is a table read that had already succeeded, so
+     * the button re-ran the half that worked and left the half that did not. It looked
+     * like a retry and could not have fixed anything.
+     *
+     * `provider.refetch()` reruns even with `retry: false`, which governs automatic
+     * attempts rather than deliberate ones.
+     */
+    retry: () => {
+      void result.refetch();
+      if (providerEnabled) void provider.refetch();
+    },
     /** The provider pass is supplementary, so it reports separately: local results are
      *  already on screen and must not be replaced by its spinner or its failure. */
     providerSearching: provider.isFetching,

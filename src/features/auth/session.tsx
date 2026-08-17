@@ -132,6 +132,75 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+export type RoutingInput = {
+  status: AuthState['status'];
+  /** `segments[0]` and `segments[1]`, which is all this needs of the route. */
+  group: string | undefined;
+  screen: string | undefined;
+  /** Undefined while the first-run check has not answered. */
+  tasteNeeded: boolean | undefined;
+  tastePending: boolean;
+};
+
+/**
+ * Where a user belongs, as a function rather than as an effect.
+ *
+ * Extracted so it can be tested as arithmetic. It was inline, and independent review
+ * found a defect in it that no test could have caught from outside — the hook's own
+ * `useAuth` cannot be mocked past a `requireActual`, so a test of the hook was really a
+ * test of a provider it had not built. Returning a path or `null` makes every branch
+ * reachable from a table of inputs.
+ */
+export function nextRoute({
+  status,
+  group,
+  screen,
+  tasteNeeded,
+  tastePending,
+}: RoutingInput): string | null {
+  // Not knowing where the user belongs is not a reason to move them.
+  if (status === 'loading' || status === 'error') return null;
+
+  const inAuthGroup = group === '(auth)';
+
+  if (status === 'signed-out') return inAuthGroup ? null : '/(auth)/sign-in';
+
+  if (status === 'onboarding') {
+    return !inAuthGroup || screen !== 'create-profile' ? '/(auth)/create-profile' : null;
+  }
+
+  /**
+   * **Routing sends people into the first-run flow; it never takes them out of it.**
+   *
+   * The screen owns its own exit — the two buttons on its summary, and "Not now".
+   * Letting this decide as well is the blocker independent review found: bucketing the
+   * first film makes the account stop looking new, and the router, seeing somebody on
+   * the onboarding route who no longer needed it, replaced the screen with the feed at
+   * one of five. The flow working correctly was being read as a reason to end it.
+   */
+  if (group === 'onboarding') return null;
+
+  /**
+   * Still pending is not a reason to move anyone: the flow's screen would be mounted
+   * and then replaced, and the feed would flash behind it. Waiting costs one count
+   * query on a cold start and nothing afterwards (`staleTime: Infinity`).
+   */
+  if (tastePending) return null;
+
+  if (tasteNeeded) return '/onboarding/taste';
+
+  /**
+   * `/` is the other route a ready user does not belong on. `(tabs)` is a group and
+   * contributes no path segment, so nothing serves `/` and `app/index.tsx` only waits
+   * there. At the root index `segments` is empty, which is what the undefined group
+   * means. Redirecting from that screen instead would mount the feed before this state
+   * resolves, and the feed calls `useCurrentProfile`, which throws.
+   */
+  if (inAuthGroup || group === undefined) return '/(tabs)/feed';
+
+  return null;
+}
+
 /**
  * Keeps the visible route consistent with the auth state, in one place. Screens do
  * not redirect each other: with three entry points into onboarding — cold start,
@@ -158,55 +227,19 @@ export function useAuthRouting() {
   );
 
   useEffect(() => {
-    // Not knowing where the user belongs is not a reason to move them.
-    if (auth.status === 'loading' || auth.status === 'error') return;
-
-    // Typed routes give `segments` a union of fixed-length tuples, so indexing past
-    // the shortest one is a type error rather than a runtime one. The names are what
-    // this needs, not the route type.
+    // Typed routes give `segments` a union of fixed-length tuples, so indexing past the
+    // shortest one is a type error rather than a runtime one. The names are what this
+    // needs, not the route type.
     const [group, screen] = segments as readonly (string | undefined)[];
-    const inAuthGroup = group === '(auth)';
 
-    if (auth.status === 'signed-out') {
-      if (!inAuthGroup) router.replace('/(auth)/sign-in');
-      return;
-    }
+    const destination = nextRoute({
+      status: auth.status,
+      group,
+      screen,
+      tasteNeeded: taste.data?.needed,
+      tastePending: taste.isPending,
+    });
 
-    if (auth.status === 'onboarding') {
-      if (!inAuthGroup || screen !== 'create-profile') router.replace('/(auth)/create-profile');
-      return;
-    }
-
-    const inOnboarding = group === 'onboarding';
-
-    /**
-     * A brand-new account is sent to build its taste before it is sent anywhere else.
-     *
-     * Still pending is not a reason to move anyone: the flow's own screen would be
-     * mounted and then replaced, and the feed would flash behind it. So this waits,
-     * which costs one count query on a cold start and nothing afterwards
-     * (`staleTime: Infinity`).
-     *
-     * The decision is deliberately taken from a query that the ranking writes do *not*
-     * invalidate. If it followed them it would flip to "no longer needed" as soon as
-     * the first film was placed, and the user would be thrown out of the flow they were
-     * three films into. Leaving it is an explicit act — finishing, or "Not now".
-     */
-    if (taste.isPending) return;
-
-    if (taste.data?.needed) {
-      if (!inOnboarding) router.replace('/onboarding/taste');
-      return;
-    }
-
-    // `/` is the other route a ready user does not belong on. `(tabs)` is a group and
-    // contributes no path segment, so nothing serves `/` and `app/index.tsx` only waits
-    // here. At the root index `segments` is empty, which is what the undefined group
-    // means. Redirecting from that screen instead would mount the feed before this
-    // state resolves, and the feed calls useCurrentProfile, which throws.
-    //
-    // `onboarding` joins that list: somebody who has finished or declined it is a
-    // ready user standing on a screen with nothing left to do.
-    if (inAuthGroup || inOnboarding || group === undefined) router.replace('/(tabs)/feed');
+    if (destination) router.replace(destination as never);
   }, [auth, segments, router, taste.isPending, taste.data?.needed]);
 }

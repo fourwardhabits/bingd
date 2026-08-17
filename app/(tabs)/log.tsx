@@ -61,7 +61,7 @@ export default function LogScreen() {
     isPending,
     isError,
     isPlaceholderData,
-    refetch,
+    retry,
     providerSearching,
     providerExhausted,
     providerRateLimited,
@@ -167,7 +167,7 @@ export default function LogScreen() {
         exhausted={providerExhausted}
         rateLimited={providerRateLimited}
         providerFailed={providerFailed}
-        onRetry={() => void refetch()}
+        onRetry={retry}
         onOpenTitle={openTitle}
         onOpenLog={openLog}
       />

@@ -79,7 +79,57 @@ describe('useTasteOnboarding', () => {
   });
 
   it('is not needed by somebody who already said not now', async () => {
-    mockPrefs.set('user-1.onboarding.taste.skipped', true);
+    mockPrefs.set('user-1.onboarding.taste.phase', 'skipped');
+
+    const result = await read();
+    expect(result.current.data?.needed).toBe(false);
+  });
+
+  it('is not needed by somebody who finished it', async () => {
+    mockPrefs.set('user-1.onboarding.taste.phase', 'done');
+    mockCounts.rankings = 5;
+    mockCounts.user_media = 5;
+
+    const result = await read();
+    expect(result.current.data?.needed).toBe(false);
+  });
+
+  /**
+   * The defect independent review found, as two tests.
+   *
+   * The entry test used to be "this account has nothing in it", and the flow's own first
+   * film falsifies that — `set_bucket` writes a `user_media` row. So from film one
+   * onward the account no longer looked new: the router saw somebody on the onboarding
+   * route who no longer needed it and sent them to the feed at 1 of 5, and closing the
+   * app after the first film meant reopening went straight past the rest.
+   *
+   * The entry decision is now taken once and remembered, and only progress is read live.
+   */
+  it('stays needed once the flow has started and put a film in the collection', async () => {
+    mockPrefs.set('user-1.onboarding.taste.phase', 'active');
+    mockCounts.rankings = 1;
+    mockCounts.user_media = 1;
+
+    const result = await read();
+    expect(result.current.data).toEqual({ ranked: 1, needed: true });
+  });
+
+  it('resumes a flow abandoned after one film, on the next launch', async () => {
+    // Bucketed one and closed the app before the comparison finished: a `user_media`
+    // row exists and no ranking does. Under the old test this account read as
+    // established and never saw the flow again.
+    mockPrefs.set('user-1.onboarding.taste.phase', 'active');
+    mockCounts.rankings = 0;
+    mockCounts.user_media = 1;
+
+    const result = await read();
+    expect(result.current.data?.needed).toBe(true);
+  });
+
+  it('stops being needed once five are placed', async () => {
+    mockPrefs.set('user-1.onboarding.taste.phase', 'active');
+    mockCounts.rankings = 5;
+    mockCounts.user_media = 5;
 
     const result = await read();
     expect(result.current.data?.needed).toBe(false);

@@ -1,11 +1,12 @@
 import { Stack, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { TasteBucketSheet, type TasteSubject } from '@/features/onboarding/TasteBucketSheet';
 import {
   FIRST_FIVE,
+  useBeginTasteOnboarding,
   useCompleteTasteOnboarding,
   useTasteOnboarding,
 } from '@/features/onboarding/use-taste-onboarding';
@@ -55,10 +56,17 @@ export default function TasteOnboardingScreen() {
 
   const state = useTasteOnboarding(profile.id);
   const complete = useCompleteTasteOnboarding(profile.id);
+  const begin = useBeginTasteOnboarding(profile.id);
   const ranked = state.data?.ranked ?? 0;
   const done = ranked >= FIRST_FIVE;
 
-  const { results, idle, isPending, isError, refetch, providerSearching } = useTitleSearch(input);
+  // Records that this account is in the flow, so that bucketing the first film — which
+  // makes the collection non-empty — does not make the account stop looking new.
+  useEffect(() => {
+    void begin();
+  }, [begin]);
+
+  const { results, idle, isPending, isError, retry, providerSearching } = useTitleSearch(input);
   // Films only. A series cannot be ranked at all, so offering one here is offering a
   // dead end at the exact moment somebody is deciding whether this app works.
   const films = results.filter((result) => result.kind === 'movie');
@@ -123,7 +131,7 @@ export default function TasteOnboardingScreen() {
               kind="couldNotLoad"
               title="Could not search"
               body="Search needs a connection."
-              action={{ label: 'Try again', onPress: () => void refetch() }}
+              action={{ label: 'Try again', onPress: retry }}
             />
           ) : isPending ? (
             <SkeletonRow count={5} />

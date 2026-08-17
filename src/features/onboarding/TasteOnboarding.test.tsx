@@ -197,6 +197,6 @@ describe('the first five', () => {
     await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)/feed'));
-    expect(mockPrefs.get('user-1.onboarding.taste.skipped')).toBe(true);
+    expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('skipped');
   });
 });

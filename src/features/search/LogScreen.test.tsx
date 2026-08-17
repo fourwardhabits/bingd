@@ -439,6 +439,24 @@ describe('when the wider search cannot answer', () => {
     );
   });
 
+  it('actually retries the half that failed', async () => {
+    mockSearchProvider.mockRejectedValue(new AdapterError('BG500', 'upstream failed'));
+
+    const view = await search('breaking');
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+    await settle();
+    await waitFor(() => expect(view.getByLabelText('Search wider again')).toBeTruthy());
+
+    const before = mockSearchProvider.mock.calls.length;
+    await fireEvent.press(view.getByLabelText('Search wider again'));
+
+    // The button used to call the *local* query's refetch. Every failure it is offered
+    // for is a provider failure, so it re-ran the half that had already succeeded and
+    // left the half that had not — a control that looked like a retry and could not
+    // have fixed anything.
+    await waitFor(() => expect(mockSearchProvider.mock.calls.length).toBeGreaterThan(before));
+  });
+
   it('says nothing when the wider search worked and had nothing to add', async () => {
     const view = await search('breaking');
     await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());

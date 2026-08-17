@@ -21,15 +21,43 @@ import { supabase } from '@/lib/supabase';
  */
 export const FIRST_FIVE = 5;
 
-/** Set when somebody chooses to get on with it. Device-local, deliberately — see below. */
-const SKIPPED_PREF = 'onboarding.taste.skipped';
+/**
+ * Which phase of the first-run flow this device believes the account is in.
+ *
+ * This exists because "is this account new" stops being true the moment the flow does
+ * its job. The first film bucketed writes a `user_media` row, so a test of "has nothing
+ * in it" answers *no* from film one onward — and independent review found exactly what
+ * that costs: the router saw an account that no longer needed onboarding, sitting on the
+ * onboarding route, and sent it to the feed at 1 of 5. Closing the app after the first
+ * film had the same effect on reopening, which is the resume requirement failing.
+ *
+ * So the *entry* decision is taken once and then remembered, and only progress is read
+ * live afterwards:
+ *
+ * | phase | meaning |
+ * |---|---|
+ * | absent | never decided — ask the collection, once |
+ * | `active` | in the flow; stay until five are placed or they leave |
+ * | `done` | finished |
+ * | `skipped` | said not now |
+ *
+ * Device-local, like the skip it replaces, and with the same trade recorded at
+ * `useCompleteTasteOnboarding`: on a second device an account halfway through is read as
+ * established and is not offered the rest. That is a worse outcome than a column would
+ * give and a much smaller one than a schema change to the account table at this stage.
+ */
+const PHASE_PREF = 'onboarding.taste.phase';
+
+export type TastePhase = 'active' | 'done' | 'skipped';
 
 export type TasteOnboarding = {
   /** Ranked movies, which is what the flow counts toward `FIRST_FIVE`. */
   ranked: number;
-  /** True when this account has never ranked or logged anything, and has not skipped. */
+  /** True when this account belongs in the flow — see `PHASE_PREF`. */
   needed: boolean;
 };
+
+const phaseKey = (userId: string) => `${userId}.${PHASE_PREF}`;
 
 async function readState(userId: string): Promise<TasteOnboarding> {
   const [{ count: rankedCount, error: rankedError }, { count: loggedCount, error: loggedError }] =
@@ -50,9 +78,19 @@ async function readState(userId: string): Promise<TasteOnboarding> {
 
   const ranked = rankedCount ?? 0;
   const logged = loggedCount ?? 0;
-  const skipped = (await readPref<boolean>(`${userId}.${SKIPPED_PREF}`)) === true;
+  const phase = await readPref<TastePhase>(phaseKey(userId));
 
-  return { ranked, needed: !skipped && ranked === 0 && logged === 0 };
+  if (phase === 'done' || phase === 'skipped') return { ranked, needed: false };
+
+  // Already in it: stay until five are placed. Read live, so a film ranked in an
+  // earlier session counts and a failed placement does not.
+  if (phase === 'active') return { ranked, needed: ranked < FIRST_FIVE };
+
+  // Never decided. This is the only place the collection decides, and it decides once:
+  // any ranking or any logged title at all means an account that has been used, and
+  // dropping that person into "build your taste" is the app telling somebody with a
+  // collection that it has never met them.
+  return { ranked, needed: ranked === 0 && logged === 0 };
 }
 
 /**
@@ -98,11 +136,24 @@ export function useCompleteTasteOnboarding(userId: string) {
 
   return useCallback(
     async ({ skipped }: { skipped: boolean }) => {
-      if (skipped) {
-        await writePref(`${userId}.${SKIPPED_PREF}`, true).catch(() => {});
-      }
+      await writePref<TastePhase>(phaseKey(userId), skipped ? 'skipped' : 'done').catch(() => {});
       await queryClient.invalidateQueries({ queryKey: queryKeys.tasteOnboarding(userId) });
     },
     [queryClient, userId],
   );
+}
+
+/**
+ * Marks the account as in the flow, on arrival.
+ *
+ * Written from the screen rather than from `readState`, so the query stays a read. It is
+ * what makes the rest of the flow — and a resume after the app is closed — independent
+ * of the "has nothing in it" test that the first film invalidates.
+ */
+export function useBeginTasteOnboarding(userId: string) {
+  return useCallback(async () => {
+    const phase = await readPref<TastePhase>(phaseKey(userId)).catch(() => null);
+    if (phase) return;
+    await writePref<TastePhase>(phaseKey(userId), 'active').catch(() => {});
+  }, [userId]);
 }
