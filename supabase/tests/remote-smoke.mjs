@@ -260,6 +260,15 @@ expectRefused(
   'anon cannot execute set_watch_goal',
   await rpc('set_watch_goal', { p_year: 2026, p_category: 'movies', p_target: 1 }),
 );
+// Added 2026-08-17 with the Following score. It is `authenticated` only because
+// `auth.uid()` is its entire population filter, so anon could only ever receive the
+// empty answer — but the grant is what makes that a decision rather than an accident.
+// This probe does double duty: `refused` proves the signature resolved, so it also
+// asserts the migration is actually on the deployed database and not merely on disk.
+expectRefused(
+  'anon cannot execute following_score',
+  await rpc('following_score', { p_media_item_id: NIL }),
+);
 
 // Own-read only, and a stranger is not the owner. An empty array is the correct
 // answer under RLS; a row would mean the policy is not doing its job.
