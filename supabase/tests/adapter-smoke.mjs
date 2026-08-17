@@ -224,24 +224,48 @@ const rest = async (path) => {
   failed += 1;
   console.log(`FAIL          the run itself — ${cause.message}`);
 } finally {
+  // Each step independently caught, so one failing cannot stop the next. Independent
+  // review 15b: a rejected `delete_account` used to prevent the admin deletion
+  // entirely, which is the one path that guarantees the account goes.
+  const attempt = async (what, fn) => {
+    try {
+      await fn();
+    } catch (cause) {
+      failed += 1;
+      console.log(`FAIL          cleanup: ${what} — ${cause.message}`);
+    }
+  };
+
   if (auth) {
-    await fetch(`${url}/rest/v1/rpc/delete_account`, {
-      method: 'POST',
-      headers: auth,
-      body: JSON.stringify({ p_confirmation: `adp_${stamp}` }),
-    });
+    await attempt('delete the probe account', () =>
+      fetch(`${url}/rest/v1/rpc/delete_account`, {
+        method: 'POST',
+        headers: auth,
+        body: JSON.stringify({ p_confirmation: `adp_${stamp}` }),
+      }),
+    );
   }
-  if (user?.id) {
-    const res = await fetch(`${url}/auth/v1/admin/users/${user.id}`, {
-      method: 'DELETE',
+
+  // By email rather than by id, so this also reaches an account whose creation
+  // response was never parseable. The email is chosen before the request is made.
+  await attempt('sweep the probe account', async () => {
+    const res = await fetch(`${url}/auth/v1/admin/users?filter=${encodeURIComponent(email)}`, {
       headers: admin,
     });
-    // 404 is the ordinary case: `delete_account` already removed it.
-    if (!res.ok && res.status !== 404) {
-      failed += 1;
-      console.log(`FAIL          could not clean up the probe account — ${res.status}`);
+    if (!res.ok) throw new Error(`lookup returned ${res.status}`);
+    const { users = [] } = await res.json();
+    for (const found of users) {
+      // Matched exactly rather than on the partial filter, so this can never delete an
+      // account that merely shares a prefix with the probe address.
+      if (found.email !== email) continue;
+      const del = await fetch(`${url}/auth/v1/admin/users/${found.id}`, {
+        method: 'DELETE',
+        headers: admin,
+      });
+      if (!del.ok && del.status !== 404) throw new Error(`delete returned ${del.status}`);
     }
-  }
+  });
+  void user;
 }
 
 console.log(`\n${passed}/${passed + failed} passed, ${failed} failed`);

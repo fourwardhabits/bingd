@@ -178,9 +178,54 @@ const stamp = Date.now().toString(36).slice(-6);
  */
 const created = [];
 
+/**
+ * Every email this run has used, whether or not its id was ever readable.
+ *
+ * Independent review 15b: the server can create the account and the *response* still
+ * fail to parse — a truncated body, a proxy that ate it — and then nothing knows the
+ * id. The email is chosen by this file before the request is made, so it is the one
+ * handle that exists no matter what comes back.
+ */
+const emails = [];
+
+/** Runs a cleanup step so that its failure cannot stop the next one. */
+async function attempt(what, fn) {
+  try {
+    await fn();
+  } catch (cause) {
+    failed += 1;
+    failures.push(`cleanup: ${what} — ${cause.message}`);
+  }
+}
+
+/** Deletes any account still holding one of this run's emails. */
+async function sweepByEmail(email) {
+  const res = await fetch(`${url}/auth/v1/admin/users?filter=${encodeURIComponent(email)}`, {
+    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+  });
+  if (!res.ok) throw new Error(`could not look up ${email}: ${res.status}`);
+  const { users = [] } = await res.json();
+
+  for (const user of users) {
+    // Matched exactly rather than on the partial filter, so this can never delete an
+    // account that merely shares a prefix with a test address.
+    if (user.email !== email) continue;
+    const del = await fetch(`${url}/auth/v1/admin/users/${user.id}`, {
+      method: 'DELETE',
+      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+    });
+    if (!del.ok && del.status !== 404) {
+      throw new Error(`could not delete ${email}: ${del.status}`);
+    }
+  }
+}
+
 async function createAccount(label) {
   const email = `bingd_accept_${label}_${stamp}@example.com`;
   const password = `Accept-${uuid()}`;
+  // Before the request, not after. This is the handle that survives a response nobody
+  // can parse.
+  emails.push(email);
 
   const response = await fetch(`${url}/auth/v1/admin/users`, {
     method: 'POST',
@@ -661,22 +706,30 @@ try {
   failures.push(`the run itself: ${cause.message}`);
   console.error(`\nFAILED: ${cause.message}`);
 } finally {
-  await destroyAccount(a);
-  await destroyAccount(b);
+  // Three passes, each step independently caught. Independent review 15b: a teardown
+  // that throws used to abort every cleanup after it, so one network blip could leave
+  // an account behind in a project two people are about to test against — which is
+  // worse than any failing check in this file.
+  await attempt('delete A', () => destroyAccount(a));
+  await attempt('delete B', () => destroyAccount(b));
 
-  // The backstop, from the ids rather than from the objects. Anything still standing
-  // here is an account a failure left behind, and a leaked test account in a project
-  // two people are about to test against is worse than a failing check.
+  // By id, for everything whose creation response was readable.
   for (const id of created) {
-    const res = await fetch(`${url}/auth/v1/admin/users/${id}`, {
-      method: 'DELETE',
-      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+    await attempt(`sweep auth user ${id}`, async () => {
+      const res = await fetch(`${url}/auth/v1/admin/users/${id}`, {
+        method: 'DELETE',
+        headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+      });
+      // 404 is the ordinary case: `delete_account` already removed it.
+      if (!res.ok && res.status !== 404) {
+        throw new Error(`${res.status} ${await res.text()}`);
+      }
     });
-    // 404 is the ordinary case: `delete_account` already removed it.
-    if (!res.ok && res.status !== 404) {
-      failed += 1;
-      failures.push(`could not clean up auth user ${id}: ${res.status} ${await res.text()}`);
-    }
+  }
+
+  // And by email, which catches the account whose id was never readable at all.
+  for (const email of emails) {
+    await attempt(`sweep ${email}`, () => sweepByEmail(email));
   }
 }
 
