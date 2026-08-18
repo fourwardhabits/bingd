@@ -63,6 +63,35 @@ const MEDIA = [
   'parent:parent_id(title, genres, original_language)',
 ].join(', ');
 
+/**
+ * Mutual Mania's read, and the `!inner` on it is the privacy control.
+ *
+ * Mutuality is a property of a pair, so both directions have to arrive and be
+ * intersected — this cannot be a count. Which makes the question "who is allowed to be
+ * in the intersection", and the answer is not in this file: each embed resolves through
+ * the foreign key to `profiles`, whose policy is `can_i_view(id)`, so **an inner join
+ * drops a suspended or otherwise unreachable account** rather than this code having to
+ * know what "unreachable" means.
+ *
+ * **The two `!inner`s are load-bearing and were measured, not assumed.** `follows_read`
+ * admits any row the caller is an end of, so it does no filtering here whatsoever — the
+ * embeds are the only thing standing between a suspended account and Mutual Mania's
+ * numerator. Drop them and the join becomes a left join: the row still arrives, with
+ * `followee: null`, `personFrom` renders it "Someone on Bingd", and it **still counts**.
+ * That exact contrast is probed against the deployed database in
+ * `supabase/tests/award-privacy.mjs`, which reads this constant out of this file so that
+ * removing an `!inner` fails a test rather than quietly widening a count.
+ *
+ * The other two eligibility conditions need nothing here, and it is worth saying why:
+ * a **block** deletes the follow rows in both directions (`block`, 20260817000200), and
+ * a **deleted** account takes them with it (`follows.follower_id references profiles on
+ * delete cascade`). Neither leaves anything to intersect.
+ */
+export const FOLLOWS_SELECT =
+  'follower_id, followee_id, state, ' +
+  'follower:follower_id!inner(id, username, display_name, avatar_path), ' +
+  'followee:followee_id!inner(id, username, display_name, avatar_path)';
+
 type MediaRow = {
   kind: string;
   title: string | null;
@@ -116,11 +145,20 @@ type ProfileRow = {
 /**
  * A person, or the honest absence of one.
  *
- * An embed onto `profiles` is filtered by `can_i_view`, so an account that has blocked
- * the reader, or been suspended, or deleted, simply does not come back. That must not
- * silently shrink a count — the follow is still a follow, the recommendation was still
- * sent — so a missing profile becomes a row that says so rather than no row at all.
- * Nothing about the hidden account is disclosed, including whether it ever existed.
+ * A plain embed onto `profiles` is filtered by `can_i_view`, so an account that has
+ * blocked the reader, or been suspended, is returned as `null` rather than omitted. For
+ * a **historical** fact that must not silently shrink — the recommendation *was* sent,
+ * the invitee *did* join — a missing profile becomes a row that says so rather than no
+ * row at all. Nothing about the hidden account is disclosed, including whether it ever
+ * existed.
+ *
+ * **This fallback is for history, and Mutual Mania deliberately does not use it.** A
+ * mutual follow is a claim about the present: "you and this person follow each other".
+ * A suspended account is not a current mutual, so it must leave the count and not merely
+ * lose its name — which is why that one read uses `!inner` (`FOLLOWS_SELECT`) and reaches
+ * this function only for pairs that are genuinely eligible. Applying the present-tense
+ * rule to the historical counts would be the mirror defect: a recommendation you sent
+ * last month did not un-happen because the recipient was suspended today.
  */
 const personFrom = (id: string, profile: ProfileRow | null): PersonRef =>
   profile?.username
@@ -217,22 +255,9 @@ async function readFacts(userId: string): Promise<AwardFacts> {
         .eq('feed_events.actor_id', userId)
         .neq('user_id', userId),
 
-      /**
-       * Mutual follows, and this one cannot be a count: mutuality is a property of a
-       * pair, so both directions have to arrive and be intersected. The two embeds are
-       * the filter — each resolves through the foreign key to `profiles`, whose policy
-       * is `can_i_view(id)`, so an inner join drops a suspended or unreachable account
-       * rather than this code having to know what "unreachable" means. A block deletes
-       * the follow rows on both sides (`block`, 20260813001700), so a blocked pair has
-       * nothing left to intersect.
-       */
       supabase
         .from('follows')
-        .select(
-          'follower_id, followee_id, state, ' +
-            'follower:follower_id!inner(id, username, display_name, avatar_path), ' +
-            'followee:followee_id!inner(id, username, display_name, avatar_path)',
-        )
+        .select(FOLLOWS_SELECT)
         .eq('state', 'approved')
         .or(`follower_id.eq.${userId},followee_id.eq.${userId}`),
     ]);

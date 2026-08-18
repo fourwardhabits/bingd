@@ -246,6 +246,106 @@ describe('every award is explainable', () => {
   });
 });
 
+/**
+ * A big collection must not be a big render.
+ *
+ * The founder's stated worst case is 1,000 movies and 500 ranked titles, and Movie
+ * Muncher's gold tier is exactly 1,000 — so the sheet's ceiling and the collection's are
+ * the same number. A `ScrollView` mounts every child it is handed, `maxHeight` bounds only
+ * the viewport, and each title row carries a poster: before the cap, opening that award
+ * mounted a thousand rows and started a thousand image requests in one frame.
+ *
+ * These tests are about the *mount*, which is why they count rendered rows rather than
+ * asserting a number in the header. The header's number is the award's own and is proved
+ * elsewhere — and the point of the cap is precisely that the two are allowed to differ,
+ * as long as the sheet says so.
+ */
+describe('a long breakdown is revealed in pages', () => {
+  /**
+   * A title row, by the label the row announces itself with.
+   *
+   * Not `getByText`: `TitleRow` draws the year inside the same `Text` as the title, so
+   * "Film 0" renders as "Film 0 (2020)" and an anchored text match silently finds
+   * nothing. The accessibility label is the exact string and is what a screen reader
+   * would read out, which makes it the better assertion anyway.
+   */
+  const film = (n: number) => screen.queryByLabelText(`Film ${n}, 2020`);
+
+  /**
+   * Presses a `Button` by its role.
+   *
+   * `Button` wraps its label in a `View` with `pointerEvents="none"`, so pressing the
+   * text node does nothing at all — the press is swallowed and the test goes on to
+   * assert against a sheet that never changed. Found the hard way: the first version of
+   * these tests pressed the text and failed three assertions downstream for a reason
+   * that looked like a pagination bug.
+   */
+  const press = (name: string) => fireEvent.press(screen.getByRole('button', { name }));
+
+  it('mounts a page of rows rather than the whole collection', async () => {
+    mockTables.user_media = movies(400);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Movie Muncher');
+
+    // Film 0..49 are mounted; Film 50 onward is not, which is the whole point: the
+    // ScrollView would otherwise hold four hundred rows and four hundred posters.
+    expect(film(0)).toBeTruthy();
+    expect(film(49)).toBeTruthy();
+    expect(film(50)).toBeNull();
+    expect(film(399)).toBeNull();
+  });
+
+  it('says how many of how many, rather than hiding behind "more"', async () => {
+    mockTables.user_media = movies(400);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Movie Muncher');
+
+    // The count above is 400; the list shows 50. A reader who counts the rows to check
+    // the badge is owed the reason they do not match.
+    expect(screen.getByText('Showing 50 of 400')).toBeTruthy();
+  });
+
+  it('reveals the next page on request, and stops offering when there are none', async () => {
+    mockTables.user_media = movies(120);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Movie Muncher');
+
+    press('Show 50 more');
+    await waitFor(() => expect(film(99)).toBeTruthy());
+    expect(screen.getByText('Showing 100 of 120')).toBeTruthy();
+
+    // The last page is short, and the control says so rather than over-promising.
+    press('Show 20 more');
+    await waitFor(() => expect(film(119)).toBeTruthy());
+    expect(screen.queryByText(/^Showing /)).toBeNull();
+    expect(screen.queryByText(/^Show \d+ more$/)).toBeNull();
+  });
+
+  it('offers nothing to expand when the whole breakdown already fits', async () => {
+    mockTables.user_media = movies(12);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Movie Muncher');
+
+    expect(film(11)).toBeTruthy();
+    expect(screen.queryByText(/^Showing /)).toBeNull();
+    expect(screen.queryByText(/^Show \d+ more$/)).toBeNull();
+  });
+
+  it('starts a freshly opened award at the first page rather than the last one expanded', async () => {
+    mockTables.user_media = movies(400);
+    await open({ onPressTitle: () => {} });
+
+    await drillInto('Movie Muncher');
+    press('Show 50 more');
+    await waitFor(() => expect(screen.getByText('Showing 100 of 400')).toBeTruthy());
+    press('Close');
+
+    await waitFor(() => expect(screen.queryByText(/^Showing /)).toBeNull());
+    await drillInto('Movie Muncher');
+    expect(screen.getByText('Showing 50 of 400')).toBeTruthy();
+  });
+});
+
 describe('the breakdowns', () => {
   it('Movie Muncher lists the films, with the date where there is one', async () => {
     mockTables.user_media = [

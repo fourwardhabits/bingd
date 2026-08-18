@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { avatarUri, posterUri } from '@/lib/images';
@@ -6,6 +7,33 @@ import { theme } from '@/ui/tokens';
 
 import type { AwardProgress } from './progress';
 import type { Breakdown, BreakdownRow } from './tracks';
+
+/**
+ * How many rows are mounted before the reader asks for more.
+ *
+ * **The cap is on what is *mounted*, not on what is scrollable.** `maxHeight: 380` below
+ * bounds the viewport and nothing else: a `ScrollView` mounts every child it is given, so
+ * before this cap existed, opening Movie Muncher on a collection at its gold tier mounted
+ * **a thousand `TitleRow`s and started a thousand poster requests** in one frame. That is
+ * the founder's stated worst case (1,000 movies, 500 ranked titles) and it is a
+ * multi-second freeze on a mid-range Android for a sheet nobody scrolls to the bottom of.
+ *
+ * Fifty is about seven viewports of scrolling — far enough that reaching the button is a
+ * deliberate act, small enough that the mount is cheap.
+ *
+ * **Not virtualisation, deliberately.** `FlashList` is already a dependency and would be
+ * the right answer for a screen; inside a `Modal`, in a container whose height is a
+ * `maxHeight` rather than a fixed one, it needs a definite height to measure against, and
+ * getting that wrong is a blank sheet. This is a release-hardening pass with no physical
+ * iOS validation behind it, so the fix that cannot regress the layout wins over the one
+ * that is theoretically neater.
+ *
+ * **The award's number is untouched by any of this.** `breakdownTotal` is computed from
+ * `contributions` in `tracks.ts`, not from what this component draws, so revealing rows
+ * in pages cannot put the sheet out of step with the badge above it — the invariant test
+ * in `awards.test.ts` measures the data, not the render.
+ */
+const PAGE = 50;
 
 export type AwardBreakdownSheetProps = {
   award: AwardProgress;
@@ -53,7 +81,35 @@ export function AwardBreakdownSheet({
   onPressProfile,
   onClose,
 }: AwardBreakdownSheetProps) {
-  const rows = breakdown.sections.flatMap((section) => section.rows);
+  const total = breakdown.sections.reduce((sum, section) => sum + section.rows.length, 0);
+  const [shown, setShown] = useState(PAGE);
+
+  /**
+   * The revealed prefix, spent across the sections in order.
+   *
+   * Sections are kept rather than flattened because Two-Screen Life's two halves are the
+   * explanation of its arithmetic — losing the headings would cost the one thing that
+   * sheet exists to show. A section past the budget draws nothing at all, including its
+   * heading: a bare "TV seasons" label with no rows under it reads as "you have none",
+   * which is a different and false claim.
+   */
+  const visible = useMemo(
+    () =>
+      breakdown.sections.map((section, index) => {
+        // Each section's own share of the budget, from how many rows precede it. A
+        // running counter reassigned inside the map would be the shorter spelling and
+        // the React Compiler rejects it — correctly, since a memo body that mutates a
+        // closure variable is not safe to re-run. Quadratic in the number of *sections*,
+        // of which no award has more than two.
+        const before = breakdown.sections
+          .slice(0, index)
+          .reduce((sum, earlier) => sum + earlier.rows.length, 0);
+        return { section, rows: section.rows.slice(0, Math.max(0, shown - before)) };
+      }),
+    [breakdown.sections, shown],
+  );
+
+  const remaining = total - Math.min(shown, total);
 
   return (
     <Sheet visible onClose={onClose} label={`What counts toward ${award.title}`}>
@@ -67,7 +123,7 @@ export function AwardBreakdownSheet({
       </View>
 
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-        {rows.length === 0 ? (
+        {total === 0 ? (
           <View style={styles.empty}>
             <EmptyState
               kind="nothingYet"
@@ -77,40 +133,61 @@ export function AwardBreakdownSheet({
             />
           </View>
         ) : (
-          breakdown.sections.map((section, index) => (
-            <View key={section.label ?? `section-${index}`}>
-              {/* Only where an award genuinely has two halves — Two-Screen Life. The
-                  value beside the label is that side's own cap, which is what makes
-                  the capped arithmetic self-evident without a paragraph about it. */}
-              {section.label ? (
-                <View style={styles.sectionHead}>
-                  <Text variant="footnote" tone="secondary" style={styles.sectionLabel}>
-                    {section.label}
-                  </Text>
-                  {section.value ? (
-                    <Text variant="footnote" tone="secondary">
-                      {section.value}
+          <>
+            {visible.map(({ section, rows }, index) =>
+              // A section wholly past the budget is omitted rather than drawn empty.
+              rows.length === 0 && section.rows.length > 0 ? null : (
+                <View key={section.label ?? `section-${index}`}>
+                  {/* Only where an award genuinely has two halves — Two-Screen Life. The
+                      value beside the label is that side's own cap, which is what makes
+                      the capped arithmetic self-evident without a paragraph about it. */}
+                  {section.label ? (
+                    <View style={styles.sectionHead}>
+                      <Text variant="footnote" tone="secondary" style={styles.sectionLabel}>
+                        {section.label}
+                      </Text>
+                      {section.value ? (
+                        <Text variant="footnote" tone="secondary">
+                          {section.value}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+
+                  {section.rows.length === 0 && section.label ? (
+                    <Text variant="footnote" tone="tertiary" style={styles.sectionEmpty}>
+                      Nothing on this side yet.
                     </Text>
                   ) : null}
+
+                  {rows.map((row) => (
+                    <Row
+                      key={row.key}
+                      row={row}
+                      onPressTitle={onPressTitle}
+                      onPressProfile={onPressProfile}
+                    />
+                  ))}
                 </View>
-              ) : null}
+              ),
+            )}
 
-              {section.rows.length === 0 && section.label ? (
-                <Text variant="footnote" tone="tertiary" style={styles.sectionEmpty}>
-                  Nothing on this side yet.
+            {/* Says the total rather than hiding behind "more", because the number above
+                is the whole point of the sheet and a reader who counts the rows to check
+                it deserves to be told why they do not add up yet. */}
+            {remaining > 0 ? (
+              <View style={styles.more}>
+                <Text variant="footnote" tone="secondary">
+                  {`Showing ${Math.min(shown, total).toLocaleString('en')} of ${total.toLocaleString('en')}`}
                 </Text>
-              ) : null}
-
-              {section.rows.map((row) => (
-                <Row
-                  key={row.key}
-                  row={row}
-                  onPressTitle={onPressTitle}
-                  onPressProfile={onPressProfile}
+                <Button
+                  label={`Show ${Math.min(PAGE, remaining).toLocaleString('en')} more`}
+                  kind="secondary"
+                  onPress={() => setShown((count) => count + PAGE)}
                 />
-              ))}
-            </View>
-          ))
+              </View>
+            ) : null}
+          </>
         )}
       </ScrollView>
 
@@ -217,6 +294,13 @@ const styles = StyleSheet.create({
   },
   sectionLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
   sectionEmpty: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
+  more: {
+    alignItems: 'center',
+    gap: theme.space[2],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[1],
+  },
   plain: {
     flexDirection: 'row',
     alignItems: 'center',

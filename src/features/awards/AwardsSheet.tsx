@@ -44,9 +44,8 @@ export type AwardsSheetProps = {
  * with no migration behind it — and what keeps an award from ever disagreeing with the
  * collection it describes.
  *
- * What a row *does* have behind it, as of this pass, is the list of titles that produced
- * its number — for the twelve tracks where that number is a set of titles. See
- * `AwardTitlesSheet`.
+ * What a row *does* have behind it is the rows that produced its number, for **all
+ * twenty** tracks rather than the twelve of the first pass. See `AwardBreakdownSheet`.
  */
 export function AwardsSheet({
   userId,
@@ -132,6 +131,9 @@ export function AwardsSheet({
             it. */}
       {open && openBreakdown ? (
         <AwardBreakdownSheet
+          // Remounts per award, so the "Show 50 more" reveal starts fresh rather than
+          // carrying one award's expansion into the next one opened.
+          key={open.trackKey}
           award={open}
           breakdown={openBreakdown}
           onPressTitle={
