@@ -366,3 +366,83 @@ None of these blocks the checklist, and all of them block the store:
   wording obligation is met; the logo is not.
 
 All four are Beta Hardening.
+
+---
+
+## Friend Recommendations — the short list, 2026-08-17
+
+**Do this section first.** It is the only part of the app that changed since the last
+re-smoke, and it is the whole of what this run added. Everything above it was certified at
+`76c38e7` and is unchanged.
+
+Baseline for this section, and it supersedes the three items at the top of this file:
+
+- [ ] `npx supabase migration list --linked` shows local and remote in step through
+      **`20260817001300`**.
+- [ ] `npx supabase functions list` shows `tmdb-adapter` at **version 6 or later**.
+      It was **not** redeployed this run and does not need to be.
+- [ ] Build fingerprint in **Settings › Build** matches the build under test.
+
+You need **two accounts on one device or two devices**, A and B, and they must follow each
+other. A one-way follow is the case half of this section is about.
+
+### Recommend
+
+- [ ] Open any film. The action row reads **Watchlist · Recommend · Share**, in that order.
+- [ ] Open a **series** (not a season). There is **no Recommend** on it.
+- [ ] Tap **Recommend** on a film. The sheet is headed `Recommend <the film>` and lists
+      only people who follow you back. Somebody you follow one way must **not** be there.
+- [ ] Tap a person. It sends on that one tap: no second Send button, no checkboxes, no
+      spinner left behind. The sheet closes and the title screen says
+      `Recommended to <name>`.
+- [ ] Tap **Recommend** again on the same film and send to the same person. It succeeds
+      quietly. Their inbox must **not** ring a second time (check on B).
+- [ ] Open a **season** and recommend it. The sheet heading must read
+      `<Show> — Season N` and never a bare `Season N`.
+- [ ] ⚠ **Share with someone not on Bingd** opens the OS share sheet. Read the message it
+      produces: it must carry the title link *and* a `bingd.app/i/…` invite link. The
+      invite page itself is not built and says so — that is expected.
+
+### On B's device
+
+- [ ] The bell carries an unread count and the inbox row reads
+      `<A> recommended a movie` with the title on the line beneath.
+- [ ] Tapping that row opens **the title**, not A's profile.
+- [ ] **Recommendations tab → Sent to you** carries a count on the tab itself.
+- [ ] The row shows the poster, the title, `<A> recommended this · 2d ago`, and a
+      bookmark. Unopened rows are tinted and carry a dot.
+- [ ] Tap the row. It opens the title, and on returning that row is no longer marked new.
+      Unopened rows stay above opened ones.
+- [ ] Tap the bookmark on a row. It fills, and the title appears in Collection → Watchlist.
+
+### Filters, shared across both tabs
+
+- [ ] On **For you**, apply a Genre filter. Switch to **Sent to you**. The filter is still
+      on, the chip still reads `Filters · 1`, and only matching recommendations are shown.
+- [ ] Filter to something nothing matches. The empty state says so and there is exactly
+      **one** `Clear all` on screen.
+- [ ] `Clear all` restores both tabs.
+
+### Follow back
+
+- [ ] From A, follow B (B must not already follow A). On B, the inbox row for that follow
+      carries a **Follow back** button.
+- [ ] Tap it. It succeeds and the button disappears.
+- [ ] Now that they are mutual, the row must **not** offer Follow back again.
+- [ ] Make B private, request a follow from a third account, and check the request row
+      shows **Approve / Decline** and **no Follow back beside them**.
+
+### Who I watched with — narrowed this run
+
+- [ ] Log a watch and open **Who I watched with**. Only people who follow you back are
+      listed. Somebody you follow one way is absent.
+- [ ] ⚠ **If you had a companion tagged before this build**, open that watch's picker.
+      That person must still be listed and still ticked, even if the follow has since
+      lapsed, and you must be able to save the list. This is the grandfather clause and
+      it is the one thing here that cannot be verified without a pre-existing tag.
+
+### What is not testable here, and is not a defect
+
+- The invite link resolves to nothing. There is no web property; `app/i/[token].tsx` says
+  invitations are not active in this build. Redemption and activation are Beta Hardening.
+- No push notification arrives. Delivery is dark by design (AD-10).

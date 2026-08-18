@@ -140,6 +140,7 @@ export default function AccountScreen() {
                 'Every ranking, watch, watchlist entry and note',
                 'Your follows, followers and blocks, in both directions',
                 'Your activity, reactions and comments — including comments on other people’s activity',
+                'Recommendations you sent and were sent, and your invite link',
                 'Companion tags naming you, and everything in your notifications',
                 'Your goals, every picture you have uploaded, and anything derived about you',
               ].map((line) => (

@@ -140,6 +140,20 @@ describe('the Settings hub', () => {
     ).toBeTruthy();
   });
 
+  it('names themoviedb.org as the source, and says what TMDB supplies', async () => {
+    // TMDB's terms ask for three things in an About section: the notice above,
+    // unparaphrased; a visible link to themoviedb.org; and a clear indication of which
+    // data is theirs. The approved logo is the fourth and is not in the repository —
+    // recorded for Beta Hardening rather than approximated, because a redrawn logo
+    // would breach the same terms this section exists to satisfy.
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    expect(view.getByText('themoviedb.org')).toBeTruthy();
+    expect(
+      view.getByText(/Artwork, cast and title details come from TMDB/),
+    ).toBeTruthy();
+  });
+
   it('surfaces the number of people waiting on the reader', async () => {
     // The only number on the screen, and the only thing in the app that is genuinely
     // a task: a reaction is news, a request is somebody waiting.

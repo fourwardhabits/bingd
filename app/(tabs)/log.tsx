@@ -481,7 +481,7 @@ function Results({
         <EmptyState
           kind="nothingMatches"
           title="Nothing in this filter"
-          body="There are results — just not of this kind. Try All."
+          body="There are results, just not of this kind. Try All."
         />
       );
     }
@@ -557,7 +557,7 @@ function Results({
           <View style={styles.status}>
             <Text variant="footnote" tone="secondary">
               {rateLimited
-                ? 'Too many searches to look wider just now — these are from your catalogue only.'
+                ? 'Too many searches to look wider just now. These are from your catalogue only.'
                 : 'The wider search did not answer, so this may not be everything.'}
             </Text>
             <Pressable

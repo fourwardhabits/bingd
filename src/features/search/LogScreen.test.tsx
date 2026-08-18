@@ -434,7 +434,7 @@ describe('when the wider search cannot answer', () => {
 
     await waitFor(() =>
       expect(
-        view.getByText('Too many searches to look wider just now — these are from your catalogue only.'),
+        view.getByText('Too many searches to look wider just now. These are from your catalogue only.'),
       ).toBeTruthy(),
     );
   });

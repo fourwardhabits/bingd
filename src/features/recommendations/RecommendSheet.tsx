@@ -135,7 +135,7 @@ export function RecommendSheet({
             kind="nothingYet"
             compact
             title="Nobody to recommend to yet"
-            body="You can recommend to people who follow you back. Send them the link below to get started."
+            body="You can recommend to anyone who follows you back. Send a friend the link below to get started."
           />
         </View>
       ) : (

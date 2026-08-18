@@ -119,7 +119,7 @@ export default function PublicProfileScreen() {
         <EmptyState
           kind="nothingYet"
           title={`You blocked @${blockedMatch.username}`}
-          body="You will not see each other on Bingd. Unblocking does not restore any follow between you."
+          body="You will not see each other on Bingd. Any follow between you is removed, and unblocking does not bring it back."
           action={{
             label: unblocking ? 'Unblocking…' : 'Unblock',
             onPress: () =>

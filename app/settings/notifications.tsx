@@ -135,7 +135,7 @@ export default function NotificationsScreen() {
         <EmptyState
           kind="nothingYet"
           title="Nothing yet"
-          body="Follows, reactions and comments on your activity show up here."
+          body="Follows, reactions, comments and recommendations land here."
         />
       ) : (
         <ScrollView contentContainerStyle={styles.page}>

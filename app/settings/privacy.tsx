@@ -157,8 +157,8 @@ export default function PrivacyScreen() {
               <Text variant="caption" tone="tertiary">
                 While your account is private, your profile does not appear in search
                 and your rankings, notes and activity are visible only to followers you
-                have approved. People you already approved stay approved — remove them
-                from your followers if you want them gone.
+                have approved. People you already approved stay approved. Remove them from your
+                followers if you want them gone.
               </Text>
             </View>
           </View>

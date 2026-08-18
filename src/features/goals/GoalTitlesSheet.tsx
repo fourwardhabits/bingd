@@ -59,7 +59,7 @@ export function GoalTitlesSheet({
           {titles.length === 1
             ? `One ${category === 'movies' ? 'film' : 'season'} counted.`
             : `${titles.length} ${noun} counted.`}{' '}
-          A title counts once, on the date you say you watched it — so anything without a
+          A title counts once, on the date you say you watched it, so anything without a
           watch date is not here.
         </Text>
       </View>

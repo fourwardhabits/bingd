@@ -362,7 +362,7 @@ function SentTab({
       <EmptyState
         kind="nothingYet"
         title="Nothing matches your filters"
-        body="Clear all above to see everything people have sent you."
+        body="Clear your filters to see everything people have sent you."
       />
     );
   }

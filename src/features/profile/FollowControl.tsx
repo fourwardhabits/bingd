@@ -97,7 +97,7 @@ export function FollowControl({
     );
 
   const confirmBlock = () =>
-    Alert.alert(`Block ${name}?`, 'You will not see each other on Bingd, and any follow between you is removed. Unblocking does not restore it.', [
+    Alert.alert(`Block ${name}?`, 'You will not see each other on Bingd. Any follow between you is removed, and unblocking does not bring it back.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Block',
