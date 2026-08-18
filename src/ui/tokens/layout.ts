@@ -46,6 +46,13 @@ export const layout = {
    * anchor again.
    */
   scoreBadge: { lg: 56, md: 44, sm: 40 },
+  /**
+   * The award badge's well (Bingd Awards, 2026-08-18).
+   *
+   * A shade larger than `scoreBadge.md`, because a score is a number and a badge is a
+   * drawing: the popcorn bucket has a face on it, and at 44 the face is a smudge.
+   */
+  awardBadge: 52,
   /** Tight, because wide gutters make a poster wall read as scattered. */
   posterGrid: { columns: 3, gap: space[1] + 2 },
   posterShelf: { gap: space[2] + 2, peek: 0.7 },

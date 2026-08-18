@@ -10,6 +10,7 @@ import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { useReactions, useSetReaction, REACTION_GLYPH } from '@/features/feed/use-reactions';
 import { useFeed } from '@/features/feed/use-feed';
+import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { GoalsSection } from '@/features/goals/GoalsSection';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
 import { TopRanked } from '@/features/profile/TopRanked';
@@ -38,9 +39,9 @@ import {
  *
  * `ProfileIdentity` and `TopRanked` are now shared, and the difference between the two
  * screens is exactly the set of things that genuinely depend on who is looking: this
- * one gets Share Profile, the other gets Follow and a Taste Match. Editing is not one
- * of them — it lives behind the gear in the header, because it is housekeeping rather
- * than the thing a profile is for.
+ * one gets Share Profile and Bingd Awards, the other gets Follow and a Taste Match.
+ * Editing is not one of them — it lives behind the gear in the header, because it is
+ * housekeeping rather than the thing a profile is for.
  *
  * Recent activity uses the Feed's own row rather than a weakened copy of it, so a
  * ranking on a profile can be reacted to, commented on and shared like the same event
@@ -54,6 +55,10 @@ export default function ProfileScreen() {
   const stats = useProfileStats(profile.id);
   const notifications = useNotifications(profile.id);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  // Mounted only while open, like every other sheet in the app: it reads nine things
+  // when it mounts, and one that stayed mounted would read them on every profile visit
+  // for a screen nobody had asked for.
+  const [awardsOpen, setAwardsOpen] = useState(false);
 
   // Own activity only. The feed query spans everyone this user follows, and a
   // friend's ranking under a heading on *your* profile is a different claim.
@@ -118,16 +123,30 @@ export default function ProfileScreen() {
           }}
           controls={
             /**
-             * Share Profile, and only that.
+             * Share Profile and Bingd Awards, in that order and nothing else.
              *
-             * The founder's restoration, and the argument is about what a profile is
-             * for: it is the thing you hand to somebody so they can follow you, and
-             * the one action that does that belongs at the top of it. Edit Profile is
-             * housekeeping and it already has a home, one tap away behind the gear in
-             * the header, so promoting it to the page's main control made the most
-             * common act the second-most prominent one.
+             * Share Profile is what a profile is *for*: it is the thing you hand to
+             * somebody so they can follow you, and the one action that does that
+             * belongs at the top of it. Edit Profile is housekeeping and already has a
+             * home behind the gear, so promoting it here made the most common act the
+             * second-most prominent one.
+             *
+             * Awards takes the filled Maroon and Share takes the outline, which is the
+             * reverse of what "primary action" would suggest and is deliberate: Share
+             * is the useful one and Awards is the fun one, and a row of two identical
+             * outlined buttons says neither. The fill is the only thing on this screen
+             * competing with the poster wall below it, so it is spent on the control
+             * that is meant to be tempting rather than on the one people already know
+             * how to find.
              */
-            <Button label="Share Profile" onPress={() => void shareProfile()} />
+            <View style={styles.controls}>
+              <View style={styles.control}>
+                <Button label="Share Profile" kind="secondary" onPress={() => void shareProfile()} />
+              </View>
+              <View style={styles.control}>
+                <Button label="Bingd Awards" onPress={() => setAwardsOpen(true)} />
+              </View>
+            </View>
           }
         />
 
@@ -206,6 +225,10 @@ export default function ProfileScreen() {
           router.push(`/u/${handle}`);
         }}
       />
+
+      {awardsOpen ? (
+        <AwardsSheet userId={profile.id} onClose={() => setAwardsOpen(false)} />
+      ) : null}
     </Screen>
   );
 }
@@ -213,4 +236,8 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   section: { paddingTop: theme.space[5], gap: theme.space[2] },
+  // Two equal halves rather than one button and a chip: they are different kinds of
+  // thing and equal weight is what stops the fill reading as the only real control.
+  controls: { flexDirection: 'row', gap: theme.space[2] },
+  control: { flex: 1 },
 });
