@@ -534,6 +534,51 @@ expectRefused('anon cannot execute my_notifications', await rpc('my_notification
 expectRefused('anon cannot execute mark_notifications_read', await rpc('mark_notifications_read', {}));
 expectRefused('anon cannot execute delete_account', await rpc('delete_account', { p_confirmation: 'x' }));
 
+// ---------------------------------------------------------------------------
+// Friend recommendations (20260817001300)
+//
+// Two new tables that hold facts about two named accounts, and four new functions,
+// three of which name a person. This is the only place the deployed grants on them can
+// be observed: the local suite builds its schema from the files and runs as the table
+// owner, for whom `revoke all ... from anon` is a question that never comes up. That
+// is the "owner is not the caller" blind spot that cost `public_profiles` two days.
+// ---------------------------------------------------------------------------
+
+for (const table of ['title_recommendations', 'invite_link_creations']) {
+  const res = await get(`${table}?select=id&limit=1`);
+  // Either the grant is absent (401/403) or RLS returns nothing. Both are correct and
+  // neither may return a row: every row in these tables is about somebody by name.
+  report(
+    `anon reads no rows from ${table}`,
+    res.status >= 400 || res.body.trim() === '[]' ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 160)}`,
+  );
+  expectRefused(`anon cannot insert into ${table}`, await insert(table, {}));
+}
+
+expectRefused(
+  'anon cannot execute recommend_title',
+  await rpc('recommend_title', { p_operation_id: NIL, p_recipient_id: NIL, p_media_item_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute recommendations_to_me',
+  await rpc('recommendations_to_me', { p_limit: 1 }),
+);
+expectRefused(
+  'anon cannot execute mark_recommendation_opened',
+  await rpc('mark_recommendation_opened', { p_recommendation_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute create_invite_link',
+  await rpc('create_invite_link', { p_operation_id: NIL, p_media_item_id: null }),
+);
+
+// The two internals. `_is_mutual_follow` answers a question about somebody else's
+// follow graph and `_can_tag` now delegates to it, so both are revoked from every
+// client role — the rule 20260813001900 exists to enforce.
+expectRefused('anon cannot execute _is_mutual_follow', await rpc('_is_mutual_follow', { p_other: NIL }));
+expectRefused('anon cannot execute _can_tag', await rpc('_can_tag', { p_tagged: NIL }));
+
 // Maintenance actions are service_role only. The anon key is a valid JWT, so
 // verify_jwt lets it through and resolveCaller is what stops it — which means this
 // probe is testing the function's own logic rather than the platform's.
