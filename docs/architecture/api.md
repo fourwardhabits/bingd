@@ -108,7 +108,7 @@ Semantics are in [`ranking.md`](./ranking.md).
 | `remove_follower(follower_id)` | Remove someone who follows you | no |
 | `react(feed_event_id, kind)` | Add or change a reaction. Upsert on the primary key | no |
 | `unreact(feed_event_id)` | Remove a reaction | no |
-| `tag_watch(media_item_id, tagged_ids uuid[])` | Tag up to 10 people you follow or who follow you | no |
+| `tag_watch(media_item_id, tagged_ids uuid[])` | Tag up to 10 **mutual follows**. Shipped as `set_watch_tags`; narrowed from "follow either way" by `20260817001300` | no |
 | `remove_tag(tag_id)` | Callable by the tagged user. Sets `removed_by_tagged` | no |
 | `block(target_id)` | Block. Removes follows both ways, voids invitations, hides tags | no |
 | `unblock(target_id)` | Remove a block. Does **not** restore prior follows | no |
@@ -121,6 +121,51 @@ Semantics are in [`ranking.md`](./ranking.md).
 `unblock` deliberately does not restore follows. Restoring a relationship the user severed would be surprising, and the follow is one tap to recreate.
 
 ---
+
+
+---
+
+## 3a. Recommending a title — implemented 2026-08-17 (`20260817001300`)
+
+| Function | Purpose | Queueable |
+|---|---|---|
+| `recommend_title(operation_id, recipient_id, media_item_id)` | Recommend one exact title to one **mutual follow** | no |
+| `recommendations_to_me(limit)` | The caller's `Sent to you` list, unopened first then newest | — |
+| `mark_recommendation_opened(recommendation_id)` | The recipient's own read receipt, written once | — |
+
+**Recipient eligibility is a mutual follow and nothing weaker**: both `follows` rows
+present, both `approved`, neither party blocked, the recipient active. There is no
+friendship table — a mutual follow *is* the friendship in this schema, and a second table
+expressing the same fact would be a second thing to keep in step with `follow`,
+`unfollow`, `block` and `respond_follow_request`.
+
+The same rule now governs **who may be tagged as a companion**. `_can_tag` admitted a
+follow in *either* direction until this migration; it is `_is_mutual_follow` now, so
+tagging and recommending obey one rule. `set_watch_tags` grandfathers anybody already
+tagged on a watch, because it refuses the whole call rather than partially applying and
+would otherwise make an older list permanently unsaveable.
+
+**Errors.** Missing, suspended and blocked all raise `P0002` with one message, through
+`_assert_reachable` — telling them apart tells a blocked caller they are blocked.
+Not-mutual raises `42501` and discloses nothing: `follows_read` already admits every row
+the caller is a party to, so "do they follow me back" was always a select away. A series
+raises `22023` (PRD §10 — a series is not a thing anybody watched).
+
+**Duplicates.** One row per `(sender, recipient, media_item)`, for good. Re-sending moves
+`recommended_at` so the recommendation returns to the top of the recipient's list, leaves
+`opened_at` alone, and **files no second notification** — the rule `20260816000700` reached
+for watch tags, for the same reason: a notice that can be re-fired at will is a way to
+reach somebody who cannot stop it.
+
+**Notification.** Type `recommendation`, `subject_type = 'media_item'`, subject the exact
+title. `my_notifications` returns the title's kind and its parent series, so the row reads
+"Ada recommended a season" above "Parks and Recreation — Season 2". Tapping opens the
+title rather than the sender.
+
+**Human recommendations are not merged into For You.** `title_recommendations` is separate
+from `recommendations` / `recommendation_generations` by design: PRD §13 requires every
+reason the engine gives to be reproducible from stored signals, and a friend's opinion is
+not one.
 
 ## 4. Lists
 
@@ -423,6 +468,8 @@ Applied per user and per IP on the surfaces PRD §17 and §22 call out as abuse-
 | `react` | Reactions per minute, so reactions cannot be used to flood someone's inbox |
 | `tag_watch` | Tags per hour, in addition to the hard limit of 10 per watch |
 | `report` | Reports per day, so reporting cannot itself be used to harass |
+| `recommend_title` | Per hour **and** per day, counted over `processed_operations` — so the ceiling is on attempts and cannot be widened by naming different titles |
+| `create_invite_link` | Link creations per day |
 | `tmdb-adapter` | Requests per user, protecting the provider quota and its cost |
 
 ---

@@ -20,7 +20,12 @@ import {
 
 import { CompanionPicker } from './CompanionPicker';
 import { formatWatchDate, today } from './dates';
-import { useCompanions, useSetCompanions, useTaggablePeople } from './use-companions';
+import {
+  taggableWith,
+  useCompanions,
+  useSetCompanions,
+  useTaggablePeople,
+} from './use-companions';
 import { emptyLogState, useLogState } from './use-log-state';
 import { WatchDatePicker } from './WatchDatePicker';
 import {
@@ -185,6 +190,8 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
   const createdRow = useRef(false);
   const stored = companions.data?.map((c) => c.id) ?? [];
   const chosen = companionEdit ?? stored;
+  // Mutual follows plus whoever is already on this watch. See `taggableWith`.
+  const taggable = taggableWith(people.data ?? [], companions.data ?? []);
 
   const bucket = bucketEdit ?? state.bucket;
   const note = noteEdit ?? state.note;
@@ -549,7 +556,7 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
           {loaded && expanded === 'who' ? (
             <View style={styles.expanded}>
               <CompanionPicker
-                people={people.data ?? []}
+                people={taggable}
                 selected={chosen}
                 onToggle={toggleCompanion}
                 max={MAX_COMPANIONS}

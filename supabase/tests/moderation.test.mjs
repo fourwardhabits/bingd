@@ -312,6 +312,11 @@ describe('the guard is wired in, not merely present', () => {
     // read what was sent to them, and hiding a pending follow request from a
     // suspended account would leave it unanswerable if the suspension is lifted.
     'my_notifications',
+    // 20260817001300. security invoker, so it can only ever return rows
+    // title_recommendations_read already admits — which is the caller's own inbox.
+    // Suspension is about what an account may do to other people; it does not make
+    // somebody unable to read what was sent to them.
+    'recommendations_to_me',
     // 20260817000800. A stable read of public notes on one title, filtered through
     // can_view_profile from the caller's own side. A suspended *author* is already
     // absent from it, which is the direction that matters.

@@ -17,7 +17,8 @@ export type NotificationKind =
   | 'follow_approved'
   | 'reaction'
   | 'comment'
-  | 'watch_tag';
+  | 'watch_tag'
+  | 'recommendation';
 
 export type Notification = {
   id: string;
@@ -31,6 +32,10 @@ export type Notification = {
   /** The title the event was about, where there is one. */
   mediaItemId: string | null;
   mediaTitle: string | null;
+  /** A film or a season, which is what the sentence says out loud. */
+  mediaKind: 'movie' | 'series' | 'season' | null;
+  /** The show a season belongs to. A season's own title is "Season 2". */
+  seriesTitle: string | null;
 };
 
 const KINDS = new Set<string>([
@@ -40,6 +45,7 @@ const KINDS = new Set<string>([
   'reaction',
   'comment',
   'watch_tag',
+  'recommendation',
 ]);
 
 /**
@@ -77,6 +83,8 @@ export function useNotifications(viewerId: string) {
         actor_avatar_path: string | null;
         media_item_id: string | null;
         media_title: string | null;
+        media_kind: 'movie' | 'series' | 'season' | null;
+        series_title: string | null;
       }[])
         .filter((row) => KINDS.has(row.kind) && Boolean(row.actor_username))
         .map((row) => ({
@@ -90,6 +98,8 @@ export function useNotifications(viewerId: string) {
           actorAvatarUri: avatarUri(row.actor_avatar_path),
           mediaItemId: row.media_item_id,
           mediaTitle: row.media_title,
+          mediaKind: row.media_kind,
+          seriesTitle: row.series_title,
         }));
     },
   });
@@ -124,8 +134,12 @@ export function unreadCount(notifications: Notification[] | undefined) {
  * One place, because the wording is the only thing distinguishing three follow states
  * that are otherwise the same row — and `follow_request` versus `follow_approved` is
  * exactly the pair that reads backwards if it is written twice.
+ *
+ * A recommendation says which kind of thing it is — "recommended a movie", "recommended
+ * a season" — because the title on the next line is often "Season 2", and the kind is
+ * what makes that sentence mean anything before the show's name is read.
  */
-export function verbFor(kind: NotificationKind): string {
+export function verbFor(kind: NotificationKind, mediaKind?: Notification['mediaKind']): string {
   switch (kind) {
     case 'follow':
       return 'started following you';
@@ -139,7 +153,28 @@ export function verbFor(kind: NotificationKind): string {
       return 'commented on your activity';
     case 'watch_tag':
       return 'watched something with you';
+    case 'recommendation':
+      if (mediaKind === 'season') return 'recommended a season';
+      if (mediaKind === 'movie') return 'recommended a movie';
+      return 'recommended something';
   }
+}
+
+
+/**
+ * Whether this row should offer Follow back.
+ *
+ * Only on `follow`, and only where the reader does not already have an edge going the
+ * other way. Not on `follow_request`: that row has Approve and Decline, and a third
+ * control that quietly starts a relationship in the opposite direction beside them is
+ * one mis-tap from a follow nobody meant. Not on `follow_approved` either — that row
+ * exists because the reader followed *them*, so there is nothing to follow back.
+ */
+export function canFollowBack(
+  row: Notification,
+  outgoing: 'approved' | 'pending' | null | undefined,
+): boolean {
+  return row.kind === 'follow' && Boolean(row.actorId) && !outgoing;
 }
 
 /**

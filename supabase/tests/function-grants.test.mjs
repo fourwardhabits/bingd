@@ -187,6 +187,29 @@ const ALLOWED = {
   'mark_notifications_read()': ['authenticated'],
   'delete_account(text)': ['authenticated'],
 
+  // Added 2026-08-17 with friend recommendations (20260817001300).
+  //
+  // `recommend_title` names a recipient, which is the reason to look hard at it — and
+  // the reason it is safe is that it decides nothing from what the caller sends. The
+  // recipient must be a mutual follow, which is a fact about the caller's own edges,
+  // and every disqualifying case raises through `_assert_reachable` with one message.
+  //
+  // `recommendations_to_me` and `mark_recommendation_opened` take no recipient at all:
+  // both filter on `recipient_id = auth.uid()`, and the filter is not a parameter.
+  // `recommendations_to_me` is additionally `security invoker`, so it can return only
+  // rows `title_recommendations_read` already admits.
+  //
+  // `create_invite_link` returns the caller's own reusable personal link (PRD §17) and
+  // records that it was created. It exposes no count and no other account.
+  //
+  // `_is_mutual_follow` is deliberately absent, for the reason `_can_tag` is: it
+  // answers a question about somebody else's follow graph, which is what
+  // 20260813001900 exists to prevent.
+  'recommend_title(uuid,uuid,uuid)': ['authenticated'],
+  'recommendations_to_me(integer)': ['authenticated'],
+  'mark_recommendation_opened(uuid)': ['authenticated'],
+  'create_invite_link(uuid,uuid)': ['authenticated'],
+
   // Added 2026-08-17 with Bingd Reviews (20260817000800). Definer, and it reuses
   // `public_notes`' own visibility predicate rather than a second copy of it — getting
   // that wrong is how a private account's writing leaks, and there is exactly one

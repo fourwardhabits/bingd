@@ -246,7 +246,10 @@ describe('follow requests', () => {
 
     await waitFor(() => expect(view.getByText('Bo')).toBeTruthy());
     expect(view.getByText(' commented on your activity')).toBeTruthy();
-    expect(view.getByText(' · Inception')).toBeTruthy();
+    // On its own line since friend recommendations arrived: "Suraj recommended a
+    // movie" and then "Inception" is the founder's shape, and it also stops a long
+    // title pushing the verb off the row.
+    expect(view.getByText('Inception')).toBeTruthy();
   });
 
   it('leaves unread rows unread until the reader says otherwise', async () => {
@@ -375,5 +378,132 @@ describe('deleting an account', () => {
 
     expect(view.queryByText('Sign out')).toBeNull();
     expect(view.getByRole('button', { name: 'Delete my account' })).toBeTruthy();
+  });
+});
+
+/**
+ * Follow back, and the recommendation row.
+ *
+ * Both arrived with 20260817001300. The follow-back control is the one worth guarding
+ * hardest: it starts a relationship, it sits inside a list somebody scrolls, and the
+ * person on the other end is notified either way — so it has to be absent everywhere
+ * it would be wrong rather than merely present where it is right.
+ */
+describe('the inbox’s two new behaviours', () => {
+  const followed = {
+    id: 'n3',
+    kind: 'follow',
+    created_at: '2026-08-17T10:00:00.000Z',
+    read_at: null,
+    actor_id: 'user-2',
+    actor_username: 'ada',
+    actor_display_name: 'Ada',
+    actor_avatar_path: null,
+    subject_type: 'profile',
+    subject_id: 'user-2',
+    media_item_id: null,
+    media_kind: null,
+    media_title: null,
+    series_title: null,
+  };
+
+  const recommended = {
+    ...followed,
+    id: 'n4',
+    kind: 'recommendation',
+    subject_type: 'media_item',
+    subject_id: 'film-1',
+    media_item_id: 'film-1',
+    media_kind: 'movie',
+    media_title: 'Inception',
+    series_title: null,
+  };
+
+  it('offers Follow back when the reader does not already follow them', async () => {
+    mockRpcResults.my_notifications = [followed];
+    mockRpcResults.follow_state_with = [
+      { user_id: 'user-2', following: null, followed_by: 'approved', blocked: false },
+    ];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Follow back')).toBeTruthy());
+    await fireEvent.press(view.getByText('Follow back'));
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'follow',
+        expect.objectContaining({ p_followee_id: 'user-2' }),
+      ),
+    );
+  });
+
+  it('does not offer it when the follow is already mutual', async () => {
+    mockRpcResults.my_notifications = [followed];
+    mockRpcResults.follow_state_with = [
+      { user_id: 'user-2', following: 'approved', followed_by: 'approved', blocked: false },
+    ];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.queryByText('Follow back')).toBeNull();
+  });
+
+  it('does not offer it while the reader’s own request is still pending', async () => {
+    mockRpcResults.my_notifications = [followed];
+    mockRpcResults.follow_state_with = [
+      { user_id: 'user-2', following: 'pending', followed_by: 'approved', blocked: false },
+    ];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.queryByText('Follow back')).toBeNull();
+  });
+
+  it('does not put Follow back beside Approve and Decline', async () => {
+    // A request row already asks the reader a question. A third control that quietly
+    // starts a relationship in the other direction is one mis-tap from a follow
+    // nobody meant.
+    mockRpcResults.my_notifications = [request];
+    mockRpcResults.follow_state_with = [
+      { user_id: 'user-2', following: null, followed_by: 'pending', blocked: false },
+    ];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Approve')).toBeTruthy());
+    expect(view.queryByText('Follow back')).toBeNull();
+  });
+
+  it('says which kind of thing was recommended, and names it', async () => {
+    mockRpcResults.my_notifications = [recommended];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.getByText(' recommended a movie')).toBeTruthy();
+    expect(view.getByText('Inception')).toBeTruthy();
+  });
+
+  it('names the show a recommended season belongs to', async () => {
+    mockRpcResults.my_notifications = [
+      {
+        ...recommended,
+        media_kind: 'season',
+        media_title: 'Season 2',
+        series_title: 'Parks and Recreation',
+      },
+    ];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText(' recommended a season')).toBeTruthy());
+    expect(view.getByText('Parks and Recreation — Season 2')).toBeTruthy();
+  });
+
+  it('opens the exact title rather than the sender', async () => {
+    mockRpcResults.my_notifications = [recommended];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Unread. Ada recommended a movie, Inception'));
+
+    expect(mockPush).toHaveBeenCalledWith('/title/film-1');
   });
 });

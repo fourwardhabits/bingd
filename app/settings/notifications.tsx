@@ -3,12 +3,14 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import {
+  canFollowBack,
   useMarkNotificationsRead,
   useNotifications,
   verbFor,
   type Notification,
 } from '@/features/notifications/use-notifications';
-import { useSocialWrites } from '@/features/profile/use-social';
+import { useRelationships, useSocialWrites } from '@/features/profile/use-social';
+import { fullTitle } from '@/lib/titles';
 import {
   Avatar,
   Button,
@@ -50,12 +52,37 @@ export default function NotificationsScreen() {
   const router = useRouter();
   const notifications = useNotifications(profile.id);
   const markRead = useMarkNotificationsRead(profile.id);
-  const { respondToRequest, busy } = useSocialWrites(profile.id);
+  const { follow, respondToRequest, busy } = useSocialWrites(profile.id);
 
   const rows = notifications.data ?? [];
   const requests = rows.filter((row) => row.kind === 'follow_request');
   const rest = rows.filter((row) => row.kind !== 'follow_request');
   const unreadCount = rows.filter((row) => !row.readAt).length;
+
+  /**
+   * Whether the reader already follows the people who followed them.
+   *
+   * Asked once for the whole screen rather than per row, and only about the actors on
+   * `follow` rows — `follow_state_with` is security invoker, so it reports the
+   * caller's own edges and nothing else, but a list of ids is still a list of ids and
+   * there is no reason to send the ones no control depends on.
+   */
+  const followActors = [
+    ...new Set(
+      rows.filter((row) => row.kind === 'follow').map((row) => row.actorId).filter(Boolean),
+    ),
+  ] as string[];
+  const relationships = useRelationships(followActors, profile.id);
+
+  const followBack = async (row: Notification) => {
+    if (!row.actorId) return;
+    const result = await follow({ userId: row.actorId });
+    if (!result.ok) {
+      Alert.alert('Could not follow', result.message);
+      return;
+    }
+    await Promise.all([notifications.refetch(), relationships.refetch()]);
+  };
 
   const answer = async (row: Notification, approve: boolean) => {
     if (!row.actorId) return;
@@ -69,6 +96,20 @@ export default function NotificationsScreen() {
 
   const openActor = (row: Notification) => {
     if (row.actorUsername) router.push(`/u/${row.actorUsername}`);
+  };
+
+  /**
+   * Where the row leads, which is not always a person.
+   *
+   * A recommendation opens the exact title — the one thing the reader was told to
+   * watch. Everything else opens the person who did it.
+   */
+  const openRow = (row: Notification) => {
+    if (row.kind === 'recommendation' && row.mediaItemId) {
+      router.push(`/title/${row.mediaItemId}`);
+      return;
+    }
+    openActor(row);
   };
 
   return (
@@ -165,40 +206,77 @@ export default function NotificationsScreen() {
           {rest.length ? (
             <View style={styles.section}>
               {requests.length ? <SectionHeader title="Earlier" /> : null}
-              {rest.map((row) => (
-                <Pressable
-                  key={row.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${row.readAt ? '' : 'Unread. '}${row.actorName} ${verbFor(
-                    row.kind,
-                  )}${row.mediaTitle ? `, ${row.mediaTitle}` : ''}`}
-                  accessibilityHint="Opens their profile"
-                  onPress={() => openActor(row)}
-                  style={({ pressed }) => [
-                    styles.row,
-                    !row.readAt && styles.unread,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Avatar size="sm" uri={row.actorAvatarUri} name={row.actorName ?? ''} />
-                  <View style={styles.rowCopy}>
-                    <Text variant="callout" numberOfLines={2}>
-                      <Text variant="callout">{row.actorName}</Text>
-                      <Text variant="callout" tone="secondary">{` ${verbFor(row.kind)}`}</Text>
-                      {/* The title, where the event had one. "Alice commented on your
-                          activity" with no indication of which activity is a
-                          notification that needs a second app to answer. */}
-                      {row.mediaTitle ? (
-                        <Text variant="callout" tone="secondary">{` · ${row.mediaTitle}`}</Text>
-                      ) : null}
-                    </Text>
-                    <Text variant="caption" tone="tertiary">
-                      {new Date(row.createdAt).toLocaleDateString()}
-                    </Text>
+              {rest.map((row) => {
+                // The subject, named the way the rest of the app names it: a season
+                // says which show it belongs to, because its own title is "Season 2".
+                const subject = row.mediaItemId
+                  ? fullTitle({
+                      kind: row.mediaKind,
+                      title: row.mediaTitle,
+                      seriesTitle: row.seriesTitle,
+                    })
+                  : null;
+                const offerFollowBack = canFollowBack(
+                  row,
+                  relationships.data?.get(row.actorId ?? '')?.following,
+                );
+
+                return (
+                  <View key={row.id} style={[styles.entry, !row.readAt && styles.unread]}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${row.readAt ? '' : 'Unread. '}${row.actorName} ${verbFor(
+                        row.kind,
+                        row.mediaKind,
+                      )}${subject ? `, ${subject}` : ''}`}
+                      accessibilityHint={
+                        row.kind === 'recommendation' ? 'Opens the title' : 'Opens their profile'
+                      }
+                      onPress={() => openRow(row)}
+                      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                    >
+                      <Avatar size="sm" uri={row.actorAvatarUri} name={row.actorName ?? ''} />
+                      <View style={styles.rowCopy}>
+                        <Text variant="callout" numberOfLines={2}>
+                          <Text variant="callout">{row.actorName}</Text>
+                          <Text variant="callout" tone="secondary">{` ${verbFor(
+                            row.kind,
+                            row.mediaKind,
+                          )}`}</Text>
+                        </Text>
+                        {/* The title on its own line rather than after a separator.
+                            "Suraj recommended a movie" and then "Inception" is the
+                            founder's shape, and it is also what stops a long name
+                            pushing the verb off the row. */}
+                        {subject ? (
+                          <Text variant="callout" tone="secondary" numberOfLines={1}>
+                            {subject}
+                          </Text>
+                        ) : null}
+                        <Text variant="caption" tone="tertiary">
+                          {new Date(row.createdAt).toLocaleDateString()}
+                        </Text>
+                      </View>
+                      <UnreadDot show={!row.readAt} />
+                    </Pressable>
+                    {/* Follow back, on the row that announced the follow and nowhere
+                        else. Absent once the reader follows them, because a control
+                        for a relationship that already exists is a control that can
+                        only mislead. */}
+                    {offerFollowBack ? (
+                      <View style={styles.answers}>
+                        <Button
+                          label="Follow back"
+                          kind="secondary"
+                          onPress={() => void followBack(row)}
+                          disabled={busy}
+                          disabledReason="One at a time"
+                        />
+                      </View>
+                    ) : null}
                   </View>
-                  <UnreadDot show={!row.readAt} />
-                </Pressable>
-              ))}
+                );
+              })}
             </View>
           ) : null}
         </ScrollView>
@@ -237,6 +315,9 @@ const styles = StyleSheet.create({
     backgroundColor: theme.semantic.action,
   },
   section: { paddingTop: theme.space[4], gap: theme.space[1] },
+  // The tint belongs to the whole entry, including a Follow back button underneath,
+  // or the unread state would stop halfway down the row it describes.
+  entry: { gap: theme.space[1] },
   request: {
     paddingHorizontal: theme.layout.gutter,
     paddingVertical: theme.space[3],

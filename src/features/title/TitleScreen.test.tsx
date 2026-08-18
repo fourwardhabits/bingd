@@ -822,3 +822,42 @@ describe('the following score with nothing to say', () => {
     expect(view.queryByText('Following')).toBeNull();
   });
 });
+
+/**
+ * The action row: Watchlist, Recommend, Share.
+ *
+ * Recommend is a first-class Bingd action rather than something inside the share
+ * sheet, which is the founder's hierarchy for this tranche. Rank is deliberately not
+ * here — it belongs opposite the poster, with the score it changes.
+ */
+describe('the action row', () => {
+  it('offers Watchlist, Recommend and Share, in that order', async () => {
+    const view = await open();
+
+    expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy();
+    expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy();
+    expect(view.getByLabelText('Share Inception')).toBeTruthy();
+  });
+
+  it('opens a sheet headed with the title', async () => {
+    const view = await open();
+    await fireEvent.press(view.getByLabelText('Recommend Inception to a friend'));
+
+    await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
+    expect(view.getByText('Share with someone not on Bingd')).toBeTruthy();
+  });
+
+  it('does not offer Recommend on a series, which is not a thing anybody watched', async () => {
+    // PRD §10 makes the season the rankable TV unit, and `recommend_title` refuses a
+    // series outright. A control that always fails is worse than its absence.
+    const film = (tableRows.media_items ?? [])[0] as Record<string, unknown>;
+    mockOpenId = 'series-1';
+    tableRows.media_items = [
+      { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
+    ];
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
+
+    expect(view.queryByLabelText(/^Recommend /)).toBeNull();
+  });
+});

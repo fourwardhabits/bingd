@@ -22,6 +22,7 @@ import { useTitleScore } from '@/features/collection/use-score';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
+import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { useSeasons } from '@/features/search/use-title-search';
 import { useCommunityScore } from '@/features/title/use-community-score';
 import { useFollowingScore } from '@/features/title/use-following-score';
@@ -99,6 +100,9 @@ export default function TitleScreen() {
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
   const [reviewSort, setReviewSort] = useState<ReviewSort>('top');
+  const [recommending, setRecommending] = useState(false);
+  /** Whom this title was last recommended to, which is the confirmation. */
+  const [recommendedTo, setRecommendedTo] = useState<string | null>(null);
 
   /**
    * The catalogue row, and only that.
@@ -609,6 +613,26 @@ export default function TitleScreen() {
             onPress={() => void toggleWatchlist()}
             disabled={watchlistBusy}
           />
+          {/* Recommend is a first-class Bingd action and sits between the two: it
+              is what somebody does with a title they already have an opinion about,
+              and it goes to one named person rather than to an address book. A
+              series has no Recommend, for the same reason it has no Rank — it is not
+              a thing anybody watched (PRD §10). */}
+          {rankable ? (
+            <RowAction
+              icon="paper-plane-outline"
+              label="Recommend"
+              accessibilityLabel={`Recommend ${title.title} to a friend`}
+              onPress={() => {
+                setActionError(null);
+                setRecommendedTo(null);
+                setRecommending(true);
+              }}
+            />
+          ) : null}
+          {/* Generic share stays, and stays quieter than the two beside it. It is
+              the fallback for everybody who is not on Bingd, and the Recommend
+              sheet offers the same thing with an invite link attached. */}
           <RowAction
             icon="share-outline"
             label="Share"
@@ -621,6 +645,17 @@ export default function TitleScreen() {
           <View style={styles.block}>
             <Text variant="footnote" tone="action">
               {actionError}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* The confirmation, on the page the reader is still looking at rather than
+            in an alert they have to dismiss. It names the person, because "Sent"
+            alone leaves them checking. */}
+        {recommendedTo ? (
+          <View style={styles.block}>
+            <Text testID="recommend-confirmation" variant="footnote" tone="secondary">
+              {`Recommended to ${recommendedTo}`}
             </Text>
           </View>
         ) : null}
@@ -852,6 +887,20 @@ export default function TitleScreen() {
         onClose={() => setRankingSubject(null)}
         onRankAnother={() => setRankingSubject(null)}
       />
+      {/* Mounted only while open, like every other sheet here: it seeds its own
+          draft state on mount, and one that stayed mounted would keep a search
+          somebody abandoned. */}
+      {recommending ? (
+        <RecommendSheet
+          viewerId={profile.id}
+          mediaItemId={title.id}
+          kind={title.kind}
+          title={displayTitle ?? title.title}
+          seriesTitle={parent?.title ?? null}
+          onClose={() => setRecommending(false)}
+          onSent={setRecommendedTo}
+        />
+      ) : null}
     </Screen>
   );
 }

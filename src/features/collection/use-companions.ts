@@ -25,18 +25,28 @@ const toPerson = (profile: ProfileShape): Person => ({
 });
 
 /**
- * The people this user may tag: approved follows in either direction (PRD §14).
+ * The people this user may tag: **mutual follows**, both edges approved.
+ *
+ * Narrowed from "either direction" by 20260817001300, so that tagging somebody and
+ * recommending a title to them obey one social rule. Putting your name on somebody's
+ * watch and putting a title in their inbox are the same kind of act, and a person who
+ * followed you once without your following back has agreed to neither.
  *
  * Read here as well as enforced in `set_watch_tags`, and the duplication is the
  * point. The server's copy is the one that decides; this one exists so the picker
  * offers only names that will be accepted, because a picker that lets you choose
  * somebody and then refuses the whole save is worse than one that never offered them.
  *
- * A block is not filtered here. `follows_read` already hides a follow row whose other
- * party has blocked you, so a blocked person cannot appear in either direction — and
- * if one somehow did, the server refuses. Filtering blocks a second time on the
- * client would mean reading the block graph, which the schema deliberately does not
- * expose (20260813001900).
+ * **The server is more permissive than this list, on purpose.** A companion already
+ * tagged on a watch stays taggable there even after the follow lapses, or the whole
+ * list could never be saved again. That grandfather clause is per watch and cannot be
+ * expressed by a picker that does not know which watch it is for, so the picker shows
+ * the current mutuals and `useCompanions` supplies anybody already on the list.
+ *
+ * A block is not filtered here. `block` deletes both follow rows, so a blocked person
+ * has no edge left to intersect — and if one somehow did, the server refuses.
+ * Filtering blocks a second time on the client would mean reading the block graph,
+ * which the schema deliberately does not expose (20260813001900).
  */
 export function useTaggablePeople(userId: string) {
   return useQuery({
@@ -59,17 +69,44 @@ export function useTaggablePeople(userId: string) {
       if (following.error) throw following.error;
       if (followers.error) throw followers.error;
 
-      const byId = new Map<string, Person>();
-      for (const row of [...(following.data ?? []), ...(followers.data ?? [])]) {
+      // The intersection, which is the whole rule: somebody in one list and not the
+      // other is a one-way follow.
+      const outgoing = new Map<string, ProfileShape>();
+      for (const row of following.data ?? []) {
         const profile = one((row as { profiles: ProfileShape | ProfileShape[] | null }).profiles);
-        // A mutual follow appears in both queries; the map is what makes the list a
-        // set rather than a list with your closest friends in it twice.
-        if (profile) byId.set(profile.id, toPerson(profile));
+        if (profile) outgoing.set(profile.id, profile);
+      }
+
+      const byId = new Map<string, Person>();
+      for (const row of followers.data ?? []) {
+        const profile = one((row as { profiles: ProfileShape | ProfileShape[] | null }).profiles);
+        if (profile && outgoing.has(profile.id)) byId.set(profile.id, toPerson(profile));
       }
 
       return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
     },
   });
+}
+
+/**
+ * The list the picker should actually offer: current mutuals, plus anybody already
+ * on this watch.
+ *
+ * `set_watch_tags` grandfathers a companion whose follow has since lapsed — without
+ * that, narrowing the rule on 2026-08-17 would have made an old list unsaveable. The
+ * picker has to agree: built from current mutuals alone it would draw a shorter list
+ * than the one being saved, the count against the ten-person cap would be wrong, and
+ * there would be no row to untick for the one person the reader wants to remove.
+ *
+ * Order is preserved from the mutual list and the survivors are appended, so the
+ * people who are still connected read first.
+ */
+export function taggableWith(mutuals: Person[], onThisWatch: Person[]): Person[] {
+  const byId = new Map(mutuals.map((person) => [person.id, person]));
+  for (const person of onThisWatch) {
+    if (!byId.has(person.id)) byId.set(person.id, person);
+  }
+  return [...byId.values()];
 }
 
 export type Companion = Person & {
@@ -144,7 +181,7 @@ export function useSetCompanions(userId: string) {
       // while the sheet was open — worth saying plainly rather than as a code.
       const message =
         error.code === '42501'
-          ? 'You can only tag people you follow or who follow you.'
+          ? 'You can only tag people who follow you back.'
           : error.message;
       return { ok: false as const, message };
     }

@@ -17,10 +17,10 @@ export type CompanionPickerProps = {
 /**
  * Who I watched with, as a list of the people who can actually be tagged.
  *
- * Not a search field. PRD §14 limits tagging to people the user follows or who follow
- * them, which for the launch cohort is a list you can see the whole of — searching a
- * set of twelve is worse than reading it. When that stops being true this gains a
- * filter, and the shape does not have to change.
+ * Not a search field. Tagging is limited to mutual follows, which for the launch
+ * cohort is a list you can see the whole of — searching a set of twelve is worse than
+ * reading it. When that stops being true this gains a filter, and the shape does not
+ * have to change.
  *
  * There is no invite affordance here. PRD §14 hands untaggable people to the
  * invitation flow, and that flow is not in this tranche; a control that leads nowhere
@@ -50,7 +50,7 @@ export function CompanionPicker({
           kind="nothingYet"
           compact
           title="Nobody to tag yet"
-          body="Follow someone, or have them follow you, and they will show up here."
+          body="People who follow you back show up here."
         />
       </View>
     );

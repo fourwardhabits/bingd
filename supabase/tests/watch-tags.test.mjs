@@ -24,6 +24,20 @@ const movie = (title) => t.createMovie(title, seq++);
 const follow = (a, b) =>
   t.sql(`insert into follows (follower_id, followee_id, state) values ($1, $2, 'approved')`, [a, b]);
 
+/**
+ * The relationship a tag now requires: both edges, both approved.
+ *
+ * 20260817001300 narrowed `_can_tag` from a follow in either direction to a mutual
+ * follow, so that tagging somebody and recommending a title to them obey one social
+ * rule. Almost every setup in this file means "make this person taggable", so almost
+ * every one of them says `mutual` — the places that still say `follow` are the ones
+ * testing that half a relationship is not enough.
+ */
+const mutual = async (a, b) => {
+  await follow(a, b);
+  await follow(b, a);
+};
+
 /** A logged watch of `id` by the acting user, which a tag requires. */
 const logWatch = (id) =>
   t.sql(`select log_watched(gen_random_uuid(), $1, null, null)`, [id]);
@@ -61,7 +75,7 @@ before(async () => {
   t = await createTestDb();
   alice = await t.createUser({ username: 'alice_tag' });
   bob = await t.createUser({ username: 'bob_tag' });
-  await follow(bob, alice); // bob follows alice
+  await mutual(bob, alice); // alice and bob follow each other
   await t.actAs(alice);
 });
 
@@ -70,7 +84,7 @@ after(async () => {
 });
 
 describe('who may be tagged', () => {
-  it('accepts someone who follows the tagger', async () => {
+  it('accepts a mutual follow', async () => {
     const id = await movie('tag_follower');
     await logWatch(id);
 
@@ -81,13 +95,80 @@ describe('who may be tagged', () => {
     );
   });
 
-  it('accepts someone the tagger follows', async () => {
+  it('refuses a one-way follow, in either direction', async () => {
+    // The narrowing of 20260817001300. Following somebody, or being followed by
+    // them, is not agreement to have your name put on their watch.
     const carol = await t.createUser({ username: 'carol_tag' });
-    await follow(alice, carol);
-    const id = await movie('tag_followee');
-    await logWatch(id);
+    await follow(alice, carol); // alice follows carol; carol does not follow back
+    const outbound = await movie('tag_followee');
+    await logWatch(outbound);
 
-    assert.equal((await setTags(id, [carol])).tagged, 1);
+    assert.equal(
+      (await t.errorFrom(`select set_watch_tags(gen_random_uuid(), $1, $2::uuid[])`, [
+        outbound,
+        [carol],
+      ]))?.code,
+      '42501',
+    );
+
+    const carla = await t.createUser({ username: 'carla_tag' });
+    await follow(carla, alice); // carla follows alice; alice does not follow back
+    const inbound = await movie('tag_follower_only');
+    await logWatch(inbound);
+
+    assert.equal(
+      (await t.errorFrom(`select set_watch_tags(gen_random_uuid(), $1, $2::uuid[])`, [
+        inbound,
+        [carla],
+      ]))?.code,
+      '42501',
+    );
+  });
+
+  it('keeps a companion already on the watch after the follow lapses', async () => {
+    // The grandfather clause. `set_watch_tags` refuses as a whole, so without it a
+    // list containing one person who is no longer a mutual follow could never be
+    // saved again — including to remove that very person. Narrowing an authorization
+    // must not lock somebody out of their own record.
+    const mel = await t.createUser({ username: 'mel_tag' });
+    await mutual(mel, alice);
+    const id = await movie('tag_grandfathered');
+    await logWatch(id);
+    assert.equal((await setTags(id, [mel])).tagged, 1);
+
+    // Mel stops following alice. The relationship is now one-way.
+    await t.sql(`delete from follows where follower_id = $1 and followee_id = $2`, [mel, alice]);
+
+    assert.equal((await setTags(id, [mel])).tagged, 1, 're-saving the same list still works');
+    assert.equal((await setTags(id, [])).tagged, 0, 'and so does removing them');
+
+    // Once they are off the list they are an ordinary addition again.
+    assert.equal(
+      (await t.errorFrom(`select set_watch_tags(gen_random_uuid(), $1, $2::uuid[])`, [id, [mel]]))
+        ?.code,
+      '42501',
+    );
+  });
+
+  it('does not grandfather somebody onto a different watch', async () => {
+    const nina = await t.createUser({ username: 'nina_tag' });
+    await mutual(nina, alice);
+    const first = await movie('tag_grandfather_scope_a');
+    await logWatch(first);
+    await setTags(first, [nina]);
+
+    await t.sql(`delete from follows where follower_id = $1 and followee_id = $2`, [nina, alice]);
+
+    const second = await movie('tag_grandfather_scope_b');
+    await logWatch(second);
+    assert.equal(
+      (await t.errorFrom(`select set_watch_tags(gen_random_uuid(), $1, $2::uuid[])`, [
+        second,
+        [nina],
+      ]))?.code,
+      '42501',
+      'the clause is per watch, not per person',
+    );
   });
 
   it('refuses a stranger', async () => {
@@ -123,7 +204,7 @@ describe('who may be tagged', () => {
 
   it('refuses across a block, in either direction', async () => {
     const frank = await t.createUser({ username: 'frank_tag' });
-    await follow(frank, alice);
+    await mutual(frank, alice);
     const id = await movie('tag_block');
     await logWatch(id);
     assert.equal((await setTags(id, [frank])).tagged, 1);
@@ -140,7 +221,7 @@ describe('who may be tagged', () => {
     );
 
     const gina = await t.createUser({ username: 'gina_tag' });
-    await follow(gina, alice);
+    await mutual(gina, alice);
     await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [alice, gina]);
     assert.equal(
       (await t.errorFrom(`select set_watch_tags(gen_random_uuid(), $1, $2::uuid[])`, [
@@ -153,7 +234,7 @@ describe('who may be tagged', () => {
 
   it('refuses a suspended account', async () => {
     const hank = await t.createUser({ username: 'hank_tag' });
-    await follow(hank, alice);
+    await mutual(hank, alice);
     await t.sql(`update profiles set status = 'suspended' where id = $1`, [hank]);
     const id = await movie('tag_suspended');
     await logWatch(id);
@@ -229,7 +310,7 @@ describe('the shape of the call', () => {
     const many = [];
     for (let i = 0; i < 11; i += 1) {
       const friend = await t.createUser({ username: `cap_friend_${i}` });
-      await follow(friend, alice);
+      await mutual(friend, alice);
       many.push(friend);
     }
 
@@ -245,7 +326,7 @@ describe('the shape of the call', () => {
 
   it('replaces rather than accumulating', async () => {
     const jack = await t.createUser({ username: 'jack_tag' });
-    await follow(jack, alice);
+    await mutual(jack, alice);
     const id = await movie('tag_replace');
     await logWatch(id);
 
@@ -392,7 +473,7 @@ describe('the tagged person’s side', () => {
 
   it('cannot hide a tag pointed at somebody else', async () => {
     const kate = await t.createUser({ username: 'kate_tag' });
-    await follow(kate, alice);
+    await mutual(kate, alice);
     const id = await movie('tag_not_yours');
     await logWatch(id);
     await setTags(id, [kate]);
@@ -509,7 +590,7 @@ describe('who can see a tag', () => {
   it('is hidden from a private tagger’s non-followers', async () => {
     const quiet = await t.createUser({ username: 'quiet_tag', visibility: 'private' });
     const friend = await t.createUser({ username: 'quiet_friend' });
-    await follow(friend, quiet);
+    await mutual(friend, quiet);
     const id = await movie('tag_private_tagger');
     await t.actAs(quiet);
     await logWatch(id);
@@ -599,7 +680,7 @@ describe('what the tagged person is told', () => {
 
   it('rings for a person newly added to an existing list, and not for the others', async () => {
     const liam = await t.createUser({ username: 'liam_tag' });
-    await follow(liam, alice);
+    await mutual(liam, alice);
     const id = await movie('tag_notify_added');
     await logWatch(id);
     await setTags(id, [bob]);
