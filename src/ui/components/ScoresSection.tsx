@@ -1,97 +1,108 @@
 import { StyleSheet, View } from 'react-native';
 
+import type { Bucket } from '@/features/collection/score';
+
 import { theme } from '../tokens';
+import { EmptyScoreBadge, ScoreBadge } from './ScoreBadge';
 import { SectionHeader } from './SectionHeader';
 import { Text } from './Text';
 
 export type ScoresSectionProps = {
-  community: {
-    score: number | null;
-    ratingCount: number;
-    minRatings: number;
-  } | null;
+  /**
+   * The reader's own, repeated here on purpose.
+   *
+   * It is also opposite the poster, and that used to be the argument for leaving it
+   * out. The founder's amendment settles it the other way: this section is a
+   * comparison, and a comparison with one of its three terms on a different part of
+   * the page is a comparison the reader has to hold in their head.
+   */
+  yours?: { score: number | null; bucket: Bucket | null } | null;
   /**
    * The mean over the accounts this viewer follows. Omitted, rather than shown empty,
-   * when none of them have ranked the title — see the note below.
+   * when the reader follows nobody — see the note below.
    */
   following?: {
     score: number | null;
     ratingCount: number;
-    /** Drawn only for a reader who follows somebody — see the note below. */
+    /** Drawn only for a reader who follows somebody. */
     followingCount: number;
+  } | null;
+  /** The app-wide mean. Withheld below its sample size, and the circle stays either way. */
+  bingd: {
+    score: number | null;
+    ratingCount: number;
+    minRatings: number;
   } | null;
 };
 
 /**
- * Everyone else's number, given its own place further down the page.
+ * Three answers to the same question, in the order a reader cares about them.
  *
- * It used to sit beside the reader's own score in the hero, and the two competed:
- * identical shape, identical weight, one about you and one about the room. The
- * founder's amendment separates them — the hero answers "what did *I* think", and
- * this answers "what does everyone think" — which is also the order somebody reads a
- * title page in.
+ *   **Your score** — what you thought.
+ *   **Following** — what the people you chose to follow thought.
+ *   **Bingd** — what everybody on the app thought.
  *
- * Only what Bingd can truthfully support today. There is exactly one signal:
+ * The population widens as you go down and the reader's stake in it narrows, which is
+ * why that is the order rather than the reverse. "Community" was the old name for the
+ * third row and it described a population rather than naming one; this is the app, and
+ * the app has a name.
  *
- *   **Community** — the mean over public, active accounts the viewer could read
- *   individually, from live rankings, for this exact media item. Withheld below the
- *   configured sample size, and the count shown either way, because "2 ratings" tells
- *   a reader how much to trust what they are looking at where a mean of two does not.
+ * **Following activates on a single rating, Bingd does not.** One account you
+ * deliberately follow is not a weak estimate of a crowd; it is that person's opinion,
+ * and it is the only case a new account can produce at all. A Bingd mean over two
+ * strangers is a different thing entirely: it looks like data and is not, so the number
+ * waits for the sample the server sets.
  *
- *   **Following** — the mean over the accounts the viewer follows, added 2026-08-16.
- *   It sits *above* Community, because the reader chose that population and did not
- *   choose the other one. Shown from a single rating, where Community waits for three:
- *   one person you deliberately follow is not a weak estimate of a crowd, it is their
- *   opinion, and it is the only case a new account can produce at all.
+ * **The circle is always drawn.** Founder instruction, and it does two jobs. A row that
+ * grows a circle when the data arrives is a row that moves; and the empty circle is
+ * itself the honest statement that there is a score-shaped hole here rather than a
+ * score. What it must never do is put a faded or greyed *number* in that hole, which
+ * would be a fact the page does not believe.
  *
- *   Two silences, told apart. A reader who **follows nobody** gets no row at all: it
- *   could only ever be empty, and drawing it on every title page of a new account is a
- *   row that never says anything. A reader who **follows people, none of whom have seen
- *   this** is told exactly that — which is a real answer, and is also how anybody finds
- *   out the feature exists before their following list happens to overlap a film they
- *   open. The first version omitted both cases and independent review was right that it
- *   made the feature undiscoverable for precisely the people it is meant to recruit.
+ * **Below the threshold Bingd says "Not enough ratings yet" and stops.** It used to say
+ * "2 ratings · 1 more needed", which turns a reader into a spectator of a counter and
+ * tells them nothing they can act on. The count is not a secret; it is simply not
+ * interesting until it means something.
  *
- * Deliberately absent, and worth naming so the absence reads as a decision:
- *
- *   **Your score** — already prominent opposite the poster. Repeating it here would
- *   be the duplication the amendment asks to avoid.
- *
- * The number is never faded or tinted by how few ratings back it. A score is either
- * shown because it means something or withheld because it does not; a greyed-out
- * number is a third state that says "here is a fact we do not believe", which is not
- * a thing to put on a page.
+ * Two silences told apart, and this is the part that keeps Following discoverable. A
+ * reader who **follows nobody** gets no row: it could only ever be empty. A reader who
+ * **follows people, none of whom have seen this** is told exactly that, which is a real
+ * answer and is also how anybody learns the feature exists before their following list
+ * happens to overlap a film they open.
  */
-export function ScoresSection({ community, following }: ScoresSectionProps) {
+export function ScoresSection({ yours, following, bingd }: ScoresSectionProps) {
   const showFollowing = Boolean(following && following.followingCount > 0);
-  if (!community && !showFollowing) return null;
+  if (!yours && !showFollowing && !bingd) return null;
 
   return (
     <View style={styles.section}>
       <SectionHeader title="Scores" />
 
+      {yours ? (
+        <ScoreRow
+          score={yours.score}
+          bucket={yours.bucket}
+          label="Your score"
+          detail={yours.score == null ? 'You have not ranked this yet' : null}
+          emptyLabel="You have not ranked this yet"
+        />
+      ) : null}
+
       {showFollowing && following ? (
         <ScoreRow
           score={following.score}
           label="Following"
-          detail={
-            following.ratingCount === 0
-              ? 'Nobody you follow has ranked this'
-              : following.ratingCount === 1
-                ? '1 person you follow'
-                : `${following.ratingCount} people you follow`
-          }
+          detail={followingDetail(following.ratingCount)}
+          emptyLabel="Nobody you follow has ranked this"
         />
       ) : null}
 
-      {community ? (
+      {bingd ? (
         <ScoreRow
-          score={community.score}
-          label="Community"
-          detail={label(
-            community.ratingCount,
-            Math.max(community.minRatings - community.ratingCount, 0),
-          )}
+          score={bingd.score}
+          label="Bingd"
+          detail={bingdDetail(bingd)}
+          emptyLabel="Not enough ratings yet"
         />
       ) : null}
     </View>
@@ -100,44 +111,61 @@ export function ScoresSection({ community, following }: ScoresSectionProps) {
 
 function ScoreRow({
   score,
-  label: name,
+  bucket,
+  label,
   detail,
+  emptyLabel,
 }: {
   score: number | null;
+  bucket?: Bucket | null;
   label: string;
-  detail: string;
+  detail: string | null;
+  emptyLabel: string;
 }) {
   return (
     <View style={styles.row}>
       <View style={styles.value}>
         {score != null ? (
-          <Text variant="title1" style={styles.number} allowFontScaling={false}>
-            {score.toFixed(1)}
-          </Text>
+          <ScoreBadge score={score} bucket={bucket ?? null} size="md" />
         ) : (
-          // Not a zero and not a faded number: nothing has been earned yet, and
-          // both of those would read as a verdict.
-          <Text variant="title1" tone="tertiary" allowFontScaling={false}>
-            —
-          </Text>
+          <EmptyScoreBadge size="md" label={emptyLabel} />
         )}
       </View>
       <View style={styles.copy}>
-        <Text variant="callout">{name}</Text>
-        <Text variant="footnote" tone="secondary">
-          {detail}
-        </Text>
+        <Text variant="callout">{label}</Text>
+        {detail ? (
+          <Text variant="footnote" tone="secondary">
+            {detail}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
 }
 
-/** "12 ratings", or exactly how far short of a number it is. */
-function label(ratingCount: number, short: number) {
-  if (ratingCount === 0) return 'No ratings yet';
-  const ratings = ratingCount === 1 ? '1 rating' : `${ratingCount} ratings`;
-  if (short <= 0) return ratings;
-  return `${ratings} · ${short} more needed`;
+/** How many of the reader's own people are behind the number. */
+function followingDetail(ratingCount: number): string {
+  if (ratingCount === 0) return 'Nobody you follow has ranked this';
+  if (ratingCount === 1) return '1 person you follow';
+  return `${ratingCount} people you follow`;
+}
+
+/**
+ * "128 ratings", or the fact that there are not enough of them to say.
+ *
+ * No countdown. "2 more needed" invites the reader to watch a number they cannot move,
+ * and the exact shortfall is a property of a config value rather than of the film.
+ */
+function bingdDetail({
+  score,
+  ratingCount,
+}: {
+  score: number | null;
+  ratingCount: number;
+  minRatings: number;
+}): string {
+  if (score == null) return 'Not enough ratings yet';
+  return ratingCount === 1 ? '1 rating' : `${ratingCount} ratings`;
 }
 
 const styles = StyleSheet.create({
@@ -149,8 +177,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     minHeight: theme.layout.rowMinHeight,
   },
-  // Fixed, so a "—" and a "7.4" put their labels in the same place.
-  value: { width: 56, alignItems: 'center' },
-  number: { color: theme.semantic.score },
+  // Fixed, so an empty circle and a 7.4 put their labels in the same place.
+  value: { width: theme.layout.scoreBadge.md + theme.space[3], alignItems: 'center' },
   copy: { flex: 1, gap: 2 },
 });

@@ -114,6 +114,39 @@ function UnrankedBadge({ diameter, onPress }: { diameter: number; onPress?: () =
 }
 
 /**
+ * The same circle with nothing in it yet.
+ *
+ * Used wherever a score has a place on the page but no value to put in it: a title
+ * nobody has ranked, a Following mean with no followee who has seen it, a Bingd mean
+ * still short of its sample. The founder’s instruction is that the circle stays in all
+ * three cases, and the reason is layout as much as tone — a row that grows a circle
+ * when the data arrives is a row that moves under the reader’s eye.
+ *
+ * Neutral rather than Maroon, and empty rather than a dash or a zero. A dash reads as a
+ * verdict of nothing and a zero reads as a verdict of nought; an empty slot reads as an
+ * empty slot. Screen readers get the sentence, because to them the shape says nothing at
+ * all.
+ */
+export function EmptyScoreBadge({
+  size = 'md',
+  label = 'No score yet',
+}: {
+  size?: ScoreBadgeSize;
+  label?: string;
+}) {
+  const { diameter } = metrics(size);
+
+  return (
+    <View
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={label}
+      style={[styles.circle, styles.empty, { width: diameter, height: diameter }]}
+    />
+  );
+}
+
+/**
  * How wide `10.0` is, as a multiple of the font size, in Inter SemiBold with
  * tabular figures: three digit advances of 0.60em and a period of 0.28em.
  *
@@ -171,6 +204,13 @@ const styles = StyleSheet.create({
   unranked: {
     borderWidth: 1,
     borderStyle: 'dashed',
+    borderColor: theme.border.strong,
+  },
+  // Solid where `unranked` is dashed: a dashed ring is an invitation to rank, and this
+  // one is not always about the reader — it also stands in for other people’s numbers.
+  empty: {
+    backgroundColor: theme.surface.sunken,
+    borderWidth: 2,
     borderColor: theme.border.strong,
   },
   pressed: { opacity: 0.7 },

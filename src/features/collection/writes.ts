@@ -215,6 +215,65 @@ export async function setWatchlist(input: {
   return error ? interpret(error) : statusOf(data);
 }
 
+/**
+ * Takes a title's position away and leaves the rest of the collection alone.
+ *
+ * `rank_unrank` (20260813000700) deletes the row and closes the gap behind it, so
+ * everything below moves up one and the band stays contiguous. The `user_media` row
+ * survives: the person still watched it, they simply no longer have it placed. That is
+ * the whole point of offering this separately from removal — an accidental comparison
+ * is a mistake about an ordering, not about having seen the film.
+ *
+ * No operation id, because the server's function does not take one. It is idempotent by
+ * shape rather than by ledger: a second call finds nothing to delete and answers P0002,
+ * which reads here as "it is already not ranked" and is mapped to success by the caller
+ * rather than surfaced as a failure the user cannot act on.
+ */
+export async function unrank(mediaItemId: string): Promise<WriteResult> {
+  const { error } = await supabase.rpc('rank_unrank', { p_media_item_id: mediaItemId });
+
+  // P0002 from this function means "there was no ranking to remove", which is the state
+  // the caller asked for. `interpret` reads that code as a missing catalogue row, which
+  // is right for every other writer and wrong here, so it is answered before it gets there.
+  if (error?.code === CODES.notFound) return { outcome: 'ok' };
+  return interpret(error);
+}
+
+/**
+ * Removes a title from the collection outright.
+ *
+ * `unlog` refuses a ranked title — `_assert_unranked` — which is deliberate on the
+ * server and awkward on the client, because "remove this from my collection" is one
+ * intent to the person pressing it. So the two steps are joined here rather than in the
+ * screen: unrank first if it is ranked, then delete the row. Both are the user's own
+ * data and both are already granted; there is no new function and no migration behind
+ * this.
+ *
+ * The operation id belongs to the *intent*, so a retry of the same removal is answered
+ * `already_applied` rather than applied twice — which is why it is passed in rather than
+ * minted here (see the module header).
+ */
+export async function removeFromCollection(input: {
+  operationId: string;
+  mediaItemId: string;
+  /** Skips a pointless round trip for a title that was never ranked. */
+  wasRanked: boolean;
+}): Promise<WriteResult> {
+  if (input.wasRanked) {
+    // A refusal here stops the delete rather than being retried into it: `unlog` would
+    // only refuse in turn, and reporting the second refusal would name the wrong cause.
+    const cleared = await unrank(input.mediaItemId);
+    if (cleared.outcome === 'failed') return cleared;
+  }
+
+  const { data, error } = await supabase.rpc('unlog', {
+    p_operation_id: input.operationId,
+    p_media_item_id: input.mediaItemId,
+  });
+
+  return error ? interpret(error) : statusOf(data);
+}
+
 /** The local calendar date, formatted the way the database wants it. */
 export const today = () => {
   const now = new Date();

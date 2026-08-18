@@ -293,6 +293,46 @@ describe('what the activity owner is told', () => {
     assert.equal(rows[0].n, 0);
   });
 
+  /**
+   * The founder reacted to their own post, got no notification, and asked whether that
+   * was right. It is, and the test above pins it. What was worth checking alongside it
+   * is the case they could not check alone: somebody else reacting, then immediately
+   * undoing it.
+   *
+   * The row stays, and that is deliberate rather than an oversight. The notification
+   * says "Bob reacted to this", and Bob did. Deleting it on undo would let anybody
+   * silently retract an inbox entry the recipient may already have read, and would put
+   * a delete on a table nothing else deletes from. What must not happen is a *second*
+   * row on the re-react, or a row the recipient can no longer resolve, and neither does.
+   */
+  it('keeps one readable notification through a react, undo and react again', async () => {
+    const event = await eventOf(alice, await movie('react_undo_redo'));
+    await react(event, 'love');
+    await react(event, null);
+    await react(event, 'love');
+
+    const { rows } = await t.sql(
+      `select recipient_id, actor_id, payload from notifications where subject_id = $1`,
+      [event],
+    );
+    assert.equal(rows.length, 1, "one inbox row, however many times the reactor changed their mind");
+    assert.equal(rows[0].recipient_id, alice);
+    assert.equal(rows[0].actor_id, bob);
+
+    // And it still resolves through the inbox the app actually reads, rather than
+    // sitting in the table pointing at an actor the recipient cannot name.
+    const inbox = await t.asUser(alice, () =>
+      t.sql(`select id, kind, actor_username from my_notifications(100) where subject_id = $1`, [
+        event,
+      ]),
+    );
+    await t.actAs(bob);
+
+    assert.equal(inbox.rows.length, 1);
+    assert.equal(inbox.rows[0].kind, 'reaction');
+    assert.equal(inbox.rows[0].actor_username, 'bob_react');
+  });
+
   it('is readable by its recipient and by nobody else', async () => {
     const event = await eventOf(alice, await movie('react_notify_private'));
     await react(event, 'love');

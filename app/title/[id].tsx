@@ -8,7 +8,6 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  Share,
   StyleSheet,
   View,
 } from 'react-native';
@@ -20,7 +19,13 @@ import { useCompanions } from '@/features/collection/use-companions';
 import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
 import { useTitleScore } from '@/features/collection/use-score';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
-import { newOperationId, setWatchlist } from '@/features/collection/writes';
+import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
+import {
+  newOperationId,
+  removeFromCollection,
+  setWatchlist,
+  unrank,
+} from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { useSeasons } from '@/features/search/use-title-search';
@@ -36,6 +41,7 @@ import { heroArtwork } from '@/lib/hero';
 import { posterUri, profileUri, videoUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
+import { relativeTime } from '@/features/recommendations/use-sent-to-you';
 import { fullTitle } from '@/lib/titles';
 import {
   CastStrip,
@@ -49,6 +55,8 @@ import {
   Screen,
   ScoresSection,
   SegmentedTabs,
+  Sheet,
+  SheetRow,
   SkeletonRow,
   Text,
   TitleHero,
@@ -80,7 +88,20 @@ type Tab = 'cast' | 'reviews' | 'videos' | 'details' | 'seasons';
  * exceptions are spent here on purpose.
  */
 export default function TitleScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  /**
+   * The title, and — when the reader arrived from something a friend sent them — who
+   * sent it and when.
+   *
+   * Carried in the link rather than looked up, because the fact belongs to the
+   * *navigation* and not to the title: the same film opened from search is not
+   * "recommended by Ada", and a query against `recommendations_to_me` on every title
+   * page would be a round trip to answer a question only one route ever asks.
+   */
+  const { id, recBy, recAt } = useLocalSearchParams<{
+    id: string;
+    recBy?: string;
+    recAt?: string;
+  }>();
   const profile = useCurrentProfile();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -101,6 +122,8 @@ export default function TitleScreen() {
   // review other people found worth reacting to, not the one written most recently.
   const [reviewSort, setReviewSort] = useState<ReviewSort>('top');
   const [recommending, setRecommending] = useState(false);
+  /** The Ranked control's menu: change the rating, drop it, or remove the title. */
+  const [managing, setManaging] = useState(false);
   /** Whom this title was last recommended to, which is the confirmation. */
   const [recommendedTo, setRecommendedTo] = useState<string | null>(null);
 
@@ -329,6 +352,11 @@ export default function TitleScreen() {
   const { score, total } = titleScore;
   const rankable = title.kind === 'movie' || title.kind === 'season';
   const isSeries = title.kind === 'series';
+  const isSeason = title.kind === 'season';
+  /** "Recommended by Ada · 2d ago", or nothing at all. */
+  const recommendedBy = recBy
+    ? `Recommended by ${recBy}${recAt ? ` · ${relativeTime(recAt)}` : ''}`
+    : null;
   const year = yearOf(title.release_date);
 
   // Certification first. It is the fact somebody scans for before deciding whether to put
@@ -423,15 +451,72 @@ export default function TitleScreen() {
     ]);
   };
 
-  const shareTitle = async () => {
-    const url = `https://bingd.app/title/${title.kind}/${title.id}`;
-    try {
-      await Share.share({ message: url, url });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Sharing failed.';
-      setActionError(message);
-      Alert.alert('Could not share', message);
+  const afterCollectionChange = () =>
+    invalidateAfterCollectionChange(queryClient, profile.id, title.id, {
+      category: rankCategory,
+    });
+
+  /**
+   * Takes the position away and leaves the title in the collection.
+   *
+   * The founder’s case is an accidental comparison: somebody ranked a film they meant to
+   * scroll past, and the only escape used to be ranking it again. This is not a deletion
+   * and does not ask to be confirmed like one — nothing is lost that a second comparison
+   * would not restore, and a confirmation dialogue in front of a reversible action is how
+   * people learn to dismiss confirmations.
+   */
+  const removeRanking = async () => {
+    setManaging(false);
+    setActionError(null);
+    const result = await unrank(title.id);
+
+    if (result.outcome === 'failed') {
+      setActionError(result.message);
+      Alert.alert('Could not remove the ranking', result.message);
+      return;
     }
+
+    afterCollectionChange();
+  };
+
+  /**
+   * Removes the title from the collection, rating and all.
+   *
+   * Confirmed, because this one genuinely destroys things the person wrote: the watch
+   * date, the note, the position. The alert names what goes rather than asking "are you
+   * sure", which is a question nobody can answer without being told the consequence.
+   */
+  const confirmRemoval = () => {
+    setManaging(false);
+    Alert.alert(
+      `Remove ${displayTitle ?? title.title} from your collection?`,
+      'Your rating, your watch date and your note go with it. You can log it again later.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setActionError(null);
+              const result = await removeFromCollection({
+                operationId: newOperationId(),
+                mediaItemId: title.id,
+                wasRanked: Boolean(data.ranked),
+              });
+
+              if (result.outcome === 'failed') {
+                setActionError(result.message);
+                Alert.alert('Could not remove this', result.message);
+                return;
+              }
+
+              afterCollectionChange();
+            })();
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -483,11 +568,32 @@ export default function TitleScreen() {
           />
         }
       >
-        <TitleHero
-          uri={hero.uri}
-          blurred={hero.treatment === 'poster'}
-          collapsedHeight={HERO_COLLAPSED}
-        />
+        <View>
+          <TitleHero
+            uri={hero.uri}
+            blurred={hero.treatment === 'poster'}
+            collapsedHeight={HERO_COLLAPSED}
+          />
+          {/* Who sent this and how long ago, over the artwork they sent it about.
+
+              A rounded callout rather than a line of copy under the title, because it is
+              not a fact about the film — it is the reason this particular person is
+              looking at it, and it stops being true the moment they arrive any other way.
+              Solid rather than translucent: legibility over a photograph cannot depend on
+              what the photograph happens to be.
+
+              Anchored above the poster rather than at the top of the hero, which keeps it
+              clear of the transparent navigation bar without having to guess at its
+              height on a device this code cannot measure.
+
+              Only where there *is* artwork. The collapsed band is 96pt and the poster
+              rises the same 96 into it, so a title with no backdrop has no hero to
+              overlay — an absolute callout there would sit on the poster or above the
+              screen. That case gets the same callout inline, under the heading. */}
+          {recommendedBy && hero.uri ? (
+            <RecommendedCallout label={recommendedBy} overlay />
+          ) : null}
+        </View>
 
         {/* The poster rises into the hero and the score sits opposite it, so the
             two anchor the same band rather than stacking. Negative margin rather
@@ -506,6 +612,11 @@ export default function TitleScreen() {
               bucket={data.ranked?.bucket ?? null}
               ordinal={heroRank?.label ?? null}
               onPress={openLog}
+              // Ranked is a fact with more than one thing to do to it, so it opens a menu
+              // rather than jumping straight back into the comparison. Long press was
+              // considered and rejected: an interaction nobody can see is not a way out of
+              // a mistake somebody is trying to undo.
+              onPressRanked={() => setManaging(true)}
               rankable={rankable}
             />
           </View>
@@ -534,9 +645,18 @@ export default function TitleScreen() {
               and "PG-13 · 95m · Nikolaj Arcel" on the next — which separates what the
               thing is called from what it is, instead of running a year, a runtime and
               a director together as one undifferentiated string. */}
+          {/* "Season 1, 2023" for a season, under the show’s own name on the line above.
+              The em dash form the log sheet uses — "Parks and Recreation — Season 2" — is
+              for surfaces with one line to say the whole name in. Here there is a
+              hierarchy to put it in, and a comma is what joins a season to its year in
+              every other place anybody writes one down. */}
           <Text variant="title1">
             {displayTitle ?? title.title}
-            {year ? <Text variant="title1" tone="tertiary">{`  ${year}`}</Text> : null}
+            {year ? (
+              <Text variant="title1" tone="tertiary">
+                {isSeason ? `, ${year}` : `  ${year}`}
+              </Text>
+            ) : null}
           </Text>
           {/* Built before it is rendered, because all three parts can be missing at once
               — an obscure title with no certification, no runtime and no director credit
@@ -549,6 +669,9 @@ export default function TitleScreen() {
               {metaLine}
             </Text>
           ) : null}
+          {/* The no-artwork case. Same object, laid out in the flow rather than over a
+              hero that is not there. */}
+          {recommendedBy && !hero.uri ? <RecommendedCallout label={recommendedBy} /> : null}
         </View>
 
         {watchedDate || companions.data?.length ? (
@@ -613,11 +736,11 @@ export default function TitleScreen() {
             onPress={() => void toggleWatchlist()}
             disabled={watchlistBusy}
           />
-          {/* Recommend is a first-class Bingd action and sits between the two: it
-              is what somebody does with a title they already have an opinion about,
-              and it goes to one named person rather than to an address book. A
-              series has no Recommend, for the same reason it has no Rank — it is not
-              a thing anybody watched (PRD §10). */}
+          {/* Recommend is a first-class Bingd action: it is what somebody does with a
+              title they already have an opinion about, and it goes to one named person
+              rather than to an address book. A series has no Recommend, for the same
+              reason it has no Rank — it is not a thing anybody watched (PRD §10), which
+              leaves a series page with Watchlist alone. Season pages keep both. */}
           {rankable ? (
             <RowAction
               icon="paper-plane-outline"
@@ -630,15 +753,11 @@ export default function TitleScreen() {
               }}
             />
           ) : null}
-          {/* Generic share stays, and stays quieter than the two beside it. It is
-              the fallback for everybody who is not on Bingd, and the Recommend
-              sheet offers the same thing with an invite link attached. */}
-          <RowAction
-            icon="share-outline"
-            label="Share"
-            accessibilityLabel={`Share ${title.title}`}
-            onPress={() => void shareTitle()}
-          />
+          {/* There is no third control. Share used to sit here and it was the one that
+              pushed the row off the edge of a narrow Android screen: three labelled chips
+              do not fit at 360pt with the gutter this page uses. It has not been dropped.
+              The Recommend sheet ends in "Share off Bingd", which is the same native
+              share with the reader's invite link attached. One act, one door. */}
         </View>
 
         {actionError ? (
@@ -690,29 +809,35 @@ export default function TitleScreen() {
             A series has no aggregate of its own, because it cannot be ranked
             (PRD §10), so it gets no section rather than a permanent "No ratings yet".
 
-            The reader's own score is deliberately absent: it is already opposite the
-            poster, at the top of the page, and repeating it here is the duplication
-            the founder rejected once already. */}
+            The reader's own score leads the section and is also opposite the poster.
+            That repetition was ruled out once and the founder has since ruled it back
+            in, which is the right call: the hero answers "have I ranked this", and this
+            section answers "how does what I thought compare", and the second question
+            cannot be asked with one of its three numbers a screen away. */}
         {!isSeries ? (
           <ScoresSection
-            community={
-              community.data
-                ? {
-                    score: community.data.score,
-                    ratingCount: community.data.ratingCount,
-                    minRatings: community.data.minRatings,
-                  }
-                : null
-            }
-            // The reader's own people, above everybody's. Omitted by the component
-            // when none of them have ranked it — that silence is about the reader's
-            // following list rather than about the film.
+            // Your own number leads, and it is deliberately the same one the hero shows.
+            // The founder's amendment: this section is a comparison, and a comparison
+            // missing one of its three terms makes the reader scroll back for it.
+            yours={{ score, bucket: data.ranked?.bucket ?? null }}
+            // The reader's own people, above everybody's. Omitted by the component when
+            // they follow nobody — that silence is about the reader's following list
+            // rather than about the film.
             following={
               following.data
                 ? {
                     score: following.data.score,
                     ratingCount: following.data.ratingCount,
                     followingCount: following.data.followingCount,
+                  }
+                : null
+            }
+            bingd={
+              community.data
+                ? {
+                    score: community.data.score,
+                    ratingCount: community.data.ratingCount,
+                    minRatings: community.data.minRatings,
                   }
                 : null
             }
@@ -890,6 +1015,49 @@ export default function TitleScreen() {
       {/* Mounted only while open, like every other sheet here: it seeds its own
           draft state on mount, and one that stayed mounted would keep a search
           somebody abandoned. */}
+      {/**
+        * The way back out of a ranking, and out of the collection.
+        *
+        * Both were unreachable before this: the only thing the Ranked chip did was
+        * reopen the comparison, so an accidental ranking could be changed and never
+        * undone, and a title logged by mistake stayed logged. Neither needed a new
+        * function — `rank_unrank` and `unlog` have been granted since the first
+        * migration and nothing on the client had ever called them.
+        *
+        * Three rows in the order of how much they destroy: change the rating, drop the
+        * position, delete the row. Only the last is confirmed, and it is confirmed by
+        * naming what goes rather than by asking whether the reader is sure.
+        */}
+      {managing ? (
+        <Sheet
+          visible
+          onClose={() => setManaging(false)}
+          label={`Options for ${displayTitle ?? title.title}`}
+        >
+          <View style={styles.menu}>
+            <SheetRow
+              icon="star-outline"
+              label="Change your rating"
+              onPress={() => {
+                setManaging(false);
+                openLog();
+              }}
+            />
+            <SheetRow
+              icon="remove-circle-outline"
+              label="Remove ranking"
+              value="Keeps it in your collection"
+              onPress={() => void removeRanking()}
+            />
+            <SheetRow
+              icon="trash-outline"
+              label="Remove from collection"
+              value="Rating, date and note"
+              onPress={confirmRemoval}
+            />
+          </View>
+        </Sheet>
+      ) : null}
       {recommending ? (
         <RecommendSheet
           viewerId={profile.id}
@@ -902,6 +1070,31 @@ export default function TitleScreen() {
         />
       ) : null}
     </Screen>
+  );
+}
+
+/**
+ * "Recommended by Ada · 2d ago", as an object rather than as a line of copy.
+ *
+ * It is not a fact about the film. It is the reason this particular person is looking
+ * at it, and it stops being true the moment they arrive any other way — so it is drawn
+ * as a callout that visibly sits *on* the page rather than as another metadata line
+ * the page owns.
+ *
+ * Solid rather than translucent, because legibility over a photograph cannot depend on
+ * what the photograph happens to be.
+ */
+function RecommendedCallout({ label, overlay = false }: { label: string; overlay?: boolean }) {
+  return (
+    <View
+      pointerEvents="none"
+      style={[styles.recommendedCallout, overlay && styles.recommendedOverlay]}
+    >
+      <Ionicons name="paper-plane" size={theme.layout.icon.sm} color={theme.semantic.action} />
+      <Text variant="footnote" numberOfLines={1} style={styles.recommendedLabel}>
+        {label}
+      </Text>
+    </View>
   );
 }
 
@@ -1086,12 +1279,51 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[4],
     gap: theme.space[1],
   },
+  /**
+   * Wraps rather than overflows.
+   *
+   * Two chips fit on every width this app supports, and that is the design. The wrap is
+   * the guard for the case the design cannot control: a reader at a large text size, on a
+   * narrow device, in a language where "Watchlist" is two words. Without it the second
+   * chip is simply cut off at the screen edge, which is what the founder found.
+   */
   actionRow: {
     flexDirection: 'row',
-    gap: theme.space[3],
+    flexWrap: 'wrap',
+    columnGap: theme.space[3],
+    rowGap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],
   },
+  recommendedCallout: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[2],
+    paddingHorizontal: theme.space[3],
+    paddingVertical: theme.space[2],
+    marginTop: theme.space[2],
+    borderRadius: theme.radius.control,
+    backgroundColor: theme.surface.raised,
+    ...theme.elevation.e1,
+  },
+  /**
+   * On the hero, above the poster.
+   *
+   * `bottom` is measured from the hero's lower edge and clears the poster, which rises
+   * `POSTER_LIFT` into it. Applied only where there is artwork to sit on: the collapsed
+   * band is the same height as the lift, so there is nothing left to overlay.
+   */
+  recommendedOverlay: {
+    position: 'absolute',
+    left: theme.layout.gutter,
+    right: theme.layout.gutter,
+    bottom: POSTER_LIFT + theme.space[3],
+    marginTop: 0,
+  },
+  // Takes the width the glyph leaves, so a long name truncates rather than pushing the
+  // callout wider than the gutters allow.
+  recommendedLabel: { flex: 1 },
+  menu: { paddingBottom: theme.space[4], paddingTop: theme.space[2] },
   rowAction: {
     flexDirection: 'row',
     alignItems: 'center',

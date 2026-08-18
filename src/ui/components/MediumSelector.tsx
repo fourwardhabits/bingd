@@ -10,6 +10,15 @@ export type Medium = 'movies' | 'tv_seasons';
 export type MediumSelectorProps = {
   value: Medium;
   onChange: (next: Medium) => void;
+  /**
+   * Override what a category is called on this screen.
+   *
+   * The rankable unit is the season, so Collection genuinely lists TV *seasons*. For
+   * You recommends shows — TMDB answers "similar" about a series and never about a
+   * season — so calling them seasons there would name something the wall does not
+   * contain. One control, two accurate labels, rather than two controls.
+   */
+  labels?: Partial<Record<Medium, string>>;
 };
 
 const OPTIONS: { id: Medium; label: string }[] = [
@@ -17,7 +26,8 @@ const OPTIONS: { id: Medium; label: string }[] = [
   { id: 'tv_seasons', label: 'TV seasons' },
 ];
 
-const labelFor = (value: Medium) => OPTIONS.find((o) => o.id === value)?.label ?? '';
+const labelFor = (value: Medium, labels?: MediumSelectorProps['labels']) =>
+  labels?.[value] ?? OPTIONS.find((o) => o.id === value)?.label ?? '';
 
 /**
  * The category the collection is showing, as a dropdown (screens.md §5).
@@ -32,21 +42,21 @@ const labelFor = (value: Medium) => OPTIONS.find((o) => o.id === value)?.label ?
  * does the same and it is why its collection header reads as a page rather than
  * as a toolbar.
  */
-export function MediumSelector({ value, onChange }: MediumSelectorProps) {
+export function MediumSelector({ value, onChange, labels }: MediumSelectorProps) {
   const [open, setOpen] = useState(false);
 
   return (
     <>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Showing ${labelFor(value)}`}
+        accessibilityLabel={`Showing ${labelFor(value, labels)}`}
         accessibilityHint="Choose a category"
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen(true)}
         style={styles.button}
       >
         <View style={styles.row}>
-          <Text variant="title1">{labelFor(value)}</Text>
+          <Text variant="title1">{labelFor(value, labels)}</Text>
           <Ionicons
             name="chevron-down"
             size={theme.layout.icon.md}
@@ -77,7 +87,7 @@ export function MediumSelector({ value, onChange }: MediumSelectorProps) {
                   }}
                   style={[styles.option, selected && styles.optionSelected]}
                 >
-                  <Text variant="title2">{option.label}</Text>
+                  <Text variant="title2">{labelFor(option.id, labels)}</Text>
                   {selected ? (
                     <Ionicons
                       name="checkmark"

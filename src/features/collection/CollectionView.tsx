@@ -6,6 +6,7 @@ import { posterUri } from '@/lib/images';
 import { fullTitle } from '@/lib/titles';
 import {
   EmptyState,
+  FilterChip,
   PosterGrid,
   ScoreBadge,
   Text,
@@ -98,19 +99,19 @@ export function CollectionView({
   return (
     <View style={styles.body}>
       <View style={styles.controls}>
-        <Control
+        <FilterChip
           icon="options-outline"
           label={activeCount ? `Filters · ${activeCount}` : 'Filters'}
           selected={isFiltered(state.filters)}
           onPress={() => setFilterOpen(true)}
         />
-        <Control
+        <FilterChip
           icon="swap-vertical-outline"
           label={sorts.find((option) => option.key === sort)?.label ?? 'Sort'}
           onPress={() => setSortOpen((open) => !open)}
         />
         {sort === 'shuffle' ? (
-          <Control
+          <FilterChip
             icon="shuffle"
             label="Shuffle"
             onPress={() => onChange({ ...state, seed: state.seed + 1 })}
@@ -250,38 +251,6 @@ export function CollectionView({
 const nameOf = (item: CollectionItem) =>
   fullTitle({ kind: item.kind, title: item.title, seriesTitle: item.seriesTitle }) ?? item.title;
 
-function Control({
-  icon,
-  label,
-  selected = false,
-  onPress,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  label: string;
-  selected?: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      hitSlop={theme.space[1]}
-      style={({ pressed }) => [styles.control, selected && styles.controlOn, pressed && styles.pressed]}
-    >
-      <Ionicons
-        name={icon}
-        size={theme.layout.icon.sm}
-        color={selected ? theme.semantic.action : theme.text.secondary}
-      />
-      <Text variant="footnote" tone={selected ? 'action' : 'secondary'}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 function ModeButton({
   icon,
   label,
@@ -320,18 +289,7 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[3],
   },
   spacer: { flex: 1 },
-  control: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[1],
-    minHeight: theme.layout.control.chipHeight,
-    paddingHorizontal: theme.space[3],
-    borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
-    backgroundColor: theme.surface.raised,
-  },
-  controlOn: { borderColor: theme.semantic.action, backgroundColor: theme.surface.sunken },
+
   modes: {
     flexDirection: 'row',
     borderRadius: theme.radius.control,

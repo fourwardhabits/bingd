@@ -1,4 +1,12 @@
-import { logWatched, newOperationId, setBucket, setWatchlist, today } from './writes';
+import {
+  logWatched,
+  newOperationId,
+  removeFromCollection,
+  setBucket,
+  setWatchlist,
+  today,
+  unrank,
+} from './writes';
 
 const mockRpc = jest.fn();
 
@@ -232,5 +240,80 @@ describe('operation ids and dates', () => {
     jest.useFakeTimers().setSystemTime(new Date(2026, 0, 5, 12, 0));
     expect(today()).toBe('2026-01-05');
     jest.useRealTimers();
+  });
+});
+
+/**
+ * Undoing a ranking, and undoing a log.
+ *
+ * Both server functions have been granted since the first migration and nothing on the
+ * client had ever called either, so an accidental comparison could be changed and never
+ * removed. What is worth testing is the join between them: `unlog` refuses a ranked
+ * title, so "remove this from my collection" is two calls in a fixed order, and the
+ * first one failing has to stop the second rather than be retried into it.
+ */
+describe('unrank', () => {
+  it('asks the server to drop the position, and nothing else', async () => {
+    mockRpc.mockResolvedValue({ data: { done: true }, error: null });
+    const result = await unrank(mediaItemId);
+
+    expect(mockRpc).toHaveBeenCalledWith('rank_unrank', { p_media_item_id: mediaItemId });
+    expect(result).toEqual({ outcome: 'ok' });
+  });
+
+  it('treats "it was not ranked" as the state the caller wanted', async () => {
+    // P0002 from this function means there was nothing to remove. `interpret` reads
+    // that code as a missing catalogue row, which is right for every other writer and
+    // wrong here.
+    mockRpc.mockResolvedValue({ data: null, error: { code: 'P0002', message: 'title is not ranked' } });
+
+    expect(await unrank(mediaItemId)).toEqual({ outcome: 'ok' });
+  });
+
+  it('still reports a refusal the reader has to know about', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'suspended' } });
+
+    expect(await unrank(mediaItemId)).toEqual({
+      outcome: 'failed',
+      message: 'Your account cannot make changes right now.',
+    });
+  });
+});
+
+describe('removeFromCollection', () => {
+  it('clears the ranking first, because unlog refuses a ranked title', async () => {
+    mockRpc.mockResolvedValue({ data: { status: 'ok' }, error: null });
+    await removeFromCollection({ operationId, mediaItemId, wasRanked: true });
+
+    expect(mockRpc.mock.calls.map((call) => call[0])).toEqual(['rank_unrank', 'unlog']);
+    expect(mockRpc).toHaveBeenLastCalledWith('unlog', {
+      p_operation_id: operationId,
+      p_media_item_id: mediaItemId,
+    });
+  });
+
+  it('skips a round trip for a title that was never ranked', async () => {
+    mockRpc.mockResolvedValue({ data: { status: 'ok' }, error: null });
+    await removeFromCollection({ operationId, mediaItemId, wasRanked: false });
+
+    expect(mockRpc.mock.calls.map((call) => call[0])).toEqual(['unlog']);
+  });
+
+  it('stops rather than deleting when the ranking could not be cleared', async () => {
+    // `unlog` would only refuse in turn, and reporting the second refusal would name
+    // the wrong cause.
+    mockRpc.mockResolvedValue({ data: null, error: { code: '28000', message: 'no session' } });
+    const result = await removeFromCollection({ operationId, mediaItemId, wasRanked: true });
+
+    expect(mockRpc.mock.calls.map((call) => call[0])).toEqual(['rank_unrank']);
+    expect(result).toEqual({ outcome: 'failed', message: 'Your session expired. Sign in again.' });
+  });
+
+  it('reports a replayed removal as already applied rather than as a failure', async () => {
+    mockRpc.mockResolvedValue({ data: { status: 'already_applied' }, error: null });
+
+    expect(await removeFromCollection({ operationId, mediaItemId, wasRanked: false })).toEqual({
+      outcome: 'already_applied',
+    });
   });
 });

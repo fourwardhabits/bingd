@@ -142,27 +142,42 @@ describe('incomplete metadata', () => {
   });
 });
 
-describe('the share action', () => {
+/**
+ * Recommend, which took the slot Share used to have.
+ *
+ * Sharing is not gone: it is the last row of the sheet this opens. What changed is
+ * that the row carries one control where it carried two, which is what stopped it
+ * running past the edge of a narrow screen.
+ */
+describe('the recommend action', () => {
   it('is icon-first and carries no large text button', async () => {
-    const onPressShare = jest.fn();
-    const view = await render(<ActivityRow {...props} onPressShare={onPressShare} />);
+    const onPressRecommend = jest.fn();
+    const view = await render(<ActivityRow {...props} onPressRecommend={onPressRecommend} />);
 
-    // The label names the title being shared, so a screen reader gets the context
-    // the glyph cannot carry. There is deliberately no visible "Share" word.
-    expect(view.queryByText('Share')).toBeNull();
-    await fireEvent.press(view.getByLabelText('Share Inception'));
-    expect(onPressShare).toHaveBeenCalled();
+    // The label names the title, so a screen reader gets the context the glyph
+    // cannot carry. There is deliberately no visible word beside it.
+    expect(view.queryByText('Recommend')).toBeNull();
+    await fireEvent.press(view.getByLabelText('Recommend Inception to a friend'));
+    expect(onPressRecommend).toHaveBeenCalled();
   });
 
-  it('names the exact entity, so sharing a season does not read as sharing the show', async () => {
+  it('names the exact entity, so a season does not read as the whole show', async () => {
     const view = await render(
-      <ActivityRow {...props} title="Parks and Recreation — Season 2" onPressShare={jest.fn()} />,
+      <ActivityRow
+        {...props}
+        title="Parks and Recreation — Season 2"
+        onPressRecommend={jest.fn()}
+      />,
     );
-    expect(view.getByLabelText('Share Parks and Recreation — Season 2')).toBeTruthy();
+    expect(
+      view.getByLabelText('Recommend Parks and Recreation — Season 2 to a friend'),
+    ).toBeTruthy();
   });
 
-  it('is absent when the row has nothing to share', async () => {
+  it('is absent when the surface has not wired it up', async () => {
     const view = await render(<ActivityRow {...props} />);
+    expect(view.queryByLabelText(/^Recommend /)).toBeNull();
+    // And the control it replaced is gone rather than hidden.
     expect(view.queryByLabelText(/^Share /)).toBeNull();
   });
 });

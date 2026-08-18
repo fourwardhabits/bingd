@@ -1,7 +1,7 @@
 
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
@@ -38,7 +38,9 @@ import {
  *
  * `ProfileIdentity` and `TopRanked` are now shared, and the difference between the two
  * screens is exactly the set of things that genuinely depend on who is looking: this
- * one gets Edit Profile and Settings, the other gets Follow and a Taste Match.
+ * one gets Share Profile, the other gets Follow and a Taste Match. Editing is not one
+ * of them — it lives behind the gear in the header, because it is housekeeping rather
+ * than the thing a profile is for.
  *
  * Recent activity uses the Feed's own row rather than a weakened copy of it, so a
  * ranking on a profile can be reacted to, commented on and shared like the same event
@@ -62,16 +64,32 @@ export default function ProfileScreen() {
   const { setReaction } = useSetReaction(profile.id);
   const openComments = commentsFor ? (recent.find((e) => e.id === commentsFor) ?? null) : null;
 
+  /**
+   * The profile as a link somebody else can open.
+   *
+   * The handle rather than the id, because it is the half a person can read back to
+   * you, and `/u/[username]` is the route that already resolves one.
+   */
+  const shareProfile = async () => {
+    const url = `https://bingd.app/u/${profile.username}`;
+    try {
+      await Share.share({ message: url, url });
+    } catch (error) {
+      Alert.alert('Could not share', error instanceof Error ? error.message : 'Sharing failed.');
+    }
+  };
+
   return (
     <Screen>
       <AppHeader
+        // A gear rather than the word, and to the left of the bell rather than in
+        // place of it. The bell is meant to sit in the same corner on every root tab;
+        // a text button beside it was pushing it out of that corner on this one.
+        settings={{ onPress: () => router.push('/settings') }}
         notifications={{
           count: unreadCount(notifications.data),
           onPress: () => router.push('/settings/notifications'),
         }}
-        right={
-          <Button label="Settings" kind="tertiary" onPress={() => router.push('/settings')} />
-        }
       />
       <ScrollView
         contentContainerStyle={styles.content}
@@ -99,14 +117,17 @@ export default function ProfileScreen() {
             seasons: stats.isPending ? '—' : (stats.data?.rankedSeasons ?? 0),
           }}
           controls={
-            // The two things only the owner can do. Share moved out of the identity
-            // block: it is an action on the page rather than part of who this is, and
-            // it was the loudest control in a group whose job is to say a name.
-            <Button
-              label="Edit Profile"
-              kind="secondary"
-              onPress={() => router.push('/settings/profile')}
-            />
+            /**
+             * Share Profile, and only that.
+             *
+             * The founder's restoration, and the argument is about what a profile is
+             * for: it is the thing you hand to somebody so they can follow you, and
+             * the one action that does that belongs at the top of it. Edit Profile is
+             * housekeeping and it already has a home, one tap away behind the gear in
+             * the header, so promoting it to the page's main control made the most
+             * common act the second-most prominent one.
+             */
+            <Button label="Share Profile" onPress={() => void shareProfile()} />
           }
         />
 

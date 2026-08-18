@@ -43,14 +43,12 @@ export function TitleHero({
 }: TitleHeroProps) {
   const { width } = useWindowDimensions();
   /**
-   * Taller than the artwork's own 16:9.
+   * Taller than the artwork's own 16:9, and no taller than it has to be.
    *
-   * The founder's note was that the image "ends too high". At 16:9 the hero is 219pt
-   * on a 390pt screen, the fade starts almost immediately, and the poster overlaps a
-   * strip that has already become page. Filling to 1:1.4 gives the artwork about
-   * seventy more points, which is what the poster needs to sit *in* rather than
-   * under — and the extra height is spent on the fade, so no more of the image is
-   * legible than before, it simply arrives at the page more slowly.
+   * At a true 16:9 the fade starts almost immediately and the poster overlaps a strip
+   * that has already become page. A little extra height is what the poster needs to sit
+   * *in* the artwork rather than under it. Every point beyond that is paid for by the
+   * sides of the image, which is what `HERO_RATIO` explains.
    */
   const height = width / HERO_RATIO;
 
@@ -68,15 +66,11 @@ export function TitleHero({
         /**
          * **Top centre, not centre.**
          *
-         * The founder's screenshots showed heads cropped off. A 16:9 backdrop in a
-         * 1:1.4 frame has to lose about a third of its height, and `cover` takes that
-         * from both edges equally — so a poster-style composition with the subject in
-         * the upper third loses the subject. Publicity stills are framed with the
-         * faces high and the empty half at the bottom; anchoring to the top keeps the
-         * part somebody composed and throws away the part they left spare.
-         *
-         * It also happens to be where the fade is: the bottom third becomes Paper, so
-         * anything sacrificed there was going to be invisible anyway.
+         * It matters for the poster fallback and costs nothing for a backdrop. A poster
+         * is far taller than this frame, so `cover` drops most of its height; taking
+         * that from the bottom keeps the part somebody composed. A backdrop is wider
+         * than the frame rather than taller, so it loses nothing vertically and this
+         * only centres it horizontally, which is what you want either way.
          */
         contentPosition="top center"
         transition={theme.duration.navigation}
@@ -101,8 +95,22 @@ export function TitleHero({
  */
 const POSTER_BLUR = 28;
 
-/** The hero's aspect. Deliberately taller than the artwork's own 16:9 — see above. */
-const HERO_RATIO = 1.4;
+/**
+ * The hero's aspect. Taller than the artwork's own 16:9, but only just.
+ *
+ * It was 1.4, and that is what the founder’s second look called "too cropped". The
+ * arithmetic is the reason. `cover` scales an image until it fills both dimensions, so
+ * a 16:9 backdrop in a frame narrower than 16:9 is scaled by height and loses the
+ * *sides*: at 1.4 on a 412pt screen the image is drawn 523pt wide, and 111pt of what
+ * somebody composed never reaches the screen. Nothing is lost from the top, which is
+ * why anchoring the crop there never fixed it.
+ *
+ * 1.62 costs about forty points of height and takes the horizontal loss from 27% to
+ * 10%, which is the difference between a backdrop and a detail of one. It is still
+ * taller than 16:9, so the poster still rises into artwork rather than into Paper, and
+ * the fade below moves with it.
+ */
+const HERO_RATIO = 1.62;
 
 /**
  * One continuous gradient, drawn by the platform.
@@ -154,18 +162,18 @@ function Scrim({ height }: { height: number }) {
 /**
  * Where the fade begins, as a share of the hero.
  *
- * The founder's range is "approximately the bottom 30–40%". Sixty-two per cent of the
- * hero is now untouched artwork, against thirty-eight before — the old banded version
- * had it the other way round, and more than half the image spent under a scrim is why
- * the artwork "ended too high" even after the frame was made taller.
+ * The founder's range is "approximately the bottom 30–40%". The frame lost height when
+ * `HERO_RATIO` came down, so the fade starts a little later to keep the same amount of
+ * artwork legible in absolute terms: two thirds of the hero is untouched, and the
+ * poster's top edge still lands above the first stop that does anything.
  */
 const SCRIM_GRADIENT = [
   'linear-gradient(to bottom,',
   `${paperAlpha(0)} 0%,`,
-  `${paperAlpha(0)} 62%,`,
-  `${paperAlpha(0.08)} 71%,`,
-  `${paperAlpha(0.42)} 82%,`,
-  `${paperAlpha(0.86)} 93%,`,
+  `${paperAlpha(0)} 66%,`,
+  `${paperAlpha(0.08)} 74%,`,
+  `${paperAlpha(0.42)} 84%,`,
+  `${paperAlpha(0.86)} 94%,`,
   `${paperAlpha(1)} 100%)`,
 ].join(' ');
 

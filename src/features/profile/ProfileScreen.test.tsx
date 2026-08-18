@@ -1,4 +1,4 @@
-import { waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -8,6 +8,8 @@ import { renderWithProviders } from '@/test-utils/render';
 import ProfileScreen from '../../../app/(tabs)/profile';
 
 const mockTables: Record<string, unknown[]> = {};
+// Recorded, because where the gear leads is a decision this screen makes.
+const mockPush = jest.fn();
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -44,7 +46,7 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: mockPush }),
 }));
 
 jest.mock('@/features/auth', () => ({
@@ -77,6 +79,7 @@ const rankedRow = (id: string, position: number) => ({
 });
 
 beforeEach(() => {
+  mockPush.mockReset();
   for (const key of Object.keys(mockTables)) delete mockTables[key];
   mockTables.follows = [];
   mockTables.rankings = [];
@@ -110,6 +113,40 @@ const stat = async (view: Awaited<ReturnType<typeof open>>, label: string) => {
  * on. The four that remain are the four a visitor already saw, which is what makes the
  * two profiles one product.
  */
+/**
+ * The controls at the top, which the founder restored after the device pass.
+ *
+ * Share Profile is the primary one because a profile is the thing you hand somebody so
+ * they can follow you. Edit Profile is housekeeping and already has a home behind the
+ * gear, so promoting it to the page’s main control made the most common act the
+ * second-most prominent one.
+ */
+describe('the profile controls', () => {
+  it('leads with Share Profile', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Share Profile')).toBeTruthy());
+    expect(view.queryByText('Edit Profile')).toBeNull();
+  });
+
+  it('keeps the bell in its corner and puts settings beside it as a gear', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Settings')).toBeTruthy());
+    // The bell sits in the same place on every root tab. A text button next to it was
+    // pushing it out of that corner on this one.
+    expect(view.getByLabelText(/^Notifications/)).toBeTruthy();
+  });
+
+  it('opens settings from the gear', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('Settings')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Settings'));
+    expect(mockPush).toHaveBeenCalledWith('/settings');
+  });
+});
+
 describe('the stat row', () => {
   it('shows the four that describe the collection, and no more', async () => {
     mockTables.rankings = [1, 2, 3].map((n) => rankedRow(`film-${n}`, n));

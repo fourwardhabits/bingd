@@ -10,10 +10,16 @@ import TitleScreen from '../../../app/title/[id]';
 const mockPush = jest.fn();
 const tableRows: Record<string, unknown[]> = {};
 let mockRpcResults: Record<string, unknown> = {};
+// Recorded rather than discarded: the collection writers this screen now calls are
+// only observable as the RPC they send.
+const mockRpc = jest.fn();
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
-    rpc: (name: string) => Promise.resolve({ data: mockRpcResults[name] ?? null, error: null }),
+    rpc: (name: string, args: unknown) => {
+      mockRpc(name, args);
+      return Promise.resolve({ data: mockRpcResults[name] ?? null, error: null });
+    },
     from: (table: string) => {
       const filters: Record<string, unknown> = {};
       const rows = () => {
@@ -54,10 +60,13 @@ let mockHeaderOptions: Record<string, unknown> = {};
 // Which title the screen is opened on. A series and a film are the same route, and the
 // difference between them is most of what the seasons flow is about.
 let mockOpenId = 'film-1';
+// Anything else the link carried. `recBy` and `recAt` are set by a tap in Sent to you
+// and by nothing else, which is the whole reason the callout can be trusted.
+let mockParams: Record<string, string> = {};
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
-  useLocalSearchParams: () => ({ id: mockOpenId }),
+  useLocalSearchParams: () => ({ id: mockOpenId, ...mockParams }),
   Stack: {
     Screen: ({ options }: { options?: Record<string, unknown> }) => {
       if (options) mockHeaderOptions = options;
@@ -144,7 +153,9 @@ const videos = {
 beforeEach(() => {
   mockHeaderOptions = {};
   mockOpenId = 'film-1';
+  mockParams = {};
   mockPush.mockReset();
+  mockRpc.mockReset();
   mockOpenURL.mockReset();
   mockEnrichmentArgs.length = 0;
   mockRpcResults = {};
@@ -267,8 +278,12 @@ describe('a title this user has ranked', () => {
   it('shows the score, not the position', async () => {
     const view = await open();
 
-    // Top of a two-title Loved band, so the band's high.
-    await waitFor(() => expect(view.getByLabelText('10.0 out of 10, Loved it')).toBeTruthy());
+    // Top of a two-title Loved band, so the band's high. Twice on the page since the
+    // founder asked the Scores section to lead with the reader's own number: once
+    // opposite the poster, once as the first term of the comparison further down.
+    await waitFor(() =>
+      expect(view.getAllByLabelText('10.0 out of 10, Loved it')).toHaveLength(2),
+    );
   });
 
   it('says where it sits in their own list, as an ordinal', async () => {
@@ -276,10 +291,47 @@ describe('a title this user has ranked', () => {
     await waitFor(() => expect(view.getByText('#1 in Movies')).toBeTruthy());
   });
 
-  it('shows a Ranked control that leads back into the rating flow', async () => {
+  it('shows a Ranked control that opens the rating and collection menu', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByLabelText('Ranked. Change your rating.')).toBeTruthy());
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
+    );
     expect(view.getByText('Ranked')).toBeTruthy();
+  });
+
+  /**
+   * The way out of a ranking, which did not exist before this pass.
+   *
+   * `rank_unrank` and `unlog` have been granted since the first migration and nothing
+   * on the client had ever called either, so an accidental comparison could be changed
+   * and never undone. Three rows, and only the destructive one is confirmed.
+   */
+  it('offers a way to unrank and a way to remove, behind that control', async () => {
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
+
+    await waitFor(() => expect(view.getByLabelText('Remove ranking')).toBeTruthy());
+    expect(view.getByLabelText('Change your rating')).toBeTruthy();
+    expect(view.getByLabelText('Remove from collection')).toBeTruthy();
+  });
+
+  it('takes the position away without touching the collection', async () => {
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
+    await waitFor(() => expect(view.getByLabelText('Remove ranking')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Remove ranking'));
+
+    // The ranking, and nothing else. `unlog` is what the row below it calls.
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('rank_unrank', { p_media_item_id: 'film-1' }),
+    );
+    expect(mockRpc).not.toHaveBeenCalledWith('unlog', expect.anything());
   });
 
   it('puts the watch date where it answers "have I seen this"', async () => {
@@ -308,7 +360,9 @@ describe('the community score', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
-    expect(view.getByText('Community')).toBeTruthy();
+    // "Bingd", not "Community". The old label described a population where the new one
+    // names it, and the app has a name.
+    expect(view.getByText('Bingd')).toBeTruthy();
     expect(view.getByText('12 ratings')).toBeTruthy();
   });
 
@@ -325,26 +379,32 @@ describe('the community score', () => {
     mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Community')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Bingd')).toBeTruthy());
     // It is a mean. An ordinal is what "#1 in Movies" is, and that is a different
     // line about a different thing.
     expect(view.queryByText(/community rank/i)).toBeNull();
   });
 
-  it('withholds a number the sample cannot support, and says how short it is', async () => {
+  it('withholds a number the sample cannot support, and does not count down to it', async () => {
     mockRpcResults.community_score = [{ score: null, rating_count: 2, min_ratings: 3 }];
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('2 ratings · 1 more needed')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Not enough ratings yet')).toBeTruthy());
+    // The founder’s correction: "2 ratings · 1 more needed" turns a reader into a
+    // spectator of a counter they cannot move, and the shortfall is a property of a
+    // config value rather than of the film.
+    expect(view.queryByText(/more needed/)).toBeNull();
     // Never a zero, and never a real number faded to say "do not trust this".
     expect(view.queryByText('0.0')).toBeNull();
   });
 
-  it('says plainly when nobody has rated it', async () => {
+  it('says the same thing when nobody has rated it at all', async () => {
     mockRpcResults.community_score = [{ score: null, rating_count: 0, min_ratings: 3 }];
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('No ratings yet')).toBeTruthy());
+    // One sentence for both, because the reader can act on neither and the difference
+    // between nought and two is not a difference in what the page can tell them.
+    await waitFor(() => expect(view.getByText('Not enough ratings yet')).toBeTruthy());
   });
 });
 
@@ -744,7 +804,7 @@ describe('the following score', () => {
     // "3 people you follow" rather than "3 ratings": the population is the whole point
     // of the number, and it is a different population from the row underneath.
     expect(view.getByText('3 people you follow')).toBeTruthy();
-    expect(view.getByText('Community')).toBeTruthy();
+    expect(view.getByText('Bingd')).toBeTruthy();
   });
 
   it('shows a single followee, which community would withhold', async () => {
@@ -763,9 +823,9 @@ describe('the following score', () => {
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Community')).toBeTruthy());
-    // Not "No ratings yet". That silence is a fact about the reader's own following
-    // list rather than about the film, and it would appear on every title page a new
+    await waitFor(() => expect(view.getByText('Bingd')).toBeTruthy());
+    // No row at all. That silence is a fact about the reader's own following list
+    // rather than about the film, and it would appear on every title page a new
     // account ever opened.
     expect(view.queryByText('Following')).toBeNull();
   });
@@ -788,7 +848,7 @@ describe('the following score', () => {
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
     expect(view.queryByText('Following')).toBeNull();
-    expect(view.queryByText('Community')).toBeNull();
+    expect(view.queryByText('Bingd')).toBeNull();
   });
 });
 
@@ -799,6 +859,74 @@ describe('the following score', () => {
  *
  * Two silences, and they are not the same silence.
  */
+/**
+ * Arriving from something a friend sent, which is the only route that says so.
+ *
+ * The fact belongs to the navigation rather than to the title. The same film opened
+ * from search is not "recommended by Ada", so nothing about the page may assert it
+ * unless the link that reached it carried the claim.
+ */
+/**
+ * How a season names itself on its own page.
+ *
+ * The em dash form — "Breaking Bad — Season 1" — belongs to surfaces with one line to
+ * say a whole name in: a feed row, a search result, a share card. Here the show is
+ * already on the line above, so the heading is the season and its year, joined the way
+ * anybody writes one down.
+ */
+describe('a season, on its own page', () => {
+  it('reads as the show, then the season and a comma and a year', async () => {
+    mockOpenId = 'season-1';
+    tableRows.media_items = [
+      {
+        ...film,
+        id: 'season-1',
+        kind: 'season',
+        title: 'Season 1',
+        release_date: '2023-04-01',
+        runtime_minutes: null,
+        parent: { id: 'series-1', title: 'Breaking Bad', poster_path: null, backdrop_path: null },
+      },
+    ];
+
+    const view = await renderWithProviders(<TitleScreen />);
+
+    // The show on its own line, and pressable, because it is where a reader goes to
+    // find the other seasons.
+    await waitFor(() => expect(view.getByText('Breaking Bad')).toBeTruthy());
+    expect(view.getByText(/^Season 1/)).toBeTruthy();
+    expect(view.getByText(', 2023')).toBeTruthy();
+    // Not the flattened form, which would say the show twice on one screen.
+    expect(view.queryByText(/Breaking Bad — Season 1/)).toBeNull();
+  });
+});
+
+describe('a title opened from a recommendation', () => {
+  it('says who sent it, over the hero', async () => {
+    mockParams = { recBy: 'Ada', recAt: new Date(Date.now() - 2 * 86400000).toISOString() };
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText(/^Recommended by Ada/)).toBeTruthy());
+    expect(view.getByText(/2d ago/)).toBeTruthy();
+  });
+
+  it('says nothing when the reader arrived any other way', async () => {
+    const view = await open();
+    expect(view.queryByText(/Recommended by/)).toBeNull();
+  });
+
+  it('still says it on a title with no artwork to sit on', async () => {
+    // The collapsed band is the same height as the poster lift, so there is no hero to
+    // overlay. The callout moves into the flow rather than disappearing or landing on
+    // top of the poster.
+    tableRows.media_items = [{ ...film, backdrop_path: null, poster_path: null }];
+    mockParams = { recBy: 'Ada' };
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText(/^Recommended by Ada/)).toBeTruthy());
+  });
+});
+
 describe('the following score with nothing to say', () => {
   it('says so, for a reader who follows people', async () => {
     mockRpcResults.following_score = [{ score: null, rating_count: 0, following_count: 11 }];
@@ -818,33 +946,36 @@ describe('the following score with nothing to say', () => {
 
     // It could only ever be empty, and drawing it on every title page of a brand-new
     // account is a row that never says anything.
-    await waitFor(() => expect(view.getByText('Community')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Bingd')).toBeTruthy());
     expect(view.queryByText('Following')).toBeNull();
   });
 });
 
 /**
- * The action row: Watchlist, Recommend, Share.
+ * The action row: Watchlist and Recommend.
  *
- * Recommend is a first-class Bingd action rather than something inside the share
- * sheet, which is the founder's hierarchy for this tranche. Rank is deliberately not
- * here — it belongs opposite the poster, with the score it changes.
+ * Share was the third chip and is now the last row of the Recommend sheet, because
+ * three labelled chips do not fit a 360pt screen and of the three it was the one with
+ * somewhere else to be. Rank is deliberately not here either: it belongs opposite the
+ * poster, with the score it changes.
  */
 describe('the action row', () => {
-  it('offers Watchlist, Recommend and Share, in that order', async () => {
+  it('offers Watchlist and Recommend, and no separate Share', async () => {
     const view = await open();
 
     expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy();
     expect(view.getByLabelText('Recommend Inception to a friend')).toBeTruthy();
-    expect(view.getByLabelText('Share Inception')).toBeTruthy();
+    // Two chips fit a narrow Android screen and three did not. Sharing is not gone:
+    // it is the last row of the Recommend sheet, which the next test opens.
+    expect(view.queryByLabelText('Share Inception')).toBeNull();
   });
 
-  it('opens a sheet headed with the title', async () => {
+  it('opens a sheet headed with the title, and that is where sharing lives', async () => {
     const view = await open();
     await fireEvent.press(view.getByLabelText('Recommend Inception to a friend'));
 
     await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
-    expect(view.getByText('Share with someone not on Bingd')).toBeTruthy();
+    expect(view.getByText('Share off Bingd')).toBeTruthy();
   });
 
   it('does not offer Recommend on a series, which is not a thing anybody watched', async () => {

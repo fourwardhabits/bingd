@@ -17,6 +17,15 @@ export type AppHeaderProps = {
    * what it counts.
    */
   notifications?: { count: number; onPress: () => void };
+  /**
+   * Settings, as a gear to the *left* of the bell.
+   *
+   * It was a text button called "Settings" and it displaced the bell, so the one
+   * control that is meant to sit in the same corner on every screen did not. A glyph
+   * of the same size, in the same row, keeps the bell where a reader has learned to
+   * find it and costs the header nothing.
+   */
+  settings?: { onPress: () => void };
 };
 
 /**
@@ -28,11 +37,26 @@ export type AppHeaderProps = {
  * keeps it from displacing a Back control: a pushed screen uses `Stack.Screen`'s own
  * header and never this component.
  */
-export function AppHeader({ right, notifications }: AppHeaderProps) {
+export function AppHeader({ right, notifications, settings }: AppHeaderProps) {
   return (
     <View style={styles.wrap} accessibilityRole="header">
       <BrandLockup size="sm" />
       <View style={styles.right}>
+        {settings ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            onPress={settings.onPress}
+            hitSlop={theme.space[3]}
+            style={({ pressed }) => [styles.bell, pressed && styles.pressed]}
+          >
+            <Ionicons
+              name="settings-outline"
+              size={theme.layout.icon.md}
+              color={theme.text.secondary}
+            />
+          </Pressable>
+        ) : null}
         {notifications ? (
           <Pressable
             accessibilityRole="button"

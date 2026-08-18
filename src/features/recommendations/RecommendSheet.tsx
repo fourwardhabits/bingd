@@ -205,10 +205,18 @@ export function RecommendSheet({
       {/* The off-Bingd path, which is the existing native share sheet carrying the
           reader's own invite link. Kept underneath the people rather than beside them:
           it is a different act, and putting it in the same list would make the person
-          at the bottom of a short list look like an option called "someone". */}
+          at the bottom of a short list look like an option called "someone".
+
+          This is also where the title page’s Share button went. Three labelled chips
+          did not fit an action row on a narrow Android screen, and of the three this
+          was the one with somewhere else to be: everyone who opens Recommend is
+          already in the act of passing a film to somebody, and whether that somebody
+          has the app is a detail of the address, not a separate decision. The label is
+          short for the same reason — it is a row in a sheet now, not a chip competing
+          for width. */}
       <View style={styles.actions}>
         <Button
-          label={sharing ? 'Opening…' : 'Share with someone not on Bingd'}
+          label={sharing ? 'Opening…' : 'Share off Bingd'}
           kind="secondary"
           onPress={() => void shareOffPlatform()}
           disabled={sharing}

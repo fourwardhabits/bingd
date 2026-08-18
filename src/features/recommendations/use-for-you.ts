@@ -6,7 +6,13 @@ import {
   useWatchlist,
   type RankedEntry,
 } from '@/features/collection/use-collection';
-import { applyFilters, emptyFilters, type CollectionFilters, type CollectionItem } from '@/features/collection/filters';
+import {
+  applyFilters,
+  emptyFilters,
+  isFiltered,
+  type CollectionFilters,
+  type CollectionItem,
+} from '@/features/collection/filters';
 import { useWatched } from '@/features/collection/use-watched';
 import { supabase } from '@/lib/supabase';
 import { AdapterError, cacheSimilar } from '@/lib/tmdb-adapter';
@@ -124,16 +130,29 @@ const TRENDING_FOR: Record<Medium, string> = {
  * anchor, not five, which is both what TMDB can answer and what stops a single
  * favourite show owning the whole TV slate before diversity even runs.
  */
-export function anchorsFrom(ranked: readonly RankedEntry[], medium: Medium): {
+export function anchorsFrom(
+  ranked: readonly RankedEntry[],
+  medium: Medium,
+  filters?: CollectionFilters,
+): {
   mediaItemId: string;
   title: string;
   score: number;
 }[] {
+  /**
+   * Band sizes from the **whole** category, before any narrowing.
+   *
+   * A score is a position within its band, so it is only meaningful against every
+   * title in that band. Counting the filtered subset instead would make almost every
+   * anchor rank last in a band of two or three and clamp to the band's floor — so a
+   * reader who picked Comedy would find their anchors had all become equally weak,
+   * for no reason they did anything to cause.
+   */
   const sizes = bandSizes(ranked);
   const seen = new Set<string>();
   const anchors: { mediaItemId: string; title: string; score: number }[] = [];
 
-  for (const entry of ranked) {
+  for (const entry of anchorScope(ranked, filters)) {
     if (entry.bucket !== 'loved') continue;
     const id = medium === 'tv' ? entry.seriesId : entry.mediaItemId;
     // A ranked season whose parent did not come back is skipped rather than anchored
@@ -149,6 +168,59 @@ export function anchorsFrom(ranked: readonly RankedEntry[], medium: Medium): {
   }
 
   return anchors;
+}
+
+/**
+ * A ranked entry as the filter model sees it.
+ *
+ * Only the facets the For You sheet actually offers matter here — genre, language,
+ * decade and anime — and all four live on the entry already. Score is left null
+ * because deriving one needs the whole band and nothing on this path filters by it.
+ */
+const rankedAsItem = (entry: RankedEntry): CollectionItem => ({
+  mediaItemId: entry.mediaItemId,
+  title: entry.title,
+  seriesTitle: entry.seriesTitle,
+  kind: entry.kind,
+  year: entry.year,
+  posterPath: entry.posterPath,
+  genres: entry.genres,
+  language: entry.language,
+  runtimeMinutes: entry.runtimeMinutes,
+  score: null,
+  bucket: entry.bucket,
+  watchedOn: null,
+});
+
+/**
+ * The reader's own rankings, narrowed to what they have asked to see.
+ *
+ * **This is the bug the founder found.** The filters reached the candidate pool and
+ * stopped there, so a wall narrowed to Comedy was still *anchored* on whatever the
+ * reader loved most overall — a thriller, say — and then asked TMDB for comedies near
+ * it. The wall said Comedy and the reasoning underneath it was about something else,
+ * which is exactly the disconnect somebody notices without being able to name.
+ *
+ * Narrowing the anchors as well makes the two halves agree: filtered comedies, chosen
+ * by the comedies this person loved. A reader who has loved nothing in the subset gets
+ * no anchors at all and a popularity-led slate inside it, which is the honest answer
+ * rather than a borrowed one.
+ *
+ * The taste vector is deliberately **not** narrowed. It is an affinity across every
+ * genre and language the reader has ranked, and recomputing it over one filtered genre
+ * would produce a vector that says "you like Comedy" — true, circular, and worth
+ * nothing as a tie-break between two comedies.
+ */
+export function anchorScope(
+  ranked: readonly RankedEntry[],
+  filters: CollectionFilters | undefined,
+): readonly RankedEntry[] {
+  if (!filters || !isFiltered(filters)) return ranked;
+
+  const kept = new Set(
+    applyFilters(ranked.map(rankedAsItem), filters).map((item) => item.mediaItemId),
+  );
+  return ranked.filter((entry) => kept.has(entry.mediaItemId));
 }
 
 type CachedList = { media_item_id: string; payload: { ids?: unknown } | null; expires_at: string };
@@ -286,7 +358,9 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
   const watchlist = useWatchlist(userId);
 
   const ranked = medium === 'movies' ? movies : seasons;
-  const anchorSeeds = ranked.data ? anchorsFrom(ranked.data, medium) : [];
+  // The filtered subset of *this* medium, which is what the founder asked the slate to
+  // reason from: filtered movies for the Movies wall, filtered seasons for the TV one.
+  const anchorSeeds = ranked.data ? anchorsFrom(ranked.data, medium, filters) : [];
 
   /**
    * Everything the *viewer* controls that changes this slate, as one string.

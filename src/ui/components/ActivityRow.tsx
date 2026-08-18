@@ -52,7 +52,15 @@ export type ActivityRowProps = {
   onPressTitle: () => void;
   onPressWatchlist?: () => void;
   inWatchlist?: boolean;
-  onPressShare?: () => void;
+  /**
+   * Opens the Recommend sheet for this title.
+   *
+   * This slot used to be Share, straight to the native sheet. Recommending is the
+   * larger act and the sheet it opens ends in "Share off Bingd", so nothing was lost
+   * by folding one into the other — and the row got back the width it was overflowing
+   * by on a narrow screen, because it is one control rather than two.
+   */
+  onPressRecommend?: () => void;
   reaction?: ActivityReaction;
   /**
    * Opens the comment sheet. Absent means the surface has not wired comments up,
@@ -107,7 +115,7 @@ export function ActivityRow({
   onPressTitle,
   onPressWatchlist,
   inWatchlist = false,
-  onPressShare,
+  onPressRecommend,
   reaction,
   onPressComments,
   commentCount = 0,
@@ -326,8 +334,12 @@ export function ActivityRow({
           />
         ) : null}
 
-        {onPressShare ? (
-          <IconAction icon="share-outline" label={`Share ${filmName}`} onPress={onPressShare} />
+        {onPressRecommend ? (
+          <IconAction
+            icon="paper-plane-outline"
+            label={`Recommend ${filmName} to a friend`}
+            onPress={onPressRecommend}
+          />
         ) : null}
 
         <Text variant="caption" tone="tertiary" style={styles.time}>
@@ -434,10 +446,18 @@ const styles = StyleSheet.create({
     gap: theme.space[2],
     paddingLeft: theme.poster.xs.width + theme.space[3],
   },
+  /**
+   * Four icons and a timestamp, on the narrowest screen this app supports.
+   *
+   * The gap was 20 and the row ran past the edge at 360pt once the comment badge had
+   * two digits in it: the timestamp takes the remaining width, so what actually gets
+   * cut is whichever control is last. Sixteen is enough separation for four tap
+   * targets that are already 44pt tall, and it buys back twelve points.
+   */
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.space[5],
+    gap: theme.space[4],
     paddingLeft: theme.poster.xs.width + theme.space[3],
   },
   action: {

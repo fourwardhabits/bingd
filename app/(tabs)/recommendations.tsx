@@ -31,43 +31,52 @@ import { queryKeys } from '@/lib/query';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
-  Button,
   EmptyState,
+  FilterChip,
+  HeaderBoundary,
+  MediumSelector,
   PosterGrid,
   Screen,
-  SegmentedTabs,
   SkeletonRow,
-  Text,
+  type Medium as CollectionMedium,
 } from '@/ui/components';
 
 /**
- * Recommendations, in two halves that do not mix.
+ * For You, rebuilt to the shape of Collection (founder pass, 2026-08-17).
  *
- * `For you` is the engine: the reader's own taste, a popularity prior, and a reason
- * that is reproducible from stored signals (PRD §13). `Sent to you` is people. They
- * share a screen, a filter state and nothing else — merging them would mean the
- * algorithm asserting a friend's opinion as its own reasoning, which is the one claim
- * PRD §13 forbids it from making.
+ * What it looked like before: a Movies/TV segmented row *under* a For you / Sent to you
+ * row, then a heading that said "For you" again, then "Based on your taste", then
+ * "Inspired by Inception, Heat + more", and only then artwork. Four bands of prose in
+ * front of a wall whose entire proposition is the artwork.
  *
- * **The filters are one state across both tabs**, deliberately. Choosing Comedy is a
- * statement about what the reader is in the mood for, not about which list they are
- * looking at, and a filter that silently resets on a tab change is a control the
- * reader has to re-apply to trust. Nothing about filtering touches a recommendation
- * record: it narrows what is drawn and that is all.
+ * All four are gone. The founder's rule is the one Collection already follows: category
+ * across the top, one filter row, then straight into the wall. A screen called For you,
+ * reached from a tab called For you, does not need a heading that says For you, and the
+ * claim underneath it was a sentence nobody read twice.
  *
- * For You is a wall of artwork; Sent to you is a list. See `SentToYouList` for why
- * they differ.
+ * **Sent to you is a filter, not a tab.** It sat as a peer of the whole engine, which
+ * made the top of the screen a two-level navigation for one wall. As the first chip in
+ * the filter row it is what it always was, a narrowing of "things to watch" down to
+ * "things people sent me", and the other chips keep working across it, which is what
+ * makes "Comedy, from friends" a thing anybody can ask for.
+ *
+ * **The filters are one state across everything**, deliberately. Choosing Comedy is a
+ * statement about what the reader is in the mood for, not about which list they happen
+ * to be looking at. Nothing about filtering touches a recommendation record: it narrows
+ * what is drawn and that is all.
+ *
+ * For You is a wall of artwork; Sent to you is a list. See `SentToYouList` for why they
+ * differ.
  */
-type Tab = 'for-you' | 'sent';
-
 export default function RecommendationsScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
   const queryClient = useQueryClient();
   const notifications = useNotifications(profile.id);
 
-  const [tab, setTab] = useState<Tab>('for-you');
   const [medium, setMedium] = useState<Medium>('movies');
+  /** The first chip. Not a tab: see the header. */
+  const [sentOnly, setSentOnly] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [filters, setFilters] = useState<CollectionFilters>(emptyFilters());
   const [filtering, setFiltering] = useState(false);
@@ -81,8 +90,8 @@ export default function RecommendationsScreen() {
   const items = slate.data?.items ?? [];
   const sentRows = sent.data ?? [];
 
-  // The list is filtered here rather than in the query, so switching tabs cannot
-  // refetch and cannot reorder: the server's ordering survives, narrowed.
+  // Filtered here rather than in the query, so turning the chip on cannot refetch and
+  // cannot reorder: the server's ordering survives, narrowed.
   const sentShown = applyFilters(sentRows.map(recommendationAsItem), filters);
   const sentVisible = sentRows.filter((row) =>
     sentShown.some((item) => item.mediaItemId === row.mediaItemId),
@@ -118,7 +127,16 @@ export default function RecommendationsScreen() {
     // honestly call it opened. It is fire-and-forget: a failure here must not stand
     // between somebody and the title they were told to watch.
     if (!row.openedAt) markOpened.mutate(row.id);
-    router.push(`/title/${row.mediaItemId}`);
+    // Who sent it and when travel with the link, so the title page can say so over its
+    // hero. The fact belongs to this route and not to the title: the same film reached
+    // from search is not "recommended by Ada", and a lookup on every title page would
+    // be a round trip to answer a question only this one asks.
+    // The object form rather than a query string, because typed routes only accept a
+    // path that matches a known pattern and `/title/x?y=z` matches none of them.
+    router.push({
+      pathname: '/title/[id]',
+      params: { id: row.mediaItemId, recBy: row.senderName, recAt: row.recommendedAt },
+    });
   };
 
   const explain = (item: ForYouItem) => {
@@ -150,6 +168,7 @@ export default function RecommendationsScreen() {
   };
 
   const unopened = unopenedCount(sentRows);
+  const activeCount = activeFilterCount(filters);
 
   return (
     <Screen>
@@ -160,61 +179,54 @@ export default function RecommendationsScreen() {
         }}
       />
 
-      <View style={styles.controls}>
-        <SegmentedTabs
-          options={[
-            { id: 'for-you', label: 'For you' },
-            // The count is the whole reason to look, so it is on the tab rather than
-            // discovered after switching to it.
-            { id: 'sent', label: unopened > 0 ? `Sent to you · ${unopened}` : 'Sent to you' },
-          ]}
-          value={tab}
-          onChange={(next) => setTab(next as Tab)}
+      {/* The same control Collection leads with, in the same place, doing the same job.
+          "TV shows" rather than "TV seasons" because this wall holds series: TMDB
+          answers "similar" about a show and never about one of its seasons. */}
+      <MediumSelector
+        value={MEDIUM_TO_SELECTOR[medium]}
+        onChange={(next) => setMedium(SELECTOR_TO_MEDIUM[next])}
+        labels={{ tv_seasons: 'TV shows' }}
+      />
+      <HeaderBoundary />
+
+      {/* One row, wrapping. Sent to you leads because it is the only chip that changes
+          what kind of thing is on screen; the rest narrow whatever is. Clear all appears
+          only when there is something to clear, and clears the *filters*: turning off
+          Sent to you as well would make one control mean two things. */}
+      <View style={styles.filterRow}>
+        <FilterChip
+          icon={sentOnly ? 'mail-open' : 'mail-outline'}
+          label={unopened > 0 ? `Sent to you · ${unopened}` : 'Sent to you'}
+          accessibilityLabel={unopened > 0 ? `Sent to you, ${unopened} unopened` : 'Sent to you'}
+          selected={sentOnly}
+          onPress={() => setSentOnly((on) => !on)}
         />
-
-        {tab === 'for-you' ? (
-          <View style={styles.mediumRow}>
-            <SegmentedTabs
-              options={[
-                { id: 'movies', label: 'Movies' },
-                { id: 'tv', label: 'TV' },
-              ]}
-              value={medium}
-              onChange={(next) => setMedium(next as Medium)}
-            />
-          </View>
-        ) : null}
-
         {/* The collection's own sheet, which its header always intended this screen to
             reuse rather than growing a second one. Genre, Language, Decade and Anime
-            come with it — and Anime is peer-level with the other three there rather
-            than pretending to be a TMDB genre. Rating filters are off: nothing on
-            either of these tabs has been ranked. */}
-        <View style={styles.filterRow}>
-          <Button
-            label={isFiltered(filters) ? `Filters · ${activeFilterCount(filters)}` : 'Filters'}
-            kind="tertiary"
-            onPress={() => setFiltering(true)}
-          />
-          {isFiltered(filters) ? (
-            <Button label="Clear all" kind="tertiary" onPress={() => setFilters(emptyFilters())} />
-          ) : null}
-        </View>
+            come with it. Rating filters are off: nothing on either list has been ranked
+            by this reader. */}
+        <FilterChip
+          icon="options-outline"
+          label={activeCount ? `Filters · ${activeCount}` : 'Filters'}
+          selected={activeCount > 0}
+          onPress={() => setFiltering(true)}
+        />
+        {isFiltered(filters) ? (
+          <FilterChip icon="close" label="Clear all" onPress={() => setFilters(emptyFilters())} />
+        ) : null}
       </View>
 
-      {tab === 'sent' ? (
-        <SentTab
+      {sentOnly ? (
+        <SentList
           query={sent}
           rows={sentVisible}
           total={sentRows.length}
-          filtered={isFiltered(filters)}
           saved={savedIds}
           busyId={busy}
           onOpen={openRecommendation}
           onToggleSave={(row) =>
             void toggleSaveById(row.mediaItemId, !savedIds.has(row.mediaItemId))
           }
-          onClearFilters={() => setFilters(emptyFilters())}
         />
       ) : slate.isError ? (
         <EmptyState
@@ -229,33 +241,12 @@ export default function RecommendationsScreen() {
         <Nothing
           medium={medium}
           ranked={logged.data?.rankedCount ?? 0}
+          filtered={isFiltered(filters)}
           onRank={() => router.push('/log')}
+          onClearFilters={() => setFilters(emptyFilters())}
         />
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
-          {/* One line for the whole wall. Twenty tiles each captioned "because you
-              loved Inception" is the same sentence twenty times, and a wall with a
-              caption under every poster is not a wall. */}
-          <View style={styles.basis}>
-            {/* The heading names the filter when there is one — "Comedy for you",
-                "Telugu picks for you" — because a wall that has been narrowed and does
-                not say so reads as the recommender having changed its mind. */}
-            <Text variant="headline">{headingFor(filters)}</Text>
-            {/* And underneath, the claim about how it was built, which is unchanged by
-                filtering: the same taste chose these, from a smaller pool. */}
-            <Text variant="footnote" tone="secondary">
-              {basisFor(slate.data?.anchorsUsed ?? 0)}
-            </Text>
-            {/* And the films that contributed, as an aside that admits there are more.
-                Absent on a genre- or language-led slate, where naming a film would be
-                inventing a reason. */}
-            {inspiredBy(items) ? (
-              <Text variant="caption" tone="tertiary">
-                {inspiredBy(items)}
-              </Text>
-            ) : null}
-          </View>
-
           <PosterGrid
             tiles={items.map((item) => ({
               id: item.mediaItemId,
@@ -263,9 +254,9 @@ export default function RecommendationsScreen() {
               year: item.year,
               posterUri: posterUri(item.posterPath, 'card'),
               saved: item.saved,
-              // Deliberately no score. Nothing here has been watched, so a score
-              // would have to be somebody else's — and a rating filter over unseen
-              // titles is the thing the collection filter sheet already refuses.
+              // Deliberately no score. Nothing here has been watched, so a score would
+              // have to be somebody else's, and a rating filter over unseen titles is
+              // the thing the collection filter sheet already refuses.
             }))}
             onPressTile={(tile) => router.push(`/title/${tile.id}`)}
             onToggleSave={(tile) => {
@@ -282,13 +273,9 @@ export default function RecommendationsScreen() {
 
       {filtering ? (
         <CollectionFilterSheet
-          // The options describe whatever tab is in front of the reader, so a Sent to
-          // you list of four films does not offer twenty genres none of them are.
-          items={
-            tab === 'sent'
-              ? sentRows.map(recommendationAsItem)
-              : (slate.data?.candidatePool ?? [])
-          }
+          // The options describe whatever is in front of the reader, so a Sent to you
+          // list of four films does not offer twenty genres none of them are.
+          items={sentOnly ? sentRows.map(recommendationAsItem) : (slate.data?.candidatePool ?? [])}
           value={filters}
           showBuckets={false}
           onApply={(next) => {
@@ -302,33 +289,39 @@ export default function RecommendationsScreen() {
   );
 }
 
+/** The screen's own medium and the shared selector's, which name different units. */
+const MEDIUM_TO_SELECTOR: Record<Medium, CollectionMedium> = {
+  movies: 'movies',
+  tv: 'tv_seasons',
+};
+const SELECTOR_TO_MEDIUM: Record<CollectionMedium, Medium> = {
+  movies: 'movies',
+  tv_seasons: 'tv',
+};
+
 /**
  * The human half.
  *
- * Three empty states rather than one, because they mean three different things and
- * only one of them is the reader's to fix: nobody has sent you anything, the filter
- * has hidden everything that was sent, or the list could not load.
+ * Three empty states rather than one, because they mean three different things and only
+ * one of them is the reader's to fix: nobody has sent you anything, the filters have
+ * hidden everything that was sent, or the list could not load.
  */
-function SentTab({
+function SentList({
   query,
   rows,
   total,
-  filtered,
   saved,
   busyId,
   onOpen,
   onToggleSave,
-  onClearFilters,
 }: {
   query: ReturnType<typeof useSentToYou>;
   rows: SentRecommendation[];
   total: number;
-  filtered: boolean;
   saved: ReadonlySet<string>;
   busyId: string | null;
   onOpen: (row: SentRecommendation) => void;
   onToggleSave: (row: SentRecommendation) => void;
-  onClearFilters: () => void;
 }) {
   if (query.isPending) return <SkeletonRow count={5} />;
 
@@ -355,10 +348,10 @@ function SentTab({
 
   if (rows.length === 0) {
     return (
-      // No button. `Clear all` is already on screen, in the control row a few points
-      // above this — a second one with the same label is the duplicated state the
-      // founder rejected on the Feed, and the reader would have to work out whether
-      // the two do the same thing.
+      // No button. Clear all is already on screen, in the chip row a few points above
+      // this, and a second one with the same label is the duplicated state the founder
+      // rejected on the Feed: the reader would have to work out whether the two do the
+      // same thing.
       <EmptyState
         kind="nothingYet"
         title="Nothing matches your filters"
@@ -391,89 +384,38 @@ function SentTab({
 }
 
 /**
- * "For you", or what the reader has narrowed it to.
+ * Nothing to show, which has three quite different causes and needs three answers.
  *
- * The founder's shapes: `Comedy for you`, `Telugu picks for you`, `Anime for you`.
- * One filter is named; two or more become the neutral heading, because "Comedy Telugu
- * 1990s picks for you" is a sentence nobody wrote and the chip row above already says
- * what is on.
- *
- * A language reads "picks for you" rather than "for you" — "Telugu for you" describes
- * a language lesson.
- */
-function headingFor(filters: CollectionFilters): string {
-  if (activeFilterCount(filters) !== 1) return 'For you';
-
-  if (filters.anime) return 'Anime for you';
-  if (filters.genres.length === 1) return `${filters.genres[0]} for you`;
-  if (filters.decades.length === 1) return `${filters.decades[0]} for you`;
-  if (filters.languages.length === 1) {
-    const name = languageName(filters.languages[0]!);
-    // Never the raw code. "te for you" is a database value on a heading, which is the
-    // one outcome the founder ruled out for every language surface.
-    if (name) return `${name} picks for you`;
-  }
-
-  return 'For you';
-}
-
-/**
- * What the wall is built on, said once — and said accurately.
- *
- * **The old copy named three films and implied they were the whole basis.** They were
- * not: the engine takes up to six anchors (`ANCHOR_LIMIT`) *and* a taste vector over
- * every genre and language the reader has ranked, *and* a popularity prior. "Based on
- * Inception, The Dark Knight and Heat" is a claim a reader can check and find wrong —
- * they will see a Telugu comedy on the wall and none of those three explains it.
- *
- * So the headline says what is true of the whole wall, and the naming becomes a
- * secondary line that says *inspired by* and admits there is more.
- *
- * "Popular right now" when there are no anchors at all, which is what a cold-start
- * slate is. Calling that personalised would be the exact label PRD §13 forbids.
- */
-function basisFor(anchorsUsed: number): string {
-  if (anchorsUsed === 0) return 'Popular right now — rank a few titles and this becomes yours.';
-  return 'Based on your taste';
-}
-
-/**
- * The films that actually contributed, named as an aside rather than as the basis.
- *
- * Three at most and always followed by "+ more" when there were others, because the
- * engine used up to six and the vector besides. Null when nothing was named, which
- * happens on a genre- or language-led slate — and a line reading "Inspired by" with
- * nothing after it would be worse than no line.
- */
-function inspiredBy(items: ForYouItem[]): string | null {
-  const named: string[] = [];
-  for (const item of items) {
-    for (const hit of item.explanation.anchors) {
-      if (!named.includes(hit.title)) named.push(hit.title);
-    }
-  }
-  if (named.length === 0) return null;
-
-  const shown = named.slice(0, 3).join(', ');
-  return named.length > 3 ? `Inspired by ${shown} + more` : `Inspired by ${shown}`;
-}
-
-/**
- * Nothing to show, which has two quite different causes and needs two answers.
- *
- * A user who has ranked nothing needs to rank something. A user who has ranked
- * plenty and still sees an empty wall has hit a data problem — no cached candidates
- * yet — and telling them to rank more would be blaming them for it.
+ * A reader who has ranked nothing needs to rank something. A reader who has filtered the
+ * wall down to nothing needs the filter gone, and telling them to rank more would be
+ * answering a question they did not ask. A reader who has ranked plenty and still sees
+ * an empty wall has hit a data problem, no cached candidates yet, and blaming them for
+ * it would be worse than saying nothing.
  */
 function Nothing({
   medium,
   ranked,
+  filtered,
   onRank,
+  onClearFilters,
 }: {
   medium: Medium;
   ranked: number;
+  filtered: boolean;
   onRank: () => void;
+  onClearFilters: () => void;
 }) {
+  if (filtered) {
+    return (
+      <EmptyState
+        kind="nothingMatches"
+        title="Nothing matches your filters"
+        body="Try removing one, or clear them and start again."
+        action={{ label: 'Clear all', onPress: onClearFilters }}
+      />
+    );
+  }
+
   if (ranked === 0) {
     return (
       <EmptyState
@@ -500,9 +442,15 @@ function Nothing({
 }
 
 const styles = StyleSheet.create({
-  controls: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[3] },
   content: { paddingBottom: theme.space[10], gap: theme.space[3] },
-  basis: { paddingHorizontal: theme.layout.gutter, gap: 2 },
-  mediumRow: { paddingTop: theme.space[2] },
-  filterRow: { flexDirection: 'row', alignItems: 'center', paddingTop: theme.space[2] },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: theme.space[2],
+    rowGap: theme.space[2],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[2],
+  },
 });

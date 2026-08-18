@@ -16,6 +16,7 @@ export {
 export { Divider } from './Divider';
 export { EmptyState, type EmptyStateKind } from './EmptyState';
 export { Field, type FieldProps } from './Field';
+export { FilterChip, type FilterChipProps } from './FilterChip';
 export { HeaderBoundary } from './HeaderBoundary';
 export { KeyboardScreen, type KeyboardScreenProps } from './KeyboardScreen';
 export { FeaturedCard, type FeaturedCardProps } from './FeaturedCard';
@@ -32,7 +33,12 @@ export {
 } from './PosterWall';
 export { Screen } from './Screen';
 export { Sheet, SheetRow, type SheetProps, type SheetRowProps } from './Sheet';
-export { ScoreBadge, type ScoreBadgeProps, type ScoreBadgeSize } from './ScoreBadge';
+export {
+  EmptyScoreBadge,
+  ScoreBadge,
+  type ScoreBadgeProps,
+  type ScoreBadgeSize,
+} from './ScoreBadge';
 export { ScorePanel, type ScorePanelProps } from './ScorePanel';
 export { ScoresSection, type ScoresSectionProps } from './ScoresSection';
 export { SearchField, type SearchFieldProps } from './SearchField';

@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
@@ -20,6 +20,7 @@ import {
   useSetReaction,
   type ReactionKind,
 } from '@/features/feed/use-reactions';
+import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { TrendingShelf } from '@/features/trending/TrendingShelf';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
@@ -31,6 +32,7 @@ import {
   Screen,
   SectionHeader,
   SkeletonRow,
+  Text,
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -53,6 +55,16 @@ export default function FeedScreen() {
   // The event whose comments are open. A third independent idea, for the same reason
   // the first two are separate: a row can be in any, all or none of these states.
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  /**
+   * The event being recommended, if any.
+   *
+   * The whole event rather than an id, because the sheet needs the title and the kind
+   * and both are already on the row that opened it. Held here rather than per row so
+   * one sheet exists for the whole list.
+   */
+  const [recommending, setRecommending] = useState<FeedItem | null>(null);
+  /** Whom the last recommendation went to, so the confirmation names a person. */
+  const [recommendedTo, setRecommendedTo] = useState<string | null>(null);
 
   const eventIds = useMemo(() => (feed.data ?? []).map((event) => event.id), [feed.data]);
   const reactions = useReactions(eventIds, profile.id);
@@ -108,14 +120,22 @@ export default function FeedScreen() {
     });
   };
 
-  const shareTitle = async (event: FeedItem) => {
-    if (!event.mediaItemId) return;
-    const url = `https://bingd.app/title/${event.kind ?? 'movie'}/${event.mediaItemId}`;
-    try {
-      await Share.share({ message: url, url });
-    } catch (error) {
-      Alert.alert('Could not share', error instanceof Error ? error.message : 'Sharing failed.');
-    }
+  /**
+   * Recommend, which is where sharing lives now.
+   *
+   * The row used to open the native share sheet straight from a Share icon. Four
+   * controls and a timestamp is what made this row overflow a narrow Android screen,
+   * and of the four this was the one that had somewhere better to be: the Recommend
+   * sheet sends to a named friend *and* ends in "Share off Bingd", so the off-platform
+   * path survives one tap further in.
+   *
+   * A series is not offered, for the same reason it cannot be ranked (PRD §10) — though
+   * nothing in the feed is a series today, because feed events are rankings and logs.
+   */
+  const openRecommend = (event: FeedItem) => {
+    if (!event.mediaItemId || event.kind === 'series') return;
+    setRecommendedTo(null);
+    setRecommending(event);
   };
 
   const events = feed.data ?? [];
@@ -182,6 +202,17 @@ export default function FeedScreen() {
           <SectionHeader title="Activity" />
         </View>
 
+        {/* The confirmation, on the screen the reader is still looking at rather than in
+            an alert they have to dismiss. It names the person, because "Sent" on its own
+            leaves them checking. Same shape as the title page’s. */}
+        {recommendedTo ? (
+          <View style={styles.pad}>
+            <Text variant="footnote" tone="secondary">
+              {`Recommended to ${recommendedTo}`}
+            </Text>
+          </View>
+        ) : null}
+
         {feed.isError ? (
           <View style={styles.pad}>
             <EmptyState
@@ -241,7 +272,11 @@ export default function FeedScreen() {
                   : undefined
               }
               inWatchlist={event.mediaItemId ? saved.has(event.mediaItemId) : false}
-              onPressShare={event.mediaItemId ? () => void shareTitle(event) : undefined}
+              onPressRecommend={
+                event.mediaItemId && event.kind !== 'series'
+                  ? () => openRecommend(event)
+                  : undefined
+              }
               reaction={reactionFor(event.id)}
               onPressComments={() => setCommentsFor(event.id)}
               commentCount={commentCounts.data?.get(event.id) ?? 0}
@@ -249,6 +284,24 @@ export default function FeedScreen() {
           ))
         )}
       </ScrollView>
+
+      {/* Mounted only while open, like every other sheet: it seeds its own draft state
+          on mount, and one that stayed mounted would keep a search somebody abandoned.
+
+          `seriesTitle` is null on purpose. A feed event’s `title` is already the long
+          form — the show and the season together — so handing the sheet a parent as well
+          would have it join a name to itself. */}
+      {recommending?.mediaItemId ? (
+        <RecommendSheet
+          viewerId={profile.id}
+          mediaItemId={recommending.mediaItemId}
+          kind={recommending.kind ?? 'movie'}
+          title={recommending.title ?? 'this title'}
+          seriesTitle={null}
+          onClose={() => setRecommending(null)}
+          onSent={setRecommendedTo}
+        />
+      ) : null}
 
       <ReactionDetail
         summary={detailFor ? (reactions.data?.get(detailFor) ?? null) : null}

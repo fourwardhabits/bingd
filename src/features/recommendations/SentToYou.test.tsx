@@ -119,7 +119,14 @@ const recommendation = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const openSentTab = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+/**
+ * Sent to you is the first chip in the filter row rather than a tab of its own.
+ *
+ * It was a peer of the whole engine, which made the top of the screen a two-level
+ * navigation for one wall. As a chip it is what it always was: a narrowing of "things
+ * to watch" down to "things people sent me".
+ */
+const openSent = async (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
   await fireEvent.press(view.getByText(/^Sent to you/));
 };
 
@@ -130,19 +137,26 @@ beforeEach(() => {
   mockWatchlist = [];
 });
 
-describe('the two tabs', () => {
+describe('the wall and the list', () => {
   it('keeps human recommendations out of the algorithmic wall', async () => {
     mockRpcResults.recommendations_to_me = [recommendation()];
     const view = await renderWithProviders(<RecommendationsScreen />);
 
-    // For You is showing and the friend's title is not on it. PRD §13: the engine may
-    // only give reasons it can reproduce from stored signals, and a friend's opinion
-    // is not one of them.
-    await waitFor(() => expect(view.getByText('For you')).toBeTruthy());
+    // The wall is showing and the friend's title is not on it. PRD §13: the engine may
+    // only give reasons it can reproduce from stored signals, and a friend's opinion is
+    // not one of them.
+    //
+    // Asserted on the category control rather than on a heading, because the headings
+    // are gone: a screen reached from a tab called For you does not need a band of
+    // prose saying For you.
+    await waitFor(() => expect(view.getByText('Movies')).toBeTruthy());
     expect(view.queryByText('Inception')).toBeNull();
+    expect(view.queryByText('For you')).toBeNull();
+    expect(view.queryByText('Based on your taste')).toBeNull();
+    expect(view.queryByText(/^Inspired by/)).toBeNull();
   });
 
-  it('counts what has not been opened on the tab itself', async () => {
+  it('counts what has not been opened on the chip itself', async () => {
     mockRpcResults.recommendations_to_me = [
       recommendation(),
       recommendation({ id: 'r2', media_item_id: 'film-2', opened_at: '2026-08-16T10:00:00.000Z' }),
@@ -155,7 +169,7 @@ describe('the two tabs', () => {
   it('names the sender and how long ago, which is what the row is for', async () => {
     mockRpcResults.recommendations_to_me = [recommendation()];
     const view = await renderWithProviders(<RecommendationsScreen />);
-    await openSentTab(view);
+    await openSent(view);
 
     await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
     expect(view.getByText(/Ada recommended this · /)).toBeTruthy();
@@ -170,7 +184,7 @@ describe('the two tabs', () => {
       recommendation({ id: 'r1', media_item_id: 'film-1', opened_at: '2026-08-16T10:00:00.000Z' }),
     ];
     const view = await renderWithProviders(<RecommendationsScreen />);
-    await openSentTab(view);
+    await openSent(view);
 
     await waitFor(() => expect(view.getByText('Heat (2010)')).toBeTruthy());
     // The unopened one carries the mark; the opened one does not.
@@ -181,12 +195,17 @@ describe('the two tabs', () => {
   it('records the open on the way to the title, once', async () => {
     mockRpcResults.recommendations_to_me = [recommendation()];
     const view = await renderWithProviders(<RecommendationsScreen />);
-    await openSentTab(view);
+    await openSent(view);
 
     await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
     await fireEvent.press(view.getByText('Inception (2010)'));
 
-    expect(mockPush).toHaveBeenCalledWith('/title/film-1');
+    // The sender and the moment travel with the link, so the title page can say so
+    // over its hero without asking the server who sent it.
+    expect(mockPush).toHaveBeenCalledWith({
+      pathname: '/title/[id]',
+      params: { id: 'film-1', recBy: 'Ada', recAt: '2026-08-15T10:00:00.000Z' },
+    });
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith('mark_recommendation_opened', {
         p_recommendation_id: 'r1',
@@ -199,19 +218,21 @@ describe('the two tabs', () => {
       recommendation({ opened_at: '2026-08-16T10:00:00.000Z' }),
     ];
     const view = await renderWithProviders(<RecommendationsScreen />);
-    await openSentTab(view);
+    await openSent(view);
 
     await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
     await fireEvent.press(view.getByText('Inception (2010)'));
 
-    expect(mockPush).toHaveBeenCalledWith('/title/film-1');
+    expect(mockPush).toHaveBeenCalledWith(
+      expect.objectContaining({ params: expect.objectContaining({ id: 'film-1' }) }),
+    );
     expect(mockRpc).not.toHaveBeenCalledWith('mark_recommendation_opened', expect.anything());
   });
 
   it('shows the watchlist state and can change it from the row', async () => {
     mockRpcResults.recommendations_to_me = [recommendation()];
     const view = await renderWithProviders(<RecommendationsScreen />);
-    await openSentTab(view);
+    await openSent(view);
 
     await waitFor(() =>
       expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy(),
@@ -228,7 +249,7 @@ describe('the two tabs', () => {
 
   it('says nothing has been sent rather than showing an empty list', async () => {
     const view = await renderWithProviders(<RecommendationsScreen />);
-    await openSentTab(view);
+    await openSent(view);
 
     await waitFor(() => expect(view.getByText('Nothing sent your way yet')).toBeTruthy());
   });
@@ -257,7 +278,7 @@ describe('the shared filter state', () => {
 
     // Switch tabs. The founder's example: Comedy stays on, and only the Comedy
     // recommendation survives.
-    await openSentTab(view);
+    await openSent(view);
 
     await waitFor(() => expect(view.getByText('Inception (2010)')).toBeTruthy());
     expect(view.queryByText('Hereditary (2010)')).toBeNull();
@@ -275,7 +296,7 @@ describe('the shared filter state', () => {
     await fireEvent.press(view.getByText('Comedy'));
     await fireEvent.press(view.getByText('Apply'));
 
-    await openSentTab(view);
+    await openSent(view);
     // Everything is filtered out, and the empty state points at the control rather
     // than growing a second one beside it.
     await waitFor(() => expect(view.getByText('Nothing matches your filters')).toBeTruthy());
@@ -293,7 +314,7 @@ describe('the shared filter state', () => {
     await waitFor(() => expect(view.getByText('Horror')).toBeTruthy());
     await fireEvent.press(view.getByText('Horror'));
     await fireEvent.press(view.getByText('Apply'));
-    await openSentTab(view);
+    await openSent(view);
 
     await waitFor(() => expect(view.getByText('Nothing matches your filters')).toBeTruthy());
     // Filtering is a view. Nothing about it may reach the record — no open, no delete.
