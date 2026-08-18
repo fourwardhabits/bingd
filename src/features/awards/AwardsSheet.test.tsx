@@ -170,15 +170,19 @@ describe('the sheet', () => {
     ).toBeTruthy();
   });
 
-  it('loses one award to a failed count rather than the whole sheet', async () => {
+  it('loses one award to a failed count rather than the whole sheet, and says which', async () => {
     mockTables.user_media = Array.from({ length: 12 }, (_, i) => movie(`m${i}`));
     mockBroken.add('follows');
     await open();
 
-    // Nineteen awards still loaded, and Mutual Mania reads as zero rather than
-    // taking the other nineteen down with it.
+    // Nineteen awards still loaded. Mutual Mania is the twentieth and it says it
+    // could not be read rather than reporting a zero nobody measured — independent
+    // review 20's finding and the founder's Phase 7, which are one instruction.
     expect(screen.getByText('Bronze earned')).toBeTruthy();
-    expect(screen.getByLabelText(/^Mutual Mania\. Hello locked\. Next: Follow 1 person/)).toBeTruthy();
+    expect(screen.getByLabelText('Mutual Mania. Could not load this one')).toBeTruthy();
+    expect(count('—')).toBeTruthy();
+    // The old locked wording is gone with it: a locked row claims a number.
+    expect(screen.queryByLabelText(/^Mutual Mania\. Hello locked/)).toBeNull();
   });
 
   it('gives up on the sheet when the collection itself cannot be read', async () => {

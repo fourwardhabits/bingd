@@ -33,6 +33,17 @@
  *      resampled, so nothing is softened or stretched; the art keeps the relative size
  *      the illustrator drew it at, and every file has the same aspect so a list of them
  *      does not jitter.
+ *
+ * **What the checks can and cannot establish.** They prove a crop exists, is not empty,
+ * fits the canvas, and has clear space on all four sides — which is what catches a
+ * caption pulled in by padding, and is exactly what caught the gold popcorn and the
+ * couch before the band clamp existed. They cannot prove that every retained pixel
+ * belongs to the illustration somebody meant: a caption fragment fully enclosed inside
+ * an art band would pass all four. Independent review 20 named that gap and it is real.
+ * What closes it is looking: `scripts/awards/contact-sheet.mjs` lays all thirty out in
+ * a grid, and every one of them was read that way before they were committed.
+ * `assets/awards/BADGES.json` records the source rectangle each came from, so a rerun
+ * that moves one is visible in a diff rather than only on a device.
  */
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 

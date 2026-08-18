@@ -56,6 +56,20 @@ export type AwardFacts = {
   reactionsReceived: number;
   /** Approved follows in both directions, with an account that still exists. */
   mutualFollows: number;
+  /**
+   * Which of the fields above could not be read.
+   *
+   * **A count that failed is not a count of zero**, and the difference matters here more
+   * than almost anywhere else in the app: zero is a statement about the reader — you
+   * have sent no recommendations — and a badge that says it because a request timed out
+   * is the app being wrong about somebody in a way they cannot argue with. Independent
+   * review 20 found the swallowed error; the founder's Phase 7 asked for exactly this
+   * state, and the two agree.
+   *
+   * `watched` is never in here. It is the one fatal read, because seven tracks are
+   * meaningless without it and a sheet of seven blanks is worse than saying so once.
+   */
+  unavailable?: ReadonlySet<keyof AwardFacts>;
 };
 
 export type AwardTier = {
@@ -76,6 +90,14 @@ export type AwardTrack = {
   earned: (threshold: number) => string;
   /** Exactly three, lowest first. */
   tiers: [AwardTier, AwardTier, AwardTier];
+  /**
+   * The fact this track counts, so a read that failed can be told from a zero.
+   *
+   * One field, never a list: every track reads exactly one of them, which is not a
+   * coincidence but the shape that lets `unavailable` be answered without guessing
+   * which half of a compound metric went missing.
+   */
+  needs: keyof AwardFacts;
   /**
    * One line under the name when the metric is not the obvious reading of it.
    *
@@ -106,6 +128,7 @@ const tiers = (
 export const AWARD_TRACKS: AwardTrack[] = [
   {
     key: 'movie-muncher',
+    needs: "watched",
     displayName: 'Movie Muncher',
     metric: movies,
     next: (n) => `Watch ${n} ${plural(n, 'movie', 'movies')}`,
@@ -114,6 +137,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'season-snacker',
+    needs: "watched",
     displayName: 'Season Snacker',
     metric: seasons,
     next: (n) => `Watch ${n} TV ${plural(n, 'season', 'seasons')}`,
@@ -122,6 +146,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'invite-instigator',
+    needs: "invitesCreated",
     displayName: 'Invite Instigator',
     metric: (facts) => facts.invitesCreated,
     next: (n) => `Make your invite link ${n} ${plural(n, 'time', 'times')}`,
@@ -135,6 +160,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'queue-dragon',
+    needs: "watchlistCount",
     displayName: 'Queue Dragon',
     metric: (facts) => facts.watchlistCount,
     next: (n) => `Keep ${n} ${plural(n, 'title', 'titles')} on your watchlist`,
@@ -154,6 +180,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'rating-rascal',
+    needs: "rankedCount",
     displayName: 'Rating Rascal',
     metric: (facts) => facts.rankedCount,
     next: (n) => `Rank ${n} ${plural(n, 'title', 'titles')}`,
@@ -166,6 +193,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'comment-gremlin',
+    needs: "writtenCount",
     displayName: 'Comment Gremlin',
     metric: (facts) => facts.writtenCount,
     next: (n) => `Write ${n} ${plural(n, 'comment or public note', 'comments or public notes')}`,
@@ -178,6 +206,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'hype-courier',
+    needs: "recommendationsSent",
     displayName: 'Hype Courier',
     metric: (facts) => facts.recommendationsSent,
     next: (n) => `Send ${n} ${plural(n, 'recommendation', 'recommendations')}`,
@@ -190,6 +219,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'scream-snack',
+    needs: "watched",
     displayName: 'Scream Snack',
     metric: inGenre(['Horror']),
     next: (n) => `Watch ${n} horror ${plural(n, 'title', 'titles')}`,
@@ -202,6 +232,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'lol-mode',
+    needs: "watched",
     displayName: 'LOL Mode',
     metric: inGenre(['Comedy']),
     next: (n) => `Watch ${n} ${plural(n, 'comedy', 'comedies')}`,
@@ -210,6 +241,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'softie-hours',
+    needs: "watched",
     displayName: 'Softie Hours',
     // Drama *or* Romance, and a title that is both is one title. The set in
     // `genres.ts` is what makes that true rather than a comment promising it.
@@ -224,6 +256,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'space-brain',
+    needs: "watched",
     displayName: 'Space Brain',
     metric: inGenre(['Science Fiction']),
     next: (n) => `Watch ${n} science fiction ${plural(n, 'title', 'titles')}`,
@@ -236,6 +269,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'boom-club',
+    needs: "watched",
     displayName: 'Boom Club',
     metric: inGenre(['Action']),
     next: (n) => `Watch ${n} action ${plural(n, 'title', 'titles')}`,
@@ -244,6 +278,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'toon-bloom',
+    needs: "watched",
     displayName: 'Toon Bloom',
     metric: inGenre(['Animation']),
     next: (n) => `Watch ${n} animated ${plural(n, 'title', 'titles')}`,
@@ -256,6 +291,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'truth-worm',
+    needs: "watched",
     displayName: 'Truth Worm',
     metric: inGenre(['Documentary']),
     next: (n) => `Watch ${n} ${plural(n, 'documentary', 'documentaries')}`,
@@ -268,6 +304,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'passport-mode',
+    needs: "watched",
     displayName: 'Passport Mode',
     // `original_language`, which is a fact about how the thing was made rather than
     // about what a viewer happened to hear. A title with no language recorded is not
@@ -284,6 +321,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'time-hopper',
+    needs: "watched",
     displayName: 'Time Hopper',
     metric: (facts) => facts.watched.filter((title) => title.year != null && title.year < 2000).length,
     next: (n) => `Watch ${n} ${plural(n, 'title', 'titles')} released before 2000`,
@@ -296,6 +334,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'genre-gremlin',
+    needs: "watched",
     displayName: 'Genre Gremlin',
     // How many of the eighteen in `genres.ts`, not how many raw labels. Wikidata hands
     // `12 Angry Men` three of its own, and counting those would make one film look like
@@ -317,6 +356,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'two-screen-life',
+    needs: "watched",
     displayName: 'Two-Screen Life',
     // **The dual requirement, as one number.** The tier wants five movies *and* five
     // seasons, so the metric is the weaker of the two: at four movies and nine seasons
@@ -330,6 +370,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'heart-magnet',
+    needs: "reactionsReceived",
     displayName: 'Heart Magnet',
     metric: (facts) => facts.reactionsReceived,
     next: (n) => `Get ${n} ${plural(n, 'reaction', 'reactions')} on your activity`,
@@ -342,6 +383,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'mutual-mania',
+    needs: "mutualFollows",
     displayName: 'Mutual Mania',
     metric: (facts) => facts.mutualFollows,
     // The verb agrees with the noun, so a tier of one does not read "1 person who

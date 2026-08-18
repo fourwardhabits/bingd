@@ -1,6 +1,13 @@
 import { badgeFor, BADGES } from './badges';
 import { canonicalGenres, CANONICAL_GENRES } from './genres';
-import { awardsFor, earnedSummary, evaluate, sortAwards, type AwardProgress } from './progress';
+import {
+  awardsFor,
+  earnedSummary,
+  evaluate,
+  sortAwards,
+  unavailableCount,
+  type AwardProgress,
+} from './progress';
 import { AWARD_TRACKS, type AwardFacts, type AwardTrack, type WatchedTitle } from './tracks';
 import { mutualFollowCount } from './use-awards';
 
@@ -45,6 +52,16 @@ const award = (key: string, input: AwardFacts) => evaluate(track(key), input);
 describe('the shape of the set', () => {
   it('is exactly twenty tracks', () => {
     expect(AWARD_TRACKS).toHaveLength(20);
+  });
+
+  it('says which single fact it counts, so a failed read can be told from a zero', () => {
+    const fields = new Set(Object.keys(NOTHING));
+    for (const t of AWARD_TRACKS) {
+      expect([t.key, fields.has(t.needs)]).toEqual([t.key, true]);
+    }
+    // Thirteen of the twenty are about the collection, which is the one read that is
+    // fatal rather than degradable.
+    expect(AWARD_TRACKS.filter((t) => t.needs === 'watched')).toHaveLength(13);
   });
 
   it('gives every track a unique key and three ascending tiers', () => {
@@ -406,6 +423,58 @@ describe('sorting', () => {
   it('returns all twenty however it is ordered', () => {
     expect(awardsFor(NOTHING)).toHaveLength(20);
     expect(awardsFor(facts({ watched: many(200), rankedCount: 400 }))).toHaveLength(20);
+  });
+});
+
+/**
+ * A read that failed is not a count of zero, and the difference matters more here than
+ * almost anywhere in the app. Zero is a statement about the reader — you have sent no
+ * recommendations — and making it because a request timed out is the app being wrong
+ * about somebody in a way they cannot argue with. Independent review 20 found the
+ * swallowed error; the founder's Phase 7 asked for this state; they are one instruction.
+ */
+describe('a track whose number could not be read', () => {
+  const missing = (field: keyof AwardFacts) =>
+    facts({ unavailable: new Set<keyof AwardFacts>([field]) });
+
+  it('says so rather than drawing a zero', () => {
+    const result = award('mutual-mania', missing('mutualFollows'));
+    expect(result.unavailable).toBe(true);
+    expect(result.detailLine).toBe('Could not load this one');
+    expect(result.countLabel).toBe('—');
+    expect(result.earnedTier).toBeNull();
+    // Never a fraction: the app does not know one.
+    expect(result.fraction).toBe(0);
+  });
+
+  it('costs only the tracks that needed that field', () => {
+    const input = facts({
+      watched: many(12),
+      unavailable: new Set<keyof AwardFacts>(['mutualFollows']),
+    });
+    const list = awardsFor(input);
+    expect(unavailableCount(list)).toBe(1);
+    expect(list.find((a) => a.trackKey === 'movie-muncher')?.earnedTier?.label).toBe('Bronze');
+    expect(list.find((a) => a.trackKey === 'mutual-mania')?.unavailable).toBe(true);
+  });
+
+  it('takes both tracks down when one field feeds two, and neither when it feeds none', () => {
+    expect(unavailableCount(awardsFor(facts({ unavailable: new Set(['watched']) })))).toBe(13);
+    expect(unavailableCount(awardsFor(NOTHING))).toBe(0);
+  });
+
+  it('sinks to the bottom, below even a track sitting at zero', () => {
+    const list = awardsFor(
+      facts({ watched: many(12), unavailable: new Set<keyof AwardFacts>(['rankedCount']) }),
+    );
+    expect(list.at(-1)?.trackKey).toBe('rating-rascal');
+  });
+
+  it('is not counted as earned by the summary', () => {
+    const list = awardsFor(
+      facts({ watched: many(12), unavailable: new Set<keyof AwardFacts>(['mutualFollows']) }),
+    );
+    expect(earnedSummary(list)).toBe('1 award earned');
   });
 });
 

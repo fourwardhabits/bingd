@@ -25,11 +25,40 @@ export type AwardProgress = {
   countLabel: string;
   /** The track's own caveat, where it has one. */
   note?: string;
+  /**
+   * True when the number behind this track could not be read at all.
+   *
+   * Not the same as zero, and drawn differently: a locked badge and "Could not load
+   * this one" rather than a progress fraction the app does not actually know.
+   */
+  unavailable: boolean;
   /** How far into the next tier, 0 to 1. One once every tier is earned. */
   fraction: number;
 };
 
 export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
+  // A read that failed is not a count of zero. Answered before the metric runs, so a
+  // track whose field is missing never produces a number nobody measured.
+  if (facts.unavailable?.has(track.needs)) {
+    const first = track.tiers[0];
+    return {
+      trackKey: track.key,
+      displayName: track.displayName,
+      badge: badgeFor(track.key, first.key),
+      badgeTierLabel: first.label,
+      earnedTier: null,
+      earnedTierIndex: -1,
+      nextTier: first,
+      value: 0,
+      earnedLine: null,
+      detailLine: 'Could not load this one',
+      countLabel: '—',
+      note: track.note,
+      unavailable: true,
+      fraction: 0,
+    };
+  }
+
   const value = track.metric(facts);
 
   // Ascending, so the last tier that passes wins. **At the threshold counts as
@@ -67,6 +96,7 @@ export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
         `${top.label} earned: ${track.earned(top.threshold)}`,
     countLabel: nextTier ? `${value} / ${nextTier.threshold}` : `${value}`,
     note: track.note,
+    unavailable: false,
     fraction: nextTier ? Math.min(1, value / nextTier.threshold) : 1,
   };
 }
@@ -90,8 +120,12 @@ export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
  * dozen tracks all sit at exactly zero.
  */
 export function sortAwards(list: AwardProgress[]): AwardProgress[] {
-  /** 0 finished, 1 earned and climbing, 2 locked. */
+  /** 0 finished, 1 earned and climbing, 2 locked, 3 unreadable. */
   const band = (award: AwardProgress) => {
+    // Last, and below even a track at zero: a row that says "could not load this one"
+    // is the app apologising, and an apology belongs at the bottom of a list somebody
+    // opened to enjoy themselves.
+    if (award.unavailable) return 3;
     if (!award.earnedTier) return 2;
     return award.nextTier ? 1 : 0;
   };
@@ -118,3 +152,7 @@ export function earnedSummary(list: AwardProgress[]): string | null {
   if (earned === 0) return null;
   return earned === 1 ? '1 award earned' : `${earned} awards earned`;
 }
+
+/** How many tracks could not be read. Zero on any ordinary open. */
+export const unavailableCount = (list: AwardProgress[]): number =>
+  list.filter((award) => award.unavailable).length;

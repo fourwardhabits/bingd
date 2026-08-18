@@ -26,6 +26,12 @@ export type AwardRowProps = {
  * "earned" — so the row grows by one line exactly once in a track's life, in the middle,
  * where there genuinely are two things to say.
  *
+ * **A track whose number could not be read says so**, rather than drawing a zero. The
+ * badge stays locked, the detail line reads "Could not load this one" and the count is a
+ * dash. Zero is a statement about the reader — you have sent no recommendations — and
+ * making it on the strength of a request that never came back is the app being wrong
+ * about somebody in a way they cannot argue with.
+ *
  * **Not tappable.** There is nothing behind an award: no detail screen, no history, no
  * share. A row that looks pressable and does nothing is worse than one that never
  * offered, and the drill-down the goals rows have exists because a *goal* is a claim
@@ -43,12 +49,15 @@ export function AwardRow({ award }: AwardRowProps) {
       // One announcement, in the order the row reads. Without this a screen reader
       // gives four fragments and the count lands last, detached from the goal it is
       // counting toward.
-      accessibilityLabel={[
-        award.displayName,
-        earned ? `${award.badgeTierLabel} earned` : `${award.badgeTierLabel} locked`,
-        award.detailLine,
-        award.nextTier ? `${award.value} of ${award.nextTier.threshold}` : `${award.value}`,
-      ].join('. ')}
+      accessibilityLabel={(award.unavailable
+        ? [award.displayName, award.detailLine]
+        : [
+            award.displayName,
+            earned ? `${award.badgeTierLabel} earned` : `${award.badgeTierLabel} locked`,
+            award.detailLine,
+            award.nextTier ? `${award.value} of ${award.nextTier.threshold}` : `${award.value}`,
+          ]
+      ).join('. ')}
     >
       <AwardBadge badge={award.badge} earned={earned} />
 
@@ -65,8 +74,11 @@ export function AwardRow({ award }: AwardRowProps) {
         {/* The caveat, where a track has one — that Queue Dragon counts the pile you
             are holding rather than everything you ever added, that Bingd cannot see
             whether an invite link was opened. Two tracks have one. It is tertiary
-            because it is a footnote about the number, not part of the goal. */}
-        {award.note ? (
+            because it is a footnote about the number, not part of the goal.
+
+            Suppressed on an unreadable row: a note explaining what a number means,
+            under a row that has no number, is noise on top of an apology. */}
+        {award.note && !award.unavailable ? (
           <Text variant="caption" tone="tertiary">
             {award.note}
           </Text>

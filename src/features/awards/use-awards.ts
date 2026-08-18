@@ -15,10 +15,21 @@ import type { AwardFacts, WatchedTitle } from './tracks';
  * can go *down* — unlog a horror film and Scream Snack loses one — and that is correct:
  * the alternative is a badge that remembers a title the database says is gone.
  *
- * **Nine reads, eight of which are counts.** `head: true` with `count: 'exact'` asks
- * PostgREST for the number and none of the rows, so Mutual Mania costs a count rather
- * than a download of somebody's followers. Only the watched collection comes back whole,
- * because seven tracks need the genres, the language and the year of each title.
+ * **Nine reads, seven of which are counts.** `head: true` with `count: 'exact'` asks
+ * PostgREST for the number and none of the rows. Two come back with rows: the watched
+ * collection, because seven tracks need the genres, the language and the year of every
+ * title; and the follow edges, because mutuality is a property of a *pair* and cannot be
+ * counted without intersecting both directions.
+ *
+ * **The follow embed is `follower:follower_id!inner(id)`, and the FK-column form is
+ * deliberate.** PostgREST resolves an embed named for a foreign key column to that key's
+ * target, which is `profiles` here, and `!inner` on it is a real inner join rather than
+ * a hint it ignores. Independent review 20 read this as malformed and asked for
+ * `profiles!follower_id`; it was checked against the deployed database instead of
+ * argued about, and both forms return 200 while a genuinely unknown relationship returns
+ * PGRST200. The inner join was confirmed separately: the same form over
+ * `media_items.parent_id` returns only seasons, which is what an inner join does and
+ * what an ignored hint would not.
  *
  * **Row level security is the authorization and nothing here repeats it.** Every one of
  * these tables is already scoped: `user_media`, `watchlist` and `rankings` to the owner;
@@ -80,11 +91,12 @@ async function readFacts(userId: string): Promise<AwardFacts> {
       .neq('user_id', userId),
 
     // Mutual follows, and this one cannot be a count: mutuality is a property of a
-    // pair, so both directions have to arrive and be intersected. `profiles!inner`
-    // makes the join the filter — `profiles_read` is `can_i_view(id)`, so a suspended
-    // or unreachable account drops out of the result rather than being filtered here.
-    // A block deletes the follow rows on both sides (`block`, 20260813001700), so a
-    // blocked pair has nothing left to intersect.
+    // pair, so both directions have to arrive and be intersected. The two embeds are
+    // the filter — each resolves through the foreign key to `profiles`, whose policy is
+    // `can_i_view(id)`, so an inner join drops a suspended or unreachable account
+    // rather than this code having to know what "unreachable" means. A block deletes
+    // the follow rows on both sides (`block`, 20260813001700), so a blocked pair has
+    // nothing left to intersect.
     supabase
       .from('follows')
       .select('follower_id, followee_id, state, follower:follower_id!inner(id), followee:followee_id!inner(id)')
@@ -118,21 +130,39 @@ async function readFacts(userId: string): Promise<AwardFacts> {
     });
   }
 
-  const mutuals = mutualFollowCount(follows.data as FollowRow[] | null, userId);
+  /**
+   * Which fields could not be read, so a failure is never dressed up as a zero.
+   *
+   * Independent review 20's finding, and the founder's Phase 7 instruction, are the
+   * same instruction: an award that cannot be calculated reliably says so. A failed
+   * count rendered as 0 is the app making a statement about the reader — you have sent
+   * no recommendations — on the strength of a request that never came back.
+   *
+   * Still per-field rather than fatal. Losing Mutual Mania to a network blip should
+   * not cost somebody the nineteen awards that did load; only `watched` throws, above,
+   * because seven tracks are meaningless without it.
+   */
+  const unavailable = new Set<keyof AwardFacts>();
+  const count = (result: { count: number | null; error: unknown }, field: keyof AwardFacts) => {
+    if (result.error) unavailable.add(field);
+    return result.count ?? 0;
+  };
+
+  // Two reads, one number. Either failing makes the number wrong rather than small.
+  const written = count(comments, 'writtenCount') + count(notes, 'writtenCount');
 
   return {
     watched: titles,
-    // A failed count reads as zero rather than throwing the whole sheet away. Nine
-    // reads and one screen: losing Mutual Mania to a network blip should not cost
-    // somebody the nineteen awards that did load. Only `watched` is fatal, because
-    // seven tracks are meaningless without it.
-    rankedCount: ranked.count ?? 0,
-    watchlistCount: watchlist.count ?? 0,
-    invitesCreated: invites.count ?? 0,
-    writtenCount: (comments.count ?? 0) + (notes.count ?? 0),
-    recommendationsSent: recommendations.count ?? 0,
-    reactionsReceived: reactions.count ?? 0,
-    mutualFollows: mutuals,
+    rankedCount: count(ranked, 'rankedCount'),
+    watchlistCount: count(watchlist, 'watchlistCount'),
+    invitesCreated: count(invites, 'invitesCreated'),
+    writtenCount: written,
+    recommendationsSent: count(recommendations, 'recommendationsSent'),
+    reactionsReceived: count(reactions, 'reactionsReceived'),
+    mutualFollows: follows.error
+      ? (unavailable.add('mutualFollows'), 0)
+      : mutualFollowCount(follows.data as FollowRow[] | null, userId),
+    unavailable,
   };
 }
 
