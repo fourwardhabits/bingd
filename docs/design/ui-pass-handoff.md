@@ -5,9 +5,14 @@ Read this instead of re-exploring the repo. Full rationale, screen by screen, is
 
 ## State
 
-- Branch `ui/visual-pass`, commit `87528f5`. `main` is at `ec3d205`, untouched.
-- Lint, typecheck, 133 unit tests, 223 database tests all pass on that commit.
-- No schema, RPC or migration changes. No TMDB work. Ranking semantics untouched.
+- Branch `ui/visual-pass`. `main` is untouched. Nothing has been pushed.
+- Latest: `cafd144` — 911 Jest, 681 database, deno 17, lint and typecheck clean, and
+  `expo export --platform android` succeeds.
+- The pass this document was written for changed no schema. **Two later passes did**, and
+  both are deployed to bingd-nonprod only: `20260817001300` (friend recommendations) and
+  `20260818000100` (removal takes its activity, and the Bingd threshold at ten). Bingd
+  Awards, added 2026-08-18, needed no backend change at all.
+- Ranking semantics untouched throughout.
 
 ## The constraint that shaped everything
 
@@ -177,3 +182,98 @@ that calls them.
   fits without the timestamp being pushed off.
 - Reacting to somebody else's activity should still land in their inbox; reacting to your
   own should still be silent.
+
+---
+
+## Founder smoke checklist — 2026-08-18, second pass
+
+One migration deployed (`20260818000100`, bingd-nonprod only). Awards are client-only.
+Build note: **no native module changed**, so a JS reload is enough — no new development
+build is needed for any of this.
+
+### Remove from collection
+
+- Rank something, react to it from a second account if you have one, then open the title,
+  tap **Ranked** → **Remove from collection**.
+- The alert now names the reactions and comments as well as your rating, date and note.
+  Read it: that sentence is the only warning anybody gets, and the cascade reaches other
+  people's writing.
+- After confirming: the title is out of Watched and out of Ranked, **and the activity is
+  gone from the Feed and from your profile**. That was the known gap on the last
+  checklist and it is closed.
+- It should **not** reappear on your Watchlist. Removal is not a decision to watch it
+  again.
+- **Known and deliberate:** *Remove ranking* is the other row and behaves differently. It
+  takes the position away, leaves the title in Watched, and **leaves the old activity
+  saying "ranked"**. That is debt item 18 and a product decision, not an oversight —
+  `rank_rebucket` calls the same function, so closing it there would delete reactions
+  every time somebody moved a title between bands.
+
+### Title scores
+
+- The hero has **Your score**, the rank line under it, and **Ranked** / **Rank** opposite
+  the poster.
+- The Scores section below has exactly two rows: **Following** and **Bingd**. Your own
+  number should appear **once** on the page. It was on it twice.
+- Both rows are always present. Empty is a grey circle and the words `Not enough ratings`,
+  and nothing anywhere counts down.
+- Following lights up on a single rating from somebody you follow. Bingd now waits for
+  **ten**, up from three, so expect more titles to sit on the empty state than before.
+
+### Season naming
+
+- Feed, Collection, Search, Sent to you, notifications and the Recommend sheet should all
+  read `The Last of Us, S1 (2023)`.
+- No em dash anywhere, and no spelled-out "Season 1" in a compact row.
+- A season's own page keeps the hierarchy: the show on one line, `Season 1, 2023` under
+  it.
+- The one to look at hardest is **Sent to you**, whose read does not carry the season
+  number and recovers it by parsing `Season N` from the title. If a season there reads
+  `Show, Season 3 (2021)` rather than `Show, S3 (2021)`, that is the fallback firing and
+  worth reporting.
+
+### Awards sheet
+
+- Profile: **Share Profile** (outlined) beside **Bingd Awards** (filled Maroon).
+- Tapping opens a sheet that should feel like the Goals list: heading, one line, then
+  rows.
+- Twenty rows, always all twenty. Earned first, then locked closest-to-unlock first.
+- The summary at the top reads `6 awards earned`; on a brand new account it says nothing
+  of the sort and invites instead.
+- **Ten tracks show an emoji rather than a drawing.** That is expected — see the
+  placeholder list below.
+
+### Locked, bronze, silver, gold
+
+Movie Muncher is the easiest one to walk, because a film is quick to log.
+
+| what you should see | when |
+|---|---|
+| grey badge on a flat ring, `Next: Watch 10 movies`, `7 / 10` | under ten films |
+| full-colour bronze bucket, `Bronze earned`, `Next: Watch 50 movies`, `27 / 50` | at ten |
+| the bucket with the ticket, `Silver earned`, `Next: Watch 150 movies` | at fifty |
+| the gold crowned bucket, `Gold earned: Watched 150 movies`, and a bare `164` | at 150 |
+
+- Only ever **one** badge per row. Three tiers side by side would be a scoreboard of what
+  you have not done.
+- Locked is the same artwork faded on a flat ring, not a separate grey asset. If it reads
+  as *loading* rather than *locked*, say so — that is the judgement call most worth a
+  second opinion.
+- Two rows carry a caveat line, deliberately: Queue Dragon says it counts the watchlist
+  you are holding now, and Invite Instigator says Bingd cannot see whether a link was
+  opened.
+- Turn airplane mode on and reopen the sheet: a row whose number could not be read says
+  **Could not load this one** with a dash, and sinks to the bottom. It must never show a
+  zero for a number nobody measured.
+
+### Badge placeholders — the ten tracks with no artwork
+
+Space Brain, Boom Club, Toon Bloom, Truth Worm, Passport Mode, Time Hopper, Genre Gremlin,
+Two-Screen Life, Heart Magnet, Mutual Mania. All thirty of their tiers are emoji. The
+sheet drew the first ten families and stopped. Each is one line in
+`src/features/awards/badges.ts` away from being finished, and
+`scripts/awards/build-badges.mjs` re-cuts everything from a replacement sheet.
+
+The thirty that **are** drawn: Movie Muncher, Season Snacker, Invite Instigator, Queue
+Dragon, Rating Rascal, Comment Gremlin, Hype Courier, Scream Snack, LOL Mode, Softie
+Hours — three tiers each.
