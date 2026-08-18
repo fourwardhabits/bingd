@@ -193,9 +193,9 @@ describe('a series in the results', () => {
     await fireEvent.press(view.getByLabelText('Season 2, 2009'));
 
     // The series title travels with the season, or the header reads "Season 2" alone.
-    // "Parks and Recreation — Season 2" is the approved season identity (founder
+    // "Parks and Recreation, S2" is the approved season identity (founder
     // decision D5, 2026-08-15): an em dash, not a colon, and never a bare "Season 2".
-    await waitFor(() => expect(view.getByText('Breaking Bad — Season 2')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Breaking Bad, S2')).toBeTruthy());
 
     await fireEvent.press(view.getByLabelText('Loved it'));
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));

@@ -252,6 +252,13 @@ export async function unrank(mediaItemId: string): Promise<WriteResult> {
  * The operation id belongs to the *intent*, so a retry of the same removal is answered
  * `already_applied` rather than applied twice — which is why it is passed in rather than
  * minted here (see the module header).
+ *
+ * **The activity goes with it, and the server does that.** `unlog` deletes the caller's
+ * `title_ranked`, `title_logged` and `season_completed` events for the title, and their
+ * reactions and comments cascade (`20260818000100`). It was a known gap until then: the
+ * collection said the title was gone and the feed went on saying it was ranked. Nothing
+ * here filters for it, deliberately — a rule enforced by a client predicate is a rule
+ * the next client forgets.
  */
 export async function removeFromCollection(input: {
   operationId: string;

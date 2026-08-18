@@ -4,7 +4,7 @@ import type { Bucket } from '@/features/collection/score';
 import { avatarUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
-import { fullTitle, type MediaKind } from '@/lib/titles';
+import { compactName, type MediaKind } from '@/lib/titles';
 
 export type FeedNote = {
   text: string;
@@ -21,9 +21,10 @@ export type FeedItem = {
   mediaItemId: string | null;
   kind: MediaKind | null;
   /**
-   * The name to print. For a season this is "Parks and Recreation — Season 2",
-   * because a feed never shows the parent series alongside it and "Season 2" on its
-   * own names nothing (founder amendment, 2026-08-16).
+   * The name to print. For a season this is "Parks and Recreation, S2", because a
+   * feed never shows the parent series alongside it and "Season 2" on its own names
+   * nothing (founder amendments, 2026-08-16 and 2026-08-18). The year is separate,
+   * below, so the row can print it in its own weight.
    */
   title: string | null;
   year: number | null;
@@ -71,6 +72,7 @@ type ParentShape = { title: string | null };
 type MediaShape = {
   kind: MediaKind;
   title: string;
+  season_number: number | null;
   release_date: string | null;
   poster_path: string | null;
   genres: string[] | null;
@@ -173,7 +175,8 @@ async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
       'id, type, actor_id, media_item_id, created_at, payload, ' +
         // The parent series, so a season can be named. A self-join through
         // parent_id, which PostgREST resolves as an embed like any other.
-        'media_items(kind, title, release_date, poster_path, genres, runtime_minutes, ' +
+        'media_items(kind, title, season_number, release_date, poster_path, genres, ' +
+        'runtime_minutes, ' +
         'parent:parent_id(title)), ' +
         'profiles:actor_id(username, display_name, avatar_path)',
     )
@@ -209,10 +212,11 @@ async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
       mediaItemId: row.media_item_id,
       kind: media?.kind ?? null,
       title: media
-        ? fullTitle({
+        ? compactName({
             kind: media.kind,
             title: media.title,
             seriesTitle: one(media.parent)?.title ?? null,
+            seasonNumber: media.season_number,
           })
         : null,
       year: media?.release_date ? Number(media.release_date.slice(0, 4)) : null,

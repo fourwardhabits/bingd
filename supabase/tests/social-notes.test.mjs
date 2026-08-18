@@ -322,6 +322,25 @@ describe('public_notes', () => {
 });
 
 describe('community_score', () => {
+  /**
+   * **The shipped threshold is ten and this block lowers it to three.**
+   *
+   * Ten fresh accounts, each ranking to completion, per sample-size assertion is
+   * about thirty seconds of test for one boolean. What these tests are about is the
+   * *population* -- the exact entity, the blocked rater, the live ranking rather than
+   * the feed snapshot -- and none of that varies with the number. The number itself is
+   * asserted once, on the shipped default, in `config-defaults.test.mjs`.
+   */
+  before(async () => {
+    await t.sql(`update app_config set value = '3'::jsonb
+                  where key = 'score.community_min_ratings'`);
+  });
+
+  after(async () => {
+    await t.sql(`update app_config set value = '10'::jsonb
+                  where key = 'score.community_min_ratings'`);
+  });
+
   /** Ranks the same title for `count` fresh public users, incumbent always winning. */
   let raterSeq = 0;
   const rankedBy = async (mediaItemId, count, bucket = 'loved') => {

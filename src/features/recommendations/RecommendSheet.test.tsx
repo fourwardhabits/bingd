@@ -117,7 +117,7 @@ describe('who the sheet offers', () => {
       />,
     );
 
-    expect(view.getByText(/Parks and Recreation — Season 2/)).toBeTruthy();
+    expect(view.getByText(/Parks and Recreation, S2/)).toBeTruthy();
   });
 });
 

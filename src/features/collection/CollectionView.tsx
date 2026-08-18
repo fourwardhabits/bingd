@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { posterUri } from '@/lib/images';
-import { fullTitle } from '@/lib/titles';
+import { compactName } from '@/lib/titles';
 import {
   EmptyState,
   FilterChip,
@@ -249,7 +249,12 @@ export function CollectionView({
 
 /** A ranked TV list is otherwise a column of rows called "Season 2". */
 const nameOf = (item: CollectionItem) =>
-  fullTitle({ kind: item.kind, title: item.title, seriesTitle: item.seriesTitle }) ?? item.title;
+  compactName({
+    kind: item.kind,
+    title: item.title,
+    seriesTitle: item.seriesTitle,
+    seasonNumber: item.seasonNumber,
+  }) ?? item.title;
 
 function ModeButton({
   icon,

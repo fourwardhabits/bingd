@@ -249,6 +249,7 @@ export default function LogScreen() {
             posterUri: posterUri(season.posterPath, 'card'),
             kind: 'season',
             seriesTitle: series?.title ?? null,
+            seasonNumber: season.seasonNumber,
           });
           setSeries(null);
         }}

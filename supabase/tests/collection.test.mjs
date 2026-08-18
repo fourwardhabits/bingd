@@ -232,6 +232,120 @@ describe('collection writes', () => {
       const err = await t.errorFrom(`select unlog($1, $2)`, [await uuid(), film]);
       assert.equal(err?.code, 'P0002');
     });
+
+    /**
+     * Removal takes the activity with it — founder correction, 2026-08-18,
+     * `20260818000100`.
+     *
+     * The gap this closes: `feed_events` has no foreign key to `user_media`, so the
+     * feed went on saying "ranked Inception" about a title the collection no longer
+     * held. The collection said gone and every social surface said ranked.
+     */
+    describe('and the activity that claimed it', () => {
+      const eventsFor = async (userId, mediaItemId) => {
+        const { rows } = await t.sql(
+          `select id, type from feed_events
+             where actor_id = $1 and media_item_id = $2 order by created_at`,
+          [userId, mediaItemId],
+        );
+        return rows;
+      };
+
+      it('deletes every ranking event for that title, not merely the latest', async () => {
+        const film = await t.createMovie('Ikiru', 1030);
+        // Ranking, unranking and ranking again: `_rank_finalize` writes a new event
+        // each time a ranking completes, so a (user, title) pair holds several and
+        // every one of them claims the title is in the collection.
+        await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+        await t.sql(`select rank_unrank($1)`, [film]);
+        await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+        assert.ok(
+          (await eventsFor(user, film)).length >= 2,
+          'the fixture needs more than one event for this test to mean anything',
+        );
+
+        await t.sql(`select rank_unrank($1)`, [film]);
+        await call(`unlog($1, $2)`, [await uuid(), film]);
+
+        assert.deepEqual(await eventsFor(user, film), []);
+      });
+
+      it('takes the reactions and comments on those events with them', async () => {
+        const film = await t.createMovie('Yojimbo', 1031);
+        await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+        const [event] = await eventsFor(user, film);
+
+        const fan = await t.createUser({ username: 'unlog_fan' });
+        await t.asUser(fan, async () => {
+          await t.sql(`select set_reaction($1, $2, 'love')`, [await uuid(), event.id]);
+          await t.sql(`select add_comment($1, $2, 'yes', false)`, [await uuid(), event.id]);
+        });
+
+        const counts = async () => {
+          const { rows } = await t.sql(
+            `select (select count(*)::int from reactions where feed_event_id = $1) as reactions,
+                    (select count(*)::int from comments  where feed_event_id = $1) as comments,
+                    (select count(*)::int from notifications
+                      where subject_type = 'feed_event' and subject_id = $1) as notices`,
+            [event.id],
+          );
+          return rows[0];
+        };
+        assert.deepEqual(await counts(), { reactions: 1, comments: 1, notices: 2 });
+
+        await t.actAs(user);
+        await t.sql(`select rank_unrank($1)`, [film]);
+        await call(`unlog($1, $2)`, [await uuid(), film]);
+
+        // Reactions and comments cascade off the foreign key. The notifications do
+        // not — `notifications.subject_id` is a bare uuid — so `unlog` removes them
+        // itself, or `my_notifications` would render a notice about a null title.
+        assert.deepEqual(await counts(), { reactions: 0, comments: 0, notices: 0 });
+      });
+
+      it('leaves other people, other titles and other kinds of event alone', async () => {
+        const mine = await t.createMovie('Sanjuro', 1032);
+        const other = await t.createMovie('Rashomon', 1033);
+        await t.rankToCompletion(mine, 'loved', async (pivot) => pivot);
+        await t.rankToCompletion(other, 'loved', async (pivot) => pivot);
+
+        const stranger = await t.createUser({ username: 'unlog_stranger' });
+        await t.asUser(stranger, async () => {
+          await t.rankToCompletion(mine, 'loved', async (pivot) => pivot);
+        });
+
+        // A list membership is a different claim from a collection membership, and
+        // removing a title from a collection does not make it untrue.
+        await t.sql(
+          `insert into feed_events (actor_id, type, media_item_id) values ($1, 'list_added', $2)`,
+          [user, mine],
+        );
+
+        await t.actAs(user);
+        await t.sql(`select rank_unrank($1)`, [mine]);
+        await call(`unlog($1, $2)`, [await uuid(), mine]);
+
+        assert.deepEqual(
+          (await eventsFor(user, mine)).map((row) => row.type),
+          ['list_added'],
+        );
+        assert.equal((await eventsFor(stranger, mine)).length, 1, "not the stranger's");
+        assert.equal((await eventsFor(user, other)).length, 1, 'not the other title');
+      });
+
+      it('does not put the title back on the watchlist', async () => {
+        const film = await t.createMovie('Throne of Blood', 1034);
+        await call(`log_watched($1, $2)`, [await uuid(), film]);
+        await call(`unlog($1, $2)`, [await uuid(), film]);
+
+        const { rows } = await t.sql(
+          `select count(*)::int as n from watchlist where user_id = $1 and media_item_id = $2`,
+          [user, film],
+        );
+        // Removal is not a decision to watch it again. Founder instruction.
+        assert.equal(rows[0].n, 0);
+      });
+    });
   });
 
   describe('set_watchlist', () => {

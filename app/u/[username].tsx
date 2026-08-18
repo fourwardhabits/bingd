@@ -14,7 +14,7 @@ import { useProfileNotes, usePublicProfile } from '@/features/profile/use-public
 import { useMyBlocks, useRelationships, useSocialWrites } from '@/features/profile/use-social';
 import { tasteMatchCopy, useTasteMatch } from '@/features/profile/use-taste-match';
 import { posterUri } from '@/lib/images';
-import { fullTitle } from '@/lib/titles';
+import { compactName } from '@/lib/titles';
 import {
   ActivityRow,
   EmptyState,
@@ -195,7 +195,7 @@ export default function PublicProfileScreen() {
                 <View key={`${entry.mediaItemId}-${entry.updatedAt}`} style={styles.note}>
                   <TitleRow
                     title={
-                      fullTitle({
+                      compactName({
                         kind: entry.kind,
                         title: entry.title,
                         seriesTitle: entry.seriesTitle,

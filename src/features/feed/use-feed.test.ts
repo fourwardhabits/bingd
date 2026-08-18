@@ -195,13 +195,13 @@ describe('a season in the feed', () => {
     mockFeedRows = [event({ media_items: season({ title: 'Parks and Recreation' }) })];
 
     const item = await only();
-    expect(item.title).toBe('Parks and Recreation — Season 2');
+    expect(item.title).toBe('Parks and Recreation, S2');
     expect(item.kind).toBe('season');
   });
 
   it('reads the parent embed whether it arrives as an object or an array', async () => {
     mockFeedRows = [event({ media_items: season([{ title: 'Parks and Recreation' }]) })];
-    expect((await only()).title).toBe('Parks and Recreation — Season 2');
+    expect((await only()).title).toBe('Parks and Recreation, S2');
   });
 
   it('falls back to the season alone rather than to nothing', async () => {

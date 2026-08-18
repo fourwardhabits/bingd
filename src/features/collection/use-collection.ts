@@ -29,6 +29,8 @@ export type RankedEntry = {
    * a request per visible row.
    */
   seriesTitle: string | null;
+  /** `media_items.season_number`, so a row can read "The Last of Us, S1" without parsing. */
+  seasonNumber?: number | null;
   /**
    * The parent series' id, for a season.
    *
@@ -54,6 +56,8 @@ export type LoggedEntry = {
   kind: 'movie' | 'season' | 'series';
   /** The parent series, for a season — the same rule as RankedEntry. */
   seriesTitle: string | null;
+  /** The season's number, for the same reason. */
+  seasonNumber?: number | null;
   /** ISO 639-1, for the collection filters. */
   language: string | null;
   bucket: 'loved' | 'fine' | 'not_for_me' | null;
@@ -66,6 +70,7 @@ const yearOf = (date: string | null) => (date ? Number(date.slice(0, 4)) : null)
 
 type MediaShape = {
   title: string;
+  season_number?: number | null;
   release_date: string | null;
   poster_path: string | null;
   genres: string[] | null;
@@ -115,7 +120,7 @@ export function useRankedCollection(
         .from('rankings')
         .select(
           'media_item_id, bucket, position, category, ' +
-            'media_items(title, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent_id, parent:parent_id(title))',
+            'media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent_id, parent:parent_id(title))',
         )
         .eq('user_id', userId)
         .eq('category', category)
@@ -131,6 +136,7 @@ export function useRankedCollection(
         runtimeMinutes: media(row.media_items).runtime_minutes,
         kind: media(row.media_items).kind,
         seriesTitle: parentTitle(media(row.media_items)),
+        seasonNumber: media(row.media_items).season_number ?? null,
         seriesId: media(row.media_items).parent_id ?? null,
         language: media(row.media_items).original_language ?? null,
         bucket: row.bucket,
@@ -162,7 +168,7 @@ export function useLoggedCollection(userId: string) {
         supabase
           .from('user_media')
           .select(
-            'media_item_id, bucket, watched_on, media_items(title, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title))',
+            'media_item_id, bucket, watched_on, media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title))',
           )
           .eq('user_id', userId)
           .order('created_at', { ascending: false }),
@@ -184,6 +190,7 @@ export function useLoggedCollection(userId: string) {
           runtimeMinutes: media(row.media_items).runtime_minutes,
           kind: media(row.media_items).kind,
           seriesTitle: parentTitle(media(row.media_items)),
+          seasonNumber: media(row.media_items).season_number ?? null,
           language: media(row.media_items).original_language ?? null,
           bucket: row.bucket,
           watchedOn: row.watched_on,
@@ -210,7 +217,7 @@ export function useWatchlist(userId: string) {
       const { data, error } = await supabase
         .from('watchlist')
         .select(
-          'media_item_id, media_items(title, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title))',
+          'media_item_id, media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title))',
         )
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
@@ -225,6 +232,7 @@ export function useWatchlist(userId: string) {
         runtimeMinutes: media(row.media_items).runtime_minutes,
         kind: media(row.media_items).kind,
         seriesTitle: parentTitle(media(row.media_items)),
+        seasonNumber: media(row.media_items).season_number ?? null,
         language: media(row.media_items).original_language ?? null,
         bucket: null,
         watchedOn: null,

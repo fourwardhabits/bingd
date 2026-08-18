@@ -36,7 +36,7 @@ export type ActivityRowProps = {
   verb: string;
   /** Names the actor said they watched it with (PRD §14). */
   companions?: string[];
-  /** Already in its full form — "Parks and Recreation — Season 2" (`lib/titles.ts`). */
+  /** Already in its compact form — "Parks and Recreation, S2" (`lib/titles.ts`). */
   title: string | null;
   year?: number | null;
   posterUri?: string | null;
@@ -181,12 +181,15 @@ export function ActivityRow({
             onPress={onPressTitle}
             style={({ pressed }) => pressed && styles.pressed}
           >
+            {/* Parenthesised, and the same shape `TitleRow` prints. The feed used to
+                set the year off with two spaces and every list used "(2023)", which
+                made one product write a title two ways. The founder's standard is
+                `The Last of Us, S1 (2023)`, everywhere a title is named compactly. */}
             <Text variant="callout" numberOfLines={1}>
               {filmName}
               {year ? (
                 <Text variant="callout" tone="secondary">
-                  {'  '}
-                  {year}
+                  {` (${year})`}
                 </Text>
               ) : null}
             </Text>

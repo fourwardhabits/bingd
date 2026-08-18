@@ -179,7 +179,7 @@ describe('what this person likes', () => {
     // through the tile's accessibility label — which is where a picture has to say
     // what it is, and is the only place it was ever legible to a screen reader.
     await waitFor(() =>
-      expect(view.getAllByLabelText(/Parks and Recreation — Season 2/).length).toBeGreaterThan(0),
+      expect(view.getAllByLabelText(/Parks and Recreation, S2/).length).toBeGreaterThan(0),
     );
   });
 

@@ -12,6 +12,8 @@ export type CollectionItem = {
   mediaItemId: string;
   title: string;
   seriesTitle: string | null;
+  /** For a season, so the row can read "The Last of Us, S1" (`lib/titles.ts`). */
+  seasonNumber?: number | null;
   kind: 'movie' | 'season' | 'series';
   year: number | null;
   posterPath: string | null;

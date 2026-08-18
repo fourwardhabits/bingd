@@ -107,6 +107,7 @@ describe('the ranked list', () => {
       seriesTitle: null,
       // The show's id, for a season. For You anchors on it, because TMDB publishes
       // recommendations for a series and none for a season.
+      seasonNumber: null,
       seriesId: null,
       language: null,
       bucket: 'loved',

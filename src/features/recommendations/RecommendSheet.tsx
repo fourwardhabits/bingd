@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 
-import { fullTitle, type MediaKind } from '@/lib/titles';
+import { compactName, type MediaKind } from '@/lib/titles';
 import { Avatar, Button, EmptyState, SearchField, Sheet, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -20,6 +20,7 @@ export type RecommendSheetProps = {
   kind: MediaKind;
   title: string;
   seriesTitle?: string | null;
+  seasonNumber?: number | null;
   onClose: () => void;
   /** Called once a recommendation has actually been filed, with the recipient's name. */
   onSent: (recipientName: string) => void;
@@ -50,6 +51,7 @@ export function RecommendSheet({
   kind,
   title,
   seriesTitle,
+  seasonNumber,
   onClose,
   onSent,
 }: RecommendSheetProps) {
@@ -63,7 +65,7 @@ export function RecommendSheet({
 
   const people = recipients.data ?? [];
   const shown = filterRecipients(people, query);
-  const name = fullTitle({ kind, title, seriesTitle }) ?? title;
+  const name = compactName({ kind, title, seriesTitle, seasonNumber }) ?? title;
 
   const recommend = async (person: Recipient) => {
     if (sending) return;

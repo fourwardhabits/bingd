@@ -4,7 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import { bandSizes, scoreFor } from '@/features/collection/score';
 import { useRankedCollection } from '@/features/collection/use-collection';
 import { posterUri } from '@/lib/images';
-import { fullTitle } from '@/lib/titles';
+import { compactName } from '@/lib/titles';
 import { EmptyState, PosterGrid, SectionHeader, SegmentedTabs, SkeletonRow } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -50,8 +50,12 @@ export function TopRanked({ userId, otherName, onPressTitle }: TopRankedProps) {
     const toTile = (entry: (typeof movieRows)[number], sizes: ReturnType<typeof bandSizes>) => ({
       id: entry.mediaItemId,
       title:
-        fullTitle({ kind: entry.kind, title: entry.title, seriesTitle: entry.seriesTitle }) ??
-        entry.title,
+        compactName({
+          kind: entry.kind,
+          title: entry.title,
+          seriesTitle: entry.seriesTitle,
+          seasonNumber: entry.seasonNumber,
+        }) ?? entry.title,
       year: entry.year,
       posterUri: posterUri(entry.posterPath, 'card'),
       score: scoreFor(entry.bucket, entry.position, sizes),

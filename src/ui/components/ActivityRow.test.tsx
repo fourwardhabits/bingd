@@ -51,9 +51,9 @@ describe('the sentence', () => {
 
   it('carries the full name of a season, since the feed never shows its series', async () => {
     const view = await render(
-      <ActivityRow {...props} title="Parks and Recreation — Season 2" />,
+      <ActivityRow {...props} title="Parks and Recreation, S2" />,
     );
-    expect(view.getByText(/Parks and Recreation — Season 2/)).toBeTruthy();
+    expect(view.getByText(/Parks and Recreation, S2/)).toBeTruthy();
   });
 
   it('opens the actor’s profile when there is one to open', async () => {
@@ -165,12 +165,12 @@ describe('the recommend action', () => {
     const view = await render(
       <ActivityRow
         {...props}
-        title="Parks and Recreation — Season 2"
+        title="Parks and Recreation, S2"
         onPressRecommend={jest.fn()}
       />,
     );
     expect(
-      view.getByLabelText('Recommend Parks and Recreation — Season 2 to a friend'),
+      view.getByLabelText('Recommend Parks and Recreation, S2 to a friend'),
     ).toBeTruthy();
   });
 

@@ -10,7 +10,7 @@ import {
   type Notification,
 } from '@/features/notifications/use-notifications';
 import { useRelationships, useSocialWrites } from '@/features/profile/use-social';
-import { fullTitle } from '@/lib/titles';
+import { compactName } from '@/lib/titles';
 import {
   Avatar,
   Button,
@@ -210,7 +210,7 @@ export default function NotificationsScreen() {
                 // The subject, named the way the rest of the app names it: a season
                 // says which show it belongs to, because its own title is "Season 2".
                 const subject = row.mediaItemId
-                  ? fullTitle({
+                  ? compactName({
                       kind: row.mediaKind,
                       title: row.mediaTitle,
                       seriesTitle: row.seriesTitle,

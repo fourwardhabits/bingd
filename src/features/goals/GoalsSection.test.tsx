@@ -243,7 +243,7 @@ describe('opening a goal into the titles behind it', () => {
       watch('m4', 'Last Year Film', 'movie', '2025-12-31'),
       // Rule 3: a series is neither a movie nor a season.
       watch('s1', 'Severance', 'series', '2026-02-02'),
-      watch('s2', 'Severance — Season 2', 'season', '2026-02-03'),
+      watch('s2', 'Severance, S2', 'season', '2026-02-03'),
     ];
   });
 
@@ -266,7 +266,7 @@ describe('opening a goal into the titles behind it', () => {
     expect(screen.queryByText('Undated Film')).toBeNull();
     expect(screen.queryByText('Last Year Film')).toBeNull();
     expect(screen.queryByText('Severance')).toBeNull();
-    expect(screen.queryByText('Severance — Season 2')).toBeNull();
+    expect(screen.queryByText('Severance, S2')).toBeNull();
   });
 
   it('counts the seasons goal from seasons alone', async () => {
@@ -277,7 +277,7 @@ describe('opening a goal into the titles behind it', () => {
 
     await fireEvent.press(screen.getByLabelText('TV seasons, 1 of 10 seasons'));
 
-    expect(screen.getByText('Severance — Season 2')).toBeTruthy();
+    expect(screen.getByText('Severance, S2')).toBeTruthy();
     expect(screen.queryByText('Sinners')).toBeNull();
   });
 

@@ -278,12 +278,24 @@ describe('a title this user has ranked', () => {
   it('shows the score, not the position', async () => {
     const view = await open();
 
-    // Top of a two-title Loved band, so the band's high. Twice on the page since the
-    // founder asked the Scores section to lead with the reader's own number: once
-    // opposite the poster, once as the first term of the comparison further down.
+    // Top of a two-title Loved band, so the band's high. **Once.** It led the Scores
+    // section as well until the founder's correction of 2026-08-18; two copies of one
+    // number, and the second had neither the rank line nor the control that changes it.
     await waitFor(() =>
-      expect(view.getAllByLabelText('10.0 out of 10, Loved it')).toHaveLength(2),
+      expect(view.getAllByLabelText('10.0 out of 10, Loved it')).toHaveLength(1),
     );
+  });
+
+  it('puts its one copy in the hero and never in the Scores section', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Scores')).toBeTruthy());
+    // "Your score" labels the hero badge. Exactly one of them is the correction: the
+    // Scores section carried a second row under the same words until 2026-08-18.
+    expect(view.getAllByText('Your score')).toHaveLength(1);
+    // The section is what everybody *else* thought, and those are its only two rows.
+    expect(view.getByText('Following')).toBeTruthy();
+    expect(view.getByText('Bingd')).toBeTruthy();
   });
 
   it('says where it sits in their own list, as an ordinal', async () => {
@@ -389,7 +401,7 @@ describe('the community score', () => {
     mockRpcResults.community_score = [{ score: null, rating_count: 2, min_ratings: 3 }];
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Not enough ratings yet')).toBeTruthy());
+    await waitFor(() => expect(view.getAllByText('Not enough ratings').length).toBeGreaterThan(0));
     // The founder’s correction: "2 ratings · 1 more needed" turns a reader into a
     // spectator of a counter they cannot move, and the shortfall is a property of a
     // config value rather than of the film.
@@ -404,7 +416,7 @@ describe('the community score', () => {
 
     // One sentence for both, because the reader can act on neither and the difference
     // between nought and two is not a difference in what the page can tell them.
-    await waitFor(() => expect(view.getByText('Not enough ratings yet')).toBeTruthy());
+    await waitFor(() => expect(view.getAllByText('Not enough ratings').length).toBeGreaterThan(0));
   });
 });
 
@@ -789,8 +801,8 @@ describe('a series', () => {
  * The server owns every rule that matters: approved followees only, `can_view_profile`
  * from the caller's own side, the exact media item, live rankings. `following-score.test.mjs`
  * is where those are asserted. What is asserted here is the screen's part — that it
- * shows the number, names the population honestly, and says nothing at all when the
- * reader's following list has nothing to say.
+ * shows the number, names the population honestly, and keeps the row with its grey
+ * circle when the reader's following list has nothing to say.
  */
 describe('the following score', () => {
   it('shows it above the community score, with the sample named', async () => {
@@ -817,17 +829,18 @@ describe('the following score', () => {
     expect(view.getByText('9.1')).toBeTruthy();
   });
 
-  it('says nothing when nobody the reader follows has ranked it', async () => {
+  it('keeps its row, empty, when nobody the reader follows has ranked it', async () => {
     mockRpcResults.following_score = [{ score: null, rating_count: 0, following_count: 0 }];
     mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
 
     const view = await open();
 
     await waitFor(() => expect(view.getByText('Bingd')).toBeTruthy());
-    // No row at all. That silence is a fact about the reader's own following list
-    // rather than about the film, and it would appear on every title page a new
-    // account ever opened.
-    expect(view.queryByText('Following')).toBeNull();
+    // Founder correction, 2026-08-18: the row is always drawn, with the grey circle
+    // and the same four words. A row that appears when the data does is a page that
+    // moves under somebody reading it.
+    expect(view.getByText('Following')).toBeTruthy();
+    expect(view.getByText('Not enough ratings')).toBeTruthy();
   });
 
   it('never calls it a friend score, because following is not mutual', async () => {
@@ -869,7 +882,7 @@ describe('the following score', () => {
 /**
  * How a season names itself on its own page.
  *
- * The em dash form — "Breaking Bad — Season 1" — belongs to surfaces with one line to
+ * The compact form, "Breaking Bad, S1", belongs to surfaces with one line to
  * say a whole name in: a feed row, a search result, a share card. Here the show is
  * already on the line above, so the heading is the season and its year, joined the way
  * anybody writes one down.
@@ -897,7 +910,7 @@ describe('a season, on its own page', () => {
     expect(view.getByText(/^Season 1/)).toBeTruthy();
     expect(view.getByText(', 2023')).toBeTruthy();
     // Not the flattened form, which would say the show twice on one screen.
-    expect(view.queryByText(/Breaking Bad — Season 1/)).toBeNull();
+    expect(view.queryByText(/Breaking Bad, S1/)).toBeNull();
   });
 });
 
@@ -927,27 +940,51 @@ describe('a title opened from a recommendation', () => {
   });
 });
 
+/**
+ * The empty state, which is now one shape for both rows.
+ *
+ * Two silences used to be told apart here: a reader who followed nobody got no row at
+ * all, and a reader who followed eleven people none of whom had seen the film was told
+ * exactly that. The founder collapsed both into the grey circle and four words on
+ * 2026-08-18. The reader can act on neither case, and a row that materialises when the
+ * data arrives moves the page under somebody reading it.
+ */
 describe('the following score with nothing to say', () => {
-  it('says so, for a reader who follows people', async () => {
+  it('says so for a reader who follows eleven people', async () => {
     mockRpcResults.following_score = [{ score: null, rating_count: 0, following_count: 11 }];
     mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
 
     const view = await open();
 
     await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
-    expect(view.getByText('Nobody you follow has ranked this')).toBeTruthy();
+    expect(view.getByText('Not enough ratings')).toBeTruthy();
+    // The old copy named the reader's following list back to them. It is gone.
+    expect(view.queryByText('Nobody you follow has ranked this')).toBeNull();
   });
 
-  it('draws no row at all for a reader who follows nobody', async () => {
+  it('says exactly the same for a reader who follows nobody', async () => {
     mockRpcResults.following_score = [{ score: null, rating_count: 0, following_count: 0 }];
     mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
 
     const view = await open();
 
-    // It could only ever be empty, and drawing it on every title page of a brand-new
-    // account is a row that never says anything.
+    // The row used to be absent in this case. Two silences told apart was a real
+    // distinction and the founder collapsed it: the reader can act on neither, and a
+    // row that materialises when the data arrives moves the page under them.
+    await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
+    expect(view.getByText('Not enough ratings')).toBeTruthy();
+  });
+
+  it('draws the grey circle rather than a faded number', async () => {
+    mockRpcResults.following_score = [{ score: null, rating_count: 0, following_count: 0 }];
+    mockRpcResults.community_score = [{ score: null, rating_count: 2, min_ratings: 10 }];
+
+    const view = await open();
+
     await waitFor(() => expect(view.getByText('Bingd')).toBeTruthy());
-    expect(view.queryByText('Following')).toBeNull();
+    expect(view.getAllByText('Not enough ratings')).toHaveLength(2);
+    // Never a zero, and never a real number greyed out to say "do not trust this".
+    expect(view.queryByText('0.0')).toBeNull();
   });
 });
 

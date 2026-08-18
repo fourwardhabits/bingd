@@ -42,7 +42,7 @@ import { posterUri, profileUri, videoUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { relativeTime } from '@/features/recommendations/use-sent-to-you';
-import { fullTitle } from '@/lib/titles';
+import { compactName } from '@/lib/titles';
 import {
   CastStrip,
   Chip,
@@ -153,7 +153,7 @@ export default function TitleScreen() {
         .select(
           // The parent's artwork comes with it: a season has no backdrop of its own
           // (TMDB publishes none) and borrows the series' — see `lib/hero.ts`.
-          'id, kind, title, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, certification, parent:parent_id(id, title, poster_path, backdrop_path)',
+          'id, kind, title, season_number, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, certification, parent:parent_id(id, title, poster_path, backdrop_path)',
         )
         .eq('id', id ?? '')
         .single();
@@ -330,8 +330,13 @@ export default function TitleScreen() {
   });
   // The page shows the series' own name in the hierarchy above the season, so the
   // heading itself stays short: "Season 2", under "Parks and Recreation".
-  const displayTitle = fullTitle(
-    { kind: title.kind, title: title.title, seriesTitle: parent?.title ?? null },
+  const displayTitle = compactName(
+    {
+      kind: title.kind,
+      title: title.title,
+      seriesTitle: parent?.title ?? null,
+      seasonNumber: title.season_number ?? null,
+    },
     { parentIsVisible: true },
   );
   const isWatchlisted = Boolean(data.watchlist);
@@ -424,6 +429,7 @@ export default function TitleScreen() {
       posterUri: posterUri(title.poster_path, 'card'),
       kind: title.kind,
       seriesTitle: parent?.title ?? null,
+      seasonNumber: title.season_number ?? null,
     });
   };
 
@@ -485,12 +491,18 @@ export default function TitleScreen() {
    * Confirmed, because this one genuinely destroys things the person wrote: the watch
    * date, the note, the position. The alert names what goes rather than asking "are you
    * sure", which is a question nobody can answer without being told the consequence.
+   *
+   * The activity goes too, as of `20260818000100`, and the alert says so. It has to:
+   * removing the feed event takes other people's reactions and comments on it with it,
+   * and a consequence that reaches other people is exactly the sort a confirmation
+   * exists to state. The copy stays plain and serious — this is the one place in the
+   * app the playful voice does not go.
    */
   const confirmRemoval = () => {
     setManaging(false);
     Alert.alert(
       `Remove ${displayTitle ?? title.title} from your collection?`,
-      'Your rating, your watch date and your note go with it. You can log it again later.',
+      'Your rating, your watch date, your note and the activity about it go with it. You can log it again later.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -809,38 +821,24 @@ export default function TitleScreen() {
             A series has no aggregate of its own, because it cannot be ranked
             (PRD §10), so it gets no section rather than a permanent "No ratings yet".
 
-            The reader's own score leads the section and is also opposite the poster.
-            That repetition was ruled out once and the founder has since ruled it back
-            in, which is the right call: the hero answers "have I ranked this", and this
-            section answers "how does what I thought compare", and the second question
-            cannot be asked with one of its three numbers a screen away. */}
+            **The reader's own score is not in here.** It is in the hero, opposite the
+            poster, with the rank context and the Ranked control beside it. It led this
+            section as well until 2026-08-18, which put the same number on the page
+            twice and made the second copy the weaker one — no rank line, no way to
+            change the rating. Founder correction. */}
         {!isSeries ? (
           <ScoresSection
-            // Your own number leads, and it is deliberately the same one the hero shows.
-            // The founder's amendment: this section is a comparison, and a comparison
-            // missing one of its three terms makes the reader scroll back for it.
-            yours={{ score, bucket: data.ranked?.bucket ?? null }}
-            // The reader's own people, above everybody's. Omitted by the component when
-            // they follow nobody — that silence is about the reader's following list
-            // rather than about the film.
-            following={
-              following.data
-                ? {
-                    score: following.data.score,
-                    ratingCount: following.data.ratingCount,
-                    followingCount: following.data.followingCount,
-                  }
-                : null
-            }
-            bingd={
-              community.data
-                ? {
-                    score: community.data.score,
-                    ratingCount: community.data.ratingCount,
-                    minRatings: community.data.minRatings,
-                  }
-                : null
-            }
+            // The reader's own people, above everybody's. Both rows are always drawn:
+            // a grey circle and "Not enough ratings" is a real answer, and a row that
+            // appears when the data does is a page that moves under the reader.
+            following={{
+              score: following.data?.score ?? null,
+              ratingCount: following.data?.ratingCount ?? 0,
+            }}
+            bingd={{
+              score: community.data?.score ?? null,
+              ratingCount: community.data?.ratingCount ?? 0,
+            }}
           />
         ) : null}
 
@@ -1065,6 +1063,7 @@ export default function TitleScreen() {
           kind={title.kind}
           title={displayTitle ?? title.title}
           seriesTitle={parent?.title ?? null}
+          seasonNumber={title.season_number ?? null}
           onClose={() => setRecommending(false)}
           onSent={setRecommendedTo}
         />

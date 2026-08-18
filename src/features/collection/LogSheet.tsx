@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 
 import { invalidateAfterCollectionChange } from './invalidate';
 import { diagnose } from '@/lib/diagnose';
+import { compactName } from '@/lib/titles';
 import { useCurrentProfile } from '@/features/auth';
 import { theme } from '@/ui/tokens';
 import {
@@ -46,6 +47,8 @@ export type LoggableTitle = {
   kind: 'movie' | 'season';
   /** For a season, the series it belongs to, so the header is not just "Season 3". */
   seriesTitle?: string | null;
+  /** For a season, its number, so the header reads "The Last of Us, S1". */
+  seasonNumber?: number | null;
 };
 
 export type LogSheetProps = {
@@ -443,7 +446,9 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
     : 'Add';
 
   const category = title.kind === 'movie' ? 'Movies' : 'TV season';
-  const heading = title.seriesTitle ? `${title.seriesTitle} — ${title.title}` : title.title;
+  // The compact identity, which is what a sheet heading is: one line, series and
+  // season joined the way every other row in the app joins them (`lib/titles.ts`).
+  const heading = compactName(title) ?? title.title;
   const noteValue = note.trim() ? `${note.trim().split(/\s+/).length} words` : 'Add';
 
   return (

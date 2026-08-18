@@ -508,7 +508,7 @@ describe('the inbox’s two new behaviours', () => {
     const view = await renderWithProviders(<NotificationsScreen />);
 
     await waitFor(() => expect(view.getByText(' recommended a season')).toBeTruthy());
-    expect(view.getByText('Parks and Recreation — Season 2')).toBeTruthy();
+    expect(view.getByText('Parks and Recreation, S2')).toBeTruthy();
   });
 
   it('opens the exact title rather than the sender', async () => {

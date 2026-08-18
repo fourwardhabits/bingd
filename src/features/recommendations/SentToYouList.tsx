@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { posterUri } from '@/lib/images';
-import { fullTitle } from '@/lib/titles';
+import { compactName } from '@/lib/titles';
 import { Text, TitleRow } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -34,7 +34,7 @@ export function SentToYouList({ rows, saved, busyId, onOpen, onToggleSave }: Sen
   return (
     <View>
       {rows.map((row) => {
-        const name = fullTitle(row) ?? row.title;
+        const name = compactName(row) ?? row.title;
         const isSaved = saved.has(row.mediaItemId);
         const unopened = !row.openedAt;
 

@@ -16,6 +16,8 @@ export type SeasonPickerProps = {
     title: string;
     year: number | null;
     posterPath: string | null;
+    /** Travels with the season so the log sheet can head itself "The Last of Us, S1". */
+    seasonNumber: number;
   }) => void;
 };
 
@@ -98,6 +100,7 @@ export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
                     title: season.title,
                     year: yearOf(season.release_date),
                     posterPath: season.poster_path,
+                    seasonNumber: season.season_number,
                   })
                 }
                 style={styles.row}
