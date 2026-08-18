@@ -492,17 +492,19 @@ export default function TitleScreen() {
    * date, the note, the position. The alert names what goes rather than asking "are you
    * sure", which is a question nobody can answer without being told the consequence.
    *
-   * The activity goes too, as of `20260818000100`, and the alert says so. It has to:
-   * removing the feed event takes other people's reactions and comments on it with it,
-   * and a consequence that reaches other people is exactly the sort a confirmation
-   * exists to state. The copy stays plain and serious — this is the one place in the
-   * app the playful voice does not go.
+   * The activity goes too, as of `20260818000100`, and the alert names the reactions
+   * and comments by name. Review 19 asked for that and it is right: the cascade reaches
+   * other people's writing, and a consequence that falls on somebody who is not in the
+   * room is exactly the sort a confirmation exists to state. Saying "the activity" and
+   * leaving the rest implied is the kind of true-but-incomplete wording review 14
+   * rejected on the deletion inventory. The copy stays plain and serious — this is the
+   * one place in the app the playful voice does not go.
    */
   const confirmRemoval = () => {
     setManaging(false);
     Alert.alert(
       `Remove ${displayTitle ?? title.title} from your collection?`,
-      'Your rating, your watch date, your note and the activity about it go with it. You can log it again later.',
+      'Your rating, your watch date and your note go with it. The activity about it goes too, along with any reactions and comments on it. You can log it again later.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
