@@ -107,6 +107,67 @@ type MediaRow = {
 const one = <T>(value: T | T[] | null | undefined): T | null =>
   (Array.isArray(value) ? value[0] : value) ?? null;
 
+/**
+ * How many rows one request may return, and how many requests one fact may take.
+ *
+ * **PostgREST silently caps an unbounded select**, and this was measured against
+ * bingd-nonprod rather than assumed: `media_items` holds 2,835 rows, a select with no
+ * range returns exactly 1,000, and the only sign of it is a `Content-Range: 0-999/*`
+ * header that supabase-js discards. No error, no flag, no short read — just a shorter
+ * array than the truth.
+ *
+ * That is a wrong number rather than a slow one, and it lands exactly where it hurts
+ * most: **Movie Muncher's gold tier is 1,000 movies.** A collection of 1,000 films and
+ * any television at all puts `user_media` past the cap, so the read comes back short and
+ * the award reports a number below the tier the reader has actually reached — a badge
+ * they have earned and cannot unlock, for a reason nothing on the screen could explain.
+ * Heart Magnet and Mutual Mania fail the same way on a popular account.
+ *
+ * So every fact is paged to exhaustion. A page shorter than `PAGE_ROWS` is the end;
+ * anything else asks for the next one.
+ *
+ * **The ceiling exists so this can never quietly lie again.** Twelve pages is 12,000
+ * rows, far past any real collection. Hitting it does not truncate — it returns an error,
+ * which `rowsOf` turns into the `unavailable` state review 20 established, so the row
+ * draws "Could not load this one" and a dash instead of a confident wrong number. A cap
+ * that degrades into a plausible figure is the defect this comment exists about.
+ */
+const PAGE_ROWS = 1000;
+const MAX_PAGES = 12;
+
+type PageResult = { data: unknown; error: unknown };
+type Paged = (from: number, to: number) => PromiseLike<PageResult>;
+
+/**
+ * One fact, however many requests it takes.
+ *
+ * Takes a factory rather than a query because a supabase-js builder is single-use: it is
+ * a thenable that issues its request on the first `await`, so the same object cannot ask
+ * for a second page.
+ */
+async function readAll(page: Paged): Promise<PageResult> {
+  const rows: unknown[] = [];
+  for (let index = 0; index < MAX_PAGES; index += 1) {
+    const from = index * PAGE_ROWS;
+    const result = await page(from, from + PAGE_ROWS - 1);
+    if (result.error) return { data: null, error: result.error };
+
+    const batch = (result.data ?? []) as unknown[];
+    rows.push(...batch);
+    // Short page means the end. Equality means there may be more, including the exact
+    // case where the total is a multiple of the page size — which costs one empty
+    // request and is the price of not guessing.
+    if (batch.length < PAGE_ROWS) return { data: rows, error: null };
+  }
+  return {
+    data: null,
+    error: {
+      code: 'BINGD_TOO_MANY_ROWS',
+      message: `More than ${MAX_PAGES * PAGE_ROWS} rows; refusing to report a partial count.`,
+    },
+  };
+}
+
 /** A media row as the awards need it, with a season's inheritance applied. */
 function titleFrom(mediaItemId: string, media: MediaRow | null): WatchedTitle | null {
   // A series cannot be logged, ranked or watchlisted — `_assert_loggable` refuses one —
@@ -182,23 +243,41 @@ async function readFacts(userId: string): Promise<AwardFacts> {
        * second query is what makes double-counting impossible: one row is one
        * contribution, and the same row is the one Movie Muncher counted.
        */
-      supabase
-        .from('user_media')
-        .select(`media_item_id, watched_on, note, note_visibility, media_items(${MEDIA})`)
-        .eq('user_id', userId),
+      readAll((from, to) =>
+        supabase
+          .from('user_media')
+          .select(`media_item_id, watched_on, note, note_visibility, media_items(${MEDIA})`)
+          .eq('user_id', userId)
+          // Ordered because a paged read without one is not a read of anything: the
+          // database may return rows in any order per request, so page two could repeat
+          // page one's rows and omit others entirely. The primary key is the cheap
+          // stable tiebreak every one of these tables has.
+          .order('media_item_id', { ascending: true })
+          .range(from, to),
+      ),
 
       // Bucket and position come too, so Rating Rascal's drill-down can show the score
       // the reader actually gave — which is derived from the band, not stored.
-      supabase
-        .from('rankings')
-        .select(`media_item_id, bucket, position, category, media_items(${MEDIA})`)
-        .eq('user_id', userId),
+      readAll((from, to) =>
+        supabase
+          .from('rankings')
+          .select(`media_item_id, bucket, position, category, media_items(${MEDIA})`)
+          .eq('user_id', userId)
+          .order('media_item_id', { ascending: true })
+          .range(from, to),
+      ),
 
-      supabase
-        .from('watchlist')
-        .select(`media_item_id, media_items(${MEDIA})`)
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false }),
+      readAll((from, to) =>
+        supabase
+          .from('watchlist')
+          .select(`media_item_id, media_items(${MEDIA})`)
+          .eq('user_id', userId)
+          // `created_at` is not unique, so on its own it is a page boundary that can drop
+          // or repeat a row when several land in the same instant. The key breaks the tie.
+          .order('created_at', { ascending: false })
+          .order('media_item_id', { ascending: true })
+          .range(from, to),
+      ),
 
       /**
        * People who joined on this reader's invitation, not links they made.
@@ -211,30 +290,42 @@ async function readFacts(userId: string): Promise<AwardFacts> {
        * `docs/product/growth-instrumentation.md` §1 for the five pieces Beta Hardening
        * owes it.
        */
-      supabase
-        .from('invite_attributions')
-        .select('invitee_id, activated_at, invitee:invitee_id(id, username, display_name, avatar_path)')
-        .eq('inviter_id', userId)
-        .not('activated_at', 'is', null),
+      readAll((from, to) =>
+        supabase
+          .from('invite_attributions')
+          .select('invitee_id, activated_at, invitee:invitee_id(id, username, display_name, avatar_path)')
+          .eq('inviter_id', userId)
+          .not('activated_at', 'is', null)
+          .order('invitee_id', { ascending: true })
+          .range(from, to),
+      ),
 
       // The reader's own comments, with the title they are about. `comments_read` needs
       // the event's actor to be visible too, so a comment left on somebody who has since
       // blocked the reader is absent from both the count and the list, together.
-      supabase
-        .from('comments')
-        .select(
-          `id, created_at, feed_event_id, feed_events!inner(media_item_id, media_items(${MEDIA}))`,
-        )
-        .eq('author_id', userId)
-        .order('created_at', { ascending: false }),
+      readAll((from, to) =>
+        supabase
+          .from('comments')
+          .select(
+            `id, created_at, feed_event_id, feed_events!inner(media_item_id, media_items(${MEDIA}))`,
+          )
+          .eq('author_id', userId)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
 
-      supabase
-        .from('title_recommendations')
-        .select(
-          `id, recommended_at, recipient_id, media_items(${MEDIA}), recipient:recipient_id(id, username, display_name, avatar_path)`,
-        )
-        .eq('sender_id', userId)
-        .order('recommended_at', { ascending: false }),
+      readAll((from, to) =>
+        supabase
+          .from('title_recommendations')
+          .select(
+            `id, recommended_at, recipient_id, media_items(${MEDIA}), recipient:recipient_id(id, username, display_name, avatar_path)`,
+          )
+          .eq('sender_id', userId)
+          .order('recommended_at', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
 
       /**
        * Reactions on the reader's own activity, from anybody but the reader.
@@ -249,17 +340,28 @@ async function readFacts(userId: string): Promise<AwardFacts> {
        * reactor to be visible to the caller, so a reaction from a blocked account is
        * outside the count and outside the list in the same motion.
        */
-      supabase
-        .from('reactions')
-        .select(`feed_event_id, feed_events!inner(actor_id, media_item_id, media_items(${MEDIA}))`)
-        .eq('feed_events.actor_id', userId)
-        .neq('user_id', userId),
+      readAll((from, to) =>
+        supabase
+          .from('reactions')
+          .select(`feed_event_id, feed_events!inner(actor_id, media_item_id, media_items(${MEDIA}))`)
+          .eq('feed_events.actor_id', userId)
+          .neq('user_id', userId)
+          // `reactions` is keyed by the pair, so the pair is what makes the order total.
+          .order('feed_event_id', { ascending: true })
+          .order('user_id', { ascending: true })
+          .range(from, to),
+      ),
 
-      supabase
-        .from('follows')
-        .select(FOLLOWS_SELECT)
-        .eq('state', 'approved')
-        .or(`follower_id.eq.${userId},followee_id.eq.${userId}`),
+      readAll((from, to) =>
+        supabase
+          .from('follows')
+          .select(FOLLOWS_SELECT)
+          .eq('state', 'approved')
+          .or(`follower_id.eq.${userId},followee_id.eq.${userId}`)
+          .order('follower_id', { ascending: true })
+          .order('followee_id', { ascending: true })
+          .range(from, to),
+      ),
     ]);
 
   if (watched.error) throw watched.error;
@@ -524,11 +626,16 @@ export type AwardsQuery = {
 /**
  * The awards for one account.
  *
- * `staleTime` is a minute. Awards move when the reader watches, ranks or is reacted to,
- * and all three of those already invalidate the collection keys this shares a screen
- * with; a minute is short enough that reopening the sheet after logging a film shows
- * the new number, and long enough that scrolling out and back does not refetch eight
- * things.
+ * `staleTime` is a minute, and **the invalidation is what makes that safe** — which was
+ * not true when this comment first claimed it was. Logging and ranking go through
+ * `invalidateAfterCollectionChange`, and Awards was built after that list and never added
+ * to it, so a badge earned by the film just logged did not move for up to a minute. The
+ * comment asserted the opposite; independent review 21 found the gap. `['awards', userId]`
+ * is on the list now, so a threshold crossed by a write shows immediately.
+ *
+ * The minute still earns its place for what no local write can invalidate: reactions and
+ * follows arrive from other people, so Heart Magnet and Mutual Mania have nothing to hook
+ * and a short staleness is the honest cost of not polling.
  */
 export function useAwards(userId: string, options: { enabled?: boolean } = {}) {
   return useQuery({

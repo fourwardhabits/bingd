@@ -60,9 +60,11 @@ const KEYS = {
   following: ['following-score', USER, TITLE],
   goalsThisYear: ['goals', USER, 2026],
   goalsLastYear: ['goals', USER, 2025],
+  awards: ['awards', USER],
   // Left alone on purpose.
   search: ['search', 'inception'],
   otherUserGoals: ['goals', OTHER, 2026],
+  otherUserAwards: ['awards', OTHER],
   credits: ['credits', TITLE],
   videos: ['videos', TITLE],
   otherTitle: ['title', 'film-2'],
@@ -112,6 +114,18 @@ describe('after a ranking completes', () => {
 
   it('refreshes this title’s community score, which now includes the new rating', async () => {
     expect(has(touched(), KEYS.community)).toBe(true);
+  });
+
+  it('refreshes Bingd Awards, which thirteen tracks read the collection for', async () => {
+    // The failure this module exists to prevent, repeated: Awards was built after the
+    // list and never added to it, so a badge earned by the film just logged did not move
+    // until the one-minute staleTime expired — and `use-awards.ts` carried a comment
+    // saying the opposite. Independent review 21.
+    expect(has(touched(), KEYS.awards)).toBe(true);
+  });
+
+  it('leaves somebody else’s awards alone', async () => {
+    expect(has(touched(), KEYS.otherUserAwards)).toBe(false);
   });
 
   it('leaves the following score alone, which the reader cannot move', async () => {

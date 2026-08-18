@@ -24,7 +24,8 @@
     "brand:render": "node assets/brand/render.mjs",
     "build:web": "node web/build.mjs",
     "test:adapter": "node supabase/tests/adapter-smoke.mjs",
-    "test:acceptance": "node supabase/tests/two-user-acceptance.mjs"
+    "test:acceptance": "node supabase/tests/two-user-acceptance.mjs",
+    "test:award-privacy": "node supabase/tests/award-privacy.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/dm-serif-display": "^0.4.2",

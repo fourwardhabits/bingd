@@ -21,11 +21,23 @@ const mockBroken = new Set<string>();
 /** Every table this render actually asked for, so a read can be asserted by name. */
 const mockAsked: string[] = [];
 
-/** A `PostgrestFilterBuilder` in miniature. Every award read now returns rows. */
+/** How many requests each table was asked for, so paging can be asserted. */
+const mockRequests: Record<string, number> = {};
+
+/**
+ * A `PostgrestFilterBuilder` in miniature.
+ *
+ * **It honours `range`, and that is not decoration.** PostgREST caps an unbounded select
+ * at 1,000 rows and says so only in a header supabase-js discards, so `readFacts` pages
+ * every fact to exhaustion. A mock that ignored `range` and returned the whole array on
+ * every call would make that loop look like it worked while testing nothing — and would
+ * hide the opposite bug, a loop that never terminates because each page looks full.
+ */
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     from: (table: string) => {
       mockAsked.push(table);
+      let slice: { from: number; to: number } | null = null;
       const chain: Record<string, unknown> = {
         select: () => chain,
         eq: () => chain,
@@ -33,11 +45,18 @@ jest.mock('@/lib/supabase', () => ({
         not: () => chain,
         or: () => chain,
         order: () => chain,
+        range: (from: number, to: number) => {
+          slice = { from, to };
+          return chain;
+        },
         then: (resolve: (value: unknown) => unknown) => {
+          mockRequests[table] = (mockRequests[table] ?? 0) + 1;
           if (mockBroken.has(table)) {
             return Promise.resolve({ data: null, error: { message: 'nope' } }).then(resolve);
           }
-          return Promise.resolve({ data: mockTables[table] ?? [], error: null }).then(resolve);
+          const all = mockTables[table] ?? [];
+          const data = slice ? all.slice(slice.from, slice.to + 1) : all;
+          return Promise.resolve({ data, error: null }).then(resolve);
         },
       };
       return chain;
@@ -78,6 +97,7 @@ const profile = (username: string, name = username) => ({
 
 beforeEach(() => {
   for (const key of Object.keys(mockTables)) delete mockTables[key];
+  for (const key of Object.keys(mockRequests)) delete mockRequests[key];
   mockBroken.clear();
   mockAsked.length = 0;
 });
@@ -260,6 +280,48 @@ describe('every award is explainable', () => {
  * elsewhere — and the point of the cap is precisely that the two are allowed to differ,
  * as long as the sheet says so.
  */
+/**
+ * A count past the page size is still the whole count.
+ *
+ * PostgREST caps an unbounded select at 1,000 rows on this project — measured, not
+ * assumed: `media_items` holds 2,835 and a select with no range returns exactly 1,000,
+ * with the only evidence in a `Content-Range` header supabase-js throws away. Silent, so
+ * the award simply reports a smaller number than the truth.
+ *
+ * It lands worst on the one track where the numbers coincide: **Movie Muncher's gold tier
+ * is 1,000 movies.** A reader with 1,000 films and any television at all has more than
+ * 1,000 rows in `user_media`, so before this fix the read came back short and the badge
+ * they had earned could not be unlocked, for a reason nothing on screen could explain.
+ */
+describe('a collection past the page size', () => {
+  it('counts every title rather than the first page of them', async () => {
+    // 1,200 films: past the 1,000-row cap, and past Movie Muncher's gold tier.
+    mockTables.user_media = movies(1200);
+    await open();
+
+    // Every tier earned, so the label is the bare total rather than a fraction.
+    expect(count('1,200')).toBeTruthy();
+    // Two requests, not one: the first page came back full, so there had to be a second.
+    expect(mockRequests.user_media).toBe(2);
+  });
+
+  it('asks once more when the total lands exactly on a page boundary', async () => {
+    mockTables.user_media = movies(1000);
+    await open();
+
+    expect(count('1,000')).toBeTruthy();
+    // A full page cannot be known to be the last one, so the empty page is the price of
+    // not guessing — and 1,000 is precisely the total a gold Movie Muncher has.
+    expect(mockRequests.user_media).toBe(2);
+  });
+
+  it('makes one request when the first page is short', async () => {
+    mockTables.user_media = movies(30);
+    await open();
+    expect(mockRequests.user_media).toBe(1);
+  });
+});
+
 describe('a long breakdown is revealed in pages', () => {
   /**
    * A title row, by the label the row announces itself with.

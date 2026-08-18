@@ -86,4 +86,21 @@ export function invalidateAfterCollectionChange(
   // screen: logging a film watched last December has to move *that* year's bar, and
   // this module has no business computing which year that was.
   invalidate(['goals', userId]);
+
+  /**
+   * Bingd Awards, which is the exact failure this module was written to prevent
+   * happening again — and it happened again anyway.
+   *
+   * Thirteen of the twenty tracks are functions of the watched collection, so logging a
+   * film moves them by construction. Awards arrived after this list existed and was
+   * never added to it, so for up to its one-minute `staleTime` the sheet showed the
+   * count from before the log. `use-awards.ts` asserted the opposite in a comment —
+   * that ranking and logging "already invalidate the collection keys this shares a
+   * screen with" — which was true of every key except its own.
+   *
+   * It lands on the founder's acceptance walk directly: log the film that crosses a
+   * threshold, open the sheet, and the badge has not moved. Found by independent review
+   * 21.
+   */
+  invalidate(['awards', userId]);
 }
