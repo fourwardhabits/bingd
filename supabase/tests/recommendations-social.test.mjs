@@ -43,6 +43,19 @@ const recommendError = (recipient, mediaItemId) =>
   t.errorFrom(`select recommend_title(gen_random_uuid(), $1, $2)`, [recipient, mediaItemId]);
 
 /**
+ * Why a send was refused, or null if it went through.
+ *
+ * `recommend_title` returns its refusals rather than raising them, so that a refused
+ * attempt still commits its operation claim and still costs a slot against the hourly
+ * ceiling. Independent review 18 found the alternative: a raise rolls the claim back,
+ * and refused attempts are then free.
+ */
+const refusal = async (recipient, mediaItemId) => {
+  const r = await recommend(recipient, mediaItemId);
+  return r.status === 'refused' ? r.reason : null;
+};
+
+/**
  * A read performed as somebody, with the acting identity put back afterwards.
  *
  * `asRole` resets the Postgres role and deliberately leaves `request.jwt.claims`
@@ -88,6 +101,14 @@ before(async () => {
   bob = await t.createUser({ username: 'bob_rec' });
   await mutual(alice, bob);
   await t.actAs(alice);
+
+  // The ceiling is lifted for the file, and lowered again by the one test that is
+  // about it. Every refusal below now commits its operation claim — which is the
+  // point of returning refusals rather than raising them — so alice spends a slot on
+  // each of the thirty-odd sends here and would otherwise hit 20/hour a third of the
+  // way through, with every later failure reading as a defect in whatever it was
+  // testing.
+  await t.sql(`update app_config set value = '1000'::jsonb where key like 'recommendations.max_per_%'`);
 });
 
 after(async () => {
@@ -112,16 +133,16 @@ describe('who may be recommended to', () => {
   it('refuses a one-way follow in either direction', async () => {
     const carol = await t.createUser({ username: 'carol_rec' });
     await follow(alice, carol); // alice follows carol, who does not follow back
-    assert.equal((await recommendError(carol, await movie('rec_outbound')))?.code, '42501');
+    assert.equal(await refusal(carol, await movie('rec_outbound')), 'not_mutual');
 
     const carla = await t.createUser({ username: 'carla_rec' });
     await follow(carla, alice); // carla follows alice, who does not follow back
-    assert.equal((await recommendError(carla, await movie('rec_inbound')))?.code, '42501');
+    assert.equal(await refusal(carla, await movie('rec_inbound')), 'not_mutual');
   });
 
   it('refuses a stranger', async () => {
     const dave = await t.createUser({ username: 'dave_rec' });
-    assert.equal((await recommendError(dave, await movie('rec_stranger')))?.code, '42501');
+    assert.equal(await refusal(dave, await movie('rec_stranger')), 'not_mutual');
   });
 
   it('refuses a pending request, which is not a follow', async () => {
@@ -131,7 +152,7 @@ describe('who may be recommended to', () => {
       alice,
       erin,
     ]);
-    assert.equal((await recommendError(erin, await movie('rec_pending')))?.code, '42501');
+    assert.equal(await refusal(erin, await movie('rec_pending')), 'not_mutual');
   });
 
   it('refuses across a block, and says the same thing as a missing account', async () => {
@@ -139,17 +160,16 @@ describe('who may be recommended to', () => {
     await mutual(alice, frank);
     await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [frank, alice]);
 
-    const blocked = await recommendError(frank, await movie('rec_blocked'));
-    const missing = await recommendError(
+    const blocked = await refusal(frank, await movie('rec_blocked'));
+    const missing = await refusal(
       '00000000-0000-4000-8000-000000000000',
       await movie('rec_missing'),
     );
 
-    // Both P0002, and deliberately the same message: telling them apart tells a
-    // blocked caller they are blocked.
-    assert.equal(blocked?.code, 'P0002');
-    assert.equal(missing?.code, 'P0002');
-    assert.equal(blocked?.message, missing?.message);
+    // One reason for both, and for a suspension and a stranger besides: a caller who
+    // could tell them apart could tell that they had been blocked.
+    assert.equal(blocked, 'not_mutual');
+    assert.equal(missing, 'not_mutual');
   });
 
   it('refuses a suspended recipient', async () => {
@@ -157,7 +177,7 @@ describe('who may be recommended to', () => {
     await mutual(alice, hank);
     await t.sql(`update profiles set status = 'suspended' where id = $1`, [hank]);
 
-    assert.equal((await recommendError(hank, await movie('rec_suspended')))?.code, 'P0002');
+    assert.equal(await refusal(hank, await movie('rec_suspended')), 'not_mutual');
   });
 
   it('refuses a suspended sender', async () => {
@@ -172,16 +192,14 @@ describe('who may be recommended to', () => {
   });
 
   it('refuses recommending to yourself', async () => {
-    assert.equal((await recommendError(alice, await movie('rec_self')))?.code, '22023');
+    assert.equal(await refusal(alice, await movie('rec_self')), 'yourself');
   });
 });
 
 describe('what may be recommended', () => {
   it('refuses a whole series, because a series is not a thing anybody watched', async () => {
     const series = await t.createSeries('rec_series', seq++);
-    const error = await recommendError(bob, series);
-    assert.equal(error?.code, '22023');
-    assert.match(error?.message ?? '', /not a whole series/);
+    assert.equal(await refusal(bob, series), 'not_recommendable');
   });
 
   it('accepts an exact season, and names the show it belongs to', async () => {
@@ -198,8 +216,9 @@ describe('what may be recommended', () => {
 
   it('refuses a title that does not exist', async () => {
     assert.equal(
-      (await recommendError(bob, '00000000-0000-4000-8000-000000000001'))?.code,
-      'P0002',
+      await refusal(bob, '00000000-0000-4000-8000-000000000001'),
+      'not_recommendable',
+      'and reports the same way as a series, which discloses nothing: media_items is world-readable',
     );
   });
 });
@@ -291,7 +310,30 @@ describe('the rate limit', () => {
     } finally {
       await t.actAs(alice);
       await t.sql(
-        `update app_config set value = '20'::jsonb where key = 'recommendations.max_per_hour'`,
+        `update app_config set value = '1000'::jsonb where key = 'recommendations.max_per_hour'`,
+      );
+    }
+  });
+
+  it('counts a refused attempt too, so a script aimed at strangers is not free', async () => {
+    // Independent review 18, second Major. `_claim_operation` inserts the row the
+    // limiter counts, and a `raise` rolls it back — so a writer that refused by
+    // raising charged nothing for the refusal, and the ceiling was on successes
+    // rather than on attempts. `recommend_title` returns its refusals instead.
+    const script = await t.createUser({ username: 'script_rec' });
+    const nobody = await t.createUser({ username: 'nobody_rec' });
+    await t.sql(`update app_config set value = '1'::jsonb where key = 'recommendations.max_per_hour'`);
+    await t.actAs(script);
+
+    try {
+      assert.equal(await refusal(nobody, await movie('rate_refused_a')), 'not_mutual');
+
+      const error = await recommendError(nobody, await movie('rate_refused_b'));
+      assert.equal(error?.code, '53400', 'the refused attempt was counted against the ceiling');
+    } finally {
+      await t.actAs(alice);
+      await t.sql(
+        `update app_config set value = '1000'::jsonb where key = 'recommendations.max_per_hour'`,
       );
     }
   });
@@ -475,6 +517,17 @@ describe('marking one opened', () => {
   });
 });
 
+/**
+ * The invite link.
+ *
+ * The mint takes a per-account advisory lock, added for independent review 18's first
+ * Major: `invite_tokens_one_live` is a partial unique index, and the read-then-write
+ * around it turned two simultaneous taps on Share into a 23505 for one of them.
+ * **PGlite is single-connection, so nothing here can exercise that lock** — it is
+ * verified by inspection, like `_lock_pair` and the rate limiter's, and it is the same
+ * gap debt item 10 records. What is tested is the property the lock protects: one live
+ * token per owner, and the same token returned every time.
+ */
 describe('the invite link', () => {
   it('mints one personal link and then reuses it', async () => {
     const vic = await t.createUser({ username: 'vic_rec' });

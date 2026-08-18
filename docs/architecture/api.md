@@ -145,11 +145,20 @@ tagging and recommending obey one rule. `set_watch_tags` grandfathers anybody al
 tagged on a watch, because it refuses the whole call rather than partially applying and
 would otherwise make an older list permanently unsaveable.
 
-**Errors.** Missing, suspended and blocked all raise `P0002` with one message, through
-`_assert_reachable` — telling them apart tells a blocked caller they are blocked.
-Not-mutual raises `42501` and discloses nothing: `follows_read` already admits every row
-the caller is a party to, so "do they follow me back" was always a select away. A series
-raises `22023` (PRD §10 — a series is not a thing anybody watched).
+**Refusals are returned, not raised.** `recommend_title` answers
+`{"status":"refused","reason":...}` with reasons `not_mutual`, `yourself` and
+`not_recommendable`. That is a rate-limit decision rather than a stylistic one: a `raise`
+rolls back the `processed_operations` claim the limiter counts, so a writer that refuses
+by raising charges nothing for a refusal and a script pointed at an ineligible recipient
+runs without limit. Independent review 18 found it, and it is true of **every writer in
+this schema** — recorded as debt rather than fixed everywhere in one pass.
+
+`not_mutual` covers a stranger, a one-way follow, a block in either direction, a
+suspension and a missing account as one answer, which discloses less than the two error
+codes it replaced: a caller who could tell them apart could tell they had been blocked.
+
+What still raises: `42501` from `assert_can_write` for a suspended caller, and `53400`
+from the rate limiter itself.
 
 **Duplicates.** One row per `(sender, recipient, media_item)`, for good. Re-sending moves
 `recommended_at` so the recommendation returns to the top of the recipient's list, leaves

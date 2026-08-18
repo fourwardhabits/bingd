@@ -316,6 +316,23 @@ try {
   const profileOfB = await get(a.token, `public_profiles?username=eq.${b.username}&select=id,username`);
   check('A can open B’s public profile', (profileOfB.body ?? []).length === 1);
 
+  // A recommendation needs a mutual follow, and right now they are strangers. Refusals
+  // come back as a 200 with a body, deliberately: `recommend_title` returns them so that
+  // a refused attempt still costs a slot against the hourly ceiling, which a raise would
+  // roll back along with the operation claim (independent review 18).
+  const strangerSend = await rpc(a.token, 'recommend_title', {
+    p_operation_id: uuid(),
+    p_recipient_id: b.id,
+    p_media_item_id: films[0].id,
+  });
+  check(
+    'a stranger cannot be recommended to',
+    strangerSend.status === 200 &&
+      strangerSend.body?.status === 'refused' &&
+      strangerSend.body?.reason === 'not_mutual',
+    JSON.stringify(strangerSend.body),
+  );
+
   const follow = await rpc(a.token, 'follow', { p_operation_id: uuid(), p_followee_id: b.id });
   check(
     'A follows B, and a public account is approved outright',
@@ -439,6 +456,235 @@ try {
 
   const back = await rpc(b.token, 'follow', { p_operation_id: uuid(), p_followee_id: a.id });
   check('B follows A back', back.status === 200 && back.body?.state === 'approved');
+
+  // -------------------------------------------------------------------------
+  console.log('\n— recommending, which needs both edges —');
+  // -------------------------------------------------------------------------
+
+  const gift = films[0];
+  const second = films[1];
+
+  const sent = await rpc(a.token, 'recommend_title', {
+    p_operation_id: uuid(),
+    p_recipient_id: b.id,
+    p_media_item_id: gift.id,
+  });
+  check(
+    'a mutual follow can be recommended to',
+    sent.status === 200 && sent.body?.status === 'ok' && sent.body?.created === true,
+    JSON.stringify(sent.body),
+  );
+
+  const bSentToYou = await rpc(b.token, 'recommendations_to_me', { p_limit: 20 });
+  const gifted = (bSentToYou.body ?? []).find((row) => row.media_item_id === gift.id);
+  check(
+    'it lands in B’s Sent to you, naming A',
+    bSentToYou.status === 200 && gifted && gifted.sender_username === a.username,
+    JSON.stringify(bSentToYou.body)?.slice(0, 200),
+  );
+  check('and arrives unopened', Boolean(gifted) && gifted.opened_at === null, JSON.stringify(gifted));
+
+  const recInbox = await rpc(b.token, 'my_notifications', { p_limit: 30 });
+  const recRow = (recInbox.body ?? []).find(
+    (row) => row.kind === 'recommendation' && row.subject_id === gift.id,
+  );
+  check(
+    'B is told, and the row points at the exact title',
+    Boolean(recRow) && recRow.actor_username === a.username && recRow.subject_type === 'media_item',
+    JSON.stringify(recRow),
+  );
+  check(
+    'and carries the kind, so the sentence can say which',
+    Boolean(recRow) && recRow.media_kind === 'movie',
+    JSON.stringify(recRow?.media_kind),
+  );
+
+  // The duplicate rule: one row per sender, recipient and exact title, for good.
+  const again = await rpc(a.token, 'recommend_title', {
+    p_operation_id: uuid(),
+    p_recipient_id: b.id,
+    p_media_item_id: gift.id,
+  });
+  check(
+    're-sending the same title updates rather than duplicating',
+    again.status === 200 && again.body?.status === 'ok' && again.body?.created === false,
+    JSON.stringify(again.body),
+  );
+
+  const afterResend = await rpc(b.token, 'recommendations_to_me', { p_limit: 20 });
+  check(
+    'so B still has exactly one of it',
+    (afterResend.body ?? []).filter((row) => row.media_item_id === gift.id).length === 1,
+  );
+
+  const noticesAfterResend = await rpc(b.token, 'my_notifications', { p_limit: 50 });
+  check(
+    'and was not told a second time',
+    (noticesAfterResend.body ?? []).filter(
+      (row) => row.kind === 'recommendation' && row.subject_id === gift.id,
+    ).length === 1,
+  );
+
+  // Ordering: unopened first, newest within that.
+  await rpc(a.token, 'recommend_title', {
+    p_operation_id: uuid(),
+    p_recipient_id: b.id,
+    p_media_item_id: second.id,
+  });
+
+  const opened = await rpc(b.token, 'mark_recommendation_opened', {
+    p_recommendation_id: gifted?.id,
+  });
+  check(
+    'B can mark one opened',
+    opened.status === 200 && opened.body?.opened === true,
+    JSON.stringify(opened.body),
+  );
+
+  const openedTwice = await rpc(b.token, 'mark_recommendation_opened', {
+    p_recommendation_id: gifted?.id,
+  });
+  check(
+    'and a second call changes nothing',
+    openedTwice.status === 200 && openedTwice.body?.opened === false,
+    JSON.stringify(openedTwice.body),
+  );
+
+  const ordered = await rpc(b.token, 'recommendations_to_me', { p_limit: 20 });
+  const orderedRows = ordered.body ?? [];
+  check(
+    'the unopened one sorts above the opened one',
+    orderedRows.findIndex((row) => row.media_item_id === second.id) <
+      orderedRows.findIndex((row) => row.media_item_id === gift.id),
+    orderedRows
+      .map((row) => `${row.media_item_id === gift.id ? 'gift' : 'other'}:${row.opened_at ? 'seen' : 'new'}`)
+      .join(' '),
+  );
+
+  const senderOpen = await rpc(a.token, 'mark_recommendation_opened', {
+    p_recommendation_id: gifted?.id,
+  });
+  check(
+    'the sender cannot mark it opened on their behalf',
+    senderOpen.status === 200 && senderOpen.body?.opened === false,
+    JSON.stringify(senderOpen.body),
+  );
+
+  // A season is the canonical TV unit. A series is not a thing anybody watched, so it
+  // is not a thing anybody can be told to watch (PRD §10).
+  const seasonRows = await get(a.token, 'media_items?kind=eq.season&select=id,parent_id,title&limit=1');
+  const season = (seasonRows.body ?? [])[0];
+  if (season) {
+    const sentSeason = await rpc(a.token, 'recommend_title', {
+      p_operation_id: uuid(),
+      p_recipient_id: b.id,
+      p_media_item_id: season.id,
+    });
+    check(
+      'an exact season can be recommended',
+      sentSeason.body?.status === 'ok',
+      JSON.stringify(sentSeason.body),
+    );
+
+    const withSeason = await rpc(b.token, 'recommendations_to_me', { p_limit: 20 });
+    const seasonRow = (withSeason.body ?? []).find((row) => row.media_item_id === season.id);
+    check(
+      'and the row names the show it belongs to, not only "Season 2"',
+      Boolean(seasonRow) && seasonRow.media_kind === 'season' && Boolean(seasonRow.series_title),
+      JSON.stringify(seasonRow)?.slice(0, 200),
+    );
+
+    const sentSeries = await rpc(a.token, 'recommend_title', {
+      p_operation_id: uuid(),
+      p_recipient_id: b.id,
+      p_media_item_id: season.parent_id,
+    });
+    check(
+      'a whole series is refused',
+      sentSeries.body?.status === 'refused' && sentSeries.body?.reason === 'not_recommendable',
+      JSON.stringify(sentSeries.body),
+    );
+  } else {
+    check('the deployed catalogue has a season to recommend', false, 'no season rows');
+  }
+
+  const selfSend = await rpc(a.token, 'recommend_title', {
+    p_operation_id: uuid(),
+    p_recipient_id: a.id,
+    p_media_item_id: gift.id,
+  });
+  check(
+    'and so is recommending to yourself',
+    selfSend.body?.status === 'refused' && selfSend.body?.reason === 'yourself',
+    JSON.stringify(selfSend.body),
+  );
+
+  // -------------------------------------------------------------------------
+  console.log('\n— Who I watched with, on the same rule —');
+  // -------------------------------------------------------------------------
+
+  const tagged = await rpc(a.token, 'set_watch_tags', {
+    p_operation_id: uuid(),
+    p_media_item_id: shared[0].id,
+    p_tagged_ids: [b.id],
+  });
+  check(
+    'a mutual follow can be tagged as a companion',
+    tagged.status === 200 && tagged.body?.status === 'ok',
+    JSON.stringify(tagged.body),
+  );
+
+  const tagNotice = await rpc(b.token, 'my_notifications', { p_limit: 50 });
+  check(
+    'and they are told once',
+    (tagNotice.body ?? []).filter((row) => row.kind === 'watch_tag').length === 1,
+  );
+
+  // -------------------------------------------------------------------------
+  console.log('\n— the invite link —');
+  // -------------------------------------------------------------------------
+
+  const link = await rpc(a.token, 'create_invite_link', {
+    p_operation_id: uuid(),
+    p_media_item_id: gift.id,
+  });
+  check(
+    'A can mint their one personal invite link',
+    link.status === 200 && typeof link.body?.token === 'string' && link.body.token.length === 32,
+    JSON.stringify(link.body),
+  );
+
+  const linkAgain = await rpc(a.token, 'create_invite_link', {
+    p_operation_id: uuid(),
+    p_media_item_id: null,
+  });
+  check(
+    'and asking again returns the same link rather than rotating it',
+    linkAgain.body?.token === link.body?.token,
+    `${link.body?.token} vs ${linkAgain.body?.token}`,
+  );
+
+  const myCreations = await get(
+    a.token,
+    'invite_link_creations?select=id,media_item_id&order=created_at.asc',
+  );
+  check(
+    'each creation is recorded, with the title that was in view',
+    (myCreations.body ?? []).length === 2 &&
+      myCreations.body[0].media_item_id === gift.id &&
+      myCreations.body[1].media_item_id === null,
+    JSON.stringify(myCreations.body)?.slice(0, 200),
+  );
+
+  const theirCreations = await get(
+    b.token,
+    `invite_link_creations?inviter_id=eq.${a.id}&select=id`,
+  );
+  check(
+    'and nobody can count somebody else’s',
+    (theirCreations.body ?? []).length === 0,
+    JSON.stringify(theirCreations.body)?.slice(0, 120),
+  );
 
   const bComment = await rpc(b.token, 'add_comment', {
     p_operation_id: uuid(),
@@ -567,6 +813,41 @@ try {
     'and A is not told they were blocked',
     edge && edge.blocked === false,
     'blocked:true would tell A that B blocked them',
+  );
+
+  const recommendWhileBlocked = await rpc(a.token, 'recommend_title', {
+    p_operation_id: uuid(),
+    p_recipient_id: b.id,
+    p_media_item_id: shared[0].id,
+  });
+  check(
+    'and cannot recommend their way back in either',
+    recommendWhileBlocked.body?.status === 'refused' &&
+      recommendWhileBlocked.body?.reason === 'not_mutual',
+    JSON.stringify(recommendWhileBlocked.body),
+  );
+  check(
+    'which reads the same as a stranger, so a block is not announced',
+    recommendWhileBlocked.body?.reason === strangerSend.body?.reason,
+    `${recommendWhileBlocked.body?.reason} vs ${strangerSend.body?.reason}`,
+  );
+
+  const sentToYouAfterBlock = await rpc(b.token, 'recommendations_to_me', { p_limit: 20 });
+  check(
+    'and what A already sent leaves B’s Sent to you',
+    !(sentToYouAfterBlock.body ?? []).some((row) => row.sender_id === a.id),
+    JSON.stringify(sentToYouAfterBlock.body)?.slice(0, 160),
+  );
+
+  const tagAfterBlock = await rpc(a.token, 'set_watch_tags', {
+    p_operation_id: uuid(),
+    p_media_item_id: shared[1].id,
+    p_tagged_ids: [b.id],
+  });
+  check(
+    'nor tag them on a watch they were never on',
+    tagAfterBlock.status >= 400,
+    JSON.stringify(tagAfterBlock.body)?.slice(0, 120),
   );
 
   const commentAfterBlock = await rpc(a.token, 'add_comment', {

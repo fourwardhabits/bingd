@@ -103,13 +103,30 @@ export function filterRecipients(people: Recipient[], query: string): Recipient[
 export type SendResult = { ok: true } | { ok: false; message: string };
 
 /**
+ * What the server says when it will not send.
+ *
+ * `recommend_title` returns its refusals rather than raising them, so that a refused
+ * attempt still costs the sender a slot against the hourly ceiling — see the header of
+ * `20260817001300`. The consequence here is that **a 200 is not a success**, and the
+ * body has to be read.
+ *
+ * `not_mutual` covers a stranger, a one-way follow, a block in either direction and a
+ * suspended account, all as one answer. The wording is about the relationship rather
+ * than about the person, which is both the honest reading and the one that does not
+ * tell somebody they have been blocked.
+ */
+const REFUSALS: Record<string, string> = {
+  not_mutual: 'You can only recommend to people who follow you back.',
+  yourself: 'You cannot recommend a title to yourself.',
+  not_recommendable: 'You can recommend a film or a season, not a whole series.',
+};
+
+/**
  * Sending one.
  *
  * One recipient per call, which is the V1 shape: no multi-select, no send-to-all, no
- * message. The server's own refusals are mapped to sentences rather than surfaced as
- * codes, and 42501 is the one worth naming precisely — it means the relationship
- * changed while the sheet was open, which is the only way an offered name can be
- * refused.
+ * message. Refusals arrive in the body and errors arrive as codes, and both become
+ * sentences here rather than reaching the sheet as either.
  */
 export function useRecommendTitle(viewerId: string) {
   const queryClient = useQueryClient();
@@ -122,33 +139,37 @@ export function useRecommendTitle(viewerId: string) {
       recipientId: string;
       mediaItemId: string;
     }): Promise<SendResult> => {
-      const { error } = await supabase.rpc('recommend_title', {
+      const { data, error } = await supabase.rpc('recommend_title', {
         p_operation_id: newOperationId(),
         p_recipient_id: recipientId,
         p_media_item_id: mediaItemId,
       });
 
-      if (!error) return { ok: true };
-
-      switch (error.code) {
-        case '42501':
-          return {
-            ok: false,
-            message: 'You can only recommend to people who follow you back.',
-          };
-        case 'P0002':
-          return { ok: false, message: 'That account is not available.' };
-        case '53400':
-          return {
-            ok: false,
-            message: 'You have sent a lot of recommendations today. Try again later.',
-          };
-        default:
-          return {
-            ok: false,
-            message: diagnose(error) ?? error.message,
-          };
+      if (error) {
+        switch (error.code) {
+          case '53400':
+            return {
+              ok: false,
+              message: 'You have sent a lot of recommendations today. Try again later.',
+            };
+          // assert_can_write. The only 42501 left on this path, now that a refused
+          // recipient comes back in the body instead.
+          case '42501':
+            return { ok: false, message: 'Your account cannot make changes right now.' };
+          default:
+            return { ok: false, message: diagnose(error) ?? error.message };
+        }
       }
+
+      const result = data as { status?: string; reason?: string } | null;
+      if (result?.status === 'refused') {
+        return {
+          ok: false,
+          message: REFUSALS[result.reason ?? ''] ?? 'That recommendation could not be sent.',
+        };
+      }
+
+      return { ok: true };
     },
     onSuccess: (result) => {
       if (!result.ok) return;

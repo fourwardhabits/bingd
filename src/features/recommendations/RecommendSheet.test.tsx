@@ -146,7 +146,10 @@ describe('sending', () => {
   });
 
   it('explains a refusal in words rather than as a code, and stays open', async () => {
-    mockRpcErrors.recommend_title = { code: '42501', message: 'nope' };
+    // A refusal comes back in the body with a 200, not as an error — the server
+    // returns it so that a refused attempt still costs a slot against the hourly
+    // ceiling. Which means a 200 is not a success here, and the body has to be read.
+    mockRpcResults.recommend_title = { status: 'refused', reason: 'not_mutual' };
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
@@ -171,6 +174,22 @@ describe('sending', () => {
         view.getByText('You have sent a lot of recommendations today. Try again later.'),
       ).toBeTruthy(),
     );
+  });
+
+  it('does not treat a refused 200 as a send', async () => {
+    mockRpcResults.recommend_title = { status: 'refused', reason: 'not_recommendable' };
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+
+    await waitFor(() =>
+      expect(
+        view.getByText('You can recommend a film or a season, not a whole series.'),
+      ).toBeTruthy(),
+    );
+    expect(props.onSent).not.toHaveBeenCalled();
+    expect(props.onClose).not.toHaveBeenCalled();
   });
 
   it('has no multi-select and no Send button', async () => {

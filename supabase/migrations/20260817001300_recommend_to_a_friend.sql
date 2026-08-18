@@ -38,16 +38,20 @@
 -- `follow`, which must be permitted where `can_view_profile` is false.
 --
 -- ===========================================================================
--- WHAT A REFUSAL MAY SAY
+-- WHAT A REFUSAL MAY SAY, AND WHY IT IS NOT AN ERROR
 --
--- Missing, suspended and blocked all raise the same P0002 through `_assert_reachable`,
--- for the reason that function records: a caller must not be able to tell "you are
--- blocked" from "no such account".
+-- `recommend_title` **returns** its refusals rather than raising them, and the reason
+-- is the rate limit rather than the phrasing. A raise rolls back the operation claim
+-- the limiter counts, so a refused attempt would cost nothing and a script pointed at
+-- an ineligible recipient could run without limit. The full argument is above
+-- `recommend_title`; it is independent review 18's second Major and it is true of
+-- every writer in this schema, not only of this one.
 --
--- Not-mutual is different and gets its own 42501. It discloses nothing the caller could
--- not already read: `follows_read` admits every row the caller is a party to, in both
--- directions, so "do they follow me back" is already a select away. Collapsing it into
--- P0002 would only make a legitimate refusal unexplainable in the UI.
+-- The vocabulary is `yourself`, `not_mutual` and `not_recommendable`, and it discloses
+-- **less** than an error would. Missing, suspended, blocked either way and simply not
+-- mutual are one answer, because `_is_mutual_follow` folds all four into one boolean --
+-- and a caller who could tell them apart could tell that they had been blocked, which
+-- is the harassment vector `blocks_read` hides the row to prevent.
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
@@ -177,6 +181,43 @@ comment on function _is_mutual_follow(uuid) is
 -- The cost is that a genuine "no really, watch it" is quiet; the recommendation moves
 -- back to the top of their list, where they will see it.
 --
+-- ---------------------------------------------------------------------------
+-- WHY A REFUSAL IS RETURNED AND NOT RAISED
+--
+-- Independent review 18, second Major, and it is the most useful thing that review
+-- found because it is true of **every writer in this schema** and not only of this one.
+--
+-- `_claim_operation` inserts the row that `_assert_operation_rate` counts. A later
+-- `raise` rolls the whole transaction back, **including that insert**. So a writer that
+-- refuses by raising does not count the refused attempt, and a script pointed at an
+-- ineligible recipient can call it without limit. The ceiling had been described here as
+-- a ceiling on attempts; against refusals it was a ceiling on successes.
+--
+-- The fix that stays inside the existing framework is to stop raising. Every refusal a
+-- client can provoke repeatedly is **returned** as `{"status":"refused","reason":...}`,
+-- the function commits, and the claim stands. A refused send now costs the same quota as
+-- a successful one, which is what makes "twenty an hour" true of a script and not only
+-- of a person.
+--
+-- **The reason vocabulary discloses strictly less than the errors it replaces.** There
+-- used to be a P0002 for missing / suspended / blocked and a 42501 for not-mutual; there
+-- is now one `not_mutual` for all four, because `_is_mutual_follow` already folds
+-- exists, active, not-blocked and not-self into one answer. `_assert_reachable` is
+-- therefore not called here at all -- it exists to raise, and its three-cases-one-error
+-- reasoning is subsumed by a predicate that has the same property and returns a boolean.
+--
+-- What still raises, and why each is right:
+--
+--   * `assert_can_write` (42501) -- a suspended account, refused before the claim. It
+--     is contained by suspension rather than by a quota.
+--   * `_assert_operation_rate` (53400) -- the ceiling itself. Its rollback discards a
+--     claim that was never going to be honoured, and the count it read was made of
+--     claims that committed, so the ceiling still holds.
+--
+-- The cost of returning rather than raising is that a caller who ignores the body reads
+-- a refusal as a success. `useRecommendTitle` is the only caller and asserts on it.
+--
+-- ---------------------------------------------------------------------------
 -- RATE LIMITING uses `_assert_operation_rate` and nothing else -- there is no second
 -- framework here. Two windows over the same kind, which is one existing function
 -- called twice:
@@ -185,10 +226,11 @@ comment on function _is_mutual_follow(uuid) is
 --     minute is the flooding case, and a daily ceiling it fits inside is not a limit.
 --   * per day, which bounds the total.
 --
--- It counts `processed_operations` rows of kind `recommend_title`, so it counts
--- *attempts* and is indifferent to which title or which recipient each one named --
--- which is what closes the "bypass through multiple title requests" route. A
--- send-and-resend loop is counted too, because a claim is never withdrawn.
+-- It counts `processed_operations` rows of kind `recommend_title`, and with refusals
+-- committing it now counts every attempt -- indifferent to which title or which
+-- recipient each one named, which is what closes the "bypass through multiple title
+-- requests" route. A send-and-resend loop is counted too, because a claim is never
+-- withdrawn.
 -- ---------------------------------------------------------------------------
 
 create or replace function recommend_title(
@@ -205,6 +247,7 @@ declare
   v_kind    media_kind;
   v_id      uuid;
   v_created boolean;
+  v_refusal text;
 begin
   perform assert_can_write();
 
@@ -223,26 +266,28 @@ begin
   -- what makes the read-then-write below safe without an upsert.
   perform _lock_pair(auth.uid(), p_recipient_id);
 
-  -- Missing, suspended, blocked, or yourself. One error for the first three.
-  perform _assert_reachable(p_recipient_id);
+  if p_recipient_id = auth.uid() then
+    v_refusal := 'yourself';
+  elsif not _is_mutual_follow(p_recipient_id) then
+    -- Missing, suspended, blocked either way, or simply not mutual. One answer for all
+    -- four: telling them apart tells a blocked caller they are blocked.
+    v_refusal := 'not_mutual';
+  else
+    select m.kind into v_kind from media_items m where m.id = p_media_item_id;
 
-  if not _is_mutual_follow(p_recipient_id) then
-    raise exception 'you can only recommend to people who follow you back'
-      using errcode = '42501';
+    -- PRD §10. A series is not a thing anybody watched, so it is not a thing anybody
+    -- can be told to watch -- the same refusal the collection writers make, for the
+    -- same reason. A title that does not exist reports the same way, and discloses
+    -- nothing by doing so: `media_items_read` is `using (true)`.
+    if v_kind is null or rankable_category(v_kind) is null then
+      v_refusal := 'not_recommendable';
+    end if;
   end if;
 
-  select m.kind into v_kind from media_items m where m.id = p_media_item_id;
-
-  if v_kind is null then
-    raise exception 'no such title' using errcode = 'P0002';
-  end if;
-
-  -- PRD §10. A series is not a thing anybody watched, so it is not a thing anybody can
-  -- be told to watch -- the same refusal the collection writers make, for the same
-  -- reason.
-  if rankable_category(v_kind) is null then
-    raise exception 'recommend a film or a season, not a whole series'
-      using errcode = '22023';
+  if v_refusal is not null then
+    -- Returned rather than raised, so this attempt keeps its claim and counts against
+    -- the ceiling. See the header.
+    return jsonb_build_object('status', 'refused', 'reason', v_refusal);
   end if;
 
   select r.id into v_id
@@ -277,7 +322,7 @@ end;
 $$;
 
 comment on function recommend_title(uuid, uuid, uuid) is
-  'Recommends one exact title to one mutual follow. Refuses a stranger, a one-way follow, a block, a suspension and a series. Re-sending the same title to the same person moves recommended_at and files no second notification -- one row per (sender, recipient, title), for good. Rate-limited per hour and per day over processed_operations, so the ceiling is on attempts and cannot be widened by naming different titles.';
+  'Recommends one exact title to one mutual follow. A stranger, a one-way follow, a block, a suspension and a series are all refused by returning {"status":"refused"} rather than by raising -- a raise would roll back the operation claim the rate limiter counts, and refused attempts would then be free. Re-sending the same title to the same person moves recommended_at and files no second notification: one row per (sender, recipient, title), for good. Rate-limited per hour and per day over processed_operations.';
 
 -- ---------------------------------------------------------------------------
 -- 4. Reading them back
@@ -729,6 +774,16 @@ begin
 
   perform _assert_operation_rate('create_invite_link', 'invite.max_links_per_day', 30);
 
+  -- Independent review 18, first Major. `invite_tokens_one_live` is a partial unique
+  -- index over one live token per owner, and the read-then-write below is not atomic:
+  -- two taps on Share arriving together both find no token, both insert, and the loser
+  -- gets a 23505 -- a share that fails for a reason the person could never act on.
+  --
+  -- One account against itself, keyed like the rate limiter rather than like
+  -- `_lock_pair`, because there is no second party here. Transaction-scoped, so it
+  -- releases on commit or rollback with no cleanup path to get wrong.
+  perform pg_advisory_xact_lock(hashtextextended(coalesce(auth.uid()::text, '') || 'invite_link', 0));
+
   select t.token, t.short_code, t.id into v_token, v_short, v_token_id
     from invite_tokens t
    where t.owner_id = auth.uid() and t.revoked_at is null;
@@ -758,7 +813,7 @@ end;
 $$;
 
 comment on function create_invite_link(uuid, uuid) is
-  'Returns the caller''s one reusable personal invite link (PRD §17), minting it on first use, and records that it was created and which title was in view. Never rotates: a personal link that changes on every share detaches everybody who already holds the old one. Rate-limited over processed_operations like every other social writer.';
+  'Returns the caller''s one reusable personal invite link (PRD §17), minting it on first use, and records that it was created and which title was in view. Never rotates: a personal link that changes on every share detaches everybody who already holds the old one. Takes a per-account advisory lock before the mint, because invite_tokens_one_live would otherwise turn two simultaneous taps on Share into a 23505 for one of them. Rate-limited over processed_operations like every other social writer.';
 
 -- ---------------------------------------------------------------------------
 -- 9. Configuration and privileges
