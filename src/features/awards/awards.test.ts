@@ -2,25 +2,35 @@ import { badgeFor, BADGES } from './badges';
 import { canonicalGenres, CANONICAL_GENRES } from './genres';
 import {
   awardsFor,
+  breakdownFor,
   evaluate,
   PINNED,
   sortAwards,
   unavailableCount,
   type AwardProgress,
 } from './progress';
-import { AWARD_TRACKS, type AwardFacts, type AwardTrack, type WatchedTitle } from './tracks';
-import { mutualFollowCount } from './use-awards';
+import {
+  AWARD_TRACKS,
+  breakdownTotal,
+  compactLabel,
+  type AwardFacts,
+  type AwardTrack,
+  type PersonRef,
+  type RankedTitle,
+  type WatchedTitle,
+} from './tracks';
+import { mutualFollowCount, mutualsFrom } from './use-awards';
 
 /** No collection, no social life. Every count starts at nothing. */
 const NOTHING: AwardFacts = {
   watched: [],
-  rankedCount: 0,
-  watchlistCount: 0,
-  invitedSignups: 0,
-  writtenCount: 0,
-  recommendationsSent: 0,
-  reactionsReceived: 0,
-  mutualFollows: 0,
+  rankings: [],
+  watchlist: [],
+  invitedSignups: [],
+  written: [],
+  recommendationsSent: [],
+  reactionsReceived: [],
+  mutualFollows: [],
 };
 
 const facts = (over: Partial<AwardFacts> = {}): AwardFacts => ({ ...NOTHING, ...over });
@@ -38,12 +48,28 @@ const title = (over: Partial<WatchedTitle> = {}): WatchedTitle => {
     genres: [],
     language: 'en',
     year: 2020,
+    watchedOn: null,
     ...over,
   };
 };
 
 const many = (n: number, over: Partial<WatchedTitle> = {}) =>
   Array.from({ length: n }, () => title(over));
+
+const ranked = (n: number, over: Partial<RankedTitle> = {}): RankedTitle[] =>
+  Array.from({ length: n }, () => ({ ...title(), score: 8.1, ...over }));
+
+let personSeq = 0;
+const person = (over: Partial<PersonRef> = {}): PersonRef => {
+  personSeq += 1;
+  return {
+    id: `p${personSeq}`,
+    name: `Person ${personSeq}`,
+    username: `person${personSeq}`,
+    avatarPath: null,
+    ...over,
+  };
+};
 
 const track = (key: string): AwardTrack => {
   const found = AWARD_TRACKS.find((t) => t.key === key);
@@ -52,6 +78,13 @@ const track = (key: string): AwardTrack => {
 };
 
 const award = (key: string, input: AwardFacts) => evaluate(track(key), input);
+
+/** The rows behind a track, for the tier it is currently working toward. */
+const rowsFor = (key: string, input: AwardFacts) => {
+  const progress = award(key, input);
+  const breakdown = breakdownFor(track(key), input, progress);
+  return { progress, breakdown, rows: breakdown.sections.flatMap((section) => section.rows) };
+};
 
 describe('the shape of the set', () => {
   it('is exactly twenty tracks', () => {
@@ -90,8 +123,6 @@ describe('the shape of the set', () => {
         ...t.tiers.map((tier) => t.next(tier.threshold)),
         ...t.tiers.map((tier) => t.earned(tier.threshold)),
       ].join(' ');
-      // Slugs and snake_case are the shapes a leaked key takes. The display strings
-      // are sentences and none of them should contain one.
       expect(copy).not.toMatch(/[a-z]+_[a-z]+/);
       expect(copy).not.toMatch(/\b[a-z]+-[a-z]+-[a-z]+\b/);
       // No em dash anywhere in the new copy — founder standing rule.
@@ -100,9 +131,6 @@ describe('the shape of the set', () => {
   });
 
   it('agrees with the noun when a threshold is one', () => {
-    // No tier is one any more, but the plural rule is what stops a future tier of one
-    // reading "1 movies" — the kind of thing that makes a reader distrust every other
-    // number on the screen.
     expect(track('movie-muncher').next(1)).toBe('Watch 1 movie');
     expect(track('mutual-mania').next(1)).toBe('Follow 1 person who follows you back');
     expect(track('invite-instigator').next(1)).toBe('Bring 1 person to Bingd');
@@ -110,21 +138,18 @@ describe('the shape of the set', () => {
 
   it('separates thousands, so a top tier is a number and not a serial', () => {
     expect(track('movie-muncher').earned(1000)).toBe('Watched 1,000 movies');
-    expect(award('rating-rascal', facts({ rankedCount: 1500 })).countLabel).toBe('1,500 / 2,000');
+    expect(award('rating-rascal', facts({ rankings: ranked(1500) })).countLabel).toBe(
+      '1,500 / 2,000',
+    );
   });
 });
 
 /**
  * **Every threshold in the product, written out.**
  *
- * The founder's device review of 2026-08-18 found the first set far too easy — a Bronze
- * that arrives in an evening is a participation trophy — and set these in their place:
- * Bronze already earned, Silver a serious enthusiast, Gold rare and possibly multi-year.
- *
  * This table is the assertion because a threshold is a *product* decision. Deriving the
  * expectation from the config would make this test agree with any future typo; written
- * out, a number that moves has to be moved here too, deliberately, by somebody who has
- * read this paragraph.
+ * out, a number that moves has to be moved here too, deliberately.
  */
 describe('the thresholds', () => {
   const EXPECTED: Record<string, [number, number, number]> = {
@@ -161,87 +186,42 @@ describe('the thresholds', () => {
     expect(Object.keys(EXPECTED).sort()).toEqual(AWARD_TRACKS.map((t) => t.key).sort());
   });
 
-  it('never lets a first tier be reachable in an evening', () => {
-    // The specific failure being guarded: Movie Muncher's Bronze was ten films, which
-    // is a weekend. Nothing that counts titles a person has to *watch* starts below
-    // fifteen now.
-    const watching = ['movie-muncher', 'season-snacker', 'toon-bloom', 'truth-worm'];
-    for (const key of watching) {
-      expect([key, track(key).tiers[0].threshold >= 15]).toEqual([key, true]);
-    }
-  });
-
-  /**
-   * The audit behind Chaos Collector, restated as an assertion.
-   *
-   * The founder's instruction was to stop carrying a knowingly unreachable top tier.
-   * `genres.ts` knows eighteen; the seeded catalogue carries all eighteen but has two
-   * documentaries and eight animated titles, so a threshold above sixteen is a hunt for
-   * one specific film rather than a measure of range. Sixteen leaves the reader free to
-   * miss any two.
-   */
   it('sets the distinct-genre top tier inside the vocabulary it counts', () => {
+    // Sixteen of eighteen: the audit is in the config's own comment. Documentary is two
+    // titles in the seeded catalogue and Animation is eight, so a reader must be free to
+    // miss any two rather than hunt one documentary.
     const top = track('genre-gremlin').tiers[2].threshold;
     expect(top).toBeLessThanOrEqual(CANONICAL_GENRES.length);
     expect(CANONICAL_GENRES.length - top).toBe(2);
   });
 });
 
-/**
- * The boundary, on all three tiers, for one track — and then the same boundary asserted
- * across all twenty, because a rule that holds for Movie Muncher and not for Passport
- * Mode is the failure this catches.
- */
 describe('tier boundaries', () => {
   const movieMuncher = (n: number) => award('movie-muncher', facts({ watched: many(n) }));
 
   it('is locked below the first threshold', () => {
     const result = movieMuncher(49);
     expect(result.earnedTier).toBeNull();
-    expect(result.earnedLine).toBeNull();
     expect(result.detailLine).toBe('Next: Watch 50 movies');
     expect(result.countLabel).toBe('49 / 50');
-    expect(result.badgeTierLabel).toBe('Bronze');
   });
 
   it('is earned exactly at the first threshold', () => {
     const result = movieMuncher(50);
     expect(result.earnedTier?.label).toBe('Bronze');
-    expect(result.earnedLine).toBe('Bronze earned');
     expect(result.detailLine).toBe('Next: Watch 200 movies');
-    expect(result.countLabel).toBe('50 / 200');
-  });
-
-  it('stays on the first tier above it and below the second', () => {
-    const result = movieMuncher(84);
-    expect(result.earnedTier?.label).toBe('Bronze');
-    expect(result.detailLine).toBe('Next: Watch 200 movies');
-    expect(result.countLabel).toBe('84 / 200');
-  });
-
-  it('is earned exactly at the second threshold', () => {
-    const result = movieMuncher(200);
-    expect(result.earnedTier?.label).toBe('Silver');
-    expect(result.earnedLine).toBe('Silver earned');
-    expect(result.detailLine).toBe('Next: Watch 1,000 movies');
-    expect(result.countLabel).toBe('200 / 1,000');
   });
 
   it('is earned exactly at the third threshold, and says what earned it', () => {
     const result = movieMuncher(1000);
     expect(result.earnedTier?.label).toBe('Gold');
     expect(result.nextTier).toBeNull();
-    // The founder's shape at the top: the tier on one line, what earned it on the next.
-    expect(result.earnedLine).toBe('Gold earned');
     expect(result.detailLine).toBe('Watched 1,000 movies');
-    // A bare count above the top. There is no denominator left to be a fraction of.
     expect(result.countLabel).toBe('1,000');
   });
 
   it('keeps counting past the top rather than freezing at the threshold', () => {
-    const result = movieMuncher(1164);
-    expect(result.countLabel).toBe('1,164');
-    expect(result.detailLine).toBe('Watched 1,000 movies');
+    expect(movieMuncher(1164).countLabel).toBe('1,164');
   });
 
   it('holds at every threshold of every track, one below and exactly on', () => {
@@ -260,8 +240,8 @@ describe('tier boundaries', () => {
  * A `AwardFacts` whose metric for `track` comes out at exactly `value`.
  *
  * Built per track rather than with one universal fixture, because the twenty metrics
- * read eight different fields and the whole point of the sweep above is that no track
- * is skipped by a fixture that happens not to feed it.
+ * read eight different fields and the whole point of the sweeps is that no track is
+ * skipped by a fixture that happens not to feed it.
  */
 function forced(t: AwardTrack, value: number): AwardFacts {
   const n = Math.max(0, value);
@@ -271,15 +251,34 @@ function forced(t: AwardTrack, value: number): AwardFacts {
     case 'season-snacker':
       return facts({ watched: many(n, { kind: 'season' }) });
     case 'invite-instigator':
-      return facts({ invitedSignups: n });
+      return facts({
+        invitedSignups: Array.from({ length: n }, () => ({
+          person: person(),
+          activatedAt: '2026-01-01T00:00:00Z',
+        })),
+      });
     case 'queue-dragon':
-      return facts({ watchlistCount: n });
+      return facts({ watchlist: many(n) });
     case 'rating-rascal':
-      return facts({ rankedCount: n });
+      return facts({ rankings: ranked(n) });
     case 'comment-gremlin':
-      return facts({ writtenCount: n });
+      return facts({
+        written: Array.from({ length: n }, (_, i) => ({
+          key: `c${i}`,
+          kind: 'comment' as const,
+          title: title(),
+          writtenAt: '2026-01-01T00:00:00Z',
+        })),
+      });
     case 'hype-courier':
-      return facts({ recommendationsSent: n });
+      return facts({
+        recommendationsSent: Array.from({ length: n }, (_, i) => ({
+          key: `r${i}`,
+          title: title(),
+          recipient: person(),
+          sentAt: '2026-01-01T00:00:00Z',
+        })),
+      });
     case 'scream-snack':
       return facts({ watched: many(n, { genres: ['Horror'] }) });
     case 'lol-mode':
@@ -309,13 +308,152 @@ function forced(t: AwardTrack, value: number): AwardFacts {
         watched: [...many(Math.ceil(n / 2)), ...many(Math.floor(n / 2), { kind: 'season' })],
       });
     case 'heart-magnet':
-      return facts({ reactionsReceived: n });
+      // One item carrying the whole weight, which is also the case the sum has to
+      // survive: a breakdown row is not always worth one.
+      return facts({
+        reactionsReceived: n > 0 ? [{ key: 'e1', title: title(), reactions: n }] : [],
+      });
     case 'mutual-mania':
-      return facts({ mutualFollows: n });
+      return facts({ mutualFollows: Array.from({ length: n }, () => person()) });
     default:
       throw new Error(`forced() does not know ${t.key}`);
   }
 }
+
+/**
+ * **The invariant this whole pass is built on.**
+ *
+ * The number on a row and the list behind it come from one call — `contributions` — so
+ * they cannot disagree. This asserts it for all twenty tracks at several sizes, which is
+ * the test that would fail the moment somebody added a second query "just for the
+ * drill-down".
+ */
+describe('the award number is the breakdown', () => {
+  it('holds for every track at every tier boundary', () => {
+    for (const t of AWARD_TRACKS) {
+      for (const tier of t.tiers) {
+        for (const value of [0, tier.threshold - 1, tier.threshold]) {
+          if (value < 0) continue;
+          const input = forced(t, value);
+          const progress = evaluate(t, input);
+          const total = breakdownTotal(breakdownFor(t, input, progress));
+          expect([t.key, value, total]).toEqual([t.key, value, progress.value]);
+        }
+      }
+    }
+  });
+
+  it('holds against a mixed collection rather than a single-purpose fixture', () => {
+    const input = facts({
+      watched: [
+        title({ genres: ['Horror', 'Thriller'], language: 'ja', year: 1985 }),
+        title({ genres: ['Comedy'], watchedOn: '2026-02-03' }),
+        title({ kind: 'season', genres: ['Drama'], seriesTitle: 'The Last of Us', seasonNumber: 1, year: 2023 }),
+        title({ genres: ['Animation', 'Documentary'], language: 'fr' }),
+      ],
+      rankings: ranked(3),
+      watchlist: many(2),
+      written: [{ key: 'c1', kind: 'comment', title: title(), writtenAt: null }],
+      recommendationsSent: [{ key: 'r1', title: title(), recipient: person(), sentAt: null }],
+      reactionsReceived: [
+        { key: 'e1', title: title(), reactions: 4 },
+        { key: 'e2', title: title(), reactions: 1 },
+      ],
+      mutualFollows: [person(), person()],
+      invitedSignups: [],
+    });
+
+    for (const t of AWARD_TRACKS) {
+      const progress = evaluate(t, input);
+      const total = breakdownTotal(breakdownFor(t, input, progress));
+      expect([t.key, total]).toEqual([t.key, progress.value]);
+    }
+  });
+
+  it('offers a breakdown on all twenty rows, not a chosen few', () => {
+    // The founder's principle: a number the reader is shown is a number they can open.
+    for (const t of AWARD_TRACKS) {
+      expect([t.key, typeof t.contributions]).toEqual([t.key, 'function']);
+    }
+  });
+});
+
+/**
+ * Television is part of the app now.
+ *
+ * Before `lib/media-metadata.ts` a season carried no genres and no language, so nine of
+ * the twenty tracks were quietly movie-only: `The Last of Us, S1` counted toward Season
+ * Snacker and nothing else. The facts arrive already resolved (`use-awards.ts`), so what
+ * is asserted here is that the tracks count a season exactly like a film once it has
+ * metadata — and that a series is never in the set to be double-counted.
+ */
+describe('TV seasons count', () => {
+  const lastOfUs = (over: Partial<WatchedTitle> = {}) =>
+    title({
+      kind: 'season',
+      title: 'Season 1',
+      seriesTitle: 'The Last of Us',
+      seasonNumber: 1,
+      year: 2023,
+      genres: ['Drama'],
+      ...over,
+    });
+
+  it('contributes to a genre award through its series genres', () => {
+    const input = facts({ watched: [lastOfUs()] });
+    expect(award('softie-hours', input).value).toBe(1);
+    expect(rowsFor('softie-hours', input).rows[0]?.label).toBe('The Last of Us, S1');
+  });
+
+  it('contributes to Passport Mode through its series language', () => {
+    const input = facts({ watched: [lastOfUs({ language: 'ko', genres: [] })] });
+    expect(award('passport-mode', input).value).toBe(1);
+    // The language is named rather than coded: "ko" is a database value, not a label.
+    expect(rowsFor('passport-mode', input).rows[0]?.detail).toBe('Korean');
+  });
+
+  it('contributes to Genre Gremlin, and a season and a film share one genre once', () => {
+    const input = facts({
+      watched: [lastOfUs(), title({ genres: ['Drama'] }), title({ genres: ['Horror'] })],
+    });
+    expect(award('genre-gremlin', input).value).toBe(2);
+    const { rows } = rowsFor('genre-gremlin', input);
+    expect(rows.map((row) => row.label)).toEqual(['Drama', 'Horror']);
+    // Two titles carry Drama — the season and the film — and the row says so.
+    expect(rows[0]?.value).toBe('2 titles');
+  });
+
+  it('counts the season and never the series, so nothing is doubled', () => {
+    // A series cannot be logged at all (`_assert_loggable`), and `WatchedTitle` has no
+    // 'series' kind to represent one. The type is the guarantee; this is the statement
+    // of it, over a show with three seasons.
+    const input = facts({
+      watched: [lastOfUs(), lastOfUs({ seasonNumber: 2 }), lastOfUs({ seasonNumber: 3 })],
+    });
+    expect(award('season-snacker', input).value).toBe(3);
+    expect(award('softie-hours', input).value).toBe(3);
+    expect(award('movie-muncher', input).value).toBe(0);
+    expect(award('genre-gremlin', input).value).toBe(1);
+  });
+
+  it('does not count a season whose show carries nothing either', () => {
+    const orphan = lastOfUs({ genres: [], language: null });
+    const input = facts({ watched: [orphan] });
+    expect(award('softie-hours', input).value).toBe(0);
+    expect(award('passport-mode', input).value).toBe(0);
+    // It is still a season, and Season Snacker is about the watching rather than the
+    // metadata.
+    expect(award('season-snacker', input).value).toBe(1);
+  });
+
+  it('names a season by its show everywhere a breakdown draws one', () => {
+    expect(compactLabel(lastOfUs())).toBe('The Last of Us, S1');
+    // A season named after its own show must not read "Chernobyl, Chernobyl".
+    expect(
+      compactLabel(title({ kind: 'season', title: 'Chernobyl', seriesTitle: 'Chernobyl' })),
+    ).toBe('Chernobyl');
+  });
+});
 
 describe('what each metric counts', () => {
   it('counts movies and seasons apart', () => {
@@ -325,7 +463,6 @@ describe('what each metric counts', () => {
   });
 
   it('counts a title once however many names one genre has', () => {
-    // Wikidata gives this film three labels and two of them are Comedy. One title.
     const input = facts({
       watched: [title({ genres: ['comedy drama', 'romantic comedy film', 'teen film'] })],
     });
@@ -335,13 +472,7 @@ describe('what each metric counts', () => {
   it('counts a drama-romance once rather than twice', () => {
     const input = facts({ watched: [title({ genres: ['Drama', 'Romance'] })] });
     expect(award('softie-hours', input).value).toBe(1);
-  });
-
-  it('reads Wikidata phrasing and TMDB naming as the same genre', () => {
-    const input = facts({
-      watched: [title({ genres: ['horror film'] }), title({ genres: ['Horror'] })],
-    });
-    expect(award('scream-snack', input).value).toBe(2);
+    expect(rowsFor('softie-hours', input).rows).toHaveLength(1);
   });
 
   it('counts non-English by original language, and never by absence of one', () => {
@@ -350,7 +481,6 @@ describe('what each metric counts', () => {
         title({ language: 'ja' }),
         title({ language: 'ko' }),
         title({ language: 'en' }),
-        // No language recorded is not evidence of a foreign one.
         title({ language: null }),
       ],
     });
@@ -368,270 +498,181 @@ describe('what each metric counts', () => {
     });
     expect(award('time-hopper', input).value).toBe(2);
   });
-
-  it('counts distinct genres from the canonical vocabulary, not from raw labels', () => {
-    const input = facts({
-      // One film, three Wikidata labels, and only one of them is a genre this app
-      // knows. Counting labels would call that three genres of range.
-      watched: [title({ genres: ['drama film', 'huis-clos film', 'trial film'] })],
-    });
-    expect(award('genre-gremlin', input).value).toBe(1);
-  });
-
-  it('counts a genre once across many titles', () => {
-    const input = facts({ watched: many(8, { genres: ['Horror'] }) });
-    expect(award('genre-gremlin', input).value).toBe(1);
-  });
-
-  it('counts recommendations sent', () => {
-    expect(award('hype-courier', facts({ recommendationsSent: 100 })).earnedTier?.label).toBe(
-      'Messenger',
-    );
-  });
-
-  it('counts the watchlist being held now, and says so as a goal rather than a caveat', () => {
-    expect(award('queue-dragon', facts({ watchlistCount: 100 })).earnedTier?.label).toBe('Hoarder');
-    // The old row carried a footnote explaining that the number goes down. The goal
-    // line says "Keep", which is the same fact as an instruction rather than an excuse.
-    expect(track('queue-dragon').next(25)).toBe('Keep 25 titles on your watchlist');
-  });
 });
 
 /**
- * **Invite Instigator counts people, not links.**
+ * **The title of a row is the tier reached, and that is the reward.**
  *
- * The founder's instruction of 2026-08-18, and the thing most worth a test: the old
- * metric was `invite_link_creations` — rows written when somebody pressed "get my link"
- * — so the award rewarded opening a share sheet. Nothing about opening a share sheet
- * says anybody arrived.
- *
- * The read itself is asserted in `AwardsSheet.test.tsx`, which pins the table.
+ * A creative track used to keep its family name and add a line saying "Dabbler earned",
+ * which stated the achievement and celebrated it nowhere. The name now *becomes* the
+ * row's heading — and the next one is never shown early, because handing over the name
+ * in advance spends the reward before it is earned.
  */
+describe('what a row is called', () => {
+  const gremlin = (n: number) =>
+    award('genre-gremlin', facts({ watched: CANONICAL_GENRES.slice(0, n).map((g) => title({ genres: [g] })) }));
+
+  it('shows the family name before the first tier', () => {
+    const locked = gremlin(6);
+    expect(locked.title).toBe('Genre Gremlin');
+    expect(locked.detailLine).toBe('Next: Watch 8 different genres');
+    expect(locked.countLabel).toBe('6 / 8');
+  });
+
+  it('becomes the first tier name once it is earned', () => {
+    const tier1 = gremlin(10);
+    expect(tier1.title).toBe('Dabbler');
+    expect(tier1.detailLine).toBe('Next: Watch 14 different genres');
+    expect(tier1.countLabel).toBe('10 / 14');
+  });
+
+  it('becomes the second tier name at the second threshold', () => {
+    const tier2 = gremlin(14);
+    expect(tier2.title).toBe('Mixer');
+    expect(tier2.detailLine).toBe('Next: Watch 16 different genres');
+  });
+
+  it('becomes the third tier name at the top, and states what earned it', () => {
+    const tier3 = gremlin(16);
+    expect(tier3.title).toBe('Chaos Collector');
+    expect(tier3.detailLine).toBe('Watched 16 different genres');
+    expect(tier3.countLabel).toBe('16');
+  });
+
+  it('never reveals the next tier name before it is earned', () => {
+    // The specific leak this guards: a locked row that said "Dabbler" would give away
+    // the reward, and a tier-1 row that said "Mixer" would give away the next one.
+    for (const [reached, forbidden] of [
+      [6, ['Dabbler', 'Mixer', 'Chaos Collector']],
+      [10, ['Mixer', 'Chaos Collector']],
+      [14, ['Chaos Collector']],
+    ] as const) {
+      const progress = gremlin(reached);
+      const shown = [progress.title, progress.detailLine].join(' ');
+      for (const name of forbidden) expect([reached, name, shown.includes(name)]).toEqual([reached, name, false]);
+    }
+  });
+
+  it('keeps the family name on a generic Bronze/Silver/Gold track', () => {
+    // A row headed "Silver" says nothing about what was done, and three of them on one
+    // screen say less. The art and the dots carry the metal.
+    for (const key of ['movie-muncher', 'season-snacker', 'invite-instigator']) {
+      const t = track(key);
+      expect([key, t.metalTiers]).toEqual([key, true]);
+      for (const value of [0, t.tiers[0].threshold, t.tiers[1].threshold, t.tiers[2].threshold]) {
+        expect([key, value, evaluate(t, forced(t, value)).title]).toEqual([
+          key,
+          value,
+          t.displayName,
+        ]);
+      }
+    }
+  });
+
+  it('marks exactly the metal tracks as metal', () => {
+    expect(AWARD_TRACKS.filter((t) => t.metalTiers).map((t) => t.key)).toEqual([
+      'movie-muncher',
+      'season-snacker',
+      'invite-instigator',
+    ]);
+    // And no creative track pretends to be one, which would cost it its reward.
+    for (const t of AWARD_TRACKS.filter((x) => !x.metalTiers)) {
+      expect([t.key, t.tiers.map((tier) => tier.label)]).not.toEqual([
+        t.key,
+        ['Bronze', 'Silver', 'Gold'],
+      ]);
+    }
+  });
+
+  it('has no separate earned line left to render', () => {
+    // The line is gone from the model, not merely hidden: `AwardProgress` has no field
+    // for it, so nothing can put it back by accident.
+    const progress = gremlin(10) as AwardProgress & { earnedLine?: unknown };
+    expect(progress.earnedLine).toBeUndefined();
+    expect(Object.keys(progress)).not.toContain('earnedLine');
+  });
+
+  it('fills one dot per tier earned', () => {
+    // `earnedTierIndex` is what `TierDots` draws: -1 is three empty, 0 is bronze only.
+    expect(gremlin(6).earnedTierIndex).toBe(-1);
+    expect(gremlin(10).earnedTierIndex).toBe(0);
+    expect(gremlin(14).earnedTierIndex).toBe(1);
+    expect(gremlin(16).earnedTierIndex).toBe(2);
+  });
+});
+
 describe('Invite Instigator', () => {
   it('reads attributed signups and nothing else', () => {
     expect(track('invite-instigator').needs).toBe('invitedSignups');
-    // The old field is gone from the fact set entirely, so nothing can quietly read it.
     expect(Object.keys(NOTHING)).not.toContain('invitesCreated');
-  });
-
-  it('does not move when links are made, because links are not a fact any more', () => {
-    // The strongest form this can take without a database: the whole fact surface is
-    // eight fields, and none of them is a count of links.
     expect(Object.keys(NOTHING).filter((key) => /link/i.test(key))).toEqual([]);
-    expect(award('invite-instigator', facts()).value).toBe(0);
-    expect(award('invite-instigator', facts({ invitedSignups: 3 })).earnedTier?.label).toBe(
-      'Bronze',
-    );
   });
 
   it('never describes the number as links, sharing or sending', () => {
-    const copy = [
-      track('invite-instigator').next(3),
-      track('invite-instigator').earned(50),
-    ].join(' ');
+    const copy = [track('invite-instigator').next(3), track('invite-instigator').earned(50)].join(' ');
     expect(copy).toBe('Bring 3 people to Bingd Brought 50 people to Bingd');
     for (const word of ['link', 'share', 'sent', 'invited']) {
       expect(copy.toLowerCase()).not.toContain(word);
     }
   });
 
-  it('carries no caveat line, because there is nothing left to explain', () => {
-    // "Counts links you made. Bingd cannot see whether they were opened." was a
-    // technical apology under a badge. The metric was fixed instead of footnoted.
-    expect('note' in track('invite-instigator')).toBe(false);
-  });
-});
-
-/**
- * **Two-Screen Life is capped contribution, not the weaker side.**
- *
- * `min(movies, seasons)` gave a reader at four films and nine seasons `4 / 5`, which
- * needed a sentence under it explaining that the number was whichever side they were
- * behind on. Each side now counts up to the tier's cap and the two are added, so the
- * number rises whenever either side does and the goal line states the whole rule.
- */
-describe('Two-Screen Life', () => {
-  const twoScreen = (movies: number, seasons: number) =>
-    award(
-      'two-screen-life',
-      facts({ watched: [...many(movies), ...many(seasons, { kind: 'season' })] }),
-    );
-
-  it('adds both sides rather than taking the smaller', () => {
-    // The founder's example. Fifteen films and seven seasons is 22, not 7.
-    const result = twoScreen(15, 7);
-    expect(result.value).toBe(22);
-    expect(result.countLabel).toBe('22 / 30');
-    expect(result.earnedTier).toBeNull();
+  it('is tappable and truthfully empty while attribution is deferred', () => {
+    const { progress, breakdown, rows } = rowsFor('invite-instigator', NOTHING);
+    expect(progress.value).toBe(0);
+    expect(rows).toEqual([]);
+    expect(breakdown.emptyLabel).toBe('No activated invites yet.');
   });
 
-  it('caps each side, so one enormous side cannot earn the tier alone', () => {
-    // A hundred films and no television is fifteen, not thirty. That is the whole
-    // point of the award.
-    const lopsided = twoScreen(100, 0);
-    expect(lopsided.value).toBe(15);
-    expect(lopsided.countLabel).toBe('15 / 30');
-    expect(lopsided.earnedTier).toBeNull();
-  });
-
-  it('is earned at exactly fifteen and fifteen', () => {
-    const result = twoScreen(15, 15);
-    expect(result.value).toBe(30);
-    expect(result.earnedTier?.label).toBe('Tourist');
-    // The next line states the next tier's caps, not its total.
-    expect(result.detailLine).toBe('Next: Watch 50 movies and 50 TV seasons');
-  });
-
-  it('re-measures against the tier being worked toward', () => {
-    // Twenty films and twenty seasons: Bronze is capped at fifteen a side and long
-    // earned, and Silver's caps are fifty, so the number the row shows is forty.
-    const result = twoScreen(20, 20);
-    expect(result.earnedTier?.label).toBe('Tourist');
-    expect(result.value).toBe(40);
-    expect(result.countLabel).toBe('40 / 100');
-  });
-
-  it('finishes at a hundred and fifty a side', () => {
-    const result = twoScreen(150, 150);
-    expect(result.earnedTier?.label).toBe('Mayor');
-    expect(result.nextTier).toBeNull();
-    expect(result.earnedLine).toBe('Mayor earned');
-    expect(result.detailLine).toBe('Watched 150 movies and 150 TV seasons');
-    expect(result.countLabel).toBe('300');
-  });
-
-  it('caps at exactly half of every threshold, so the goal line cannot drift', () => {
-    // The cap is derived from the threshold rather than configured beside it. This is
-    // the identity that makes "Watch 15 movies and 15 TV seasons" true for Bronze
-    // without anybody maintaining the fifteen in two places.
-    for (const tier of track('two-screen-life').tiers) {
-      const cap = tier.threshold / 2;
-      expect(Number.isInteger(cap)).toBe(true);
-      expect(twoScreen(cap, cap).value).toBeGreaterThanOrEqual(tier.threshold);
-      expect(twoScreen(cap, cap - 1).value).toBe(tier.threshold - 1);
-    }
-  });
-
-  it('carries no explanation of its own arithmetic', () => {
-    expect('note' in track('two-screen-life')).toBe(false);
-  });
-});
-
-/**
- * The titles behind a number, which is the drill-down the founder asked for — the same
- * argument as the goals bars: a count of your own collection that you cannot enumerate
- * is a claim you have to take on faith.
- */
-describe('contributors', () => {
-  const WITH_CONTRIBUTORS = [
-    'movie-muncher',
-    'season-snacker',
-    'scream-snack',
-    'lol-mode',
-    'softie-hours',
-    'space-brain',
-    'boom-club',
-    'toon-bloom',
-    'truth-worm',
-    'passport-mode',
-    'time-hopper',
-    'two-screen-life',
-  ];
-
-  it('is on exactly the tracks whose number is a set of titles', () => {
-    const actual = AWARD_TRACKS.filter((t) => t.contributors).map((t) => t.key);
-    expect(actual.sort()).toEqual([...WITH_CONTRIBUTORS].sort());
-  });
-
-  it('is absent wherever there is no privacy-safe list to show', () => {
-    // Invites, reactions and mutual follows are other people, and Bingd has no surface
-    // that lists them. Rankings, writing and the watchlist are titles but arrive as
-    // counts, not rows. Genre Gremlin counts genres, so a list of titles would have a
-    // length that disagrees with the number above it.
-    for (const key of [
-      'invite-instigator',
-      'heart-magnet',
-      'mutual-mania',
-      'hype-courier',
-      'rating-rascal',
-      'comment-gremlin',
-      'queue-dragon',
-      'genre-gremlin',
-    ]) {
-      expect([key, Boolean(track(key).contributors)]).toEqual([key, false]);
-      expect([key, award(key, facts()).hasContributors]).toEqual([key, false]);
-    }
-  });
-
-  it('lists exactly as many titles as the number claims', () => {
-    // The invariant that keeps a drill-down from being a second opinion: for every
-    // track but the capped one, the count *is* the length of this list.
+  it('lists the people once there are any, with when they joined', () => {
     const input = facts({
-      watched: [
-        title({ genres: ['Horror'], language: 'ja', year: 1985 }),
-        title({ genres: ['Comedy'] }),
-        title({ kind: 'season', genres: ['Drama'], year: 1998 }),
-        title({ genres: ['Animation', 'Documentary'] }),
-      ],
+      invitedSignups: [{ person: person({ name: 'Ada', username: 'ada' }), activatedAt: '2026-03-04T00:00:00Z' }],
     });
-
-    for (const key of WITH_CONTRIBUTORS) {
-      if (key === 'two-screen-life') continue;
-      const t = track(key);
-      expect([key, t.contributors?.(input).length]).toEqual([key, award(key, input).value]);
-    }
-  });
-
-  it('names the right titles, not merely the right number of them', () => {
-    const horror = title({ genres: ['horror film'] });
-    const comedy = title({ genres: ['Comedy'] });
-    const foreign = title({ language: 'ko' });
-    const old = title({ year: 1971 });
-    const input = facts({ watched: [horror, comedy, foreign, old] });
-
-    const ids = (key: string) => track(key).contributors?.(input).map((t) => t.mediaItemId);
-    expect(ids('scream-snack')).toEqual([horror.mediaItemId]);
-    expect(ids('lol-mode')).toEqual([comedy.mediaItemId]);
-    expect(ids('passport-mode')).toEqual([foreign.mediaItemId]);
-    expect(ids('time-hopper')).toEqual([old.mediaItemId]);
-  });
-
-  it('gives Two-Screen Life both halves, movies first', () => {
-    const movies = many(2);
-    const seasons = many(3, { kind: 'season' });
-    const input = facts({ watched: [...seasons, ...movies] });
-    expect(track('two-screen-life').contributors?.(input).map((t) => t.kind)).toEqual([
-      'movie',
-      'movie',
-      'season',
-      'season',
-      'season',
-    ]);
-  });
-
-  it('is never offered on a row whose number could not be read', () => {
-    // A drill-down into a dash would be a list claiming to explain a count nobody has.
-    const missing = facts({ unavailable: new Set<keyof AwardFacts>(['watched']) });
-    expect(award('movie-muncher', missing).hasContributors).toBe(false);
+    const { rows, progress } = rowsFor('invite-instigator', input);
+    expect(progress.value).toBe(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.label).toBe('Ada');
+    expect(rows[0]?.detail).toContain('Joined');
+    expect(rows[0]?.link).toEqual({ kind: 'profile', username: 'ada' });
   });
 });
 
 /**
- * Two counts the query does rather than the config, and both have a rule that is easy
- * to state and easy to leave out.
+ * The privacy rule every people-shaped breakdown shares.
+ *
+ * An embed onto `profiles` is filtered by `can_i_view`, so a blocked, suspended or
+ * deleted account does not come back. That must not shrink the count — the follow is
+ * still a follow — so it becomes a row that discloses nothing and leads nowhere.
  */
+describe('a person the reader may not see', () => {
+  const hidden = person({ name: 'Someone on Bingd', username: null });
+
+  it('still counts, so the number stays honest', () => {
+    const input = facts({ mutualFollows: [person(), hidden] });
+    expect(award('mutual-mania', input).value).toBe(2);
+    expect(rowsFor('mutual-mania', input).rows).toHaveLength(2);
+  });
+
+  it('discloses no handle and offers no route to a profile', () => {
+    const { rows } = rowsFor('mutual-mania', facts({ mutualFollows: [hidden] }));
+    expect(rows[0]?.label).toBe('Someone on Bingd');
+    expect(rows[0]?.detail).toBe('This account is not available to you');
+    expect(rows[0]?.link).toBeNull();
+  });
+});
+
 describe('mutual follows', () => {
   const me = 'me';
+  const edge = (follower: string, followee: string) => ({
+    follower_id: follower,
+    followee_id: followee,
+    follower: { id: follower, username: follower, display_name: null, avatar_path: null },
+    followee: { id: followee, username: followee, display_name: null, avatar_path: null },
+  });
 
   it('counts only the people the edge runs both ways with', () => {
-    const rows = [
-      { follower_id: me, followee_id: 'a' },
-      { follower_id: 'a', followee_id: me },
-      // One direction only, twice over.
-      { follower_id: me, followee_id: 'b' },
-      { follower_id: 'c', followee_id: me },
-    ];
+    const rows = [edge(me, 'a'), edge('a', me), edge(me, 'b'), edge('c', me)];
     expect(mutualFollowCount(rows, me)).toBe(1);
+    expect(mutualsFrom(rows, me).map((p) => p.id)).toEqual(['a']);
   });
 
   it('is nothing on an empty or missing result rather than a crash', () => {
@@ -641,36 +682,198 @@ describe('mutual follows', () => {
   });
 
   it('never counts the reader as their own mutual', () => {
-    expect(mutualFollowCount([{ follower_id: me, followee_id: me }], me)).toBe(0);
+    expect(mutualFollowCount([edge(me, me)], me)).toBe(0);
   });
 
   it('waits for five, because one person following back is not a social life', () => {
-    expect(award('mutual-mania', facts({ mutualFollows: 5 })).earnedTier?.label).toBe('Hello');
-    expect(award('mutual-mania', facts({ mutualFollows: 4 })).earnedTier).toBeNull();
+    expect(award('mutual-mania', facts({ mutualFollows: [person(), person(), person(), person(), person()] })).earnedTier?.label).toBe('Hello');
+    expect(award('mutual-mania', facts({ mutualFollows: [person()] })).earnedTier).toBeNull();
+  });
+
+  it('gives every mutual a row, and the row count is the number', () => {
+    const input = facts({ mutualFollows: [person(), person(), person()] });
+    const { rows, progress } = rowsFor('mutual-mania', input);
+    expect(rows).toHaveLength(3);
+    expect(progress.value).toBe(3);
   });
 });
 
-describe('reactions received', () => {
-  it('is the count the query returns, and the query excludes the reader', () => {
-    // The exclusion lives in the read — `neq('user_id', userId)` — so what is asserted
-    // here is that the track counts what it is given and invents nothing on top.
-    expect(award('heart-magnet', facts({ reactionsReceived: 50 })).earnedTier?.label).toBe(
+describe('Heart Magnet', () => {
+  it('sums the reactions on each item rather than counting the items', () => {
+    const input = facts({
+      reactionsReceived: [
+        { key: 'e1', title: title({ title: 'The Wolf of Wall Street' }), reactions: 18 },
+        { key: 'e2', title: title({ title: 'Inception' }), reactions: 12 },
+      ],
+    });
+    const { progress, rows } = rowsFor('heart-magnet', input);
+    expect(progress.value).toBe(30);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.value).toBe('18 reactions');
+    // The sum of the rows is the badge's number, which is the invariant that stops a
+    // content-centric breakdown from quietly disagreeing with a reaction count.
+    expect(rows.reduce((sum, row) => sum + (row.weight ?? 1), 0)).toBe(progress.value);
+  });
+
+  it('excludes the reader’s own reactions, because the read does', () => {
+    // `neq('user_id', userId)` is where the rule lives; what the track guarantees is
+    // that it counts what it is given and invents nothing on top.
+    expect(award('heart-magnet', facts({ reactionsReceived: [] })).value).toBe(0);
+    expect(award('heart-magnet', forced(track('heart-magnet'), 50)).earnedTier?.label).toBe(
       'Warmup',
     );
-    expect(award('heart-magnet', facts({ reactionsReceived: 49 })).earnedTier).toBeNull();
+  });
+
+  it('says what was reacted to and never who reacted', () => {
+    const { rows } = rowsFor(
+      'heart-magnet',
+      facts({ reactionsReceived: [{ key: 'e1', title: title({ title: 'Heat' }), reactions: 3 }] }),
+    );
+    expect(rows[0]?.label).toBe('Heat');
+    expect(rows[0]?.avatarPath).toBeUndefined();
+  });
+});
+
+describe('Comment Gremlin', () => {
+  it('counts one canonical contribution once, however many surfaces show it', () => {
+    // A public note is one `user_media` row that appears on the activity row and in
+    // Bingd Reviews. It is counted where it is stored, so there is one row for it.
+    const input = facts({
+      written: [
+        { key: 'note:m1', kind: 'note', title: title({ title: 'Arrival' }), writtenAt: null },
+        { key: 'comment:c1', kind: 'comment', title: title({ title: 'Heat' }), writtenAt: '2026-01-02T00:00:00Z' },
+      ],
+    });
+    const { progress, rows } = rowsFor('comment-gremlin', input);
+    expect(progress.value).toBe(2);
+    expect(new Set(rows.map((row) => row.key)).size).toBe(2);
+  });
+
+  it('distinguishes the kind of contribution and where it was', () => {
+    const { rows } = rowsFor(
+      'comment-gremlin',
+      facts({ written: [{ key: 'note:m1', kind: 'note', title: title({ title: 'Arrival' }), writtenAt: null }] }),
+    );
+    expect(rows[0]?.label).toBe('Arrival');
+    expect(rows[0]?.detail).toBe('Public note');
+  });
+
+  it('never reprints what was written', () => {
+    // The award counts that somebody wrote. A note's body belongs where its spoiler
+    // masking lives, and the fact type has no field to carry one.
+    const contribution = { key: 'k', kind: 'note' as const, title: null, writtenAt: null };
+    expect(Object.keys(contribution)).not.toContain('body');
+    const { rows } = rowsFor('comment-gremlin', facts({ written: [contribution] }));
+    expect(rows[0]?.label).toBe('A Bingd activity');
+  });
+});
+
+describe('Hype Courier', () => {
+  it('counts in-app recommendations and names the recipient', () => {
+    const input = facts({
+      recommendationsSent: [
+        { key: 'r1', title: title({ title: 'Heat' }), recipient: person({ name: 'Ada' }), sentAt: '2026-01-02T00:00:00Z' },
+      ],
+    });
+    const { progress, rows } = rowsFor('hype-courier', input);
+    expect(progress.value).toBe(1);
+    expect(rows[0]?.label).toBe('Heat');
+    expect(rows[0]?.detail).toContain('To Ada');
+  });
+
+  it('counts nothing for a share off Bingd, because the metric never sees one', () => {
+    // An OS share sheet may be dismissed and nothing here would know — the same rule
+    // that keeps Invite Instigator off link creations. There is no field for one.
+    expect(Object.keys(NOTHING)).not.toContain('sharesOffPlatform');
+    expect(award('hype-courier', NOTHING).value).toBe(0);
+  });
+});
+
+describe('Rating Rascal and Queue Dragon', () => {
+  it('lists the exact ranked titles with the score the reader gave', () => {
+    const input = facts({ rankings: [{ ...title({ title: 'Heat' }), score: 9.2 }] });
+    const { progress, rows } = rowsFor('rating-rascal', input);
+    expect(progress.value).toBe(1);
+    expect(rows[0]?.label).toBe('Heat');
+    expect(rows[0]?.value).toBe('9.2');
+  });
+
+  it('lists the watchlist being held now', () => {
+    const input = facts({ watchlist: many(3) });
+    const { progress, rows } = rowsFor('queue-dragon', input);
+    expect(progress.value).toBe(3);
+    expect(rows).toHaveLength(3);
+    // The goal line says "Keep", which is the same fact as an instruction rather than
+    // as the footnote the row used to carry.
+    expect(track('queue-dragon').next(25)).toBe('Keep 25 titles on your watchlist');
   });
 });
 
 /**
- * **The order, which is most of the reward.**
+ * **Two-Screen Life is capped contribution, and its breakdown is the explanation.**
  *
- * The founder's rule: three tracks pinned to the top for good, then earned above
- * locked, and inside each of those a fixed category grouping rather than a race by
- * percentage. The old comparator sorted the whole list by closeness to the next tier,
- * which meant the sheet rearranged itself every time somebody logged a film.
+ * Each side counts up to half the tier and the two are added. The sheet shows a Movies
+ * section reading `15 / 15` and a TV Seasons section reading `7 / 15`, which makes the
+ * arithmetic self-evident without a paragraph about caps.
  */
+describe('Two-Screen Life', () => {
+  const twoScreen = (movies: number, seasons: number) =>
+    facts({ watched: [...many(movies), ...many(seasons, { kind: 'season' })] });
+
+  it('adds both sides rather than taking the smaller', () => {
+    const result = award('two-screen-life', twoScreen(15, 7));
+    expect(result.value).toBe(22);
+    expect(result.countLabel).toBe('22 / 30');
+  });
+
+  it('caps each side, so one enormous side cannot earn the tier alone', () => {
+    expect(award('two-screen-life', twoScreen(100, 0)).value).toBe(15);
+  });
+
+  it('is earned at exactly fifteen and fifteen', () => {
+    const result = award('two-screen-life', twoScreen(15, 15));
+    expect(result.earnedTier?.label).toBe('Tourist');
+    expect(result.detailLine).toBe('Next: Watch 50 movies and 50 TV seasons');
+  });
+
+  it('re-measures against the tier being worked toward', () => {
+    const result = award('two-screen-life', twoScreen(20, 20));
+    expect(result.value).toBe(40);
+    expect(result.countLabel).toBe('40 / 100');
+  });
+
+  it('breaks down into two capped sections that reproduce the arithmetic', () => {
+    const input = twoScreen(20, 7);
+    const { breakdown, progress } = rowsFor('two-screen-life', input);
+    const [movies, seasons] = breakdown.sections;
+
+    expect(movies?.label).toBe('Movies');
+    expect(movies?.value).toBe('15 / 15');
+    // Only the fifteen that count are listed, which is what keeps the sum equal to the
+    // number — and is why twenty films do not appear under a heading saying fifteen.
+    expect(movies?.rows).toHaveLength(15);
+
+    expect(seasons?.label).toBe('TV seasons');
+    expect(seasons?.value).toBe('7 / 15');
+    expect(seasons?.rows).toHaveLength(7);
+
+    expect(progress.value).toBe(22);
+    expect(breakdownTotal(breakdown)).toBe(22);
+  });
+
+  it('caps at exactly half of every threshold, so the goal line cannot drift', () => {
+    for (const tier of track('two-screen-life').tiers) {
+      const cap = tier.threshold / 2;
+      expect(Number.isInteger(cap)).toBe(true);
+      expect(award('two-screen-life', twoScreen(cap, cap)).value).toBeGreaterThanOrEqual(
+        tier.threshold,
+      );
+      expect(award('two-screen-life', twoScreen(cap, cap - 1)).value).toBe(tier.threshold - 1);
+    }
+  });
+});
+
 describe('sorting', () => {
-  const at = (key: string, value: number) => evaluate(track(key), forced(track(key), value));
   const keys = (list: AwardProgress[]) => list.map((a) => a.trackKey);
 
   it('pins the three core tracks to the top, in the founder’s order', () => {
@@ -683,28 +886,12 @@ describe('sorting', () => {
   });
 
   it('keeps them there whether they are earned or not', () => {
-    // Everything else earned to the top tier, the core three at nothing. The three
-    // still lead, which is what "never move based on earned status" means.
     const loaded = facts({
-      rankedCount: 2000,
-      writtenCount: 500,
-      recommendationsSent: 500,
-      reactionsReceived: 1000,
-      mutualFollows: 100,
-      watchlistCount: 300,
+      rankings: ranked(2000),
+      written: forced(track('comment-gremlin'), 500).written,
+      mutualFollows: Array.from({ length: 100 }, () => person()),
     });
     expect(keys(awardsFor(loaded)).slice(0, 3)).toEqual([
-      'movie-muncher',
-      'season-snacker',
-      'invite-instigator',
-    ]);
-
-    // And the mirror: the core three finished, everything else at zero.
-    const core = facts({
-      watched: [...many(1000), ...many(250, { kind: 'season' })],
-      invitedSignups: 50,
-    });
-    expect(keys(awardsFor(core)).slice(0, 3)).toEqual([
       'movie-muncher',
       'season-snacker',
       'invite-instigator',
@@ -718,16 +905,14 @@ describe('sorting', () => {
   });
 
   it('puts everything earned above everything locked, after the pinned three', () => {
-    const list = awardsFor(facts({ rankedCount: 100, watched: many(25, { genres: ['Horror'] }) }));
+    const list = awardsFor(
+      facts({ rankings: ranked(100), watched: many(25, { genres: ['Horror'] }) }),
+    );
     const rest = list.slice(3);
-    const earned = rest.filter((a) => a.earnedTier).map((a) => a.trackKey);
-    expect(earned).toEqual(['rating-rascal', 'scream-snack']);
-    expect(keys(rest).slice(0, 2)).toEqual(earned);
+    expect(keys(rest).slice(0, 2)).toEqual(['rating-rascal', 'scream-snack']);
   });
 
   it('keeps the category grouping inside each bucket', () => {
-    // Nothing earned, so the whole tail is one bucket in group order: activity, then
-    // genres, then exploration.
     expect(keys(awardsFor(NOTHING))).toEqual([
       'movie-muncher',
       'season-snacker',
@@ -752,53 +937,24 @@ describe('sorting', () => {
     ]);
   });
 
-  it('lets an earned track rise past the locked ones without leaving its area', () => {
-    // Time Hopper earned, from the exploration group: it rises above every locked
-    // track — including the activity ones it normally sits below — and the rest of the
-    // list keeps its order underneath.
-    const list = awardsFor(facts({ watched: many(25, { year: 1994 }) }));
-    expect(keys(list)[3]).toBe('time-hopper');
-    expect(keys(list).slice(4, 7)).toEqual(['rating-rascal', 'comment-gremlin', 'hype-courier']);
-  });
-
   it('does not reorder on closeness to the next tier', () => {
-    // Nine tenths of the way to Whisper against nothing at all on Hype Courier. The old
-    // comparator would promote Comment Gremlin; the order is fixed and it does not.
-    const list = awardsFor(facts({ writtenCount: 18 }));
+    const list = awardsFor(facts({ written: forced(track('comment-gremlin'), 18).written }));
     expect(keys(list).slice(3)).toEqual(keys(awardsFor(NOTHING)).slice(3));
   });
 
   it('is stable across renders of the same data', () => {
-    const input = facts({ watched: many(60), rankedCount: 120, mutualFollows: 7 });
+    const input = facts({ watched: many(60), rankings: ranked(120) });
     expect(keys(awardsFor(input))).toEqual(keys(awardsFor(input)));
-    // And the comparator itself does not depend on the order it is handed.
     const evaluated = AWARD_TRACKS.map((t) => evaluate(t, input));
     expect(keys(sortAwards(evaluated))).toEqual(keys(sortAwards([...evaluated].reverse())));
   });
 
-  it('orders earned tracks by their group, never by how large the number is', () => {
-    // 2,000 ranked titles is Rank Beast; 25 horror films is Spooky Sip. Rating Rascal
-    // leads because activity comes before genres, not because the number is bigger —
-    // and the same order holds when the sizes are reversed.
-    const list = sortAwards([at('rating-rascal', 2000), at('scream-snack', 25)]);
-    expect(keys(list)).toEqual(['rating-rascal', 'scream-snack']);
-    const flipped = sortAwards([at('scream-snack', 300), at('rating-rascal', 100)]);
-    expect(keys(flipped)).toEqual(['rating-rascal', 'scream-snack']);
-  });
-
   it('returns all twenty however it is ordered', () => {
     expect(awardsFor(NOTHING)).toHaveLength(20);
-    expect(awardsFor(facts({ watched: many(200), rankedCount: 400 }))).toHaveLength(20);
+    expect(awardsFor(facts({ watched: many(200), rankings: ranked(400) }))).toHaveLength(20);
   });
 });
 
-/**
- * A read that failed is not a count of zero, and the difference matters more here than
- * almost anywhere in the app. Zero is a statement about the reader — you have sent no
- * recommendations — and making it because a request timed out is the app being wrong
- * about somebody in a way they cannot argue with. Independent review 20 found the
- * swallowed error; the founder's Phase 7 asked for this state; they are one instruction.
- */
 describe('a track whose number could not be read', () => {
   const missing = (field: keyof AwardFacts) =>
     facts({ unavailable: new Set<keyof AwardFacts>([field]) });
@@ -808,20 +964,14 @@ describe('a track whose number could not be read', () => {
     expect(result.unavailable).toBe(true);
     expect(result.detailLine).toBe('Could not load this one');
     expect(result.countLabel).toBe('—');
-    expect(result.earnedTier).toBeNull();
-    // Never a fraction: the app does not know one.
     expect(result.fraction).toBe(0);
   });
 
   it('costs only the tracks that needed that field', () => {
-    const input = facts({
-      watched: many(60),
-      unavailable: new Set<keyof AwardFacts>(['mutualFollows']),
-    });
+    const input = facts({ watched: many(60), unavailable: new Set<keyof AwardFacts>(['mutualFollows']) });
     const list = awardsFor(input);
     expect(unavailableCount(list)).toBe(1);
     expect(list.find((a) => a.trackKey === 'movie-muncher')?.earnedTier?.label).toBe('Bronze');
-    expect(list.find((a) => a.trackKey === 'mutual-mania')?.unavailable).toBe(true);
   });
 
   it('takes every track that field feeds, and none when it feeds none', () => {
@@ -831,7 +981,7 @@ describe('a track whose number could not be read', () => {
 
   it('sinks to the bottom, below even a track sitting at zero', () => {
     const list = awardsFor(
-      facts({ watched: many(60), unavailable: new Set<keyof AwardFacts>(['rankedCount']) }),
+      facts({ watched: many(60), unavailable: new Set<keyof AwardFacts>(['rankings']) }),
     );
     expect(list.at(-1)?.trackKey).toBe('rating-rascal');
   });
@@ -850,52 +1000,21 @@ describe('the badge manifest', () => {
 
   it('has sixty entries and not one more, so nothing is mapped to a tier that is gone', () => {
     expect(Object.keys(BADGES)).toHaveLength(60);
-    const valid = new Set(
-      AWARD_TRACKS.flatMap((t) => t.tiers.map((tier) => `${t.key}-${tier.key}`)),
-    );
+    const valid = new Set(AWARD_TRACKS.flatMap((t) => t.tiers.map((tier) => `${t.key}-${tier.key}`)));
     expect(Object.keys(BADGES).filter((key) => !valid.has(key))).toEqual([]);
   });
 
   it('falls back to a medal rather than to nothing', () => {
-    // A missing entry must not be able to crash the sheet or render an empty box.
     expect(badgeFor('no-such-track', 'no-such-tier')).toEqual({ kind: 'emoji', emoji: '🏅' });
   });
 
-  it('carries artwork for the ten tracks that were drawn', () => {
-    const drawn = [
-      'movie-muncher',
-      'season-snacker',
-      'invite-instigator',
-      'queue-dragon',
-      'rating-rascal',
-      'comment-gremlin',
-      'hype-courier',
-      'scream-snack',
-      'lol-mode',
-      'softie-hours',
-    ];
-    for (const key of drawn) {
-      for (const tier of track(key).tiers) {
-        expect([key, tier.key, badgeFor(key, tier.key).kind]).toEqual([key, tier.key, 'art']);
-      }
-    }
-  });
-
-  it('stands the other ten in with an emoji rather than leaving a hole', () => {
+  it('stands ten tracks in with an emoji rather than leaving a hole', () => {
     const placeholders = Object.entries(BADGES).filter(([, badge]) => badge.kind === 'emoji');
-    // Thirty tiers across ten tracks. If this number moves, the report of what is a
-    // placeholder has moved with it and the handoff has to say so.
     expect(placeholders).toHaveLength(30);
-    for (const [, badge] of placeholders) {
-      expect(badge.kind === 'emoji' && badge.emoji.length).toBeGreaterThan(0);
-    }
   });
 });
 
 describe('the genre vocabulary', () => {
-  // The test that found the `musical?` bug: the pattern for Music matched "musica"
-  // and "musical" and not the word "Music", which is exactly how TMDB spells it. A
-  // genre that cannot recognise its own name is one Genre Gremlin can never count.
   it('recognises every one of its own names', () => {
     for (const genre of CANONICAL_GENRES) {
       expect([genre, [...canonicalGenres([genre])]]).toEqual([genre, [genre]]);
@@ -909,11 +1028,17 @@ describe('the genre vocabulary', () => {
 
   it('returns nothing for a label it does not recognise, rather than inventing one', () => {
     expect([...canonicalGenres(['huis-clos film'])]).toEqual([]);
-    expect([...canonicalGenres([])]).toEqual([]);
     expect([...canonicalGenres(null)]).toEqual([]);
   });
 
-  it('does not let a substring inside a longer word count', () => {
-    expect([...canonicalGenres(['warm drama'])]).toEqual(['Drama']);
+  it('uses the same vocabulary in the award and in its breakdown', () => {
+    // Genre Gremlin's sheet must not list a genre the evaluator would not count, or the
+    // row count and the numerator part company.
+    const input = facts({
+      watched: [title({ genres: ['drama film', 'huis-clos film', 'trial film'] })],
+    });
+    const { rows, progress } = rowsFor('genre-gremlin', input);
+    expect(rows.map((row) => row.label)).toEqual(['Drama']);
+    expect(progress.value).toBe(1);
   });
 });

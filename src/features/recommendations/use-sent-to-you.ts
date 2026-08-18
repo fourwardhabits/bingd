@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { CollectionItem } from '@/features/collection/filters';
 import { avatarUri } from '@/lib/images';
+import { effectiveGenres, effectiveLanguage, parentOf, type EmbeddedParent } from '@/lib/media-metadata';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -72,7 +73,10 @@ export function useSentToYou(viewerId: string) {
       const { data, error } = await supabase.rpc('recommendations_to_me', { p_limit: 100 });
       if (error) throw error;
 
-      return ((data ?? []) as Row[]).map((row) => ({
+      const rows = (data ?? []) as Row[];
+      const inherited = await inheritedMetadata(rows);
+
+      return rows.map((row) => ({
         id: row.id,
         senderId: row.sender_id,
         senderUsername: row.sender_username,
@@ -84,14 +88,68 @@ export function useSentToYou(viewerId: string) {
         seriesTitle: row.series_title,
         posterPath: row.poster_path,
         year: yearOf(row.release_date),
-        genres: row.genres ?? [],
-        language: row.original_language,
+        ...(inherited.get(row.media_item_id) ?? {
+          genres: row.genres ?? [],
+          language: row.original_language,
+        }),
         runtimeMinutes: row.runtime_minutes,
         recommendedAt: row.recommended_at,
         openedAt: row.opened_at,
       }));
     },
   });
+}
+
+/**
+ * The genres and language of any **seasons** in the list, taken from their series.
+ *
+ * `recommendations_to_me` returns the media row's own `genres` and
+ * `original_language`, and a season has neither — so a recommended season was
+ * invisible the moment the reader put a genre filter on the tab, which is the same
+ * defect the collection had before `lib/media-metadata.ts`.
+ *
+ * Resolved with one supplementary read of `media_items` rather than by widening the
+ * RPC, because widening the RPC is a migration and this is a client-side composition
+ * over a catalogue table every client can already read. One query, only when the list
+ * actually contains a season, over at most the hundred rows the RPC returns.
+ *
+ * A failure here is not a failure of the list: the rows keep their own metadata, which
+ * is what they had before, and the filter is the only thing that notices.
+ */
+async function inheritedMetadata(
+  rows: readonly Row[],
+): Promise<Map<string, { genres: string[]; language: string | null }>> {
+  const seasonIds = rows.filter((row) => row.media_kind === 'season').map((row) => row.media_item_id);
+  if (seasonIds.length === 0) return new Map();
+
+  const { data, error } = await supabase
+    .from('media_items')
+    .select('id, genres, original_language, parent:parent_id(genres, original_language)')
+    .in('id', seasonIds);
+  if (error) return new Map();
+
+  type SeasonRow = {
+    id: string;
+    genres: string[] | null;
+    original_language: string | null;
+    parent: EmbeddedParent;
+  };
+
+  const resolved = new Map<string, { genres: string[]; language: string | null }>();
+  for (const season of (data ?? []) as unknown as SeasonRow[]) {
+    const parent = parentOf(season.parent);
+    const subject = {
+      kind: 'season' as const,
+      genres: season.genres,
+      language: season.original_language,
+      parent: parent ? { genres: parent.genres, language: parent.original_language } : null,
+    };
+    resolved.set(season.id, {
+      genres: effectiveGenres(subject),
+      language: effectiveLanguage(subject),
+    });
+  }
+  return resolved;
 }
 
 /** How many have not been opened, which is what the tab's dot carries. */

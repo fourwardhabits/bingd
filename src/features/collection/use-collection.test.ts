@@ -2,6 +2,8 @@ import { waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
+import { applyFilters, emptyFilters, facetOptions } from './filters';
+
 import {
   BAND_ORDER,
   useLoggedCollection,
@@ -205,5 +207,188 @@ describe('the bands', () => {
   it('runs from loved to not for me, which is the order the scale is always shown in', () => {
     // Reversed, the collection reads as a ranking of what the user disliked most.
     expect(BAND_ORDER).toEqual(['loved', 'fine', 'not_for_me']);
+  });
+});
+
+/**
+ * **A season is part of its show, and the read is where that becomes true.**
+ *
+ * `tmdb_upsert_seasons` writes neither `genres` nor `original_language`, and the seeded
+ * catalogue has neither on any of its 1,432 seasons — TMDB publishes both on the series.
+ * So a season arrived here describing nothing, and every surface downstream that filters
+ * or counts by genre was quietly movie-only: the Collection genre filter emptied the TV
+ * tab, For You lost its TV anchors the moment a genre was picked, and nine of the twenty
+ * awards could not see television at all.
+ *
+ * The fix is one resolver applied at every mapper in this file (`lib/media-metadata.ts`),
+ * so the entries these hooks return already carry the show's metadata. Everything above
+ * them — filters, awards, the hero's rank line — inherited the fix without changing.
+ */
+describe('a season inherits its series metadata', () => {
+  const showSeason = (over: Record<string, unknown> = {}) => ({
+    title: 'Season 1',
+    season_number: 1,
+    release_date: '2023-01-15',
+    poster_path: '/tlou.jpg',
+    // What the catalogue actually stores on a season: nothing descriptive.
+    genres: null,
+    original_language: null,
+    runtime_minutes: null,
+    kind: 'season',
+    parent_id: 'series-1',
+    parent: { title: 'The Last of Us', genres: ['Drama', 'Thriller'], original_language: 'ja' },
+    ...over,
+  });
+
+  it('asks the parent for the two columns it inherits', async () => {
+    rows.rankings = [];
+    await renderHookWithProviders(() => useRankedCollection('user-1', 'tv_seasons'));
+
+    // The embed was already being fetched for the show's name; this is two more columns
+    // on it rather than another query.
+    expect(readOf('rankings').columns).toContain(
+      'parent:parent_id(title, genres, original_language)',
+    );
+  });
+
+  it('gives a ranked season the show’s genres and language', async () => {
+    rows.rankings = [
+      {
+        media_item_id: 's1',
+        bucket: 'loved',
+        position: 1,
+        category: 'tv_seasons',
+        media_items: showSeason(),
+      },
+    ];
+
+    const { result } = await renderHookWithProviders(() =>
+      useRankedCollection('user-1', 'tv_seasons'),
+    );
+
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    expect(result.current.data?.[0]).toMatchObject({
+      seriesTitle: 'The Last of Us',
+      genres: ['Drama', 'Thriller'],
+      language: 'ja',
+    });
+  });
+
+  it('gives a logged season the same', async () => {
+    rows.user_media = [
+      { media_item_id: 's1', bucket: null, watched_on: null, media_items: showSeason() },
+    ];
+    rows.rankings = [];
+
+    const { result } = await renderHookWithProviders(() => useLoggedCollection('user-1'));
+
+    await waitFor(() => expect(result.current.data?.entries).toHaveLength(1));
+    expect(result.current.data?.entries[0]).toMatchObject({
+      genres: ['Drama', 'Thriller'],
+      language: 'ja',
+    });
+  });
+
+  it('gives a watchlisted season the same', async () => {
+    rows.watchlist = [{ media_item_id: 's1', media_items: showSeason() }];
+
+    const { result } = await renderHookWithProviders(() => useWatchlist('user-1'));
+
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    expect(result.current.data?.[0]).toMatchObject({
+      genres: ['Drama', 'Thriller'],
+      language: 'ja',
+    });
+  });
+
+  it('prefers a season’s own metadata where it genuinely has some', async () => {
+    // An anthology season enriched separately is the more specific truth about that
+    // season, so own-first rather than parent-first.
+    rows.watchlist = [
+      {
+        media_item_id: 's1',
+        media_items: showSeason({ genres: ['Comedy'], original_language: 'fr' }),
+      },
+    ];
+
+    const { result } = await renderHookWithProviders(() => useWatchlist('user-1'));
+
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    expect(result.current.data?.[0]).toMatchObject({ genres: ['Comedy'], language: 'fr' });
+  });
+
+  it('does not guess when there is no parent to inherit from', async () => {
+    rows.watchlist = [
+      { media_item_id: 's1', media_items: showSeason({ parent: null, parent_id: null }) },
+    ];
+
+    const { result } = await renderHookWithProviders(() => useWatchlist('user-1'));
+
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    // Unknown, not inferred from the title and not borrowed from anywhere.
+    expect(result.current.data?.[0]).toMatchObject({ genres: [], language: null });
+  });
+
+  it('leaves a film reading its own metadata', async () => {
+    rows.watchlist = [{ media_item_id: 'z', media_items: item('Sicario', '2015') }];
+
+    const { result } = await renderHookWithProviders(() => useWatchlist('user-1'));
+
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    expect(result.current.data?.[0]).toMatchObject({ genres: ['Drama'], language: null });
+  });
+});
+
+/**
+ * The reason the inheritance had to reach the *entry* rather than one screen: the
+ * collection filter model reads `genres` and `language` off whatever it is handed, so a
+ * season that arrives describing nothing is a season the Genre and Language filters
+ * silently drop.
+ */
+describe('the collection filters see an inherited season', () => {
+  const season = {
+    mediaItemId: 's1',
+    title: 'Season 1',
+    seriesTitle: 'The Last of Us',
+    seasonNumber: 1,
+    kind: 'season' as const,
+    year: 2023,
+    posterPath: null,
+    genres: ['Drama', 'Thriller'],
+    language: 'ja',
+    runtimeMinutes: null,
+    score: null,
+    bucket: null,
+    watchedOn: null,
+  };
+
+  it('keeps it under a genre it inherited', () => {
+    expect(applyFilters([season], { ...emptyFilters(), genres: ['Drama'] })).toHaveLength(1);
+  });
+
+  it('keeps it under a language it inherited', () => {
+    expect(applyFilters([season], { ...emptyFilters(), languages: ['ja'] })).toHaveLength(1);
+  });
+
+  it('still drops it from a genre it does not have', () => {
+    expect(applyFilters([season], { ...emptyFilters(), genres: ['Comedy'] })).toEqual([]);
+  });
+
+  it('lets an animated Japanese season read as anime', () => {
+    // The anime facet is Japanese original language *and* an animation genre. Both now
+    // reach a season through its show, which is the only way a TV anime could ever
+    // satisfy it.
+    const anime = { ...season, genres: ['Animation'] };
+    expect(applyFilters([anime], { ...emptyFilters(), anime: true })).toHaveLength(1);
+    expect(applyFilters([season], { ...emptyFilters(), anime: true })).toEqual([]);
+  });
+
+  it('offers the inherited genres as facet options', () => {
+    // The filter sheet builds its list from the rows in hand, so a TV collection used
+    // to offer no genres at all.
+    expect(facetOptions([season]).genres.map((option) => option.value)).toEqual([
+      'Drama',
+      'Thriller',
+    ]);
   });
 });

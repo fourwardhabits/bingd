@@ -6,7 +6,8 @@ import { Button, EmptyState, Sheet, SkeletonRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { AwardRow } from './AwardRow';
-import { AwardTitlesSheet } from './AwardTitlesSheet';
+import { AwardBreakdownSheet } from './AwardBreakdownSheet';
+import { breakdownFor } from './progress';
 import { AWARD_TRACKS } from './tracks';
 import { useAwards } from './use-awards';
 
@@ -14,6 +15,8 @@ export type AwardsSheetProps = {
   userId: string;
   /** Opens a title from a drill-down. Absent where the caller cannot navigate. */
   onPressTitle?: (mediaItemId: string) => void;
+  /** Opens somebody's profile from a drill-down, where visibility allows one. */
+  onPressProfile?: (username: string) => void;
   onClose: () => void;
 };
 
@@ -45,22 +48,29 @@ export type AwardsSheetProps = {
  * its number — for the twelve tracks where that number is a set of titles. See
  * `AwardTitlesSheet`.
  */
-export function AwardsSheet({ userId, onPressTitle, onClose }: AwardsSheetProps) {
+export function AwardsSheet({
+  userId,
+  onPressTitle,
+  onPressProfile,
+  onClose,
+}: AwardsSheetProps) {
   const awards = useAwards(userId);
   const list = awards.data?.awards ?? [];
   // Which row has been opened into its titles. Null is closed.
   const [inspecting, setInspecting] = useState<string | null>(null);
 
   const open = inspecting ? list.find((award) => award.trackKey === inspecting) : null;
-  // Computed on demand rather than carried on every row: the contributors of a track
-  // are the same array the metric filtered, and holding twelve of them on a list nobody
-  // has tapped is twelve lists kept alive for a sheet that may never open.
-  const openTitles =
-    open && awards.data
-      ? (AWARD_TRACKS.find((track) => track.key === open.trackKey)?.contributors?.(
-          awards.data.facts,
-        ) ?? [])
-      : [];
+  const openTrack = open ? AWARD_TRACKS.find((track) => track.key === open.trackKey) : null;
+  /**
+   * The rows behind the open award, built on demand.
+   *
+   * The same `contributions` call the metric is measured from — see
+   * `progress.breakdownFor` — so the sheet cannot be open against a count it does not
+   * match. Built when a row is tapped rather than carried on all twenty, because that is
+   * twenty lists kept alive for a sheet that may never open.
+   */
+  const openBreakdown =
+    open && openTrack && awards.data ? breakdownFor(openTrack, awards.data.facts, open) : null;
 
   return (
     <Sheet visible onClose={onClose} label="Bingd Awards">
@@ -98,11 +108,11 @@ export function AwardsSheet({ userId, onPressTitle, onClose }: AwardsSheetProps)
             // Pressable exactly where there is something behind it *and* somewhere for
             // a tapped title to go. Without a destination the drill-down would be a
             // list of rows that lead nowhere, which is the goals section's own rule.
-            onPress={
-              award.hasContributors && onPressTitle
-                ? () => setInspecting(award.trackKey)
-                : undefined
-            }
+            // **Every row, not a chosen twelve.** A number the reader is shown is a
+            // number they are entitled to check, and the seven tracks that count people
+            // or writing use the same sheet with different rows. The one exception is a
+            // row whose number could not be read: there is nothing behind a dash.
+            onPress={award.unavailable ? undefined : () => setInspecting(award.trackKey)}
           />
         ))}
       </ScrollView>
@@ -120,14 +130,26 @@ export function AwardsSheet({ userId, onPressTitle, onClose }: AwardsSheetProps)
             — the testing library reports exactly that, and on iOS VoiceOver behaves the
             same way. Nested, there is one modal context and the drill-down is part of
             it. */}
-      {open && onPressTitle ? (
-        <AwardTitlesSheet
+      {open && openBreakdown ? (
+        <AwardBreakdownSheet
           award={open}
-          titles={openTitles}
-          onPressTitle={(mediaItemId) => {
-            setInspecting(null);
-            onPressTitle(mediaItemId);
-          }}
+          breakdown={openBreakdown}
+          onPressTitle={
+            onPressTitle
+              ? (mediaItemId) => {
+                  setInspecting(null);
+                  onPressTitle(mediaItemId);
+                }
+              : undefined
+          }
+          onPressProfile={
+            onPressProfile
+              ? (username) => {
+                  setInspecting(null);
+                  onPressProfile(username);
+                }
+              : undefined
+          }
           onClose={() => setInspecting(null)}
         />
       ) : null}

@@ -1,8 +1,8 @@
 import type { RankedEntry } from '@/features/collection/use-collection';
 
-import { emptyFilters, type CollectionFilters } from '@/features/collection/filters';
+import { applyFilters, emptyFilters, type CollectionFilters } from '@/features/collection/filters';
 
-import { anchorScope, anchorsFrom } from './use-for-you';
+import { anchorScope, anchorsFrom, asCollectionItem } from './use-for-you';
 import { ANCHOR_LIMIT } from './rank';
 
 /**
@@ -220,5 +220,83 @@ describe('the subset a filtered wall reasons from', () => {
     );
 
     expect(anchors).toEqual([]);
+  });
+});
+
+/**
+ * **Television reasons from its show's metadata, on both halves of the slate.**
+ *
+ * A season row carries no genres and no language of its own — TMDB publishes both on the
+ * series — so before `lib/media-metadata.ts` a TV wall narrowed to Comedy had *no*
+ * anchors at all: every ranked season looked genreless and fell out of the subset. The
+ * wall then said Comedy and reasoned from nothing.
+ *
+ * The entries these functions receive now arrive already resolved (proved over the real
+ * query shape in `use-collection.test.ts`), so what is asserted here is the half that
+ * lives in this file: that the anchor subset and the candidate pool are narrowed by the
+ * same filter model, over the same metadata.
+ */
+describe('a filtered TV wall', () => {
+  const filters = (over: Partial<CollectionFilters>): CollectionFilters => ({
+    ...emptyFilters(),
+    ...over,
+  });
+
+  /** A ranked season as the read now hands it over: the show's genres, on the season. */
+  const inherited = (id: string, seriesId: string, genres: string[], language = 'en') => ({
+    ...season(id, seriesId, 1),
+    genres,
+    language,
+  });
+
+  it('anchors on a season that qualifies through its series genres', () => {
+    const drama = inherited('s1', 'show-a', ['Drama', 'Thriller']);
+    const comedy = inherited('s2', 'show-b', ['Comedy']);
+
+    const anchors = anchorsFrom([drama, comedy], 'tv', filters({ genres: ['Drama'] }));
+
+    // The show, not the season: TMDB answers "similar" about a series only.
+    expect(anchors.map((anchor) => anchor.mediaItemId)).toEqual(['show-a']);
+  });
+
+  it('anchors on a season that qualifies through its series language', () => {
+    const japanese = inherited('s1', 'show-a', ['Drama'], 'ja');
+    const english = inherited('s2', 'show-b', ['Drama'], 'en');
+
+    const anchors = anchorsFrom([japanese, english], 'tv', filters({ languages: ['ja'] }));
+
+    expect(anchors.map((anchor) => anchor.mediaItemId)).toEqual(['show-a']);
+  });
+
+  it('keeps the whole TV subset when nothing is filtered', () => {
+    const anchors = anchorScope(
+      [inherited('s1', 'show-a', ['Drama']), inherited('s2', 'show-b', ['Comedy'])],
+      emptyFilters(),
+    );
+    expect(anchors).toHaveLength(2);
+  });
+
+  it('narrows candidates by the same rule it narrows anchors by', () => {
+    // The founder's constraint: "the anchor subset and candidate constraints must use
+    // the same semantics". Both go through `applyFilters`, so the proof is that one
+    // filter accepts an inherited-genre season on the anchor side and the matching
+    // series on the candidate side.
+    const comedy = filters({ genres: ['Comedy'] });
+
+    const anchors = anchorScope([inherited('s1', 'show-a', ['Comedy'])], comedy);
+    expect(anchors).toHaveLength(1);
+
+    const candidate = asCollectionItem({
+      mediaItemId: 'show-a',
+      title: 'Show A',
+      year: 2023,
+      posterPath: null,
+      kind: 'series',
+      genres: ['Comedy'],
+      language: 'en',
+      popularity: 10,
+    });
+    expect(applyFilters([candidate], comedy)).toHaveLength(1);
+    expect(applyFilters([candidate], filters({ genres: ['Horror'] }))).toEqual([]);
   });
 });

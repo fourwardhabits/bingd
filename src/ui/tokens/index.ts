@@ -9,6 +9,7 @@ export {
   semantic,
   surface,
   text,
+  tier,
   type BucketKey,
 } from './color';
 export { fontFamily, typography, type TypographyToken } from './typography';

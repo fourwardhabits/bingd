@@ -130,4 +130,36 @@ export const bucketInk = {
 
 export type BucketKey = keyof typeof bucket;
 
-export const color = { brand, surface, border, text, semantic, bucket, bucketInk } as const;
+/**
+ * The three award metals, for the tier dots under a badge (`awards/TierDots.tsx`).
+ *
+ * **Decorative, and never text or a fill behind text.** Nothing in the system puts ink
+ * on these, so they are exempt from the certified-pair rule in design-system.md §3 —
+ * they are 8pt dots and the tier they describe is also stated in words in the row's
+ * accessibility label. Colour is never the only carrier.
+ *
+ * Warm rather than literal metal. A true silver (#C0C0C0) reads as a disabled control
+ * on Paper and a true gold (#FFD700) is brighter than Amber, which is the palette's own
+ * celebration colour and must stay the loudest thing on the screen. These sit under it:
+ * bronze is Amber pushed toward the Maroon end, silver is a warm neutral from the same
+ * family as Stone, and gold is Amber itself lifted just enough to read as the brighter
+ * of the three beside it.
+ */
+export const tier = {
+  bronze: '#A9713F',
+  silver: '#9E9C97',
+  gold: brand.amber,
+  /** Not yet earned: a ring, not a fill. Reads as an outline at 8pt. */
+  locked: inkAlpha(0.22),
+} as const;
+
+export const color = {
+  brand,
+  surface,
+  border,
+  text,
+  semantic,
+  bucket,
+  bucketInk,
+  tier,
+} as const;

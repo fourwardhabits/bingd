@@ -4,61 +4,62 @@ import { Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { AwardBadge } from './AwardBadge';
+import { TierDots } from './TierDots';
 import type { AwardProgress } from './progress';
 
 export type AwardRowProps = {
   award: AwardProgress;
-  /**
-   * Opens the titles behind the number.
-   *
-   * Passed only where there are any — `award.hasContributors` — so a row is pressable
-   * exactly when there is something behind it. A row that looks tappable and does
-   * nothing is worse than one that never offered.
-   */
+  /** Opens the breakdown behind the number. Every row has one. */
   onPress?: () => void;
 };
 
 /**
  * One award, as a row.
  *
- *     [badge]  Movie Muncher                                   84 / 200
- *              Bronze earned
- *              Next: Watch 200 movies
+ *     [badge]  Dabbler                                          10 / 14
+ *      ●○○     Next: Watch 14 different genres
  *
  * The founder's shape, and the count on the right is doing the work a progress bar
  * would do in a taller row. A bar per award over twenty awards is twenty bars, which
- * reads as a dashboard; `84 / 200` is the same fact in the space of a word.
+ * reads as a dashboard; `10 / 14` is the same fact in the space of a word.
  *
- * **Three lines at most, and usually two.** The earned line is absent before the first
- * tier. At the top it is present and the line under it changes person — "Gold earned"
- * over "Watched 1,000 movies" — so a finished track states the tier and what finished
- * it, rather than pointing at a fourth tier that does not exist.
+ * **The title is the tier, and that is the reward.** A creative track is headed by the
+ * name of the tier reached — Genre Gremlin becomes Dabbler, then Mixer, then Chaos
+ * Collector — so earning one *changes the row*. It used to keep the family name and add
+ * a third line saying "Dabbler earned", which stated the achievement and celebrated it
+ * nowhere. The badge art changes with it and the dots below fill in.
  *
- * **No explanatory paragraph, on any row.** Three tracks carried one — that Queue
- * Dragon counts the pile you are holding, that Bingd cannot see whether an invite link
- * was opened, that Two-Screen Life shows whichever side you are behind on. All three
- * were the same defect: a technical footnote about a metric, in a list somebody is
- * scrolling for fun. Two were answered by fixing the metric (invites now count people,
- * Two-Screen Life now counts capped contributions) and the third by trusting "Keep 25
- * titles on your watchlist" to say what it says.
+ * **The next tier's name is never shown.** A locked Genre Gremlin says "Genre Gremlin",
+ * not "Dabbler", because handing over the name in advance spends the reward before it
+ * is earned. What the row does show is the requirement — "Next: Watch 8 different
+ * genres" — which is the useful half.
  *
- * **A track whose number could not be read says so**, rather than drawing a zero. The
- * badge stays locked, the detail line reads "Could not load this one" and the count is a
- * dash. Zero is a statement about the reader — you have sent no recommendations — and
- * making it on the strength of a request that never came back is the app being wrong
- * about somebody in a way they cannot argue with.
+ * **Metal tracks keep their family name.** Movie Muncher stays Movie Muncher at every
+ * tier: a row headed "Silver" says nothing about what was done, and three rows headed
+ * "Bronze" say less than one. See `AwardTrack.metalTiers`.
+ *
+ * **Two lines, always.** The separate earned line is gone in both directions — the tier
+ * is in the title now, and at the top the second line states what finished it.
+ *
+ * **Every row is tappable.** If Bingd shows somebody `10 / 14`, they are entitled to see
+ * what the fourteen are made of; a number a reader cannot check is a number they have to
+ * take on faith. The seven non-title tracks open the same kind of sheet as the twelve
+ * title ones — see `AwardBreakdownSheet`.
+ *
+ * **A track whose number could not be read says so**, rather than drawing a zero, and is
+ * the one row with nothing behind it.
  */
 export function AwardRow({ award, onPress }: AwardRowProps) {
   const earned = award.earnedTier != null;
 
   // One announcement, in the order the row reads. Without this a screen reader gives
   // four fragments and the count lands last, detached from the goal it is counting
-  // toward. The hint is only true where there is a drill-down to hint at.
+  // toward. The tier is named here in words, which is what lets the dots be decorative.
   const label = (
     award.unavailable
       ? [award.displayName, award.detailLine]
       : [
-          award.displayName,
+          award.title,
           earned ? `${award.badgeTierLabel} earned` : `${award.badgeTierLabel} locked`,
           award.detailLine,
           award.nextTier ? `${award.value} of ${award.nextTier.threshold}` : `${award.value}`,
@@ -67,15 +68,15 @@ export function AwardRow({ award, onPress }: AwardRowProps) {
 
   const body = (
     <>
-      <AwardBadge badge={award.badge} earned={earned} />
+      {/* The badge and its dots are one object: the strip is positioned inside this
+          box, over the badge's lower edge, so the row's height is unchanged. */}
+      <View style={styles.badge}>
+        <AwardBadge badge={award.badge} earned={earned} />
+        {award.unavailable ? null : <TierDots earnedTierIndex={award.earnedTierIndex} />}
+      </View>
 
       <View style={styles.copy}>
-        <Text variant="callout">{award.displayName}</Text>
-        {award.earnedLine ? (
-          <Text variant="footnote" tone="secondary">
-            {award.earnedLine}
-          </Text>
-        ) : null}
+        <Text variant="callout">{award.title}</Text>
         <Text variant="footnote" tone="secondary">
           {award.detailLine}
         </Text>
@@ -86,7 +87,7 @@ export function AwardRow({ award, onPress }: AwardRowProps) {
         tone={earned ? 'primary' : 'secondary'}
         style={styles.count}
         // The count is already in the row's one label, and a second reading of
-        // "84 / 200" as "eighty-four slash two hundred" helps nobody.
+        // "10 / 14" as "ten slash fourteen" helps nobody.
         accessibilityElementsHidden
         importantForAccessibility="no"
       >
@@ -108,7 +109,7 @@ export function AwardRow({ award, onPress }: AwardRowProps) {
       accessible
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityHint="Shows the titles that counted"
+      accessibilityHint="Shows what counts toward this"
       onPress={onPress}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
@@ -126,11 +127,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     minHeight: theme.layout.row.media,
   },
+  // Exactly the badge's own size, so `TierDots` can position against its bottom edge.
+  badge: { width: theme.layout.awardBadge, height: theme.layout.awardBadge },
   copy: { flex: 1, gap: 1 },
   /**
    * Right-aligned with a floor under it, so `7 / 50` and `1,164 / 2,000` end on the
    * same edge and the column does not breathe as the reader scrolls past a wider
-   * number. Wider than it was: the top tiers are now four figures.
+   * number.
    */
   count: { minWidth: 72, textAlign: 'right' },
   pressed: { opacity: 0.7 },

@@ -1,4 +1,4 @@
-import { border, bucket, bucketInk, semantic, surface, text } from './color';
+import { border, bucket, bucketInk, semantic, surface, text, tier } from './color';
 import {
   duration,
   elevation,
@@ -24,6 +24,7 @@ const paper = {
   semantic,
   bucket,
   bucketInk,
+  tier,
   typography,
   space,
   layout,

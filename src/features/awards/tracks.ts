@@ -1,19 +1,20 @@
 import { canonicalGenres, hasAnyGenre, type CanonicalGenre } from './genres';
 
 /**
- * The twenty award tracks, and every threshold in the product.
+ * The twenty award tracks: every threshold, every metric, and the breakdown behind it.
  *
  * **Nothing outside this file knows a number.** A row renders what `progress.ts` hands
  * it; `progress.ts` reads this table. That is the point of the shape: a threshold in a
  * component is a threshold that disagrees with a test six weeks later.
  *
- * A track is a metric and three tiers. The metric is a function of {@link AwardFacts} —
- * one snapshot of the reader's own canonical data, assembled once by `use-awards.ts` and
- * shared by all twenty, so opening the sheet is a handful of reads rather than twenty.
+ * **One evaluator, not two.** Every track's `contributions` returns the rows behind its
+ * number, and its metric is the *weight of those rows*. So the count on a row and the
+ * list behind it cannot disagree — not because two queries were kept in step, but
+ * because there is one. `awards.test.ts` asserts the identity for all twenty.
  *
- * **The copy is here too, and it is a pair of functions rather than a pair of strings.**
- * `next` is what to do and `earned` is what was done, and both take the threshold
- * because the number is the thing that differs between the tiers.
+ * **The copy is a pair of functions rather than a pair of strings.** `next` is what to
+ * do and `earned` is what was done, and both take the threshold because the number is
+ * the thing that differs between the tiers.
  *
  * **No metric key is ever shown.** `movies-watched` is a name for the code; the reader
  * gets "Watch 50 movies".
@@ -26,71 +27,113 @@ import { canonicalGenres, hasAnyGenre, type CanonicalGenre } from './genres';
  * exactly right: a Bronze earned by logging ten films is a participation trophy, and a
  * shelf of them is worth nothing. These are set so that Bronze is already something an
  * active reader gets to over months, Silver reads as an enthusiast, and Gold is rare
- * and quite possibly multi-year.
- *
- * They are **not** tuned against the founder's seeded account. Several tiers are
- * deliberately out of reach of any collection that exists today.
+ * and quite possibly multi-year. They are **not** tuned against the founder's seeded
+ * account.
  */
 
-/** One watched title, as the awards need it. One row per exact movie or season. */
+/** One watched, ranked or saved title, as the awards need it. */
 export type WatchedTitle = {
   mediaItemId: string;
   /** A series is never here: `_assert_loggable` refuses one, so nothing can log it. */
   kind: 'movie' | 'season';
   /** The row's own title. A season's is "Season 1" until `seriesTitle` joins it. */
   title: string;
-  /** The parent series, for a season, so a drill-down is not a column of "Season 2". */
+  /** The parent series, for a season, so a row is not a column of "Season 2". */
   seriesTitle: string | null;
   /** `media_items.season_number`, for the same reason. */
   seasonNumber: number | null;
   /** For the drill-down thumbnail. Null everywhere the catalogue has no artwork. */
   posterPath: string | null;
-  /** `media_items.genres`, in whichever vocabulary that row happens to carry. */
+  /**
+   * Genres, **with a season's inheritance already applied** (`lib/media-metadata.ts`).
+   *
+   * Before 2026-08-18 a season carried none at all, which made every genre track and
+   * Genre Gremlin movie-only without anything saying so.
+   */
   genres: string[];
-  /** `media_items.original_language`, ISO 639-1. */
+  /** ISO 639-1, with the same inheritance. */
   language: string | null;
   /** The release year, from `media_items.release_date`. */
   year: number | null;
+  /** `user_media.watched_on`, where the reader gave one. */
+  watchedOn: string | null;
+};
+
+/** A ranked title, with the score the reader's own list gives it. */
+export type RankedTitle = WatchedTitle & { score: number };
+
+/** Somebody else, as much of them as the reader is entitled to see. */
+export type PersonRef = {
+  id: string;
+  /** Their display name, or a neutral stand-in when the profile is not visible. */
+  name: string;
+  /** Null when the account is hidden, suspended or gone. */
+  username: string | null;
+  avatarPath: string | null;
+};
+
+export type ContributionKind = 'comment' | 'note';
+
+/** One thing the reader wrote. The body is deliberately not carried. */
+export type WrittenContribution = {
+  key: string;
+  kind: ContributionKind;
+  /** What it was about. Null when the event's title could not be resolved. */
+  title: WatchedTitle | null;
+  writtenAt: string | null;
+};
+
+export type RecommendationSent = {
+  key: string;
+  title: WatchedTitle | null;
+  recipient: PersonRef;
+  sentAt: string | null;
+};
+
+/** One piece of the reader's activity, and how many reactions it drew. */
+export type ReactedItem = {
+  key: string;
+  title: WatchedTitle | null;
+  reactions: number;
+};
+
+export type InvitedSignup = {
+  person: PersonRef;
+  activatedAt: string | null;
 };
 
 /**
  * Everything the twenty tracks are allowed to know.
  *
- * Deliberately flat and deliberately counted at the edge: a track's metric is a pure
+ * Deliberately flat and deliberately assembled at the edge: a track's metric is a pure
  * function of this, which is what lets every threshold be tested without a database.
  */
 export type AwardFacts = {
   /** Exact movies and seasons in the collection, one entry each. */
   watched: WatchedTitle[];
-  /** Rows in `rankings` — exact titles with a position. */
-  rankedCount: number;
+  /** Rows in `rankings` — exact titles with a position — with their derived score. */
+  rankings: RankedTitle[];
   /** Rows in `watchlist` now. See Queue Dragon on why "now" and not "ever". */
-  watchlistCount: number;
+  watchlist: WatchedTitle[];
   /**
    * People who joined Bingd on this reader's invitation and then used it.
    *
-   * **Not links minted, and the change is the point.** Until 2026-08-18 this counted
-   * rows in `invite_link_creations` — the number of times somebody asked for their own
-   * link — which is a measure of pressing a button. The founder's instruction is that
-   * the award is for bringing people to Bingd, so the metric is now attributed,
-   * activated signups: rows in `invite_attributions` where this reader is the inviter
-   * and `activated_at` is set.
-   *
-   * **Nothing writes that column yet**, so the number is a true zero for everybody. See
-   * `docs/product/growth-instrumentation.md` and the note in `use-awards.ts`: the
-   * semantic is correct now and starts counting the day the redemption path lands, with
-   * no client change. What it must never be is a stand-in number that flatters the
-   * reader for having opened a share sheet.
+   * **Not links minted.** Until 2026-08-18 this counted `invite_link_creations` — the
+   * number of times somebody asked for their own link — which is a measure of pressing
+   * a button. It is now attributed, activated signups. **Nothing writes that column
+   * yet**, so the list is empty for everybody and the award reads `0 / 3`; the semantic
+   * is correct now and starts counting the day the redemption path lands, with no
+   * client change. See `docs/product/growth-instrumentation.md`.
    */
-  invitedSignups: number;
+  invitedSignups: InvitedSignup[];
   /** Comments the reader has written, plus the notes they have made public. */
-  writtenCount: number;
+  written: WrittenContribution[];
   /** Rows in `title_recommendations` the reader sent. */
-  recommendationsSent: number;
-  /** Reactions other people left on the reader's activity. Never their own. */
-  reactionsReceived: number;
+  recommendationsSent: RecommendationSent[];
+  /** The reader's own activity, folded into what drew reactions. Never their own. */
+  reactionsReceived: ReactedItem[];
   /** Approved follows in both directions, with an account that still exists. */
-  mutualFollows: number;
+  mutualFollows: PersonRef[];
   /**
    * Which of the fields above could not be read.
    *
@@ -98,8 +141,6 @@ export type AwardFacts = {
    * more than almost anywhere else in the app: zero is a statement about the reader —
    * you have sent no recommendations — and a badge that says it because a request timed
    * out is the app being wrong about somebody in a way they cannot argue with.
-   * Independent review 20 found the swallowed error; the founder's Phase 7 asked for
-   * exactly this state, and the two agree.
    *
    * `watched` is never in here. It is the one fatal read, because thirteen tracks are
    * meaningless without it and a sheet of thirteen blanks is worse than saying so once.
@@ -110,37 +151,76 @@ export type AwardFacts = {
 export type AwardTier = {
   /** Slugged, and half of the badge key. */
   key: string;
-  /** What the reader sees: "Bronze", "Jetsetter", "Sob Lord". */
+  /** What the reader sees once it is earned: "Bronze", "Jetsetter", "Sob Lord". */
   label: string;
   threshold: number;
 };
 
+/**
+ * One line of a drill-down.
+ *
+ * Deliberately one shape for titles, people and genres alike. Three row types would be
+ * three components and three ways for a breakdown to stop matching its number; the
+ * fields a given row does not use are simply absent.
+ */
+export type BreakdownRow = {
+  key: string;
+  /** The primary line. A compact title, a person's name, a genre. */
+  label: string;
+  /** Under it: a watch date, a language, a recipient, a contribution type. */
+  detail?: string | null;
+  /** Right-aligned: a score, a reaction count, how many titles a genre has. */
+  value?: string | null;
+  posterPath?: string | null;
+  avatarPath?: string | null;
+  year?: number | null;
+  /** Where tapping leads, where anything does. */
+  link?: { kind: 'title'; mediaItemId: string } | { kind: 'profile'; username: string } | null;
+  /**
+   * What this row contributes to the award's number. One unless stated.
+   *
+   * Heart Magnet's rows weigh their reaction count; Two-Screen Life's weigh nothing
+   * past the tier's cap. The sum over every section is the metric, and that is asserted
+   * rather than assumed.
+   */
+  weight?: number;
+};
+
+/** A drill-down: one section usually, two where the award genuinely has two halves. */
+export type BreakdownSection = {
+  /** Absent on a single-section breakdown, where the sheet's own heading is enough. */
+  label?: string;
+  /** "15 / 15" beside the section label, where a side has a cap of its own. */
+  value?: string;
+  rows: BreakdownRow[];
+};
+
+export type Breakdown = {
+  sections: BreakdownSection[];
+  /** What the reader is told the list adds up to. Empty means "nothing yet". */
+  emptyLabel: string;
+};
+
+export const weightOf = (row: BreakdownRow) => row.weight ?? 1;
+
+/** The number a breakdown claims. Must equal the track's metric, and is tested to. */
+export const breakdownTotal = (breakdown: Breakdown): number =>
+  breakdown.sections.reduce(
+    (total, section) => total + section.rows.reduce((sum, row) => sum + weightOf(row), 0),
+    0,
+  );
+
 export type AwardTrack = {
   key: string;
   displayName: string;
-  metric: (facts: AwardFacts) => number;
   /**
-   * The metric where it depends on which tier is being measured.
+   * The rows behind the number, for the tier being worked toward.
    *
-   * One track has one: Two-Screen Life caps each side's contribution at the tier, so
-   * the number genuinely differs between Bronze and Gold rather than being one value
-   * compared against three thresholds. Everything else leaves this unset and is
-   * measured once.
+   * The tier matters to exactly one track — Two-Screen Life caps each side at it — and
+   * is ignored by the other nineteen. Passing it always is cheaper than a second
+   * optional hook and makes the capped case ordinary rather than special.
    */
-  metricAt?: (facts: AwardFacts, tier: AwardTier) => number;
-  /**
-   * The exact titles behind the number, where the number is made of titles.
-   *
-   * Present on twelve of the thirteen collection tracks and absent on the seven that
-   * count invites, reactions, follows, recommendations, rankings, writing or the
-   * watchlist — not because those have no contributors but because Bingd has no
-   * privacy-safe surface that lists them, and inventing one for a drill-down would be a
-   * social analytics feature arriving through the back door.
-   *
-   * Genre Gremlin has none either: its number is *genres*, and a list of titles under
-   * "8 / 14" would be a list whose length disagrees with the count above it.
-   */
-  contributors?: (facts: AwardFacts) => WatchedTitle[];
+  contributions: (facts: AwardFacts, tier: AwardTier) => Breakdown;
   /** "Watch 50 movies". Imperative, and the thing still to do. */
   next: (threshold: number) => string;
   /** "Watched 1,000 movies". Past, and only ever shown beside a tier already earned. */
@@ -155,6 +235,15 @@ export type AwardTrack = {
    * which half of a compound metric went missing.
    */
   needs: keyof AwardFacts;
+  /**
+   * True where the tier labels are metals rather than names.
+   *
+   * It decides what the row is *called*. A creative track is titled by the tier the
+   * reader has reached — Dabbler, then Mixer, then Chaos Collector — because that name
+   * is the reward. A metal track keeps its family name, because a row headed "Silver"
+   * says nothing about what was done and three rows headed "Bronze" say less.
+   */
+  metalTiers?: boolean;
 };
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
@@ -168,11 +257,61 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
  */
 export const count = (n: number): string => n.toLocaleString('en-US');
 
+// --- The shapes a breakdown takes ------------------------------------------
+
+/** A title as a row: the show and the season, never a bare "Season 2". */
+export function titleRow(title: WatchedTitle, extra: Partial<BreakdownRow> = {}): BreakdownRow {
+  return {
+    key: title.mediaItemId || `${title.title}-${title.seasonNumber ?? ''}`,
+    label: compactLabel(title),
+    posterPath: title.posterPath,
+    year: title.year,
+    link: title.mediaItemId ? { kind: 'title', mediaItemId: title.mediaItemId } : null,
+    ...extra,
+  };
+}
+
+/**
+ * `The Last of Us, S1`.
+ *
+ * The same rule `lib/titles.ts` states, applied to the award's own shape rather than
+ * imported, because that helper takes a media row and this takes a `WatchedTitle` — and
+ * a season named after its own show ("Chernobyl") must not read "Chernobyl, Chernobyl".
+ */
+export function compactLabel(title: WatchedTitle): string {
+  const own = title.title?.trim() || '';
+  if (title.kind !== 'season') return own;
+  const series = title.seriesTitle?.trim();
+  if (!series) return own;
+  if (own.toLowerCase().includes(series.toLowerCase())) return own;
+  return title.seasonNumber != null ? `${series}, S${title.seasonNumber}` : `${series}, ${own}`;
+}
+
+const personRow = (person: PersonRef, extra: Partial<BreakdownRow> = {}): BreakdownRow => ({
+  key: person.id,
+  label: person.name,
+  detail: person.username ? `@${person.username}` : 'This account is not available to you',
+  avatarPath: person.avatarPath,
+  link: person.username ? { kind: 'profile', username: person.username } : null,
+  ...extra,
+});
+
+/** A date as a reader reads one. Absent rather than "Unknown" when there is none. */
+const on = (iso: string | null | undefined): string | null => {
+  if (!iso) return null;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString();
+};
+
+const titles = (rows: WatchedTitle[], emptyLabel: string, extra?: (t: WatchedTitle) => Partial<BreakdownRow>): Breakdown => ({
+  sections: [{ rows: rows.map((title) => titleRow(title, extra?.(title) ?? {})) }],
+  emptyLabel,
+});
+
+// --- The metrics themselves ------------------------------------------------
+
 const moviesIn = (facts: AwardFacts) => facts.watched.filter((t) => t.kind === 'movie');
 const seasonsIn = (facts: AwardFacts) => facts.watched.filter((t) => t.kind === 'season');
-
-const movies = (facts: AwardFacts) => moviesIn(facts).length;
-const seasons = (facts: AwardFacts) => seasonsIn(facts).length;
 
 /** Titles in a genre, counted once each however many of its names they carry. */
 const inGenre = (genres: CanonicalGenre[]) => (facts: AwardFacts) =>
@@ -197,9 +336,11 @@ const tiers = (
  * A genre track, whose seven instances differ only in the genre and the words.
  *
  * Written as one function because the seven were seven near-identical blocks and the
- * difference between them — which genre, which noun — was buried in the repetition. The
- * metric is derived from the contributor list rather than written twice, so the
- * drill-down cannot list a set whose size disagrees with the count above it.
+ * difference between them — which genre, which noun — was buried in the repetition.
+ *
+ * **Its drill-down lists movies and seasons together**, which is the whole point of the
+ * metadata inheritance this pass added: `The Last of Us, S1` is in Softie Hours because
+ * the show is a drama, and the sheet is where a reader can see that it counted.
  */
 const genreTrack = (config: {
   key: string;
@@ -209,13 +350,15 @@ const genreTrack = (config: {
   noun: (n: number) => string;
   tiers: [AwardTier, AwardTier, AwardTier];
 }): AwardTrack => {
-  const contributors = inGenre(config.genres);
+  const matching = inGenre(config.genres);
   return {
     key: config.key,
     needs: 'watched',
     displayName: config.displayName,
-    metric: (facts) => contributors(facts).length,
-    contributors,
+    contributions: (facts) =>
+      titles(matching(facts), `No ${config.noun(2)} yet.`, (title) => ({
+        detail: on(title.watchedOn) ? `Watched ${on(title.watchedOn)}` : null,
+      })),
     next: (n) => `Watch ${count(n)} ${config.noun(n)}`,
     earned: (n) => `Watched ${count(n)} ${config.noun(n)}`,
     tiers: config.tiers,
@@ -229,35 +372,16 @@ const genreTiers = (
 ): [AwardTier, AwardTier, AwardTier] =>
   tiers([keys[0], labels[0], 25], [keys[1], labels[1], 100], [keys[2], labels[2], 300]);
 
-/**
- * Two-Screen Life, as arithmetic rather than as a paragraph.
- *
- * **Capped contribution, not the weaker of the two sides.** The old metric was
- * `min(movies, seasons)`, which meant a reader at four movies and nine seasons saw
- * `4 / 5` with no way to tell what the five was about — and the row needed a sentence
- * saying "the number is whichever side you are further behind on", which is a technical
- * explanation of a badge.
- *
- * Each side counts up to the tier's cap and the two are added, so Bronze at 30 is
- * fifteen films and fifteen seasons, `22 / 30` is a number that goes up whenever either
- * side does, and the goal line — "Watch 15 movies and 15 TV seasons" — says the whole
- * rule in seven words.
- *
- * The cap is half the threshold by construction. Deriving it rather than configuring it
- * separately is what stops the two drifting apart; `awards.test.ts` pins the identity.
- */
-const twoScreenAt = (facts: AwardFacts, threshold: number) => {
-  const cap = threshold / 2;
-  return Math.min(movies(facts), cap) + Math.min(seasons(facts), cap);
-};
-
 export const AWARD_TRACKS: AwardTrack[] = [
   {
     key: 'movie-muncher',
     needs: 'watched',
     displayName: 'Movie Muncher',
-    metric: movies,
-    contributors: moviesIn,
+    metalTiers: true,
+    contributions: (facts) =>
+      titles(moviesIn(facts), 'No films logged yet.', (title) => ({
+        detail: on(title.watchedOn) ? `Watched ${on(title.watchedOn)}` : null,
+      })),
     next: (n) => `Watch ${count(n)} ${plural(n, 'movie', 'movies')}`,
     earned: (n) => `Watched ${count(n)} ${plural(n, 'movie', 'movies')}`,
     tiers: tiers(['bronze', 'Bronze', 50], ['silver', 'Silver', 200], ['gold', 'Gold', 1000]),
@@ -266,8 +390,11 @@ export const AWARD_TRACKS: AwardTrack[] = [
     key: 'season-snacker',
     needs: 'watched',
     displayName: 'Season Snacker',
-    metric: seasons,
-    contributors: seasonsIn,
+    metalTiers: true,
+    contributions: (facts) =>
+      titles(seasonsIn(facts), 'No TV seasons logged yet.', (title) => ({
+        detail: on(title.watchedOn) ? `Watched ${on(title.watchedOn)}` : null,
+      })),
     next: (n) => `Watch ${count(n)} TV ${plural(n, 'season', 'seasons')}`,
     earned: (n) => `Watched ${count(n)} TV ${plural(n, 'season', 'seasons')}`,
     tiers: tiers(['bronze', 'Bronze', 15], ['silver', 'Silver', 60], ['gold', 'Gold', 250]),
@@ -276,21 +403,37 @@ export const AWARD_TRACKS: AwardTrack[] = [
     key: 'invite-instigator',
     needs: 'invitedSignups',
     displayName: 'Invite Instigator',
-    metric: (facts) => facts.invitedSignups,
-    // **People, not links.** The founder's instruction of 2026-08-18: opening a share
-    // sheet is not an invitation, minting a URL is not an invitation, and sending one is
-    // not an invitation either. The only thing worth a badge is somebody arriving. The
-    // copy says so plainly, and there is no caveat line under it explaining what the
-    // number really counts, because the number now counts what it says.
+    metalTiers: true,
+    // **People, not links.** Opening a share sheet is not an invitation, minting a URL
+    // is not an invitation, and sending one is not an invitation either. The only thing
+    // worth a badge is somebody arriving — so the drill-down is people, and it is
+    // honestly empty until the redemption path exists.
+    contributions: (facts) => ({
+      sections: [
+        {
+          rows: facts.invitedSignups.map(({ person, activatedAt }) =>
+            personRow(person, {
+              detail: on(activatedAt)
+                ? `Joined ${on(activatedAt)}`
+                : (person.username ? `@${person.username}` : null),
+            }),
+          ),
+        },
+      ],
+      emptyLabel: 'No activated invites yet.',
+    }),
     next: (n) => `Bring ${count(n)} ${plural(n, 'person', 'people')} to Bingd`,
     earned: (n) => `Brought ${count(n)} ${plural(n, 'person', 'people')} to Bingd`,
     tiers: tiers(['bronze', 'Bronze', 3], ['silver', 'Silver', 15], ['gold', 'Gold', 50]),
   },
   {
     key: 'queue-dragon',
-    needs: 'watchlistCount',
+    needs: 'watchlist',
     displayName: 'Queue Dragon',
-    metric: (facts) => facts.watchlistCount,
+    // The pile being held now, not everything ever added: `set_watchlist(false)` deletes
+    // the row, so a lifetime total cannot be recovered. The goal line says "Keep", which
+    // is the same fact as an instruction rather than as a footnote.
+    contributions: (facts) => titles(facts.watchlist, 'Nothing saved for later yet.'),
     next: (n) => `Keep ${count(n)} ${plural(n, 'title', 'titles')} on your watchlist`,
     earned: (n) => `Kept ${count(n)} ${plural(n, 'title', 'titles')} on your watchlist`,
     tiers: tiers(
@@ -298,19 +441,21 @@ export const AWARD_TRACKS: AwardTrack[] = [
       ['hoarder', 'Hoarder', 100],
       ['queue-dragon', 'Queue Dragon', 300],
     ),
-    // **The documented compromise, no longer explained on the row.** The brief asked for
-    // watchlist *additions* and nothing records one: `set_watchlist(false)` deletes the
-    // row, so a lifetime total cannot be recovered. This counts the pile being held now,
-    // which is the more Queue Dragon number anyway. The old caveat line — "your
-    // watchlist right now, so it goes down when you watch something" — was a technical
-    // explanation living in a list somebody scrolls, and the goal line already says
-    // "Keep 25 titles on your watchlist". Keep is the whole of it.
   },
   {
     key: 'rating-rascal',
-    needs: 'rankedCount',
+    needs: 'rankings',
     displayName: 'Rating Rascal',
-    metric: (facts) => facts.rankedCount,
+    contributions: (facts) => ({
+      sections: [
+        {
+          rows: facts.rankings.map((title) =>
+            titleRow(title, { value: title.score.toFixed(1) }),
+          ),
+        },
+      ],
+      emptyLabel: 'Nothing ranked yet.',
+    }),
     next: (n) => `Rank ${count(n)} ${plural(n, 'title', 'titles')}`,
     earned: (n) => `Ranked ${count(n)} ${plural(n, 'title', 'titles')}`,
     tiers: tiers(
@@ -321,9 +466,38 @@ export const AWARD_TRACKS: AwardTrack[] = [
   },
   {
     key: 'comment-gremlin',
-    needs: 'writtenCount',
+    needs: 'written',
     displayName: 'Comment Gremlin',
-    metric: (facts) => facts.writtenCount,
+    /**
+     * What the reader wrote, and where.
+     *
+     * **Never the writing itself.** The award counts that somebody talked; reprinting a
+     * note here would be a third surface for it with none of the spoiler masking the
+     * other two have, and a comment's body belongs under the activity it answers.
+     *
+     * One canonical contribution is one row: a public note is one `user_media` row even
+     * though it appears on the activity row and in Bingd Reviews, and it is counted
+     * where it is stored rather than where it is displayed.
+     */
+    contributions: (facts) => ({
+      sections: [
+        {
+          rows: facts.written.map((entry) => ({
+            key: entry.key,
+            label: entry.title ? compactLabel(entry.title) : 'A Bingd activity',
+            detail: [entry.kind === 'note' ? 'Public note' : 'Comment', on(entry.writtenAt)]
+              .filter(Boolean)
+              .join(' · '),
+            posterPath: entry.title?.posterPath ?? null,
+            year: entry.title?.year ?? null,
+            link: entry.title?.mediaItemId
+              ? { kind: 'title', mediaItemId: entry.title.mediaItemId }
+              : null,
+          })),
+        },
+      ],
+      emptyLabel: 'Nothing written yet.',
+    }),
     next: (n) =>
       `Write ${count(n)} ${plural(n, 'comment or public note', 'comments or public notes')}`,
     earned: (n) =>
@@ -338,7 +512,26 @@ export const AWARD_TRACKS: AwardTrack[] = [
     key: 'hype-courier',
     needs: 'recommendationsSent',
     displayName: 'Hype Courier',
-    metric: (facts) => facts.recommendationsSent,
+    // In-app recommendations only. A share off Bingd opens an OS sheet that may be
+    // dismissed, and nothing here would ever know — the same rule that keeps Invite
+    // Instigator off link creations.
+    contributions: (facts) => ({
+      sections: [
+        {
+          rows: facts.recommendationsSent.map((sent) => ({
+            key: sent.key,
+            label: sent.title ? compactLabel(sent.title) : 'A title',
+            detail: [`To ${sent.recipient.name}`, on(sent.sentAt)].filter(Boolean).join(' · '),
+            posterPath: sent.title?.posterPath ?? null,
+            year: sent.title?.year ?? null,
+            link: sent.title?.mediaItemId
+              ? { kind: 'title', mediaItemId: sent.title.mediaItemId }
+              : null,
+          })),
+        },
+      ],
+      emptyLabel: 'Nothing recommended yet.',
+    }),
     next: (n) => `Send ${count(n)} ${plural(n, 'recommendation', 'recommendations')}`,
     earned: (n) => `Sent ${count(n)} ${plural(n, 'recommendation', 'recommendations')}`,
     tiers: tiers(
@@ -396,8 +589,8 @@ export const AWARD_TRACKS: AwardTrack[] = [
     genres: ['Animation'],
     noun: (n) => `animated ${plural(n, 'title', 'titles')}`,
     // Lower than the other genres, deliberately: animation is a smaller shelf than
-    // action in any catalogue, so identical numbers would make it the harder award for a
-    // reason that has nothing to do with the reader.
+    // action in any catalogue, so identical numbers would make it the harder award for
+    // a reason that has nothing to do with the reader.
     tiers: tiers(
       ['sketch', 'Sketch', 20],
       ['ink-pop', 'Ink Pop', 75],
@@ -422,9 +615,12 @@ export const AWARD_TRACKS: AwardTrack[] = [
     displayName: 'Passport Mode',
     // `original_language`, which is a fact about how the thing was made rather than
     // about what a viewer happened to hear. A title with no language recorded is not
-    // counted: absent is not evidence of foreign.
-    metric: (facts) => nonEnglish(facts).length,
-    contributors: nonEnglish,
+    // counted: absent is not evidence of foreign. A season's language is its show's.
+    contributions: (facts) =>
+      titles(nonEnglish(facts), 'Nothing in another language yet.', (title) => ({
+        // The name rather than the code: "ko" is a database value, not a label.
+        detail: languageLabel(title.language),
+      })),
     next: (n) => `Watch ${count(n)} non-English ${plural(n, 'title', 'titles')}`,
     earned: (n) => `Watched ${count(n)} non-English ${plural(n, 'title', 'titles')}`,
     tiers: tiers(
@@ -437,8 +633,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
     key: 'time-hopper',
     needs: 'watched',
     displayName: 'Time Hopper',
-    metric: (facts) => beforeMillennium(facts).length,
-    contributors: beforeMillennium,
+    contributions: (facts) => titles(beforeMillennium(facts), 'Nothing from before 2000 yet.'),
     next: (n) => `Watch ${count(n)} ${plural(n, 'title', 'titles')} released before 2000`,
     earned: (n) => `Watched ${count(n)} ${plural(n, 'title', 'titles')} released before 2000`,
     tiers: tiers(
@@ -451,35 +646,50 @@ export const AWARD_TRACKS: AwardTrack[] = [
     key: 'genre-gremlin',
     needs: 'watched',
     displayName: 'Genre Gremlin',
-    // How many of the eighteen in `genres.ts`, not how many raw labels. Wikidata hands
-    // `12 Angry Men` three of its own, and counting those would make one film look like
-    // a third of somebody's range.
-    metric: (facts) => {
-      const found = new Set<CanonicalGenre>();
+    /**
+     * **This one counts genres, so its breakdown is genres.**
+     *
+     * One row per canonical genre the collection touches, with how many titles carry it
+     * — which answers the question the number actually raises ("which ten?") rather than
+     * listing every title and leaving the reader to count the distinct ones themselves.
+     *
+     * The vocabulary is `genres.ts` and nothing else: Wikidata gives `12 Angry Men`
+     * three labels, and counting those would make one film look like a third of
+     * somebody's range. Seasons contribute through their series' genres.
+     */
+    contributions: (facts) => {
+      const byGenre = new Map<CanonicalGenre, number>();
       for (const title of facts.watched) {
-        for (const genre of canonicalGenres(title.genres)) found.add(genre);
+        for (const genre of canonicalGenres(title.genres)) {
+          byGenre.set(genre, (byGenre.get(genre) ?? 0) + 1);
+        }
       }
-      return found.size;
+      return {
+        sections: [
+          {
+            rows: [...byGenre.entries()]
+              .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'en'))
+              .map(([genre, titleCount]) => ({
+                key: genre,
+                label: genre,
+                value: `${count(titleCount)} ${plural(titleCount, 'title', 'titles')}`,
+              })),
+          },
+        ],
+        emptyLabel: 'No genres counted yet.',
+      };
     },
     next: (n) => `Watch ${count(n)} different ${plural(n, 'genre', 'genres')}`,
     earned: (n) => `Watched ${count(n)} different ${plural(n, 'genre', 'genres')}`,
     /**
      * **Sixteen, and the number was audited rather than picked.**
      *
-     * The old top tier was fifteen of eighteen, and the founder's instruction was to
-     * stop guessing at it: find the vocabulary the catalogue can actually support and
-     * set the tier there, rather than keep a target that is unreachable in practice.
-     *
-     * All eighteen canonical genres do appear in the seeded catalogue, so eighteen is
-     * not *impossible* — but the tail is one or two titles deep. Counted over the 1,814
-     * countable rows in `supabase/seed/catalogue.json`: Documentary is carried by two
-     * titles, Animation by eight, Western by fourteen. Every other genre has at least
-     * twenty-one.
-     *
-     * So sixteen is the largest tier that never depends on a genre with fewer than
-     * fourteen titles behind it: a reader may miss any two of the eighteen and still
-     * finish, which means they can skip the two thinnest without the award turning into
-     * a hunt for one specific documentary. Eighteen would have been that hunt.
+     * `genres.ts` knows eighteen and all eighteen appear in the seeded catalogue — but
+     * the tail is one or two titles deep: over the 1,814 countable rows in
+     * `supabase/seed/catalogue.json`, Documentary is carried by two titles, Animation by
+     * eight and Western by fourteen, while every other genre has at least twenty-one.
+     * Sixteen is the largest tier that never depends on a genre with fewer than fourteen
+     * titles behind it, so a reader may miss any two rather than hunt one documentary.
      */
     tiers: tiers(
       ['dabbler', 'Dabbler', 8],
@@ -491,13 +701,33 @@ export const AWARD_TRACKS: AwardTrack[] = [
     key: 'two-screen-life',
     needs: 'watched',
     displayName: 'Two-Screen Life',
-    // Bronze's number, so a caller with no tier in hand still gets a real one. Every
-    // reader-facing number comes from `metricAt` below.
-    metric: (facts) => twoScreenAt(facts, 30),
-    metricAt: (facts, tier) => twoScreenAt(facts, tier.threshold),
-    // Both halves, movies first. The award is about using Bingd for both, so the list
-    // behind it is both — not whichever side happens to be short.
-    contributors: (facts) => [...moviesIn(facts), ...seasonsIn(facts)],
+    /**
+     * **Capped contribution, shown as two halves rather than explained in a sentence.**
+     *
+     * Each side counts up to half the tier and the two are added, so Bronze is fifteen
+     * films and fifteen seasons. The old metric took the weaker side, which meant a
+     * reader at four films and nine seasons saw `4 / 5` and needed a footnote saying
+     * "the number is whichever side you are further behind on".
+     *
+     * The drill-down is the footnote's replacement: a Movies section reading `15 / 15`
+     * over the films that counted, a TV Seasons section reading `7 / 15` over the
+     * seasons, and the arithmetic is self-evident from the two headings. Rows past the
+     * cap are not listed, which is also what keeps the sum equal to the number.
+     */
+    contributions: (facts, tier) => {
+      const cap = tier.threshold / 2;
+      const movies = moviesIn(facts);
+      const seasons = seasonsIn(facts);
+      const section = (label: string, rows: WatchedTitle[]): BreakdownSection => ({
+        label,
+        value: `${count(Math.min(rows.length, cap))} / ${count(cap)}`,
+        rows: rows.slice(0, cap).map((title) => titleRow(title)),
+      });
+      return {
+        sections: [section('Movies', movies), section('TV seasons', seasons)],
+        emptyLabel: 'Nothing on either side yet.',
+      };
+    },
     next: (n) => `Watch ${count(n / 2)} movies and ${count(n / 2)} TV seasons`,
     earned: (n) => `Watched ${count(n / 2)} movies and ${count(n / 2)} TV seasons`,
     tiers: tiers(
@@ -510,7 +740,32 @@ export const AWARD_TRACKS: AwardTrack[] = [
     key: 'heart-magnet',
     needs: 'reactionsReceived',
     displayName: 'Heart Magnet',
-    metric: (facts) => facts.reactionsReceived,
+    /**
+     * **What was reacted to, not who reacted.**
+     *
+     * The content-centric reading is the useful one — "The Wolf of Wall Street, 18
+     * reactions" tells the reader something about their own taste — and it is the one
+     * that discloses nothing. A list of reactors would be a new social surface, and the
+     * per-item weight is what keeps the sum equal to the badge's number.
+     */
+    contributions: (facts) => ({
+      sections: [
+        {
+          rows: facts.reactionsReceived.map((item) => ({
+            key: item.key,
+            label: item.title ? compactLabel(item.title) : 'A Bingd activity',
+            posterPath: item.title?.posterPath ?? null,
+            year: item.title?.year ?? null,
+            value: `${count(item.reactions)} ${plural(item.reactions, 'reaction', 'reactions')}`,
+            weight: item.reactions,
+            link: item.title?.mediaItemId
+              ? { kind: 'title', mediaItemId: item.title.mediaItemId }
+              : null,
+          })),
+        },
+      ],
+      emptyLabel: 'No reactions yet.',
+    }),
     next: (n) => `Get ${count(n)} ${plural(n, 'reaction', 'reactions')} on your activity`,
     earned: (n) => `Got ${count(n)} ${plural(n, 'reaction', 'reactions')} on your activity`,
     tiers: tiers(
@@ -523,7 +778,10 @@ export const AWARD_TRACKS: AwardTrack[] = [
     key: 'mutual-mania',
     needs: 'mutualFollows',
     displayName: 'Mutual Mania',
-    metric: (facts) => facts.mutualFollows,
+    contributions: (facts) => ({
+      sections: [{ rows: facts.mutualFollows.map((person) => personRow(person)) }],
+      emptyLabel: 'Nobody follows you back yet.',
+    }),
     // The verb agrees with the noun, so a tier of one does not read "1 person who follow
     // you back". Both halves move together or neither should.
     next: (n) =>
@@ -537,3 +795,20 @@ export const AWARD_TRACKS: AwardTrack[] = [
     ),
   },
 ];
+
+/**
+ * An ISO 639-1 code as a word, for Passport Mode's rows.
+ *
+ * `Intl.DisplayNames` uses the platform's own tables — the same helper `lib/language.ts`
+ * wraps for the filter sheet. Falls back to the code rather than to nothing: a row that
+ * said only "Ringu" would leave the reader wondering why it was in this list.
+ */
+function languageLabel(code: string | null): string | null {
+  if (!code) return null;
+  try {
+    const name = new Intl.DisplayNames(undefined, { type: 'language' }).of(code);
+    return name && name !== code ? name : code.toUpperCase();
+  } catch {
+    return code.toUpperCase();
+  }
+}

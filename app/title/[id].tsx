@@ -38,6 +38,7 @@ import { useTitleReviews, type ReviewSort } from '@/features/title/use-title-rev
 import { diagnose } from '@/lib/diagnose';
 import { heroArtwork } from '@/lib/hero';
 import { posterUri, profileUri, videoUri } from '@/lib/images';
+import { resolveMetadata } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { relativeTime } from '@/features/recommendations/use-sent-to-you';
@@ -152,7 +153,7 @@ export default function TitleScreen() {
         .select(
           // The parent's artwork comes with it: a season has no backdrop of its own
           // (TMDB publishes none) and borrows the series' — see `lib/hero.ts`.
-          'id, kind, title, season_number, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, certification, parent:parent_id(id, title, poster_path, backdrop_path)',
+          'id, kind, title, season_number, release_date, runtime_minutes, overview, poster_path, backdrop_path, genres, provenance, tmdb_id, original_language, certification, parent:parent_id(id, title, poster_path, backdrop_path, genres, original_language)',
         )
         .eq('id', id ?? '')
         .single();
@@ -319,6 +320,21 @@ export default function TitleScreen() {
 
   const title = data.title;
   const parent = Array.isArray(title.parent) ? title.parent[0] : title.parent;
+  /**
+   * The genres and language to describe this title with.
+   *
+   * A season carries neither of its own — TMDB publishes both on the series and
+   * `tmdb_upsert_seasons` writes neither — so before this the genre pills were absent on
+   * every season page, Details said nothing under Language, and the hero's rank line
+   * could never read "#3 in Drama" for television. The show's are the season's.
+   * (`lib/media-metadata.ts`.)
+   */
+  const descriptive = resolveMetadata({
+    kind: title.kind,
+    genres: title.genres,
+    original_language: title.original_language,
+    parent: title.parent ?? null,
+  });
   // A season borrows its series' key art, because TMDB publishes no season backdrop
   // and the page was rendering its collapsed band for every one of them.
   const hero = heroArtwork({
@@ -683,9 +699,9 @@ export default function TitleScreen() {
             order is metadata → genres → description, which reads outward from what the
             thing *is* to what it is *about*; underneath the description they were a
             footnote to a paragraph nobody had finished reading. */}
-        {title.genres?.length ? (
+        {descriptive.genres.length ? (
           <View style={styles.pills}>
-            {title.genres.slice(0, 5).map((genre: string) => (
+            {descriptive.genres.slice(0, 5).map((genre: string) => (
               <Chip key={genre} label={genre} />
             ))}
           </View>
@@ -901,8 +917,8 @@ export default function TitleScreen() {
               label="Runtime"
               value={title.runtime_minutes ? `${title.runtime_minutes} minutes` : null}
             />
-            <Detail label="Genres" value={title.genres?.join(', ') || null} />
-            <Detail label="Language" value={languageName(title.original_language)} />
+            <Detail label="Genres" value={descriptive.genres.join(', ') || null} />
+            <Detail label="Language" value={languageName(descriptive.language)} />
             <Detail label="Director" value={credits.data?.director ?? null} />
             {/* The ordinal with its denominator. The panel above shows the short
                 form, which is the one people read; this is the one that says what

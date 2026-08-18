@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { resolveMetadata, type EmbeddedParent } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 
@@ -78,7 +79,7 @@ type MediaShape = {
   kind: 'movie' | 'season' | 'series';
   original_language?: string | null;
   parent_id?: string | null;
-  parent?: { title: string } | { title: string }[] | null;
+  parent?: EmbeddedParent;
 };
 
 /** PostgREST returns an embedded row as an object, but types it as an array. */
@@ -92,10 +93,23 @@ const media = (value: MediaShape | MediaShape[] | null): MediaShape =>
     kind: 'movie',
   };
 
-const parentTitle = (shape: MediaShape): string | null => {
-  const parent = Array.isArray(shape.parent) ? shape.parent[0] : shape.parent;
-  return parent?.title ?? null;
-};
+/**
+ * The descriptive metadata of one row, with a season's inheritance already applied.
+ *
+ * Every mapper below goes through this rather than reading `genres` and
+ * `original_language` off the row, which is what makes `The Last of Us, S1` a drama
+ * everywhere at once — collection filters, For You anchors, the hero's rank line and
+ * the genre awards — rather than in whichever surface remembered to look at the parent.
+ *
+ * See `lib/media-metadata.ts` for why this resolves at read time and copies nothing.
+ */
+const descriptive = (shape: MediaShape) =>
+  resolveMetadata({
+    kind: shape.kind,
+    genres: shape.genres,
+    original_language: shape.original_language,
+    parent: shape.parent ?? null,
+  });
 
 /**
  * The ranked list for one category, in position order.
@@ -120,29 +134,33 @@ export function useRankedCollection(
         .from('rankings')
         .select(
           'media_item_id, bucket, position, category, ' +
-            'media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent_id, parent:parent_id(title))',
+            'media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent_id, parent:parent_id(title, genres, original_language))',
         )
         .eq('user_id', userId)
         .eq('category', category)
         .order('position');
       if (error) throw error;
 
-      return (data ?? []).map((row: any) => ({
-        mediaItemId: row.media_item_id,
-        title: media(row.media_items).title,
-        year: yearOf(media(row.media_items).release_date),
-        posterPath: media(row.media_items).poster_path,
-        genres: media(row.media_items).genres ?? [],
-        runtimeMinutes: media(row.media_items).runtime_minutes,
-        kind: media(row.media_items).kind,
-        seriesTitle: parentTitle(media(row.media_items)),
-        seasonNumber: media(row.media_items).season_number ?? null,
-        seriesId: media(row.media_items).parent_id ?? null,
-        language: media(row.media_items).original_language ?? null,
-        bucket: row.bucket,
-        position: row.position,
-        category: row.category,
-      }));
+      return (data ?? []).map((row: any) => {
+        const shape = media(row.media_items);
+        const meta = descriptive(shape);
+        return {
+          mediaItemId: row.media_item_id,
+          title: shape.title,
+          year: yearOf(shape.release_date),
+          posterPath: shape.poster_path,
+          genres: meta.genres,
+          runtimeMinutes: shape.runtime_minutes,
+          kind: shape.kind,
+          seriesTitle: meta.seriesTitle,
+          seasonNumber: shape.season_number ?? null,
+          seriesId: shape.parent_id ?? null,
+          language: meta.language,
+          bucket: row.bucket,
+          position: row.position,
+          category: row.category,
+        };
+      });
     },
   });
 }
@@ -168,7 +186,7 @@ export function useLoggedCollection(userId: string) {
         supabase
           .from('user_media')
           .select(
-            'media_item_id, bucket, watched_on, media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title))',
+            'media_item_id, bucket, watched_on, media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title, genres, original_language))',
           )
           .eq('user_id', userId)
           .order('created_at', { ascending: false }),
@@ -180,23 +198,27 @@ export function useLoggedCollection(userId: string) {
 
       const hasPosition = new Set((ranked.data ?? []).map((row) => row.media_item_id));
 
-      const rows = (logged.data ?? []).map((row: any) => ({
-        entry: {
-          mediaItemId: row.media_item_id,
-          title: media(row.media_items).title,
-          year: yearOf(media(row.media_items).release_date),
-          posterPath: media(row.media_items).poster_path,
-          genres: media(row.media_items).genres ?? [],
-          runtimeMinutes: media(row.media_items).runtime_minutes,
-          kind: media(row.media_items).kind,
-          seriesTitle: parentTitle(media(row.media_items)),
-          seasonNumber: media(row.media_items).season_number ?? null,
-          language: media(row.media_items).original_language ?? null,
-          bucket: row.bucket,
-          watchedOn: row.watched_on,
-        } satisfies LoggedEntry,
-        ranked: hasPosition.has(row.media_item_id),
-      }));
+      const rows = (logged.data ?? []).map((row: any) => {
+        const shape = media(row.media_items);
+        const meta = descriptive(shape);
+        return {
+          entry: {
+            mediaItemId: row.media_item_id,
+            title: shape.title,
+            year: yearOf(shape.release_date),
+            posterPath: shape.poster_path,
+            genres: meta.genres,
+            runtimeMinutes: shape.runtime_minutes,
+            kind: shape.kind,
+            seriesTitle: meta.seriesTitle,
+            seasonNumber: shape.season_number ?? null,
+            language: meta.language,
+            bucket: row.bucket,
+            watchedOn: row.watched_on,
+          } satisfies LoggedEntry,
+          ranked: hasPosition.has(row.media_item_id),
+        };
+      });
 
       return {
         entries: rows.map((r) => r.entry),
@@ -217,26 +239,30 @@ export function useWatchlist(userId: string) {
       const { data, error } = await supabase
         .from('watchlist')
         .select(
-          'media_item_id, media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title))',
+          'media_item_id, media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title, genres, original_language))',
         )
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
       if (error) throw error;
 
-      return (data ?? []).map((row: any) => ({
-        mediaItemId: row.media_item_id,
-        title: media(row.media_items).title,
-        year: yearOf(media(row.media_items).release_date),
-        posterPath: media(row.media_items).poster_path,
-        genres: media(row.media_items).genres ?? [],
-        runtimeMinutes: media(row.media_items).runtime_minutes,
-        kind: media(row.media_items).kind,
-        seriesTitle: parentTitle(media(row.media_items)),
-        seasonNumber: media(row.media_items).season_number ?? null,
-        language: media(row.media_items).original_language ?? null,
-        bucket: null,
-        watchedOn: null,
-      }));
+      return (data ?? []).map((row: any) => {
+        const shape = media(row.media_items);
+        const meta = descriptive(shape);
+        return {
+          mediaItemId: row.media_item_id,
+          title: shape.title,
+          year: yearOf(shape.release_date),
+          posterPath: shape.poster_path,
+          genres: meta.genres,
+          runtimeMinutes: shape.runtime_minutes,
+          kind: shape.kind,
+          seriesTitle: meta.seriesTitle,
+          seasonNumber: shape.season_number ?? null,
+          language: meta.language,
+          bucket: null,
+          watchedOn: null,
+        };
+      });
     },
   });
 }

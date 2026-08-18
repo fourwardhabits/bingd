@@ -1,30 +1,44 @@
 import { badgeFor, type Badge } from './badges';
 import {
   AWARD_TRACKS,
+  breakdownTotal,
   count,
   type AwardFacts,
   type AwardTier,
   type AwardTrack,
+  type Breakdown,
 } from './tracks';
 
 /** One track, evaluated against one reader. Everything a row draws is here. */
 export type AwardProgress = {
   trackKey: string;
+  /** The family name — "Genre Gremlin". What the row is called before anything. */
   displayName: string;
+  /**
+   * What the row is **titled**, which is the reward this pass moved.
+   *
+   * Before the first tier it is the family name. After each tier it becomes the name of
+   * the tier reached — Dabbler, then Mixer, then Chaos Collector — because that name is
+   * the thing that was won, and a separate "Dabbler earned" line under a heading that
+   * still said "Genre Gremlin" was saying it twice and celebrating it once.
+   *
+   * **Metal tracks keep the family name.** A row headed "Silver" says nothing about
+   * what was done, and three of them on one screen say less. The badge art and the tier
+   * dots carry the metal.
+   */
+  title: string;
   /** The badge to draw: the highest tier earned, or the next one, greyed. */
   badge: Badge;
   /** Which tier that badge belongs to, for the accessibility label. */
   badgeTierLabel: string;
   /** Null before the first tier. */
   earnedTier: AwardTier | null;
-  /** 0, 1, 2 — or -1 before anything is earned. */
+  /** 0, 1, 2 — or -1 before anything is earned. Also how many dots are filled. */
   earnedTierIndex: number;
   /** Null once the third tier is earned, which is what finished means here. */
   nextTier: AwardTier | null;
   /** Where the reader is, measured against the tier they are working toward. */
   value: number;
-  /** `Bronze earned`, or nothing yet. Present at the top tier too. */
-  earnedLine: string | null;
   /** `Next: Watch 50 movies` — or, at the top, what was done to finish it. */
   detailLine: string;
   /** `27 / 50` while there is a tier to reach, and `1,164` once there is not. */
@@ -36,17 +50,19 @@ export type AwardProgress = {
    * this one" rather than a progress fraction the app does not actually know.
    */
   unavailable: boolean;
-  /**
-   * Whether tapping the row opens the titles behind the number.
-   *
-   * False on the seven tracks whose number is not made of titles, and false on any
-   * track whose number could not be read — a drill-down into a count that failed would
-   * be a list claiming to explain a dash.
-   */
-  hasContributors: boolean;
   /** How far into the next tier, 0 to 1. One once every tier is earned. */
   fraction: number;
 };
+
+/**
+ * The number, and the rows it is made of, for one tier.
+ *
+ * The metric *is* the weight of the breakdown — there is no second count to keep in
+ * step. Two-Screen Life is why this takes a tier: its caps move with the threshold, so
+ * its number genuinely differs between Bronze and Gold. The other nineteen ignore it.
+ */
+const measure = (track: AwardTrack, facts: AwardFacts, tier: AwardTier) =>
+  breakdownTotal(track.contributions(facts, tier));
 
 export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
   // A read that failed is not a count of zero. Answered before the metric runs, so a
@@ -56,43 +72,30 @@ export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
     return {
       trackKey: track.key,
       displayName: track.displayName,
+      title: track.displayName,
       badge: badgeFor(track.key, first.key),
       badgeTierLabel: first.label,
       earnedTier: null,
       earnedTierIndex: -1,
       nextTier: first,
       value: 0,
-      earnedLine: null,
       detailLine: 'Could not load this one',
       countLabel: '—',
       unavailable: true,
-      hasContributors: false,
       fraction: 0,
     };
   }
-
-  /**
-   * The number, for one tier.
-   *
-   * Almost every track ignores the tier and is measured once — `base` below — because
-   * a metric over a thousand watched titles is not free and running it three times to
-   * get the same answer would be. Two-Screen Life is the exception the whole shape
-   * exists for: its caps move with the tier, so its number genuinely differs between
-   * Bronze and Gold.
-   */
-  const base = track.metricAt ? null : track.metric(facts);
-  const measure = (tier: AwardTier) =>
-    track.metricAt ? track.metricAt(facts, tier) : (base as number);
 
   // Ascending, so the last tier that passes wins. **At the threshold counts as
   // earned** — `>=`, not `>` — which is the boundary every tier test pins down.
   let earnedTierIndex = -1;
   for (const [index, tier] of track.tiers.entries()) {
-    if (measure(tier) >= tier.threshold) earnedTierIndex = index;
+    if (measure(track, facts, tier) >= tier.threshold) earnedTierIndex = index;
   }
   const earnedTier: AwardTier | null =
     earnedTierIndex >= 0 ? (track.tiers[earnedTierIndex] ?? null) : null;
-  const nextTier = track.tiers.find((tier) => measure(tier) < tier.threshold) ?? null;
+  const nextTier =
+    track.tiers.find((tier) => measure(track, facts, tier) < tier.threshold) ?? null;
 
   // **One badge per track, never three.** The one on screen is the highest tier
   // actually earned, or — before any of them — the first one, drawn grey. A row
@@ -100,24 +103,26 @@ export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
   const badgeTier = earnedTier ?? track.tiers[0];
   const top = track.tiers[2];
 
-  // Measured against the tier being worked toward, which is the only tier the number
-  // on the row is about. Past the top there is nothing left to work toward, so it is
-  // the top tier's own reading that keeps climbing.
-  const value = measure(nextTier ?? top);
+  // Measured against the tier being worked toward, which is the only tier the number on
+  // the row is about. Past the top there is nothing left to work toward, so it is the
+  // top tier's own reading that keeps climbing.
+  const value = measure(track, facts, nextTier ?? top);
 
   return {
     trackKey: track.key,
     displayName: track.displayName,
+    /**
+     * **Never the next tier's name.** A locked Genre Gremlin says "Genre Gremlin" and
+     * "Next: watch 8 different genres" — not "Dabbler", which would hand over the
+     * reward before it was earned and leave nothing to arrive later.
+     */
+    title: earnedTier && !track.metalTiers ? earnedTier.label : track.displayName,
     badge: badgeFor(track.key, badgeTier.key),
     badgeTierLabel: badgeTier.label,
     earnedTier,
     earnedTierIndex,
     nextTier,
     value,
-    // Two short lines rather than one long one, at every stage of a track's life. At
-    // the top the pair reads "Gold earned" over "Watched 1,000 movies", which is the
-    // founder's shape: the tier on its own line, and the thing that earned it under it.
-    earnedLine: earnedTier ? `${earnedTier.label} earned` : null,
     detailLine: nextTier
       ? `Next: ${track.next(nextTier.threshold)}`
       : // Past the top there is nothing to aim at, so the line states what was done
@@ -125,9 +130,22 @@ export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
         track.earned(top.threshold),
     countLabel: nextTier ? `${count(value)} / ${count(nextTier.threshold)}` : count(value),
     unavailable: false,
-    hasContributors: Boolean(track.contributors),
     fraction: nextTier ? Math.min(1, value / nextTier.threshold) : 1,
   };
+}
+
+/**
+ * The rows behind one award's number, for the tier it is working toward.
+ *
+ * The same call `evaluate` measures with, so the sheet and the badge cannot disagree —
+ * and the reason there is no separate drill-down query anywhere in this feature.
+ */
+export function breakdownFor(
+  track: AwardTrack,
+  facts: AwardFacts,
+  progress: AwardProgress,
+): Breakdown {
+  return track.contributions(facts, progress.nextTier ?? track.tiers[2]);
 }
 
 /**

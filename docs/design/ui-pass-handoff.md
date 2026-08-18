@@ -6,9 +6,9 @@ Read this instead of re-exploring the repo. Full rationale, screen by screen, is
 ## State
 
 - Branch `ui/visual-pass`. `main` is untouched. Nothing has been pushed.
-- Latest: the final product-tuning pass of 2026-08-18 — Jest, lint and typecheck clean,
-  and `expo export --platform android` succeeds. Counts are in the last section of this
-  file.
+- Latest: the TV-metadata and award-drilldown micro-pass of 2026-08-18 — Jest, the
+  database suite, lint and typecheck all clean, and `expo export --platform android`
+  succeeds. Counts are in the last section of this file.
 - The pass this document was written for changed no schema. **Two later passes did**, and
   both are deployed to bingd-nonprod only: `20260817001300` (friend recommendations) and
   `20260818000100` (removal takes its activity, and the Bingd threshold at ten). Bingd
@@ -425,11 +425,129 @@ alone. Both cases are now pinned by tests in `TitleHero.test.tsx`.
 
 ### Known, unchanged, and worth knowing
 
-- **Seasons carry no genres and no original language, ever.** `tmdb_upsert_seasons` writes
-  neither column and the seed has neither. So the seven genre tracks, Passport Mode and
-  Genre Gremlin are effectively movie-only. Nothing is wrong on screen; it is a catalogue
-  limit, and it belongs on the Beta Hardening list rather than in a threshold.
+- **Seasons carrying no genres and no original language was fixed on 2026-08-18** by the
+  micro-pass below. `tmdb_upsert_seasons` still writes neither column — that has not
+  changed and needs no migration — but a season now inherits both from its series at read
+  time, so the genre tracks, Passport Mode and Genre Gremlin all count television.
 - The seeded catalogue is 382 movies and 1,432 seasons, so several top tiers are beyond
   what exists today. That is intended — the catalogue grows through the TMDB adapter — but
   it is why nobody will be walking Movie Muncher Gold on the alpha.
 - The ten emoji badge families are still emoji. Nothing about that changed.
+
+---
+
+## Founder smoke checklist — 2026-08-18, TV metadata and award drilldowns
+
+**Client and read-composition only. No migration, no RPC change, nothing deployed,
+nothing pushed.** No native module changed, so a JS reload is enough.
+
+Verified: `tsc` clean, `eslint` clean (one pre-existing `no-console` warning in
+`src/features/auth/methods.ts`), Jest green, the database suite green, and
+`expo export --platform android` succeeds. Counts are at the end of this section.
+
+### A season is part of its show now
+
+**The defect, which was three defects.** A season row carries no `genres` and no
+`original_language` — TMDB publishes both on the series and `tmdb_upsert_seasons` writes
+neither — so `The Last of Us, S1` described nothing. That showed up as: genre awards
+television could never contribute to, a Collection genre filter that emptied the TV tab,
+and a For You wall whose TV anchors vanished the moment a genre was picked.
+
+**One resolver, applied at every read: `src/lib/media-metadata.ts`.** A season inherits
+its series' genres and language when it has none of its own; a movie and a series use
+their own; own-first, so an anthology season with real metadata still wins. Nothing is
+copied onto any row and no migration was needed — the parent embed these queries were
+already fetching for the show's *name* now carries two more columns.
+
+What to check on the device:
+
+- Open a season's page. **Genre pills** should be the show's, and Details should now name
+  a **Language**. Both were blank on every season before.
+- The hero's rank line can now read `#3 in Drama` for a season.
+- **Collection → TV seasons → Filters.** The Genre and Language lists should be populated
+  rather than empty, and choosing one should keep your seasons rather than emptying the
+  tab. The Anime facet can match a TV title for the first time.
+- **For You → TV shows → set a genre.** The wall should still be anchored — long-press a
+  tile and the "because you loved" anchors should be shows from inside the filter. Before,
+  filtering TV left it with no anchors at all and a popularity-only slate.
+- **Sent to you** with a genre filter on: a recommended *season* should survive it. That
+  path reads an RPC that returns the season's own metadata, so it resolves the parent with
+  one small supplementary read rather than a widened RPC.
+- **Awards.** Seasons now count toward Scream Snack, LOL Mode, Softie Hours, Space Brain,
+  Boom Club, Toon Bloom, Truth Worm, Passport Mode and Genre Gremlin. A show with three
+  seasons counts as three titles and one genre — the season is the counted unit and the
+  series is never counted at all.
+- **A season whose show has no metadata either stays unknown.** Nothing guesses from a
+  title, and no client-side provider call was added to fill a field.
+
+### Awards: the tier name is the title
+
+- A creative track is now **headed by the tier it has reached**. Genre Gremlin becomes
+  **Dabbler**, then **Mixer**, then **Chaos Collector**. There is no separate
+  `Dabbler earned` line any more; the row is two lines at every stage.
+- **The next tier's name is never shown early.** A locked Genre Gremlin says "Genre
+  Gremlin" and `Next: Watch 8 different genres`. Seeing "Dabbler" before you have earned
+  it would spend the reward in advance — if you can find one, that is a bug.
+- **Movie Muncher, Season Snacker and Invite Instigator keep their family names** at every
+  tier. A row headed "Silver" says nothing about what was done. The art and the dots carry
+  the metal.
+
+### Awards: three tier dots
+
+Under each badge, overlapping its lower edge: `○○○`, then `●○○`, `●●○`, `●●●`.
+
+- **Each dot keeps its own metal.** At silver the first dot stays bronze; at gold all three
+  are individually coloured. If they all turn gold, that is a regression.
+- They should read as a progression, not as carousel pagination, and the row must not get
+  any taller — the strip is positioned inside the badge's own box.
+- Locked treatment on the badge itself is unchanged, deliberately.
+
+### Awards: every row opens
+
+**All twenty rows are tappable now**, not the twelve title-based ones. The principle is
+the founder's: if Bingd shows you `10 / 14`, you are entitled to see what the ten are.
+
+| award | what the sheet shows |
+|---|---|
+| Movie Muncher | the films, with the watch date where there is one |
+| Season Snacker | the seasons, named `The Last of Us, S1` |
+| Invite Instigator | people who joined and used it — **empty until the referral wiring lands** |
+| Queue Dragon | the watchlist you are holding now |
+| Rating Rascal | every ranked title with the score you gave it |
+| Comment Gremlin | your comments and public notes, by title and type — **never the text** |
+| Hype Courier | what you sent and who to |
+| the seven genres | the exact films **and seasons** that qualify |
+| Passport Mode | the titles, with the language named ("Japanese", not "ja") |
+| Time Hopper | the pre-2000 titles |
+| Genre Gremlin | one row per **genre**, with how many titles carry it |
+| Two-Screen Life | a Movies section and a TV Seasons section, each with its own cap |
+| Heart Magnet | what was reacted to and how many — never who reacted |
+| Mutual Mania | the people who follow you back |
+
+- **The number on the row and the total of the sheet are the same call.** There is no
+  second query anywhere in this feature; a test asserts the identity for all twenty tracks
+  at every tier boundary. If a sheet ever disagrees with the badge above it, that is a
+  serious bug and worth reporting immediately.
+- Tapping a title opens it; tapping a person opens their profile.
+- A row whose number could not be read is the one row that does not open — there is
+  nothing behind a dash.
+
+### Privacy, and the one compromise
+
+Nothing here asks for more than the count already counted: the drill-downs render the rows
+the metric measured, under the same policies.
+
+- **An account you may not see** — blocked, suspended, deleted — comes back from the embed
+  as nothing. It still *counts*, because the follow is still a follow, and it renders as
+  **"Someone on Bingd" / "This account is not available to you"** with no handle and no
+  route. That is the compromise: a row exists, and it discloses nothing.
+- **Heart Magnet never lists reactors.** It is content-centric on purpose — "The Wolf of
+  Wall Street, 18 reactions" — and no new reactor sheet was built.
+- **Comment Gremlin never reprints what you wrote.** A note's body belongs where its
+  spoiler masking lives.
+- **Invite Instigator** is unchanged in meaning: activated attributed signups, still zero
+  for everybody, still documented in `docs/product/growth-instrumentation.md` §1.
+
+### Counts
+
+1,020 Jest across 63 suites, 686 database, lint and typecheck clean, Android export green.

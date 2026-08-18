@@ -229,11 +229,16 @@ export default function ProfileScreen() {
       {awardsOpen ? (
         <AwardsSheet
           userId={profile.id}
-          // The same drill-down the goals bars have: a row whose number is made of
-          // titles opens into exactly those titles, and each one leads to its page.
+          // The same drill-down the goals bars have, now on every row: a number the
+          // reader is shown is one they can open and check, and each contributing
+          // title or person leads where it already leads everywhere else.
           onPressTitle={(id) => {
             setAwardsOpen(false);
             router.push(`/title/${id}`);
+          }}
+          onPressProfile={(username) => {
+            setAwardsOpen(false);
+            router.push(`/u/${username}`);
           }}
           onClose={() => setAwardsOpen(false)}
         />
