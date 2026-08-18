@@ -281,3 +281,90 @@ describe('function and table privileges', () => {
     assert.ok(err, 'a client wrote to a table directly');
   });
 });
+
+/**
+ * The read behind the Invite Instigator award, which moved onto this table on
+ * 2026-08-18.
+ *
+ * The award used to count `invite_link_creations` — links minted — and now counts
+ * people who joined on somebody's invitation and used it. Nothing writes
+ * `invite_attributions` yet, so on a real database the count is zero for everybody;
+ * these rows are inserted as owner to prove the *read path* is the one the client
+ * thinks it is, and that it is scoped.
+ *
+ * That matters because "the number is zero" and "the request failed" look identical
+ * from the client, and the sheet deliberately renders them differently. If the grant
+ * or the policy were wrong, every account would see "Could not load this one" on a row
+ * that is supposed to read `0 / 3`.
+ */
+describe('the invite attribution behind the award', () => {
+  before(async () => {
+    await t.sql(
+      `insert into invite_attributions (invitee_id, inviter_id, accepted_at, activated_at)
+       values ($1, $2, now(), now())`,
+      [bob, alice],
+    );
+    // Accepted but never activated. The award counts the stricter of the two.
+    await t.sql(
+      `insert into invite_attributions (invitee_id, inviter_id, accepted_at)
+       values ($1, $2, now())`,
+      [priya, alice],
+    );
+  });
+
+  it('lets an inviter count the people who joined and used it', async () => {
+    const { rows } = await t.asUser(alice, () =>
+      t.sql(
+        `select count(*)::int as n from invite_attributions
+          where inviter_id = $1 and activated_at is not null`,
+        [alice],
+      ),
+    );
+    assert.equal(rows[0].n, 1, 'the inviter cannot read their own attributions');
+  });
+
+  it('counts activation rather than acceptance, so a dormant signup is not a badge', async () => {
+    const { rows } = await t.asUser(alice, () =>
+      t.sql(`select count(*)::int as n from invite_attributions where inviter_id = $1`, [alice]),
+    );
+    // Two rows exist and only one of them is activated. The award's filter is what
+    // makes the difference, and this is the row it deliberately does not count.
+    assert.equal(rows[0].n, 2);
+  });
+
+  it('shows a stranger nothing at all', async () => {
+    const { rows } = await t.asUser(mallory, () =>
+      t.sql(`select invitee_id from invite_attributions`),
+    );
+    assert.deepEqual(rows, [], 'invite attributions leaked to somebody outside the pair');
+  });
+
+  it('lets the invitee see who they are attributed to', async () => {
+    // Both parties, by policy: the inviter needs their count and the invitee is
+    // entitled to know how they were brought in.
+    const { rows } = await t.asUser(bob, () =>
+      t.sql(`select inviter_id from invite_attributions`),
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].inviter_id, alice);
+  });
+
+  it('grants the select the client depends on, and no write', async () => {
+    const { rows } = await t.sql(`
+      select privilege_type
+        from information_schema.role_table_grants
+       where table_schema = 'public'
+         and table_name = 'invite_attributions'
+         and grantee = 'authenticated'
+       order by privilege_type
+    `);
+    assert.ok(
+      rows.some((row) => row.privilege_type === 'SELECT'),
+      'the award read would fail for every account',
+    );
+    assert.deepEqual(
+      rows.filter((row) => ['INSERT', 'UPDATE', 'DELETE'].includes(row.privilege_type)),
+      [],
+    );
+  });
+});

@@ -12,7 +12,7 @@ import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
 import { TopRanked } from '@/features/profile/TopRanked';
 import { useProfileNotes, usePublicProfile } from '@/features/profile/use-public-profile';
 import { useMyBlocks, useRelationships, useSocialWrites } from '@/features/profile/use-social';
-import { tasteMatchCopy, useTasteMatch } from '@/features/profile/use-taste-match';
+import { tasteMatchBadge, useTasteMatch } from '@/features/profile/use-taste-match';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
@@ -92,7 +92,7 @@ export default function PublicProfileScreen() {
     viewer.id,
   );
   const openComments = commentsFor ? (recent.find((e) => e.id === commentsFor) ?? null) : null;
-  const tasteCopy = tasteMatchCopy(taste.data);
+  const tasteBadge = tasteMatchBadge(taste.data);
 
   return (
     <Screen includeBottomInset edges={[]}>
@@ -156,17 +156,20 @@ export default function PublicProfileScreen() {
               seasons: profile.data.rankedSeasons,
             }}
             badge={
-              /* Directly under the handle, which is where the founder placed it.
-                 Absent entirely on the viewer's own profile, and absent while the
-                 answer is still loading rather than showing a placeholder number that
-                 then changes. */
-              !isSelf && tasteCopy ? (
+              /* Under the avatar, in the avatar's own column — the founder's final
+                 layout. It was in the name column, where it was a third thing stacked
+                 against the identity and pushed the bio down the page.
+
+                 Absent on the viewer's own profile, absent while the answer is still
+                 loading rather than showing a placeholder number that then changes,
+                 and absent when there is not enough overlap to have a number at all. */
+              !isSelf && tasteBadge ? (
                 <View style={styles.taste}>
                   <Text variant="callout" tone="action">
-                    {tasteCopy.headline}
+                    {tasteBadge.value}
                   </Text>
                   <Text variant="caption" tone="tertiary">
-                    {tasteCopy.detail}
+                    {tasteBadge.label}
                   </Text>
                 </View>
               ) : null
@@ -285,7 +288,8 @@ const VERB = {
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
-  taste: { alignItems: 'center', gap: 2, paddingTop: theme.space[1] },
+  // Centred under the photo, tight: two short lines about the person in it.
+  taste: { alignItems: 'center', gap: 0 },
   identity: {
     alignItems: 'center',
     gap: theme.space[2],

@@ -82,14 +82,45 @@ describe('the hero fade', () => {
     expect(start).toBeGreaterThanOrEqual(60);
   });
 
+  /**
+   * **The alignment, recorded rather than re-litigated.**
+   *
+   * Asked again in the founder's final pass, where the hero still read "somewhat like a
+   * cropped cutoff". The answer, checked against the arithmetic rather than adjusted by
+   * eye:
+   *
+   * `contentPosition="top center"` is what the Image carries, and expo-image does apply
+   * it — this test asserts the resolved object, not the string that was written.
+   *
+   * **For a real backdrop the vertical half is a no-op.** `cover` scales until both
+   * dimensions are filled. A 16:9 backdrop (1.78) in a 1.62 frame is wider than the
+   * frame once scaled to its height, so the crop comes off the *sides* and nothing is
+   * lost vertically at all. Top, centre and bottom would render identically. What the
+   * founder is seeing is the ~10% horizontal loss `HERO_RATIO` already documents, and
+   * no alignment value can return it: `left: '50%'` is the middle, and moving it left
+   * or right would drop one side of the frame entirely.
+   *
+   * **For the poster fallback the vertical half is load-bearing**, which is the case
+   * below. A 2:3 poster in a 1.62 frame is far taller than the frame, so `cover` takes
+   * the crop from the height — and taking it from the bottom keeps the part somebody
+   * composed. Centre or bottom would be a strictly worse choice there.
+   *
+   * So: no supported one-line change is an improvement, and the hero is left alone.
+   */
   it('anchors the crop to the top, so faces survive it', async () => {
-    // A 16:9 backdrop in a 1:1.4 frame loses a third of its height, and `cover` takes
-    // that from both edges. Publicity stills are framed with the faces high.
     const nodes = await treeOf(<TitleHero uri={BACKDROP} />);
     const positioned = nodes.filter((node) => node.props.contentPosition);
 
-    // expo-image normalises the shorthand to its object form, so the assertion is on
-    // what it resolved to rather than on the string that was written.
+    expect(positioned).toHaveLength(1);
+    expect(positioned[0]!.props.contentPosition).toEqual({ top: 0, left: '50%' });
+  });
+
+  it('anchors the poster fallback the same way, which is where it decides anything', async () => {
+    // A season borrows the series' key art and falls back to a poster where there is
+    // none. This is the case the top anchor exists for.
+    const nodes = await treeOf(<TitleHero uri={BACKDROP} blurred />);
+    const positioned = nodes.filter((node) => node.props.contentPosition);
+
     expect(positioned).toHaveLength(1);
     expect(positioned[0]!.props.contentPosition).toEqual({ top: 0, left: '50%' });
   });

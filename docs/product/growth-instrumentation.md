@@ -20,6 +20,42 @@ share-sheet opens is a number that will be believed and is wrong.
 | **Redeemed / signup attributed** | **No** | `invite_attributions.accepted_at`, column exists, no writer |
 | **Activated** | **No** | `invite_attributions.activated_at`, column exists, no writer |
 
+### The one place a stage of this funnel is now on screen
+
+**Bingd Awards has an Invite Instigator track, and as of 2026-08-18 it reads the bottom
+row of that table rather than the top one.** It counts
+
+```sql
+select count(*) from invite_attributions
+ where inviter_id = auth.uid() and activated_at is not null;
+```
+
+which is **zero for every account and will stay zero until §1's wiring lands**. That is
+the intended state, and it is the reason this section exists rather than a footnote.
+
+The award previously counted `invite_link_creations`, which made it a badge for pressing
+a button — exactly the confusion the rule at the top of this document exists to prevent,
+promoted to a reward. The founder's instruction was that the award is for bringing people
+to Bingd, so the metric was changed to the honest one immediately and the number left at
+zero, rather than the semantic being left wrong until the backend caught up.
+
+**`activated_at` rather than `accepted_at`**, of the two unwritten columns. Both mean a
+real account with reliable attribution; activation additionally means the invitee did
+something with it, which is what makes a reward farm-resistant — the reason
+`20260813001300` put the column there in the first place. Moving the award to
+`accepted_at` later is a one-line change in `use-awards.ts` and a product decision, not a
+correction.
+
+**What Beta Hardening owes this award** is nothing of its own: items 1–5 below are the
+whole dependency. The day `redeem_invite` and the activation writer exist, Invite
+Instigator starts counting with no client change, no migration and no threshold rewrite.
+Its tiers — 3, 15, 50 — are set on the assumption that they are being counted honestly.
+
+Until then the row shows `0 / 3` and `Next: Bring 3 people to Bingd`. It is deliberately
+**not** rendered as unavailable: the read succeeds, the table is real, and the answer is
+genuinely none. A row that said "could not load this one" would be claiming a failure
+that did not happen.
+
 ### What "created" actually means
 
 `create_invite_link(operation_id, media_item_id)` returns the caller's **one reusable
@@ -143,5 +179,9 @@ and "these two things are both true".
 - **A missing writer is not a missing column.** Three columns in `invite_attributions`
   have existed since `20260813001300` with nothing writing them. That is recorded here
   rather than filled in with something approximate.
-- **No public counts until there is something to promise.** Awards and any invite-derived
-  badge are backlog, not build (`docs/product/backlog.md`).
+- **No public counts until there is something to promise.** Awards shipped on 2026-08-18
+  and the invite-derived badge went with them, so this rule now has one live case rather
+  than none — and it held: the badge reads the stage that would be honest, sits at zero
+  until that stage is written, and the *measurable* stage is still exposed nowhere. What
+  the rule forbids is publishing `invite_link_creations` as though it were arrivals, and
+  nothing does.

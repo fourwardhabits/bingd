@@ -424,36 +424,47 @@ describe('the relationship controls', () => {
   });
 });
 
+/**
+ * Taste Match, which moved under the avatar in the founder's final layout.
+ *
+ * It used to sit in the name column as a headline and a detail line — "84% Taste Match"
+ * over "12 titles in common" — where it was a third thing stacked against the identity
+ * and pushed the bio down the page. It is now the avatar's own subheading, which is a
+ * column about sixty points wide: a figure and a word, and no room for a sentence.
+ */
 describe('Taste Match', () => {
-  it('shows the score and the count under the handle', async () => {
+  it('shows the percentage under the avatar', async () => {
     mockRpcResults.taste_match = [{ score: 84, common_count: 12, min_common: 5 }];
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('84% Taste Match')).toBeTruthy());
-    expect(view.getByText('12 titles in common')).toBeTruthy();
+    await waitFor(() => expect(view.getByText('84%')).toBeTruthy());
+    expect(view.getByText('Match')).toBeTruthy();
+    // The long form is gone from this surface. It reads badly under a photo and the
+    // count was never the thing anybody came for.
+    expect(view.queryByText(/Taste Match/)).toBeNull();
+    expect(view.queryByText(/titles in common/)).toBeNull();
   });
 
-  it('says there is not enough overlap rather than showing a low number', async () => {
-    // An absence of evidence is not a low score. "0% match" over three shared films
-    // would be the feature's first lie.
+  it('shows no badge at all rather than a low number, when there is not enough overlap', async () => {
+    // An absence of evidence is not a low score. "0%" over three shared films would be
+    // the feature's first lie, and the badge is a number or it is nothing.
     mockRpcResults.taste_match = [{ score: null, common_count: 3, min_common: 5 }];
 
     const view = await open();
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
 
-    await waitFor(() => expect(view.getByText('Not enough overlap yet')).toBeTruthy());
-    // The count is still shown, or the reader cannot tell whether they are one film
-    // away or five.
-    expect(view.getByText('3 titles in common — 5 needed.')).toBeTruthy();
-    expect(view.queryByText(/0% Taste Match/)).toBeNull();
+    expect(view.queryByText('Match')).toBeNull();
+    expect(view.queryByText(/%$/)).toBeNull();
   });
 
-  it('says something sensible when they have nothing in common at all', async () => {
+  it('says nothing when they have nothing in common at all', async () => {
     mockRpcResults.taste_match = [{ score: null, common_count: 0, min_common: 5 }];
 
     const view = await open();
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
 
-    await waitFor(() => expect(view.getByText('Nothing you have both ranked.')).toBeTruthy());
+    expect(view.queryByText('Match')).toBeNull();
   });
 
   it('is absent on the viewer’s own profile', async () => {
@@ -465,7 +476,8 @@ describe('Taste Match', () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
 
-    expect(view.queryByText(/Taste Match/)).toBeNull();
+    expect(view.queryByText('Match')).toBeNull();
+    expect(view.queryByText('100%')).toBeNull();
     expect(mockRpcCalls.some((call) => call.name === 'taste_match')).toBe(false);
   });
 
@@ -477,6 +489,6 @@ describe('Taste Match', () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
 
-    expect(view.queryByText(/Taste Match/)).toBeNull();
+    expect(view.queryByText('Match')).toBeNull();
   });
 });

@@ -17,9 +17,10 @@ import type { AwardFacts, WatchedTitle } from './tracks';
  *
  * **Nine reads, seven of which are counts.** `head: true` with `count: 'exact'` asks
  * PostgREST for the number and none of the rows. Two come back with rows: the watched
- * collection, because seven tracks need the genres, the language and the year of every
- * title; and the follow edges, because mutuality is a property of a *pair* and cannot be
- * counted without intersecting both directions.
+ * collection, because thirteen tracks need the genres, the language, the year — and now
+ * the name and the poster, for the drill-down — of every title; and the follow edges,
+ * because mutuality is a property of a *pair* and cannot be counted without
+ * intersecting both directions.
  *
  * **The follow embed is `follower:follower_id!inner(id)`, and the FK-column form is
  * deliberate.** PostgREST resolves an embed named for a foreign key column to that key's
@@ -33,7 +34,7 @@ import type { AwardFacts, WatchedTitle } from './tracks';
  *
  * **Row level security is the authorization and nothing here repeats it.** Every one of
  * these tables is already scoped: `user_media`, `watchlist` and `rankings` to the owner;
- * `title_recommendations` to its two parties; `invite_link_creations` to its inviter;
+ * `title_recommendations` to its two parties; `invite_attributions` to its two parties;
  * `comments` and `reactions` to what the caller may see. This asks for its own rows and
  * the database decides what that means.
  */
@@ -49,19 +50,54 @@ async function readFacts(userId: string): Promise<AwardFacts> {
     reactions,
     follows,
   ] = await Promise.all([
+    // The title, the poster and the parent series are here for the drill-down rather
+    // than for the counting. An award row that opens into the exact films behind its
+    // number cannot render one without them, and reading them per row when the sheet
+    // is tapped would be a request per title on a list that is already in memory.
     supabase
       .from('user_media')
-      .select('media_item_id, media_items(kind, genres, original_language, release_date)')
+      .select(
+        'media_item_id, media_items(kind, title, season_number, poster_path, genres, ' +
+          'original_language, release_date, parent:parent_id(title))',
+      )
       .eq('user_id', userId),
 
     supabase.from('rankings').select('media_item_id', { count: 'exact', head: true }).eq('user_id', userId),
 
     supabase.from('watchlist').select('media_item_id', { count: 'exact', head: true }).eq('user_id', userId),
 
+    /**
+     * People who joined on this reader's invitation, not links they made.
+     *
+     * **The founder's correction of 2026-08-18, and the one read here that currently
+     * returns nothing for everybody.** It used to count `invite_link_creations` — one
+     * row per press of "get my link" — and call the result Invite Instigator, which
+     * rewarded opening a share sheet. `invite_attributions` is where a real arrival is
+     * recorded, and this asks it the strictest question the schema can answer:
+     * activated, meaning the invitee reached the app and used it, on a row that names
+     * this reader as the inviter.
+     *
+     * **Nothing writes `activated_at` yet, and nothing writes `accepted_at` either.**
+     * `https://bingd.app/i/<token>` resolves to nothing, `app/i/[token].tsx` is a
+     * placeholder screen, and no function in any migration inserts an attribution — the
+     * only statement that touches the table is `block`, which voids one. So this is a
+     * true zero rather than a missing read: the table exists, the policy lets the
+     * inviter see their own rows, and there are none.
+     *
+     * That is deliberate and it is the whole point. The semantic is correct *now*, so
+     * the day the redemption path lands during Beta Hardening the award starts counting
+     * with no client change and no threshold rewrite. The alternative — leaving it on
+     * link creations until then — is a badge that says somebody brought fifteen people
+     * to Bingd when they pressed a button fifteen times.
+     *
+     * Not marked unavailable, because it is not: a read that succeeds and returns zero
+     * is a fact. See `docs/product/growth-instrumentation.md`.
+     */
     supabase
-      .from('invite_link_creations')
-      .select('id', { count: 'exact', head: true })
-      .eq('inviter_id', userId),
+      .from('invite_attributions')
+      .select('invitee_id', { count: 'exact', head: true })
+      .eq('inviter_id', userId)
+      .not('activated_at', 'is', null),
 
     supabase.from('comments').select('id', { count: 'exact', head: true }).eq('author_id', userId),
 
@@ -106,12 +142,21 @@ async function readFacts(userId: string): Promise<AwardFacts> {
 
   if (watched.error) throw watched.error;
 
+  type MediaShape = {
+    kind: string;
+    title: string | null;
+    season_number: number | null;
+    poster_path: string | null;
+    genres: string[] | null;
+    original_language: string | null;
+    release_date: string | null;
+    /** PostgREST returns an embedded row as an object and types it as an array. */
+    parent: { title: string } | { title: string }[] | null;
+  };
+
   const rows = (watched.data ?? []) as unknown as {
     media_item_id: string;
-    media_items:
-      | { kind: string; genres: string[] | null; original_language: string | null; release_date: string | null }
-      | { kind: string; genres: string[] | null; original_language: string | null; release_date: string | null }[]
-      | null;
+    media_items: MediaShape | MediaShape[] | null;
   }[];
 
   const titles: WatchedTitle[] = [];
@@ -121,9 +166,14 @@ async function readFacts(userId: string): Promise<AwardFacts> {
     // one would be counting a thing nobody watched, and PRD §10 is explicit that the
     // rankable and watchable unit is the season.
     if (!media || (media.kind !== 'movie' && media.kind !== 'season')) continue;
+    const parent = Array.isArray(media.parent) ? media.parent[0] : media.parent;
     titles.push({
       mediaItemId: row.media_item_id,
       kind: media.kind,
+      title: media.title ?? '',
+      seriesTitle: parent?.title ?? null,
+      seasonNumber: media.season_number ?? null,
+      posterPath: media.poster_path ?? null,
       genres: media.genres ?? [],
       language: media.original_language ?? null,
       year: media.release_date ? Number(media.release_date.slice(0, 4)) : null,
@@ -140,7 +190,7 @@ async function readFacts(userId: string): Promise<AwardFacts> {
    *
    * Still per-field rather than fatal. Losing Mutual Mania to a network blip should
    * not cost somebody the nineteen awards that did load; only `watched` throws, above,
-   * because seven tracks are meaningless without it.
+   * because thirteen tracks are meaningless without it.
    */
   const unavailable = new Set<keyof AwardFacts>();
   const count = (result: { count: number | null; error: unknown }, field: keyof AwardFacts) => {
@@ -155,7 +205,7 @@ async function readFacts(userId: string): Promise<AwardFacts> {
     watched: titles,
     rankedCount: count(ranked, 'rankedCount'),
     watchlistCount: count(watchlist, 'watchlistCount'),
-    invitesCreated: count(invites, 'invitesCreated'),
+    invitedSignups: count(invites, 'invitedSignups'),
     writtenCount: written,
     recommendationsSent: count(recommendations, 'recommendationsSent'),
     reactionsReceived: count(reactions, 'reactionsReceived'),

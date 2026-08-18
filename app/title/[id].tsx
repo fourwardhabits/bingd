@@ -24,7 +24,6 @@ import {
   newOperationId,
   removeFromCollection,
   setWatchlist,
-  unrank,
 } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
@@ -461,29 +460,6 @@ export default function TitleScreen() {
     invalidateAfterCollectionChange(queryClient, profile.id, title.id, {
       category: rankCategory,
     });
-
-  /**
-   * Takes the position away and leaves the title in the collection.
-   *
-   * The founder’s case is an accidental comparison: somebody ranked a film they meant to
-   * scroll past, and the only escape used to be ranking it again. This is not a deletion
-   * and does not ask to be confirmed like one — nothing is lost that a second comparison
-   * would not restore, and a confirmation dialogue in front of a reversible action is how
-   * people learn to dismiss confirmations.
-   */
-  const removeRanking = async () => {
-    setManaging(false);
-    setActionError(null);
-    const result = await unrank(title.id);
-
-    if (result.outcome === 'failed') {
-      setActionError(result.message);
-      Alert.alert('Could not remove the ranking', result.message);
-      return;
-    }
-
-    afterCollectionChange();
-  };
 
   /**
    * Removes the title from the collection, rating and all.
@@ -1020,13 +996,24 @@ export default function TitleScreen() {
         *
         * Both were unreachable before this: the only thing the Ranked chip did was
         * reopen the comparison, so an accidental ranking could be changed and never
-        * undone, and a title logged by mistake stayed logged. Neither needed a new
-        * function — `rank_unrank` and `unlog` have been granted since the first
-        * migration and nothing on the client had ever called them.
+        * undone, and a title logged by mistake stayed logged.
         *
-        * Three rows in the order of how much they destroy: change the rating, drop the
-        * position, delete the row. Only the last is confirmed, and it is confirmed by
-        * naming what goes rather than by asking whether the reader is sure.
+        * **Two rows, since the founder's final pass. There is no "remove ranking".** It
+        * was the middle row and it offered a state Bingd does not otherwise have: a
+        * title sitting in somebody's collection with no position, permanently, by
+        * choice. The product rule is that a title you keep is a title you have an
+        * opinion about — the Unranked tab is a queue to get through, not a place to
+        * park things — and an action whose whole purpose is to create a state the rest
+        * of the app treats as unfinished is an action that should not be offered.
+        *
+        * So: change the rating if it was wrong, and remove it from the collection if it
+        * should not be there. The second is the full escape hatch for an accidental log
+        * and always was; what it costs over the old middle row is a confirmation and
+        * the watch date, which is the right price for the rarer intention.
+        *
+        * **`rank_unrank` itself is untouched.** It is what `rank_rebucket` calls to move
+        * a title between bands, and it is granted, tested and load-bearing. What has
+        * gone is one row in one sheet.
         */}
       {managing ? (
         <Sheet
@@ -1042,12 +1029,6 @@ export default function TitleScreen() {
                 setManaging(false);
                 openLog();
               }}
-            />
-            <SheetRow
-              icon="remove-circle-outline"
-              label="Remove ranking"
-              value="Keeps it in your collection"
-              onPress={() => void removeRanking()}
             />
             <SheetRow
               icon="trash-outline"

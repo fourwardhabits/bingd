@@ -54,6 +54,8 @@ jest.mock('@/features/auth', () => ({
     id: 'user-1',
     username: 'sai',
     display_name: 'Sai',
+    // Present, because where the bio is drawn is one of the things this file asserts.
+    bio: 'Films, mostly.',
     avatar_path: null,
     avatarUri: null,
   }),
@@ -223,5 +225,99 @@ describe('top ranked', () => {
   it('invites a first ranking when there are none', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('Nothing ranked yet')).toBeTruthy());
+  });
+});
+
+/**
+ * **The order of the page, which the founder's final pass rearranged.**
+ *
+ * Identity, then the bio across the full width, then the stats, then the controls, then
+ * the goals and the collection below them.
+ *
+ * Two things moved. The bio left the identity column, where it had two thirds of the
+ * screen and competed with the name for it; and Share Profile and Bingd Awards moved
+ * *below* the stat row, so identity flows into the numbers that describe it without a
+ * row of buttons interrupting, and the two controls sit next to the goals and the
+ * poster wall they actually lead to.
+ *
+ * Asserted through the order the page reads in rather than through any measurement,
+ * because the sequence a reader's eye takes is what was wrong.
+ */
+describe('the shape of the page', () => {
+  /**
+   * Every string the page draws, in the order it draws them.
+   *
+   * An element whose children are all strings is joined into one entry, because
+   * `<Text>@{username}</Text>` is two children and "@sai" is one thing on the screen.
+   */
+  const textsInOrder = (node: unknown, out: string[] = []): string[] => {
+    if (typeof node === 'string') {
+      out.push(node);
+      return out;
+    }
+    if (Array.isArray(node)) {
+      for (const child of node) textsInOrder(child, out);
+      return out;
+    }
+    const children = (node as { children?: unknown[] })?.children;
+    if (!children) return out;
+    if (children.every((child) => typeof child === 'string')) {
+      out.push(children.join(''));
+      return out;
+    }
+    for (const child of children) textsInOrder(child, out);
+    return out;
+  };
+
+  /** Where each of these first appears in that order. */
+  const positions = (view: Awaited<ReturnType<typeof open>>, wanted: string[]) => {
+    const texts = textsInOrder(view.toJSON());
+    return wanted.map((want) => ({
+      want,
+      at: texts.findIndex((text) => text.includes(want)),
+    }));
+  };
+
+  it('reads identity, bio, stats, buttons, goals — in that order', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Nothing ranked yet')).toBeTruthy());
+
+    const found = positions(view, [
+      '@sai',
+      'Films, mostly.',
+      'Followers',
+      'Share Profile',
+      'Bingd Awards',
+      // Top ranked's empty state. A section heading would have been the natural marker,
+      // and `SectionHeader` upper-cases its title, so none of them is on the page as it
+      // is written.
+      'Nothing ranked yet',
+    ]);
+
+    // Present at all, first: a missing piece would otherwise sort to the front as -1.
+    for (const piece of found) expect([piece.want, piece.at >= 0]).toEqual([piece.want, true]);
+
+    const order = found.map((piece) => piece.at);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('keeps the bio out of the name column, where it used to wrap early', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('@sai')).toBeTruthy());
+
+    // The bio is drawn after the handle and before the stats, which is the full-width
+    // block between the identity header and the counts — not a third line inside the
+    // column the photo leaves.
+    const [handle, bio, followers] = positions(view, ['@sai', 'Films, mostly.', 'Followers']);
+    expect(handle!.at).toBeLessThan(bio!.at);
+    expect(bio!.at).toBeLessThan(followers!.at);
+  });
+
+  it('shows no Taste Match against yourself', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('@sai')).toBeTruthy());
+    // A 100% match with your own catalogue is a tautology, and the badge slot under the
+    // avatar is empty on this screen by construction.
+    expect(view.queryByText('Match')).toBeNull();
   });
 });

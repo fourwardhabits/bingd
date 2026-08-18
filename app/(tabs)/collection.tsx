@@ -15,6 +15,7 @@ import {
   type CollectionViewState,
 } from '@/features/collection/CollectionView';
 import {
+  filterByMedium,
   watchedItems,
   watchlistItems,
 } from '@/features/collection/watched-rows';
@@ -83,7 +84,22 @@ export default function CollectionScreen() {
       .finally(() => setNudgePrefLoaded(true));
   }, [profile.id]);
 
-  const unrankedCount = loggedSummary?.unranked.length ?? 0;
+  /**
+   * Unranked titles **in the category being looked at**, which is the fix.
+   *
+   * The founder found it on the device: Movies showed an Unranked tab because a *TV
+   * season* was unranked. `loggedSummary.unranked` spans the whole collection, and the
+   * tab was drawn from its length — so one unranked season put an Unranked tab on the
+   * Movies list, and tapping it produced an empty one, because the list underneath has
+   * always filtered by medium (`watchlistItems(…, medium)`).
+   *
+   * The tab and the list it opens now ask the same question, through the same helper.
+   * `filterByMedium` is the single definition of what belongs to which side — including
+   * that a series counts as TV — so the two cannot drift apart again.
+   */
+  const unrankedFor = (which: Medium) =>
+    filterByMedium(loggedSummary?.unranked ?? [], which).length;
+  const unrankedCount = unrankedFor(medium);
   const rankedCount = loggedSummary?.rankedCount ?? 0;
 
   const segments: { id: Segment; label: string }[] = useMemo(
@@ -97,11 +113,25 @@ export default function CollectionScreen() {
     [unrankedCount],
   );
 
-  // Ranking the last unranked title removes the tab the user may be standing
-  // on. Derived rather than corrected in an effect: the fallback then applies
-  // in the same render the tab disappears, instead of one frame later with a
-  // blank list in between.
+  // Ranking the last unranked title — or switching to a category with none — removes
+  // the tab the user may be standing on. Derived rather than corrected in an effect:
+  // the fallback applies in the same render the tab disappears, instead of one frame
+  // later with a blank list in between. Watched, always, because it is the one segment
+  // that is never absent.
   const active: Segment = segment === 'unranked' && unrankedCount === 0 ? 'watched' : segment;
+
+  /**
+   * Switching Movies and TV, and forgetting Unranked when the new side has none.
+   *
+   * The derivation above already draws the right tab, so this is about the state rather
+   * than the pixels: without it a reader who moved to Movies (no unranked, so Watched)
+   * and back to TV would silently land on Unranked again, having chosen Watched in
+   * between. Falling back deterministically means falling back for good.
+   */
+  const changeMedium = (next: Medium) => {
+    setMedium(next);
+    if (segment === 'unranked' && unrankedFor(next) === 0) setSegment('watched');
+  };
 
   const showNudge = shouldShowUnrankedNudge({
     unrankedCount,
@@ -123,7 +153,7 @@ export default function CollectionScreen() {
   return (
     <Screen>
       <AppHeader />
-      <MediumSelector value={medium} onChange={setMedium} />
+      <MediumSelector value={medium} onChange={changeMedium} />
       <SegmentedTabs options={segments} value={active} onChange={setSegment} />
       {/* Beneath the Movies/TV and Watched/Watchlist controls, which are both
           navigation: the same seam Feed and Log use, in the analogous place. The

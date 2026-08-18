@@ -6,8 +6,9 @@ Read this instead of re-exploring the repo. Full rationale, screen by screen, is
 ## State
 
 - Branch `ui/visual-pass`. `main` is untouched. Nothing has been pushed.
-- Latest: `cafd144` — 911 Jest, 681 database, deno 17, lint and typecheck clean, and
-  `expo export --platform android` succeeds.
+- Latest: the final product-tuning pass of 2026-08-18 — Jest, lint and typecheck clean,
+  and `expo export --platform android` succeeds. Counts are in the last section of this
+  file.
 - The pass this document was written for changed no schema. **Two later passes did**, and
   both are deployed to bingd-nonprod only: `20260817001300` (friend recommendations) and
   `20260818000100` (removal takes its activity, and the Bingd threshold at ten). Bingd
@@ -203,11 +204,11 @@ build is needed for any of this.
   checklist and it is closed.
 - It should **not** reappear on your Watchlist. Removal is not a decision to watch it
   again.
-- **Known and deliberate:** *Remove ranking* is the other row and behaves differently. It
-  takes the position away, leaves the title in Watched, and **leaves the old activity
-  saying "ranked"**. That is debt item 18 and a product decision, not an oversight —
-  `rank_rebucket` calls the same function, so closing it there would delete reactions
-  every time somebody moved a title between bands.
+- **Superseded on 2026-08-18 by the final tuning pass.** *Remove ranking* was the other
+  row and no longer exists; the sheet has two rows. Debt item 18 — that unranking left
+  the old activity saying "ranked" — is closed by removal rather than by a fix, because
+  the state it created is one the product does not want. `rank_unrank` itself is
+  untouched and `rank_rebucket` still calls it.
 
 ### Title scores
 
@@ -277,3 +278,158 @@ sheet drew the first ten families and stopped. Each is one line in
 The thirty that **are** drawn: Movie Muncher, Season Snacker, Invite Instigator, Queue
 Dragon, Rating Rascal, Comment Gremlin, Hype Courier, Scream Snack, LOL Mode, Softie
 Hours — three tiers each.
+
+---
+
+## Founder smoke checklist — 2026-08-18, final product-tuning pass
+
+**Client and config only. No migration, no adapter change, nothing deployed, nothing
+pushed.** No native module changed either, so a JS reload is enough — no new development
+build is needed for any of this.
+
+Verified before stopping: `tsc` clean, `eslint` clean, Jest green, and
+`expo export --platform android` succeeds. The database and Deno suites were not affected
+and were not re-run for this pass; `npm run test:db` was last green at `cafd144` and no
+SQL changed since.
+
+### Awards — the numbers are long-term now
+
+The first set was walkable in an evening. These are set so Bronze is already earned,
+Silver reads as an enthusiast, and Gold is rare and possibly multi-year. **They are not
+tuned to the seeded account** — expect to lose most of the badges you had.
+
+| track | bronze | silver | gold |
+|---|---|---|---|
+| Movie Muncher | 50 | 200 | 1,000 |
+| Season Snacker | 15 | 60 | 250 |
+| Invite Instigator | 3 | 15 | 50 |
+| Queue Dragon | 25 | 100 | 300 |
+| Rating Rascal | 100 | 500 | 2,000 |
+| Comment Gremlin | 20 | 100 | 500 |
+| Hype Courier | 25 | 100 | 500 |
+| Scream Snack · LOL Mode · Softie Hours · Space Brain · Boom Club | 25 | 100 | 300 |
+| Toon Bloom | 20 | 75 | 250 |
+| Truth Worm | 15 | 50 | 150 |
+| Passport Mode | 15 | 75 | 250 |
+| Time Hopper | 25 | 100 | 300 |
+| Genre Gremlin | 8 | 14 | 16 |
+| Two-Screen Life | 30 | 100 | 300 |
+| Heart Magnet | 50 | 250 | 1,000 |
+| Mutual Mania | 5 | 25 | 100 |
+
+Every one of them is written out in `awards.test.ts` as well as in `tracks.ts`, so a
+number cannot move without somebody moving it in two places on purpose.
+
+**Genre Gremlin's top tier was audited rather than picked.** `genres.ts` knows eighteen
+genres and all eighteen do appear in the seeded catalogue — but Documentary is carried by
+two titles, Animation by eight and Western by fourteen out of 1,814 countable rows.
+Sixteen is the largest tier that lets a reader miss any two, so the award never becomes a
+hunt for one specific documentary.
+
+**Two-Screen Life is capped contribution, not the weaker side.** Each side counts up to
+half the threshold and the two are added: Bronze is fifteen films and fifteen seasons, and
+fifteen films with seven seasons reads `22 / 30`. A hundred films and no television reads
+`15 / 30` and stays there, which is the point of the award. The old `min(movies, seasons)`
+needed a sentence explaining itself; this one says `Next: Watch 15 movies and 15 TV
+seasons`.
+
+### Awards — Invite Instigator counts people now
+
+**This is the one thing on the sheet that will read as broken and is not.** It counts
+people who joined Bingd on your invitation and used it — `invite_attributions` where
+`activated_at` is set — instead of the number of times you asked for your link.
+
+Nothing writes that column yet: there is no link resolver, `app/i/[token].tsx` is a
+placeholder, and no migration inserts an attribution. So the row sits at `0 / 3` for
+everybody, including you, and it should.
+
+It is deliberately **not** shown as "could not load this one". The read succeeds and the
+answer is genuinely none; claiming a failure that did not happen would be its own lie. The
+full dependency is written up in `docs/product/growth-instrumentation.md` §1 — five named
+pieces, all Beta Hardening — and when they land this award starts counting with no client
+change.
+
+### Awards — order, copy and the drill-down
+
+- **Three rows are pinned to the top and never move**, whether earned or not: Movie
+  Muncher, Season Snacker, Invite Instigator. They are what Bingd is for. Log a thousand
+  films and they are still first; log nothing and they are still first.
+- After them: everything earned, then everything locked, and inside each of those a fixed
+  grouping — activity, then genres, then exploration. **The list should not rearrange
+  itself as you use the app.** It moves once per tier, when something is earned. If you
+  see rows swapping places for no reason, that is a bug.
+- **The summary line at the top is gone.** The sheet opens with `Bingd Awards` and then
+  rows.
+- **No row has an explanatory paragraph.** Check Queue Dragon, Invite Instigator and
+  Two-Screen Life especially — all three used to have one.
+- At the top tier a row reads `Gold earned` over `Watched 1,000 movies`, not one long line.
+- **Tap a row whose number is made of titles** — Movie Muncher, Season Snacker, any genre,
+  Passport Mode, Time Hopper, Two-Screen Life. It opens a Goals-style sheet listing the
+  exact titles that counted, poster and year, each leading to its page. Seasons should read
+  `The Last of Us, S1`.
+- **Rows that are not made of titles should not be tappable at all**: Invite Instigator,
+  Heart Magnet, Mutual Mania, Hype Courier, Rating Rascal, Comment Gremlin, Queue Dragon,
+  Genre Gremlin. Nothing new was built to make them tappable, deliberately — a contributor
+  list for reactions or follows is a social analytics feature and this pass is not that.
+
+### Profile
+
+- `[avatar]` then name and `@handle` beside it. **The bio is now a full-width block below
+  that header**, not a third line squeezed into the name column. Try it with a two-line bio.
+- On somebody else's profile, Taste Match is **under the avatar** as `84%` over `Match`.
+  Where there is not enough overlap it is **absent** rather than showing a sentence — that
+  is a deliberate change and the one thing this pass removed rather than moved.
+- Order down the page: identity, bio, stats, **Share Profile / Bingd Awards**, Goals, Top
+  ranked. The buttons moved below the stat row.
+- Unchanged: gear left of bell, bell where it always is, Share outlined, Awards filled
+  Maroon.
+
+### Collection — the Unranked tab is per category
+
+The founder's device bug: Movies showed an Unranked tab because an unranked *TV season*
+existed, and tapping it gave an empty list.
+
+- Leave one film unranked. **Movies** should show Unranked; **TV seasons** should not.
+- Leave one season unranked. The reverse.
+- Stand on Unranked and switch category to a side with none: you should land on **Watched**,
+  and switching back should leave you on Watched rather than quietly returning you to a tab
+  you were moved off.
+- Both sides unranked: switching keeps you on Unranked, because the tab did not disappear.
+
+### Title page
+
+- **Tap Ranked. Two rows now: change your rating, remove from collection.** *Remove
+  ranking* is gone. If a title is in your collection Bingd expects it to have a position;
+  the escape hatch for an accidental log is removal, which still names everything it takes.
+  `rank_unrank` is untouched internally and `rank_rebucket` still uses it.
+- **Scores is one row of two columns**: Following on the left, Bingd on the right, circle
+  above the label. Same thresholds as before — Following lights on one rating from somebody
+  you follow, Bingd waits for ten — same grey circle, same `Not enough ratings`, still no
+  countdown. On a narrow device or with type size turned up it falls back to the two
+  stacked rows rather than cramming.
+- Your own score is still only in the hero.
+
+### Hero — inspected, unchanged
+
+Asked again and answered with arithmetic rather than by eye. `contentPosition="top center"`
+is what the Image carries and expo-image does apply it.
+
+For a real backdrop **the vertical half does nothing**: a 16:9 image in the 1.62 frame is
+scaled by height and cropped on the *sides*, so top, centre and bottom render identically.
+The "cropped cutoff" impression is the ~10% horizontal loss `HERO_RATIO` already documents,
+and no alignment value returns it — `left: '50%'` is already the middle.
+
+For the blurred poster fallback the vertical anchor **is** load-bearing, and top is the
+right choice there. So no supported one-line change is an improvement and the hero was left
+alone. Both cases are now pinned by tests in `TitleHero.test.tsx`.
+
+### Known, unchanged, and worth knowing
+
+- **Seasons carry no genres and no original language, ever.** `tmdb_upsert_seasons` writes
+  neither column and the seed has neither. So the seven genre tracks, Passport Mode and
+  Genre Gremlin are effectively movie-only. Nothing is wrong on screen; it is a catalogue
+  limit, and it belongs on the Beta Hardening list rather than in a threshold.
+- The seeded catalogue is 382 movies and 1,432 seasons, so several top tiers are beyond
+  what exists today. That is intended — the catalogue grows through the TMDB adapter — but
+  it is why nobody will be walking Movie Muncher Gold on the alpha.
+- The ten emoji badge families are still emoji. Nothing about that changed.

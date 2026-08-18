@@ -312,38 +312,42 @@ describe('a title this user has ranked', () => {
   });
 
   /**
-   * The way out of a ranking, which did not exist before this pass.
+   * The way out of a ranking, which did not exist before the pass that added this
+   * sheet — `rank_unrank` and `unlog` were granted from the first migration and nothing
+   * on the client had ever called either.
    *
-   * `rank_unrank` and `unlog` have been granted since the first migration and nothing
-   * on the client had ever called either, so an accidental comparison could be changed
-   * and never undone. Three rows, and only the destructive one is confirmed.
+   * **Two rows now, not three.** The founder's final pass removed "Remove ranking". It
+   * offered a state Bingd does not otherwise have — a title kept in the collection with
+   * no position, permanently, by choice — and the product rule is that a title you keep
+   * is one you have an opinion about. Changing the rating covers a wrong score;
+   * removing from the collection covers an accidental log, which is what the middle row
+   * was really being used for.
    */
-  it('offers a way to unrank and a way to remove, behind that control', async () => {
+  it('offers exactly two rows: change the rating, or remove it', async () => {
     const view = await open();
     await waitFor(() =>
       expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
     );
     await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
 
-    await waitFor(() => expect(view.getByLabelText('Remove ranking')).toBeTruthy());
-    expect(view.getByLabelText('Change your rating')).toBeTruthy();
+    await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
     expect(view.getByLabelText('Remove from collection')).toBeTruthy();
   });
 
-  it('takes the position away without touching the collection', async () => {
+  it('no longer offers to keep a title in the collection without a ranking', async () => {
     const view = await open();
     await waitFor(() =>
       expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
     );
     await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
-    await waitFor(() => expect(view.getByLabelText('Remove ranking')).toBeTruthy());
-    await fireEvent.press(view.getByLabelText('Remove ranking'));
+    await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
 
-    // The ranking, and nothing else. `unlog` is what the row below it calls.
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('rank_unrank', { p_media_item_id: 'film-1' }),
-    );
-    expect(mockRpc).not.toHaveBeenCalledWith('unlog', expect.anything());
+    expect(view.queryByLabelText('Remove ranking')).toBeNull();
+    expect(view.queryByText('Keeps it in your collection')).toBeNull();
+    // And nothing on the screen can reach the function on its own any more. It is still
+    // granted and still load-bearing — `rank_rebucket` calls it to move a title between
+    // bands — but no user-facing control invokes it directly.
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
   });
 
   it('puts the watch date where it answers "have I seen this"', async () => {

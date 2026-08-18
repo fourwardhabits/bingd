@@ -49,7 +49,30 @@ export function useTasteMatch(subjectId: string | null, viewerId: string) {
 }
 
 /**
- * The two lines the profile prints, or null when there is nothing to say.
+ * The two short lines that sit under the avatar, or null when there is nothing to say.
+ *
+ * **`84%` over `Match`, and nothing when there is no number.** The founder's final
+ * layout puts this in the avatar's column, beside the name rather than inside it, and
+ * that column is about sixty points wide — room for a figure and a word, and not for a
+ * sentence. `tasteMatchCopy` below still has the long form and is what a wider surface
+ * would use.
+ *
+ * The insufficient-overlap case returns null here rather than a placeholder. It is the
+ * one decision in this pass that removes something a reader could previously see, and
+ * the alternative was worse: "Not enough overlap yet" under a 64pt photo wraps to three
+ * lines and pushes the whole page down for a state that is not actionable. What must
+ * never happen — printing `0%` when the app has no score — is what returning null
+ * guarantees.
+ */
+export function tasteMatchBadge(
+  match: TasteMatch | undefined,
+): { value: string; label: string } | null {
+  if (!match || match.score === null) return null;
+  return { value: `${match.score}%`, label: 'Match' };
+}
+
+/**
+ * The two lines the long form prints, or null when there is nothing to say.
  *
  * Separated from the component so the copy rules are testable without a render, and
  * because the "not enough yet" case has a shape that is easy to get wrong: it must

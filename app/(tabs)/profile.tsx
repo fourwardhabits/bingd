@@ -227,7 +227,16 @@ export default function ProfileScreen() {
       />
 
       {awardsOpen ? (
-        <AwardsSheet userId={profile.id} onClose={() => setAwardsOpen(false)} />
+        <AwardsSheet
+          userId={profile.id}
+          // The same drill-down the goals bars have: a row whose number is made of
+          // titles opens into exactly those titles, and each one leads to its page.
+          onPressTitle={(id) => {
+            setAwardsOpen(false);
+            router.push(`/title/${id}`);
+          }}
+          onClose={() => setAwardsOpen(false)}
+        />
       ) : null}
     </Screen>
   );
