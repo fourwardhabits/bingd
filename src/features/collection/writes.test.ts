@@ -309,6 +309,67 @@ describe('removeFromCollection', () => {
     expect(result).toEqual({ outcome: 'failed', message: 'Your session expired. Sign in again.' });
   });
 
+  /**
+   * **Removal is two writes, so it has a middle**, and the middle is the case independent
+   * review 21c found. `rank_unrank` succeeds, the connection drops, `unlog` fails: the
+   * ranking is gone and the title is still logged.
+   *
+   * The caller treats `failed` as "nothing happened" and skips invalidation, which is
+   * right for one write and wrong for this one — the ranked list, the score denominators
+   * and Rating Rascal have all moved. So the outcome says so.
+   */
+  it('says the ranking went even when the delete that followed it failed', async () => {
+    mockRpc
+      .mockResolvedValueOnce({ data: { status: 'ok' }, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: 'network down' } });
+
+    const result = await removeFromCollection({ operationId, mediaItemId, wasRanked: true });
+
+    expect(mockRpc.mock.calls.map((call) => call[0])).toEqual(['rank_unrank', 'unlog']);
+    expect(result).toMatchObject({ outcome: 'failed', changed: true });
+  });
+
+  it('does not claim anything changed when the server refused the first write', async () => {
+    // A SQLSTATE is the server answering, and a server that answered no did not commit.
+    mockRpc.mockResolvedValue({ data: null, error: { code: '28000', message: 'no session' } });
+    const result = await removeFromCollection({ operationId, mediaItemId, wasRanked: true });
+
+    expect(result).not.toHaveProperty('changed');
+  });
+
+  /**
+   * **A request with no SQLSTATE was never answered**, which is not the same as being
+   * answered no.
+   *
+   * `changed` as first written meant "acknowledged success", and independent review 21d
+   * found the hole: `rank_unrank` can commit and lose its reply, or `unlog` can, and
+   * either comes back as a plain failure. The client cannot tell that apart from a
+   * refusal — so the only safe reading is that it may have landed, and the caller
+   * refreshes on the way out of the error.
+   */
+  it('says a title may have gone when the delete was never answered', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: 'network down' } });
+    const result = await removeFromCollection({ operationId, mediaItemId, wasRanked: false });
+
+    expect(result).toMatchObject({ outcome: 'failed', changed: true });
+  });
+
+  it('says the same when the unranking was never answered', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: 'network down' } });
+    const result = await removeFromCollection({ operationId, mediaItemId, wasRanked: true });
+
+    expect(mockRpc.mock.calls.map((call) => call[0])).toEqual(['rank_unrank']);
+    expect(result).toMatchObject({ outcome: 'failed', changed: true });
+  });
+
+  it('leaves a refused write alone, so an ordinary failure does not refetch', async () => {
+    // The whole point of the distinction: 42501 is the server declining, every time.
+    mockRpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'suspended' } });
+    const result = await removeFromCollection({ operationId, mediaItemId, wasRanked: false });
+
+    expect(result).not.toHaveProperty('changed');
+  });
+
   it('reports a replayed removal as already applied rather than as a failure', async () => {
     mockRpc.mockResolvedValue({ data: { status: 'already_applied' }, error: null });
 

@@ -70,7 +70,9 @@ export function useSentToYou(viewerId: string) {
     queryKey: ['sent-to-you', viewerId],
     staleTime: 30_000,
     queryFn: async (): Promise<SentRecommendation[]> => {
-      const { data, error } = await supabase.rpc('recommendations_to_me', { p_limit: 100 });
+      const { data, error } = await supabase.rpc('recommendations_to_me', {
+        p_limit: SENT_LIMIT,
+      });
       if (error) throw error;
 
       const rows = (data ?? []) as Row[];
@@ -152,9 +154,36 @@ async function inheritedMetadata(
   return resolved;
 }
 
+/**
+ * As many as this list can hold, which is as many as the server will return.
+ *
+ * `recommendations_to_me` clamps its `p_limit` to 200 (`20260817001300`), so this is the
+ * ceiling and not a preference. It was 100, which is half of what was available for no
+ * reason anybody wrote down.
+ */
+export const SENT_LIMIT = 200;
+
 /** How many have not been opened, which is what the tab's dot carries. */
 export const unopenedCount = (rows: SentRecommendation[] | undefined) =>
   (rows ?? []).filter((row) => !row.openedAt).length;
+
+/**
+ * Whether that number is the whole truth or a floor.
+ *
+ * **A capped list may not be presented as a total**, which is the rule this whole pass is
+ * about, and this is the one place in the app where the cap is the server's rather than
+ * PostgREST's — so it cannot be paged away without a migration. What it can be is honest.
+ *
+ * The server orders unopened first, so the unopened rows are a prefix of what arrives.
+ * That makes the test exact rather than defensive: if the prefix does not fill the page,
+ * every unopened recommendation is in hand and the count is the count. Only when the
+ * whole page is unopened can there be more, and only then does the chip say "200+".
+ *
+ * Independent review 21c found this one, after the first sweep looked only at PostgREST's
+ * cap and not at a limit the app asks for itself.
+ */
+export const unopenedIsAtLeast = (rows: SentRecommendation[] | undefined) =>
+  (rows ?? []).length >= SENT_LIMIT && unopenedCount(rows) >= SENT_LIMIT;
 
 /**
  * A recommendation as the shared filter sheet sees it.

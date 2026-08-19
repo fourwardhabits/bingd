@@ -21,13 +21,14 @@ import { useForYou, type ForYouItem, type Medium } from '@/features/recommendati
 import {
   asCollectionItem as recommendationAsItem,
   unopenedCount,
+  unopenedIsAtLeast,
   useMarkRecommendationOpened,
   useSentToYou,
   type SentRecommendation,
 } from '@/features/recommendations/use-sent-to-you';
 import { posterUri } from '@/lib/images';
 import { languageName } from '@/lib/language';
-import { queryKeys } from '@/lib/query';
+import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
@@ -114,9 +115,8 @@ export default function RecommendationsScreen() {
       return;
     }
 
-    await queryClient.invalidateQueries({
-      queryKey: [...queryKeys.collection(profile.id), 'watchlist'],
-    });
+    // The watchlist and Queue Dragon, which counts it (`collection/invalidate.ts`).
+    invalidateAfterWatchlistChange(queryClient, profile.id);
     // The slate carries `saved` on each item, so it has to be refetched to redraw the
     // bookmark. Keyed by prefix: both media, and whatever anchors are current.
     await queryClient.invalidateQueries({ queryKey: ['for-you', profile.id] });
@@ -168,6 +168,10 @@ export default function RecommendationsScreen() {
   };
 
   const unopened = unopenedCount(sentRows);
+  // The server caps this list at 200 and orders unopened first, so a full page of
+  // unopened rows means there may be more (`use-sent-to-you.ts`). The chip says so
+  // rather than presenting a cap as a total. Independent review 21c.
+  const atLeast = unopenedIsAtLeast(sentRows);
   const activeCount = activeFilterCount(filters);
 
   return (
@@ -196,8 +200,12 @@ export default function RecommendationsScreen() {
       <View style={styles.filterRow}>
         <FilterChip
           icon={sentOnly ? 'mail-open' : 'mail-outline'}
-          label={unopened > 0 ? `Sent to you · ${unopened}` : 'Sent to you'}
-          accessibilityLabel={unopened > 0 ? `Sent to you, ${unopened} unopened` : 'Sent to you'}
+          label={unopened > 0 ? `Sent to you · ${unopened}${atLeast ? '+' : ''}` : 'Sent to you'}
+          accessibilityLabel={
+            unopened > 0
+              ? `Sent to you, ${atLeast ? 'at least ' : ''}${unopened} unopened`
+              : 'Sent to you'
+          }
           selected={sentOnly}
           onPress={() => setSentOnly((on) => !on)}
         />

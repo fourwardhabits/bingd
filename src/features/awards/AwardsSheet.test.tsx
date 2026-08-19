@@ -14,56 +14,75 @@ import { AwardsSheet } from './AwardsSheet';
  * is made of.
  */
 
-/** Rows per table, keyed by the table the query builder resolved to. */
-const mockTables: Record<string, unknown[]> = {};
-/** Reads that fail. */
-const mockBroken = new Set<string>();
-/** Every table this render actually asked for, so a read can be asserted by name. */
-const mockAsked: string[] = [];
+/**
+ * A PostgREST that applies what the reads say (`test-utils/postgrest.ts`).
+ *
+ * **The filters are honoured, and that is not decoration.** These reads page to
+ * exhaustion by keyset, so a stub that ignored `gt` and `limit` and handed back the
+ * whole seeded array every time would make the loop look like it worked while testing
+ * nothing — and would hide the opposite bug, a loop that never ends because every page
+ * looks full. `follows` is read twice, once per direction, and only a mock that applies
+ * `eq` can tell the two apart at all.
+ */
+jest.mock('@/lib/supabase', () => {
+  // Everything is inside the factory because `jest.mock` is hoisted above the imports
+  // *and* above this file's own `const`s — a table object declared out here would be
+  // captured as `undefined`.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createPostgrest } = require('@/test-utils/postgrest');
+  const client = createPostgrest();
+  (globalThis as { __pg?: unknown }).__pg = client;
+  return { supabase: { from: client.from }, startSessionRefresh: () => () => {} };
+});
 
-/** How many requests each table was asked for, so paging can be asserted. */
-const mockRequests: Record<string, number> = {};
+const pg = () =>
+  (globalThis as unknown as { __pg: import('@/test-utils/postgrest').Postgrest }).__pg;
+
+/** Rows per table, keyed by the table the query builder resolved to. */
+const mockTables = pg().tables;
+
+const OWNER = 'me';
 
 /**
- * A `PostgrestFilterBuilder` in miniature.
+ * The columns each read filters on, stamped onto whatever a test seeds.
  *
- * **It honours `range`, and that is not decoration.** PostgREST caps an unbounded select
- * at 1,000 rows and says so only in a header supabase-js discards, so `readFacts` pages
- * every fact to exhaustion. A mock that ignored `range` and returned the whole array on
- * every call would make that loop look like it worked while testing nothing — and would
- * hide the opposite bug, a loop that never terminates because each page looks full.
+ * They are here rather than in every literal because they are not what any test is
+ * about — but they cannot be *skipped*, because a stand-in that ignored `eq(user_id)`
+ * would answer a scoped read and an unscoped one identically, which is the shape of
+ * half the defects this suite exists for. Seeded rows spell out only what their test
+ * cares about; this makes them rows the shipped query would actually match.
  */
-jest.mock('@/lib/supabase', () => ({
-  supabase: {
-    from: (table: string) => {
-      mockAsked.push(table);
-      let slice: { from: number; to: number } | null = null;
-      const chain: Record<string, unknown> = {
-        select: () => chain,
-        eq: () => chain,
-        neq: () => chain,
-        not: () => chain,
-        or: () => chain,
-        order: () => chain,
-        range: (from: number, to: number) => {
-          slice = { from, to };
-          return chain;
-        },
-        then: (resolve: (value: unknown) => unknown) => {
-          mockRequests[table] = (mockRequests[table] ?? 0) + 1;
-          if (mockBroken.has(table)) {
-            return Promise.resolve({ data: null, error: { message: 'nope' } }).then(resolve);
-          }
-          const all = mockTables[table] ?? [];
-          const data = slice ? all.slice(slice.from, slice.to + 1) : all;
-          return Promise.resolve({ data, error: null }).then(resolve);
-        },
-      };
-      return chain;
-    },
-  },
-  startSessionRefresh: () => () => {},
-}));
+const SCOPE: Record<string, (row: Record<string, unknown>, index: number) => unknown> = {
+  user_media: (row) => ({ user_id: OWNER, ...row }),
+  rankings: (row) => ({ user_id: OWNER, ...row }),
+  watchlist: (row, i) => ({
+    user_id: OWNER,
+    created_at: `2026-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+    ...row,
+  }),
+  invite_attributions: (row) => ({ inviter_id: OWNER, activated_at: null, ...row }),
+  comments: (row) => ({ author_id: OWNER, ...row }),
+  title_recommendations: (row) => ({ sender_id: OWNER, ...row }),
+  // A reaction is keyed by the pair, and two reactions on one event come from two
+  // people — which is also what keeps the composite cursor's keys distinct.
+  reactions: (row, i) => ({
+    user_id: `reactor-${i}`,
+    ...row,
+    feed_events: { actor_id: OWNER, ...((row.feed_events as object) ?? {}) },
+  }),
+  follows: (row) => ({ state: 'approved', ...row }),
+};
+
+const seed = (table: string, rows: unknown[]) => {
+  const stamp = SCOPE[table] ?? ((row: unknown) => row);
+  mockTables[table] = rows.map((row, i) => stamp(row as Record<string, unknown>, i));
+};
+/** Reads that fail. */
+const mockBroken = () => pg().broken;
+/** Every table this render actually asked for, so a read can be asserted by name. */
+const mockAsked = () => pg().reads.map((read) => read.table);
+/** How many requests each table was asked for, so paging can be asserted. */
+const mockRequests = () => pg().requests;
 
 const media = (over: Record<string, unknown> = {}) => ({
   kind: 'movie',
@@ -85,8 +104,18 @@ const watched = (id: string, over: Record<string, unknown> = {}) => ({
   media_items: media(over),
 });
 
+/**
+ * `n` films. The ids are zero-padded because the read is ordered by them.
+ *
+ * `m10` sorts before `m2`, so unpadded ids would put Film 10 ahead of Film 2 in every
+ * breakdown and make the pagination assertions below about nothing in particular. Real
+ * ids are UUIDs, whose text order is their byte order; padding is how a readable id
+ * behaves the same way.
+ */
 const movies = (n: number, over: Record<string, unknown> = {}) =>
-  Array.from({ length: n }, (_, i) => watched(`m${i}`, { title: `Film ${i}`, ...over }));
+  Array.from({ length: n }, (_, i) =>
+    watched(`m${String(i).padStart(4, '0')}`, { title: `Film ${i}`, ...over }),
+  );
 
 const profile = (username: string, name = username) => ({
   id: `id-${username}`,
@@ -97,9 +126,10 @@ const profile = (username: string, name = username) => ({
 
 beforeEach(() => {
   for (const key of Object.keys(mockTables)) delete mockTables[key];
-  for (const key of Object.keys(mockRequests)) delete mockRequests[key];
-  mockBroken.clear();
-  mockAsked.length = 0;
+  for (const key of Object.keys(pg().requests)) delete pg().requests[key];
+  pg().reads.length = 0;
+  pg().broken.clear();
+  pg().between = () => {};
 });
 
 /**
@@ -134,22 +164,22 @@ describe('the sheet', () => {
   });
 
   it('opens with its own name and no scoreline above the rows', async () => {
-    mockTables.user_media = movies(60);
+    seed('user_media', movies(60));
     await open();
     expect(screen.getByText('Bingd Awards')).toBeTruthy();
     expect(screen.queryByText(/awards earned/)).toBeNull();
   });
 
   it('shows the goal still to reach, with the count beside it', async () => {
-    mockTables.user_media = movies(7);
+    seed('user_media', movies(7));
     await open();
     expect(screen.getByText('Next: Watch 50 movies')).toBeTruthy();
     expect(count('7 / 50')).toBeTruthy();
   });
 
   it('loses one award to a failed read rather than the whole sheet, and says which', async () => {
-    mockTables.user_media = movies(60);
-    mockBroken.add('follows');
+    seed('user_media', movies(60));
+    mockBroken().add('follows');
     await open();
 
     expect(screen.getByLabelText('Mutual Mania. Could not load this one')).toBeTruthy();
@@ -158,10 +188,66 @@ describe('the sheet', () => {
     expect(screen.getByLabelText(/^Movie Muncher\. Bronze earned/)).toBeTruthy();
   });
 
-  it('gives up on the sheet when the collection itself cannot be read', async () => {
-    mockBroken.add('user_media');
+  /**
+   * A collection that cannot be read costs the awards made of it, and no others.
+   *
+   * It used to reject the whole sheet, on the reasoning that thirteen tracks are
+   * meaningless without the collection. Thirteen are — and seven are not, so refusing
+   * those seven was the same wrong answer in the other direction. Review 21b's nit, and
+   * it matters most in exactly the case the ceiling was built for: a collection too
+   * large to read is no reason to withhold Mutual Mania.
+   */
+  it('costs the awards made of the collection, and keeps the ones that are not', async () => {
+    mockBroken().add('user_media');
+    seed('follows', [
+      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
+      { follower_id: 'id-ada', followee_id: 'me', follower: profile('ada', 'Ada'), followee: profile('me') },
+    ]);
+    await open();
+
+    expect(screen.getByLabelText('Movie Muncher. Could not load this one')).toBeTruthy();
+    expect(screen.queryByText('Could not load your awards')).toBeNull();
+    // Mutual Mania has nothing to do with the collection and still knows its number.
+    expect(count('1 / 5')).toBeTruthy();
+  });
+
+  it('still gives up on the whole sheet when nothing at all can be read', async () => {
+    // Per-field degradation is right for one failed read and wrong for a device with no
+    // signal: twenty rows of dashes is a worse sentence than one that says so and offers
+    // Try again.
+    for (const table of [
+      'user_media',
+      'rankings',
+      'watchlist',
+      'invite_attributions',
+      'comments',
+      'title_recommendations',
+      'reactions',
+      'follows',
+    ]) {
+      mockBroken().add(table);
+    }
+
     await renderWithProviders(<AwardsSheet userId="me" onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('Could not load your awards')).toBeTruthy());
+  });
+
+  it('takes the written count with the collection, since public notes live on it', async () => {
+    // Comment Gremlin counts comments *and* public notes, and the notes are rows on
+    // `user_media`. Falling back to the comments alone would be a confident undercount,
+    // which is the failure the whole unavailable state exists to prevent.
+    mockBroken().add('user_media');
+    seed('comments', [
+      {
+        id: 'c1',
+        created_at: '2026-01-02T00:00:00Z',
+        feed_event_id: 'e1',
+        feed_events: { media_item_id: 'b', media_items: media({ title: 'Heat' }) },
+      },
+    ]);
+    await open();
+
+    expect(screen.getByLabelText('Comment Gremlin. Could not load this one')).toBeTruthy();
   });
 });
 
@@ -189,7 +275,7 @@ describe('what a row is called', () => {
   const FOURTEEN = [...EIGHT, 'History', 'Horror', 'Music', 'Mystery', 'Romance', 'Thriller'];
 
   it('shows the family name and the requirement while locked', async () => {
-    mockTables.user_media = genres(EIGHT.slice(0, 6));
+    seed('user_media', genres(EIGHT.slice(0, 6)));
     await open();
     expect(screen.getByText('Genre Gremlin')).toBeTruthy();
     expect(screen.getByText('Next: Watch 8 different genres')).toBeTruthy();
@@ -199,7 +285,7 @@ describe('what a row is called', () => {
   });
 
   it('becomes the tier name once it is earned, with no separate earned line', async () => {
-    mockTables.user_media = genres(EIGHT);
+    seed('user_media', genres(EIGHT));
     await open();
     expect(screen.getByText('Dabbler')).toBeTruthy();
     expect(screen.getByText('Next: Watch 14 different genres')).toBeTruthy();
@@ -209,7 +295,7 @@ describe('what a row is called', () => {
   });
 
   it('advances to the second tier name', async () => {
-    mockTables.user_media = genres(FOURTEEN);
+    seed('user_media', genres(FOURTEEN));
     await open();
     expect(screen.getByText('Mixer')).toBeTruthy();
     expect(screen.queryByText('Genre Gremlin')).toBeNull();
@@ -217,7 +303,7 @@ describe('what a row is called', () => {
   });
 
   it('keeps the family name on a generic Bronze/Silver/Gold track', async () => {
-    mockTables.user_media = movies(60);
+    seed('user_media', movies(60));
     await open();
     // Earned at Bronze and still called Movie Muncher. A row headed "Bronze" would say
     // nothing about what was done.
@@ -241,7 +327,7 @@ describe('what a row is called', () => {
  */
 describe('every award is explainable', () => {
   it('makes all twenty rows tappable', async () => {
-    mockTables.user_media = movies(3);
+    seed('user_media', movies(3));
     await open({ onPressTitle: () => {} });
     const awardRows = screen
       .getAllByRole('button')
@@ -251,14 +337,14 @@ describe('every award is explainable', () => {
 
   it('opens even where there is no navigation to offer', async () => {
     // The breakdown is worth showing on its own; only the links inside it need a route.
-    mockTables.user_media = movies(3);
+    seed('user_media', movies(3));
     await open();
     await drillInto('Movie Muncher');
     expect(screen.getByText(/3 \/ 50/)).toBeTruthy();
   });
 
   it('leaves a row whose number could not be read unpressable', async () => {
-    mockBroken.add('follows');
+    mockBroken().add('follows');
     await open({ onPressTitle: () => {} });
     expect(
       screen.getByLabelText('Mutual Mania. Could not load this one').props.accessibilityRole,
@@ -296,30 +382,243 @@ describe('every award is explainable', () => {
 describe('a collection past the page size', () => {
   it('counts every title rather than the first page of them', async () => {
     // 1,200 films: past the 1,000-row cap, and past Movie Muncher's gold tier.
-    mockTables.user_media = movies(1200);
+    seed('user_media', movies(1200));
     await open();
 
     // Every tier earned, so the label is the bare total rather than a fraction.
     expect(count('1,200')).toBeTruthy();
     // Two requests, not one: the first page came back full, so there had to be a second.
-    expect(mockRequests.user_media).toBe(2);
+    expect(mockRequests().user_media).toBe(2);
   });
 
   it('asks once more when the total lands exactly on a page boundary', async () => {
-    mockTables.user_media = movies(1000);
+    seed('user_media', movies(1000));
     await open();
 
     expect(count('1,000')).toBeTruthy();
     // A full page cannot be known to be the last one, so the empty page is the price of
     // not guessing — and 1,000 is precisely the total a gold Movie Muncher has.
-    expect(mockRequests.user_media).toBe(2);
+    expect(mockRequests().user_media).toBe(2);
   });
 
   it('makes one request when the first page is short', async () => {
-    mockTables.user_media = movies(30);
+    seed('user_media', movies(30));
     await open();
-    expect(mockRequests.user_media).toBe(1);
+    expect(mockRequests().user_media).toBe(1);
   });
+
+  it('refuses rather than reporting a partial count past the ceiling', async () => {
+    // Twelve full pages and no thirteenth request to prove exhaustion. A truncated array
+    // here would be a confident wrong number; the dash is the honest one.
+    seed('user_media', movies(12_001));
+    await open();
+
+    expect(screen.getByLabelText('Movie Muncher. Could not load this one')).toBeTruthy();
+  }, 30_000);
+});
+
+/**
+ * **The number stays right while somebody else is writing.**
+ *
+ * Independent review 21b: `.range()` paging is not snapshot-consistent, because every
+ * page is its own request and its own `READ COMMITTED` transaction. A title logged on
+ * another device between two pages shifts the offsets underneath the read — the boundary
+ * row arrives twice and one row is never seen — and the total still looks plausible.
+ * Codex's sequence is 999 films assembling to 1,000 and unlocking Movie Muncher Gold on
+ * an account that has not earned it.
+ *
+ * The mechanics of that are proved in `lib/read-all.test.ts`, against both strategies.
+ * What these two are for is that the *shipped queries* carry the cursor — that the
+ * predicate reaches PostgREST rather than living in a helper nothing calls.
+ */
+describe('while another device is writing', () => {
+  it('does not count a film twice when one is logged between two pages', async () => {
+    seed('user_media', movies(1500));
+    pg().between = (table, requests, tables) => {
+      if (table !== 'user_media' || requests !== 1) return;
+      // Sorts before page one's boundary — the position that breaks offset paging.
+      (tables.user_media as unknown[]).push({
+        user_id: OWNER,
+        media_item_id: 'm0000-a',
+        watched_on: null,
+        note: null,
+        note_visibility: null,
+        media_items: media({ title: 'Logged on the tablet' }),
+      });
+    };
+
+    await open();
+
+    // 1,500, not 1,501. The row that landed behind the cursor is outside this read
+    // rather than duplicated into it, and nothing arrives twice.
+    expect(count('1,500')).toBeTruthy();
+  }, 30_000);
+
+  it('pages every read on a cursor rather than an offset', async () => {
+    seed('user_media', movies(1500));
+    await open();
+
+    const paged = pg().reads.filter((read) => read.table === 'user_media');
+    expect(paged[0]!.gt).toEqual([]);
+    expect(paged[1]!.gt).toEqual([['media_item_id', 'm0999']]);
+    // No offsets anywhere on the sheet: `range` is what shifts under a concurrent write.
+    expect(pg().reads.every((read) => !('range' in read))).toBe(true);
+  }, 30_000);
+});
+
+/**
+ * The two reads whose keys are pairs, and what each of them does about it.
+ *
+ * `follows` splits into one request per direction, which makes the other half of the pair
+ * unique and the cursor a single column. `reactions` has no direction to split on, so it
+ * is the one composite cursor in the app.
+ */
+describe('a key that is a pair', () => {
+  /**
+   * **One request, both directions.**
+   *
+   * This was briefly two requests, one per direction, which makes each cursor a single
+   * column and is the obvious thing to do. Independent review 21c killed it: an
+   * intersection taken from two snapshots can report a pair that never coexisted — read
+   * `me → A`, have it deleted, have `A → me` approved, read the other direction — and
+   * Mutual Mania is a present-tense claim about a pair.
+   */
+  it('reads follows in one request, with both directions and both privacy markers', async () => {
+    seed('follows', [
+      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
+      { follower_id: 'id-ada', followee_id: 'me', follower: profile('ada', 'Ada'), followee: profile('me') },
+    ]);
+    await open();
+
+    const reads = pg().reads.filter((read) => read.table === 'follows');
+    expect(reads).toHaveLength(1);
+    expect(reads[0]!.filters).toEqual({ state: 'approved' });
+    expect(reads[0]!.or).toBe('follower_id.eq.me,followee_id.eq.me');
+    expect((reads[0]!.columns.match(/!inner/g) ?? []).length).toBe(2);
+    expect(count('1 / 5')).toBeTruthy();
+  });
+
+  it('cannot report a mutual whose two edges never existed at once', async () => {
+    // The sequence review 21c named, run against the stand-in. With one request there is
+    // no window between the directions for it to happen in — the write below lands after
+    // the only page has been served, so it cannot reach the intersection at all.
+    seed('follows', [
+      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
+    ]);
+    pg().between = (table, requests, tables) => {
+      if (table !== 'follows' || requests !== 1) return;
+      tables.follows = [
+        {
+          state: 'approved',
+          follower_id: 'id-ada',
+          followee_id: 'me',
+          follower: profile('ada', 'Ada'),
+          followee: profile('me'),
+        },
+      ];
+    };
+
+    await open();
+
+    // Ada follows back only after the read; `me → Ada` was already gone by then. Neither
+    // state was ever a mutual, and the sheet does not invent one.
+    expect(count('0 / 5')).toBeTruthy();
+  });
+
+  /**
+   * **Past one page, the number is refused rather than stated.**
+   *
+   * One request is one `READ COMMITTED` transaction and therefore one snapshot. Two are
+   * not: page one can hold `me → A`, that edge can be deleted, `A → me` can be approved,
+   * and page two holds the reverse — so the assembled arrays name a mutual that existed
+   * at no instant. A count survives being read across pages; an intersection invents a
+   * member.
+   *
+   * Review 21c rejected the two-request version of this and I fixed only the version I
+   * had written; 21d pointed out that the multi-page case is the same defect with a
+   * higher threshold, and that "every real account is under a thousand edges" is not an
+   * invariant anything enforces.
+   */
+  it('pages the pair, and refuses to state a mutual count taken from two snapshots', async () => {
+    seed(
+      'follows',
+      Array.from({ length: 1200 }, (_, i) => ({
+        follower_id: 'me',
+        followee_id: `id-${String(i).padStart(5, '0')}`,
+        follower: profile('me'),
+        followee: profile(`u${i}`),
+      })),
+    );
+    await open();
+
+    const reads = pg().reads.filter((read) => read.table === 'follows');
+    expect(reads).toHaveLength(2);
+    // The cursor and the direction filter share one `or=`, which is what keeps every page
+    // a single request.
+    expect(reads[1]!.or).toMatch(
+      /^and\(follower_id\.gt\..+,or\(follower_id\.eq\.me,followee_id\.eq\.me\)\),and\(follower_id\.eq\..+,followee_id\.gt\..+,or\(.+\)\)$/,
+    );
+    // A dash, not a zero and not a number: the read was complete but not atomic.
+    expect(screen.getByLabelText('Mutual Mania. Could not load this one')).toBeTruthy();
+  }, 30_000);
+
+  it('states the count at exactly one full page, which takes two requests', async () => {
+    // Review 21e's first finding, and the sharpest possible landing: a full page is always
+    // followed by an exhaustion probe, so 1,000 edges is two requests and one snapshot.
+    // Counting requests rather than pages-with-rows put "could not load this one" on an
+    // account that was read perfectly.
+    seed(
+      'follows',
+      Array.from({ length: 1000 }, (_, i) => ({
+        follower_id: 'me',
+        followee_id: `id-${String(i).padStart(5, '0')}`,
+        follower: profile('me'),
+        followee: profile(`u${i}`),
+      })),
+    );
+    await open();
+
+    expect(pg().requests.follows).toBe(2);
+    // One-way follows, so the honest answer is zero — a number, not a dash.
+    expect(count('0 / 5')).toBeTruthy();
+    expect(screen.queryByLabelText('Mutual Mania. Could not load this one')).toBeNull();
+  }, 30_000);
+
+  it('states the count when one request was enough, which is every real account', async () => {
+    seed('follows', [
+      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
+      { follower_id: 'id-ada', followee_id: 'me', follower: profile('ada', 'Ada'), followee: profile('me') },
+    ]);
+    await open();
+
+    expect(pg().requests.follows).toBe(1);
+    expect(count('1 / 5')).toBeTruthy();
+  });
+
+  it('counts every reaction on an event that straddles a page boundary', async () => {
+    // 1,002 events × 2 reactions is 2,004 rows, so both boundaries fall inside a group.
+    // A cursor on `feed_event_id` alone would skip the rest of the boundary event, which
+    // is a silent undercount of Heart Magnet — the exact shape of the defect.
+    seed(
+      'reactions',
+      Array.from({ length: 1002 }, (_, e) =>
+        Array.from({ length: 2 }, () => ({
+          feed_event_id: `e${String(e).padStart(5, '0')}`,
+          feed_events: {
+            media_item_id: `t${String(e).padStart(5, '0')}`,
+            media_items: media({ title: `Title ${e}` }),
+          },
+        })),
+      ).flat(),
+    );
+    await open();
+
+    expect(count('2,004')).toBeTruthy();
+    expect(mockRequests().reactions).toBe(3);
+    // The cursor is the pair, spelled the way PostgREST spells a tuple comparison.
+    const second = pg().reads.filter((read) => read.table === 'reactions')[1]!;
+    expect(second.or).toMatch(/^feed_event_id\.gt\..+,and\(feed_event_id\.eq\..+,user_id\.gt\..+\)$/);
+  }, 30_000);
 });
 
 describe('a long breakdown is revealed in pages', () => {
@@ -345,7 +644,7 @@ describe('a long breakdown is revealed in pages', () => {
   const press = (name: string) => fireEvent.press(screen.getByRole('button', { name }));
 
   it('mounts a page of rows rather than the whole collection', async () => {
-    mockTables.user_media = movies(400);
+    seed('user_media', movies(400));
     await open({ onPressTitle: () => {} });
     await drillInto('Movie Muncher');
 
@@ -358,7 +657,7 @@ describe('a long breakdown is revealed in pages', () => {
   });
 
   it('says how many of how many, rather than hiding behind "more"', async () => {
-    mockTables.user_media = movies(400);
+    seed('user_media', movies(400));
     await open({ onPressTitle: () => {} });
     await drillInto('Movie Muncher');
 
@@ -368,7 +667,7 @@ describe('a long breakdown is revealed in pages', () => {
   });
 
   it('reveals the next page on request, and stops offering when there are none', async () => {
-    mockTables.user_media = movies(120);
+    seed('user_media', movies(120));
     await open({ onPressTitle: () => {} });
     await drillInto('Movie Muncher');
 
@@ -384,7 +683,7 @@ describe('a long breakdown is revealed in pages', () => {
   });
 
   it('offers nothing to expand when the whole breakdown already fits', async () => {
-    mockTables.user_media = movies(12);
+    seed('user_media', movies(12));
     await open({ onPressTitle: () => {} });
     await drillInto('Movie Muncher');
 
@@ -394,7 +693,7 @@ describe('a long breakdown is revealed in pages', () => {
   });
 
   it('starts a freshly opened award at the first page rather than the last one expanded', async () => {
-    mockTables.user_media = movies(400);
+    seed('user_media', movies(400));
     await open({ onPressTitle: () => {} });
 
     await drillInto('Movie Muncher');
@@ -410,10 +709,10 @@ describe('a long breakdown is revealed in pages', () => {
 
 describe('the breakdowns', () => {
   it('Movie Muncher lists the films, with the date where there is one', async () => {
-    mockTables.user_media = [
+    seed('user_media', [
       watched('a', { title: 'Ringu', release_date: '1998-01-31' }),
       { ...watched('b', { title: 'Airplane!' }), watched_on: '2026-02-03' },
-    ];
+    ]);
     await open({ onPressTitle: () => {} });
     await drillInto('Movie Muncher');
 
@@ -423,7 +722,7 @@ describe('the breakdowns', () => {
   });
 
   it('Season Snacker names a season by its show', async () => {
-    mockTables.user_media = [
+    seed('user_media', [
       watched('s1', {
         kind: 'season',
         title: 'Season 1',
@@ -431,7 +730,7 @@ describe('the breakdowns', () => {
         release_date: '2023-01-15',
         parent: { title: 'The Last of Us', genres: ['Drama'], original_language: 'en' },
       }),
-    ];
+    ]);
     await open({ onPressTitle: () => {} });
     await drillInto('Season Snacker');
     expect(screen.getByText(/The Last of Us, S1/)).toBeTruthy();
@@ -440,14 +739,14 @@ describe('the breakdowns', () => {
   it('a genre award includes a TV season through its series genres', async () => {
     // The whole point of the metadata inheritance: the season carries no genres of its
     // own, and Softie Hours counts it because the show is a drama.
-    mockTables.user_media = [
+    seed('user_media', [
       watched('s1', {
         kind: 'season',
         title: 'Season 1',
         season_number: 1,
         parent: { title: 'The Last of Us', genres: ['Drama'], original_language: 'en' },
       }),
-    ];
+    ]);
     await open({ onPressTitle: () => {} });
     expect(count('1 / 25')).toBeTruthy();
     await drillInto('Softie Hours');
@@ -455,18 +754,18 @@ describe('the breakdowns', () => {
   });
 
   it('Passport Mode names the language rather than printing its code', async () => {
-    mockTables.user_media = [watched('a', { title: 'Ringu', original_language: 'ja' })];
+    seed('user_media', [watched('a', { title: 'Ringu', original_language: 'ja' })]);
     await open({ onPressTitle: () => {} });
     await drillInto('Passport Mode');
     expect(screen.getByText('Japanese')).toBeTruthy();
   });
 
   it('Genre Gremlin lists genres, not titles, and the rows are the numerator', async () => {
-    mockTables.user_media = [
+    seed('user_media', [
       watched('a', { genres: ['Action'] }),
       watched('b', { genres: ['Action'] }),
       watched('c', { genres: ['Comedy'] }),
-    ];
+    ]);
     await open({ onPressTitle: () => {} });
     await drillInto('Genre Gremlin');
 
@@ -478,7 +777,7 @@ describe('the breakdowns', () => {
   });
 
   it('Two-Screen Life shows both sides with their own caps', async () => {
-    mockTables.user_media = [
+    seed('user_media', [
       ...movies(3),
       ...Array.from({ length: 2 }, (_, i) =>
         watched(`s${i}`, {
@@ -488,7 +787,7 @@ describe('the breakdowns', () => {
           parent: { title: 'A Show', genres: [], original_language: 'en' },
         }),
       ),
-    ];
+    ]);
     await open({ onPressTitle: () => {} });
     await drillInto('Two-Screen Life');
 
@@ -501,8 +800,8 @@ describe('the breakdowns', () => {
   });
 
   it('Rating Rascal shows the score the reader gave', async () => {
-    mockTables.user_media = movies(1);
-    mockTables.rankings = [
+    seed('user_media', movies(1));
+    seed('rankings', [
       {
         media_item_id: 'm0',
         bucket: 'loved',
@@ -510,7 +809,7 @@ describe('the breakdowns', () => {
         category: 'movies',
         media_items: media({ title: 'Heat' }),
       },
-    ];
+    ]);
     await open({ onPressTitle: () => {} });
     await drillInto('Rating Rascal');
     expect(screen.getByText(/Heat/)).toBeTruthy();
@@ -519,28 +818,28 @@ describe('the breakdowns', () => {
   });
 
   it('Queue Dragon lists the watchlist being held now', async () => {
-    mockTables.watchlist = [{ media_item_id: 'w1', media_items: media({ title: 'Dune' }) }];
+    seed('watchlist', [{ media_item_id: 'w1', media_items: media({ title: 'Dune' }) }]);
     await open({ onPressTitle: () => {} });
     await drillInto('Queue Dragon');
     expect(screen.getByText(/Dune/)).toBeTruthy();
   });
 
   it('Comment Gremlin distinguishes a comment from a public note', async () => {
-    mockTables.user_media = [
+    seed('user_media', [
       {
         ...watched('a', { title: 'Arrival' }),
         note: 'Loved the structure.',
         note_visibility: 'public',
       },
-    ];
-    mockTables.comments = [
+    ]);
+    seed('comments', [
       {
         id: 'c1',
         created_at: '2026-01-02T00:00:00Z',
         feed_event_id: 'e1',
         feed_events: { media_item_id: 'b', media_items: media({ title: 'Heat' }) },
       },
-    ];
+    ]);
     await open({ onPressTitle: () => {} });
     await drillInto('Comment Gremlin');
 
@@ -551,7 +850,7 @@ describe('the breakdowns', () => {
   });
 
   it('Hype Courier names the title and who it went to', async () => {
-    mockTables.title_recommendations = [
+    seed('title_recommendations', [
       {
         id: 'r1',
         recommended_at: '2026-01-02T00:00:00Z',
@@ -559,7 +858,7 @@ describe('the breakdowns', () => {
         media_items: media({ title: 'Heat' }),
         recipient: profile('ada', 'Ada'),
       },
-    ];
+    ]);
     await open({ onPressTitle: () => {} });
     await drillInto('Hype Courier');
     expect(screen.getByText(/Heat/)).toBeTruthy();
@@ -567,7 +866,7 @@ describe('the breakdowns', () => {
   });
 
   it('Heart Magnet counts reactions per item, and the rows sum to the number', async () => {
-    mockTables.reactions = [
+    seed('reactions', [
       {
         feed_event_id: 'e1',
         feed_events: { media_item_id: 'a', media_items: media({ title: 'Heat' }) },
@@ -580,7 +879,7 @@ describe('the breakdowns', () => {
         feed_event_id: 'e2',
         feed_events: { media_item_id: 'b', media_items: media({ title: 'Arrival' }) },
       },
-    ];
+    ]);
     await open({ onPressTitle: () => {} });
     expect(count('3 / 50')).toBeTruthy();
     await drillInto('Heart Magnet');
@@ -592,7 +891,7 @@ describe('the breakdowns', () => {
   });
 
   it('Mutual Mania lists the people who follow back', async () => {
-    mockTables.follows = [
+    seed('follows', [
       {
         follower_id: 'me',
         followee_id: 'id-ada',
@@ -612,7 +911,7 @@ describe('the breakdowns', () => {
         follower: profile('bo', 'Bo'),
         followee: profile('me'),
       },
-    ];
+    ]);
     await open({ onPressTitle: () => {} });
     expect(count('1 / 5')).toBeTruthy();
     await drillInto('Mutual Mania');
@@ -630,7 +929,7 @@ describe('the breakdowns', () => {
 
   it('leads to a title', async () => {
     const onPressTitle = jest.fn();
-    mockTables.user_media = [watched('a', { title: 'Ringu' })];
+    seed('user_media', [watched('a', { title: 'Ringu' })]);
 
     await open({ onPressTitle });
     await drillInto('Movie Muncher');
@@ -641,7 +940,7 @@ describe('the breakdowns', () => {
 
   it('leads to a profile', async () => {
     const onPressProfile = jest.fn();
-    mockTables.follows = [
+    seed('follows', [
       {
         follower_id: 'me',
         followee_id: 'id-ada',
@@ -654,7 +953,7 @@ describe('the breakdowns', () => {
         follower: profile('ada', 'Ada'),
         followee: profile('me'),
       },
-    ];
+    ]);
 
     await open({ onPressProfile });
     await drillInto('Mutual Mania');
@@ -673,10 +972,10 @@ describe('privacy', () => {
   it('shows a person the reader may not see without disclosing them', async () => {
     // `can_i_view` filters the embed, so a blocked or suspended account comes back with
     // no profile. The follow still counts; the row says nothing about who it is.
-    mockTables.follows = [
+    seed('follows', [
       { follower_id: 'me', followee_id: 'id-x', follower: profile('me'), followee: null },
       { follower_id: 'id-x', followee_id: 'me', follower: null, followee: profile('me') },
-    ];
+    ]);
     await open({ onPressProfile: () => {} });
     expect(count('1 / 5')).toBeTruthy();
     await drillInto('Mutual Mania');
@@ -687,7 +986,7 @@ describe('privacy', () => {
 
   it('reads attributed signups and never invite link creations', async () => {
     await open();
-    expect(mockAsked).toContain('invite_attributions');
-    expect(mockAsked).not.toContain('invite_link_creations');
+    expect(mockAsked()).toContain('invite_attributions');
+    expect(mockAsked()).not.toContain('invite_link_creations');
   });
 });

@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { invalidateAwards } from '@/features/awards/invalidate';
 import { newOperationId } from '@/features/collection/writes';
 import { diagnose } from '@/lib/diagnose';
+import { readAllByKey } from '@/lib/read-all';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 
@@ -49,32 +51,78 @@ export function useRecommendRecipients(viewerId: string) {
     queryKey: ['recommend-recipients', viewerId],
     staleTime: 5 * 60_000,
     queryFn: async (): Promise<Recipient[]> => {
-      const [following, followers] = await Promise.all([
-        supabase
-          .from('follows')
-          .select('profiles:followee_id(id, username, display_name, avatar_path, status)')
-          .eq('follower_id', viewerId)
-          .eq('state', 'approved'),
-        supabase
-          .from('follows')
-          .select('profiles:follower_id(id, username, display_name, avatar_path, status)')
-          .eq('followee_id', viewerId)
-          .eq('state', 'approved'),
-      ]);
+      /**
+       * Every edge the viewer is an end of, in one request per page (`lib/read-all.ts`).
+       *
+       * Two things changed here at once and each is worth naming.
+       *
+       * **It is read to exhaustion.** PostgREST caps an unbounded select at 1,000 rows,
+       * and this is an intersection: a short read does not shorten the list, it *removes
+       * people from it*, so a mutual the reader has followed for a year would simply not
+       * appear in the picker.
+       *
+       * **And it is one request rather than two.** It used to be a select per direction,
+       * intersected. That is not a snapshot: read the outgoing side, have `me → A`
+       * deleted, have `A → me` approved, then read the incoming side, and the picker
+       * offers a mutual that never existed. `recommend_title` refuses it — the server's
+       * copy of the rule is the one that decides — but the founder's brief is that a
+       * picker offering somebody it will then refuse is the failure to avoid.
+       * Independent review 21c; `use-awards.ts` carries the same predicate for the same
+       * reason.
+       */
+      type Edge = {
+        follower_id: string;
+        followee_id: string;
+        follower: ProfileShape | ProfileShape[] | null;
+        followee: ProfileShape | ProfileShape[] | null;
+      };
 
-      if (following.error) throw following.error;
-      if (followers.error) throw followers.error;
+      const edges = await readAllByKey<Edge>(
+        (cursor, limit) => {
+          const mine = `follower_id.eq.${viewerId},followee_id.eq.${viewerId}`;
+          const request = supabase
+            .from('follows')
+            .select(
+              'follower_id, followee_id, ' +
+                'follower:follower_id(id, username, display_name, avatar_path, status), ' +
+                'followee:followee_id(id, username, display_name, avatar_path, status)',
+            )
+            .eq('state', 'approved');
 
+          return (
+            cursor === null
+              ? request.or(mine)
+              : request.or(
+                  `and(follower_id.gt.${cursor[0]},or(${mine})),` +
+                    `and(follower_id.eq.${cursor[0]},followee_id.gt.${cursor[1]},or(${mine}))`,
+                )
+          )
+            .order('follower_id', { ascending: true })
+            .order('followee_id', { ascending: true })
+            .limit(limit);
+        },
+        (row) => [row.follower_id, row.followee_id],
+      );
+
+      if (edges.error) throw edges.error;
+
+      // The intersection, which is the whole rule: somebody on one side and not the other
+      // is a one-way follow.
       const outgoing = new Map<string, ProfileShape>();
-      for (const row of following.data ?? []) {
-        const profile = one((row as { profiles: ProfileShape | ProfileShape[] | null }).profiles);
-        if (profile) outgoing.set(profile.id, profile);
+      const incoming = new Set<string>();
+      for (const row of edges.data ?? []) {
+        if (row.follower_id === viewerId) {
+          const profile = one(row.followee);
+          if (profile) outgoing.set(profile.id, profile);
+        }
+        if (row.followee_id === viewerId) incoming.add(row.follower_id);
       }
 
       const mutuals: Recipient[] = [];
-      for (const row of followers.data ?? []) {
-        const profile = one((row as { profiles: ProfileShape | ProfileShape[] | null }).profiles);
-        if (!profile || !outgoing.has(profile.id)) continue;
+      for (const [id, profile] of outgoing) {
+        if (!incoming.has(id)) continue;
+        // A suspended account keeps its edges and should stop being offered. A block does
+        // not need filtering: `block` deletes both rows, so there is nothing to intersect.
         if (profile.status !== 'active') continue;
         mutuals.push({
           id: profile.id,
@@ -172,9 +220,13 @@ export function useRecommendTitle(viewerId: string) {
       return { ok: true };
     },
     onSuccess: (result) => {
+      // Success only, and `recommend_title` returns its refusals in the body — so a 200
+      // that says `not_mutual` must not move anything.
       if (!result.ok) return;
       void queryClient.invalidateQueries({ queryKey: ['sent-to-you'] });
       void queryClient.invalidateQueries({ queryKey: ['recommend-recipients', viewerId] });
+      // Hype Courier counts recommendations sent (`awards/invalidate.ts`). Review 21b.
+      invalidateAwards(queryClient, viewerId);
     },
   });
 }

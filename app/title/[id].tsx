@@ -19,7 +19,10 @@ import { useCompanions } from '@/features/collection/use-companions';
 import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
 import { useTitleScore } from '@/features/collection/use-score';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
-import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
+import {
+  invalidateAfterCollectionChange,
+  invalidateAfterWatchlistChange,
+} from '@/features/collection/invalidate';
 import {
   newOperationId,
   removeFromCollection,
@@ -466,7 +469,8 @@ export default function TitleScreen() {
     }
 
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: [...queryKeys.collection(profile.id), 'watchlist'] }),
+      // The watchlist itself and Queue Dragon, which counts it (collection/invalidate.ts).
+      invalidateAfterWatchlistChange(queryClient, profile.id),
       queryClient.invalidateQueries({ queryKey: queryKeys.title(id ?? '') }),
       queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) }),
     ]);
@@ -514,6 +518,11 @@ export default function TitleScreen() {
               if (result.outcome === 'failed') {
                 setActionError(result.message);
                 Alert.alert('Could not remove this', result.message);
+                // Removal is two writes, and `changed` says the first one landed: the
+                // ranking is gone even though the title is still logged. Refreshing on
+                // the way out of a failure is the only way the screen agrees with the
+                // database (`collection/writes.ts`). Review 21c.
+                if (result.changed) afterCollectionChange();
                 return;
               }
 

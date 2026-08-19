@@ -51,8 +51,11 @@ jest.mock('@/lib/supabase', () => ({
           return chain;
         },
         in: () => chain,
-        order: () => Promise.resolve({ data: rows(), error: null }),
+        // Both return the chain: the collection reads page by keyset now, so the call is
+        // `.order(...).limit(...)` and `then` is what resolves it.
+        order: () => chain,
         limit: () => chain,
+        gt: () => chain,
         maybeSingle: () =>
           failing()
             ? Promise.resolve({ data: null, error: { message: 'network down' } })

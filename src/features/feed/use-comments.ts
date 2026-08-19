@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { invalidateAwards } from '@/features/awards/invalidate';
 import { newOperationId } from '@/features/collection/writes';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
@@ -166,6 +167,11 @@ export function useCommentWrites(viewerId: string) {
       queryClient.invalidateQueries({ queryKey: ['comments', viewerId] }),
       queryClient.invalidateQueries({ queryKey: ['comment-counts', viewerId] }),
     ]);
+    // Comment Gremlin counts what this reader has written, so the twentieth comment
+    // moves a badge. It went unnoticed for the same reason every version of this bug
+    // has: the award reads a table this file writes, and the two never met
+    // (`awards/invalidate.ts`). Independent review 21b.
+    invalidateAwards(queryClient, viewerId);
   };
 
   const run = async (fn: () => PromiseLike<{ error: unknown }>): Promise<CommentWriteResult> => {

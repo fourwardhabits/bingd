@@ -9,6 +9,9 @@ type Read = {
   columns: string;
   filters: Record<string, unknown>;
   ranges: { op: string; column: string; value: unknown }[];
+  /** The keyset order and cursor, which is what makes the paging assertable. */
+  order?: string;
+  after?: { column: string; value: string };
 };
 
 const reads: Read[] = [];
@@ -45,8 +48,32 @@ jest.mock('@/lib/supabase', () => ({
           read.ranges.push({ op: 'lte', column, value });
           return chain;
         },
-        then: (resolve: (value: unknown) => unknown) =>
-          resolve({ data: rows[table] ?? [], error: null }),
+        /**
+         * The year's watches are paged to exhaustion by keyset now
+         * (`lib/read-all.ts`), because what comes out of that read is a number on a
+         * progress bar and PostgREST silently caps an unbounded select at 1,000 rows.
+         *
+         * `gt` is honoured rather than ignored: a stand-in that dropped the cursor and
+         * returned the whole array every time would loop until the ceiling, which is
+         * the failure mode a no-op would hide.
+         */
+        order: (column: string) => {
+          read.order = column;
+          return chain;
+        },
+        limit: () => chain,
+        gt: (column: string, value: unknown) => {
+          read.after = { column, value: String(value) };
+          return chain;
+        },
+        then: (resolve: (value: unknown) => unknown) => {
+          const all = (rows[table] ?? []) as Record<string, unknown>[];
+          const cursor = read.after;
+          const data = cursor
+            ? all.filter((row) => String(row[cursor.column]) > cursor.value)
+            : all;
+          return resolve({ data, error: null });
+        },
       };
 
       return chain;

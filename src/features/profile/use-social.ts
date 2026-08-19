@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import { invalidateAwards } from '@/features/awards/invalidate';
 import { newOperationId } from '@/features/collection/writes';
 import { avatarUri } from '@/lib/images';
 import { diagnose } from '@/lib/diagnose';
@@ -142,6 +143,12 @@ export function useSocialWrites(viewerId: string) {
         ['notifications'],
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     );
+    // Mutual Mania is an intersection of the follow graph, so following back somebody
+    // who already follows you moves it from 4 to 5 — and blocking moves it down, since
+    // `block` deletes both edges. Not folded into the list above because that list is
+    // unkeyed by account on purpose and this one must not be
+    // (`awards/invalidate.ts`). Independent review 21b.
+    invalidateAwards(queryClient, viewerId);
   };
 
   const run = async (fn: () => PromiseLike<{ error: unknown }>): Promise<SocialWriteResult> => {

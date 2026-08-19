@@ -37,8 +37,12 @@ jest.mock('@/lib/supabase', () => ({
         },
         in: () => chain,
         filter: () => chain,
-        order: () => Promise.resolve({ data: rows(), error: null }),
+        // Both return the chain: the collection and band-size reads page by keyset now
+        // (`lib/read-all.ts`), so the call is `.order(...).limit(...)` and `then` is what
+        // resolves it. `order` used to resolve, which made `.limit` a call on a promise.
+        order: () => chain,
         limit: () => chain,
+        gt: () => chain,
         single: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
         maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
         // `count` as well as `data`: `useCredits` first asks whether the cache has

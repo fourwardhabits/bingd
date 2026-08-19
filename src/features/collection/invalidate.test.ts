@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 
-import { invalidateAfterCollectionChange } from './invalidate';
+import { invalidateAfterCollectionChange, invalidateAfterWatchlistChange } from './invalidate';
 
 /**
  * The founder ranked a film and the Feed did not show it.
@@ -176,5 +176,41 @@ describe('when the category is not known', () => {
 
     expect(has(set, KEYS.rankedMovies)).toBe(true);
     expect(has(set, KEYS.rankedSeasons)).toBe(true);
+  });
+});
+
+/**
+ * The bookmark control, which four screens carry and none of them owned.
+ *
+ * The title page, the Feed, Recommendations and a person's credits each kept their own
+ * invalidation list — the arrangement this whole module exists to argue against — and all
+ * four moved **Queue Dragon** without saying so. 24 → 25, and the badge stayed at 24 for a
+ * minute. Independent review 21b.
+ */
+describe('after a watchlist change', () => {
+  const touched = () =>
+    invalidatedBy(all, (client) => invalidateAfterWatchlistChange(client, USER));
+
+  it('refreshes the watchlist itself', async () => {
+    expect(has(touched(), KEYS.watchlist)).toBe(true);
+  });
+
+  it('refreshes Bingd Awards, which is what Queue Dragon counts', async () => {
+    expect(has(touched(), KEYS.awards)).toBe(true);
+  });
+
+  it('leaves the rest of the collection and the ranked lists alone', async () => {
+    // A bookmark is not a log. Invalidating the collection here would refetch every
+    // logged title and both ranked lists on a single tap, four screens over.
+    const set = touched();
+    for (const key of [KEYS.collection, KEYS.rankedMovies, KEYS.rankedSeasons, KEYS.watched]) {
+      expect(has(set, key)).toBe(false);
+    }
+  });
+
+  it('leaves another account’s watchlist and awards alone', async () => {
+    const set = touched();
+    expect(has(set, KEYS.otherUserCollection)).toBe(false);
+    expect(has(set, KEYS.otherUserAwards)).toBe(false);
   });
 });

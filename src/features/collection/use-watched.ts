@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { after, readAllByKey } from '@/lib/read-all';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -29,12 +30,24 @@ export function useWatched(userId: string) {
     // viewer who has just this moment watched the thing.
     staleTime: 60_000,
     queryFn: async (): Promise<Set<string>> => {
-      const { data, error } = await supabase
-        .from('user_media')
-        .select('media_item_id')
-        .eq('user_id', userId);
+      // Read to exhaustion (`lib/read-all.ts`). PostgREST caps an unbounded select at
+      // 1,000 rows, and a *set* silently missing its thousand-and-first member is a
+      // question this module answers wrongly — the film you watched last night would
+      // stay masked because the read stopped before reaching it. It fails in the safe
+      // direction, which is exactly why nobody would ever report it.
+      const { data, error } = await readAllByKey<{ media_item_id: string }>(
+        (cursor, limit) =>
+          after(
+            supabase.from('user_media').select('media_item_id').eq('user_id', userId),
+            'media_item_id',
+            cursor,
+          )
+            .order('media_item_id', { ascending: true })
+            .limit(limit),
+        (row) => [row.media_item_id],
+      );
       if (error) throw error;
-      return new Set((data ?? []).map((row) => row.media_item_id as string));
+      return new Set((data ?? []).map((row) => row.media_item_id));
     },
   });
 }

@@ -14,6 +14,7 @@ import {
   type PersonCredit,
 } from '@/features/person/use-person';
 import { posterUri, profileUri } from '@/lib/images';
+import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { queryKeys } from '@/lib/query';
 import {
   Avatar,
@@ -156,7 +157,8 @@ export default function PersonScreen() {
     }
 
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: [...queryKeys.collection(viewer.id), 'watchlist'] }),
+      // The watchlist and Queue Dragon, which counts it (`collection/invalidate.ts`).
+      invalidateAfterWatchlistChange(queryClient, viewer.id),
       queryClient.invalidateQueries({ queryKey: queryKeys.title(credit.mediaItemId) }),
     ]);
   };

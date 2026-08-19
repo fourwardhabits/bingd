@@ -114,6 +114,39 @@ function shippedFollowsSelect() {
 
 const FOLLOWS_SELECT = shippedFollowsSelect();
 
+/**
+ * The keyset predicate, also lifted out of `use-awards.ts` rather than copied.
+ *
+ * Independent review 21d's Minor: the first version of this probe held its own copy of
+ * the nested `or=`, so **removing the cursor from the shipped query would have left this
+ * file passing** — the same defect the `FOLLOWS_SELECT` parser exists to prevent, one
+ * predicate along.
+ *
+ * The source builds it with a template literal, so the parse turns `${cursor[0]}` and
+ * `${cursor[1]}` and `${mine}` back into holes this file can fill. A rewrite the parser
+ * cannot read throws here rather than silently probing a stale string.
+ */
+function shippedFollowsCursor(id, after) {
+  const file = join(root, 'src', 'features', 'awards', 'use-awards.ts');
+  const source = readFileSync(file, 'utf8');
+
+  // Anchored on `and(follower_id.gt.`, because the file holds two composite cursors and
+  // an unanchored match found the `reactions` one — which is exactly the class of silent
+  // wrongness this parser exists to avoid, and was caught by the assertion below rather
+  // than by reading. Two mistakes worth one regex.
+  const mine = /const mine = `([^`]*)`/.exec(source);
+  const predicate = /`(and\(follower_id\.gt\.[\s\S]*?)`\s*\+\s*`([\s\S]*?)`/.exec(source);
+  if (!mine || !predicate) {
+    throw new Error(`could not find the follows cursor in ${file} — the parser needs updating`);
+  }
+
+  const direction = mine[1].replaceAll('${userId}', id);
+  return (predicate[1] + predicate[2])
+    .replaceAll('${cursor[0]}', after[0])
+    .replaceAll('${cursor[1]}', after[1])
+    .replaceAll('${mine}', direction);
+}
+
 /** The same read with the inner markers stripped: what the unsafe form would return. */
 const LEFT_JOIN_SELECT = FOLLOWS_SELECT.replaceAll('!inner', '');
 
@@ -172,12 +205,44 @@ const get = async (token, path) => {
   return { status: res.status, body };
 };
 
-/** The awards read, verbatim: same table, same select, same filters. */
+/**
+ * The awards read, verbatim: same table, same select, same filters — **and now the same
+ * two requests**.
+ *
+ * `use-awards.ts` no longer asks for both directions with `or=(follower_id.eq,
+ * followee_id.eq)`. It reads each direction separately, because `follows` is keyed by the
+ * `(follower_id, followee_id)` pair and the `.or()` left neither column unique — so
+ * neither could be a keyset cursor, and offset paging is not concurrency-safe (review
+ * 21b). Pinning one half of the pair makes the other unique.
+ *
+ * The two sets are disjoint: `no_self_follow` forbids the only row that could satisfy
+ * both. So concatenating them is exactly the row set the single request used to return,
+ * and `mutualIds` below is unchanged.
+ */
 const followsRead = (token, select, id) =>
   get(
     token,
     `follows?select=${encodeURIComponent(select)}&state=eq.approved` +
-      `&or=(follower_id.eq.${id},followee_id.eq.${id})`,
+      `&or=(follower_id.eq.${id},followee_id.eq.${id})` +
+      `&order=follower_id.asc,followee_id.asc&limit=1000`,
+  );
+
+/**
+ * The second page of that read, which is where the cursor lives.
+ *
+ * The direction filter and the keyset cursor share **one** `or=`, because two would be
+ * two query parameters and this is the read where being a single request is the point:
+ * Mutual Mania is an intersection, and an intersection assembled from two snapshots can
+ * report a pair that never coexisted (review 21c). PostgREST allows an `or(...)` nested
+ * inside an `and(...)` inside a top-level `or=`, which is what makes that possible — and
+ * "allows" is the thing being checked here rather than assumed.
+ */
+const followsPage = (token, select, id, after) =>
+  get(
+    token,
+    `follows?select=${encodeURIComponent(select)}&state=eq.approved` +
+      `&or=(${shippedFollowsCursor(id, after)})` +
+      `&order=follower_id.asc,followee_id.asc&limit=1000`,
   );
 
 /**
@@ -287,6 +352,118 @@ try {
   const label = (id) => (id === a.id ? 'A' : id === b.id ? 'B' : id === c.id ? 'C' : id);
 
   // -------------------------------------------------------------------------
+  console.log('— the paging the awards read depends on, against the real PostgREST —');
+  // -------------------------------------------------------------------------
+
+  /**
+   * Everything below is an assumption `lib/read-all.ts` is built on, checked here because
+   * the unit tests check it against a stand-in I wrote. A stand-in agreeing with the code
+   * that shares an author is not evidence.
+   *
+   * `media_items` is world-readable and holds thousands of rows, which makes it the one
+   * table where a traversal can be proved end to end without seeding anything.
+   */
+  const counted = await fetch(`${url}/rest/v1/media_items?select=id&limit=1`, {
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${a.token}`,
+      Prefer: 'count=exact',
+    },
+  });
+  const total = Number((counted.headers.get('content-range') ?? '').split('/')[1]);
+
+  const unbounded = await get(a.token, 'media_items?select=id');
+  check(
+    'an unbounded select is silently capped, and the cap is below the truth',
+    Array.isArray(unbounded.body) && unbounded.body.length === 1000 && total > 1000,
+    `returned ${unbounded.body?.length}, table holds ${total}`,
+  );
+
+  const seen = [];
+  let cursor = null;
+  for (let page = 0; page < 12; page += 1) {
+    const query =
+      `media_items?select=id&order=id.asc&limit=1000` + (cursor ? `&id=gt.${cursor}` : '');
+    const next = await get(a.token, query);
+    if (!Array.isArray(next.body)) break;
+    seen.push(...next.body.map((row) => row.id));
+    if (next.body.length < 1000) break;
+    cursor = next.body[next.body.length - 1].id;
+  }
+  check(
+    'a keyset traversal reaches every row the cap hid',
+    seen.length === total,
+    `walked ${seen.length} of ${total}`,
+  );
+  check(
+    'and returns none of them twice',
+    new Set(seen).size === seen.length,
+    `${seen.length - new Set(seen).size} duplicate(s)`,
+  );
+
+  /**
+   * The one composite cursor in the app, which is `reactions` — keyed by the
+   * `(feed_event_id, user_id)` pair, with no direction to split on the way `follows` has.
+   *
+   * What is being checked is that PostgREST accepts a nested `and(...)` inside a
+   * top-level `or=`, since that is how a tuple comparison has to be spelled. The control
+   * matters as much as the check: an unknown operator returns 400, so a 200 means the
+   * predicate parsed rather than that the server ignores what it cannot read.
+   */
+  const zero = '00000000-0000-0000-0000-000000000000';
+  const composite = await get(
+    a.token,
+    `reactions?select=feed_event_id,user_id&order=feed_event_id.asc,user_id.asc&limit=10` +
+      `&or=(feed_event_id.gt.${zero},and(feed_event_id.eq.${zero},user_id.gt.${zero}))`,
+  );
+  check(
+    'PostgREST accepts the composite keyset predicate the reactions read uses',
+    composite.status === 200,
+    `${composite.status} ${JSON.stringify(composite.body)?.slice(0, 200)}`,
+  );
+
+  const nonsense = await get(
+    a.token,
+    `reactions?select=feed_event_id&or=(feed_event_id.notanoperator.${zero})`,
+  );
+  check(
+    'and rejects one it cannot parse, so the 200 above means something',
+    nonsense.status === 400,
+    `${nonsense.status} ${JSON.stringify(nonsense.body)?.slice(0, 200)}`,
+  );
+
+  /**
+   * And the harder one: the follows cursor, which nests an `or(...)` inside an `and(...)`
+   * inside the top-level `or=`. That shape is what lets the direction filter and the
+   * keyset predicate share one query parameter, and therefore what keeps every page of
+   * Mutual Mania's read a single request. If PostgREST would not take it, the alternative
+   * is two requests per page — which review 21c established is how a mutual that never
+   * existed gets counted.
+   */
+  const shippedCursor = shippedFollowsCursor(a.id, [zero, zero]);
+  console.log(`follows cursor as shipped:\n  ${shippedCursor}\n`);
+  check(
+    'the shipped follows cursor is a strict comparison on both halves of the pair',
+    /follower_id\.gt\./.test(shippedCursor) &&
+      /follower_id\.eq\./.test(shippedCursor) &&
+      /followee_id\.gt\./.test(shippedCursor) &&
+      // Strict, never `gte`: the boundary row has already been read, and asking for it
+      // again is the duplicate `readAllByKey` refuses to report a count from.
+      !/\.gte\./.test(shippedCursor) &&
+      // The direction filter has to be inside each branch, or the predicate reaches
+      // third-party edges and the page is no longer the account's own.
+      (shippedCursor.match(/or\(follower_id\.eq\./g) ?? []).length === 2,
+    shippedCursor,
+  );
+
+  const nested = await followsPage(a.token, FOLLOWS_SELECT, a.id, [zero, zero]);
+  check(
+    'PostgREST accepts the nested follows cursor, so each page stays one request',
+    nested.status === 200,
+    `${nested.status} ${JSON.stringify(nested.body)?.slice(0, 200)}`,
+  );
+
+  // -------------------------------------------------------------------------
   console.log('— A is mutual with both B and C —');
   // -------------------------------------------------------------------------
 
@@ -322,6 +499,36 @@ try {
     control.status === 200 && controlMutuals.length === 2,
     `${control.status} · ${controlMutuals.map(label).join(',')} · ${JSON.stringify(control.body)?.slice(0, 200)}`,
   );
+
+  /**
+   * And that the cursor actually excludes what it names.
+   *
+   * A 200 says the predicate parsed. This says it *filters*: paging from A's own row as
+   * the cursor must not return that row again, which is what `.gt` rather than `.gte`
+   * buys and is the mutant review 21d asked about.
+   */
+  const own = await followsRead(a.token, FOLLOWS_SELECT, a.id);
+  const first = (own.body ?? []).slice().sort((x, y) =>
+    x.follower_id === y.follower_id
+      ? x.followee_id.localeCompare(y.followee_id)
+      : x.follower_id.localeCompare(y.follower_id),
+  )[0];
+  check('CONTROL: there is a row to page past', Boolean(first), JSON.stringify(own.body)?.slice(0, 120));
+  if (first) {
+    const past = await followsPage(a.token, FOLLOWS_SELECT, a.id, [
+      first.follower_id,
+      first.followee_id,
+    ]);
+    check(
+      'and that paging past a row does not return that row again',
+      Array.isArray(past.body) &&
+        !past.body.some(
+          (row) =>
+            row.follower_id === first.follower_id && row.followee_id === first.followee_id,
+        ),
+      `${past.status} ${JSON.stringify(past.body)?.slice(0, 200)}`,
+    );
+  }
 
   // -------------------------------------------------------------------------
   console.log('\n— B is suspended, and stops being a current mutual —');

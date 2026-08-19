@@ -54,7 +54,21 @@ export type WriteResult =
   | { outcome: 'already_applied' }
   /** Refused because ranking owns the bucket now; the user must re-rank to change it. */
   | { outcome: 'ranked' }
-  | { outcome: 'failed'; message: string };
+  /**
+   * `changed` means **the server may already have written something**, so the caller
+   * still has caches to refresh even though it is about to show an error.
+   *
+   * Two ways it gets set, and review 21c found the first and 21d the second:
+   *
+   * - a writer that is more than one request failed after an earlier one landed;
+   * - **the request has no SQLSTATE**, so it was never answered. A recognised code is
+   *   the server declining, which it can only do by not committing. No code at all is a
+   *   dropped connection or a timeout — the write may have committed and the reply may
+   *   simply not have arrived, and nothing on this side can tell those apart.
+   *
+   * Absent means nothing happened, which stays the ordinary case.
+   */
+  | { outcome: 'failed'; message: string; changed?: boolean };
 
 const interpret = (error: { code?: string; message: string } | null): WriteResult => {
   if (!error) return { outcome: 'ok' };
@@ -73,7 +87,11 @@ const interpret = (error: { code?: string; message: string } | null): WriteResul
     case CODES.notFound:
       return { outcome: 'failed', message: 'That title is no longer in the catalogue.' };
     default:
-      return { outcome: 'failed', message: error.message };
+      // No code at all is a request that was never answered — see `changed` above. An
+      // unrecognised code still came from the server, so it declined and did not commit.
+      return error.code
+        ? { outcome: 'failed', message: error.message }
+        : { outcome: 'failed', message: error.message, changed: true };
   }
 };
 
@@ -266,11 +284,16 @@ export async function removeFromCollection(input: {
   /** Skips a pointless round trip for a title that was never ranked. */
   wasRanked: boolean;
 }): Promise<WriteResult> {
+  let removedRanking = false;
+
   if (input.wasRanked) {
     // A refusal here stops the delete rather than being retried into it: `unlog` would
     // only refuse in turn, and reporting the second refusal would name the wrong cause.
+    // A refusal here stops the delete rather than being retried into it, and `unrank`
+    // already carries `changed` when its own request went unanswered.
     const cleared = await unrank(input.mediaItemId);
     if (cleared.outcome === 'failed') return cleared;
+    removedRanking = true;
   }
 
   const { data, error } = await supabase.rpc('unlog', {
@@ -278,7 +301,26 @@ export async function removeFromCollection(input: {
     p_media_item_id: input.mediaItemId,
   });
 
-  return error ? interpret(error) : statusOf(data);
+  const result = error ? interpret(error) : statusOf(data);
+  if (result.outcome !== 'failed') return result;
+
+  /**
+   * **This is two writes, so it has a middle** — and the middle turned out to have a
+   * middle of its own.
+   *
+   * Review 21c found the first half: `rank_unrank` succeeds, `unlog` fails, the ranking
+   * is gone and the title is still logged, and the caller skips invalidation because the
+   * result says `failed`. Review 21d found that `changed` as I first wrote it only
+   * described **acknowledged** success. A request can commit and lose its reply, and the
+   * client cannot tell that apart from a refusal — so `rank_unrank` committing and then
+   * timing out came back as a plain failure with nothing to say the ranking had gone.
+   *
+   * The distinction that does hold is in `interpret`: **a SQLSTATE means the server
+   * answered**, and a server that answered with a refusal did not commit. An error
+   * carrying no code may have. So `unlog`'s own ambiguity is already on `result`, and all
+   * this line adds is the ranking that certainly went.
+   */
+  return removedRanking ? { ...result, changed: true } : result;
 }
 
 /** The local calendar date, formatted the way the database wants it. */

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { bandSizes, scoreFor, type Bucket } from '@/features/collection/score';
 import { resolveMetadata, type EmbeddedParent } from '@/lib/media-metadata';
+import { after, readAllByKey } from '@/lib/read-all';
 import { supabase } from '@/lib/supabase';
 
 import { awardsFor, type AwardProgress } from './progress';
@@ -108,65 +109,38 @@ const one = <T>(value: T | T[] | null | undefined): T | null =>
   (Array.isArray(value) ? value[0] : value) ?? null;
 
 /**
- * How many rows one request may return, and how many requests one fact may take.
+ * Every fact on this screen is read to exhaustion, by keyset, through `lib/read-all.ts`.
  *
- * **PostgREST silently caps an unbounded select**, and this was measured against
- * bingd-nonprod rather than assumed: `media_items` holds 2,835 rows, a select with no
- * range returns exactly 1,000, and the only sign of it is a `Content-Range: 0-999/*`
- * header that supabase-js discards. No error, no flag, no short read — just a shorter
- * array than the truth.
+ * Two defects sit behind that one sentence and independent review found both.
+ * PostgREST **silently caps an unbounded select at 1,000 rows**, which lands exactly
+ * where it hurts most — Movie Muncher's gold tier is 1,000 movies, so a collection of
+ * 1,000 films and any television at all came back short and could not unlock a badge it
+ * had earned. And paging that cap away with `.range()` **is not concurrency-safe**: each
+ * page is its own request and therefore its own `READ COMMITTED` transaction, so a title
+ * logged on another device mid-read shifts every later offset — one row arrives twice and
+ * another is never seen. 999 films assemble to 1,000 and the gold badge unlocks anyway,
+ * with no error and no sign that anything went wrong.
  *
- * That is a wrong number rather than a slow one, and it lands exactly where it hurts
- * most: **Movie Muncher's gold tier is 1,000 movies.** A collection of 1,000 films and
- * any television at all puts `user_media` past the cap, so the read comes back short and
- * the award reports a number below the tier the reader has actually reached — a badge
- * they have earned and cannot unlock, for a reason nothing on the screen could explain.
- * Heart Magnet and Mutual Mania fail the same way on a popular account.
+ * Keyset has neither problem and `read-all.ts` explains why. What matters here is the
+ * consequence for these reads: **the server's order carries no meaning any more, because
+ * the read does not stop until there is nothing left.** So each one sorts by whichever
+ * column is unique inside it, and the order the screen shows — newest comment first,
+ * newest recommendation first — is applied in JS over the assembled rows. That is what
+ * lets every cursor on this page be one unique column rather than a tuple.
  *
- * So every fact is paged to exhaustion. A page shorter than `PAGE_ROWS` is the end;
- * anything else asks for the next one.
+ * **Two reads are keyed by a pair rather than a column, and both stay one request per
+ * page.** `reactions` is `(feed_event_id, user_id)` and `follows` is
+ * `(follower_id, followee_id)`, so each compares a tuple in its predicate.
  *
- * **The ceiling exists so this can never quietly lie again.** Twelve pages is 12,000
- * rows, far past any real collection. Hitting it does not truncate — it returns an error,
- * which `rowsOf` turns into the `unavailable` state review 20 established, so the row
- * draws "Could not load this one" and a dash instead of a confident wrong number. A cap
- * that degrades into a plausible figure is the defect this comment exists about.
+ * `follows` was briefly split into two requests, one per direction, which makes each
+ * cursor a single column and is the obvious thing to do. **It is wrong**, and independent
+ * review 21c is where that was settled: an intersection taken from two snapshots can
+ * report a pair that never coexisted — read `me → A`, have it deleted, have `A → me`
+ * approved, read the other direction — and Mutual Mania is a present-tense claim about a
+ * pair. One request per page cannot do that, and for every real account the whole read is
+ * one request, so the read is a snapshot again.
  */
-const PAGE_ROWS = 1000;
-const MAX_PAGES = 12;
 
-type PageResult = { data: unknown; error: unknown };
-type Paged = (from: number, to: number) => PromiseLike<PageResult>;
-
-/**
- * One fact, however many requests it takes.
- *
- * Takes a factory rather than a query because a supabase-js builder is single-use: it is
- * a thenable that issues its request on the first `await`, so the same object cannot ask
- * for a second page.
- */
-async function readAll(page: Paged): Promise<PageResult> {
-  const rows: unknown[] = [];
-  for (let index = 0; index < MAX_PAGES; index += 1) {
-    const from = index * PAGE_ROWS;
-    const result = await page(from, from + PAGE_ROWS - 1);
-    if (result.error) return { data: null, error: result.error };
-
-    const batch = (result.data ?? []) as unknown[];
-    rows.push(...batch);
-    // Short page means the end. Equality means there may be more, including the exact
-    // case where the total is a multiple of the page size — which costs one empty
-    // request and is the price of not guessing.
-    if (batch.length < PAGE_ROWS) return { data: rows, error: null };
-  }
-  return {
-    data: null,
-    error: {
-      code: 'BINGD_TOO_MANY_ROWS',
-      message: `More than ${MAX_PAGES * PAGE_ROWS} rows; refusing to report a partial count.`,
-    },
-  };
-}
 
 /** A media row as the awards need it, with a season's inheritance applied. */
 function titleFrom(mediaItemId: string, media: MediaRow | null): WatchedTitle | null {
@@ -231,9 +205,101 @@ const personFrom = (id: string, profile: ProfileRow | null): PersonRef =>
       }
     : { id, name: 'Someone on Bingd', username: null, avatarPath: null };
 
+/**
+ * The row shapes, at module scope because the reads are now generic over them.
+ *
+ * They used to be declared beside the code that maps them, which read better; the reads
+ * name them first now, and a type alias that is used above its declaration is legal but
+ * not worth making a reader check.
+ */
+
+type WatchedRow = {
+  media_item_id: string;
+  watched_on: string | null;
+  note: string | null;
+  note_visibility: string | null;
+  media_items: MediaRow | MediaRow[] | null;
+};
+
+type RankedRow = {
+  media_item_id: string;
+  bucket: Bucket;
+  position: number;
+  category: 'movies' | 'tv_seasons';
+  media_items: MediaRow | MediaRow[] | null;
+};
+
+type SimpleRow = {
+  media_item_id: string;
+  created_at: string;
+  media_items: MediaRow | MediaRow[] | null;
+};
+
+type InviteRow = {
+  invitee_id: string;
+  activated_at: string | null;
+  invitee: ProfileRow | ProfileRow[] | null;
+};
+
+type EventRef = {
+  media_item_id: string | null;
+  media_items: MediaRow | MediaRow[] | null;
+};
+
+type CommentRow = {
+  id: string;
+  created_at: string;
+  feed_events: EventRef | EventRef[] | null;
+};
+
+type RecommendationRow = {
+  id: string;
+  recommended_at: string;
+  recipient_id: string;
+  media_items: MediaRow | MediaRow[] | null;
+  recipient: ProfileRow | ProfileRow[] | null;
+};
+
+type ReactionRow = {
+  feed_event_id: string;
+  user_id: string;
+  feed_events: EventRef | EventRef[] | null;
+};
+
+type FollowRow = {
+  follower_id: string;
+  followee_id: string;
+  follower: ProfileRow | ProfileRow[] | null;
+  followee: ProfileRow | ProfileRow[] | null;
+};
+
+/**
+ * Newest first, over rows the server returned in key order.
+ *
+ * The presentational sort moved here from the request when the reads became keyset:
+ * a cursor has to be the column the request sorts by, and `created_at` is not unique.
+ * ISO-8601 sorts correctly as text, and the key breaks the tie so the order is total —
+ * without which two rows written in the same instant could swap places between renders.
+ */
+const newestFirst = <Row>(rows: Row[], at: (row: Row) => string | null, key: (row: Row) => string) =>
+  [...rows].sort((a, b) => (at(b) ?? '').localeCompare(at(a) ?? '') || key(a).localeCompare(key(b)));
+
+/** The cursor column of a row, for the reads whose key is one column. */
+const keyed =
+  <Row, K extends keyof Row>(column: K) =>
+  (row: Row): readonly string[] => [String(row[column])];
+
 async function readFacts(userId: string): Promise<AwardFacts> {
-  const [watched, ranked, watchlist, invites, comments, recommendations, reactions, follows] =
-    await Promise.all([
+  const [
+    watched,
+    ranked,
+    watchlist,
+    invites,
+    comments,
+    recommendations,
+    reactions,
+    follows,
+  ] = await Promise.all([
       /**
        * The collection, with everything thirteen tracks need on it.
        *
@@ -243,40 +309,61 @@ async function readFacts(userId: string): Promise<AwardFacts> {
        * second query is what makes double-counting impossible: one row is one
        * contribution, and the same row is the one Movie Muncher counted.
        */
-      readAll((from, to) =>
-        supabase
-          .from('user_media')
-          .select(`media_item_id, watched_on, note, note_visibility, media_items(${MEDIA})`)
-          .eq('user_id', userId)
-          // Ordered because a paged read without one is not a read of anything: the
-          // database may return rows in any order per request, so page two could repeat
-          // page one's rows and omit others entirely. The primary key is the cheap
-          // stable tiebreak every one of these tables has.
-          .order('media_item_id', { ascending: true })
-          .range(from, to),
+      readAllByKey<WatchedRow>(
+        (cursor, limit) =>
+          after(
+            supabase
+              .from('user_media')
+              .select(`media_item_id, watched_on, note, note_visibility, media_items(${MEDIA})`)
+              .eq('user_id', userId),
+            'media_item_id',
+            cursor,
+          )
+            // The cursor column and the sort column are the same column, which is the
+            // whole of what makes the traversal complete: `user_media` is keyed by
+            // `(user_id, media_item_id)` and this read pins the account, so
+            // `media_item_id` is unique across every row the request can return.
+            .order('media_item_id', { ascending: true })
+            .limit(limit),
+        keyed('media_item_id'),
       ),
 
       // Bucket and position come too, so Rating Rascal's drill-down can show the score
       // the reader actually gave — which is derived from the band, not stored.
-      readAll((from, to) =>
-        supabase
-          .from('rankings')
-          .select(`media_item_id, bucket, position, category, media_items(${MEDIA})`)
-          .eq('user_id', userId)
-          .order('media_item_id', { ascending: true })
-          .range(from, to),
+      readAllByKey<RankedRow>(
+        (cursor, limit) =>
+          after(
+            supabase
+              .from('rankings')
+              .select(`media_item_id, bucket, position, category, media_items(${MEDIA})`)
+              .eq('user_id', userId),
+            'media_item_id',
+            cursor,
+          )
+            .order('media_item_id', { ascending: true })
+            .limit(limit),
+        keyed('media_item_id'),
       ),
 
-      readAll((from, to) =>
-        supabase
-          .from('watchlist')
-          .select(`media_item_id, media_items(${MEDIA})`)
-          .eq('user_id', userId)
-          // `created_at` is not unique, so on its own it is a page boundary that can drop
-          // or repeat a row when several land in the same instant. The key breaks the tie.
-          .order('created_at', { ascending: false })
-          .order('media_item_id', { ascending: true })
-          .range(from, to),
+      readAllByKey<SimpleRow>(
+        (cursor, limit) =>
+          after(
+            supabase
+              .from('watchlist')
+              // `created_at` is selected rather than ordered on, because the order it
+              // expresses is now applied in JS once every row is in hand.
+              .select(`media_item_id, created_at, media_items(${MEDIA})`)
+              .eq('user_id', userId),
+            'media_item_id',
+            cursor,
+          )
+            // Not `created_at`, which is neither unique nor a safe cursor: two rows
+            // written in the same instant share it, and `.gt()` on a shared value skips
+            // every row but the last. Queue Dragon's list is shown in the order it was
+            // added, and that ordering is applied to the assembled rows below.
+            .order('media_item_id', { ascending: true })
+            .limit(limit),
+        keyed('media_item_id'),
       ),
 
       /**
@@ -290,41 +377,61 @@ async function readFacts(userId: string): Promise<AwardFacts> {
        * `docs/product/growth-instrumentation.md` §1 for the five pieces Beta Hardening
        * owes it.
        */
-      readAll((from, to) =>
-        supabase
-          .from('invite_attributions')
-          .select('invitee_id, activated_at, invitee:invitee_id(id, username, display_name, avatar_path)')
-          .eq('inviter_id', userId)
-          .not('activated_at', 'is', null)
-          .order('invitee_id', { ascending: true })
-          .range(from, to),
+      readAllByKey<InviteRow>(
+        (cursor, limit) =>
+          after(
+            supabase
+              .from('invite_attributions')
+              .select(
+                'invitee_id, activated_at, invitee:invitee_id(id, username, display_name, avatar_path)',
+              )
+              .eq('inviter_id', userId)
+              .not('activated_at', 'is', null),
+            'invitee_id',
+            cursor,
+          )
+            // `invitee_id` is the table's primary key, so it is unique with or without
+            // the inviter filter.
+            .order('invitee_id', { ascending: true })
+            .limit(limit),
+        keyed('invitee_id'),
       ),
 
       // The reader's own comments, with the title they are about. `comments_read` needs
       // the event's actor to be visible too, so a comment left on somebody who has since
       // blocked the reader is absent from both the count and the list, together.
-      readAll((from, to) =>
-        supabase
-          .from('comments')
-          .select(
-            `id, created_at, feed_event_id, feed_events!inner(media_item_id, media_items(${MEDIA}))`,
+      readAllByKey<CommentRow>(
+        (cursor, limit) =>
+          after(
+            supabase
+              .from('comments')
+              .select(
+                `id, created_at, feed_event_id, feed_events!inner(media_item_id, media_items(${MEDIA}))`,
+              )
+              .eq('author_id', userId),
+            'id',
+            cursor,
           )
-          .eq('author_id', userId)
-          .order('created_at', { ascending: false })
-          .order('id', { ascending: true })
-          .range(from, to),
+            .order('id', { ascending: true })
+            .limit(limit),
+        keyed('id'),
       ),
 
-      readAll((from, to) =>
-        supabase
-          .from('title_recommendations')
-          .select(
-            `id, recommended_at, recipient_id, media_items(${MEDIA}), recipient:recipient_id(id, username, display_name, avatar_path)`,
+      readAllByKey<RecommendationRow>(
+        (cursor, limit) =>
+          after(
+            supabase
+              .from('title_recommendations')
+              .select(
+                `id, recommended_at, recipient_id, media_items(${MEDIA}), recipient:recipient_id(id, username, display_name, avatar_path)`,
+              )
+              .eq('sender_id', userId),
+            'id',
+            cursor,
           )
-          .eq('sender_id', userId)
-          .order('recommended_at', { ascending: false })
-          .order('id', { ascending: true })
-          .range(from, to),
+            .order('id', { ascending: true })
+            .limit(limit),
+        keyed('id'),
       ),
 
       /**
@@ -340,31 +447,81 @@ async function readFacts(userId: string): Promise<AwardFacts> {
        * reactor to be visible to the caller, so a reaction from a blocked account is
        * outside the count and outside the list in the same motion.
        */
-      readAll((from, to) =>
-        supabase
-          .from('reactions')
-          .select(`feed_event_id, feed_events!inner(actor_id, media_item_id, media_items(${MEDIA}))`)
-          .eq('feed_events.actor_id', userId)
-          .neq('user_id', userId)
-          // `reactions` is keyed by the pair, so the pair is what makes the order total.
-          .order('feed_event_id', { ascending: true })
-          .order('user_id', { ascending: true })
-          .range(from, to),
+      readAllByKey<ReactionRow>(
+        (cursor, limit) => {
+          const request = supabase
+            .from('reactions')
+            .select(
+              `feed_event_id, user_id, feed_events!inner(actor_id, media_item_id, media_items(${MEDIA}))`,
+            )
+            .eq('feed_events.actor_id', userId)
+            .neq('user_id', userId);
+
+          /**
+           * The one composite cursor on this screen, because there is nothing to split on.
+           *
+           * `reactions` is keyed by `(feed_event_id, user_id)` and this read pins
+           * neither, so a cursor on either column alone would skip every other reaction
+           * on the boundary event. The predicate below is the ordinary tuple comparison
+           * written the way PostgREST spells it, and it is one `or=` combined by AND with
+           * the two filters above — not a second one stacked on an existing `or=`, which
+           * is precisely why `follows` is read as two requests instead.
+           */
+          const keyset =
+            cursor === null
+              ? request
+              : request.or(
+                  `feed_event_id.gt.${cursor[0]},` +
+                    `and(feed_event_id.eq.${cursor[0]},user_id.gt.${cursor[1]})`,
+                );
+
+          return keyset
+            .order('feed_event_id', { ascending: true })
+            .order('user_id', { ascending: true })
+            .limit(limit);
+        },
+        (row) => [row.feed_event_id, row.user_id],
       ),
 
-      readAll((from, to) =>
-        supabase
-          .from('follows')
-          .select(FOLLOWS_SELECT)
-          .eq('state', 'approved')
-          .or(`follower_id.eq.${userId},followee_id.eq.${userId}`)
+      /**
+       * Every approved edge the reader is an end of, in **one** request per page.
+       *
+       * This was briefly two requests, one per direction, because pinning half of the
+       * `(follower_id, followee_id)` key makes the other half unique and the cursor a
+       * single column. Independent review 21c killed that, and the sequence is the reason:
+       * read the outgoing direction, then `me → A` is deleted, then `A → me` is approved,
+       * then read the incoming direction. Both edges are in hand and **they never existed
+       * at the same instant** — a mutual fabricated out of two snapshots, which is worse
+       * than the off-by-one I had accounted for and which no amount of "the window is
+       * small" makes acceptable on a number the app states as an award.
+       *
+       * So the direction filter and the keyset cursor share one `or=`, and the nesting is
+       * what makes that possible: PostgREST allows `or(and(…,or(…)),and(…,or(…)))`, so the
+       * whole predicate is a single query parameter and every page is a single request —
+       * which means an account under a thousand edges, i.e. every real account, is read in
+       * exactly one request and therefore one snapshot, exactly as before.
+       *
+       * The `!inner` markers in `FOLLOWS_SELECT` are untouched and are still the privacy
+       * control; `supabase/tests/award-privacy.mjs` probes this predicate against the
+       * deployed database rather than trusting that it parses.
+       */
+      readAllByKey<FollowRow>((cursor, limit) => {
+        const mine = `follower_id.eq.${userId},followee_id.eq.${userId}`;
+        const request = supabase.from('follows').select(FOLLOWS_SELECT).eq('state', 'approved');
+
+        return (
+          cursor === null
+            ? request.or(mine)
+            : request.or(
+                `and(follower_id.gt.${cursor[0]},or(${mine})),` +
+                  `and(follower_id.eq.${cursor[0]},followee_id.gt.${cursor[1]},or(${mine}))`,
+              )
+        )
           .order('follower_id', { ascending: true })
           .order('followee_id', { ascending: true })
-          .range(from, to),
-      ),
+          .limit(limit);
+      }, (row) => [row.follower_id, row.followee_id]),
     ]);
-
-  if (watched.error) throw watched.error;
 
   /**
    * Which fields could not be read, so a failure is never dressed up as a zero.
@@ -374,9 +531,20 @@ async function readFacts(userId: string): Promise<AwardFacts> {
    * rendered as 0 is the app making a statement about the reader — you have sent no
    * recommendations — on the strength of a request that never came back.
    *
-   * Per-field rather than fatal: losing Mutual Mania to a network blip should not cost
-   * the nineteen awards that did load. Only `watched` throws, above, because thirteen
-   * tracks are meaningless without it.
+   * **Per-field with no exception, which is the change of this pass.** `watched` used to
+   * throw and take the whole sheet with it, on the reasoning that thirteen tracks are
+   * meaningless without it. Thirteen are; seven are not, and rejecting those seven is the
+   * same mistake in the other direction — Mutual Mania has nothing to do with the
+   * collection and refusing to show it because the collection was too large to read is a
+   * wrong answer dressed as caution. Review 21b's nit, and the model already supported
+   * this: every track in `tracks.ts` declares exactly one `needs` field, so "which awards
+   * does this failure cost" has an answer that needs no guessing.
+   *
+   * The one thing that has to be said out loud is what *else* a failed collection read
+   * costs. Public notes are rows on `user_media`, so `written` is derived from the same
+   * read as `watched`, and letting Comment Gremlin fall back to comments-only would be a
+   * silent undercount — the exact failure this whole set exists to prevent. So the two go
+   * together, below.
    */
   const unavailable = new Set<keyof AwardFacts>();
   const rowsOf = <T>(
@@ -392,18 +560,15 @@ async function readFacts(userId: string): Promise<AwardFacts> {
 
   // --- The collection ------------------------------------------------------
 
-  type WatchedRow = {
-    media_item_id: string;
-    watched_on: string | null;
-    note: string | null;
-    note_visibility: string | null;
-    media_items: MediaRow | MediaRow[] | null;
-  };
-
   const titles: WatchedTitle[] = [];
   const notes: WrittenContribution[] = [];
 
-  for (const row of (watched.data ?? []) as unknown as WatchedRow[]) {
+  const watchedRows = rowsOf<WatchedRow>(watched, 'watched');
+  // Notes live on these rows, so a collection that could not be read takes the written
+  // count with it rather than quietly reporting the comments alone.
+  if (watched.error) unavailable.add('written');
+
+  for (const row of watchedRows) {
     const title = titleFrom(row.media_item_id, one(row.media_items));
     if (!title) continue;
     titles.push({ ...title, watchedOn: row.watched_on });
@@ -427,14 +592,6 @@ async function readFacts(userId: string): Promise<AwardFacts> {
 
   // --- Rankings ------------------------------------------------------------
 
-  type RankedRow = {
-    media_item_id: string;
-    bucket: Bucket;
-    position: number;
-    category: 'movies' | 'tv_seasons';
-    media_items: MediaRow | MediaRow[] | null;
-  };
-
   const rankedRows = rowsOf<RankedRow>(ranked, 'rankings');
   // A score is a position within its band, so the band has to be sized over the whole
   // category — the same rule the collection follows. Two categories, two sets of sizes.
@@ -451,33 +608,28 @@ async function readFacts(userId: string): Promise<AwardFacts> {
 
   // --- Everything else -----------------------------------------------------
 
-  type SimpleRow = { media_item_id: string; media_items: MediaRow | MediaRow[] | null };
-
-  const watchlistTitles = rowsOf<SimpleRow>(watchlist, 'watchlist').flatMap((row) => {
+  // Newest first, which is what the server used to be asked for. The read pages on the
+  // key instead — `created_at` is not unique and a `.gt()` cursor on a shared value skips
+  // rows — so the order the reader sees is applied here, once, over every row.
+  const watchlistTitles = newestFirst(
+    rowsOf<SimpleRow>(watchlist, 'watchlist'),
+    (row) => row.created_at,
+    (row) => row.media_item_id,
+  ).flatMap((row) => {
     const title = titleFrom(row.media_item_id, one(row.media_items));
     return title ? [title] : [];
   });
-
-  type InviteRow = {
-    invitee_id: string;
-    activated_at: string | null;
-    invitee: ProfileRow | ProfileRow[] | null;
-  };
 
   const invitedSignups = rowsOf<InviteRow>(invites, 'invitedSignups').map((row) => ({
     person: personFrom(row.invitee_id, one(row.invitee)),
     activatedAt: row.activated_at,
   }));
 
-  type CommentRow = {
-    id: string;
-    created_at: string;
-    feed_events: { media_item_id: string | null; media_items: MediaRow | MediaRow[] | null }
-      | { media_item_id: string | null; media_items: MediaRow | MediaRow[] | null }[]
-      | null;
-  };
-
-  const commentRows = rowsOf<CommentRow>(comments, 'written').map((row) => {
+  const commentRows = newestFirst(
+    rowsOf<CommentRow>(comments, 'written'),
+    (row) => row.created_at,
+    (row) => row.id,
+  ).map((row) => {
     const event = one(row.feed_events);
     const title = event?.media_item_id ? titleFrom(event.media_item_id, one(event.media_items)) : null;
     return {
@@ -488,17 +640,10 @@ async function readFacts(userId: string): Promise<AwardFacts> {
     } satisfies WrittenContribution;
   });
 
-  type RecommendationRow = {
-    id: string;
-    recommended_at: string;
-    recipient_id: string;
-    media_items: MediaRow | MediaRow[] | null;
-    recipient: ProfileRow | ProfileRow[] | null;
-  };
-
-  const recommendationsSent: RecommendationSent[] = rowsOf<RecommendationRow>(
-    recommendations,
-    'recommendationsSent',
+  const recommendationsSent: RecommendationSent[] = newestFirst(
+    rowsOf<RecommendationRow>(recommendations, 'recommendationsSent'),
+    (row) => row.recommended_at,
+    (row) => row.id,
   ).map((row) => ({
     key: row.id,
     // A recommendation names a title the sender chose, so a missing media row is a
@@ -508,14 +653,6 @@ async function readFacts(userId: string): Promise<AwardFacts> {
     recipient: personFrom(row.recipient_id, one(row.recipient)),
     sentAt: row.recommended_at,
   }));
-
-  type ReactionRow = {
-    feed_event_id: string;
-    feed_events:
-      | { media_item_id: string | null; media_items: MediaRow | MediaRow[] | null }
-      | { media_item_id: string | null; media_items: MediaRow | MediaRow[] | null }[]
-      | null;
-  };
 
   /**
    * Reactions folded into the thing they were left on.
@@ -544,12 +681,27 @@ async function readFacts(userId: string): Promise<AwardFacts> {
   }
   const reactionsReceived = [...reactedByEvent.values()].sort((a, b) => b.reactions - a.reactions);
 
-  type FollowRow = {
-    follower_id: string;
-    followee_id: string;
-    follower: ProfileRow | ProfileRow[] | null;
-    followee: ProfileRow | ProfileRow[] | null;
-  };
+  /**
+   * **An intersection may only be taken from one snapshot**, and this is where that is
+   * enforced rather than argued.
+   *
+   * One request is one `READ COMMITTED` transaction. Two are not: page one can hold
+   * `me → A`, that edge can be deleted, `A → me` can be approved, and page two holds the
+   * reverse — so the assembled arrays name a mutual that existed at no instant. A count
+   * survives being read across pages; an intersection *invents a member*.
+   *
+   * Every real account is one request — a thousand approved edges is a lot of people —
+   * but "every real account" is not an invariant anything enforces, and this traversal
+   * supports twelve thousand rows. So past one page Mutual Mania becomes `unavailable`
+   * rather than a number nobody can stand behind: a dash and "Could not load this one",
+   * which is the same answer this file gives every other read it cannot vouch for.
+   * Independent review 21d, after 21c rejected the two-request version for the same
+   * reason and I fixed only the version I had written.
+   *
+   * The honest way out of the dash is a server-side intersection in one transaction,
+   * which is a migration and belongs to Beta Hardening rather than here.
+   */
+  if (!follows.error && follows.pages > 1) unavailable.add('mutualFollows');
 
   const mutualFollows = mutualsFrom(rowsOf<FollowRow>(follows, 'mutualFollows'), userId);
 
@@ -566,6 +718,24 @@ async function readFacts(userId: string): Promise<AwardFacts> {
   };
 }
 
+/**
+ * The eight metrics, so "did anything at all arrive" has an answer.
+ *
+ * Listed rather than derived from the returned object, because a metric that is an empty
+ * array on a good day — Invite Instigator is empty for everybody today — cannot be told
+ * apart from a missing one by looking at the value.
+ */
+const METRICS: (keyof AwardFacts)[] = [
+  'watched',
+  'rankings',
+  'watchlist',
+  'invitedSignups',
+  'written',
+  'recommendationsSent',
+  'reactionsReceived',
+  'mutualFollows',
+];
+
 type FollowEdge = {
   follower_id: string;
   followee_id: string;
@@ -576,10 +746,16 @@ type FollowEdge = {
 /**
  * The people who follow the reader back.
  *
- * The rows are every approved edge the reader is an end of, in both directions. A
- * mutual is an id that appears on both sides. Counted from a set intersection rather
- * than from two queries, because two queries can be answered a second apart and a
- * follow that lands between them makes the number wrong in a way nothing can detect.
+ * The rows are every approved edge the reader is an end of, in both directions, and a
+ * mutual is an id that appears on both sides. This takes them as one array and does not
+ * care how many requests assembled it — which is the honest shape, because it has never
+ * been one: the caller reads the two directions separately so each can be paged on a
+ * unique key, and past a thousand edges the single `.or()` it replaced was several
+ * requests anyway.
+ *
+ * What that costs is one follow-back landing between the two reads, counted or missed by
+ * one and corrected on the next read. What it does not cost is a phantom: an id only
+ * enters the intersection by appearing on a row that genuinely existed when it was read.
  *
  * Returns the people rather than a number, because the count is the length and a
  * drill-down that had to ask again could disagree with the badge above it.
@@ -644,6 +820,22 @@ export function useAwards(userId: string, options: { enabled?: boolean } = {}) {
     staleTime: 60_000,
     queryFn: async (): Promise<AwardsQuery> => {
       const facts = await readFacts(userId);
+
+      /**
+       * Nothing arrived at all, which is a different fact from a metric being unavailable.
+       *
+       * Per-field degradation is right when one read fails — the collection being too
+       * large to count is no reason to withhold Mutual Mania. It is the wrong answer for
+       * a device that is offline, where every field is unavailable and twenty rows of
+       * dashes is a worse sentence than one that says so and offers Try again.
+       *
+       * This is deliberately "all eight", not "the important one". The founder's phone
+       * loses signal in a lift; a single ceiling error does not.
+       */
+      if (METRICS.every((metric) => facts.unavailable?.has(metric))) {
+        throw new Error('Could not read anything about this account’s awards.');
+      }
+
       return { facts, awards: awardsFor(facts) };
     },
   });

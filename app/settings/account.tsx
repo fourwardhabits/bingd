@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { Stack, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
@@ -5,6 +6,7 @@ import { Alert, StyleSheet, View } from 'react-native';
 import { signOut, useCurrentProfile } from '@/features/auth';
 import { deleteAllAvatars } from '@/features/profile/avatar';
 import { useAccountWrites } from '@/features/settings/use-account';
+import { queryKeys } from '@/lib/query';
 import { Button, Field, KeyboardScreen, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -32,6 +34,7 @@ import { theme } from '@/ui/tokens';
 export default function AccountScreen() {
   const profile = useCurrentProfile();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { deleteAccount, busy } = useAccountWrites();
   const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +74,30 @@ export default function AccountScreen() {
               const result = await deleteAccount(confirmation.trim());
               if (!result.ok) {
                 setError(result.message);
+                /**
+                 * **The avatars went first, so a failure here is a partial deletion.**
+                 *
+                 * `deleteAllAvatars` removes the bytes and then `delete_account` refuses
+                 * — an unverified email, a wrong confirmation, a dropped connection — and
+                 * the account survives with `profiles.avatar_path` pointing at storage
+                 * that is empty. Saying only "could not delete your account" leaves
+                 * somebody looking at a profile whose picture has silently gone, with
+                 * nothing on screen connecting the two. Independent review 21d found this
+                 * as the fourth writer with a middle.
+                 *
+                 * The profile is refetched as well as described, so the screen stops
+                 * drawing an avatar that is no longer there.
+                 */
+                if (removed !== null && removed > 0) {
+                  await queryClient.invalidateQueries({
+                    queryKey: queryKeys.myProfile(profile.id),
+                  });
+                  Alert.alert(
+                    'Could not delete your account',
+                    `${result.message}\n\nYour stored pictures were already removed as part of this attempt, so your profile picture is gone even though your account is not. You can upload a new one.`,
+                  );
+                  return;
+                }
                 Alert.alert('Could not delete your account', result.message);
                 return;
               }

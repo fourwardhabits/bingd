@@ -763,7 +763,7 @@ describe('rows that lead nowhere', () => {
  * and saving from an unmount is where writes go to be lost.
  */
 describe('who I watched with', () => {
-  const withPeople = (rows: Record<string, unknown>[]) => {
+  const withPeople = (rows: unknown[]) => {
     mockFrom.mockImplementation((table: string) => {
       const chain: Record<string, unknown> = {};
       const answer = () =>
@@ -776,6 +776,13 @@ describe('who I watched with', () => {
         eq: () => chain,
         in: () => chain,
         order: () => chain,
+        // The taggable read pages to exhaustion by keyset, and the direction filter and
+        // the cursor share one `or` so that each page is a single request — an
+        // intersection assembled from two snapshots can name a pair that never coexisted
+        // (`use-companions.ts`, independent review 21c).
+        or: () => chain,
+        limit: () => chain,
+        gt: () => chain,
         maybeSingle: () => Promise.resolve({ data: null, error: null }),
         then: (resolve: (value: unknown) => unknown) => answer().then(resolve),
       });
@@ -783,9 +790,18 @@ describe('who I watched with', () => {
     });
   };
 
-  const person = (id: string, name: string) => ({
-    profiles: { id, username: name.toLowerCase(), display_name: name, avatar_path: null },
-  });
+  /**
+   * One mutual, as the single request returns it: both directions on two rows, with the
+   * profile embedded on whichever end is not the viewer.
+   */
+  const person = (id: string, name: string) => {
+    const profile = { id, username: name.toLowerCase(), display_name: name, avatar_path: null };
+    const me = { id: 'user-1', username: 'sai', display_name: 'Sai', avatar_path: null };
+    return [
+      { follower_id: 'user-1', followee_id: id, follower: me, followee: profile },
+      { follower_id: id, followee_id: 'user-1', follower: profile, followee: me },
+    ];
+  };
 
   const openWho = async () => {
     const sheet = await open(filmA);
@@ -800,9 +816,12 @@ describe('who I watched with', () => {
 
   it('offers the people the viewer is connected to, each once', async () => {
     // The same person appears in both the following and the follower query when the
-    // follow is mutual, and a list with your closest friend in it twice is a bug
-    // people notice immediately.
-    withPeople([person('u1', 'Anna'), person('u1', 'Anna'), person('u2', 'Raj')]);
+    // follow is mutual, and a list with your closest friend in it twice is a bug people
+    // notice immediately. The stand-in answers both directions from this one array, so
+    // Anna arrives twice from one row — which is how the duplicate actually reaches the
+    // list. Writing her in twice would instead be two rows sharing a primary key, which
+    // `follows` cannot hold and `readAllByKey` now refuses outright.
+    withPeople([person('u1', 'Anna'), person('u2', 'Raj')].flat());
     const sheet = await openWho();
 
     await waitFor(() => expect(sheet.getByLabelText('Anna')).toBeTruthy());
@@ -811,7 +830,7 @@ describe('who I watched with', () => {
   });
 
   it('saves the whole list on each tick rather than waiting for a close', async () => {
-    withPeople([person('u1', 'Anna'), person('u2', 'Raj')]);
+    withPeople([person('u1', 'Anna'), person('u2', 'Raj')].flat());
     const sheet = await openWho();
     await waitFor(() => expect(sheet.getByLabelText('Anna')).toBeTruthy());
 
@@ -827,7 +846,7 @@ describe('who I watched with', () => {
   });
 
   it('creates the watch first, since a tag hangs off one', async () => {
-    withPeople([person('u1', 'Anna')]);
+    withPeople([person('u1', 'Anna')].flat());
     const sheet = await openWho();
     await waitFor(() => expect(sheet.getByLabelText('Anna')).toBeTruthy());
 
@@ -838,7 +857,7 @@ describe('who I watched with', () => {
   });
 
   it('untags on a second tap', async () => {
-    withPeople([person('u1', 'Anna')]);
+    withPeople([person('u1', 'Anna')].flat());
     const sheet = await openWho();
     await waitFor(() => expect(sheet.getByLabelText('Anna')).toBeTruthy());
 
@@ -852,7 +871,7 @@ describe('who I watched with', () => {
 
   it('stops offering more once ten are chosen', async () => {
     withPeople(
-      Array.from({ length: 12 }, (_, index) => person(`u${index}`, `Friend${index}`)),
+      Array.from({ length: 12 }, (_, index) => person(`u${index}`, `Friend${index}`)).flat(),
     );
     const sheet = await openWho();
     await waitFor(() => expect(sheet.getByLabelText('Friend0')).toBeTruthy());

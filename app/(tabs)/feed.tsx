@@ -23,7 +23,7 @@ import {
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { TrendingShelf } from '@/features/trending/TrendingShelf';
 import { posterUri } from '@/lib/images';
-import { queryKeys } from '@/lib/query';
+import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import {
   ActivityRow,
   AppHeader,
@@ -115,9 +115,8 @@ export default function FeedScreen() {
       return;
     }
 
-    await queryClient.invalidateQueries({
-      queryKey: [...queryKeys.collection(profile.id), 'watchlist'],
-    });
+    // The watchlist and Queue Dragon, which counts it (`collection/invalidate.ts`).
+    invalidateAfterWatchlistChange(queryClient, profile.id);
   };
 
   /**

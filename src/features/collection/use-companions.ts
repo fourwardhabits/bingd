@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { readAllByKey } from '@/lib/read-all';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 
@@ -53,34 +54,62 @@ export function useTaggablePeople(userId: string) {
     queryKey: ['taggable', userId],
     staleTime: 5 * 60_000,
     queryFn: async (): Promise<Person[]> => {
-      const [following, followers] = await Promise.all([
-        supabase
-          .from('follows')
-          .select('profiles:followee_id(id, username, display_name, avatar_path)')
-          .eq('follower_id', userId)
-          .eq('state', 'approved'),
-        supabase
-          .from('follows')
-          .select('profiles:follower_id(id, username, display_name, avatar_path)')
-          .eq('followee_id', userId)
-          .eq('state', 'approved'),
-      ]);
+      // Every edge the viewer is an end of, in one request per page, read to exhaustion
+      // (`lib/read-all.ts`). Both properties matter for the same reason
+      // `useRecommendRecipients` gives: this is an intersection, so a short read removes
+      // people from it rather than shortening it, and two snapshots can produce a pair
+      // that never coexisted. Independent review 21c.
+      type Edge = {
+        follower_id: string;
+        followee_id: string;
+        follower: ProfileShape | ProfileShape[] | null;
+        followee: ProfileShape | ProfileShape[] | null;
+      };
 
-      if (following.error) throw following.error;
-      if (followers.error) throw followers.error;
+      const edges = await readAllByKey<Edge>(
+        (cursor, limit) => {
+          const mine = `follower_id.eq.${userId},followee_id.eq.${userId}`;
+          const request = supabase
+            .from('follows')
+            .select(
+              'follower_id, followee_id, ' +
+                'follower:follower_id(id, username, display_name, avatar_path), ' +
+                'followee:followee_id(id, username, display_name, avatar_path)',
+            )
+            .eq('state', 'approved');
+
+          return (
+            cursor === null
+              ? request.or(mine)
+              : request.or(
+                  `and(follower_id.gt.${cursor[0]},or(${mine})),` +
+                    `and(follower_id.eq.${cursor[0]},followee_id.gt.${cursor[1]},or(${mine}))`,
+                )
+          )
+            .order('follower_id', { ascending: true })
+            .order('followee_id', { ascending: true })
+            .limit(limit);
+        },
+        (row) => [row.follower_id, row.followee_id],
+      );
+
+      if (edges.error) throw edges.error;
 
       // The intersection, which is the whole rule: somebody in one list and not the
       // other is a one-way follow.
       const outgoing = new Map<string, ProfileShape>();
-      for (const row of following.data ?? []) {
-        const profile = one((row as { profiles: ProfileShape | ProfileShape[] | null }).profiles);
-        if (profile) outgoing.set(profile.id, profile);
+      const incoming = new Set<string>();
+      for (const row of edges.data ?? []) {
+        if (row.follower_id === userId) {
+          const profile = one(row.followee);
+          if (profile) outgoing.set(profile.id, profile);
+        }
+        if (row.followee_id === userId) incoming.add(row.follower_id);
       }
 
       const byId = new Map<string, Person>();
-      for (const row of followers.data ?? []) {
-        const profile = one((row as { profiles: ProfileShape | ProfileShape[] | null }).profiles);
-        if (profile && outgoing.has(profile.id)) byId.set(profile.id, toPerson(profile));
+      for (const [id, profile] of outgoing) {
+        if (incoming.has(id)) byId.set(id, toPerson(profile));
       }
 
       return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));

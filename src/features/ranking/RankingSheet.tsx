@@ -110,6 +110,33 @@ function Session({
     let live = true;
     const open = subject.mode === 'rebucket' ? rankRebucket : rankStart;
     void open(subject.id, subject.bucket).then((next) => {
+      /**
+       * **A rebucket has already happened by the time this resolves**, and that is the
+       * whole reason this is here rather than only in `apply`.
+       *
+       * `rank_rebucket` calls `rank_unrank` and updates `user_media.bucket` before it
+       * opens a session (`20260813000700`). Both are committed. So a reader who moves a
+       * film from Loved to Fine and then closes the sheet without answering a single
+       * comparison has changed their collection — the ranking is gone, the bucket has
+       * moved — while the ranked list, the score denominators and Rating Rascal all still
+       * describe the ranking that no longer exists. Invalidating only on `placed` left
+       * that standing for the full one-minute `staleTime`. Independent review 21c.
+       *
+       * `rank_start` is not a mutation and needs none of this: it opens a session and
+       * writes nothing else.
+       *
+       * **On every resolution, including `failed`.** A Postgres exception does roll the
+       * whole `rank_rebucket` transaction back — but a transaction can commit and its
+       * HTTP response can then be lost, and the client maps that to `failed` too. There
+       * is no answer here that distinguishes "refused" from "committed, reply dropped",
+       * so the only safe reading is that it may have landed. A definite rollback costs a
+       * redundant refetch; the other way costs a screen describing a ranking that is
+       * gone. Independent review 21d.
+       */
+      if (subject.mode === 'rebucket') {
+        invalidateAfterCollectionChange(queryClient, profile.id, subject.id);
+      }
+
       if (live) {
         setBusy(false);
         apply(next);
@@ -126,7 +153,7 @@ function Session({
     return () => {
       live = false;
     };
-  }, [subject, apply]);
+  }, [subject, apply, profile.id, queryClient]);
 
   const act = async (run: () => Promise<SessionStep>, progress = 0) => {
     if (busy) return;

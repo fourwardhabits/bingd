@@ -32,11 +32,38 @@ jest.mock('@/lib/supabase', () => ({
           return chain;
         },
         order: () => chain,
+        // The direction filter and the keyset cursor share one `or`, which is what keeps
+        // each page a single request (`use-recommend.ts`). The read pages to exhaustion;
+        // one page is enough for these fixtures, but the calls have to exist.
+        or: () => chain,
+        limit: () => chain,
+        gt: () => chain,
         then: (resolve: (value: unknown) => unknown) => {
           if (table !== 'follows') return resolve({ data: [], error: null });
-          // Which direction is being asked for is decided by which column was pinned,
-          // exactly as the real query decides it.
-          const data = filters.follower_id ? mockOutgoing : mockIncoming;
+          void filters;
+          /**
+           * **One request, both directions**, which is what the read does now.
+           *
+           * It was a select per direction, intersected. Independent review 21c killed
+           * that: two snapshots can produce a pair that never coexisted, so the picker
+           * could offer a mutual that the server would then refuse. The fixture answers
+           * the way the single request does — every edge the viewer is an end of.
+           */
+          const VIEWER = { id: 'user-1', username: 'me', display_name: 'Me', avatar_path: null, status: 'active' };
+          const data = [
+            ...mockOutgoing.map((profile) => ({
+              follower_id: 'user-1',
+              followee_id: (profile as { id: string }).id,
+              follower: VIEWER,
+              followee: profile,
+            })),
+            ...mockIncoming.map((profile) => ({
+              follower_id: (profile as { id: string }).id,
+              followee_id: 'user-1',
+              follower: profile,
+              followee: VIEWER,
+            })),
+          ];
           return resolve({ data, error: null });
         },
       };
@@ -45,8 +72,16 @@ jest.mock('@/lib/supabase', () => ({
   },
 }));
 
+/**
+ * One profile. `mockOutgoing` is who the viewer follows, `mockIncoming` is who follows
+ * the viewer; the stand-in above turns each into the `follows` row it would arrive on.
+ */
 const person = (id: string, username: string, name: string, status = 'active') => ({
-  profiles: { id, username, display_name: name, avatar_path: null, status },
+  id,
+  username,
+  display_name: name,
+  avatar_path: null,
+  status,
 });
 
 const props = {

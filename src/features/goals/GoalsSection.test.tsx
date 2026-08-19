@@ -39,6 +39,10 @@ jest.mock('@/lib/supabase', () => ({
         eq: () => chain,
         gte: () => chain,
         lte: () => chain,
+        // The goal read pages to exhaustion by keyset now (`lib/read-all.ts`), so the
+        // stand-in has to carry the two calls that does — one page is enough for these.
+        order: () => chain,
+        limit: () => chain,
         then: (resolve: (value: unknown) => unknown) => answer().then(resolve),
       };
       return chain;

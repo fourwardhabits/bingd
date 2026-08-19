@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { after, readAllByKey } from '@/lib/read-all';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 
@@ -83,15 +84,29 @@ export function useWatchGoals(userId: string, year: number) {
         // arriving with a null embed and being counted as a movie by `kindOf`'s
         // fallback. `media_items` is world-readable, so in practice this changes
         // nothing; it means the fallback can never decide a goal.
-        supabase
-          .from('user_media')
-          .select('media_item_id, watched_on, media_items!inner(kind, title, poster_path)')
-          .eq('user_id', userId)
-          // Bounds the transfer to one year. The year is *also* checked in
-          // `countWatched`, which is where the rule is tested — this filter is an
-          // optimisation and is not trusted to be the only one.
-          .gte('watched_on', from)
-          .lte('watched_on', to),
+        // Paged to exhaustion (`lib/read-all.ts`), because what comes out of this read is
+        // a *number* on a progress bar. PostgREST caps an unbounded select at 1,000 rows,
+        // so a year past that would have shown a goal stuck at a thousand — a wrong
+        // figure with nothing to distinguish it from a true one.
+        readAllByKey<WatchRow>(
+          (cursor, limit) =>
+            after(
+              supabase
+                .from('user_media')
+                .select('media_item_id, watched_on, media_items!inner(kind, title, poster_path)')
+                .eq('user_id', userId)
+                // Bounds the transfer to one year. The year is *also* checked in
+                // `countWatched`, which is where the rule is tested — this filter is an
+                // optimisation and is not trusted to be the only one.
+                .gte('watched_on', from)
+                .lte('watched_on', to),
+              'media_item_id',
+              cursor,
+            )
+              .order('media_item_id', { ascending: true })
+              .limit(limit),
+          (row) => [row.media_item_id],
+        ),
       ]);
 
       if (goals.error) throw goals.error;

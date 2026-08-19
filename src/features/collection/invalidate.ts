@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 
+import { invalidateAwards } from '@/features/awards/invalidate';
 import { queryKeys } from '@/lib/query';
 
 /**
@@ -89,18 +90,34 @@ export function invalidateAfterCollectionChange(
 
   /**
    * Bingd Awards, which is the exact failure this module was written to prevent
-   * happening again — and it happened again anyway.
+   * happening again — and it happened again anyway, twice.
    *
    * Thirteen of the twenty tracks are functions of the watched collection, so logging a
    * film moves them by construction. Awards arrived after this list existed and was
-   * never added to it, so for up to its one-minute `staleTime` the sheet showed the
-   * count from before the log. `use-awards.ts` asserted the opposite in a comment —
-   * that ranking and logging "already invalidate the collection keys this shares a
-   * screen with" — which was true of every key except its own.
-   *
-   * It lands on the founder's acceptance walk directly: log the film that crosses a
-   * threshold, open the sheet, and the badge has not moved. Found by independent review
-   * 21.
+   * never added to it, so for up to its one-minute `staleTime` the sheet showed the count
+   * from before the log — while `use-awards.ts` asserted the opposite in a comment.
+   * Review 21 found that; review 21b then found that fixing it *here* had fixed one
+   * writer of five. So the key itself is not written out any more:
+   * `awards/invalidate.ts` owns it, and the four other writers call the same function.
    */
-  invalidate(['awards', userId]);
+  invalidateAwards(queryClient, userId);
+}
+
+/**
+ * Everything that stops being true when a title goes on or off the watchlist.
+ *
+ * Four surfaces carry a bookmark control — the title page, the Feed, Recommendations and
+ * a person's credits — and each kept its own invalidation list, which is precisely the
+ * arrangement the module above exists to argue against. All four moved **Queue Dragon**
+ * and none of them said so: 24 → 25, and the badge did not move for a minute.
+ *
+ * The shared part is here. Each caller still adds what only it knows about — the title
+ * page also refreshes the title, Recommendations also refreshes its slate — because
+ * folding those in would make every bookmark press refetch surfaces it cannot change.
+ */
+export function invalidateAfterWatchlistChange(queryClient: QueryClient, userId: string) {
+  void queryClient.invalidateQueries({
+    queryKey: [...queryKeys.collection(userId), 'watchlist'],
+  });
+  invalidateAwards(queryClient, userId);
 }
