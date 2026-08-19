@@ -519,7 +519,10 @@ describe('notification preferences', () => {
     event = rows[0].id;
   });
 
-  it('defaults to on, because absence has meant enabled since 20260813000900', async () => {
+  it('answers for every category, defaulted by the category rather than by absence', async () => {
+    // 20260819000300 replaced the two categories with eight, and made absence mean
+    // *the category's default* rather than a flat true. Six are still on; reactions
+    // and awards are off, which is why the old flat assertion could not survive.
     const rows = await t.asUser(heidi, async () => {
       const { rows } = await t.sql(`select * from my_notification_preferences() order by category`);
       return rows;
@@ -527,12 +530,25 @@ describe('notification preferences', () => {
     await t.actAs(null);
 
     assert.deepEqual(rows, [
+      { category: 'awards', enabled: false },
+      { category: 'comments', enabled: true },
+      { category: 'follow_accepted', enabled: true },
       { category: 'follows', enabled: true },
-      { category: 'social', enabled: true },
+      { category: 'invites', enabled: true },
+      { category: 'reactions', enabled: false },
+      { category: 'recommendations', enabled: true },
+      { category: 'watch_tags', enabled: true },
     ]);
   });
 
-  it('delivers a reaction while social is on', async () => {
+  it('delivers a reaction while reactions is on', async () => {
+    // Explicitly on, because this category is the one that defaults off. Asserting a
+    // delivery against the default would be asserting the default, not the gate.
+    await t.asUser(heidi, async () => {
+      await t.sql(`select set_notification_preference('reactions', true)`);
+    });
+    await t.actAs(null);
+
     await t.asUser(ivan, async () => {
       await t.sql(`select set_reaction($1, $2, 'love')`, [await nextOp(), event]);
     });
@@ -541,11 +557,12 @@ describe('notification preferences', () => {
     assert.equal(await inbox('reaction'), 1);
   });
 
-  it('stops delivering once social is off', async () => {
-    // The switch that had no effect until now. `notification_preferences` has existed
-    // since day one and nothing read it.
+  it('stops delivering once reactions is off', async () => {
+    // The switch that had no effect until 20260817000800, and had no category of its
+    // own until 20260819000300 — before which silencing a reaction meant silencing
+    // every comment too.
     await t.asUser(heidi, async () => {
-      await t.sql(`select set_notification_preference('social', false)`);
+      await t.sql(`select set_notification_preference('reactions', false)`);
     });
     await t.actAs(null);
     await t.sql(`delete from notifications where recipient_id = $1`, [heidi]);
@@ -619,7 +636,7 @@ describe('notification preferences', () => {
     assert.equal(await inbox('milestone'), 1);
   });
 
-  it('refuses a category that is not one of the two', async () => {
+  it('refuses a category that is not one of the eight', async () => {
     const error = await t.asUser(heidi, () =>
       t.errorFrom(`select set_notification_preference('marketing', false)`),
     );
@@ -630,7 +647,7 @@ describe('notification preferences', () => {
 
   it('is not reachable signed out', async () => {
     const error = await t.asAnon(() =>
-      t.errorFrom(`select set_notification_preference('social', false)`),
+      t.errorFrom(`select set_notification_preference('comments', false)`),
     );
 
     assert.equal(error?.code, '42501');
@@ -638,7 +655,9 @@ describe('notification preferences', () => {
 
   it('keeps _notifies internal, because it answers about a third party', async () => {
     const alice = await t.createUser({ username: 'alice_pref' });
-    const error = await t.asUser(alice, () => t.errorFrom(`select _notifies($1, 'social')`, [heidi]));
+    const error = await t.asUser(alice, () =>
+      t.errorFrom(`select _notifies($1, 'comments')`, [heidi]),
+    );
     await t.actAs(null);
 
     assert.equal(error?.code, '42501');

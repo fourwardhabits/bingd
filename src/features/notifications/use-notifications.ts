@@ -19,7 +19,34 @@ export type NotificationKind =
   | 'reaction'
   | 'comment'
   | 'watch_tag'
-  | 'recommendation';
+  | 'recommendation'
+  /**
+   * Somebody who was invited joined. **Nothing writes this yet.**
+   *
+   * The type, its preference category and its route all exist ahead of the writer,
+   * which is a deliberate order rather than an oversight: `invite_attributions`
+   * has had an `activated_at` column since 20260813001300 with no writer, because
+   * https://bingd.app/i/<token> resolves to nothing and `app/i/[token].tsx` is a
+   * stub with a no-op Accept button. There is no attributable activation to
+   * observe, and 20260817001300's header is explicit that inventing one is the
+   * thing not to do. When the resolver lands, the row it writes is already
+   * rendered, already silenceable and already routed.
+   */
+  | 'invite_activated'
+  /**
+   * An award tier was crossed. **Nothing writes this yet, and this run did not
+   * build it.**
+   *
+   * Award tiers are computed on the device from raw table reads
+   * (`src/features/awards/progress.ts` over `tracks.ts`), and no server-side row
+   * records which tier an account has reached. Notifying only on a *crossing* —
+   * 49 to 50 yes, 50 to 51 no — therefore needs a durable record of the previous
+   * tier, and the only honest place for it is a server-side unlock ledger. A
+   * client-held "last seen tier" is exactly the observed-state assumption Review
+   * 21 spent seven rounds proving unsafe: a reinstall, a second device or a lost
+   * reply each turn it into either a missed award or a repeated one.
+   */
+  | 'award_earned';
 
 export type Notification = {
   id: string;
@@ -37,6 +64,17 @@ export type Notification = {
   mediaKind: 'movie' | 'series' | 'season' | null;
   /** The show a season belongs to. A season's own title is "Season 2". */
   seriesTitle: string | null;
+  /**
+   * What the row points at, as the database recorded it.
+   *
+   * Carried so that routing can tell two silences apart. A `comment` row always has
+   * a `feed_event` subject; `mediaItemId` going null therefore means the event was
+   * deleted rather than that there was never one — the join in `my_notifications`
+   * that resolves the title requires the event to still exist *and* still belong to
+   * this reader. `routing.ts` reads exactly that difference.
+   */
+  subjectType: string | null;
+  subjectId: string | null;
 };
 
 const KINDS = new Set<string>([
@@ -47,7 +85,20 @@ const KINDS = new Set<string>([
   'comment',
   'watch_tag',
   'recommendation',
+  'invite_activated',
+  'award_earned',
 ]);
+
+/**
+ * The kinds that are somebody doing something, rather than something happening.
+ *
+ * Everything here is drawn with a name and a face, so a row that cannot name its
+ * actor is dropped rather than rendered anonymously. `award_earned` is the first
+ * kind that is genuinely nobody's action — it has a null `actor_id` by construction —
+ * and it is not held to that rule. Before it existed the rule was simply "always",
+ * which would have silently swallowed the first actorless notice ever written.
+ */
+const ACTORLESS_KINDS = new Set<string>(['award_earned']);
 
 /**
  * The caller's own inbox.
@@ -86,8 +137,14 @@ export function useNotifications(viewerId: string) {
         media_title: string | null;
         media_kind: 'movie' | 'series' | 'season' | null;
         series_title: string | null;
+        subject_type: string | null;
+        subject_id: string | null;
       }[])
-        .filter((row) => KINDS.has(row.kind) && Boolean(row.actor_username))
+        .filter(
+          (row) =>
+            KINDS.has(row.kind) &&
+            (Boolean(row.actor_username) || ACTORLESS_KINDS.has(row.kind)),
+        )
         .map((row) => ({
           id: row.id,
           kind: row.kind as NotificationKind,
@@ -101,6 +158,8 @@ export function useNotifications(viewerId: string) {
           mediaTitle: row.media_title,
           mediaKind: row.media_kind,
           seriesTitle: row.series_title,
+          subjectType: row.subject_type,
+          subjectId: row.subject_id,
         }));
     },
   });
@@ -158,6 +217,15 @@ export function verbFor(kind: NotificationKind, mediaKind?: Notification['mediaK
       if (mediaKind === 'season') return 'recommended a season';
       if (mediaKind === 'movie') return 'recommended a movie';
       return 'recommended something';
+    case 'invite_activated':
+      return 'joined Bingd from your invite';
+    /**
+     * Second person, and no actor. Every other verb completes a sentence that began
+     * with somebody's name; this one is the whole sentence, which is why the row
+     * that draws it must not expect a face.
+     */
+    case 'award_earned':
+      return 'You earned a new Award';
   }
 }
 

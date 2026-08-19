@@ -235,7 +235,17 @@ const ALLOWED = {
   // answers whether a *named third party* has muted you, which is exactly what
   // 20260813001900 revoked can_view_profile for; the second is a trigger function and a
   // client holding it could suppress anybody's inbox row.
+  // `set_notification_preferences` (plural) was added 2026-08-19 with the taxonomy.
+  // It is what a section master switch calls: one transaction over several
+  // categories, because five sequential single-category writes can end up half
+  // applied and leave a master switch disagreeing with its own children.
+  //
+  // `_notification_categories` and `_notification_default` join the internal side.
+  // Both are pure and disclose nothing about anybody, but the allow-list is the
+  // artefact that gets reviewed and an entry here should follow a surface -- no
+  // client calls either, so no client may.
   'set_notification_preference(text,boolean)': ['authenticated'],
+  'set_notification_preferences(text[],boolean)': ['authenticated'],
   'my_notification_preferences()': ['authenticated'],
 
   // Added 2026-08-16 with watch tagging (PRD §14). `set_watch_tags` replaces the

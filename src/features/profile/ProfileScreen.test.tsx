@@ -47,6 +47,11 @@ jest.mock('@/lib/supabase', () => ({
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
+  // No params, which is how this tab is reached everywhere except from an award
+  // notification — that one arrives as `?awards=1` and opens the sheet on mount
+  // (`features/notifications/routing.ts`). These tests are about the tab itself, so
+  // they assert the ordinary arrival.
+  useLocalSearchParams: () => ({}),
 }));
 
 jest.mock('@/features/auth', () => ({

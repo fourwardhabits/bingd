@@ -50,6 +50,24 @@ before(async () => {
   t = await createTestDb();
   alice = await t.createUser({ username: 'alice_react' });
   bob = await t.createUser({ username: 'bob_react' });
+
+  /**
+   * Alice opts into reaction notifications, because since 20260819000300 they are
+   * the one social category that defaults **off** — one tap from anybody who can see
+   * the activity, on every event, is the lowest-signal thing in the inbox.
+   *
+   * This suite is about the row a reaction writes, not about the default. Without
+   * this line the assertions below would go green or red for a reason that has
+   * nothing to do with what they are testing, which is precisely the failure mode
+   * Review 21 kept finding: an empty result set that proves the fixture rather than
+   * the code. `notification-preferences.test.mjs` owns the default itself.
+   *
+   * Through the real writer rather than an insert, so the fixture cannot drift from
+   * what the app does.
+   */
+  await t.actAs(alice);
+  await t.sql(`select set_notification_preference('reactions', true)`);
+
   await t.actAs(bob);
 });
 
@@ -333,20 +351,34 @@ describe('what the activity owner is told', () => {
     assert.equal(inbox.rows[0].actor_username, 'bob_react');
   });
 
+  /**
+   * Reaches its recipient and nobody else.
+   *
+   * Asserted through `my_notifications` since 20260819000300, because the table itself
+   * stopped being a client surface in that migration: the recipient-only policy was
+   * only one of two read paths, and the one it did not cover let a row that raced a
+   * block be read straight off the table (independent review 23c). Both halves of the
+   * original assertion survive — the recipient sees it, the reactor does not — and the
+   * refusal is now a 42501 rather than an empty set, which is the stronger answer.
+   */
   it('is readable by its recipient and by nobody else', async () => {
     const event = await eventOf(alice, await movie('react_notify_private'));
     await react(event, 'love');
 
     const asRecipient = await t.asUser(alice, () =>
-      t.sql(`select 1 from notifications where subject_id = $1`, [event]),
+      t.sql(`select id from my_notifications(100) where subject_id = $1`, [event]),
     );
     const asReactor = await t.asUser(bob, () =>
-      t.sql(`select 1 from notifications where subject_id = $1`, [event]),
+      t.sql(`select id from my_notifications(100) where subject_id = $1`, [event]),
+    );
+    const tableRead = await t.asUser(alice, () =>
+      t.errorFrom(`select 1 from notifications where subject_id = $1`, [event]),
     );
     await t.actAs(bob);
 
     assert.equal(asRecipient.rows.length, 1);
     assert.equal(asReactor.rows.length, 0, 'the reactor does not get to read the inbox');
+    assert.equal(tableRead?.code, '42501', 'and neither of them reads the table directly');
   });
 });
 

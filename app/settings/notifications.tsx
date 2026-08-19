@@ -2,6 +2,7 @@ import { Stack, useRouter } from 'expo-router';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
   canFollowBack,
   useMarkNotificationsRead,
@@ -94,23 +95,34 @@ export default function NotificationsScreen() {
     await notifications.refetch();
   };
 
-  const openActor = (row: Notification) => {
-    if (row.actorUsername) router.push(`/u/${row.actorUsername}`);
-  };
-
   /**
-   * Where the row leads, which is not always a person.
+   * Where the row leads.
    *
-   * A recommendation opens the exact title — the one thing the reader was told to
-   * watch. Everything else opens the person who did it.
+   * Every destination comes from `routing.ts` rather than from a condition here. What
+   * this replaced was one rule — a recommendation opened the title, everything else
+   * opened the actor — with no answer at all for the case that matters: by the time
+   * somebody taps a notification, the thing it points at may have been deleted,
+   * blocked, or made private. The resolver returns an ordered chain whose last link
+   * always survives, so a tap can land on a useful parent but never on a blank screen.
    */
   const openRow = (row: Notification) => {
-    if (row.kind === 'recommendation' && row.mediaItemId) {
-      router.push(`/title/${row.mediaItemId}`);
+    const target = targetFor(row);
+    const href = hrefFor(target);
+
+    // Nothing survived. Say so rather than absorbing the tap: a press that does
+    // nothing is indistinguishable from one the app missed, and the reader repeats it.
+    if (!href) {
+      Alert.alert(
+        'No longer available',
+        target.kind === 'unavailable' ? target.reason : 'This is no longer available.',
+      );
       return;
     }
-    openActor(row);
+    router.push(href);
   };
+
+  /** The person on a follow request, which is the same chain by another entry point. */
+  const openActor = (row: Notification) => openRow(row);
 
   return (
     <Screen includeBottomInset>
@@ -119,6 +131,15 @@ export default function NotificationsScreen() {
           headerShown: true,
           title: 'Notifications',
           headerBackTitle: 'Back',
+          // Where somebody looks the moment they decide they are getting too many of
+          // these, which is here rather than back in the Settings list.
+          headerRight: () => (
+            <Button
+              label="Settings"
+              kind="tertiary"
+              onPress={() => router.push('/settings/notification-preferences')}
+            />
+          ),
         }}
       />
 
@@ -229,9 +250,9 @@ export default function NotificationsScreen() {
                         row.kind,
                         row.mediaKind,
                       )}${subject ? `, ${subject}` : ''}`}
-                      accessibilityHint={
-                        row.kind === 'recommendation' ? 'Opens the title' : 'Opens their profile'
-                      }
+                      // From the same chain the tap uses, so the hint cannot promise a
+                      // title and then open a profile.
+                      accessibilityHint={hintFor(row)}
                       onPress={() => openRow(row)}
                       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
                     >

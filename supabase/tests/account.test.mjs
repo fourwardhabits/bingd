@@ -254,6 +254,12 @@ describe('the inbox', () => {
        values ($1, 'title_ranked', $2) returning id`,
       [grace, film],
     );
+    // Reactions default off since 20260819000300 and the gate is a before-insert
+    // trigger, so even this direct insert is dropped without an opt-in. The subject
+    // under test is the title-resolution join, not the preference.
+    await t.actAs(frank);
+    await t.sql(`select set_notification_preference('reactions', true)`);
+    await t.actAs(null);
     await t.sql(
       `insert into notifications (recipient_id, type, actor_id, subject_type, subject_id)
        values ($1, 'reaction', $2, 'feed_event', $3)`,

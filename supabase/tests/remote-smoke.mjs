@@ -589,6 +589,35 @@ expectRefused(
   await rpc('can_discover_profile', { viewer: NIL, subject: NIL }),
 );
 
+// 20260819000300's internals. `_notification_default` and `_notification_categories`
+// are pure and disclose nothing about anybody, which is exactly why the grant is the
+// thing worth probing: an entry in the allow-list should follow a surface, and no
+// client calls either.
+expectRefused(
+  'anon cannot execute _notification_default',
+  await rpc('_notification_default', { p_category: 'comments' }),
+);
+expectRefused(
+  'anon cannot execute _notification_categories',
+  await rpc('_notification_categories', {}),
+);
+
+// The bulk preference writer is a session's own settings, so it is authenticated-only
+// like its single-category sibling.
+expectRefused(
+  'anon cannot execute set_notification_preferences',
+  await rpc('set_notification_preferences', { p_categories: ['comments'], p_enabled: false }),
+);
+
+// The inbox stopped being a client-readable table in 20260819000300: the recipient-only
+// policy was one of two read paths, and the one it did not cover let a row that raced a
+// block be read straight off the table. Probed here because what closes it is a grant on
+// the deployed database rather than anything in a function body.
+expectRefused(
+  'anon cannot select the notifications table',
+  await get('notifications?select=id&limit=1'),
+);
+
 // Maintenance actions are service_role only. The anon key is a valid JWT, so
 // verify_jwt lets it through and resolveCaller is what stops it — which means this
 // probe is testing the function's own logic rather than the platform's.

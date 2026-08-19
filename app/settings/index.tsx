@@ -17,11 +17,12 @@ import { theme } from '@/ui/tokens';
  * are not built yet" — above an avatar picker and the TMDB notice. It was accurate,
  * which is why it survived: nothing in the database could be reached from here.
  *
- * The five destinations are the five questions somebody opens Settings to answer:
- * *who am I here* (Edit Profile), *who can see me* (Privacy), *who is waiting on me*
- * (Notifications), *how do I leave* (Account & Data), and *what is this built on*
- * (About). There is no sixth for the sake of symmetry and there are no placeholders:
- * every row leads to controls with real backend semantics behind them.
+ * The destinations are the questions somebody opens Settings to answer: *who am I
+ * here* (Edit Profile), *who can see me* (Privacy), *who is waiting on me*
+ * (Notifications), *what should reach me at all* (Notification Settings), *how do I
+ * leave* (Account & Data), and *what is this built on* (About). There is none added
+ * for the sake of symmetry and there are no placeholders: every row leads to controls
+ * with real backend semantics behind them.
  *
  * The pending-request count is the one number on this screen. It is the only thing in
  * the app that is genuinely waiting on the reader — a reaction is news, a request is a
@@ -70,6 +71,14 @@ export default function SettingsScreen() {
             detail={pending ? `${pending} waiting` : undefined}
             emphasis={pending > 0}
             onPress={() => router.push('/settings/notifications')}
+          />
+          {/* Its own row rather than a control inside the inbox alone. The two are
+              different questions — "who is waiting on me" and "what should reach me
+              at all" — and the second is the one somebody comes to Settings for. */}
+          <Row
+            icon="options-outline"
+            label="Notification Settings"
+            onPress={() => router.push('/settings/notification-preferences')}
           />
           <Row
             icon="shield-outline"

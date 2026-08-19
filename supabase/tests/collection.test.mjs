@@ -275,6 +275,12 @@ describe('collection writes', () => {
         await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
         const [event] = await eventsFor(user, film);
 
+        // Reactions default off since 20260819000300, so the recipient opts in — this
+        // test is about `unlog` clearing *both* kinds of notice, and a reaction notice
+        // that was never written would let it pass without proving that.
+        await t.actAs(user);
+        await t.sql(`select set_notification_preference('reactions', true)`);
+
         const fan = await t.createUser({ username: 'unlog_fan' });
         await t.asUser(fan, async () => {
           await t.sql(`select set_reaction($1, $2, 'love')`, [await uuid(), event.id]);

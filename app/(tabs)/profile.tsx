@@ -1,5 +1,5 @@
 
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
 
@@ -58,7 +58,15 @@ export default function ProfileScreen() {
   // Mounted only while open, like every other sheet in the app: it reads nine things
   // when it mounts, and one that stayed mounted would read them on every profile visit
   // for a screen nobody had asked for.
-  const [awardsOpen, setAwardsOpen] = useState(false);
+  //
+  // `?awards=1` opens it on arrival, which is where an award notification routes
+  // (`features/notifications/routing.ts`). The sheet is a component on this tab rather
+  // than a route of its own, so a parameter is the only way in from outside. Read as
+  // the initial state rather than in an effect: it should open once because the reader
+  // arrived that way, not again every time this tab re-renders with the param still on
+  // the URL.
+  const { awards: awardsParam } = useLocalSearchParams<{ awards?: string }>();
+  const [awardsOpen, setAwardsOpen] = useState(awardsParam === '1');
 
   // Own activity only. The feed query spans everyone this user follows, and a
   // friend's ranking under a heading on *your* profile is a different claim.
