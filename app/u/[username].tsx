@@ -10,7 +10,11 @@ import { useActorActivity } from '@/features/feed/use-feed';
 import { FollowControl } from '@/features/profile/FollowControl';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
 import { TopRanked } from '@/features/profile/TopRanked';
-import { useProfileNotes, usePublicProfile } from '@/features/profile/use-public-profile';
+import {
+  useProfileIdentity,
+  useProfileNotes,
+  usePublicProfile,
+} from '@/features/profile/use-public-profile';
 import { useMyBlocks, useRelationships, useSocialWrites } from '@/features/profile/use-social';
 import { tasteMatchBadge, useTasteMatch } from '@/features/profile/use-taste-match';
 import { posterUri } from '@/lib/images';
@@ -53,7 +57,22 @@ export default function PublicProfileScreen() {
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
 
   const profile = usePublicProfile(username ?? null);
-  const subjectId = profile.data?.id ?? '';
+  /**
+   * Identity, asked for **every** profile rather than only the ones that come back
+   * empty.
+   *
+   * Two reasons, and the second is the load-bearing one. It removes a wait: the
+   * fallback surface is ready the moment the readable one is known to be absent,
+   * instead of starting a second round trip at that point. And it removes a
+   * disclosure: a request issued only for private accounts would report somebody's
+   * visibility setting to anybody watching the network, which is precisely what the
+   * server-side design of `profile_identity` avoids by answering for public accounts
+   * too. Cheap — one indexed row on a handle.
+   */
+  const identity = useProfileIdentity(username ?? null);
+  // The readable profile when there is one, the identity when there is not. Both name
+  // the same account; only one of them can be read.
+  const subjectId = profile.data?.id ?? identity.data?.id ?? '';
   const notes = useProfileNotes(profile.data?.id ?? null);
   const watched = useWatched(viewer.id);
   const activity = useActorActivity(profile.data?.id ?? null);
@@ -104,7 +123,7 @@ export default function PublicProfileScreen() {
         }}
       />
 
-      {profile.isPending ? (
+      {profile.isPending || (!profile.data && identity.isPending) ? (
         <LoadingScreen />
       ) : profile.isError ? (
         <EmptyState
@@ -129,9 +148,49 @@ export default function PublicProfileScreen() {
               })(),
           }}
         />
+      ) : !profile.data && identity.data ? (
+        /**
+         * **Found, and not readable.** `20260819000100` separated the two: a private
+         * account is discoverable by name so somebody who knows them can ask, while
+         * everything they wrote stays behind `can_view_profile`.
+         *
+         * So this is the whole surface — the avatar, the name, the handle, the fact
+         * that it is private, and the one control that changes anything. Not a grey
+         * circle: replacing a real face with a placeholder would make the person
+         * unrecognisable to exactly the friend the discovery exists for, and the avatar
+         * is identity rather than activity.
+         *
+         * No stats, no Top Ranked, no activity, no Awards, no goals, no taste match.
+         * Not hidden by this screen — the reads that would fill them return nothing,
+         * which is where the rule belongs.
+         */
+        <ScrollView contentContainerStyle={styles.content}>
+          <ProfileIdentity
+            name={identity.data.name}
+            username={identity.data.username}
+            bio={null}
+            avatarUri={identity.data.avatarUri}
+            controls={
+              <FollowControl
+                userId={identity.data.id}
+                name={identity.data.name}
+                viewerId={viewer.id}
+                relationship={relationships.data?.get(identity.data.id)}
+                isSelf={false}
+              />
+            }
+          />
+          <EmptyState
+            kind="nothingYet"
+            compact
+            title="This account is private"
+            body="Follow them to see what they have watched, ranked and written."
+          />
+        </ScrollView>
       ) : !profile.data ? (
-        // The same answer for a private account and for a name nobody has taken.
-        // Distinguishing them would disclose that the account exists.
+        // Nobody by that handle, an account that blocked the viewer, or a suspended
+        // one. Deliberately one answer for all three: telling them apart would report
+        // a block to the person it was applied to and a suspension to anybody who asks.
         <EmptyState
           kind="nothingYet"
           title={`@${username}`}

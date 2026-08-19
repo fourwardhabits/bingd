@@ -90,23 +90,34 @@ describe('matching', () => {
     assert.deepEqual(await found(null), []);
   });
 
-  it('finds the caller themselves', async () => {
-    // Not specially excluded: searching your own handle and getting nothing reads as
-    // a bug. The client decides not to draw a Follow control on your own row.
-    assert.deepEqual(await found('searcher'), ['searcher']);
+  it('does not return the caller themselves', async () => {
+    // Reversed by 20260819000100. Searching your own handle and getting nothing is a
+    // little surprising; a "You" row in a list of people to follow is a control that
+    // cannot exist, and leaving the exclusion to the client meant every future caller
+    // had to remember it. Discovery is about other people.
+    assert.deepEqual(await found('searcher'), []);
   });
 });
 
 // ---------------------------------------------------------------------------
 
 describe('who is not returned', () => {
-  it('omits a private account the caller does not follow', async () => {
-    const shy = await t.createUser({ username: 'shy_person', visibility: 'private' });
+  /**
+   * **A private account is findable, and 20260819000100 is where that changed.**
+   *
+   * The rule this replaces made private mean *unreachable*: a friend who knew the
+   * handle could not send a follow request, so the only way to be found was to publish
+   * your collection. Private is now about content — everything behind
+   * `can_view_profile` is unmoved — and discovery is its own predicate.
+   *
+   * What comes back is identity and nothing else: handle, display name, avatar,
+   * visibility. The tests below are the boundary; `private-discovery.test.mjs` is where
+   * the content half is proved still shut.
+   */
+  it('includes a private account the caller does not follow', async () => {
+    await t.createUser({ username: 'shy_person', visibility: 'private' });
 
-    assert.deepEqual(await found('shy_person'), []);
-    // The fixture is real and matches: it is visible to itself, so the absence above
-    // is the filter working rather than the query missing.
-    assert.deepEqual(await found('shy_person', shy), ['shy_person']);
+    assert.deepEqual(await found('shy_person'), ['shy_person']);
   });
 
   it('includes a private account the caller follows', async () => {
@@ -120,16 +131,31 @@ describe('who is not returned', () => {
     assert.deepEqual(await found('shy_friend'), ['shy_friend']);
   });
 
-  it('omits a private account with only a pending request', async () => {
-    // A request is not a relationship yet. can_view_profile is the predicate, and it
-    // requires `approved` — which is the case `state` alone would get wrong.
+  it('includes a private account with only a pending request', async () => {
+    // The state of the request has stopped mattering to *discovery*. It still decides
+    // everything about what can be read, which is the point of separating the two: a
+    // pending request is exactly the state somebody reaches by finding an account they
+    // cannot yet read.
     const shy = await t.createUser({ username: 'shy_pending', visibility: 'private' });
     await t.sql(
       `insert into follows (follower_id, followee_id, state) values ($1, $2, 'pending')`,
       [viewer, shy],
     );
 
-    assert.deepEqual(await found('shy_pending'), []);
+    assert.deepEqual(await found('shy_pending'), ['shy_pending']);
+  });
+
+  it('reports the visibility, so a row can say the account is private', async () => {
+    // Without this the client would have to guess, and a private account presented as
+    // an open one is a Follow control that silently becomes a request.
+    await t.createUser({ username: 'shy_labelled', visibility: 'private' });
+
+    const { rows } = await t.sql(
+      `select username, visibility from search_users($1, 30)`,
+      ['shy_labelled'],
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].visibility, 'private');
   });
 
   it('omits an account that has blocked the caller', async () => {

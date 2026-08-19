@@ -21,6 +21,25 @@ type UserRow = {
 };
 
 /**
+ * What a member search actually looks for, once `@` has been accounted for.
+ *
+ * **`@` is a hint, not a mode.** Typing `@suraj` plainly means "the member suraj", so
+ * the handle is matched without the sigil and Members lead the results — but a title
+ * can legitimately begin with `@`, and a search box that stops looking for titles
+ * because of one character would simply fail to find those. So there is no mode switch
+ * anywhere: the sigil changes the *order* of two sections, never the presence of either.
+ *
+ * Returns the query to match members on, and whether they should lead.
+ */
+export function memberQuery(query: string): { text: string; leads: boolean } {
+  const trimmed = query.trim();
+  if (!trimmed.startsWith('@')) return { text: trimmed, leads: false };
+  // Only the leading sigil, and only one. `@@` is not a handle and stripping greedily
+  // would turn it into one.
+  return { text: trimmed.slice(1).trim(), leads: true };
+}
+
+/**
  * People matching what was typed.
  *
  * Two things this hook deliberately does **not** do.
@@ -41,7 +60,8 @@ type UserRow = {
  * *and* the viewer for exactly that reason.
  */
 export function useUserSearch(query: string, viewerId: string, limit = 10) {
-  const trimmed = query.trim();
+  // `search_users` matches handles as they are stored, which is without the `@`.
+  const trimmed = memberQuery(query).text;
 
   return useQuery({
     queryKey: ['user-search', viewerId, trimmed, limit],
@@ -85,8 +105,13 @@ export function useUserSearch(query: string, viewerId: string, limit = 10) {
  * it hides is a row the viewer is entitled to see, and the Users tab shows them all.
  */
 export function meaningfulMatch(user: UserResult, query: string): boolean {
-  const q = fold(query.trim());
+  const { text, leads } = memberQuery(query);
+  const q = fold(text);
   if (!q) return false;
+  // An explicit `@` is somebody naming a person. The gate exists to stop strangers
+  // outranking films for a query that was plainly about a title, and a query that opens
+  // with a handle sigil is not that query.
+  if (leads) return true;
   const handle = fold(user.username);
   return handle === q || handle.startsWith(q) || fold(user.name).startsWith(q);
 }

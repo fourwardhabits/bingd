@@ -121,12 +121,69 @@ beforeEach(() => {
 
 const open = async () => renderWithProviders(<PublicProfileScreen />);
 
-describe('a profile the viewer may not see', () => {
-  it('answers the same way for a private account and a name nobody has taken', async () => {
-    // `public_profiles` is a security_invoker view, so a private account the viewer
-    // does not follow simply does not come back — and the screen must not tell the
-    // two apart, because doing so discloses that the account is there (PRD §16).
+describe('a private account the viewer has found', () => {
+  const identity = {
+    id: 'anna-id',
+    username: 'anna',
+    display_name: 'Anna',
+    avatar_path: 'anna-id/1.jpg',
+    visibility: 'private',
+  };
+
+  /**
+   * **Discovery is worthless if the row leads nowhere.**
+   *
+   * `20260819000100` made a private account findable by name. Before this screen
+   * existed, tapping one landed on "This profile is not available" — the same answer as
+   * a handle nobody has taken — with no way to ask, which turned the private setting
+   * from a door into a wall.
+   */
+  it('draws the identity and a Follow control, with no content', async () => {
     tableRows.public_profiles = [];
+    mockRpcResults.profile_identity = [identity];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
+    expect(view.getByText('@anna')).toBeTruthy();
+    expect(view.getByText('Follow')).toBeTruthy();
+    expect(view.getByText('This account is private')).toBeTruthy();
+    // Nothing that belongs to the account rather than to its identity.
+    expect(view.queryByText('Followers')).toBeNull();
+    expect(view.queryByText('Movies')).toBeNull();
+  });
+
+  it('does not draw zeros where the counts would be', async () => {
+    // Zeros are not "no answer". They are a statement that somebody has no followers
+    // and has ranked nothing, told about an account this viewer was never entitled to
+    // count — so the row is omitted rather than filled in.
+    tableRows.public_profiles = [];
+    mockRpcResults.profile_identity = [identity];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
+    expect(view.queryByText('0')).toBeNull();
+  });
+
+  it('asks for the identity on every profile, not only the ones that came back empty', async () => {
+    // A request issued only for private accounts would report somebody's visibility
+    // setting to anybody watching the network — which is exactly what answering for
+    // public accounts too is there to prevent, server-side and here.
+    const view = await open();
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
+
+    expect(mockRpcCalls.some((call) => call.name === 'profile_identity')).toBe(true);
+  });
+});
+
+describe('a profile the viewer may not see', () => {
+  it('answers the same way for a blocked, suspended, or unclaimed handle', async () => {
+    // `profile_identity` is silent for all three, and so is `public_profiles`. The
+    // screen must not tell them apart: doing so reports a block to the person it was
+    // applied to, and a suspension to anybody who asks (PRD §16).
+    tableRows.public_profiles = [];
+    mockRpcResults.profile_identity = [];
     const view = await open();
 
     await waitFor(() => expect(view.getByText('This profile is not available.')).toBeTruthy());

@@ -15,12 +15,21 @@ import { theme } from '@/ui/tokens';
 const TAB_BAR_HEIGHT = Platform.OS === 'android' ? 56 : 49;
 
 /**
- * Feed · Collection · + · Recommendations · Profile — founder decision,
+ * Feed · Collection · Search · Recommendations · Profile — founder decision,
  * 2026-08-13, superseding Provisional INF-4. See docs/design/screens.md §2.
  *
- * Collection holds Ranked, Watched, Watchlist, and Lists. The centre + is the
- * log-and-rank entry point and opens directly into title search, which is why
- * there is no separate Search tab.
+ * Collection holds Ranked, Watched, Watchlist, and Lists.
+ *
+ * **The centre tab is Search, and was called Log.** The rename is the founder's, and
+ * the reasoning is that the surface is where you *find* something — a title or a
+ * member — and logging is what happens after you have chosen one. Calling it Log named
+ * the second step and hid the first, which is also why member search sat behind a chip
+ * nobody had a reason to press.
+ *
+ * The icon moved with the label: a `+` under the word Search describes neither, and the
+ * centre position is what carries the "this is the thing you do most" weight rather
+ * than the glyph. The route is still `log` — renaming a file to match a label is a
+ * deep-link and history change bought for nothing.
  */
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
@@ -93,10 +102,10 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="log"
         options={{
-          title: 'Log',
+          title: 'Search',
           tabBarIcon: ({ focused }) => (
             <Ionicons
-              name={focused ? 'add-circle' : 'add-circle-outline'}
+              name={focused ? 'search' : 'search-outline'}
               size={theme.layout.icon.lg}
               color={focused ? theme.semantic.action : theme.text.tertiary}
             />

@@ -292,11 +292,16 @@ describe('the guard is wired in, not merely present', () => {
     // number, and a suspended *caller* only ever sees their own following list — which
     // suspension does not hide from the person it was applied to.
     'following_score',
-    // 20260817000300. A stable read filtered through can_view_profile from the
-    // caller's own side. A suspended account calling it learns nothing new — and a
-    // suspended *subject* is already absent from everybody's results, which is the
-    // direction that matters.
+    // 20260817000300, widened by 20260819000100. A stable read filtered through
+    // can_discover_profile from the caller's own side. A suspended account calling it
+    // learns nothing new — and a suspended *subject* is still absent from everybody's
+    // results, which is the direction that matters and which the new predicate keeps.
     'search_users',
+    // 20260819000100. Identity only — handle, display name, avatar, visibility — for an
+    // account the caller may find. It exists so a private account discovered in search
+    // leads somewhere a follow request can be made from. Same predicate, same silence
+    // for a blocked or suspended account.
+    'profile_identity',
     // 20260817000200. security invoker, so it reads only the caller's own edges
     // through follows_read and blocks_read. Suspension does not hide a person's own
     // follow list from them, and this reports nothing else.

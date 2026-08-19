@@ -9,7 +9,16 @@ export type ProfileIdentityProps = {
   username: string;
   bio: string | null;
   avatarUri: string | null;
-  stats: {
+  /**
+   * Absent on a profile the viewer may not read.
+   *
+   * Optional rather than zeroed, because zeros are not "no answer" — they are a
+   * statement that somebody has no followers and has ranked nothing, which is a lie
+   * told about a private account this viewer was never entitled to count. The row is
+   * omitted instead. `20260819000100` made this reachable: a private account is now
+   * findable, and its identity is drawn without its numbers.
+   */
+  stats?: {
     followers: number | string;
     following: number | string;
     movies: number | string;
@@ -116,14 +125,16 @@ export function ProfileIdentity({
         </View>
       ) : null}
 
-      <StatRow
-        stats={[
-          { label: 'Followers', value: stats.followers },
-          { label: 'Following', value: stats.following },
-          { label: 'Movies', value: stats.movies },
-          { label: 'TV seasons', value: stats.seasons },
-        ]}
-      />
+      {stats ? (
+        <StatRow
+          stats={[
+            { label: 'Followers', value: stats.followers },
+            { label: 'Following', value: stats.following },
+            { label: 'Movies', value: stats.movies },
+            { label: 'TV seasons', value: stats.seasons },
+          ]}
+        />
+      ) : null}
 
       {controls ? <View style={styles.controls}>{controls}</View> : null}
     </View>

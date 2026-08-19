@@ -29,17 +29,30 @@ import {
   UserRow,
 } from '@/ui/components';
 
-/** All first, because the filter is a narrowing of a search the user has
- *  already made and the unnarrowed state is the one they arrive in. */
+/**
+ * All first, because the filter is a narrowing of a search the user has already made
+ * and the unnarrowed state is the one they arrive in.
+ *
+ * **`users` was a fourth chip here and is not one any more.** These three narrow
+ * *titles*; members are a different kind of thing and were never narrowed by them, so a
+ * Users chip made one control mean two things and put member discovery behind a press
+ * nobody had a reason to make. Members are a grouped section now, always present when
+ * somebody matched, with See all to open the rest in place.
+ */
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'movies', label: 'Movies' },
   { id: 'tv', label: 'TV' },
-  // Last, and after the two media filters, because Bingd is a film and television app
-  // first: somebody looking for a title should never have to pass a people tab to
-  // reach one (founder addendum, 2026-08-16).
-  { id: 'users', label: 'Users' },
 ] as const;
+
+/**
+ * How many members show before See all.
+ *
+ * Three, because Bingd is a film and television app first and a page of strangers above
+ * a page of films is the wrong answer to "spiderman" (founder addendum, 2026-08-16).
+ * See all lifts it to the server's own ceiling rather than routing anywhere.
+ */
+const MEMBER_PREVIEW = 3;
 
 type Filter = (typeof FILTERS)[number]['id'];
 
@@ -56,6 +69,9 @@ export default function LogScreen() {
   const profile = useCurrentProfile();
   const [input, setInput] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  // Reset by every new query below: See all is about the results on screen, and keeping
+  // it open across searches would silently widen the next one.
+  const [allMembers, setAllMembers] = useState(false);
   const [series, setSeries] = useState<{ id: string; title: string } | null>(null);
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
   const [ranking, setRanking] = useState<RankingSubject | null>(null);
@@ -77,15 +93,15 @@ export default function LogScreen() {
 
   const filtered = useMemo(() => {
     if (filter === 'all') return results;
-    // The Users tab is people and nothing else. Leaving the titles in and hiding them
-    // in the renderer would make every empty-state branch below wrong.
-    if (filter === 'users') return [];
     return results.filter((result) =>
       filter === 'movies' ? result.kind === 'movie' : result.kind !== 'movie',
     );
   }, [results, filter]);
 
-  const users = useUserSearch(input, profile.id, filter === 'users' ? 30 : 10);
+  // Always the server's ceiling. The cap that matters is a display one, applied below,
+  // and asking for ten and then for thirty when See all is pressed would make the
+  // expansion a second round trip that can fail.
+  const users = useUserSearch(input, profile.id, 30);
   const userResults = useMemo(() => users.data ?? [], [users.data]);
   const relationships = useRelationships(
     useMemo(() => userResults.map((user) => user.id), [userResults]),
@@ -93,23 +109,35 @@ export default function LogScreen() {
   );
 
   /**
-   * Who appears under **All**.
+   * Which members appear, and how many.
    *
-   * Titles stay dominant, which the founder asked for and which this enforces twice:
-   * the section is capped at three, and it holds only people whose handle or name the
-   * query actually *starts*. `search_users` matches substrings, so without that gate
-   * typing "the" would put three strangers above a page of films.
+   * Titles stay dominant, which the founder asked for and which the gate enforces:
+   * `meaningfulMatch` keeps the section to people whose handle or name the query
+   * actually *starts*, because `search_users` matches substrings and without it typing
+   * "the" would put three strangers above a page of films.
    *
-   * Under Users there is no gate and no cap beyond the server's — everything the viewer
-   * is allowed to see, which is what a dedicated tab is for. So the gate never hides
-   * anybody; it only decides which tab they lead with.
+   * **See all lifts the display cap, not the gate**, and it is deliberately not a route.
+   * Everything it reveals is already in hand — the query asked for the server's ceiling
+   * — so the expansion cannot fail, cannot spend a round trip, and cannot land somebody
+   * on a screen with its own empty state.
+   *
+   * A query opening with `@` passes the gate outright (`memberQuery`): somebody typing
+   * a handle sigil is naming a person, and the gate exists for queries that were plainly
+   * about a title.
    */
-  const usersUnderAll = useMemo(
-    () => userResults.filter((user) => meaningfulMatch(user, input)).slice(0, 3),
+  const matchedMembers = useMemo(
+    () => userResults.filter((user) => meaningfulMatch(user, input)),
     [userResults, input],
   );
 
-  const shownUsers = filter === 'users' ? userResults : filter === 'all' ? usersUnderAll : [];
+  // Members are not titles, so a Movies or TV narrowing has nothing to say about them.
+  const membersApply = filter === 'all';
+  const shownUsers = membersApply
+    ? allMembers
+      ? matchedMembers
+      : matchedMembers.slice(0, MEMBER_PREVIEW)
+    : [];
+  const moreMembers = membersApply && !allMembers && matchedMembers.length > MEMBER_PREVIEW;
 
   /**
    * History is written on commitment, never on typing.
@@ -143,13 +171,29 @@ export default function LogScreen() {
    * is notified about either way. The action lives on the profile the row opens.
    */
   const relationshipLabel = (user: UserResult) => {
-    // Your own row: "Follow" against yourself is a control that cannot exist, and the
-    // profile it opens is your own.
+    // Your own row. `search_users` stopped returning it at `20260819000100`, so this is
+    // a floor rather than a branch anybody reaches — kept because "Follow" against
+    // yourself is a control that cannot exist, and a server that changed its mind
+    // should not be able to draw one.
     if (user.id === profile.id) return 'You';
+
     const label = followLabel(relationships.data?.get(user.id) ?? noRelationship());
-    // "Follow" is the *absence* of a relationship. Printing it would describe an
-    // action nothing on this row performs.
-    return label === 'Follow' ? null : label;
+    // "Follow" is the *absence* of a relationship. Printing it would describe an action
+    // nothing on this row performs — the action lives on the profile the row opens.
+    if (label !== 'Follow') return label;
+
+    /**
+     * **Private, where there is nothing else to say.**
+     *
+     * `20260819000100` made private accounts findable, and a row that looks identical
+     * to a public one sets up a surprise: the tap leads to a locked profile and the
+     * Follow becomes a request somebody has to answer. Saying so on the row is the
+     * difference between a considered ask and an accidental one.
+     *
+     * Only when there is no relationship to name. "Following" is the more useful word
+     * for an account already approved, and it already implies the rest.
+     */
+    return user.visibility === 'private' ? 'Private' : null;
   };
 
   const openTitle = (result: SearchResult) => {
@@ -184,10 +228,18 @@ export default function LogScreen() {
       <View style={styles.field}>
         <SearchField
           accessibilityLabel="Search"
-          placeholder="A film or a series"
+          // Names both halves, because the second was invisible while it sat behind a
+          // chip. "@handle" rather than "a member" so the sigil is discoverable.
+          placeholder="A film, a series, or @someone"
           value={input}
-          onChangeText={setInput}
-          onClear={() => setInput('')}
+          onChangeText={(next) => {
+            setInput(next);
+            setAllMembers(false);
+          }}
+          onClear={() => {
+            setInput('');
+            setAllMembers(false);
+          }}
           autoFocus
           autoCorrect={false}
           autoCapitalize="none"
@@ -216,7 +268,8 @@ export default function LogScreen() {
         idle={idle}
         users={shownUsers}
         usersLoading={users.isPending && !idle}
-        usersOnly={filter === 'users'}
+        moreMembers={moreMembers}
+        onSeeAllMembers={() => setAllMembers(true)}
         relationshipLabel={relationshipLabel}
         onOpenUser={openUser}
         loading={isPending && !idle}
@@ -291,7 +344,8 @@ function Results({
   idle,
   users,
   usersLoading,
-  usersOnly,
+  moreMembers,
+  onSeeAllMembers,
   relationshipLabel,
   onOpenUser,
   loading,
@@ -313,7 +367,8 @@ function Results({
   idle: boolean;
   users: UserResult[];
   usersLoading: boolean;
-  usersOnly: boolean;
+  moreMembers: boolean;
+  onSeeAllMembers: () => void;
   relationshipLabel: (user: UserResult) => string | null;
   onOpenUser: (user: UserResult) => void;
   loading: boolean;
@@ -379,41 +434,6 @@ function Results({
     );
   }
 
-  /**
-   * The Users tab, answered before any of the title states below.
-   *
-   * Every branch after this one is written about the catalogue — "Looking further
-   * afield", "the wider search did not answer", "try the original title" — and all of
-   * them are wrong about people. There is no provider pass for accounts and nothing to
-   * be exhausted; either somebody matched or nobody did.
-   */
-  if (usersOnly) {
-    if (usersLoading) return <SkeletonRow count={4} />;
-    if (users.length === 0) {
-      return (
-        <EmptyState
-          kind="nothingMatches"
-          title="Nobody by that name"
-          body="Try their exact handle. Private accounts do not appear in search."
-        />
-      );
-    }
-    return (
-      <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-        {users.map((user) => (
-          <UserRow
-            key={user.id}
-            name={user.name}
-            username={user.username}
-            avatarUri={user.avatarUri}
-            relationship={relationshipLabel(user)}
-            onPress={() => onOpenUser(user)}
-          />
-        ))}
-      </ScrollView>
-    );
-  }
-
   if (error) {
     return (
       <EmptyState
@@ -425,24 +445,32 @@ function Results({
     );
   }
 
-  if (loading) return <SkeletonRow count={6} />;
+  if (loading && users.length === 0) return <SkeletonRow count={6} />;
 
   /**
-   * People, above the titles and visibly not among them.
+   * Members, in a labelled section of their own and visibly not among the titles.
    *
-   * A labelled section with its own divider, so a profile row is never mistaken for a
-   * result in the title ranking — which is the founder's rule, and which the round
-   * avatar against a rectangular poster already signals before the label is read.
+   * A profile row is never mistaken for a result in the title ranking — the founder's
+   * rule, which the round avatar against a rectangular poster already signals before
+   * the label is read.
    *
-   * Above rather than below, because a section under a page of films is a section
-   * nobody reaches, and the gate on `usersUnderAll` is what keeps it from appearing
-   * when the query was plainly about a title. It renders nothing at all when empty,
-   * so All looks exactly as it did before whenever nobody matched.
+   * **"Members", not "People".** People is what an actor-and-director search would be
+   * called, and that is deferred rather than absent — using the word here would have to
+   * be taken back later, on the one surface where the distinction matters.
+   *
+   * Renders nothing at all when nobody matched, so a plain title search looks exactly
+   * as it did.
    */
-  const people =
+  const members =
     users.length > 0 ? (
       <View style={styles.people}>
-        <SectionHeader title="People" />
+        <SectionHeader
+          title="Members"
+          // Not a route. Everything it reveals is already in hand, so the expansion
+          // cannot fail and cannot land anybody on a second empty state.
+          actionLabel={moreMembers ? 'See all' : undefined}
+          onPressAction={moreMembers ? onSeeAllMembers : undefined}
+        />
         {users.map((user) => (
           <UserRow
             key={user.id}
@@ -459,10 +487,11 @@ function Results({
   if (results.length === 0) {
     // Somebody matched and no title did. The title empty states below would all be
     // saying "nothing matches that" over a list that plainly has somebody in it.
-    if (people) {
+    if (members) {
       return (
         <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-          {people}
+          {members}
+          {loading ? <SkeletonRow count={4} /> : null}
           <EmptyState
             kind="nothingMatches"
             compact
@@ -472,6 +501,10 @@ function Results({
         </ScrollView>
       );
     }
+
+    // Nobody matched either, and the member read is still in flight. Saying "nothing
+    // matches that" now would be a claim about a question still being asked.
+    if (usersLoading) return <SkeletonRow count={6} />;
 
     // Several different silences, and saying the wrong one is worse than saying
     // nothing. Still looking is not the same as having looked and found nothing;
@@ -531,7 +564,11 @@ function Results({
     // ranks titles, and the next person to add sticky headers or a section index would
     // find people in it.
     <View style={styles.list}>
-      {people}
+      {/* Above the titles, always. A section under a page of films is a section nobody
+          reaches, and the gate in `meaningfulMatch` is what keeps it from appearing at
+          all when the query was plainly about a title. An `@` query lifts that gate
+          rather than reordering anything — Members are already first. */}
+      {members}
       <FlashList
         data={results}
       // The wider search runs after the local one and adds to it, so its progress is

@@ -227,3 +227,55 @@ export function useProfileStats(userId: string) {
     },
   });
 }
+
+/**
+ * The minimum needed to draw somebody the viewer may not read.
+ *
+ * **Discovery is worthless if the row leads nowhere.** `20260819000100` made a private
+ * account findable by name; before this hook, tapping one landed on "This profile is not
+ * available" — the same answer as a handle nobody has taken — with no way to ask. That
+ * turned the private setting from a door into a wall, which is the thing the migration
+ * exists to stop.
+ *
+ * `profile_identity` answers for **every** discoverable account, public ones included,
+ * and that is deliberate rather than convenient: a screen that only reached for it when
+ * `public_profiles` came back empty would make "which call succeeded" a report of
+ * somebody's visibility setting to anybody watching the network.
+ *
+ * It carries identity and nothing else — handle, display name, avatar, visibility. The
+ * collection, the activity, the counts, the notes and the goals all stay behind
+ * `can_view_profile`, which this migration did not touch.
+ */
+export type ProfileIdentitySummary = {
+  id: string;
+  username: string;
+  name: string;
+  avatarUri: string | null;
+  visibility: 'public' | 'private';
+};
+
+export function useProfileIdentity(username: string | null) {
+  return useQuery({
+    queryKey: ['profile-identity', username ?? ''],
+    enabled: Boolean(username),
+    queryFn: async (): Promise<ProfileIdentitySummary | null> => {
+      const { data, error } = await supabase.rpc('profile_identity', { p_username: username });
+      if (error) throw error;
+
+      // A set-returning function comes back as an array; nobody by that handle, or an
+      // account this viewer may not find, is an empty one.
+      const row = (Array.isArray(data) ? data[0] : data) as
+        | { id: string; username: string; display_name: string | null; avatar_path: string | null; visibility: 'public' | 'private' }
+        | undefined;
+      if (!row) return null;
+
+      return {
+        id: row.id,
+        username: row.username,
+        name: row.display_name || row.username,
+        avatarUri: avatarUri(row.avatar_path),
+        visibility: row.visibility,
+      };
+    },
+  });
+}

@@ -579,6 +579,16 @@ expectRefused(
 expectRefused('anon cannot execute _is_mutual_follow', await rpc('_is_mutual_follow', { p_other: NIL }));
 expectRefused('anon cannot execute _can_tag', await rpc('_can_tag', { p_tagged: NIL }));
 
+// The same rule again, and this one was granted by mistake and revoked by
+// 20260819000200. Given two ids known to name active accounts, a `false` from it means
+// a block between two strangers — the one thing `blocks_read` exists to keep in.
+// Probed against the deployed database rather than only in the local harness, because
+// what matters is the grant that is actually in place.
+expectRefused(
+  'anon cannot execute can_discover_profile',
+  await rpc('can_discover_profile', { viewer: NIL, subject: NIL }),
+);
+
 // Maintenance actions are service_role only. The anon key is a valid JWT, so
 // verify_jwt lets it through and resolveCaller is what stops it — which means this
 // probe is testing the function's own logic rather than the platform's.

@@ -506,62 +506,149 @@ describe('finding people', () => {
     });
   };
 
-  it('offers a Users filter, after the two media ones', async () => {
+  /**
+   * **The Users chip is gone, and its absence is the point.**
+   *
+   * The three that remain narrow *titles*; members are a different kind of thing and
+   * were never narrowed by them, so a fourth chip made one control mean two things and
+   * put member discovery behind a press nobody had a reason to make.
+   */
+  it('offers the three title filters and no Users tab', async () => {
     withPeople([]);
     const view = await search('anna');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    for (const label of ['All', 'Movies', 'TV', 'Users']) {
+    for (const label of ['All', 'Movies', 'TV']) {
       expect(view.getByText(label)).toBeTruthy();
     }
+    expect(view.queryByText('Users')).toBeNull();
   });
 
-  it('shows a compact People section above the titles under All', async () => {
+  it('shows a compact Members section above the titles', async () => {
     withPeople([anna]);
     const view = await search('anna');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    await waitFor(() => expect(view.getByLabelText('People')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Members')).toBeTruthy());
     expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy();
     // Titles are still there and still the body of the list.
     expect(view.getByLabelText(FILM_ROW)).toBeTruthy();
   });
 
-  it('keeps a middle-of-the-handle match out of All, and shows it under Users', async () => {
-    // `deanna` genuinely matches "ann" and the server genuinely returns it. Under All
-    // it would be a stranger above a page of films; under Users it is the answer.
+  it('keeps a middle-of-the-handle match out of a plain query', async () => {
+    // `deanna` genuinely matches "ann" and the server genuinely returns it. Leading a
+    // page of films with a stranger is the wrong answer to a query about a title.
     withPeople([deanna]);
     const view = await search('ann');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    expect(view.queryByLabelText('People')).toBeNull();
+    expect(view.queryByLabelText('Members')).toBeNull();
+  });
 
-    await fireEvent.press(view.getByText('Users'));
+  /**
+   * **`@` is a hint, not a mode.**
+   *
+   * It lifts the gate — somebody typing a handle sigil is naming a person — and it does
+   * **not** suppress titles, because a film can legitimately begin with `@` and a search
+   * that stopped looking would simply fail to find those.
+   */
+  it('lifts the gate for an @ query, and still searches titles', async () => {
+    withPeople([deanna]);
+    const view = await search('@ann');
+    // Titles first, and asserting them is half the point: `@` must not suppress them.
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
     await waitFor(() => expect(view.getByLabelText('Deanna Troi, @deanna')).toBeTruthy());
   });
 
-  it('shows only people under Users, never titles', async () => {
+  it('matches the handle without the sigil', async () => {
     withPeople([anna]);
-    const view = await search('anna');
-    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
-
-    await fireEvent.press(view.getByText('Users'));
+    const view = await search('@anna');
 
     await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
-    expect(view.queryByLabelText(FILM_ROW)).toBeNull();
-    // And no "People" header: on a tab that is only people, it names nothing.
-    expect(view.queryByLabelText('People')).toBeNull();
+    // The stored handle has no `@`, so sending one would match nothing.
+    const calls = mockRpc.mock.calls.filter(([fn]: [string]) => fn === 'search_users');
+    expect(calls.at(-1)?.[1]).toMatchObject({ p_query: 'anna' });
   });
 
-  it('says the right thing when nobody matches', async () => {
+  /**
+   * See all is a display cap, not a route and not a second request.
+   *
+   * Everything it reveals is already in hand, so it cannot fail, cannot spend a round
+   * trip, and cannot land somebody on a screen with its own empty state.
+   */
+  it('previews three members and reveals the rest in place', async () => {
+    const many = Array.from({ length: 5 }, (_, index) => ({
+      id: `user-${index}`,
+      username: `anna${index}`,
+      display_name: `Anna ${index}`,
+      avatar_path: null,
+      visibility: 'public',
+    }));
+    withPeople(many);
+    const view = await search('anna');
+
+    await waitFor(() => expect(view.getByLabelText('Anna 0, @anna0')).toBeTruthy());
+    expect(view.queryByLabelText('Anna 4, @anna4')).toBeNull();
+
+    await fireEvent.press(view.getByText('See all'));
+
+    await waitFor(() => expect(view.getByLabelText('Anna 4, @anna4')).toBeTruthy());
+    // No second round trip: the query already asked for the server's ceiling.
+    const calls = mockRpc.mock.calls.filter(([fn]: [string]) => fn === 'search_users');
+    expect(calls.every(([, args]: [string, { p_limit: number }]) => args.p_limit === 30)).toBe(true);
+  });
+
+  it('offers no See all when the preview already holds everybody', async () => {
+    withPeople([anna]);
+    const view = await search('anna');
+
+    await waitFor(() => expect(view.getByLabelText('Members')).toBeTruthy());
+    expect(view.queryByText('See all')).toBeNull();
+  });
+
+  it('says nothing about members when nobody matched', async () => {
+    // No section, no empty state of its own. A title search that found titles is not a
+    // failed member search, and saying so would be noise on every ordinary query.
     withPeople([]);
     const view = await search('anna');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Users'));
+    expect(view.queryByLabelText('Members')).toBeNull();
+  });
 
-    // Not a catalogue message. There is no provider pass for accounts and nothing to
-    // be exhausted, so "try the original title" would be nonsense.
-    await waitFor(() => expect(view.getByText('Nobody by that name')).toBeTruthy());
+  /**
+   * **A private account is findable, and the row says so** (`20260819000100`).
+   *
+   * Private stopped meaning "nobody can find me" and went back to meaning "my activity
+   * is private". A row identical to a public one would set up a surprise — the tap
+   * leads to a locked profile and the Follow becomes a request somebody has to answer —
+   * so the word is the difference between a considered ask and an accidental one.
+   */
+  it('marks a private account as private', async () => {
+    withPeople([{ ...anna, visibility: 'private' }]);
+    const view = await search('anna');
+
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna, Private')).toBeTruthy());
+  });
+
+  it('prefers the relationship to the word Private, where there is one', async () => {
+    // "Following" is the more useful word for an account already approved, and it
+    // already implies the rest.
+    withPeople(
+      [{ ...anna, visibility: 'private' }],
+      [{ user_id: 'user-anna', following: 'approved', followed_by: null, blocked: false }],
+    );
+    const view = await search('anna');
+
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna, Following')).toBeTruthy());
+  });
+
+  it('says nothing extra on a public account with no relationship', async () => {
+    withPeople([anna], [{ user_id: 'user-anna', following: null, followed_by: null, blocked: false }]);
+    const view = await search('anna');
+
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
   });
 
   it('names the relationship on the row, and offers no control there', async () => {

@@ -144,6 +144,16 @@ const ALLOWED = {
   // signed-out surface that lists people, and a grant should follow a surface rather
   // than precede it, which is the rule public_notes set.
   'search_users(text,integer)': ['authenticated'],
+  // 20260819000100. Identity-only, behind the discovery predicate. It cannot reach a
+  // private account's content: `can_view_profile` is untouched and still gates every
+  // content read in the schema.
+  //
+  // `can_discover_profile` is deliberately **absent** from this list. It was granted by
+  // 20260819000100 and revoked by 20260819000200: a definer helper that takes a viewer
+  // as an argument answers questions about other people, and given two ids known to be
+  // active a `false` means a block between them. 20260813001900 is the same finding
+  // about two other functions. Both callers are definer and need no grant.
+  'profile_identity(text)': ['authenticated'],
 
   // Added 2026-08-17 with the social graph writers. Definer, and it must be: blocking
   // makes the profile unreadable to the blocker as well, so naming the account
