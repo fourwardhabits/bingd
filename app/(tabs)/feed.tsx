@@ -22,6 +22,7 @@ import {
 } from '@/features/feed/use-reactions';
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { TrendingShelf } from '@/features/trending/TrendingShelf';
+import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import {
@@ -103,12 +104,19 @@ export default function FeedScreen() {
   const toggleWatchlist = async (mediaItemId: string) => {
     if (busy) return;
     setBusy(mediaItemId);
+    const present = !saved.has(mediaItemId);
     const result = await setWatchlist({
       operationId: newOperationId(),
       mediaItemId,
-      present: !saved.has(mediaItemId),
+      present,
     });
     setBusy(null);
+
+    // Additions only, and only on `ok`. Removing is not a question the beta asks, and
+    // `already_applied` is one intent replayed rather than a second save.
+    if (present && result.outcome === 'ok') {
+      track({ name: 'watchlist_added', props: { surface: 'feed' } });
+    }
 
     /**
      * **Reconciled before the error is shown, not instead of it.**
@@ -312,6 +320,7 @@ export default function FeedScreen() {
           seriesTitle={null}
           onClose={() => setRecommending(null)}
           onSent={setRecommendedTo}
+          surface="feed"
         />
       ) : null}
 

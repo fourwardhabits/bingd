@@ -6,6 +6,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { useTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
 import { identify } from '@/lib/analytics';
 import { avatarUri } from '@/lib/images';
+import { identifyForMonitoring } from '@/lib/monitoring';
 import { queryKeys } from '@/lib/query';
 import { startSessionRefresh, supabase } from '@/lib/supabase';
 
@@ -92,11 +93,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const userId = session?.user?.id ?? null;
 
-  // The internal UUID and nothing else, and reset on sign-out so a second account
-  // on the same device is a separate person to the analytics vendor.
+  /**
+   * The internal UUID and nothing else, and reset on sign-out so a second account on
+   * the same device is a separate person to both vendors.
+   *
+   * **Both**, and that is the change: `identifyForMonitoring` existed and nothing had
+   * ever called it, so every Sentry event was anonymous. A crash report that cannot be
+   * tied to an account is a crash nobody can ask about — the beta's whole support loop
+   * is "you said the app broke, let me find your session".
+   *
+   * This is also the account-deletion path. `delete_account` is followed by a sign-out
+   * (`app/settings/account.tsx`), including on the branch where the outcome was never
+   * established, so the session goes to null and both identities reset here rather than
+   * in a second place that could be forgotten.
+   *
+   * **Gated on `sessionLoaded`, and that gate is the point.** Before `getSession`
+   * answers, `userId` is null because nothing has been read yet — which is *not knowing*,
+   * not *signed out*. Reporting it as signed out asks the vendors to reset on every
+   * single launch, which throws away the anonymous distinct id that joins somebody's
+   * pre-signup events to the account they go on to create. Once it has answered, a null
+   * really does mean signed out, and the reset is the right thing — including for an
+   * identity a previous process left behind. Independent review 24.
+   */
   useEffect(() => {
+    if (!sessionLoaded) return;
     identify(userId);
-  }, [userId]);
+    identifyForMonitoring(userId);
+  }, [sessionLoaded, userId]);
 
   const profileQuery = useQuery({
     queryKey: queryKeys.myProfile(userId ?? 'none'),

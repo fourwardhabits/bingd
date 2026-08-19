@@ -1,17 +1,25 @@
 # bingd. — Product Requirements Document
 
-**Version:** v0.6 (public-alpha final)
-**Status:** Build-ready for public-alpha architecture
+**Version:** v0.6 (public-alpha final), with **as-built corrections through 2026-08-19**
+**Status:** Build-ready for public-alpha architecture. **Product scope re-frozen 2026-08-19.**
 **Date:** 2026-08-12, corrected 2026-08-13 after independent review — see [`change-log-v0.6.md`](./change-log-v0.6.md) §7
 **Supersedes:** `Bingd_PRD_v0.5_Finalization_Draft_20260812.pdf`
 
-**Companion documents:** [`decision-log.md`](./decision-log.md) · [`open-questions.md`](./open-questions.md) · [`change-log-v0.6.md`](./change-log-v0.6.md)
+**Companion documents:** [`decision-log.md`](./decision-log.md) · [`open-questions.md`](./open-questions.md) · [`change-log-v0.6.md`](./change-log-v0.6.md) · [`analytics.md`](./analytics.md) · [`deferred-roadmap.md`](./deferred-roadmap.md) · [`growth-instrumentation.md`](./growth-instrumentation.md)
 
 ---
 
 > **Precedence.** If this document and the decision log disagree, the **decision log wins** and this document must be corrected. If this document and any source PDF in `docs/reference/` disagree, **this document wins**.
 >
 > **For implementation agents.** Items marked `Open`, `Provisional`, or listed in `open-questions.md` may **not** be resolved by choosing a plausible answer. Stop and ask. Items marked `Required` are not preferences and may not be traded away for simplicity.
+
+> ### As-built corrections, and how to read them
+>
+> This document was written before implementation and has since been overtaken in places. Blocks headed **As built** carry a date and describe **what the reviewed code actually does**. Where an As-built block and the surrounding v0.6 specification disagree, **the As-built block wins and the specification text around it is stale** — it is left in place only where it still records the reasoning behind a decision.
+>
+> A section with no As-built block is either unchanged from the specification or **not built at all**. The one document that says which is [`deferred-roadmap.md`](./deferred-roadmap.md), and the release-blocking half of that list lives in `.agent-workflow/continuation.md` rather than in any roadmap.
+>
+> **Product scope is re-frozen as of 2026-08-19.** No further product feature ships before the friend beta unless a Preview test exposes a blocker, a hardening requirement forces a product behaviour change, or the founder breaks the freeze deliberately.
 
 ---
 
@@ -328,6 +336,22 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 >
 > **Renamed from v0.5.** The area formerly called "Settings / Subscription" is now **Settings**. Plan management and restore are paid-beta-only and do not exist in v1.
 
+> ### As built — 2026-08-19: the centre tab is **Search**
+>
+> **Five tabs: Feed · Collection · Search · For you · Profile.** The founder renamed the centre tab from **+** to **Search**, and the sentence above beginning "There is no Search tab" is stale.
+>
+> The reasoning is that the surface is where you *find* something — a title **or a member** — and logging is what happens after you have chosen one. Calling it Log named the second step and hid the first, which is also why member discovery had been sitting behind a chip nobody had a reason to press. The icon moved with the label: a `+` under the word Search describes neither. The route is still `log`; renaming a file to match a label is a deep-link and history change bought for nothing.
+>
+> **Search returns Titles and Members as grouped sections, not as a filtered list.**
+>
+> - The three filter chips — **All · Movies · TV** — narrow **titles only**. Members are a different kind of thing and were never narrowed by them, so a fourth "Users" chip made one control mean two things.
+> - **Titles stay dominant** (founder addendum, 2026-08-16). Members appear when somebody's handle or display name is actually *started* by the query, three at a time, with **See all** lifting the display cap in place. See all is not a route and cannot fail: everything it reveals is already in hand.
+> - **`@` raises Members without suppressing Titles.** Typing `@suraj` means "the member suraj" and passes the relevance gate outright — it is a hint, not a mode, and the title results stay on screen.
+>
+> **Private accounts are discoverable by identity; their collections stay gated.** `20260819000100` built an identity-only profile surface for exactly this: somebody can be found by handle or name, and can be sent a follow request, without any of their ratings, collection, notes or activity being readable. Being unfindable is not what "private" was ever supposed to mean, and an account nobody can find cannot be followed.
+>
+> **People and actor search is deferred** — see [`deferred-roadmap.md`](./deferred-roadmap.md) §1. The person detail page exists and is reached only from a cast strip.
+
 ---
 
 ## 8. Scope by product stage
@@ -369,6 +393,14 @@ Final pricing and localization. Staged store rollouts. Destination-specific shar
 ### Deferred
 
 Comments, DMs, discussion boards, and long-form reviews. Destination-specific social SDKs and inbound share extensions. Contact-book and social-network importing. Full offline-first sync and offline ranking replay. Full catalog mirror or image rehosting. LLM-generated recommendations or explanations. Algorithmic feed ranking, collaborative lists, episode-level ratings, whole-series ranking. Lifetime access, multiple tiers, family plans, gifting, web checkout. Dark mode. Invite rewards. Tagging users who are not on Bingd.
+
+> ### As built — 2026-08-19: three corrections to the staging above
+>
+> - **Comments shipped.** They are on feed activity, rate-limited, with their own notification type and category. The Deferred line is stale on that one word; DMs, discussion boards and long-form reviews remain deferred.
+> - **Achievements shipped as Bingd Awards** (2026-08-18) and are no longer a backlog item. See §14's As-built block.
+> - **Letterboxd import is listed as a v1 must-have and has not been built.** No import screen, no CSV parser, no matching pipeline. It is not a friend-beta blocker — the cohort is building collections by hand, which is the behaviour the beta exists to observe — but it is the largest single gap between this list and the app.
+>
+> Everything else this document calls Deferred is still deferred. The canonical register, with the reasoning and the revisit trigger for each, is [`deferred-roadmap.md`](./deferred-roadmap.md).
 
 ---
 
@@ -641,6 +673,23 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 - Exact mathematics — rank correlation or pairwise agreement, transformed to 0–100 — is an architecture-stage decision.
 - A match involving a private user is only displayed to that user's approved followers.
 
+> ### As built — 2026-08-19: two scores on a title, named **Bingd** and **Following**
+>
+> A title page carries the reader's own position and, beside it, exactly **two** aggregate scores. There is no third and no carousel.
+>
+> | Score | What it averages |
+> |---|---|
+> | **Bingd** | every rating on Bingd that the reader is allowed to see |
+> | **Following** | ratings from **accounts the reader follows** |
+>
+> **"Following" means followees, not followers**, and the direction is asserted by test rather than by the label: `following_score` joins `f.follower_id = auth.uid()` and `r.user_id = f.followee_id`. Approved follows only, and `can_view_profile` applied from the caller's own perspective — a private followee's rating counts only where the reader may see it. Audited on 2026-08-19 and found correct, so nothing was changed.
+>
+> **Bingd**, not "Community". The old label described a population where the new one names the product, and it excludes raters who have blocked the reader in either direction — a mean that included them made a blocked rater's score recoverable by subtraction.
+>
+> **A Followers score is deferred** — see [`deferred-roadmap.md`](./deferred-roadmap.md) §3. In a cohort where almost every follow is mutual, the two numbers would be nearly identical.
+>
+> **An absent score is not a zero.** A title nobody has ranked, a Following mean with no followee who has seen it, and a read that failed are three different states, and the badge distinguishes them.
+
 ### Recommendation engine — public-alpha design
 
 - Runs behind the scenes. The Recommendations surface opens directly to useful suggestions.
@@ -753,6 +802,24 @@ The invite hand-off is the point of this feature as a growth mechanism: it place
 
 ---
 
+### As built — Bingd Awards, shipped 2026-08-18
+
+v0.6 listed Achievements under §8 **Deferred** and specified them in [`backlog.md`](./backlog.md) §1. They shipped. This block is the record of what shipped, and the specification in the backlog is now historical.
+
+**Twenty tracks, thirty badges, and no table behind any of it.**
+
+- Reached from **Profile → Awards**, as a sheet. A grid where locked and unlocked sit together, because the locked slots are the reason to come back and they only read that way beside the unlocked ones.
+- **Every award is derived from canonical tables** — `user_media`, `rankings`, `watchlist`, `follows`, `title_recommendations`, `invite_attributions`, notes. There is no award table, no event log and no stored progress. An achievement system with its own event log is a second source of truth about somebody's collection, free to disagree with the first.
+- Tiered, with progress shown on anything countable, and each track states what earns it.
+- **No social surface**: no comparison, no leaderboard, and nothing is told to anybody else.
+- **Ten of the twenty tracks still render an emoji placeholder** rather than drawn art, asserted by test so the number cannot drift silently. [`deferred-roadmap.md`](./deferred-roadmap.md) §14.
+
+**Invite Instigator counts activated invitees and therefore reads zero.** It counts `invite_attributions.activated_at is not null`, which nothing writes — see §17's As-built block. It previously counted link creations, which made it a badge for pressing a button, and the founder's instruction was that the award is for bringing people to Bingd. So the metric was moved to the honest one immediately and the number left at zero rather than the semantic left wrong until the backend caught up. It renders **0 / 3**, not an error: the read succeeded, the table is real, and the answer is genuinely none.
+
+**Award notifications are deferred**, and this is a disposition rather than an oversight. Tiers are computed entirely on the device from raw reads, so **no durable state records which tier an account has reached** — and notifying only on a *crossing* needs exactly that. The `award_earned` type, the `awards` category defaulting off, its preference row and its route to this sheet all exist; only the writer is missing. §15's As-built block and [`deferred-roadmap.md`](./deferred-roadmap.md) §5.
+
+---
+
 ## 15. Notifications and activity awareness
 
 **New in v0.6.** This resolves a structural absence in v0.5, where the brand system referenced notifications but no notification feature existed anywhere in scope, information architecture, entities, tests, or metrics.
@@ -800,6 +867,62 @@ A **Notifications** sub-page under Settings with:
 ### Permission timing — Recommended
 
 Never request push permission at first launch. Request after the user's first successful invite or first follow, when the value is concrete.
+
+---
+
+### As built — 2026-08-19: taxonomy, categories, and what a preference actually governs
+
+Reviewed at 23f PASS. Where this block and the v1 event set above disagree, this block is what ships.
+
+**Nine notification types.** The canonical names are `follow`, `follow_request`, `follow_approved`, `comment`, `reaction`, `watch_tag`, `recommendation`, `invite_activated`, `award_earned`.
+
+**Eight categories, one per kind, each with its own default.** `recommendation` had been in no category at all, so the trigger's `case` returned null, the unmapped-type rule delivered the row unconditionally, and **a recommendation could not be switched off** — by accident rather than by decision. That is the defect the settings screen would otherwise have shipped on top of.
+
+| Category | Types | Default |
+|---|---|---|
+| `follows` | `follow` | **on** |
+| `follow_accepted` | `follow_approved` | **on** |
+| `comments` | `comment` | **on** |
+| `reactions` | `reaction` | **off** |
+| `watch_tags` | `watch_tag` | **on** |
+| `recommendations` | `recommendation` | **on** |
+| `invites` | `invite_activated` | **on** |
+| `awards` | `award_earned` | **off** |
+
+`reactions` defaults off because it is the only event whose median notification carries nothing beyond "somebody saw this". `awards` defaults off because **nothing writes one**.
+
+**Absence means the default, not "enabled".** There is no preference row per category per signup and no backfill when a category is added; absence resolves to the category's own default. The data migration therefore expanded only `enabled = false` rows — under the old semantics a `true` row was indistinguishable from no row, so expanding one would have manufactured a deliberate opt-in out of silence.
+
+**A preference governs creation, not delivery.** The gate is a **before-insert trigger that returns null**: off means the row was never written. There is no second channel to suppress, because there is no push. When push arrives it has to decide for itself whether these switches govern it too — a row that was never written cannot be pushed, so the current contract is *"off here means it never existed"*. See [`deferred-roadmap.md`](./deferred-roadmap.md) §4.
+
+**`follow_request` is unsilenceable**, stated as its own condition in the trigger. It is a task rather than news: somebody is waiting on an answer.
+
+**Settings offers a switch per category plus two master groups** — everything social, and everything about you — over a **Turn all off**, and it reflects the OS permission state honestly.
+
+#### Routing
+
+Each type has an ordered chain whose last link always resolves. Staleness is read from the holes `my_notifications` already leaves — a null actor handle, a null media item — rather than from a second existence query, which would be a second authorisation surface and the one most likely to get it wrong.
+
+| Type | Target | Fallback |
+|---|---|---|
+| `follow_request` | requester's profile | unavailable notice |
+| `follow` | follower's profile | unavailable notice |
+| `follow_approved` | approver's profile | unavailable notice |
+| `comment` | the title | unavailable notice |
+| `reaction` | the title | unavailable notice |
+| `watch_tag` | the Movie or Season | unavailable notice |
+| `recommendation` | the Movie or Season | recommender's profile, then unavailable |
+| `invite_activated` | the joined user's profile | unavailable notice |
+| `award_earned` | the Awards sheet | — |
+
+**Comment and reaction route to the title rather than to the exact feed event, deliberately.** There is no per-event route, and the feed tab is a paginated list of *followees'* activity — a reader's own event does not appear in it at all. Routing to a screen that cannot contain the subject is worse than routing to its parent. Deferred as [`deferred-roadmap.md`](./deferred-roadmap.md) §6.
+
+#### What is **not** built
+
+- **Push is dark.** `expo-notifications` and its config plugin are in every build, as §15 intends — and nothing on any client writes `device_tokens`, no client imports the module, and no delivery path exists. **Push delivery is not "flagged off"; it has never been built** (AD-10). [`deferred-roadmap.md`](./deferred-roadmap.md) §4.
+- **The scheduled nudge** ships with push, so it does not exist either.
+- **`invite_activated` has no writer.** The type, its category, its preference and its route all exist; nothing generates the event, because invite activation depends on the referral resolver. [`deferred-roadmap.md`](./deferred-roadmap.md) §7.
+- **`award_earned` has no writer**, and this is a disposition rather than an omission. Award tiers are computed entirely on the device from raw table reads; **no durable state records which tier an account has reached**, so a *crossing* cannot be distinguished from a *state*, and exactly-once delivery is impossible without an unlock ledger. An award notification that fires twice is worse than one that never fires. [`deferred-roadmap.md`](./deferred-roadmap.md) §5.
 
 ---
 
@@ -887,6 +1010,12 @@ A share or invite token is a **routing and attribution identifier, never authori
 
 > **Measurement rule.** `share_sheet_opened` and `share_returned` are **never** recorded as "share completed." Destination feedback is inconsistent across platforms. The meaningful signals are link opens, app opens, attributed signups, and attributed activation.
 
+> ### As built — 2026-08-19: none of those nine events exists
+>
+> The measurement rule above is right and has been kept; the event list is a specification for a share funnel that was never instrumented, and **six of the nine describe states this app cannot observe at all** — there is no web property, so a link open, an app open from a link, an install click, an attributed signup and an attributed activation have nothing to record them.
+>
+> The friend-beta event set is eleven events and is defined in [`analytics.md`](./analytics.md). The one growth event that exists is **`invite_link_created`**, which follows the `invite_link_creations` row rather than the tap. Sharing is otherwise uninstrumented, deliberately: **opening an OS share sheet is not a share completed**, which is the same rule this section already states.
+
 ---
 
 ## 17. Direct friend invitations
@@ -942,7 +1071,9 @@ A deferred-deep-link vendor is optional later, only if measured install-to-resum
 
 However — **Required** — record `invited_by` and `founding_member` on every account from day one. These cost nothing now and are impossible to reconstruct later, and they preserve the option of granting retroactive recognition or capability grants at any future point.
 
-Any future reward must count **activated** invitees only (recipient ranked at least one title), so it cannot be farmed with throwaway accounts.
+Any future reward must count **activated** invitees only, so it cannot be farmed with throwaway accounts.
+
+> **Corrected 2026-08-19.** This clause read "recipient ranked at least one title", which contradicts §28's canonical definition — **activation is ten ranked titles** — and would have handed the future resolver two incompatible contracts to write `invite_attributions.activated_at` against. §28 wins, here and everywhere: one ranked title is a tap, and the whole point of gating a reward on activation is that it is not farmable.
 
 ### Privacy and abuse — Required
 
@@ -956,6 +1087,33 @@ Any future reward must count **activated** invitees only (recipient ranked at le
 ### Analytics
 
 `invite_link_created`, `invite_link_opened`, `invite_install_clicked`, `invite_signup_attributed`, `invite_accepted`, `invite_activated`, `invite_revoked`, plus abuse events. Returning from the share sheet is never treated as delivery.
+
+---
+
+> ### As built — 2026-08-19: the link exists, the resolver does not
+>
+> Everything above from **Acceptance semantics** onward is a specification, and **none of it is implemented**. This block states which half of §17 is real, because the difference is the friend beta's growth mechanic.
+>
+> **What is built and reviewed:**
+>
+> - **`create_invite_link(operation_id, media_item_id)`** — mints the caller's **one reusable personal link** on first use and never rotates it, exactly as the token model above describes. It carries a short code, and it is environment-scoped: a non-production token does not resolve in production.
+> - **One `invite_link_creations` row per call**, carrying the title that was on screen. That is the honest measure — *how many times did this person reach for their link, and about what* — and it is a real intent signal, the strongest available without a web property.
+> - **`invite_link_created`** analytics, emitted from the row rather than from the tap: a replayed operation id answers `already_applied`, writes no row, and emits nothing.
+> - **`block` already voids unaccepted attributions** between a pair, and deliberately leaves accepted ones alone — an accepted attribution is historical fact about how somebody joined.
+>
+> **What is not built:**
+>
+> - **There is no web property**, so `https://bingd.app/i/<token>` resolves to nothing. `app/i/[token].tsx` is a stub that says invitations are not active in this build, which is true.
+> - **`record_invite_open` does not exist.** Link opens are unmeasurable.
+> - **`redeem_invite` does not exist.** `invite_attributions.accepted_at` has had a column and no writer since `20260813001300`, so **no acceptance semantics of any kind run** — not the follow, not the request, not the notification, not the attribution.
+> - **Activation has no writer.** `invite_attributions.activated_at` is likewise a column nothing sets.
+> - Consequently `invite_link_opened`, `invite_install_clicked`, `invite_signup_attributed`, `invite_accepted`, `invite_activated` and `invite_revoked` **do not exist**, and `invite_redeemed` / `invite_activated` are declared-but-unemittable in [`analytics.md`](./analytics.md) §4 so that faking one is a compile error.
+>
+> **The one place a stage of this funnel is on screen** is Bingd Awards' Invite Instigator track, and it reads the honest end: `count(*) where activated_at is not null`. It shows **0 / 3** for every account and will until the resolver lands. That is the intended state — it previously counted link creations, which made it a badge for pressing a button.
+>
+> Full disposition, and the five named pieces the wiring needs, in [`growth-instrumentation.md`](./growth-instrumentation.md) §1 and [`deferred-roadmap.md`](./deferred-roadmap.md) §7. **§7 is a friend-beta blocker as well as a roadmap item**, and is carried in the hardening documents for that reason.
+>
+> The **Required** half of Rewards above still stands and is unaffected: any future reward must count activated invitees only.
 
 ---
 
@@ -1252,8 +1410,8 @@ A user-initiated deletion path that removes personal data, invalidates tokens, r
 | Media metadata | TMDB via a Bingd-owned adapter and cache |
 | Notifications | `expo-notifications`, delivery behind a feature flag |
 | Payments | RevenueCat — **paid beta only** |
-| Crash monitoring | Sentry, with release tagging and source maps |
-| Analytics | First-party event schema; PostHog is the working recommendation |
+| Crash monitoring | Sentry, with release tagging and source maps — **source-map upload is disabled for `development` *and* `preview` in `eas.json`, so a Preview build's stack traces are minified.** Right for a dev client, a decision outstanding for Preview: it needs `SENTRY_AUTH_TOKEN` as an EAS secret, and it is a release-hardening gate rather than a founder nicety |
+| Analytics | First-party event schema, PostHog. **Implemented** — [`analytics.md`](./analytics.md) |
 | Web surfaces | Static or edge-rendered pages on `bingd.app`; Cloudflare Pages is the working recommendation |
 | Source control and CI | GitHub with required checks |
 | Builds and OTA | EAS Build, EAS Submit, EAS Update |
@@ -1572,6 +1730,14 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 6. `main` is protected, requires passing checks, and rejects direct pushes.
 7. An EAS Update reaches an installed preview build without a new store submission.
 
+> ### As built — 2026-08-19: two of these seven are not met, and one is met differently
+>
+> **4 is not met for Preview.** `eas.json` sets `SENTRY_DISABLE_AUTO_UPLOAD=true` for `development` **and** `preview`, so a Preview build's stack traces are minified. Correct for a dev client, wrong for the build the friend beta will run on, and it needs `SENTRY_AUTH_TOKEN` as an EAS secret. **This is an unmet release-hardening gate**, not a founder nicety, and it is carried as such. Every build does trace to a commit, and Sentry now also carries `environment`, `app_version`, `build_number`, `runtime_version`, `eas_channel`, `eas_update_id` and `build_kind` as tags (see [`analytics.md`](./analytics.md) §6).
+>
+> **5 is met for four of its seven, and the others describe features that do not exist.** Onboarding, ranking and invitations (link creation only) fire; sharing, import, gate hits and recommendation feedback do not, because there is no share funnel, no import, no capability gate instrumentation and no feedback event. The criterion's second half — **contains no private content** — is met and is enforced three ways rather than asserted: a typed union, a property allowlist, and scalar-only values. See §28's As-built block.
+>
+> **1, 2, 3, 6 and 7 stand as written.** The three variants install side by side with distinct names, bundle ids and schemes; non-production shows the environment badge; non-production points at `bingd-nonprod` and **there is no production Supabase project to read at all**; and the `fingerprint` runtime policy is what makes 7 safe rather than merely true.
+
 ---
 
 ## 27. Public-release requirements
@@ -1628,6 +1794,29 @@ v0.5 used two near-definitions interchangeably; this is the canonical one. See I
 | Offline | Queued operations per user; sync success rate; median time to sync; failed-operation rate |
 | Metadata | Cache hit ratio; provider calls per active user; image bandwidth per user; provider error rate |
 | Monetization intent | Gate hits by capability and screen; % reaching the three-list ceiling **via in-app creation only**; median collection size at first gate hit |
+
+> ### As built — 2026-08-19: what is actually measured before the friend beta
+>
+> The table above is the metric practice for a public alpha. **Almost none of it is instrumented, on purpose.** The friend beta is thirty to sixty people on four different builds, and the failure mode there is not too little data — it is a hundred event types nobody has agreed the meaning of, half of them counting taps instead of outcomes.
+>
+> So the implemented set is **eleven events**, sized to one question: *do people activate, run the core loop, use the social side — and which build were they on when they did it.* The canonical definitions, the exact once-per semantics of each, the privacy exclusions and the release-identity fields are in **[`analytics.md`](./analytics.md)**, which is the document to read rather than this table.
+>
+> | Area of the table above | Status |
+> |---|---|
+> | Activation | **partly** — `signup_completed` → `onboarding_completed` → `ranking_completed`. No 24-hour bound, no funnel infrastructure |
+> | Collection, Engagement | **partly** — `title_logged`, `ranking_completed` with its comparison count, `watchlist_added` |
+> | Social | **partly** — `follow_created` (approved vs pending), `recommendation_sent`, `recommendation_opened`, `member_search_result_opened` |
+> | Invitations | **link creations only** — the rest of the funnel has no writer (§17 As built) |
+> | Import | **not measured** — import is not built |
+> | Notifications, Recommendations quality, Offline, Metadata, Monetization intent | **not measured** |
+> | Retention at day 7 / day 30, cohorts | **not built** — [`deferred-roadmap.md`](./deferred-roadmap.md) §9 |
+>
+> **Activation stays defined as ten ranked titles.** Nothing about the thin instrumentation changes the definition; `ranking_completed` is what will count toward it.
+>
+> Two rules from that document are product decisions rather than implementation details, and belong here:
+>
+> - **No free text, ever.** No event carries a title, a username, a note, a search query, a bio or a date of birth. Autocapture and session replay are off and stay off, because in a mobile app they record whatever was on screen — which here is somebody's private collection (§22).
+> - **An event follows a server outcome, never a tap.** A write that commits and loses its reply is deliberately **under-counted**; a retry is never counted twice. Undercounting a lost reply is a small bias in a known direction, and double-counting a retry is a number that looks like growth and is not.
 
 ---
 

@@ -41,6 +41,7 @@ import { useTitleVideos } from '@/features/title/use-title-extras';
 import { useTitleReviews, type ReviewSort } from '@/features/title/use-title-reviews';
 import { diagnose } from '@/lib/diagnose';
 import { heroArtwork } from '@/lib/hero';
+import { track } from '@/lib/analytics';
 import { posterUri, profileUri, videoUri } from '@/lib/images';
 import { resolveMetadata } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
@@ -456,12 +457,18 @@ export default function TitleScreen() {
     if (watchlistBusy) return;
     setWatchlistBusy(true);
     setActionError(null);
+    const present = !isWatchlisted;
     const result = await setWatchlist({
       operationId: newOperationId(),
       mediaItemId: title.id,
-      present: !isWatchlisted,
+      present,
     });
     setWatchlistBusy(false);
+
+    // Additions only, and only on `ok` — the same rule as the other three bookmarks.
+    if (present && result.outcome === 'ok') {
+      track({ name: 'watchlist_added', props: { surface: 'title' } });
+    }
 
     // Reconciled on an unknown outcome as well as on success — the same rule the other
     // three bookmark surfaces follow (`lib/write-outcome.ts`). Independent review 21e.
@@ -997,6 +1004,7 @@ export default function TitleScreen() {
 
       <LogSheet
         title={loggingTitle}
+        surface="title"
         onClose={() => {
           setLoggingTitle(null);
           setActionError(null);
@@ -1017,6 +1025,7 @@ export default function TitleScreen() {
         subject={rankingSubject}
         onClose={() => setRankingSubject(null)}
         onRankAnother={() => setRankingSubject(null)}
+        surface="title"
       />
       {/* Mounted only while open, like every other sheet here: it seeds its own
           draft state on mount, and one that stayed mounted would keep a search
@@ -1079,6 +1088,7 @@ export default function TitleScreen() {
           seasonNumber={title.season_number ?? null}
           onClose={() => setRecommending(false)}
           onSent={setRecommendedTo}
+          surface="title"
         />
       ) : null}
     </Screen>

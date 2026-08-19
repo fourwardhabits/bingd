@@ -89,7 +89,7 @@ beforeEach(() => {
 const openSheet = async (props: Partial<RankingSheetProps> = {}) => {
   const onClose = jest.fn();
   const view = await renderWithProviders(
-    <RankingSheet subject={subject} onClose={onClose} {...props} />,
+    <RankingSheet subject={subject} onClose={onClose} surface="search" {...props} />,
   );
 
   return {
@@ -243,7 +243,7 @@ describe('closing', () => {
     await fireEvent.press(sheet.close());
     expect(sheet.onClose).toHaveBeenCalled();
 
-    await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} />);
+    await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} surface="search" />);
     answer(comparison());
 
     await waitFor(() => expect(callsTo('rank_cancel')).toHaveLength(1));
@@ -338,8 +338,8 @@ describe('the reveal', () => {
     expect(sheet.getByText(/#3 Movies/, { includeHiddenElements: true })).toBeTruthy();
 
     // Rendering happened before the spy, so re-run the placement to observe it.
-    await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} />);
-    await sheet.rerender(<RankingSheet subject={subject} onClose={sheet.onClose} />);
+    await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} surface="search" />);
+    await sheet.rerender(<RankingSheet subject={subject} onClose={sheet.onClose} surface="search" />);
     await waitFor(() => expect(invalidate).toHaveBeenCalled());
 
     const keys = invalidate.mock.calls.map(([args]) => JSON.stringify(args?.queryKey));
@@ -398,7 +398,7 @@ describe('moving a title to another band', () => {
     const view = await render(
       <QueryClientProvider client={client}>
         <SafeAreaProvider initialMetrics={METRICS}>
-          <RankingSheet subject={subject} onClose={jest.fn()} {...props} />
+          <RankingSheet subject={subject} onClose={jest.fn()} surface="search" {...props} />
         </SafeAreaProvider>
       </QueryClientProvider>,
     );

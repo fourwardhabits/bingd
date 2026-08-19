@@ -17,7 +17,7 @@ import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, AuthStatusOverlay, useAuthRouting } from '@/features/auth';
-import { initAnalytics, track } from '@/lib/analytics';
+import { initAnalytics } from '@/lib/analytics';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
 import { createQueryClient } from '@/lib/query';
 import { startUpdateChecks } from '@/lib/updates';
@@ -55,9 +55,10 @@ function RootLayout() {
     }
   }, [navigationRef]);
 
-  useEffect(() => {
-    track({ name: 'app_opened' });
-  }, []);
+  // `app_opened` used to be emitted here and has been removed. PostHog's own
+  // `captureAppLifecycleEvents` already sends Application Opened for the same launch,
+  // and it gets the background-to-foreground case right where a mount effect does not.
+  // Two events for one launch is the duplicate-capture problem in miniature.
 
   useEffect(() => startUpdateChecks(), []);
 

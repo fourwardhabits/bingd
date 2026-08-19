@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import { Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { newOperationId } from '@/features/collection/writes';
+import { track, type Surface } from '@/lib/analytics';
 import { compactName, type MediaKind } from '@/lib/titles';
 import { Avatar, Button, EmptyState, SearchField, Sheet, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -25,6 +26,8 @@ export type RecommendSheetProps = {
   onClose: () => void;
   /** Called once a recommendation has actually been filed, with the recipient's name. */
   onSent: (recipientName: string) => void;
+  /** Where this sheet was opened from, for `recommendation_sent` and `invite_link_created`. */
+  surface: Surface;
 };
 
 /** Above this many people, reading the list is slower than typing a name. */
@@ -55,6 +58,7 @@ export function RecommendSheet({
   seasonNumber,
   onClose,
   onSent,
+  surface,
 }: RecommendSheetProps) {
   const recipients = useRecommendRecipients(viewerId);
   const send = useRecommendTitle(viewerId);
@@ -120,6 +124,22 @@ export function RecommendSheet({
       setError(result.message);
       return;
     }
+
+    /**
+     * `recommendation_sent`, and only from `ok`.
+     *
+     * `ok` here means the row is stored: the mutation has already separated the two
+     * things a 200 can mean, since `recommend_title` returns `not_mutual` and its
+     * siblings inside the body rather than raising them (`use-recommend.ts`). A refusal
+     * and an unknown outcome both return early above and emit nothing — the unknown one
+     * deliberately, because that is the send whose id is being *held* for a retry, and a
+     * retry that eventually succeeds is the send this event should count once.
+     */
+    track({
+      name: 'recommendation_sent',
+      props: { media_kind: kind === 'season' ? 'tv_season' : 'movie', surface },
+    });
+
     // The confirmation belongs to the screen underneath, which is still showing the
     // title this was about. A second one in here would be a message nobody sees,
     // because the sheet closes on the same tick.
@@ -154,7 +174,7 @@ export function RecommendSheet({
     // decision, and the creation log should say two. What it must not count twice is one
     // decision the client told them had failed.
     const operationId = (shareIntent.current ??= newOperationId());
-    const invite = await createInviteLink(mediaItemId, operationId);
+    const invite = await createInviteLink(mediaItemId, operationId, surface);
     if (invite) shareIntent.current = null;
     const titleUrl = `https://bingd.app/title/${kind}/${mediaItemId}`;
     const message = invite

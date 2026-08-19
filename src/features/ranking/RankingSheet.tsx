@@ -6,6 +6,7 @@ import { useCurrentProfile } from '@/features/auth';
 import { formatGenreRank, genreRanksFor } from '@/features/collection/genre-rank';
 import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
 import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
+import { track, type Surface } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import { queryKeys } from '@/lib/query';
@@ -43,6 +44,14 @@ export type RankingSheetProps = {
   onClose: () => void;
   /** "Rank another" — closes this and sends the user back to search. */
   onRankAnother?: () => void;
+  /**
+   * Which screen opened this, for `ranking_completed` alone.
+   *
+   * Passed in rather than inferred from the route: the sheet is mounted by three
+   * different screens and the route it happens to be over is not the same question as
+   * where the person decided to rank something.
+   */
+  surface: Surface;
 };
 
 /**
@@ -57,13 +66,19 @@ export type RankingSheetProps = {
  * of the mechanic. Decided by the founder, 2026-08-13. The position is visible everywhere
  * else in the app, which is why this component fetches only titles.
  */
-export function RankingSheet({ subject, onClose, onRankAnother }: RankingSheetProps) {
+export function RankingSheet({ subject, onClose, onRankAnother, surface }: RankingSheetProps) {
   if (!subject) return null;
 
   // Keyed by the title, so moving to a different one starts a genuinely new component
   // rather than leaving one session's answers counted against the next.
   return (
-    <Session key={subject.id} subject={subject} onClose={onClose} onRankAnother={onRankAnother} />
+    <Session
+      key={subject.id}
+      subject={subject}
+      onClose={onClose}
+      onRankAnother={onRankAnother}
+      surface={surface}
+    />
   );
 }
 
@@ -71,6 +86,7 @@ function Session({
   subject,
   onClose,
   onRankAnother,
+  surface,
 }: RankingSheetProps & { subject: NonNullable<RankingSheetProps['subject']> }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
@@ -79,6 +95,16 @@ function Session({
   // Starts true: the session is already being opened by the time anything renders.
   const [busy, setBusy] = useState(true);
   const [answered, setAnswered] = useState(0);
+  /**
+   * The same count, kept in a ref because `ranking_completed` needs it *now*.
+   *
+   * `act` queues `setAnswered` and then calls `apply` in the same tick, so the state
+   * `apply` closes over is the value from before the comparison that finished the
+   * session — the placing answer would be missing from every event. A ref is updated
+   * synchronously, so the number in the event is the number of comparisons the person
+   * actually answered.
+   */
+  const answeredCount = useRef(0);
 
   // The session the server is still holding, if any — what closing owes a rank_cancel to.
   // A ref because it has to be right in the same tick as the press, and because it has to
@@ -101,6 +127,28 @@ function Session({
         invalidateAfterCollectionChange(queryClient, profile.id, subject.id, {
           category: next.category,
         });
+        /**
+         * `ranking_completed`, and **only here**.
+         *
+         * `placed` is the server saying the title has a position — the one answer that
+         * proves the ranking finished. The `failed && changed` branch below is the
+         * lost-reply case, where the ranking *may* have landed, and it deliberately
+         * emits nothing: an event on a maybe is how a retry becomes two rankings. The
+         * cost is a small undercount in a known direction, which is the trade this
+         * app has taken everywhere else (`lib/write-outcome.ts`).
+         *
+         * `next.category` is the server's own vocabulary, so the media kind comes from
+         * what was actually written rather than from what the client thought it sent.
+         */
+        track({
+          name: 'ranking_completed',
+          props: {
+            media_kind: next.category === 'tv_seasons' ? 'tv_season' : 'movie',
+            surface,
+            comparisons: answeredCount.current,
+            rebucket: subject.mode === 'rebucket',
+          },
+        });
       } else if (next.state === 'failed' && next.changed) {
         /**
          * **A failed answer can still have placed the title.**
@@ -113,7 +161,7 @@ function Session({
         invalidateAfterCollectionChange(queryClient, profile.id, subject.id);
       }
     },
-    [profile.id, queryClient, subject.id],
+    [profile.id, queryClient, subject.id, subject.mode, surface],
   );
 
   useEffect(() => {
@@ -170,7 +218,10 @@ function Session({
     setBusy(true);
     const next = await run();
     setBusy(false);
-    if (progress) setAnswered((n) => Math.max(0, n + progress));
+    if (progress) {
+      answeredCount.current = Math.max(0, answeredCount.current + progress);
+      setAnswered(answeredCount.current);
+    }
     apply(next);
   };
 

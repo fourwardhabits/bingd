@@ -155,12 +155,12 @@ const failing = (fn: string, error: { code?: string; message: string }) => {
 };
 
 const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> = {}) => {
-  const view = await renderWithProviders(<LogSheet title={title} onClose={() => {}} {...props} />);
+  const view = await renderWithProviders(<LogSheet title={title} onClose={() => {}} surface="search" {...props} />);
 
   return {
     ...view,
     show: (next: LoggableTitle | null) =>
-      view.rerender(<LogSheet title={next} onClose={() => {}} {...props} />),
+      view.rerender(<LogSheet title={next} onClose={() => {}} surface="search" {...props} />),
     bucket: (label: string) => view.getByLabelText(label),
     // The row and the field it discloses share the name "Notes" — which is right for
     // a screen reader, since one is a button and the other a text field — so the
@@ -824,7 +824,7 @@ describe('two accounts on one device', () => {
     // and their own read fails — the case where a shared cache entry would be the
     // only thing with anything in it.
     stubFailedLogState();
-    const view = await renderWithProviders(<LogSheet title={filmA} onClose={() => {}} />);
+    const view = await renderWithProviders(<LogSheet title={filmA} onClose={() => {}} surface="search" />);
 
     // Somebody else's note, written into the cache under the key shape this used to
     // have: title only, no account. One client, so a shared key really would be

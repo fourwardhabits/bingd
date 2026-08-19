@@ -95,7 +95,7 @@ export default function PublicProfileScreen() {
   const taste = useTasteMatch(subjectId || null, viewer.id);
   const blocks = useMyBlocks(viewer.id);
   const blockedMatch = (blocks.data ?? []).find((account) => account.username === username);
-  const { unblock, busy: unblocking } = useSocialWrites(viewer.id);
+  const { unblock, busy: unblocking } = useSocialWrites(viewer.id, 'profile');
 
   const isSelf = profile.data?.id === viewer.id;
   // Asked about this actor directly. Filtering the viewer's own feed would have
@@ -177,6 +177,7 @@ export default function PublicProfileScreen() {
                 viewerId={viewer.id}
                 relationship={relationships.data?.get(identity.data.id)}
                 isSelf={false}
+                surface="profile"
               />
             }
           />
@@ -240,6 +241,7 @@ export default function PublicProfileScreen() {
                 viewerId={viewer.id}
                 relationship={relationships.data?.get(subjectId)}
                 isSelf={isSelf}
+                surface="profile"
               />
             }
           />

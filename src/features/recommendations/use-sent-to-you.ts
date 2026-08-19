@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { CollectionItem } from '@/features/collection/filters';
+import { track, type MediaKind } from '@/lib/analytics';
 import { avatarUri } from '@/lib/images';
 import { effectiveGenres, effectiveLanguage, parentOf, type EmbeddedParent } from '@/lib/media-metadata';
 import { supabase } from '@/lib/supabase';
@@ -240,14 +241,71 @@ export const asCollectionItem = (row: SentRecommendation): CollectionItem => ({
  * because "we could not record that you looked at this" is not a sentence worth
  * interrupting somebody with.
  */
+/**
+ * Which recommendations have already been reported as opened, for the life of the process.
+ *
+ * **Module-level, not a ref**, and independent review 24b is why: the recommendations tab
+ * is a tab, so it unmounts whenever somebody moves to another one. A ref would be emptied
+ * by that, and a reader who opened a recommendation, switched tabs and came back before
+ * the list refetched would report a second open for one row.
+ *
+ * Keyed by viewer as well as by recommendation, like every other cache in this app: two
+ * accounts on one device must not read each other's state, even where — as here — the
+ * consequence is only a missing event.
+ */
+const reportedOpens = new Set<string>();
+
+/** Exported for tests, which must not inherit what a previous one reported. */
+export function resetReportedOpens() {
+  reportedOpens.clear();
+}
+
 export function useMarkRecommendationOpened(viewerId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (recommendationId: string) => {
-      await supabase.rpc('mark_recommendation_opened', {
+    mutationFn: async ({
+      recommendationId,
+      mediaKind,
+    }: {
+      recommendationId: string;
+      mediaKind: MediaKind;
+    }) => {
+      const { error } = await supabase.rpc('mark_recommendation_opened', {
         p_recommendation_id: recommendationId,
       });
+
+      /**
+       * `recommendation_opened`, **after the server answered and once per row**.
+       *
+       * The caller's `!row.openedAt` gate is necessary and not sufficient, which is what
+       * independent review 24 found. It reads a cached list, so two taps before the
+       * refetch lands both see a null timestamp — and the emission used to sit on the
+       * tap, so a write that never committed still reported an open. Two things fix it:
+       *
+       * - **the error check**, so this follows the server rather than the press. The
+       *   write itself stays fire-and-forget for the *person* — a failure must not stand
+       *   between somebody and the title they were told to watch — but a failure is not
+       *   an open, so it emits nothing. A failure also leaves the row **out** of the set,
+       *   so a later successful open still reports;
+       * - **`reportedOpens`**, which is module-level so that leaving the tab and coming
+       *   back does not reset it, and makes this once per row per process regardless of
+       *   how stale the list underneath was.
+       *
+       * `mark_recommendation_opened` refuses to move an existing timestamp, so a
+       * genuinely repeated call is a no-op server-side; this is the client half of the
+       * same guarantee. The residual is a reinstall or a second device, which would
+       * report one more open for a row already opened elsewhere — bounded, and in the
+       * same known direction as everything else here.
+       */
+      const seen = `${viewerId}:${recommendationId}`;
+      if (!error && !reportedOpens.has(seen)) {
+        reportedOpens.add(seen);
+        track({
+          name: 'recommendation_opened',
+          props: { media_kind: mediaKind, surface: 'sent_to_you' },
+        });
+      }
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['sent-to-you', viewerId] }),
   });

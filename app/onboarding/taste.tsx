@@ -247,6 +247,7 @@ export default function TasteOnboardingScreen() {
           setInput('');
           void state.refetch();
         }}
+        surface="onboarding"
       />
     </Screen>
   );

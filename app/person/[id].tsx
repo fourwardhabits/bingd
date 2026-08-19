@@ -13,6 +13,7 @@ import {
   usePersonFetch,
   type PersonCredit,
 } from '@/features/person/use-person';
+import { track } from '@/lib/analytics';
 import { posterUri, profileUri } from '@/lib/images';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import { queryKeys } from '@/lib/query';
@@ -150,6 +151,11 @@ export default function PersonScreen() {
       present,
     });
     setBusyId(null);
+
+    // Additions only, and only on `ok` — the same rule as the other three bookmarks.
+    if (present && result.outcome === 'ok') {
+      track({ name: 'watchlist_added', props: { surface: 'title' } });
+    }
 
     // Reconciled on an unknown outcome as well as on success — the same rule the other
     // three bookmark surfaces follow (`lib/write-outcome.ts`). Independent review 21e.

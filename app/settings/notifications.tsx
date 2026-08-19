@@ -53,7 +53,7 @@ export default function NotificationsScreen() {
   const router = useRouter();
   const notifications = useNotifications(profile.id);
   const markRead = useMarkNotificationsRead(profile.id);
-  const { follow, respondToRequest, busy } = useSocialWrites(profile.id);
+  const { follow, respondToRequest, busy } = useSocialWrites(profile.id, 'notifications');
 
   const rows = notifications.data ?? [];
   const requests = rows.filter((row) => row.kind === 'follow_request');
@@ -77,7 +77,13 @@ export default function NotificationsScreen() {
 
   const followBack = async (row: Notification) => {
     if (!row.actorId) return;
-    const result = await follow({ userId: row.actorId });
+    // Three states, not two: `relationships` may not have resolved, and "nobody has
+    // looked" is not "there was no edge". Unknown emits nothing (`use-social.ts`).
+    const known = relationships.data?.get(row.actorId);
+    const result = await follow({
+      userId: row.actorId,
+      priorState: !relationships.data ? 'unknown' : known?.following ? 'existing' : 'none',
+    });
     if (!result.ok) {
       Alert.alert('Could not follow', result.message);
       return;

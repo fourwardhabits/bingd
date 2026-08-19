@@ -140,7 +140,9 @@ export default function CreateProfileScreen() {
 
     switch (result.outcome) {
       case 'created':
-        track({ name: 'account_created' });
+        // `created` only. `already_exists` below is a replay of an account that was
+        // already there, and counting it would report a second signup for one person.
+        track({ name: 'signup_completed' });
         await clearPendingDisplayName();
         // The gate re-reads the profile and moves the user. Navigating from here as
         // well would race it.

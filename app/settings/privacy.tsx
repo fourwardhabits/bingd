@@ -36,7 +36,7 @@ export default function PrivacyScreen() {
   const router = useRouter();
   const { setVisibility, busy } = useAccountWrites();
   const blocks = useMyBlocks(profile.id);
-  const { unblock, busy: unblocking } = useSocialWrites(profile.id);
+  const { unblock, busy: unblocking } = useSocialWrites(profile.id, 'profile');
 
   /**
    * Read from `profiles` rather than from the session profile.

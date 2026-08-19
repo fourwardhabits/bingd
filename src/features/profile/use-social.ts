@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { invalidateAwards } from '@/features/awards/invalidate';
+import { track, type Surface } from '@/lib/analytics';
 import { avatarUri } from '@/lib/images';
 import { diagnose } from '@/lib/diagnose';
 import { supabase } from '@/lib/supabase';
@@ -127,7 +128,7 @@ export type SocialWriteResult = { ok: true } | { ok: false; message: string };
  * seen at all. Enumerating those precisely would be a list to keep in step with every
  * future feature, and this is a once-in-a-while write rather than a per-keystroke one.
  */
-export function useSocialWrites(viewerId: string) {
+export function useSocialWrites(viewerId: string, surface: Surface) {
   const queryClient = useQueryClient();
 
   const refresh = async () => {
@@ -152,8 +153,20 @@ export function useSocialWrites(viewerId: string) {
     invalidateAwards(queryClient, viewerId);
   };
 
-  const run = async (fn: () => PromiseLike<{ error: unknown }>): Promise<SocialWriteResult> => {
-    const { error } = await fn();
+  /**
+   * `observe` sees the server's body, and only when the server answered.
+   *
+   * It exists for `follow_created`, which needs something the boolean result cannot
+   * carry: whether the follow landed as `approved` or as `pending`. `follow` is the one
+   * writer here that reports that, and it is the only decision in the schema about it
+   * (`20260817000600`) — so reading it out of the reply is the only way to record it
+   * without asking the client to guess from a visibility it may not have.
+   */
+  const run = async (
+    fn: () => PromiseLike<{ data?: unknown; error: unknown }>,
+    observe?: (data: unknown) => void,
+  ): Promise<SocialWriteResult> => {
+    const { data, error } = await fn();
 
     /**
      * **Reconciled on an unknown outcome as well as on a commit.**
@@ -174,6 +187,7 @@ export function useSocialWrites(viewerId: string) {
         (error instanceof Error ? error.message : 'Something went wrong. Try again.');
       return { ok: false, message };
     }
+    observe?.(data);
     return { ok: true };
   };
 
@@ -188,7 +202,11 @@ export function useSocialWrites(viewerId: string) {
   const [busy, setBusy] = useState(false);
   const withIntent = useOperationIntent();
 
-  const rpc = async (name: string, args: Record<string, unknown>): Promise<SocialWriteResult> => {
+  const rpc = async (
+    name: string,
+    args: Record<string, unknown>,
+    observe?: (data: unknown) => void,
+  ): Promise<SocialWriteResult> => {
     if (busy) return { ok: false, message: 'One at a time.' };
     setBusy(true);
     try {
@@ -207,12 +225,14 @@ export function useSocialWrites(viewerId: string) {
        * second answered `already_applied` — a control that says it worked and did
        * nothing.
        */
-      return await run(() =>
-        withIntent(
-          `${name}:${JSON.stringify(args)}`,
-          (operationId) => supabase.rpc(name, { p_operation_id: operationId, ...args }),
-          answerWasLost,
-        ),
+      return await run(
+        () =>
+          withIntent(
+            `${name}:${JSON.stringify(args)}`,
+            (operationId) => supabase.rpc(name, { p_operation_id: operationId, ...args }),
+            answerWasLost,
+          ),
+        observe,
       );
     } finally {
       setBusy(false);
@@ -220,7 +240,46 @@ export function useSocialWrites(viewerId: string) {
   };
 
   return {
-    follow: ({ userId }: { userId: string }) => rpc('follow', { p_followee_id: userId }),
+    /**
+     * `follow_created` is emitted from the server's own answer, and only from `ok`.
+     *
+     * Three bodies are possible and only one of them is a new edge:
+     *
+     * - `{status: 'ok', state}` where no row existed — the edge this event is about.
+     * - `{status: 'ok', state}` where a row **already existed**. `follow` returns the
+     *   existing state rather than raising, so that re-following somebody you follow is
+     *   not an error. It is also not a second follow, and counting it would let one
+     *   person inflate the network by tapping a button that changed nothing. **The body
+     *   cannot tell the two apart**, which is why the caller has to say what it knew.
+     * - `{status: 'already_applied'}` — `_claim_operation` recognising a replayed id
+     *   after a lost reply. Carries no `state` at all, so it emits nothing.
+     *
+     * `priorState` is the caller's own reading of the relationship *before* the press,
+     * and it has three values rather than two. `'unknown'` is the one independent review
+     * 24 was right about: `FollowControl` renders a Follow button from `noRelationship()`
+     * while `follow_state_with` is still in flight, so a boolean would report "there was
+     * no edge" when the honest answer is "nobody has looked". **Unknown emits nothing** —
+     * an undercount in the same direction as every other event here, rather than a
+     * network that looks bigger than it is.
+     *
+     * The complete fix is a server that reports whether it inserted. That is a migration,
+     * the database is frozen for this tranche, and this closes the case that actually
+     * occurs.
+     */
+    follow: ({
+      userId,
+      priorState,
+    }: {
+      userId: string;
+      priorState: 'none' | 'existing' | 'unknown';
+    }) =>
+      rpc('follow', { p_followee_id: userId }, (data) => {
+        if (priorState !== 'none') return;
+        const body = data as { status?: string; state?: string } | null;
+        if (body?.status !== 'ok') return;
+        if (body.state !== 'approved' && body.state !== 'pending') return;
+        track({ name: 'follow_created', props: { surface, state: body.state } });
+      }),
     unfollow: ({ userId }: { userId: string }) => rpc('unfollow', { p_followee_id: userId }),
     block: ({ userId }: { userId: string }) => rpc('block', { p_blocked_id: userId }),
     unblock: ({ userId }: { userId: string }) => rpc('unblock', { p_blocked_id: userId }),

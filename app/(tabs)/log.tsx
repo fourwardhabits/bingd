@@ -12,6 +12,7 @@ import { useRecentSearches } from '@/features/search/use-recent-searches';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
 import { meaningfulMatch, useUserSearch, type UserResult } from '@/features/search/use-user-search';
 import { followLabel, noRelationship, useRelationships } from '@/features/profile/use-social';
+import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { theme } from '@/ui/tokens';
 import {
@@ -159,6 +160,21 @@ export default function LogScreen() {
 
   const openUser = (user: UserResult) => {
     commitSelection(user.name);
+    /**
+     * `member_search_result_opened`.
+     *
+     * The position in the list and nothing else. **Not the query, not the handle, not
+     * the display name** — what somebody typed into a search box is exactly the kind of
+     * free text this app's analytics refuses to carry (`lib/analytics.ts`), and the
+     * question the beta actually has is whether member search gets used at all and
+     * whether people take the first result or scroll.
+     *
+     * One-based, so a chart's "1" means the top row rather than an index.
+     */
+    track({
+      name: 'member_search_result_opened',
+      props: { surface: 'search', position: shownUsers.indexOf(user) + 1 },
+    });
     router.push(`/u/${user.username}`);
   };
 
@@ -311,6 +327,7 @@ export default function LogScreen() {
       <LogSheet
         title={logging}
         onClose={() => setLogging(null)}
+        surface="search"
         onRank={(bucket, mode) => {
           if (!logging) return;
           // The log sheet closes as the comparison opens. screens.md §4 asks for one
@@ -330,6 +347,7 @@ export default function LogScreen() {
         subject={ranking}
         onClose={() => setRanking(null)}
         onRankAnother={() => setInput('')}
+        surface="search"
       />
     </Screen>
   );

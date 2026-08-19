@@ -103,6 +103,7 @@ const props = {
   title: 'Inception',
   seriesTitle: null,
   onClose: jest.fn(),
+  surface: 'title' as const,
   onSent: jest.fn(),
 };
 

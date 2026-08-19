@@ -5,6 +5,7 @@ import { StyleSheet, View } from 'react-native';
 import { useCurrentProfile } from '@/features/auth';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import { mustReconcile, newOperationId, setBucket } from '@/features/collection/writes';
+import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
 import { BUCKETS, BucketChip, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
@@ -83,6 +84,20 @@ export function TasteBucketSheet({
       // the retry is one tap on the same three buttons.
       setProblem(result.message);
       return;
+    }
+
+    // The same rule as the log sheet's: `ok` only. `already_applied` is one intent
+    // replayed, and the retry this sheet deliberately invites is exactly how it happens.
+    // Movies only — the flow does not offer a season (`app/onboarding/taste.tsx`).
+    if (result.outcome === 'ok') {
+      track({
+        name: 'title_logged',
+        props: {
+          media_kind: 'movie',
+          surface: 'onboarding',
+          bucket: bucket === 'notForMe' ? 'not_for_me' : bucket,
+        },
+      });
     }
 
     onChosen(bucket);

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { invalidateAwards } from '@/features/awards/invalidate';
+import { track, type Surface } from '@/lib/analytics';
 import { diagnose } from '@/lib/diagnose';
 import { readAllByKey } from '@/lib/read-all';
 import { avatarUri } from '@/lib/images';
@@ -291,6 +292,8 @@ export async function createInviteLink(
    * it after 21g's PASS, in the sweep 21h existed to make.
    */
   operationId: string,
+  /** Where the share was started from, for `invite_link_created`. */
+  surface: Surface,
 ): Promise<string | null> {
   const { data, error } = await supabase.rpc('create_invite_link', {
     p_operation_id: operationId,
@@ -298,6 +301,28 @@ export async function createInviteLink(
   });
   if (error) return null;
 
-  const token = (data as { token?: string } | null)?.token;
+  const body = data as { status?: string; token?: string } | null;
+
+  /**
+   * `invite_link_created` follows the **row**, not the tap.
+   *
+   * `create_invite_link` writes one `invite_link_creations` row per accepted call and
+   * answers `already_applied` — with the same token, so the share still works — when
+   * `_claim_operation` recognises a replayed id. That replay writes nothing, so it must
+   * count nothing. It is the exact case the held operation id exists for: a creation
+   * that commits, loses its reply, and is retried because the person was told the share
+   * had failed (independent review 21h).
+   *
+   * The event is emitted here rather than at the share sheet for the same reason the id
+   * is released here: what is being counted is the creation being recorded, not the
+   * message going out. Opening a share sheet is not an invitation sent, and this is the
+   * one stage of that funnel the app can measure honestly
+   * (`docs/product/growth-instrumentation.md`).
+   */
+  if (body?.status === 'ok') {
+    track({ name: 'invite_link_created', props: { surface, has_title: Boolean(mediaItemId) } });
+  }
+
+  const token = body?.token;
   return token ? `https://bingd.app/i/${token}` : null;
 }

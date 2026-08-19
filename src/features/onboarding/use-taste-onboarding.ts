@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
+import { track } from '@/lib/analytics';
 import { readPref, writePref } from '@/lib/prefs';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
@@ -170,6 +171,35 @@ export function useCompleteTasteOnboarding(userId: string) {
   return useCallback(
     async ({ skipped }: { skipped: boolean }) => {
       const phase: TastePhase = skipped ? 'skipped' : 'done';
+
+      /**
+       * `onboarding_completed`, from the one function all three exits go through.
+       *
+       * The screen has three of them — the summary's two buttons and "Not now" — and an
+       * event per button is three places for a fourth exit to be forgotten later.
+       *
+       * **Guarded on the flow having already *ended*, not on `intent` being set at all.**
+       * `begin()` puts `active` in that map on arrival, so `intent.has` is true for the
+       * whole of a normal flow and testing it would suppress every real completion. What
+       * has to be excluded is a second *ending*: two of the three exits are buttons
+       * sitting side by side on the summary, and one person pressing both must not report
+       * two completions.
+       *
+       * `titles_ranked` is read from the cache rather than refetched. It is what the
+       * progress bar was showing when they left, which is the number the event is about.
+       */
+      const ended = intent.get(userId);
+      if (ended !== 'done' && ended !== 'skipped') {
+        track({
+          name: 'onboarding_completed',
+          props: {
+            skipped,
+            titles_ranked:
+              queryClient.getQueryData<TasteOnboarding>(queryKeys.tasteOnboarding(userId))
+                ?.ranked ?? 0,
+          },
+        });
+      }
       // Synchronously, and before the write is awaited. `begin` checks this immediately
       // before its own write, which is what closes the race review found: begin reads an
       // absent phase, the user presses "Not now", complete writes `skipped`, and begin's

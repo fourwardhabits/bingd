@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 
 import { invalidateAfterCollectionChange } from './invalidate';
 import { diagnose } from '@/lib/diagnose';
+import { track, type Surface } from '@/lib/analytics';
 import { compactName } from '@/lib/titles';
 import { useCurrentProfile } from '@/features/auth';
 import { theme } from '@/ui/tokens';
@@ -69,6 +70,12 @@ export type LogSheetProps = {
    * would hit `set_bucket`'s 55000 refusal.
    */
   onRank?: (bucket: BucketId, mode: 'start' | 'rebucket') => void;
+  /**
+   * Which screen opened this, for `title_logged` alone. Two screens mount this sheet
+   * and the route underneath it is not the same question as where somebody decided to
+   * log something.
+   */
+  surface: Surface;
 };
 
 /**
@@ -79,14 +86,16 @@ export type LogSheetProps = {
  * space only when opened. What is borrowed is density and hierarchy; the palette,
  * the serif and the poster treatment stay Bingd's (PRD §5).
  */
-export function LogSheet({ title, onClose, onRank }: LogSheetProps) {
+export function LogSheet({ title, onClose, onRank, surface }: LogSheetProps) {
   if (!title) return null;
 
   // Keyed by the title, and unmounted entirely when there is none. Both matter: a sheet
   // that stays mounted between titles inherits the last one's bucket, its message and —
   // worst of all — its unsaved note, which then gets filed against whatever is on screen
   // now.
-  return <Body key={title.id} title={title} onClose={onClose} onRank={onRank} />;
+  return (
+    <Body key={title.id} title={title} onClose={onClose} onRank={onRank} surface={surface} />
+  );
 }
 
 type Expanded = 'notes' | 'date' | 'who' | null;
@@ -107,7 +116,12 @@ const GATE_REASON: Record<'loading' | 'ready' | 'unavailable', string | undefine
   unavailable: 'Unavailable',
 };
 
-function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle }) {
+function Body({
+  title,
+  onClose,
+  onRank,
+  surface,
+}: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
   const logState = useLogState(profile.id, title.id);
@@ -261,6 +275,28 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
       // (`lib/write-outcome.ts`). Independent review 21e.
       if (mustReconcile(result)) refresh();
       return;
+    }
+
+    /**
+     * `title_logged`, on `ok` and **not** on `already_applied`.
+     *
+     * `already_applied` is `_claim_operation` answering that this exact operation id has
+     * been seen before — a replay of one intent, not a second log. Counting it would
+     * turn one tap on a bad connection into two titles in the funnel.
+     *
+     * A `failed` outcome never reaches here at all: `report` returned false above and
+     * the function returned. That includes the unknown-outcome case, which is the
+     * deliberate undercount written up in `lib/analytics.ts`.
+     */
+    if (result.outcome === 'ok') {
+      track({
+        name: 'title_logged',
+        props: {
+          media_kind: title.kind === 'season' ? 'tv_season' : 'movie',
+          surface,
+          bucket: chosen === 'notForMe' ? 'not_for_me' : chosen,
+        },
+      });
     }
 
     // The row says "Today", so today is what must be stored. `set_bucket` writes no

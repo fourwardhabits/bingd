@@ -1,5 +1,6 @@
 import { Alert, StyleSheet, View } from 'react-native';
 
+import type { Surface } from '@/lib/analytics';
 import { Button } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -12,6 +13,8 @@ export type FollowControlProps = {
   relationship: Relationship | undefined;
   /** Hidden entirely on your own profile — you cannot follow or block yourself. */
   isSelf: boolean;
+  /** Where this control is being shown, for `follow_created` alone. */
+  surface: Surface;
 };
 
 /**
@@ -43,8 +46,9 @@ export function FollowControl({
   viewerId,
   relationship,
   isSelf,
+  surface,
 }: FollowControlProps) {
-  const { follow, unfollow, block, unblock, busy } = useSocialWrites(viewerId);
+  const { follow, unfollow, block, unblock, busy } = useSocialWrites(viewerId, surface);
   const state = relationship ?? noRelationship();
 
   if (isSelf) return null;
@@ -121,7 +125,23 @@ export function FollowControl({
         onPress={() => {
           if (following || requested) return confirmUnfollow();
           void (async () => {
-            const result = await follow({ userId });
+            /**
+             * **`undefined` is not "no relationship".**
+             *
+             * This button renders "Follow" from `noRelationship()` while
+             * `follow_state_with` is still in flight, so a press can arrive before anybody
+             * has looked. Reporting that as "there was no edge" is how a re-follow gets
+             * counted as a new one, which independent review 24 named. The three states
+             * are passed through as three, and `unknown` emits nothing.
+             *
+             * The branch above already returned for anybody the screen *knows* is in a
+             * relationship, so the only two possibilities left here are a genuine new
+             * follow and a read that has not landed.
+             */
+            const result = await follow({
+              userId,
+              priorState: relationship === undefined ? 'unknown' : 'none',
+            });
             report(result, 'Could not follow');
           })();
         }}

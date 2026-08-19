@@ -26,6 +26,7 @@ import {
   useSentToYou,
   type SentRecommendation,
 } from '@/features/recommendations/use-sent-to-you';
+import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { languageName } from '@/lib/language';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
@@ -110,6 +111,11 @@ export default function RecommendationsScreen() {
     });
     setBusy(null);
 
+    // Additions only, and only on `ok` — the same rule as the other three bookmarks.
+    if (present && result.outcome === 'ok') {
+      track({ name: 'watchlist_added', props: { surface: 'for_you' } });
+    }
+
     // Reconciled on an unknown outcome as well as on success — the same rule the other
     // three bookmark surfaces follow (`lib/write-outcome.ts`). Independent review 21e.
     if (mustReconcile(result)) {
@@ -130,7 +136,15 @@ export default function RecommendationsScreen() {
     // Opened is recorded on the way through, which is the only moment anybody can
     // honestly call it opened. It is fire-and-forget: a failure here must not stand
     // between somebody and the title they were told to watch.
-    if (!row.openedAt) markOpened.mutate(row.id);
+    // `recommendation_opened` is emitted by the mutation, once the server has answered
+    // and once per row — not here on the tap, which reads a cached `openedAt` and would
+    // fire twice for two quick presses. See `useMarkRecommendationOpened`.
+    if (!row.openedAt) {
+      markOpened.mutate({
+        recommendationId: row.id,
+        mediaKind: row.kind === 'movie' ? 'movie' : 'tv_season',
+      });
+    }
     // Who sent it and when travel with the link, so the title page can say so over its
     // hero. The fact belongs to this route and not to the title: the same film reached
     // from search is not "recommended by Ada", and a lookup on every title page would
