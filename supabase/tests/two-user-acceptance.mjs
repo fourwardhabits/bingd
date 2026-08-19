@@ -409,6 +409,17 @@ try {
   // -------------------------------------------------------------------------
 
   const event = events[0];
+
+  // Reactions default **off** since 20260819000300 — the before-insert trigger drops
+  // the row when the recipient has not asked for them, so without this the inbox
+  // assertion below fails for a product reason rather than a wiring one. B opting in
+  // is also the only place this script exercises the preference writer.
+  const optIn = await rpc(b.token, 'set_notification_preference', {
+    p_category: 'reactions',
+    p_enabled: true,
+  });
+  check('B turns reaction notifications on', optIn.status === 200 && optIn.body?.enabled === true);
+
   const reaction = await rpc(a.token, 'set_reaction', {
     p_operation_id: uuid(),
     p_feed_event_id: event.id,
@@ -736,15 +747,21 @@ try {
 
   await rpc(a.token, 'unfollow', { p_operation_id: uuid(), p_followee_id: b.id });
 
-  const notFound = await rpc(a.token, 'search_users', { p_query: b.username, p_limit: 10 });
+  // 20260819000100 separated *being found* from *being read*, because one setting was
+  // carrying two meanings: private used to make an account unfindable, so the only way
+  // to be found was to publish your collection. A private account is now discoverable
+  // by identity — which is what makes the request below possible at all — and it is
+  // the content that stays gated. This assertion was the old rule and was inverted on
+  // 2026-08-19; the pair of checks is the current one.
+  const stillFound = await rpc(a.token, 'search_users', { p_query: b.username, p_limit: 10 });
   check(
-    'a private account is undiscoverable by name once you stop following them',
-    !(notFound.body ?? []).some((row) => row.username === b.username),
-    JSON.stringify(notFound.body)?.slice(0, 120),
+    'a private account stays findable by name after you stop following them',
+    (stillFound.body ?? []).some((row) => row.username === b.username),
+    JSON.stringify(stillFound.body)?.slice(0, 120),
   );
 
   const gone = await get(a.token, `public_profiles?id=eq.${b.id}&select=id`);
-  check('and their profile is not readable', (gone.body ?? []).length === 0);
+  check('but their profile is not readable', (gone.body ?? []).length === 0);
 
   const requested = await rpc(a.token, 'follow', { p_operation_id: uuid(), p_followee_id: b.id });
   check(

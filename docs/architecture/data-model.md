@@ -579,6 +579,16 @@ create table device_tokens (
 
 Preferences default to enabled by absence: a missing row means enabled. This avoids writing seven rows per signup and avoids a backfill every time a category is added.
 
+> **As built, 2026-08-19 — absence resolves to the *category's* default.** `20260819000300` replaced "absence means enabled" with `_notification_default(category)`, because `reactions` and `awards` default **off** and the old rule could not express that without a row per account per signup. Six of the eight categories still default on, so for those nothing changed. The paragraph above describes the v0.6 design.
+
+> **As built, 2026-08-19 — a block is a barrier, not a filter.** Every writer that acts on a *pair* of accounts takes `_lock_pair` before the check that reads `follows` or `blocks`, and holds it through the `notifications` insert. Without it a writer's check passes, `block()` commits and deletes both inboxes, and the writer's row lands afterwards — a row that cannot exist under the product model, because `block` removes every row between the pair and every writer is refused thereafter.
+>
+> `20260819000400` brought `add_comment`, `set_reaction` and `set_watch_tags` under the rule the other seven writers already followed. The order is **check → lock → check again**: the pair is not known until the feed event has been read, and moving the check after the lock instead of repeating it makes the refusal *timeable*, which is an oracle rather than a refactor — see the migration header. `set_watch_tags` holds one lock per companion, **ordered by uuid**, because it is the only writer holding more than one.
+>
+> This is demonstrated rather than argued: `supabase/tests/concurrency` races real PostgreSQL sessions and correlates each wait against the exact advisory key the function computes. `npm run test:race`, and `npm run test:race:mutants` for the proof that removing the lock turns it red.
+>
+> **Still un-locked, and correctly so:** the per-day cap on `reports` (§10) is counted without a lock and is advisory by design; its idempotency is a partial unique index, which concurrency cannot defeat.
+
 ---
 
 ## 8. Recommendations

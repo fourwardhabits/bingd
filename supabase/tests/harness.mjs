@@ -40,10 +40,19 @@ const migrationsDir = join(here, '..', 'migrations');
  *     `resolve_capabilities` became callable for arbitrary users, so a lockdown
  *     has to be written explicitly and can then be tested.
  */
-const SHIM = `
+/**
+ * Parameterised on one line only, and the parameter exists because of the concurrency
+ * harness in `concurrency/harness.mjs`. That one runs against a **real** PostgreSQL,
+ * where `citext` is a real extension rather than a gap to be papered over — so it asks
+ * for `citext: 'extension'` and the migrations' own `create extension` is left to run.
+ *
+ * Exported rather than copied. Two shims for two harnesses is the drift that ends with
+ * a race test passing against a schema production does not have.
+ */
+export const buildShim = ({ citext = 'domain' } = {}) => `
   create schema if not exists auth;
   create table auth.users (id uuid primary key);
-  create domain citext as text;
+  ${citext === 'extension' ? 'create extension if not exists citext;' : 'create domain citext as text;'}
 
   create role anon         nologin noinherit;
   create role authenticated nologin noinherit;
@@ -120,6 +129,8 @@ const SHIM = `
   grant execute on function storage.foldername(text) to anon, authenticated, service_role;
 `;
 
+const SHIM = buildShim({ citext: 'domain' });
+
 /**
  * The migrated database, dumped once and reloaded for each test database.
  *
@@ -135,13 +146,27 @@ const SHIM = `
  */
 let migratedSnapshot;
 
-const migrationFiles = async () =>
+export const migrationFiles = async () =>
   (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
 
+/**
+ * One migration's SQL, as the harness applying it needs it.
+ *
+ * `citext: 'domain'` strips the extension statement, because PGlite has no such
+ * extension and the shim has already declared a domain of that name. `'extension'`
+ * leaves the statement alone, which is what a real PostgreSQL wants — and is the
+ * more faithful of the two, since case-insensitive uniqueness is then genuinely
+ * exercised rather than noted as a known gap.
+ */
+export const migrationSql = async (file, { citext = 'domain' } = {}) => {
+  const sql = await readFile(join(migrationsDir, file), 'utf8');
+  return citext === 'extension'
+    ? sql
+    : sql.replace(/create extension if not exists citext;/g, '');
+};
+
 const applyOne = async (db, file) => {
-  let sql = await readFile(join(migrationsDir, file), 'utf8');
-  // The shim already defines citext as a domain.
-  sql = sql.replace(/create extension if not exists citext;/g, '');
+  const sql = await migrationSql(file, { citext: 'domain' });
   try {
     await db.exec(sql);
   } catch (e) {
