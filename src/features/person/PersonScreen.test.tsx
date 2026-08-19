@@ -23,11 +23,21 @@ let mockPersonId = '6193';
  * broken implementation from the fixed one.
  */
 let mockFailAfter: { table: string; successes: number } | null = null;
+/**
+ * How many times each table has actually been read.
+ *
+ * An invalidation is only worth anything if a read follows it, so the reconciliation
+ * tests below assert the *refetch* rather than asserting that a helper was called.
+ * Independent review 21e's point about the surviving mutant was that the integration was
+ * missing, and a test on the helper would not have noticed.
+ */
+const mockReads: Record<string, number> = {};
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: () => Promise.resolve({ data: null, error: null }),
     from: (table: string) => {
+      mockReads[table] = (mockReads[table] ?? 0) + 1;
       const filters: Record<string, unknown> = {};
       const failing = () => {
         if (!mockFailAfter || mockFailAfter.table !== table) return false;
@@ -86,7 +96,16 @@ jest.mock('@/lib/tmdb-adapter', () => ({
   cachePerson: (...args: unknown[]) => mockCachePerson(...(args as [])),
 }));
 
+/**
+ * **Partially mocked, on purpose.**
+ *
+ * `setWatchlist` is stood in for, because what this screen does with the *result* is the
+ * thing under test. `mustReconcile` is the real one: a whole-module mock silently
+ * dropped it, and a screen given a stub for the rule it is supposed to obey proves
+ * nothing about whether it obeys the rule.
+ */
 jest.mock('@/features/collection/writes', () => ({
+  ...jest.requireActual('@/features/collection/writes'),
   newOperationId: () => 'op-1',
   setWatchlist: (...args: unknown[]) => mockSetWatchlist(...(args as [])),
 }));
@@ -289,6 +308,46 @@ describe('the reader’s own state on somebody else’s work', () => {
     expect(mockSetWatchlist).toHaveBeenCalledWith(
       expect.objectContaining({ mediaItemId: 'film-1', present: true }),
     );
+  });
+
+  /**
+   * **A write whose outcome is unknown still moved the watchlist.**
+   *
+   * `set_watchlist` commits, the reply is lost, and `writes.ts` reports
+   * `{ failed, changed }` (`lib/write-outcome.ts`). This screen used to alert and return
+   * before invalidating anything, so the row stayed saved on the server and empty here
+   * until the cache went stale on its own. Independent review 21e, Major 3 — the mutant
+   * that survived because the integration was missing rather than because the assertion
+   * was weak.
+   */
+  it('refetches the watchlist when the save may have landed anyway', async () => {
+    mockSetWatchlist.mockResolvedValueOnce({
+      outcome: 'failed',
+      message: 'network down',
+      changed: true,
+    } as never);
+    const view = await open();
+    const before = mockReads.watchlist ?? 0;
+
+    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+
+    await waitFor(() => expect(mockReads.watchlist ?? 0).toBeGreaterThan(before));
+  });
+
+  it('leaves the cache alone when the server refused outright', async () => {
+    // The other half of the trade. A refusal this app raises on purpose proves nothing
+    // was written, so a refetch here would be a round trip bought with nothing.
+    mockSetWatchlist.mockResolvedValueOnce({
+      outcome: 'failed',
+      message: 'Your account cannot make changes right now.',
+    } as never);
+    const view = await open();
+    const before = mockReads.watchlist ?? 0;
+
+    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+
+    await waitFor(() => expect(mockSetWatchlist).toHaveBeenCalled());
+    expect(mockReads.watchlist ?? 0).toBe(before);
   });
 
   it('offers to remove one that is already saved', async () => {

@@ -7,7 +7,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useCurrentProfile } from '@/features/auth';
 import { useRankedCollection, useWatchlist } from '@/features/collection/use-collection';
 import { useWatched } from '@/features/collection/use-watched';
-import { newOperationId, setWatchlist } from '@/features/collection/writes';
+import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import {
   usePerson,
   usePersonFetch,
@@ -151,16 +151,20 @@ export default function PersonScreen() {
     });
     setBusyId(null);
 
+    // Reconciled on an unknown outcome as well as on success — the same rule the other
+    // three bookmark surfaces follow (`lib/write-outcome.ts`). Independent review 21e.
+    if (mustReconcile(result)) {
+      await Promise.all([
+        // The watchlist and Queue Dragon, which counts it (`collection/invalidate.ts`).
+        invalidateAfterWatchlistChange(queryClient, viewer.id),
+        queryClient.invalidateQueries({ queryKey: queryKeys.title(credit.mediaItemId) }),
+      ]);
+    }
+
     if (result.outcome === 'failed') {
       Alert.alert('Could not update watchlist', result.message);
       return;
     }
-
-    await Promise.all([
-      // The watchlist and Queue Dragon, which counts it (`collection/invalidate.ts`).
-      invalidateAfterWatchlistChange(queryClient, viewer.id),
-      queryClient.invalidateQueries({ queryKey: queryKeys.title(credit.mediaItemId) }),
-    ]);
   };
 
   return (

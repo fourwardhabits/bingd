@@ -2,12 +2,19 @@ import { waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { DEFAULT_REACTION, REACTIONS, useReactions } from './use-reactions';
+import { DEFAULT_REACTION, REACTIONS, useReactions, useSetReaction } from './use-reactions';
 
 let mockRows: unknown[] = [];
+const mockRpc = jest.fn();
+
+// A fresh id every call, so a held one is visibly held rather than two undefineds
+// comparing equal. `expo-crypto` has no native module under jest.
+let issued = 0;
+jest.mock('expo-crypto', () => ({ randomUUID: () => `id-${(issued += 1)}` }));
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
+    rpc: (...args: unknown[]) => mockRpc(...args),
     from: () => {
       const chain: Record<string, unknown> = {};
       Object.assign(chain, {
@@ -36,6 +43,66 @@ const summaries = async (viewer = 'me') => {
 
 beforeEach(() => {
   mockRows = [];
+  issued = 0;
+  mockRpc.mockReset();
+  mockRpc.mockResolvedValue({ data: null, error: null });
+});
+
+/**
+ * **One operation id per reaction-on-an-event**, held across the retry a lost reply
+ * invites (`lib/operation-intent.ts`).
+ *
+ * The row converges — `set_reaction` assigns — but the RPC is rate-limited, so a replay
+ * under a fresh id spends a second slot for one tap and brings
+ * `reactions.max_per_day` forward for somebody nowhere near it. Nothing raises.
+ * Independent review 21j.
+ */
+describe('one operation id per reaction', () => {
+  const idsSent = () =>
+    mockRpc.mock.calls.map(([, args]) => (args as { p_operation_id: string }).p_operation_id);
+
+  const mount = async () => {
+    const view = await renderHookWithProviders(() => useSetReaction('me'));
+    return view.result;
+  };
+
+  it('replays an unanswered reaction under the id the first attempt used', async () => {
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: '', message: 'TypeError: Network request failed' },
+    });
+    const result = await mount();
+
+    await result.current.setReaction('event-1', 'love');
+    await result.current.setReaction('event-1', 'love');
+
+    const [first, second] = idsSent();
+    expect(typeof first).toBe('string');
+    expect(second).toBe(first);
+  });
+
+  it('takes a fresh id once the server has answered', async () => {
+    const result = await mount();
+
+    await result.current.setReaction('event-1', 'love');
+    await result.current.setReaction('event-1', 'love');
+
+    const [first, second] = idsSent();
+    expect(second).not.toBe(first);
+  });
+
+  it('treats a change of mind as its own intent', async () => {
+    // Replaying the first id for a different kind would have the server answer
+    // `already_applied` — a pill that reports success and stores the previous reaction.
+    mockRpc.mockResolvedValue({ data: null, error: { code: '08007', message: 'unknown' } });
+    const result = await mount();
+
+    await result.current.setReaction('event-1', 'love');
+    await result.current.setReaction('event-1', 'disagree');
+
+    const [first, second] = idsSent();
+    expect(second).not.toBe(first);
+  });
 });
 
 /**

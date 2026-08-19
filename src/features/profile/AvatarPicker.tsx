@@ -47,6 +47,11 @@ export function AvatarPicker() {
     }
 
     if (result.outcome === 'failed') {
+      // `changed` is set only when `set_avatar` itself went unanswered — a failed resize
+      // or a failed upload never reached it. The bytes are deliberately left in place in
+      // that case (`avatar.ts`), so refetching is what tells this screen whether the
+      // profile is already pointing at them. Independent review 21e's invariant.
+      if (result.changed) await refresh();
       Alert.alert('Could not update your picture', result.message);
       return;
     }
@@ -61,6 +66,10 @@ export function AvatarPicker() {
     setBusy(false);
 
     if (result.outcome === 'failed') {
+      // `changed` means `set_avatar` may have cleared the pointer anyway, so the face on
+      // screen may already be gone from the profile. Refetched before the alert rather
+      // than instead of it (`lib/write-outcome.ts`). Independent review 21e.
+      if (result.changed) await refresh();
       Alert.alert('Could not remove your picture', result.message);
       return;
     }

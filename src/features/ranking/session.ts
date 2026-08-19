@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { classifyWrite } from '@/lib/write-outcome';
 import type { BucketId } from '@/ui/components';
 
 /**
@@ -73,6 +74,21 @@ export type SessionFailed = {
    * to a comparison the user was never shown (api.md §8).
    */
   restart: boolean;
+  /**
+   * **The collection may have moved anyway.**
+   *
+   * `rank_answer` records a comparison and, on the last one, finalises the placement —
+   * it writes the `rankings` row, the score and the `feed_events` entry, all in the same
+   * transaction. So a `rank_answer` that commits and loses its reply is a title that is
+   * *placed*, reported here as a failure. The sheet used to invalidate only on `placed`,
+   * which left the ranked list, the score denominators, Rating Rascal and the feed all
+   * describing the ranking from before the one the reader just finished.
+   *
+   * Set for any outcome `lib/write-outcome.ts` cannot prove was a refusal. Reviews 21d
+   * and 21e established the same thing about `rank_rebucket` and about the collection
+   * writers; this is the third member of the family.
+   */
+  changed?: boolean;
 };
 
 export type SessionStep = Comparison | Placed | SessionEnded | SessionFailed;
@@ -91,6 +107,10 @@ type RankResponse = {
 };
 
 const fail = (error: { code?: string; message: string }): SessionFailed => {
+  // Every branch below is a refusal this app raises on purpose except the default, and
+  // the default is where a dropped connection or an `08007` arrives.
+  const ambiguous = classifyWrite(error) === 'unknown' ? { changed: true as const } : {};
+
   switch (error.code) {
     case CODES.notFound:
       return {
@@ -118,12 +138,15 @@ const fail = (error: { code?: string; message: string }): SessionFailed => {
     case CODES.unauthenticated:
       return { state: 'failed', message: 'Your session expired. Sign in again.', restart: false };
     default:
-      return { state: 'failed', message: error.message, restart: false };
+      return { state: 'failed', message: error.message, restart: false, ...ambiguous };
   }
 };
 
 const step = (data: RankResponse | null, subjectId: string): SessionStep => {
-  if (!data) return { state: 'failed', message: 'The server said nothing.', restart: true };
+  // A 200 with an unusable body. The request was *answered*, so whatever it did is
+  // committed — which makes this the one failure here that is certainly a change.
+  if (!data)
+    return { state: 'failed', message: 'The server said nothing.', restart: true, changed: true };
 
   if (data.done) {
     return {

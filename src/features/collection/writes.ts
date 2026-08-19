@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 
 import { supabase } from '@/lib/supabase';
+import { classifyWrite } from '@/lib/write-outcome';
 import type { BucketId } from '@/ui/components';
 
 /**
@@ -56,22 +57,49 @@ export type WriteResult =
   | { outcome: 'ranked' }
   /**
    * `changed` means **the server may already have written something**, so the caller
-   * still has caches to refresh even though it is about to show an error.
+   * still has caches to reconcile even though it is about to show an error.
    *
-   * Two ways it gets set, and review 21c found the first and 21d the second:
+   * Two ways it gets set, and reviews 21c, 21d and 21e each sharpened the second:
    *
    * - a writer that is more than one request failed after an earlier one landed;
-   * - **the request has no SQLSTATE**, so it was never answered. A recognised code is
-   *   the server declining, which it can only do by not committing. No code at all is a
-   *   dropped connection or a timeout — the write may have committed and the reply may
-   *   simply not have arrived, and nothing on this side can tell those apart.
+   * - **the outcome of this request is unknown** — `lib/write-outcome.ts` classifies
+   *   that, and the rule is *not* "the error has no code". 21d's version tested for a
+   *   SQLSTATE, and 21e answered it with `08007 transaction_resolution_unknown`: a
+   *   SQLSTATE whose entire meaning is that the commit outcome is unknown. Only a code
+   *   this app raises on purpose proves a refusal. Everything else may have landed.
    *
-   * Absent means nothing happened, which stays the ordinary case.
+   * Absent means the server answered no, which stays the ordinary case.
+   *
+   * **`mustReconcile` below is how a caller should read this.** Testing
+   * `outcome === 'failed'` first and returning is the bug review 21e found in four
+   * separate screens.
    */
   | { outcome: 'failed'; message: string; changed?: boolean };
 
+/**
+ * Whether the caller must reconcile the canonical state this write touches, whatever it
+ * is about to put on screen.
+ *
+ * **True on success and true on an unknown failure.** Four callers reconciled on success
+ * and returned early on failure, so the one case that most needed a refetch — a write
+ * that committed and could not say so — was the only one that never got one (independent
+ * review 21e, Major 3). Reading the flag through a named function is what makes the next
+ * caller do it too.
+ */
+export const mustReconcile = (result: WriteResult) =>
+  result.outcome !== 'failed' || result.changed === true;
+
 const interpret = (error: { code?: string; message: string } | null): WriteResult => {
   if (!error) return { outcome: 'ok' };
+
+  /**
+   * **Classified before it is worded**, because those are two different questions.
+   *
+   * `classifyWrite` answers "did this commit"; the switch below answers "what does the
+   * person read". They used to be one expression keyed on `error.code`, which is how the
+   * default branch came to read every coded error as a definite rollback.
+   */
+  const ambiguous = classifyWrite(error) === 'unknown' ? { changed: true as const } : {};
 
   switch (error.code) {
     case CODES.ranked:
@@ -87,11 +115,11 @@ const interpret = (error: { code?: string; message: string } | null): WriteResul
     case CODES.notFound:
       return { outcome: 'failed', message: 'That title is no longer in the catalogue.' };
     default:
-      // No code at all is a request that was never answered — see `changed` above. An
-      // unrecognised code still came from the server, so it declined and did not commit.
-      return error.code
-        ? { outcome: 'failed', message: error.message }
-        : { outcome: 'failed', message: error.message, changed: true };
+      // Everything the five above do not name: an unrecognised SQLSTATE, the `08`
+      // connection class, a dropped socket, a gateway's HTML. `ambiguous` is empty only
+      // for a code `REFUSAL_CODES` recognises, which is the one thing that proves the
+      // server declined.
+      return { outcome: 'failed', message: error.message, ...ambiguous };
   }
 };
 
@@ -289,8 +317,8 @@ export async function removeFromCollection(input: {
   if (input.wasRanked) {
     // A refusal here stops the delete rather than being retried into it: `unlog` would
     // only refuse in turn, and reporting the second refusal would name the wrong cause.
-    // A refusal here stops the delete rather than being retried into it, and `unrank`
-    // already carries `changed` when its own request went unanswered.
+    // `unrank` already carries `changed` when its own outcome was unknown, so a caller
+    // reading the result through `mustReconcile` refreshes on the way out either way.
     const cleared = await unrank(input.mediaItemId);
     if (cleared.outcome === 'failed') return cleared;
     removedRanking = true;
@@ -315,10 +343,12 @@ export async function removeFromCollection(input: {
    * client cannot tell that apart from a refusal — so `rank_unrank` committing and then
    * timing out came back as a plain failure with nothing to say the ranking had gone.
    *
-   * The distinction that does hold is in `interpret`: **a SQLSTATE means the server
-   * answered**, and a server that answered with a refusal did not commit. An error
-   * carrying no code may have. So `unlog`'s own ambiguity is already on `result`, and all
-   * this line adds is the ranking that certainly went.
+   * Review 21e then found that 21d's distinction was itself too generous. "A SQLSTATE
+   * means the server answered" is false for `08007 transaction_resolution_unknown` and
+   * for the rest of the `08` connection class. The rule that survives is in
+   * `lib/write-outcome.ts`: **only a code this app raises on purpose proves a refusal**.
+   * So `unlog`'s own ambiguity is already on `result`, and all this line adds is the
+   * ranking that certainly went.
    */
   return removedRanking ? { ...result, changed: true } : result;
 }

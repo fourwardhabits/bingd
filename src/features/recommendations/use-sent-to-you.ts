@@ -160,6 +160,27 @@ async function inheritedMetadata(
  * `recommendations_to_me` clamps its `p_limit` to 200 (`20260817001300`), so this is the
  * ceiling and not a preference. It was 100, which is half of what was available for no
  * reason anybody wrote down.
+ *
+ * **What this cap is, and what it is not.** Independent review 21e asked for the audit
+ * and this is its result, so that nobody has to redo it:
+ *
+ * - It is **not** behind any count that claims to be exact. `unopenedIsAtLeast` below is
+ *   the guard, and it is exact rather than defensive because the server orders unopened
+ *   first.
+ * - It is **not** behind any award. Hype Courier and the rest read
+ *   `title_recommendations` directly through `readAllByKey` (`awards/use-awards.ts`),
+ *   which pages to exhaustion and refuses rather than truncates. This RPC feeds no
+ *   award metric.
+ * - It is **not** behind a completeness assertion. `SentList`'s `total` is only ever
+ *   compared to zero, to choose between a list and an empty state.
+ * - It **is** a presentation cap on the list itself. A reader with more than two hundred
+ *   recommendations sees the two hundred the server ranks highest — unopened first, then
+ *   newest — and the rest are not reachable from this screen.
+ *
+ * That last one is **deferred pagination debt, not a wrong number**. Paging it needs a
+ * cursor the RPC does not take, which is a migration, and it is carried into Beta
+ * Hardening §2 rather than approximated here. What this pass fixed was the number; the
+ * list stays capped and says nothing false about itself.
  */
 export const SENT_LIMIT = 200;
 

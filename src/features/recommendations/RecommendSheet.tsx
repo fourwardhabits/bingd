@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 
+import { newOperationId } from '@/features/collection/writes';
 import { compactName, type MediaKind } from '@/lib/titles';
 import { Avatar, Button, EmptyState, SearchField, Sheet, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -62,6 +63,22 @@ export function RecommendSheet({
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  /**
+   * The operation id for the off-platform share, held across attempts.
+   *
+   * A ref rather than state because it is machinery and nothing renders from it, and
+   * because it has to be right in the same tick as the press. Keyed to the sheet
+   * instance, which is keyed to the title — a share of a different film mounts a new
+   * one. See `shareOffPlatform` for the sequence it exists for.
+   */
+  const shareIntent = useRef<string | null>(null);
+  /**
+   * The operation id for a send, per recipient, held across attempts.
+   *
+   * Keyed by person because the sheet can be tapped down a list and each name is its own
+   * intent. Released as soon as the server answers anything at all — see `recommend`.
+   */
+  const sendIntents = useRef(new Map<string, string>());
 
   const people = recipients.data ?? [];
   const shown = filterRecipients(people, query);
@@ -71,8 +88,33 @@ export function RecommendSheet({
     if (sending) return;
     setSending(person.id);
     setError(null);
-    const result = await send.mutateAsync({ recipientId: person.id, mediaItemId });
+    /**
+     * **One id per recipient, held only while the outcome is unknown.**
+     *
+     * Independent review 21i: `recommend_title` is keyed on (sender, recipient, title) so
+     * it cannot store the same recommendation twice — but a replay with a *fresh* id
+     * still spends a rate-limit slot and still moves `recommended_at`, which reorders
+     * the recipient's list. Holding the id makes `_claim_operation` answer
+     * `already_applied` instead, which is what that ledger is for.
+     *
+     * Released the moment the server answers **anything**, and that is not symmetry for
+     * its own sake: a `refused` arrives as a 200 and **keeps its claim on purpose**
+     * (`20260817001300` — a raise would roll the claim back and make refused attempts
+     * free). Reusing a spent id would have the next attempt answered `already_applied`
+     * and silently send nothing. So only `changed` — the outcome nobody established —
+     * keeps it.
+     */
+    const held = sendIntents.current.get(person.id) ?? newOperationId();
+    sendIntents.current.set(person.id, held);
+
+    const result = await send.mutateAsync({
+      operationId: held,
+      recipientId: person.id,
+      mediaItemId,
+    });
     setSending(null);
+
+    if (result.ok || !result.changed) sendIntents.current.delete(person.id);
 
     if (!result.ok) {
       setError(result.message);
@@ -93,7 +135,27 @@ export function RecommendSheet({
     // The invite link is the growth instrumentation and the title link is the point of
     // the share, so a link that could not be minted degrades to sharing the title
     // alone rather than failing the share.
-    const invite = await createInviteLink(mediaItemId);
+    //
+    // **One id for the share, held across the retries that degradation invites.** A
+    // creation that commits and loses its reply returns null here, the share goes out
+    // without the link, and pressing Share again is the natural next move — with a fresh
+    // id that would record a second creation for one intent (`use-recommend.ts`).
+    // `??=` is what makes the second attempt carry the first one's id.
+    //
+    // **Released when the link is minted, not when the share goes out**, because the row
+    // being protected is the *creation*. A minted link means the creation is definitely
+    // recorded and the next press is a new one; a null means it may or may not be, and
+    // the next press has to be able to claim the same slot. Tying it to `Share.share`
+    // instead would release the id on the very path this exists for — the share still
+    // goes out, without the link, and that is the case Codex named.
+    //
+    // The ref lives with the sheet, so closing it and opening it again mints a fresh id.
+    // That is deliberate: a person who has left the sheet and come back has made a second
+    // decision, and the creation log should say two. What it must not count twice is one
+    // decision the client told them had failed.
+    const operationId = (shareIntent.current ??= newOperationId());
+    const invite = await createInviteLink(mediaItemId, operationId);
+    if (invite) shareIntent.current = null;
     const titleUrl = `https://bingd.app/title/${kind}/${mediaItemId}`;
     const message = invite
       ? `${name} on Bingd\n${titleUrl}\n\nJoin me on Bingd: ${invite}`

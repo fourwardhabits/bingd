@@ -128,6 +128,32 @@ beforeEach(() => {
 
 const callsTo = (fn: string) => mockRpc.mock.calls.filter(([name]) => name === fn);
 
+/**
+ * How many times a table has been read.
+ *
+ * `mockFrom` records the table name, so this counts reads without every stub having to
+ * cooperate. It is how the reconciliation tests below assert the *refetch* rather than
+ * asserting that a helper was called — independent review 21e's surviving mutant lived
+ * in the missing integration, not in a weak assertion.
+ */
+const readsOf = (table: string) =>
+  mockFrom.mock.calls.filter(([name]) => name === table).length;
+
+/**
+ * Answers one RPC with an error and everything else normally.
+ *
+ * The error shapes matter and are copied from what a client actually receives: a
+ * SQLSTATE this app raises on purpose is a refusal, `08007` and a bare `code: ''` are
+ * not (`lib/write-outcome.ts`).
+ */
+const failing = (fn: string, error: { code?: string; message: string }) => {
+  mockRpc.mockImplementation((name: string) =>
+    Promise.resolve(
+      name === fn ? { data: null, error } : { data: { status: 'ok' }, error: null },
+    ),
+  );
+};
+
 const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> = {}) => {
   const view = await renderWithProviders(<LogSheet title={title} onClose={() => {}} {...props} />);
 
@@ -400,6 +426,86 @@ describe('notes', () => {
     await fireEvent(sheet.note(), 'blur');
 
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(0));
+  });
+
+  /**
+   * **The note editor is a writer with a middle too**, which is the sixth instance of
+   * the shape reviews 21c, 21d and 21e found four times elsewhere.
+   *
+   * A date and a note changed together are `log_watched` and then `save_note`. The old
+   * code tracked one flag for both "did it succeed" and "is there anything to refetch",
+   * so `save_note` being refused after `log_watched` had landed skipped the refresh —
+   * and the sheet went on showing the old date over a row that had already moved.
+   */
+  it('refreshes the date that landed even when the note that followed it was refused', async () => {
+    stubReads(
+      { bucket: 'loved', watched_on: '2026-08-01', note: 'before', note_updated_at: 'v1' },
+      null,
+    );
+    mockRpc.mockImplementation((name: string) =>
+      Promise.resolve(
+        name === 'save_note'
+          ? { data: null, error: { code: '42501', message: 'suspended' } }
+          : { data: { status: 'ok' }, error: null },
+      ),
+    );
+
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('before'));
+    // Typed but not blurred, so the note edit is still local when the date is pressed —
+    // which is what puts both writes into one save.
+    await fireEvent.changeText(sheet.note(), 'after');
+    const before = readsOf('user_media');
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: 'Yesterday' }));
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('log_watched')).toHaveLength(1);
+    // The date is stored. The sheet has to re-read rather than keep showing the old one.
+    await waitFor(() => expect(readsOf('user_media')).toBeGreaterThan(before));
+  });
+
+  it('refreshes when a note save was never answered', async () => {
+    stubReads(
+      { bucket: 'loved', watched_on: '2026-08-01', note: 'before', note_updated_at: 'v1' },
+      null,
+    );
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: '', message: 'TypeError: Network request failed' },
+    });
+
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('before'));
+    const before = readsOf('user_media');
+    await fireEvent.changeText(sheet.note(), 'after');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    await waitFor(() => expect(readsOf('user_media')).toBeGreaterThan(before));
+  });
+
+  it('leaves the cache alone when a note save was refused outright', async () => {
+    // 55000 from `save_note` is its version conflict: somebody else's edit is stored and
+    // this one was declined. Nothing was written, so there is nothing to reconcile — the
+    // reader is told to reopen it, which is a read they take themselves.
+    stubReads(
+      { bucket: 'loved', watched_on: '2026-08-01', note: 'before', note_updated_at: 'v1' },
+      null,
+    );
+    mockRpc.mockResolvedValue({ data: null, error: { code: '55000', message: 'stale' } });
+
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('before'));
+    const before = readsOf('user_media');
+    await fireEvent.changeText(sheet.note(), 'after');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(readsOf('user_media')).toBe(before);
   });
 });
 
@@ -794,6 +900,7 @@ describe('who I watched with', () => {
    * One mutual, as the single request returns it: both directions on two rows, with the
    * profile embedded on whichever end is not the viewer.
    */
+  /** One mutual, flattened — the shape `withPeople` wants. */
   const person = (id: string, name: string) => {
     const profile = { id, username: name.toLowerCase(), display_name: name, avatar_path: null };
     const me = { id: 'user-1', username: 'sai', display_name: 'Sai', avatar_path: null };
@@ -867,6 +974,134 @@ describe('who I watched with', () => {
 
     await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(2));
     expect(callsTo('set_watch_tags')[1][1].p_tagged_ids).toEqual([]);
+  });
+
+  /**
+   * **The companion path is a writer with a middle**, and this is its sequence matrix.
+   *
+   * On an unlogged title, ticking somebody is `log_watched` and then `set_watch_tags`.
+   * Independent review 21e: the log succeeds, the follow lapses, the tag write returns
+   * 42501 — and the sheet reverted the companion and never refreshed, so the collection
+   * went on showing the title as unlogged while the database held the watch.
+   *
+   * The axes are which step fails and what the client was told about it. What is asserted
+   * is the canonical state the client must reconcile, not the absence of an exception.
+   */
+  describe('when one step of it fails', () => {
+    const tickAnna = async () => {
+      withPeople(person('u1', 'Anna'));
+      const sheet = await openWho();
+      await waitFor(() => expect(sheet.getByLabelText('Anna')).toBeTruthy());
+      const before = readsOf('user_media');
+      await fireEvent.press(sheet.getByLabelText('Anna'));
+      return { sheet, before };
+    };
+
+    it('refreshes after a log that landed, even though the tagging was refused', async () => {
+      // The exact sequence 21e named. `log_watched` commits; `set_watch_tags` answers
+      // 42501 because the follow lapsed while the sheet was open. The watch exists.
+      failing('set_watch_tags', { code: '42501', message: 'not mutual' });
+      const { sheet, before } = await tickAnna();
+
+      await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(1));
+      expect(callsTo('log_watched')).toHaveLength(1);
+      // The title is logged now, so the log state this sheet renders has to be re-read.
+      await waitFor(() => expect(readsOf('user_media')).toBeGreaterThan(before));
+      await waitFor(() =>
+        expect(sheet.getByText('You can only tag people who follow you back.')).toBeTruthy(),
+      );
+    });
+
+    it('refreshes when the log itself was never answered', async () => {
+      // `log_watched` may have committed and lost its reply, so the row may exist. The
+      // sequence stops — there is nothing to hang a tag off that we can name — but the
+      // collection still has to be reconciled.
+      failing('log_watched', { code: '', message: 'TypeError: Network request failed' });
+      const { before } = await tickAnna();
+
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      await waitFor(() => expect(readsOf('user_media')).toBeGreaterThan(before));
+      // No tag was attempted against a watch nobody can vouch for.
+      expect(callsTo('set_watch_tags')).toHaveLength(0);
+    });
+
+    it('refreshes when the log came back 08007', async () => {
+      // The code that carries a SQLSTATE and still proves nothing.
+      failing('log_watched', { code: '08007', message: 'transaction resolution unknown' });
+      const { before } = await tickAnna();
+
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      await waitFor(() => expect(readsOf('user_media')).toBeGreaterThan(before));
+    });
+
+    it('leaves the cache alone when the log was refused outright', async () => {
+      // A suspension is the server declining, every time. Nothing was written, so a
+      // refetch here would be a round trip bought with nothing.
+      failing('log_watched', { code: '42501', message: 'suspended' });
+      const { before } = await tickAnna();
+
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      expect(readsOf('user_media')).toBe(before);
+      expect(callsTo('set_watch_tags')).toHaveLength(0);
+    });
+
+    it('says it could not confirm when the tag write was never answered', async () => {
+      // The list on screen is put back to the server's, *and* the server's is refetched
+      // — the fallback is only honest if something re-reads it. Saying "that failed"
+      // over a tag that may be stored is the false-success problem in reverse.
+      failing('set_watch_tags', { code: '', message: 'TypeError: Network request failed' });
+      const { sheet } = await tickAnna();
+
+      await waitFor(() =>
+        expect(
+          sheet.getByText(
+            'We could not confirm that. This list has been refreshed to whatever was saved.',
+          ),
+        ).toBeTruthy(),
+      );
+      await waitFor(() => expect(readsOf('watch_tags')).toBeGreaterThan(1));
+    });
+
+    it('replays an unanswered tag write under the id the first attempt used', async () => {
+      // `set_watch_tags` replaces, so the tags converge — but it is rate-limited, and a
+      // replay under a fresh id spends a second slot for one tick
+      // (`lib/operation-intent.ts`). Independent review 21j.
+      failing('set_watch_tags', { code: '', message: 'TypeError: Network request failed' });
+      const { sheet } = await tickAnna();
+      await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(1));
+
+      // Tapping Anna again is the retry: the failed save put the list back to what the
+      // server last confirmed — nobody — so the tick computes [u1] a second time. Same
+      // list, same intent, and the ledger has to be able to see that.
+      await fireEvent.press(sheet.getByLabelText('Anna'));
+      await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(2));
+
+      const ids = callsTo('set_watch_tags').map((call) => call[1].p_operation_id);
+      expect(typeof ids[0]).toBe('string');
+      expect(ids[1]).toBe(ids[0]);
+      // Both really did send the same list, which is what makes them one intent rather
+      // than two that happen to share a key.
+      expect(callsTo('set_watch_tags')[0][1].p_tagged_ids).toEqual(['u1']);
+      expect(callsTo('set_watch_tags')[1][1].p_tagged_ids).toEqual(['u1']);
+    });
+
+    it('sends the whole list again on a retry rather than a second tag', async () => {
+      // Retry safety is a property of the RPC: `set_watch_tags` is handed the complete
+      // list and replaces what is stored, so two attempts at the same intent store one
+      // set. That is what makes a fresh operation id on the second attempt harmless.
+      failing('set_watch_tags', { code: '', message: 'TypeError: Network request failed' });
+      const { sheet } = await tickAnna();
+      await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(1));
+
+      mockRpc.mockResolvedValue({ data: { status: 'ok' }, error: null });
+      await fireEvent.press(sheet.getByLabelText('Anna'));
+
+      await waitFor(() => expect(callsTo('set_watch_tags')).toHaveLength(2));
+      for (const call of callsTo('set_watch_tags')) {
+        // Never an "add this one" delta, which is what could accumulate under a retry.
+        expect(Array.isArray(call[1].p_tagged_ids)).toBe(true);
+      }
+    });
   });
 
   it('stops offering more once ten are chosen', async () => {

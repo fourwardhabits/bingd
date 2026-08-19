@@ -24,6 +24,7 @@ import {
   invalidateAfterWatchlistChange,
 } from '@/features/collection/invalidate';
 import {
+  mustReconcile,
   newOperationId,
   removeFromCollection,
   setWatchlist,
@@ -462,18 +463,22 @@ export default function TitleScreen() {
     });
     setWatchlistBusy(false);
 
+    // Reconciled on an unknown outcome as well as on success — the same rule the other
+    // three bookmark surfaces follow (`lib/write-outcome.ts`). Independent review 21e.
+    if (mustReconcile(result)) {
+      await Promise.all([
+        // The watchlist itself and Queue Dragon, which counts it (collection/invalidate.ts).
+        invalidateAfterWatchlistChange(queryClient, profile.id),
+        queryClient.invalidateQueries({ queryKey: queryKeys.title(id ?? '') }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) }),
+      ]);
+    }
+
     if (result.outcome === 'failed') {
       setActionError(result.message);
       Alert.alert('Could not update watchlist', result.message);
       return;
     }
-
-    await Promise.all([
-      // The watchlist itself and Queue Dragon, which counts it (collection/invalidate.ts).
-      invalidateAfterWatchlistChange(queryClient, profile.id),
-      queryClient.invalidateQueries({ queryKey: queryKeys.title(id ?? '') }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) }),
-    ]);
   };
 
   const afterCollectionChange = () =>
@@ -515,18 +520,18 @@ export default function TitleScreen() {
                 wasRanked: Boolean(data.ranked),
               });
 
+              // Removal is two writes with a middle, and `changed` says either that the
+              // first one landed or that the second one's outcome is unknown: the ranking
+              // may be gone even though the title is still logged. Refreshing on the way
+              // out of a failure is the only way the screen agrees with the database
+              // (`collection/writes.ts`). Reviews 21c, 21d and 21e.
+              if (mustReconcile(result)) afterCollectionChange();
+
               if (result.outcome === 'failed') {
                 setActionError(result.message);
                 Alert.alert('Could not remove this', result.message);
-                // Removal is two writes, and `changed` says the first one landed: the
-                // ranking is gone even though the title is still logged. Refreshing on
-                // the way out of a failure is the only way the screen agrees with the
-                // database (`collection/writes.ts`). Review 21c.
-                if (result.changed) afterCollectionChange();
                 return;
               }
-
-              afterCollectionChange();
             })();
           },
         },

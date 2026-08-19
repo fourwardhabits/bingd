@@ -6,6 +6,12 @@ import { renderWithProviders } from '@/test-utils/render';
 import { RecommendSheet } from './RecommendSheet';
 import { filterRecipients, type Recipient } from './use-recommend';
 
+// A fresh id every call, so a module-level constant cannot pass for a generator — and so
+// the retry assertions below are about two real ids rather than two undefineds.
+// `expo-crypto` has no native module under jest and `randomUUID` answers undefined without this.
+let issued = 0;
+jest.mock('expo-crypto', () => ({ randomUUID: () => `share-${(issued += 1)}` }));
+
 const mockRpc = jest.fn();
 let mockRpcResults: Record<string, unknown> = {};
 let mockRpcErrors: Record<string, { code?: string; message: string } | null> = {};
@@ -84,6 +90,12 @@ const person = (id: string, username: string, name: string, status = 'active') =
   status,
 });
 
+/** The operation ids sent to one RPC, in order. */
+const idsSentTo = (fn: string) =>
+  mockRpc.mock.calls
+    .filter(([name]) => name === fn)
+    .map(([, args]) => (args as { p_operation_id: string }).p_operation_id);
+
 const props = {
   viewerId: 'user-1',
   mediaItemId: 'film-1',
@@ -95,6 +107,7 @@ const props = {
 };
 
 beforeEach(() => {
+  issued = 0;
   mockRpc.mockReset();
   mockRpcResults = {};
   mockRpcErrors = {};
@@ -227,6 +240,88 @@ describe('sending', () => {
     expect(props.onClose).not.toHaveBeenCalled();
   });
 
+  /**
+   * **A send that commits and loses its reply, then the tap that follows it.**
+   *
+   * Independent review 21i. The unique key on (sender, recipient, title) stops a second
+   * *row* — and stops nothing else. A replay with a fresh id passes `_claim_operation`,
+   * spends a second slot against `recommendations.max_per_hour`, and takes the `else`
+   * branch that moves `recommended_at` to now, reordering the recipient's list on the
+   * strength of a send they had already been shown. One tap, a wrong quota and a wrong
+   * screen, and nothing raised anywhere.
+   */
+  it('replays an unanswered send under the id the first attempt used', async () => {
+    mockRpcErrors.recommend_title = { code: '', message: 'TypeError: Network request failed' };
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(1));
+
+    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(2));
+
+    const [first, second] = idsSentTo('recommend_title');
+    // A real id, not two undefineds — `expo-crypto` has no native module under jest.
+    expect(typeof first).toBe('string');
+    expect(second).toBe(first);
+  });
+
+  it('takes a fresh id after a refusal, which spent the first one', async () => {
+    // A `refused` arrives as a 200 and **keeps its claim on purpose** — a raise would
+    // roll the claim back and make refused attempts free (`20260817001300`). Reusing a
+    // spent id would have the next attempt answered `already_applied`: a send that
+    // reports success and stores nothing, which is the worst outcome on this sheet.
+    mockRpcResults.recommend_title = { status: 'refused', reason: 'not_mutual' };
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(1));
+
+    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(2));
+
+    const [first, second] = idsSentTo('recommend_title');
+    expect(second).not.toBe(first);
+  });
+
+  it('takes a fresh id after a refusal the server raised', async () => {
+    // 53400 is the rate limiter, which raises — so the claim rolls back with it and the
+    // outcome is established either way. Nothing to hold.
+    mockRpcErrors.recommend_title = { code: '53400', message: 'too many' };
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(1));
+
+    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(2));
+
+    const [first, second] = idsSentTo('recommend_title');
+    expect(second).not.toBe(first);
+  });
+
+  it('holds one id per recipient rather than one for the sheet', async () => {
+    // Each name is its own intent. Sharing an id across them would have the second
+    // person's send answered `already_applied` — a tap that reports success and sends
+    // nothing to anybody.
+    mockOutgoing = [person('user-2', 'ada', 'Ada'), person('user-3', 'grace', 'Grace')];
+    mockIncoming = [person('user-2', 'ada', 'Ada'), person('user-3', 'grace', 'Grace')];
+    mockRpcErrors.recommend_title = { code: '', message: 'TypeError: Network request failed' };
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Grace')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(1));
+    await fireEvent.press(view.getByLabelText('Recommend to Grace, @grace'));
+    await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(2));
+
+    const [first, second] = idsSentTo('recommend_title');
+    expect(second).not.toBe(first);
+  });
+
   it('has no multi-select and no Send button', async () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
@@ -270,6 +365,69 @@ describe('sharing with somebody who is not on Bingd', () => {
     const shared = (Share.share as jest.Mock).mock.calls[0][0] as { message: string };
     expect(shared.message).toContain('https://bingd.app/title/movie/film-1');
     expect(shared.message).not.toContain('/i/');
+  });
+
+  /**
+   * **The degradation above is what invites the retry, and the retry used to be counted.**
+   *
+   * `create_invite_link` reuses the caller's token but inserts an `invite_link_creations`
+   * row unconditionally. So: the insert commits, the reply is lost, this returns null, the
+   * share goes out without the link — and pressing Share again *because that is not what
+   * they wanted* minted a fresh operation id, walked past `_claim_operation`, and recorded
+   * a second creation for one intent. One wrong number, no exception, plausible state.
+   *
+   * Independent review 21h, after 21g's PASS: it was the last writer minting its own id
+   * whose RPC is not idempotent by shape.
+   */
+  it('claims the same slot when a link mint went unanswered', async () => {
+    // No SQLSTATE: never answered, so the creation may well be recorded already.
+    mockRpcErrors.create_invite_link = { code: '', message: 'TypeError: Network request failed' };
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await fireEvent.press(view.getByText('Share off Bingd'));
+    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(1));
+
+    await fireEvent.press(view.getByText('Share off Bingd'));
+    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(2));
+
+    const [first, second] = idsSentTo('create_invite_link');
+    expect(typeof first).toBe('string');
+    // The server's ledger can only refuse a replay it recognises.
+    expect(second).toBe(first);
+  });
+
+  it('takes a fresh slot once a link has actually been minted', async () => {
+    // Released on the *mint*, not on the share: a minted link means the creation is
+    // definitely recorded, so the next press is a second creation and should say so.
+    mockRpcResults.create_invite_link = { status: 'ok', token: 'abc123' };
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await fireEvent.press(view.getByText('Share off Bingd'));
+    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(1));
+
+    await fireEvent.press(view.getByText('Share off Bingd'));
+    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(2));
+
+    const [first, second] = idsSentTo('create_invite_link');
+    expect(second).not.toBe(first);
+  });
+
+  it('still claims the same slot when the share sheet itself was dismissed', async () => {
+    // The release cannot hang off `Share.share`. Dismissing the OS sheet resolves rather
+    // than throwing, so tying it there would free the id on exactly the path where the
+    // creation is still in doubt.
+    mockRpcErrors.create_invite_link = { code: '08007', message: 'transaction resolution unknown' };
+    (Share.share as jest.Mock).mockResolvedValue({ action: 'dismissedAction' } as never);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await fireEvent.press(view.getByText('Share off Bingd'));
+    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(1));
+
+    await fireEvent.press(view.getByText('Share off Bingd'));
+    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(2));
+
+    const [first, second] = idsSentTo('create_invite_link');
+    expect(second).toBe(first);
   });
 });
 

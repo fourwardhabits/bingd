@@ -2,10 +2,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { invalidateAwards } from '@/features/awards/invalidate';
-import { newOperationId } from '@/features/collection/writes';
 import { avatarUri } from '@/lib/images';
 import { diagnose } from '@/lib/diagnose';
 import { supabase } from '@/lib/supabase';
+import { answerWasLost, useOperationIntent } from '@/lib/operation-intent';
+import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
 
 /**
  * How the viewer stands with one other account.
@@ -153,13 +154,26 @@ export function useSocialWrites(viewerId: string) {
 
   const run = async (fn: () => PromiseLike<{ error: unknown }>): Promise<SocialWriteResult> => {
     const { error } = await fn();
+
+    /**
+     * **Reconciled on an unknown outcome as well as on a commit.**
+     *
+     * A follow that lands and loses its reply leaves the relationship changed on the server
+     * and unchanged on every surface that draws it — including `block`, where believing you
+     * have blocked somebody and being wrong is a safety failure rather than a stale cache. `lib/write-outcome.ts` is what separates a refusal this app raises on
+     * purpose — which proves nothing was written — from a dropped socket, a timeout, or
+     * an `08007` out of the pooler, any of which can carry a committed transaction. This
+     * helper used to return on any error and refresh only afterwards, which is the defect
+     * independent review 21e found in four screens; it is the same defect here.
+     */
+    if (mustReconcile(classifyWrite(error as { code?: string }))) await refresh();
+
     if (error) {
       const message =
         diagnose(error) ??
         (error instanceof Error ? error.message : 'Something went wrong. Try again.');
       return { ok: false, message };
     }
-    await refresh();
     return { ok: true };
   };
 
@@ -172,12 +186,34 @@ export function useSocialWrites(viewerId: string) {
    * it also broke the rules of hooks the moment the five were built by a helper.
    */
   const [busy, setBusy] = useState(false);
+  const withIntent = useOperationIntent();
 
   const rpc = async (name: string, args: Record<string, unknown>): Promise<SocialWriteResult> => {
     if (busy) return { ok: false, message: 'One at a time.' };
     setBusy(true);
     try {
-      return await run(() => supabase.rpc(name, { p_operation_id: newOperationId(), ...args }));
+      /**
+       * **The intent is the verb and who it is about**, which is exactly what the key
+       * says (`lib/operation-intent.ts`).
+       *
+       * All five converge — a follow, an unfollow, a block, an unblock and a request
+       * response each assign or delete — but `follow` is rate-limited, so a replay under
+       * a fresh id after a lost reply spends a second slot for one tap and brings
+       * `follows.max_per_day` forward for somebody who has not reached it. Independent
+       * review 21j.
+       *
+       * The arguments are in the key rather than only the verb: following Ada and
+       * following Grace are two intents, and sharing an id between them would have the
+       * second answered `already_applied` — a control that says it worked and did
+       * nothing.
+       */
+      return await run(() =>
+        withIntent(
+          `${name}:${JSON.stringify(args)}`,
+          (operationId) => supabase.rpc(name, { p_operation_id: operationId, ...args }),
+          answerWasLost,
+        ),
+      );
     } finally {
       setBusy(false);
     }

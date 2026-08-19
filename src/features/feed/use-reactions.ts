@@ -1,10 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { newOperationId } from '@/features/collection/writes';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
+import { answerWasLost, useOperationIntent } from '@/lib/operation-intent';
+import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
 
 /**
  * The six, in PRD §14's order. Stored as meanings rather than glyph names, so
@@ -165,21 +166,44 @@ export const emptyReactionSummary = () => EMPTY;
 export function useSetReaction(viewerId: string) {
   const queryClient = useQueryClient();
   const [pending, setPending] = useState<string | null>(null);
+  const withIntent = useOperationIntent();
 
   const setReaction = async (feedEventId: string, kind: ReactionKind | null) => {
     if (pending) return { ok: false as const, message: null };
     setPending(feedEventId);
 
-    const { error } = await supabase.rpc('set_reaction', {
-      p_operation_id: newOperationId(),
-      p_feed_event_id: feedEventId,
-      p_kind: kind,
-    });
+    /**
+     * **One id for "this reaction on this event", held across the retry a lost reply
+     * invites** (`lib/operation-intent.ts`).
+     *
+     * The row converges — `set_reaction` assigns — but `set_reaction` is rate-limited,
+     * and a replay under a fresh id spends a second slot for one tap. The kind is in the
+     * key because changing your mind from a heart to a disagree is a different thing to
+     * say, and replaying the first id would have the server answer `already_applied` to
+     * a reaction nobody has stored.
+     */
+    const { error } = await withIntent(
+      `set_reaction:${feedEventId}:${kind ?? 'none'}`,
+      (operationId) =>
+        supabase.rpc('set_reaction', {
+          p_operation_id: operationId,
+          p_feed_event_id: feedEventId,
+          p_kind: kind,
+        }),
+      answerWasLost,
+    );
 
     setPending(null);
-    if (error) return { ok: false as const, message: diagnose(error) ?? error.message };
 
-    await queryClient.invalidateQueries({ queryKey: ['reactions', viewerId] });
+    // Reconciled on an unknown outcome as well as on a commit: a reaction that lands and
+    // loses its reply leaves the pill showing the previous state, and the reader's next
+    // tap sends the *opposite* intent against a row that already moved
+    // (`lib/write-outcome.ts`). Independent review 21e's invariant, in a fifth place.
+    if (mustReconcile(classifyWrite(error))) {
+      await queryClient.invalidateQueries({ queryKey: ['reactions', viewerId] });
+    }
+
+    if (error) return { ok: false as const, message: diagnose(error) ?? error.message };
     return { ok: true as const, message: null };
   };
 

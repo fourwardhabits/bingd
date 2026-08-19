@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { invalidateAwards } from '@/features/awards/invalidate';
-import { newOperationId } from '@/features/collection/writes';
 import { diagnose } from '@/lib/diagnose';
 import { readAllByKey } from '@/lib/read-all';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
+import { classifyWrite } from '@/lib/write-outcome';
 
 /**
  * The send half of friend recommendations (20260817001300).
@@ -148,7 +148,14 @@ export function filterRecipients(people: Recipient[], query: string): Recipient[
   );
 }
 
-export type SendResult = { ok: true } | { ok: false; message: string };
+/**
+ * `changed` carries the same meaning it does in `collection/writes.ts`: **the send may
+ * already have happened**, so the caches that describe sends have to be reconciled even
+ * while the sheet shows an error. Absent means the server answered no — either as a
+ * SQLSTATE this app raises on purpose, or as a `refused` in a 200's body, which is how
+ * `recommend_title` declines a recipient (see `REFUSALS` below).
+ */
+export type SendResult = { ok: true } | { ok: false; message: string; changed?: boolean };
 
 /**
  * What the server says when it will not send.
@@ -180,20 +187,41 @@ export function useRecommendTitle(viewerId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    /**
+     * **The operation id comes from the caller**, for the reason independent review 21i
+     * gave: a unique key on (sender, recipient, title) stops a duplicate *row*, and that
+     * is not the same as the operation being idempotent.
+     *
+     * A send commits, the reply is lost, the sheet stays open and reports a failure, and
+     * the person taps the same name again. With a fresh id: `_claim_operation` lets it
+     * through, so it counts a second time against `recommendations.max_per_hour` and
+     * `max_per_day` — one intent, two slots — and the `else` branch moves
+     * `recommended_at` to now, reordering the recipient's list on the strength of a
+     * send they were already shown. A wrong quota and a wrong screen from one tap.
+     *
+     * With the id held, `_claim_operation` answers `already_applied`, which is the exact
+     * mechanism `20260817001300` built for it.
+     */
     mutationFn: async ({
+      operationId,
       recipientId,
       mediaItemId,
     }: {
+      operationId: string;
       recipientId: string;
       mediaItemId: string;
     }): Promise<SendResult> => {
       const { data, error } = await supabase.rpc('recommend_title', {
-        p_operation_id: newOperationId(),
+        p_operation_id: operationId,
         p_recipient_id: recipientId,
         p_media_item_id: mediaItemId,
       });
 
       if (error) {
+        // A rate limit and an `assert_can_write` are both refusals this app raises on
+        // purpose, so nothing was sent. Anything else may have been
+        // (`lib/write-outcome.ts`), and `onSuccess` below reconciles on it.
+        const changed = classifyWrite(error) === 'unknown';
         switch (error.code) {
           case '53400':
             return {
@@ -205,7 +233,7 @@ export function useRecommendTitle(viewerId: string) {
           case '42501':
             return { ok: false, message: 'Your account cannot make changes right now.' };
           default:
-            return { ok: false, message: diagnose(error) ?? error.message };
+            return { ok: false, message: diagnose(error) ?? error.message, changed };
         }
       }
 
@@ -219,10 +247,17 @@ export function useRecommendTitle(viewerId: string) {
 
       return { ok: true };
     },
+    /**
+     * `recommend_title` returns its refusals in the body, so a 200 that says
+     * `not_mutual` must not move anything — that one is a genuine "nothing happened".
+     *
+     * **But a failure whose outcome is unknown must.** The row may be in
+     * `title_recommendations`, in which case the recipient's list, the picker's
+     * already-sent set and Hype Courier are all describing the state before it.
+     * Independent review 21e's invariant, in the send path.
+     */
     onSuccess: (result) => {
-      // Success only, and `recommend_title` returns its refusals in the body — so a 200
-      // that says `not_mutual` must not move anything.
-      if (!result.ok) return;
+      if (!result.ok && !result.changed) return;
       void queryClient.invalidateQueries({ queryKey: ['sent-to-you'] });
       void queryClient.invalidateQueries({ queryKey: ['recommend-recipients', viewerId] });
       // Hype Courier counts recommendations sent (`awards/invalidate.ts`). Review 21b.
@@ -239,9 +274,26 @@ export function useRecommendTitle(viewerId: string) {
  * share because the growth instrumentation was unavailable would be the tail wagging
  * the dog.
  */
-export async function createInviteLink(mediaItemId: string | null): Promise<string | null> {
+export async function createInviteLink(
+  mediaItemId: string | null,
+  /**
+   * **The operation id belongs to the share, not to the attempt.**
+   *
+   * The token itself is stable — the function reuses the caller's existing one — but the
+   * `invite_link_creations` row beside it is an unconditional insert, and that is the
+   * half that counts. So: the insert commits, the reply is lost, this returns `null`, the
+   * sheet degrades to sharing the title without the link, and the person presses Share
+   * again *because the first attempt did not do what they wanted*. A fresh id walks
+   * straight past `_claim_operation` and records a second creation for one intent.
+   *
+   * That is one wrong number in the growth instrumentation with no exception anywhere,
+   * which is the exact shape this section has been closing. Independent review 21h found
+   * it after 21g's PASS, in the sweep 21h existed to make.
+   */
+  operationId: string,
+): Promise<string | null> {
   const { data, error } = await supabase.rpc('create_invite_link', {
-    p_operation_id: newOperationId(),
+    p_operation_id: operationId,
     p_media_item_id: mediaItemId,
   });
   if (error) return null;

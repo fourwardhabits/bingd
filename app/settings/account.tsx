@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 
 import { signOut, useCurrentProfile } from '@/features/auth';
-import { deleteAllAvatars } from '@/features/profile/avatar';
+import { avatarsMayHaveGone, deleteAllAvatars } from '@/features/profile/avatar';
 import { useAccountWrites } from '@/features/settings/use-account';
 import { queryKeys } from '@/lib/query';
 import { Button, Field, KeyboardScreen, Screen, SectionHeader, Text } from '@/ui/components';
@@ -69,9 +69,58 @@ export default function AccountScreen() {
                * "we removed everything except one file we could not reach" are
                * different sentences and only one of them is true.
                */
-              const removed = await deleteAllAvatars(profile.id);
+              const sweep = await deleteAllAvatars(profile.id);
 
-              const result = await deleteAccount(confirmation.trim());
+              /**
+               * **Asking again is how this screen finds out what the first attempt did.**
+               *
+               * `delete_account` can commit — the auth user gone, every cascade with it —
+               * and lose its reply. The client saw an error, so it said "Could not delete
+               * your account", left the person signed in against an account that no
+               * longer exists, and kept a profile screen drawn from cache. Independent
+               * review 21f found it, and it is the last member of the family reviews 21c
+               * to 21e worked through: a failure that is not evidence of a rollback.
+               *
+               * There is no cache to reconcile against here, because what changed is
+               * whether the account exists. What there *is* is a server function that is
+               * idempotent by nature: with the profile already deleted it answers
+               * `already_applied` before it validates the confirmation (`20260817000700`).
+               * So one repeat of the same intent turns "unknown" into an answer — and it
+               * cannot over-delete, because there is nothing left to delete. The JWT
+               * outlives the row it names, which is what lets the second call be made at
+               * all.
+               */
+              let result = await deleteAccount(confirmation.trim());
+              let unresolved = false;
+              if (!result.ok && result.changed) {
+                const again = await deleteAccount(confirmation.trim());
+                // Answered either way — success means it had landed (or has now), and a
+                // definite refusal means the account is still here and the reason is real.
+                if (again.ok || !again.changed) result = again;
+                else unresolved = true;
+              }
+
+              /**
+               * Twice unanswered. Nothing on this device can establish whether the
+               * account exists, and the two wrong things to do are both worse than
+               * saying so: claiming it is gone, or leaving somebody signed in to
+               * something that may not be there.
+               *
+               * The session ends, because a token for an account that may already be
+               * deleted is the state with no good next step — and signing in again is
+               * how they find out, which is a fact this screen can honestly hand them.
+               */
+              if (unresolved) {
+                setError(null);
+                Alert.alert(
+                  'We could not confirm that',
+                  'Your connection dropped before we heard back, so we cannot tell you whether your account was deleted. You have been signed out. Sign in again to find out — if it worked, there will be nothing to sign in to.',
+                );
+                await signOut();
+                router.replace('/');
+                return;
+              }
+
               if (!result.ok) {
                 setError(result.message);
                 /**
@@ -87,14 +136,30 @@ export default function AccountScreen() {
                  *
                  * The profile is refetched as well as described, so the screen stops
                  * drawing an avatar that is no longer there.
+                 *
+                 * **21d's fix reached only the sequence that prompted it**, and 21e found
+                 * the rest of it: `deleteAllAvatars` used to answer `null` from any later
+                 * failure, so deleting the first page and then losing the connection was
+                 * indistinguishable here from having deleted nothing, and this branch was
+                 * skipped. It now reports what it removed *and* whether a removal request
+                 * went unanswered, and `avatarsMayHaveGone` is true for either — the
+                 * profile is refetched whenever the picture may have gone, not only when
+                 * it certainly did.
                  */
-                if (removed !== null && removed > 0) {
+                if (avatarsMayHaveGone(sweep)) {
                   await queryClient.invalidateQueries({
                     queryKey: queryKeys.myProfile(profile.id),
                   });
                   Alert.alert(
                     'Could not delete your account',
-                    `${result.message}\n\nYour stored pictures were already removed as part of this attempt, so your profile picture is gone even though your account is not. You can upload a new one.`,
+                    // Two sentences, because "were removed" and "may have been removed"
+                    // are different facts and the person is entitled to the one that is
+                    // true. `removed` counts acknowledged deletions only.
+                    `${result.message}\n\n${
+                      sweep.removed > 0
+                        ? 'Your stored pictures were already removed as part of this attempt, so your profile picture is gone even though your account is not. You can upload a new one.'
+                        : 'Your stored pictures may already have been removed as part of this attempt, so your profile picture may be gone even though your account is not. You can upload a new one.'
+                    }`,
                   );
                   return;
                 }
@@ -107,7 +172,9 @@ export default function AccountScreen() {
               // second exists because `delete_account` cannot remove them — Supabase
               // refuses direct deletion from storage tables — so counting is the only
               // thing it can honestly do, and saying nothing would be the lie.
-              if (removed === null || (result.avatarsRemaining ?? 0) > 0) {
+              // `complete` is the only thing that establishes the folder was walked to
+              // the end and emptied; an unanswered removal leaves it false as well.
+              if (!sweep.complete || (result.avatarsRemaining ?? 0) > 0) {
                 Alert.alert(
                   'Account deleted',
                   'Your account and everything in it is gone. One thing is not certain: your stored pictures could not be fully cleared, so some may still exist in storage even though nothing links to them any more.',

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
+import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
 
 /**
  * The kinds of notification this app writes, and the only ones it renders.
@@ -193,6 +194,13 @@ export function useMarkNotificationsRead(viewerId: string) {
       const { error } = await supabase.rpc('mark_notifications_read');
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications', viewerId] }),
+    // `onSettled` rather than `onSuccess`: a mark-read that commits and loses its reply
+    // leaves the badge showing a count the server no longer agrees with, and the reader
+    // has no control that would ask again (`lib/write-outcome.ts`). A refusal this app
+    // raises on purpose is the one case with nothing to refetch.
+    onSettled: (_data, error) => {
+      if (!mustReconcile(classifyWrite(error as { code?: string } | null))) return;
+      return queryClient.invalidateQueries({ queryKey: ['notifications', viewerId] });
+    },
   });
 }

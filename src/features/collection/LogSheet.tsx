@@ -31,6 +31,7 @@ import { emptyLogState, useLogState } from './use-log-state';
 import { WatchDatePicker } from './WatchDatePicker';
 import {
   logWatched,
+  mustReconcile,
   newOperationId,
   saveNote,
   setBucket,
@@ -253,6 +254,12 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
     if (!report(result)) {
       setSaving(false);
       setBucketEdit(null);
+      // **The revert above is a guess, so it is checked rather than trusted.**
+      // `set_bucket` creates the `user_media` row, and an unknown outcome means it may
+      // have. Putting the control back and refreshing means the sheet redraws from
+      // whatever is actually stored instead of from what this client assumed
+      // (`lib/write-outcome.ts`). Independent review 21e.
+      if (mustReconcile(result)) refresh();
       return;
     }
 
@@ -329,9 +336,19 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
     setSaving(true);
     setProblem(null);
 
-    // The date always goes through log_watched, which upserts — and this may be the
-    // call that creates the row a note then needs.
+    /**
+     * The date always goes through log_watched, which upserts — and this may be the
+     * call that creates the row a note then needs.
+     *
+     * **Two writes with a middle, tracked separately from whether they succeeded.**
+     * `ok` decides what the person is told; `touched` decides what gets refetched, and
+     * they are not the same question. `log_watched` landing and `save_note` then being
+     * refused left `ok` false and skipped the refresh, so the sheet went on showing the
+     * old date over a row that had already moved. The same shape independent review 21c
+     * found in `removeFromCollection` and 21e found in four more places.
+     */
     let ok = true;
+    let touched = false;
     const writesNoteHere = (noteChanged || claimsChanged) && !state.exists;
     if (dateChanged || writesNoteHere) {
       const result = await logWatched({
@@ -347,6 +364,7 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
         noteSpoilers: writesNoteHere ? nextSpoilers : null,
       });
       ok = report(result);
+      touched = touched || mustReconcile(result);
     }
 
     // An existing note goes through save_note, which assigns rather than coalesces.
@@ -365,10 +383,11 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
         noteSpoilers: nextSpoilers,
       });
       ok = report(result);
+      touched = touched || mustReconcile(result);
     }
 
     setSaving(false);
-    if (ok) refresh();
+    if (touched) refresh();
   };
 
   /**
@@ -415,7 +434,22 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
             mediaItemId: title.id,
             watchedOn: effectiveDate,
           });
+          // Only an acknowledged success proves the row is there. An unknown outcome
+          // leaves the flag false so the next tap asks again — `log_watched` upserts,
+          // so asking twice about the same watch stores it once.
           if (created.outcome !== 'failed') createdRow.current = true;
+
+          /**
+           * **Reconciled before the staleness check, not after it.**
+           *
+           * Independent review 21e: logging succeeds, the follow lapses, `set_watch_tags`
+           * returns 42501 — and the sheet reverted the companion and never refreshed, so
+           * the collection went on showing the title as unlogged while the database held
+           * the watch. Whether a *newer* tap has superseded this one is a question about
+           * the picker; whether this request moved the database is a question about the
+           * cache, and the second does not depend on the first.
+           */
+          if (mustReconcile(created)) refresh();
           if (stale()) return;
           if (!report(created)) {
             setCompanionEdit(null);
@@ -424,12 +458,21 @@ function Body({ title, onClose, onRank }: LogSheetProps & { title: LoggableTitle
         }
 
         const result = await saveCompanions(title.id, next);
+        // The tag list itself is reconciled inside `useSetCompanions`, on an unknown
+        // outcome as well as on a commit, so it happens whether or not this reply is
+        // still the newest one.
         if (stale()) return;
 
         if (!result.ok) {
-          setProblem(result.message);
-          // Back to whatever the server last confirmed, rather than to the
-          // optimistic list that was just refused.
+          // Back to whatever the server last confirmed, rather than to the optimistic
+          // list that was just refused — and when the outcome is unknown, "what the
+          // server last confirmed" is being refetched underneath this, so the sentence
+          // says so rather than implying nothing was saved.
+          setProblem(
+            result.changed
+              ? 'We could not confirm that. This list has been refreshed to whatever was saved.'
+              : result.message,
+          );
           setCompanionEdit(null);
           return;
         }

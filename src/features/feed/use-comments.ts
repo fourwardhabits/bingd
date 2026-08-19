@@ -5,6 +5,7 @@ import { newOperationId } from '@/features/collection/writes';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
+import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
 
 export type Comment = {
   id: string;
@@ -176,29 +177,57 @@ export function useCommentWrites(viewerId: string) {
 
   const run = async (fn: () => PromiseLike<{ error: unknown }>): Promise<CommentWriteResult> => {
     const { error } = await fn();
+
+    /**
+     * **Reconciled on an unknown outcome as well as on a commit.**
+     *
+     * A comment that is written and cannot say so leaves the thread short of it and the
+     * count disagreeing with the list — the two views this module exists to keep in step. `lib/write-outcome.ts` is what separates a refusal this app raises on
+     * purpose — which proves nothing was written — from a dropped socket, a timeout, or
+     * an `08007` out of the pooler, any of which can carry a committed transaction. This
+     * helper used to return on any error and refresh only afterwards, which is the defect
+     * independent review 21e found in four screens; it is the same defect here.
+     */
+    if (mustReconcile(classifyWrite(error as { code?: string }))) await refresh();
+
     if (error) {
       const message =
         diagnose(error) ??
         (error instanceof Error ? error.message : 'Something went wrong. Try again.');
       return { ok: false, message };
     }
-    await refresh();
     return { ok: true };
   };
 
+  /**
+   * **The operation id comes from the caller, and this is the only writer in the app
+   * where that is load-bearing rather than tidy.**
+   *
+   * `_claim_operation` deduplicates a replayed intent, but only if the replay carries
+   * the *same* id — `collection/writes.ts`'s module header says so, and this module was
+   * minting a fresh one inside the writer. Every other RPC behind it is idempotent by
+   * shape (a follow, a reaction, a tag set, a profile save all assign; `recommend_title`
+   * is keyed on sender/recipient/title), so nothing accumulated and nobody noticed.
+   * **`add_comment` inserts.** So: the reply is lost, the person is told it failed, they
+   * press Post again, and there are two identical comments — no exception anywhere, and
+   * the second one looks exactly as legitimate as the first. `CommentSheet` now holds an
+   * id per attempt-at-an-intent and passes it in.
+   */
   const add = useMutation({
     mutationFn: ({
+      operationId,
       eventId,
       body,
       hasSpoilers,
     }: {
+      operationId: string;
       eventId: string;
       body: string;
       hasSpoilers: boolean;
     }) =>
       run(() =>
         supabase.rpc('add_comment', {
-          p_operation_id: newOperationId(),
+          p_operation_id: operationId,
           p_feed_event_id: eventId,
           p_body: body,
           p_has_spoilers: hasSpoilers,
@@ -206,19 +235,24 @@ export function useCommentWrites(viewerId: string) {
       ),
   });
 
+  // An edit assigns rather than accumulates, so a replayed one is harmless whatever id
+  // it carries — but it takes the caller's for the same reason: an intent has one id,
+  // and a rule that holds only where it happens to matter is a rule nobody can apply.
   const edit = useMutation({
     mutationFn: ({
+      operationId,
       commentId,
       body,
       hasSpoilers,
     }: {
+      operationId: string;
       commentId: string;
       body: string;
       hasSpoilers: boolean;
     }) =>
       run(() =>
         supabase.rpc('edit_comment', {
-          p_operation_id: newOperationId(),
+          p_operation_id: operationId,
           p_comment_id: commentId,
           p_body: body,
           p_has_spoilers: hasSpoilers,

@@ -1,6 +1,32 @@
-import { SENT_LIMIT, unopenedCount, unopenedIsAtLeast } from './use-sent-to-you';
+import { waitFor } from '@testing-library/react-native';
+
+import { renderHookWithProviders } from '@/test-utils/render';
+
+import { SENT_LIMIT, unopenedCount, unopenedIsAtLeast, useSentToYou } from './use-sent-to-you';
 
 import type { SentRecommendation } from './use-sent-to-you';
+
+const mockRpc = jest.fn();
+
+jest.mock('@/lib/supabase', () => ({
+  supabase: {
+    rpc: (...args: unknown[]) => mockRpc(...args),
+    from: () => {
+      const chain = {
+        select: () => chain,
+        in: () => chain,
+        then: (resolve: (value: unknown) => unknown) => resolve({ data: [], error: null }),
+      };
+      return chain;
+    },
+  },
+  startSessionRefresh: () => () => {},
+}));
+
+beforeEach(() => {
+  mockRpc.mockReset();
+  mockRpc.mockResolvedValue({ data: [], error: null });
+});
 
 /**
  * **The one cap in this app that is the server's, not PostgREST's.**
@@ -76,9 +102,47 @@ describe('whether that number is the whole truth', () => {
     expect(unopenedCount(list(SENT_LIMIT))).toBe(SENT_LIMIT);
   });
 
-  it('asks the server for as many as it will give, which is 200', () => {
-    // It was 100, which was half of what was available for no reason anybody wrote down.
-    // The clamp is `least(greatest(coalesce(p_limit, 100), 1), 200)`.
-    expect(SENT_LIMIT).toBe(200);
+});
+
+/**
+ * **The request, not the constant.**
+ *
+ * The first version of this asserted `SENT_LIMIT === 200` and nothing else, which
+ * independent review 21e correctly called out: replacing `p_limit: SENT_LIMIT` with a
+ * literal `100` left it green. The constant would still be 200, `unopenedIsAtLeast`
+ * would still compare against 200, and a hundred unopened recommendations would be
+ * presented as an exact count of a hundred while the reader had more. A test on a
+ * constant proves the constant.
+ */
+describe('what the query actually asks the server for', () => {
+  it('sends the server\'s own maximum as p_limit', async () => {
+    await renderHookWithProviders(() => useSentToYou('viewer-1'));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalled());
+    expect(mockRpc).toHaveBeenCalledWith('recommendations_to_me', { p_limit: 200 });
+  });
+
+  it('sends the same number the ceiling test is written against', async () => {
+    // The two have to agree or the floor check is measured against a page that cannot
+    // reach it. Asserted as one fact rather than two, so raising one and not the other
+    // is a failure rather than a silent mismatch.
+    await renderHookWithProviders(() => useSentToYou('viewer-1'));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalled());
+    const [, args] = mockRpc.mock.calls[0] as [string, { p_limit: number }];
+    expect(args.p_limit).toBe(SENT_LIMIT);
+  });
+
+  it('asks once rather than paging, because the cap is the server\'s', async () => {
+    // `recommendations_to_me` clamps `p_limit` to 200 itself (`20260817001300`), so
+    // there is no cursor to advance and a second request would return the same rows.
+    // Paging this one out is a migration, and is carried as deferred work rather than
+    // faked here — see `use-sent-to-you.ts`.
+    await renderHookWithProviders(() => useSentToYou('viewer-1'));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalled());
+    expect(
+      mockRpc.mock.calls.filter(([name]) => name === 'recommendations_to_me'),
+    ).toHaveLength(1);
   });
 });

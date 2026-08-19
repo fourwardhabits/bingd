@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { shouldMask } from '@/features/collection/use-watched';
+import { newOperationId } from '@/features/collection/writes';
 import { Avatar, Button, EmptyState, Sheet, SpoilerNote, Text } from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
@@ -117,6 +118,26 @@ export function CommentSheet({
    * A layout effect runs synchronously in the commit phase, which closes it. (The ref
    * cannot simply be assigned during render: `react-hooks` forbids it, correctly.)
    */
+  /**
+   * **One id per intent, held across retries.**
+   *
+   * `add_comment` inserts, and `_claim_operation` can only refuse a replay that carries
+   * the id it already saw. A submit whose reply is lost is reported as a failure with
+   * the draft still in the box — so the obvious next thing a person does is press Post
+   * again, and a fresh id on that attempt is two identical comments with no error to
+   * show for it. Minting once and keeping it until the intent changes is what makes the
+   * server's ledger able to do its job (`collection/writes.ts` module header).
+   *
+   * Cleared on success, and on any edit to what is being said: a different body, a
+   * flipped spoiler claim or a different comment under edit is a different intent, and
+   * replaying it under the old id would have the server answer `already_applied` to
+   * something nobody has stored.
+   */
+  const attempt = useRef<string | null>(null);
+  const newIntent = () => {
+    attempt.current = null;
+  };
+
   const openingRef = useRef(composer.opening);
   useLayoutEffect(() => {
     openingRef.current = composer.opening;
@@ -132,6 +153,7 @@ export function CommentSheet({
   if (!eventId) return null;
 
   const reset = () => {
+    newIntent();
     setDraft('');
     setSpoilers(false);
     setEditing(null);
@@ -140,32 +162,42 @@ export function CommentSheet({
   /** Whether this is still the composer the closure was made in. */
   const stillHere = (opening: number) => openingRef.current === opening;
 
+
   const submit = async () => {
     const body = draft.trim();
     if (!body || busy) return;
 
     const opening = composer.opening;
     const wasEditing = editing;
+    // Held rather than minted per attempt — see `attempt` above. `??=` is what makes a
+    // retry of the same words carry the id the first try used.
+    const operationId = (attempt.current ??= newOperationId());
 
     const result = wasEditing
-      ? await edit({ commentId: wasEditing.id, body, hasSpoilers: spoilers })
-      : await add({ eventId, body, hasSpoilers: spoilers });
+      ? await edit({ operationId, commentId: wasEditing.id, body, hasSpoilers: spoilers })
+      : await add({ operationId, eventId, body, hasSpoilers: spoilers });
 
     if (!result.ok) {
-      // Reported even if the sheet has moved on. The write did not happen and the
-      // author believes it did; that is worth interrupting for wherever they are.
+      // Reported even if the sheet has moved on. The write may not have happened and the
+      // author believes it did; that is worth interrupting for wherever they are. The
+      // list itself is reconciled by `useCommentWrites` when the outcome is unknown, so
+      // a comment that did land appears under the alert rather than after a stale minute.
       Alert.alert(
         wasEditing ? 'Could not save your edit' : 'Could not post your comment',
         result.message,
       );
       return;
     }
+
+    // Stored. The next thing typed is a new intent and needs an id of its own.
+    newIntent();
     // But the composer is only cleared if it is still the same one. Otherwise a slow
     // post against the previous activity wipes the draft being typed against this one.
     if (stillHere(opening)) reset();
   };
 
   const beginEdit = (comment: Comment) => {
+    newIntent();
     setEditing(comment);
     setDraft(comment.body);
     setSpoilers(comment.hasSpoilers);
@@ -273,7 +305,11 @@ export function CommentSheet({
           placeholder="Add a comment"
           placeholderTextColor={theme.text.tertiary}
           value={draft}
-          onChangeText={setDraft}
+          onChangeText={(next) => {
+            // Different words are a different intent, so the held id goes with them.
+            newIntent();
+            setDraft(next);
+          }}
           multiline
           maxLength={COMMENT_MAX_LENGTH}
           style={styles.input}
@@ -287,7 +323,10 @@ export function CommentSheet({
             accessibilityRole="switch"
             accessibilityState={{ checked: spoilers }}
             accessibilityLabel="Mark this comment as containing spoilers"
-            onPress={() => setSpoilers((value) => !value)}
+            onPress={() => {
+              newIntent();
+              setSpoilers((value) => !value);
+            }}
             hitSlop={theme.space[2]}
             style={({ pressed }) => [styles.spoilerToggle, pressed && styles.pressed]}
           >

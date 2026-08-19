@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -15,12 +15,30 @@ const mockReplace = jest.fn();
 const mockSignOut = jest.fn(() => Promise.resolve());
 const mockRpc = jest.fn();
 let mockRpcResults: Record<string, unknown> = {};
+/**
+ * Errors to answer an RPC with, **in order**, one per call.
+ *
+ * A queue rather than a value because the deletion path can now ask twice: an unanswered
+ * `delete_account` may have committed, and `20260817000700` makes the function
+ * idempotent by nature so that asking again is what establishes which. Testing that needs
+ * the two calls to be answerable differently.
+ */
+let mockRpcErrors: Record<string, unknown[]> = {};
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
-      return Promise.resolve({ data: mockRpcResults[name] ?? null, error: null });
+      const error = mockRpcErrors[name]?.shift() ?? null;
+      return Promise.resolve({ data: error ? null : (mockRpcResults[name] ?? null), error });
+    },
+    // The account screen sweeps the avatar folder before it deletes anything. An empty
+    // folder is the uninteresting case and keeps these tests about the deletion.
+    storage: {
+      from: () => ({
+        list: () => Promise.resolve({ data: [], error: null }),
+        remove: () => Promise.resolve({ error: null }),
+      }),
     },
     from: () => {
       const chain = {
@@ -98,6 +116,7 @@ beforeEach(() => {
   mockSignOut.mockClear();
   mockRpc.mockReset();
   mockRpcResults = {};
+  mockRpcErrors = {};
   jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 });
 
@@ -382,6 +401,126 @@ describe('deleting an account', () => {
 
     expect(view.queryByText(/deactivat/i)).toBeTruthy();
     expect(view.getByText(/There is no deactivation/)).toBeTruthy();
+  });
+
+  /**
+   * **A deletion that commits and loses its reply**, which independent review 21f found
+   * as the last member of the family reviews 21c to 21e worked through.
+   *
+   * The account is gone — the auth user, and every cascade with it — and the client saw
+   * an error. It used to say "Could not delete your account" and leave the person signed
+   * in against something that no longer exists, with their profile still drawn from
+   * cache. There is no cache to reconcile against here, because what changed is whether
+   * the account exists; what there is instead is a server function that answers
+   * `already_applied` once the profile is gone (`20260817000700`), so asking again turns
+   * "unknown" into an answer.
+   */
+  describe('when the answer is lost', () => {
+    const confirmAndDelete = async () => {
+      const view = await renderWithProviders(<AccountScreen />);
+      await fireEvent.changeText(view.getByLabelText('Type sai to confirm'), 'sai');
+      await fireEvent.press(view.getByRole('button', { name: 'Delete my account' }));
+
+      const buttons = (Alert.alert as jest.Mock).mock.calls.at(-1)?.[2] as {
+        text: string;
+        onPress?: () => void;
+      }[];
+      const destructive = buttons.find((button) => button.text === 'Delete for good');
+      await act(async () => {
+        destructive?.onPress?.();
+        // The handler is an async IIFE the press does not await, so the queue has to be
+        // drained before anything is asserted about what it did.
+        await Promise.resolve();
+      });
+      return view;
+    };
+
+    const callsToDelete = () =>
+      mockRpc.mock.calls.filter(([name]) => name === 'delete_account');
+
+    it('asks again, and finishes the sign-out when the account had already gone', async () => {
+      // First reply lost; the second finds the profile already deleted and says so.
+      mockRpcErrors.delete_account = [{ code: '', message: 'TypeError: Network request failed' }];
+      mockRpcResults.delete_account = { status: 'already_applied' };
+
+      await confirmAndDelete();
+
+      await waitFor(() => expect(callsToDelete()).toHaveLength(2));
+      // The point of the whole fix: the person leaves, rather than being told it failed
+      // over an account that is not there.
+      await waitFor(() => expect(mockSignOut).toHaveBeenCalled());
+      expect(mockReplace).toHaveBeenCalledWith('/');
+    });
+
+    it('asks again for 08007, which carries a code and still proves nothing', async () => {
+      mockRpcErrors.delete_account = [{ code: '08007', message: 'transaction resolution unknown' }];
+      mockRpcResults.delete_account = { status: 'already_applied' };
+
+      await confirmAndDelete();
+
+      await waitFor(() => expect(callsToDelete()).toHaveLength(2));
+      await waitFor(() => expect(mockSignOut).toHaveBeenCalled());
+    });
+
+    it('reports the refusal when the second attempt is answered no', async () => {
+      // The first reply was lost and the account is still here — the confirmation was
+      // wrong, or the delete is genuinely blocked. The person stays signed in and is
+      // told the real reason rather than a transport error.
+      mockRpcErrors.delete_account = [
+        { code: '', message: 'TypeError: Network request failed' },
+        { code: '22023', message: 'type your username to confirm' },
+      ];
+
+      await confirmAndDelete();
+
+      await waitFor(() => expect(callsToDelete()).toHaveLength(2));
+      expect(mockSignOut).not.toHaveBeenCalled();
+      // The failure alert, not the "we could not tell" one. The sentence itself is the
+      // generic fallback: `diagnose` withholds Postgres wording in a release build, and
+      // that is deliberate and unrelated to this.
+      await waitFor(() =>
+        expect(Alert.alert).toHaveBeenCalledWith(
+          'Could not delete your account',
+          expect.any(String),
+        ),
+      );
+      expect(Alert.alert).not.toHaveBeenCalledWith(
+        'We could not confirm that',
+        expect.any(String),
+      );
+    });
+
+    it('signs out and says it could not tell when neither attempt is answered', async () => {
+      // Twice unanswered. Claiming it is gone would be a lie; leaving somebody holding a
+      // token for an account that may not exist is the state with no next step.
+      mockRpcErrors.delete_account = [
+        { code: '', message: 'TypeError: Network request failed' },
+        { code: '', message: 'TypeError: Network request failed' },
+      ];
+
+      await confirmAndDelete();
+
+      await waitFor(() => expect(callsToDelete()).toHaveLength(2));
+      await waitFor(() =>
+        expect(Alert.alert).toHaveBeenCalledWith(
+          'We could not confirm that',
+          expect.stringContaining('cannot tell you whether your account was deleted'),
+        ),
+      );
+      expect(mockSignOut).toHaveBeenCalled();
+      expect(mockReplace).toHaveBeenCalledWith('/');
+    });
+
+    it('does not ask twice when the server refused the first time', async () => {
+      // A refusal this app raises on purpose proves nothing was deleted. Repeating a
+      // destructive call on the strength of a "no" would be inventing an intent.
+      mockRpcErrors.delete_account = [{ code: '22023', message: 'type your username to confirm' }];
+
+      await confirmAndDelete();
+
+      await waitFor(() => expect(callsToDelete()).toHaveLength(1));
+      expect(mockSignOut).not.toHaveBeenCalled();
+    });
   });
 
   it('offers no sign-out beside the irreversible thing', async () => {

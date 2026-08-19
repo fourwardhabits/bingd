@@ -14,13 +14,30 @@ const mockRpc = jest.fn();
 let mockRpcResults: Record<string, unknown> = {};
 let mockWatchlist: unknown[] = [];
 
+/**
+ * What each RPC fails with, when it is asked to. Keyed by name so one call can be made
+ * to fail while the rest of the screen keeps loading — a failure that took the whole
+ * screen down with it would prove nothing about what the bookmark does.
+ */
+let mockRpcErrors: Record<string, unknown> = {};
+/**
+ * How many times each table has actually been read.
+ *
+ * An invalidation only means something if a read follows it, so the reconciliation tests
+ * assert the refetch rather than that a helper was called. Independent review 21e: the
+ * mutant survived because the integration was missing, not because an assertion was weak.
+ */
+const mockReads: Record<string, number> = {};
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
-      return Promise.resolve({ data: mockRpcResults[name] ?? null, error: null });
+      const error = mockRpcErrors[name] ?? null;
+      return Promise.resolve({ data: error ? null : (mockRpcResults[name] ?? null), error });
     },
     from: (table: string) => {
+      mockReads[table] = (mockReads[table] ?? 0) + 1;
       const chain = {
         select: () => chain,
         eq: () => chain,
@@ -134,7 +151,9 @@ beforeEach(() => {
   mockPush.mockReset();
   mockRpc.mockReset();
   mockRpcResults = { my_notifications: [], recommendations_to_me: [] };
+  mockRpcErrors = {};
   mockWatchlist = [];
+  for (const key of Object.keys(mockReads)) delete mockReads[key];
 });
 
 describe('the wall and the list', () => {
@@ -245,6 +264,73 @@ describe('the wall and the list', () => {
         expect.objectContaining({ p_media_item_id: 'film-1', p_present: true }),
       ),
     );
+  });
+
+  /**
+   * **A bookmark that commits and loses its reply.**
+   *
+   * `set_watchlist` writes the row, the connection dies before the 200 arrives, and
+   * `writes.ts` reports `{ failed, changed }` (`lib/write-outcome.ts`). This screen used
+   * to alert and return before invalidating, so the title stayed saved on the server and
+   * unsaved on screen, and Queue Dragon went on counting the number from before it.
+   * Independent review 21e, Major 3.
+   */
+  it('refetches the watchlist when a save may have landed anyway', async () => {
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    // No SQLSTATE: the request was never answered, so nothing here can tell a refusal
+    // from a commit whose reply was lost.
+    mockRpcErrors.set_watchlist = { code: '', message: 'TypeError: Network request failed' };
+
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await waitFor(() =>
+      expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy(),
+    );
+    const before = mockReads.watchlist ?? 0;
+
+    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+
+    await waitFor(() => expect(mockReads.watchlist ?? 0).toBeGreaterThan(before));
+  });
+
+  it('refetches it for 08007 too, which carries a code and still proves nothing', async () => {
+    // The finding that reopened all of this: `transaction_resolution_unknown` is a
+    // SQLSTATE whose meaning is that the outcome is unknown. The previous rule — "an
+    // error with a code means the server said no" — classified this as a refusal.
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    mockRpcErrors.set_watchlist = { code: '08007', message: 'transaction resolution unknown' };
+
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await waitFor(() =>
+      expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy(),
+    );
+    const before = mockReads.watchlist ?? 0;
+
+    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+
+    await waitFor(() => expect(mockReads.watchlist ?? 0).toBeGreaterThan(before));
+  });
+
+  it('leaves the cache alone when the server refused outright', async () => {
+    // The other half of the trade: a refusal this app raises on purpose proves nothing
+    // was written, and a refetch there would be a round trip bought with nothing.
+    mockRpcResults.recommendations_to_me = [recommendation()];
+    mockRpcErrors.set_watchlist = { code: '42501', message: 'suspended' };
+
+    const view = await renderWithProviders(<RecommendationsScreen />);
+    await openSent(view);
+    await waitFor(() =>
+      expect(view.getByLabelText('Add Inception to your watchlist')).toBeTruthy(),
+    );
+    const before = mockReads.watchlist ?? 0;
+
+    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.anything()),
+    );
+    expect(mockReads.watchlist ?? 0).toBe(before);
   });
 
   it('says nothing has been sent rather than showing an empty list', async () => {

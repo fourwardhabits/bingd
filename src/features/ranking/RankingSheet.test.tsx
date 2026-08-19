@@ -447,6 +447,58 @@ describe('moving a title to another band', () => {
     await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
     expect(invalidated(['awards', 'user-1'])).toBe(false);
   });
+
+  /**
+   * **An answer that fails can still have placed the title**, which is the same
+   * invariant one step further along the session.
+   *
+   * `rank_answer` records the comparison and, on the last one, finalises inside the same
+   * transaction — the `rankings` row, the score, the `feed_events` entry. So a
+   * `rank_answer` that commits and loses its reply arrives here as a failure over a
+   * collection that has already moved, and the sheet invalidated only on `placed`.
+   * `session.ts` now marks the outcomes it cannot prove were refusals
+   * (`lib/write-outcome.ts`), and this is the screen half of it.
+   */
+  it('refreshes when an answer was never resolved, since it may have placed the title', async () => {
+    answering(comparison(), { data: null, error: { code: '', message: 'TypeError: fail' } });
+    const view = await mount();
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(false),
+    );
+    await fireEvent.press(view.getByLabelText('Choose Film A'));
+
+    await waitFor(() => expect(callsTo('rank_answer')).toHaveLength(1));
+    await waitFor(() => expect(view.invalidated(['collection', 'user-1'])).toBe(true));
+    expect(view.invalidated(['awards', 'user-1'])).toBe(true);
+  });
+
+  it('refreshes on 08007 from an answer, which carries a code and proves nothing', async () => {
+    answering(comparison(), { data: null, error: { code: '08007', message: 'unknown' } });
+    const view = await mount();
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(false),
+    );
+    await fireEvent.press(view.getByLabelText('Choose Film A'));
+
+    await waitFor(() => expect(view.invalidated(['collection', 'user-1'])).toBe(true));
+  });
+
+  it('leaves the collection alone when an answer was refused outright', async () => {
+    // 22023 is the server declining — the pivot stopped being ranked mid-session, which
+    // it raises rather than guesses. Nothing was placed, so nothing needs refetching.
+    answering(comparison(), { data: null, error: { code: '22023', message: 'pivot is gone' } });
+    const view = await mount();
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(false),
+    );
+    await fireEvent.press(view.getByLabelText('Choose Film A'));
+
+    await waitFor(() => expect(callsTo('rank_answer')).toHaveLength(1));
+    expect(view.invalidated(['collection', 'user-1'])).toBe(false);
+  });
 });
 
 describe('a title that is already ranked', () => {

@@ -1,7 +1,10 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { newOperationId, setBucket } from '@/features/collection/writes';
+import { useCurrentProfile } from '@/features/auth';
+import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
+import { mustReconcile, newOperationId, setBucket } from '@/features/collection/writes';
 import { theme } from '@/ui/tokens';
 import { BUCKETS, BucketChip, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
@@ -42,6 +45,8 @@ export function TasteBucketSheet({
 }) {
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const profile = useCurrentProfile();
 
   if (!subject) return null;
 
@@ -57,6 +62,21 @@ export function TasteBucketSheet({
     });
 
     setSaving(false);
+
+    /**
+     * **Reconciled on an unknown outcome as well as on a commit**, which is the rule
+     * every writer in this app now follows (`lib/write-outcome.ts`).
+     *
+     * `set_bucket` creates the `user_media` row, so a call that commits and loses its
+     * reply has put a title in the collection that nothing here has been told about.
+     * The person retries, the sheet closes on the second attempt, and the caches that
+     * describe the first one — the collection, the log state, the awards — were never
+     * refreshed. Retrying is safe on its own terms: `set_bucket` assigns rather than
+     * accumulates, so a second attempt at the same bucket is the same row.
+     */
+    if (mustReconcile(result)) {
+      invalidateAfterCollectionChange(queryClient, profile.id, subject.id);
+    }
 
     if (result.outcome === 'failed') {
       // Kept on screen rather than closed. The title is still the one they picked, and

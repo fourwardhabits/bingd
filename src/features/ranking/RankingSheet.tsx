@@ -101,6 +101,16 @@ function Session({
         invalidateAfterCollectionChange(queryClient, profile.id, subject.id, {
           category: next.category,
         });
+      } else if (next.state === 'failed' && next.changed) {
+        /**
+         * **A failed answer can still have placed the title.**
+         *
+         * `rank_answer` finalises inside its own transaction, so one that commits and
+         * loses its reply reaches here as a failure over a collection that has already
+         * moved. No category, because a failure carries none and a rebucket can move a
+         * title between them — `invalidate.ts` refreshes both when it is not told.
+         */
+        invalidateAfterCollectionChange(queryClient, profile.id, subject.id);
       }
     },
     [profile.id, queryClient, subject.id],

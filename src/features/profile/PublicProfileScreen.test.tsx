@@ -1,4 +1,4 @@
-import { waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -10,6 +10,11 @@ import PublicProfileScreen from '../../../app/u/[username]';
 const mockPush = jest.fn();
 const tableRows: Record<string, unknown[]> = {};
 let mockRpcResults: Record<string, unknown> = {};
+let mockRpcErrors: Record<string, { code?: string; message: string } | null> = {};
+// A fresh id every call, so a held one is visibly held rather than two undefineds
+// comparing equal. `expo-crypto` has no native module under jest.
+let issued = 0;
+jest.mock('expo-crypto', () => ({ randomUUID: () => `id-${(issued += 1)}` }));
 const mockRpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 
 /**
@@ -25,7 +30,8 @@ jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: Record<string, unknown>) => {
       mockRpcCalls.push({ name, args });
-      return Promise.resolve({ data: mockRpcResults[name] ?? null, error: null });
+      const error = mockRpcErrors[name] ?? null;
+      return Promise.resolve({ data: error ? null : (mockRpcResults[name] ?? null), error });
     },
     from: (table: string) => {
       const filters: Record<string, unknown> = {};
@@ -100,6 +106,8 @@ const ranking = (id: string, title: string, position: number, over: Record<strin
 beforeEach(() => {
   mockPush.mockReset();
   mockRpcResults = {};
+  mockRpcErrors = {};
+  issued = 0;
   mockRpcCalls.length = 0;
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   tableRows.public_profiles = [anna];
@@ -352,6 +360,64 @@ describe('the relationship controls', () => {
 
     const view = await open();
     await waitFor(() => expect(view.getByText('Follow')).toBeTruthy());
+  });
+
+  /**
+   * **One operation id per follow, held across the retry a lost reply invites.**
+   *
+   * The edge converges — `follow` assigns — but the RPC is rate-limited, so a replay
+   * under a fresh id spends a second slot against `follows.max_per_day` for one tap.
+   * Nothing raises and the button behaves; the ceiling simply arrives early for somebody
+   * who has not reached it. Independent review 21j (`lib/operation-intent.ts`).
+   */
+  it('replays an unanswered follow under the id the first attempt used', async () => {
+    mockRpcResults.follow_state_with = [
+      { user_id: 'anna-id', following: null, followed_by: null, blocked: false },
+    ];
+    mockRpcErrors.follow = { code: '', message: 'TypeError: Network request failed' };
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Follow')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Follow'));
+    await waitFor(() =>
+      expect(mockRpcCalls.filter((call) => call.name === 'follow')).toHaveLength(1),
+    );
+    await fireEvent.press(view.getByText('Follow'));
+    await waitFor(() =>
+      expect(mockRpcCalls.filter((call) => call.name === 'follow')).toHaveLength(2),
+    );
+
+    const ids = mockRpcCalls
+      .filter((call) => call.name === 'follow')
+      .map((call) => call.args.p_operation_id);
+    expect(typeof ids[0]).toBe('string');
+    expect(ids[1]).toBe(ids[0]);
+  });
+
+  it('takes a fresh id for a follow the server answered', async () => {
+    mockRpcResults.follow_state_with = [
+      { user_id: 'anna-id', following: null, followed_by: null, blocked: false },
+    ];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Follow')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Follow'));
+    await waitFor(() =>
+      expect(mockRpcCalls.filter((call) => call.name === 'follow')).toHaveLength(1),
+    );
+    // The button's label is driven by a query the stub answers from a fixture, so it
+    // does not move; what matters is that the second press is a second intent.
+    await fireEvent.press(view.getByText('Follow'));
+    await waitFor(() =>
+      expect(mockRpcCalls.filter((call) => call.name === 'follow')).toHaveLength(2),
+    );
+
+    const ids = mockRpcCalls
+      .filter((call) => call.name === 'follow')
+      .map((call) => call.args.p_operation_id);
+    expect(ids[1]).not.toBe(ids[0]);
   });
 
   it('says Following once there is an approved edge', async () => {

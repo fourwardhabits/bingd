@@ -14,7 +14,7 @@ import {
   type CollectionFilters,
 } from '@/features/collection/filters';
 import { useLoggedCollection, useWatchlist } from '@/features/collection/use-collection';
-import { newOperationId, setWatchlist } from '@/features/collection/writes';
+import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { headlineFor } from '@/features/recommendations/rank';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
 import { useForYou, type ForYouItem, type Medium } from '@/features/recommendations/use-for-you';
@@ -110,16 +110,20 @@ export default function RecommendationsScreen() {
     });
     setBusy(null);
 
+    // Reconciled on an unknown outcome as well as on success — the same rule the other
+    // three bookmark surfaces follow (`lib/write-outcome.ts`). Independent review 21e.
+    if (mustReconcile(result)) {
+      // The watchlist and Queue Dragon, which counts it (`collection/invalidate.ts`).
+      invalidateAfterWatchlistChange(queryClient, profile.id);
+      // The slate carries `saved` on each item, so it has to be refetched to redraw the
+      // bookmark. Keyed by prefix: both media, and whatever anchors are current.
+      await queryClient.invalidateQueries({ queryKey: ['for-you', profile.id] });
+    }
+
     if (result.outcome === 'failed') {
       Alert.alert('Could not update watchlist', result.message);
       return;
     }
-
-    // The watchlist and Queue Dragon, which counts it (`collection/invalidate.ts`).
-    invalidateAfterWatchlistChange(queryClient, profile.id);
-    // The slate carries `saved` on each item, so it has to be refetched to redraw the
-    // bookmark. Keyed by prefix: both media, and whatever anchors are current.
-    await queryClient.invalidateQueries({ queryKey: ['for-you', profile.id] });
   };
 
   const openRecommendation = (row: SentRecommendation) => {

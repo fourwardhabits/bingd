@@ -3,8 +3,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { readAllByKey } from '@/lib/read-all';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
+import { answerWasLost, useOperationIntent } from '@/lib/operation-intent';
+import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
 
-import { newOperationId } from './writes';
 
 export type Person = {
   id: string;
@@ -187,54 +188,110 @@ export function useCompanions(taggerId: string | null, mediaItemId: string | nul
 }
 
 /**
+ * What a companion save reports back.
+ *
+ * `changed` is the same flag `collection/writes.ts` carries and means the same thing:
+ * **the server may already have written this**, so the caller has state to reconcile
+ * even while it shows an error. Independent review 21e found the LogSheet path that
+ * needs it.
+ */
+export type CompanionWriteResult =
+  | { ok: true; message: null }
+  | { ok: false; message: string; changed: boolean };
+
+/**
  * Saves the whole companion list for one watch.
  *
  * One call, because that is what the control is — a picker that opens, gets ticked,
  * and closes. Expressed as add and remove it would be N writes whose failures
  * interleave, and closing the sheet could leave the screen and the database
  * disagreeing with no single operation to retry.
+ *
+ * **Set semantics, which is what makes a retry safe.** `set_watch_tags` is handed the
+ * whole list and replaces what is stored, so sending it twice stores it once — a
+ * retry after an unknown outcome cannot produce a duplicate tag. That is a property of
+ * the RPC rather than of the operation id, which is why it survives the caller minting
+ * a fresh id for the second attempt.
  */
 export function useSetCompanions(userId: string) {
   const queryClient = useQueryClient();
+  const withIntent = useOperationIntent();
 
-  return async (mediaItemId: string, taggedIds: string[]) => {
-    const { error } = await supabase.rpc('set_watch_tags', {
-      p_operation_id: newOperationId(),
-      p_media_item_id: mediaItemId,
-      p_tagged_ids: taggedIds,
-    });
+  return async (mediaItemId: string, taggedIds: string[]): Promise<CompanionWriteResult> => {
+    /**
+     * **The intent is the list itself**, so the key is the list.
+     *
+     * `set_watch_tags` replaces, so the tags converge whatever happens — but it is
+     * rate-limited, and a replay under a fresh id spends a second slot for one tick
+     * (`lib/operation-intent.ts`). Sorted, because "Ada and Raj" and "Raj and Ada" are
+     * the same intent and the picker's order is not a fact about anything.
+     */
+    const { error } = await withIntent(
+      `set_watch_tags:${mediaItemId}:${[...taggedIds].sort().join(',')}`,
+      (operationId) =>
+        supabase.rpc('set_watch_tags', {
+          p_operation_id: operationId,
+          p_media_item_id: mediaItemId,
+          p_tagged_ids: taggedIds,
+        }),
+      answerWasLost,
+    );
 
-    if (error) {
-      // 42501 is the server refusing somebody in the list. The picker only offers
-      // connected people, so reaching it means a follow lapsed or a block landed
-      // while the sheet was open — worth saying plainly rather than as a code.
-      const message =
-        error.code === '42501'
-          ? 'You can only tag people who follow you back.'
-          : error.message;
-      return { ok: false as const, message };
+    const outcome = classifyWrite(error);
+
+    /**
+     * **Reconciled on an unknown outcome as well as on a commit.**
+     *
+     * The tag list is canonical server state and the sheet renders it. A save that
+     * commits and loses its reply used to leave the sheet showing the previous list,
+     * with the previous list also in cache — so nothing on the device disagreed with
+     * anything, and all of it was wrong. The refetch is what makes the fallback honest.
+     */
+    if (mustReconcile(outcome)) {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['companions', userId, mediaItemId] }),
+        queryClient.invalidateQueries({ queryKey: ['feed'] }),
+      ]);
     }
 
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['companions', userId, mediaItemId] }),
-      queryClient.invalidateQueries({ queryKey: ['feed'] }),
-    ]);
-    return { ok: true as const, message: null };
+    if (!error) return { ok: true as const, message: null };
+
+    // 42501 is the server refusing somebody in the list. The picker only offers
+    // connected people, so reaching it means a follow lapsed or a block landed
+    // while the sheet was open — worth saying plainly rather than as a code.
+    const message =
+      error.code === '42501'
+        ? 'You can only tag people who follow you back.'
+        : error.message;
+    return { ok: false as const, message, changed: outcome === 'unknown' };
   };
 }
 
 /** The tagged person's own control: hides the tag without touching the tagger's log. */
 export function useHideTag() {
   const queryClient = useQueryClient();
+  const withIntent = useOperationIntent();
 
   return async (tagId: string) => {
-    const { error } = await supabase.rpc('hide_watch_tag', {
-      p_operation_id: newOperationId(),
-      p_tag_id: tagId,
-    });
-    if (error) return { ok: false as const, message: error.message };
+    // Not rate-limited, and it assigns rather than accumulates — so this one costs
+    // nothing either way. It takes an intent-scoped id because a rule that holds only
+    // where it happens to matter is a rule the next writer forgets.
+    const { error } = await withIntent(
+      `hide_watch_tag:${tagId}`,
+      (operationId) =>
+        supabase.rpc('hide_watch_tag', { p_operation_id: operationId, p_tag_id: tagId }),
+      answerWasLost,
+    );
 
-    await queryClient.invalidateQueries({ queryKey: ['companions'] });
+    // The same rule as every other writer: refetch unless the server proved it refused
+    // (`lib/write-outcome.ts`). A hide that lands and loses its reply would otherwise
+    // leave the tag on screen with nothing ever asking again.
+    const outcome = classifyWrite(error);
+    if (mustReconcile(outcome)) {
+      await queryClient.invalidateQueries({ queryKey: ['companions'] });
+    }
+
+    if (error) return { ok: false as const, message: error.message, changed: outcome === 'unknown' };
     return { ok: true as const, message: null };
   };
 }

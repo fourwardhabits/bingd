@@ -1,7 +1,9 @@
 import {
   logWatched,
+  mustReconcile,
   newOperationId,
   removeFromCollection,
+  saveNote,
   setBucket,
   setWatchlist,
   today,
@@ -114,7 +116,90 @@ describe('setBucket', () => {
     expect(await setBucket({ operationId, mediaItemId, bucket: 'loved' })).toEqual({
       outcome: 'failed',
       message: 'connection lost',
+      // `08006` is the connection class. It carries a code and proves nothing about the
+      // commit, which is the whole of independent review 21e's second Major.
+      changed: true,
     });
+  });
+});
+
+/**
+ * **The outcome matrix, which is the point of this round.**
+ *
+ * Every writer here is one request, so the matrix is small: what the server did, crossed
+ * with what this client was told. `changed` is the client's answer to "must the caller
+ * reconcile", and it is wrong in exactly one direction — a false `changed` costs a
+ * refetch, a missing one costs a screen that disagrees with the database.
+ *
+ * The rule under test is *not* "the error has a code". Review 21d wrote that rule, and
+ * review 21e produced `08007 transaction_resolution_unknown` — a code whose meaning is
+ * that the outcome is unknown. `lib/write-outcome.ts` holds the rule that survives.
+ */
+describe('what a single-request writer says happened', () => {
+  const cases: [string, { code?: string; message: string } | null, boolean][] = [
+    // Server committed, client was told so.
+    ['an acknowledged success', null, false],
+    // Server refused, client was told so. Every one of these is a SQLSTATE this app's
+    // own functions raise on purpose.
+    ['a validation refusal', { code: '22023', message: 'that date is in the future' }, false],
+    ['an RLS refusal', { code: '42501', message: 'suspended' }, false],
+    ['a session refusal', { code: '28000', message: 'no session' }, false],
+    ['a missing-title refusal', { code: 'P0002', message: 'no such title' }, false],
+    // Server outcome unknown, and the client is told a variety of unhelpful things.
+    ['a transaction whose resolution is unknown', { code: '08007', message: 'unknown' }, true],
+    ['a connection that failed', { code: '08006', message: 'connection failure' }, true],
+    ['a database shutting down mid-request', { code: '57P01', message: 'terminating' }, true],
+    ['a SQLSTATE nobody here has reasoned about', { code: 'XX000', message: 'internal' }, true],
+    ['a request timeout', { code: '', message: 'AbortError: aborted' }, true],
+    ['a socket that died after the request went out', { code: '', message: 'TypeError: fail' }, true],
+    ['a gateway answering with something unparseable', { message: '<html>502</html>' }, true],
+  ];
+
+  it.each(cases)('%s', async (_name, error, reconcilable) => {
+    mockRpc.mockResolvedValue({ data: error ? null : { status: 'ok' }, error });
+
+    const result = await setWatchlist({ operationId, mediaItemId, present: true });
+
+    if (!error) {
+      expect(result).toEqual({ outcome: 'ok' });
+      expect(mustReconcile(result)).toBe(true);
+      return;
+    }
+
+    expect(result.outcome).toBe('failed');
+    // Asserted on `mustReconcile` rather than on `changed`, because that is what every
+    // caller reads. A test on the flag alone survives a caller that ignores it.
+    expect(mustReconcile(result)).toBe(reconcilable);
+  });
+
+  it('reads a refusal the server answered with as nothing to reconcile', async () => {
+    // The cheap side of the trade is still a side: an ordinary refusal must not make
+    // every screen in the app refetch, or the flag would carry no information.
+    mockRpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'suspended' } });
+    expect(mustReconcile(await setBucket({ operationId, mediaItemId, bucket: 'loved' }))).toBe(
+      false,
+    );
+  });
+
+  it('reads 55000 on a bucket as a refusal rather than as an ambiguity', async () => {
+    // `ranked` is its own outcome and never carries `changed`: the server declined to
+    // move the bucket because ranking owns it, which it can only do by not committing.
+    mockRpc.mockResolvedValue({ data: null, error: { code: '55000', message: 'already ranked' } });
+    const result = await setBucket({ operationId, mediaItemId, bucket: 'loved' });
+    expect(result).toEqual({ outcome: 'ranked' });
+    // Reconciled all the same, and for a reason of its own rather than by accident:
+    // `_assert_unranked` refusing proves the *client* was wrong about this title being
+    // unranked. Nothing was written, and the sheet is still showing a stale fact.
+    expect(mustReconcile(result)).toBe(true);
+  });
+
+  it('reads a note conflict as a refusal, with its own wording', async () => {
+    // `save_note` reuses 55000 for its version conflict. Still a refusal, so still
+    // nothing to reconcile — and still not a sentence about ranking.
+    mockRpc.mockResolvedValue({ data: null, error: { code: '55000', message: 'stale' } });
+    const result = await saveNote({ operationId, mediaItemId, note: 'x' });
+    expect(result).toMatchObject({ outcome: 'failed' });
+    expect(result).not.toHaveProperty('changed');
   });
 });
 
@@ -369,6 +454,36 @@ describe('removeFromCollection', () => {
 
     expect(result).not.toHaveProperty('changed');
   });
+
+  /**
+   * **The multi-step matrix**, which is where "a fix covers the sequence that prompted
+   * it" kept biting. Two writes means three places a failure can sit, and the client's
+   * observation is a separate axis from the server's outcome.
+   */
+  it.each([
+    // name, wasRanked, rank_unrank's error, unlog's error, must the caller reconcile
+    ['the unranking is refused', true, { code: '42501', message: 'no' }, null, false],
+    ['the unranking is unanswered', true, { code: '', message: 'lost' }, null, true],
+    ['the unranking carries 08007', true, { code: '08007', message: '?' }, null, true],
+    ['the delete is refused after the unranking landed', true, null, { code: '42501', message: 'no' }, true],
+    ['the delete is unanswered after the unranking landed', true, null, { code: '', message: 'lost' }, true],
+    ['the only write is refused', false, null, { code: '42501', message: 'no' }, false],
+    ['the only write is unanswered', false, null, { code: '', message: 'lost' }, true],
+    ['the only write carries 08007', false, null, { code: '08007', message: '?' }, true],
+  ])(
+    'reconciles when %s',
+    async (_name, wasRanked, unrankError, unlogError, reconcilable) => {
+      mockRpc.mockImplementation((fn: string) => {
+        const error = fn === 'rank_unrank' ? unrankError : unlogError;
+        return Promise.resolve({ data: error ? null : { status: 'ok' }, error });
+      });
+
+      const result = await removeFromCollection({ operationId, mediaItemId, wasRanked });
+
+      expect(result.outcome).toBe('failed');
+      expect(mustReconcile(result)).toBe(reconcilable);
+    },
+  );
 
   it('reports a replayed removal as already applied rather than as a failure', async () => {
     mockRpc.mockResolvedValue({ data: { status: 'already_applied' }, error: null });

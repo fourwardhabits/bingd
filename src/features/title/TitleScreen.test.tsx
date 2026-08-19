@@ -14,13 +14,24 @@ let mockRpcResults: Record<string, unknown> = {};
 // only observable as the RPC they send.
 const mockRpc = jest.fn();
 
+/** What each RPC fails with, when a test asks it to. Keyed by name. */
+let mockRpcErrors: Record<string, unknown> = {};
+/**
+ * How many times each table has been read. An invalidation is worth nothing unless a
+ * read follows it, so the reconciliation tests assert the refetch itself rather than
+ * asserting a helper was called (independent review 21e).
+ */
+const mockReads: Record<string, number> = {};
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
-      return Promise.resolve({ data: mockRpcResults[name] ?? null, error: null });
+      const error = mockRpcErrors[name] ?? null;
+      return Promise.resolve({ data: error ? null : (mockRpcResults[name] ?? null), error });
     },
     from: (table: string) => {
+      mockReads[table] = (mockReads[table] ?? 0) + 1;
       const filters: Record<string, unknown> = {};
       const rows = () => {
         const source = tableRows[table] ?? [];
@@ -163,6 +174,8 @@ beforeEach(() => {
   mockOpenURL.mockReset();
   mockEnrichmentArgs.length = 0;
   mockRpcResults = {};
+  mockRpcErrors = {};
+  for (const key of Object.keys(mockReads)) delete mockReads[key];
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   tableRows.media_items = [film];
   tableRows.user_media = [];
@@ -1021,6 +1034,47 @@ describe('the action row', () => {
 
     await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
     expect(view.getByText('Share off Bingd')).toBeTruthy();
+  });
+
+  /**
+   * **The bookmark, when the answer is lost.**
+   *
+   * `set_watchlist` commits, the reply never arrives, and `writes.ts` reports
+   * `{ failed, changed }` (`lib/write-outcome.ts`). This screen used to set the error and
+   * return before invalidating, so the title stayed on the watchlist server-side and off
+   * it here. Independent review 21e, Major 3 — one of four screens with the same hole.
+   */
+  it('refetches when a watchlist save may have landed anyway', async () => {
+    mockRpcErrors.set_watchlist = { code: '', message: 'TypeError: Network request failed' };
+    const view = await open();
+    const before = mockReads.watchlist ?? 0;
+
+    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+
+    await waitFor(() => expect(mockReads.watchlist ?? 0).toBeGreaterThan(before));
+  });
+
+  it('refetches for 08007, which carries a code and still proves nothing', async () => {
+    mockRpcErrors.set_watchlist = { code: '08007', message: 'transaction resolution unknown' };
+    const view = await open();
+    const before = mockReads.watchlist ?? 0;
+
+    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+
+    await waitFor(() => expect(mockReads.watchlist ?? 0).toBeGreaterThan(before));
+  });
+
+  it('leaves the cache alone when the server refused the bookmark outright', async () => {
+    mockRpcErrors.set_watchlist = { code: '42501', message: 'suspended' };
+    const view = await open();
+    const before = mockReads.watchlist ?? 0;
+
+    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('set_watchlist', expect.anything()),
+    );
+    expect(mockReads.watchlist ?? 0).toBe(before);
   });
 
   it('does not offer Recommend on a series, which is not a thing anybody watched', async () => {

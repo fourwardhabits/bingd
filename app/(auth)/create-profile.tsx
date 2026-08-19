@@ -167,6 +167,15 @@ export default function CreateProfileScreen() {
         return;
 
       default:
+        // The request was never answered, so the profile may exist. Re-reading it is
+        // what lets the gate move somebody who already has an account instead of
+        // leaving them on a form that will only ever answer `already_exists`
+        // (`lib/write-outcome.ts`). Independent review 21e's invariant.
+        if (result.outcome === 'failed' && result.changed) {
+          await queryClient.invalidateQueries({
+            queryKey: queryKeys.myProfile(auth.status === 'onboarding' ? auth.userId : 'none'),
+          });
+        }
         setError(result.message);
     }
   };

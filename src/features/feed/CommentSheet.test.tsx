@@ -275,6 +275,78 @@ describe('writing one', () => {
     expect(view.getByDisplayValue('worth keeping')).toBeTruthy();
   });
 
+  /**
+   * **The retry a lost reply invites, and the second comment it used to produce.**
+   *
+   * `add_comment` inserts. `_claim_operation` exists to refuse a replayed intent, but it
+   * can only recognise a replay that carries the id it already saw — and this module
+   * minted a fresh one inside the writer, so the ledger never got the chance. A post
+   * whose reply is lost is reported as a failure with the draft still in the box, which
+   * is an invitation to press Post again: two identical comments, no exception, and the
+   * second as legitimate-looking as the first.
+   *
+   * Every other writer behind this pattern is idempotent by shape — a follow, a reaction,
+   * a tag set and a profile save all assign, and `recommend_title` is keyed on
+   * sender/recipient/title — which is why nothing accumulated anywhere else and why this
+   * went unseen.
+   */
+  it('replays a failed post under the id the first attempt used', async () => {
+    mockRpcError = { code: '', message: 'TypeError: Network request failed' };
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());
+
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'worth saying once');
+    await fireEvent.press(view.getByText('Post'));
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
+
+    // The same words, pressed again — which is what somebody told "could not post" does.
+    await fireEvent.press(view.getByText('Post'));
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(2));
+
+    expect(mockRpcCalls[1]!.args.p_operation_id).toBe(mockRpcCalls[0]!.args.p_operation_id);
+    // And it is a real id rather than both being undefined, which would pass for the
+    // wrong reason.
+    expect(typeof mockRpcCalls[0]!.args.p_operation_id).toBe('string');
+  });
+
+  it('gives different words an id of their own', async () => {
+    // The id belongs to the intent. Editing the draft and pressing Post is a different
+    // thing to say, and replaying it under the old id would have the server answer
+    // `already_applied` to something nobody has stored.
+    mockRpcError = { code: '', message: 'TypeError: Network request failed' };
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());
+
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'first thought');
+    await fireEvent.press(view.getByText('Post'));
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
+
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'second thought');
+    await fireEvent.press(view.getByText('Post'));
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(2));
+
+    expect(mockRpcCalls[1]!.args.p_operation_id).not.toBe(mockRpcCalls[0]!.args.p_operation_id);
+  });
+
+  it('starts a fresh id after one has landed', async () => {
+    // Otherwise the next comment replays the stored one and the server answers
+    // `already_applied` to a thing nobody wrote — a post that silently does nothing.
+    const view = await open();
+    await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());
+
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'one');
+    await fireEvent.press(view.getByText('Post'));
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
+
+    await fireEvent.changeText(view.getByLabelText('Add a comment'), 'two');
+    await fireEvent.press(view.getByText('Post'));
+    await waitFor(() => expect(mockRpcCalls).toHaveLength(2));
+
+    expect(mockRpcCalls[1]!.args.p_operation_id).not.toBe(mockRpcCalls[0]!.args.p_operation_id);
+  });
+
   it('clears the draft once it lands', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());

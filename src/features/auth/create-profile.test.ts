@@ -70,6 +70,8 @@ describe('createProfile', () => {
     expect(await createProfile(input)).toEqual({
       outcome: 'failed',
       message: 'connection lost',
+      // `08006` is the connection class: a code, and no proof the insert did not land.
+      changed: true,
     });
   });
 
@@ -80,6 +82,40 @@ describe('createProfile', () => {
       'create_profile',
       expect.objectContaining({ p_display_name: null }),
     );
+  });
+});
+
+/**
+ * **A signup that may already have happened.**
+ *
+ * `create_profile` inserts the row. If the reply is lost the account exists and the
+ * screen is standing between somebody and it — retrying does converge, because the
+ * second attempt answers `already_exists`, but the flag is what lets the gate move them
+ * without a second attempt. Independent review 21e's invariant (`lib/write-outcome.ts`),
+ * applied to the one write that is nobody's second chance.
+ */
+describe('what a failed signup says about whether it happened', () => {
+  const input = { username: 'rosalind', dateOfBirth: '1990-01-01' };
+
+  it.each([
+    ['a request that was never answered', { code: '', message: 'TypeError: fail' }],
+    ['a transaction whose resolution is unknown', { code: '08007', message: 'unknown' }],
+    ['a connection that failed', { code: '08006', message: 'connection failure' }],
+  ])('says the profile may exist after %s', async (_name, error) => {
+    mockRpc.mockResolvedValue({ data: null, error });
+
+    expect(await createProfile(input)).toMatchObject({ outcome: 'failed', changed: true });
+  });
+
+  it('says nothing may have happened when the session was refused', async () => {
+    // 28000 is the server declining. No row was inserted, and re-reading the profile
+    // would be a round trip that can only answer "still nothing".
+    mockRpc.mockResolvedValue({ data: null, error: { code: '28000', message: 'no session' } });
+
+    expect(await createProfile(input)).toEqual({
+      outcome: 'failed',
+      message: 'Your session expired. Sign in again.',
+    });
   });
 });
 

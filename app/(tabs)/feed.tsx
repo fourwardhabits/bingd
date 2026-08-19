@@ -7,7 +7,7 @@ import { useCurrentProfile } from '@/features/auth';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
-import { newOperationId, setWatchlist } from '@/features/collection/writes';
+import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
@@ -110,13 +110,26 @@ export default function FeedScreen() {
     });
     setBusy(null);
 
+    /**
+     * **Reconciled before the error is shown, not instead of it.**
+     *
+     * `set_watchlist` can commit and lose its reply — a dropped socket, a timeout, an
+     * `08007` out of the pooler — and the client cannot tell that from a refusal. This
+     * screen used to alert and return, so the row stayed saved on the server, the
+     * bookmark stayed empty here, and Queue Dragon went on counting the old number for
+     * the full `staleTime`. `mustReconcile` is true for a commit and for an unknown, and
+     * false only for a refusal this app raises on purpose (`lib/write-outcome.ts`).
+     * Independent review 21e, Major 3.
+     */
+    if (mustReconcile(result)) {
+      // The watchlist and Queue Dragon, which counts it (`collection/invalidate.ts`).
+      invalidateAfterWatchlistChange(queryClient, profile.id);
+    }
+
     if (result.outcome === 'failed') {
       Alert.alert('Could not update watchlist', result.message);
       return;
     }
-
-    // The watchlist and Queue Dragon, which counts it (`collection/invalidate.ts`).
-    invalidateAfterWatchlistChange(queryClient, profile.id);
   };
 
   /**
