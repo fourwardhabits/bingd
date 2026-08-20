@@ -249,3 +249,101 @@ describe('the note attached to an activity', () => {
     expect(item.note).toBeNull();
   });
 });
+
+/**
+ * Founder Feed finalization, 2026-08-20, items 2, 7 and 8.
+ *
+ * A watchlist add is now activity, and the standardised subheading needs two fields
+ * the read was not asking for — the content rating, and a season's episode count.
+ */
+describe('a watchlist add in the feed', () => {
+  it('is fetched, and is not mistaken for a watch', async () => {
+    mockFeedRows = [event({ type: 'watchlist_added', payload: {} })];
+
+    const item = await only();
+    expect(item.type).toBe('watchlist_added');
+    expect(item.title).toBe('Inception');
+    // No ranking happened, so there is no score and the badge does not draw.
+    expect(item.score).toBeNull();
+  });
+
+  it('carries neither a note nor companions, even when the actor wrote one', async () => {
+    // The trap this closes. Notes and tags are matched on (actor, title) rather than
+    // on the event — deliberately, so both stay live and retractable — which means a
+    // watchlist row for a film its actor later watched, reviewed and tagged would
+    // otherwise render "added Dune to their watchlist with Anna" under a verdict on
+    // the film. An intention is not a viewing.
+    mockFeedRows = [
+      event({ id: 'watch-1', type: 'title_ranked' }),
+      event({ id: 'watch-2', type: 'watchlist_added', payload: {} }),
+    ];
+    mockNoteRows = [
+      { user_id: 'user-1', media_item_id: 'film-1', note: 'Best of the year.', has_spoilers: false },
+    ];
+
+    const [ranked, saved] = await load();
+    expect(ranked?.note).toEqual({ text: 'Best of the year.', hasSpoilers: false });
+    expect(saved?.note).toBeNull();
+    expect(saved?.companions).toEqual([]);
+  });
+
+  it('does not ask the note RPC about an activity that cannot have one', async () => {
+    mockFeedRows = [event({ type: 'watchlist_added', payload: {} })];
+    await load();
+
+    expect(rpcCalls.find((c) => c.name === 'public_notes')).toBeUndefined();
+  });
+});
+
+describe('the fields the subheading needs', () => {
+  it('reads a movie’s own rating and runtime', async () => {
+    mockFeedRows = [
+      event({ media_items: { ...media, certification: 'PG-13', episode_count: null } }),
+    ];
+
+    const item = await only();
+    expect(item.certification).toBe('PG-13');
+    expect(item.runtimeMinutes).toBe(148);
+    expect(item.episodeCount).toBeNull();
+  });
+
+  it('gives a season its episode count and its series’ rating and genres', async () => {
+    // `tmdb_upsert_seasons` writes neither genres nor a certification, and TMDB
+    // publishes the rating on the series. Both come off the parent embed this query
+    // was already making for the title.
+    mockFeedRows = [
+      event({
+        media_items: {
+          kind: 'season',
+          title: 'Season 2',
+          season_number: 2,
+          release_date: '2025-01-17',
+          poster_path: null,
+          genres: [],
+          certification: null,
+          runtime_minutes: 50,
+          episode_count: 8,
+          parent: {
+            title: 'Severance',
+            genres: ['Drama', 'Thriller'],
+            certification: 'TV-MA',
+          },
+        },
+      }),
+    ];
+
+    const item = await only();
+    expect(item.title).toBe('Severance, S2');
+    expect(item.certification).toBe('TV-MA');
+    expect(item.genres).toEqual(['Drama', 'Thriller']);
+    expect(item.episodeCount).toBe(8);
+  });
+
+  it('leaves both absent when nobody published them', async () => {
+    mockFeedRows = [event()];
+
+    const item = await only();
+    expect(item.certification).toBeNull();
+    expect(item.episodeCount).toBeNull();
+  });
+});

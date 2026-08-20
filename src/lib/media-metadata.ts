@@ -50,12 +50,23 @@ export type MetadataSubject = {
   /** `media_items.original_language`, ISO 639-1. */
   language?: string | null;
   /**
+   * `media_items.certification` — the US rating, `PG-13` or `TV-MA`.
+   *
+   * Optional for the same reason `genres` is: not every read selects it, and a caller
+   * that only wants genres should not have to fetch a column it will not print.
+   */
+  certification?: string | null;
+  /**
    * The parent series, where one was read.
    *
    * Absent and null are the same thing here: a movie has no parent, and a season whose
    * parent could not be resolved is in the same position as one that has none.
    */
-  parent?: { genres?: readonly string[] | null; language?: string | null } | null;
+  parent?: {
+    genres?: readonly string[] | null;
+    language?: string | null;
+    certification?: string | null;
+  } | null;
 };
 
 /** Whether a row's own genres are worth using rather than falling through. */
@@ -83,6 +94,34 @@ export function effectiveGenres(subject: MetadataSubject): string[] {
   return [];
 }
 
+/**
+ * The content certification to print for this title, or null when nobody published
+ * one.
+ *
+ * The same own-then-parent rule as the genres, and it exists for the same reason: TMDB
+ * publishes a rating on a *series* (`content_ratings`) and never on a season, so
+ * `20260817000900` stores it on the series row and a season carries nothing. A feed
+ * item about `Severance, S2` that dropped the certification would be missing the one
+ * fact people scan a rating for, on half the catalogue.
+ *
+ * Own-first anyway, so a season that ever does carry its own wins over the show's —
+ * the more specific truth, as with genres.
+ *
+ * **A movie never falls through**, because it has no parent to fall through to, and a
+ * series is the thing being inherited *from*. Null stays null everywhere: an invented
+ * `NR` would be a claim about a film's content that nobody made, which is the rule the
+ * column's own comment sets.
+ */
+export function effectiveCertification(subject: MetadataSubject): string | null {
+  const own = subject.certification?.trim();
+  if (own) return own;
+  if (subject.kind === 'season') {
+    const inherited = subject.parent?.certification?.trim();
+    if (inherited) return inherited;
+  }
+  return null;
+}
+
 /** The original language to reason about this title with, or null when unknown. */
 export function effectiveLanguage(subject: MetadataSubject): string | null {
   if (hasOwnLanguage(subject.language)) return subject.language!.trim();
@@ -107,11 +146,26 @@ export function effectiveLanguage(subject: MetadataSubject): string | null {
 export const MEDIA_METADATA_COLUMNS =
   'genres, original_language, parent:parent_id(title, genres, original_language)';
 
+/**
+ * `certification` is deliberately **not** in that list.
+ *
+ * Every caller of `MEDIA_METADATA_COLUMNS` today — awards, the collection filter, For
+ * You — reasons about genres and language and prints no rating, so adding it would put
+ * a column on four queries to be read by none of them. The feed asks for it by name in
+ * its own select instead, and {@link effectiveCertification} is structural, so it
+ * resolves whatever shape it is handed. A second surface that starts printing a rating
+ * is the moment to reconsider, not before.
+ */
+
 /** The embedded parent as PostgREST types it: an object, declared as an array. */
-export type EmbeddedParent =
-  | { title?: string | null; genres?: string[] | null; original_language?: string | null }
-  | { title?: string | null; genres?: string[] | null; original_language?: string | null }[]
-  | null;
+type ParentColumns = {
+  title?: string | null;
+  genres?: string[] | null;
+  original_language?: string | null;
+  certification?: string | null;
+};
+
+export type EmbeddedParent = ParentColumns | ParentColumns[] | null;
 
 /** The one place that unwraps it, so no caller has to remember the array case. */
 export const parentOf = (parent: EmbeddedParent) =>
@@ -127,18 +181,34 @@ export function resolveMetadata(row: {
   kind: 'movie' | 'season' | 'series';
   genres?: string[] | null;
   original_language?: string | null;
+  certification?: string | null;
   parent?: EmbeddedParent;
-}): { genres: string[]; language: string | null; seriesTitle: string | null } {
+}): {
+  genres: string[];
+  language: string | null;
+  certification: string | null;
+  seriesTitle: string | null;
+} {
   const parent = parentOf(row.parent ?? null);
   const subject: MetadataSubject = {
     kind: row.kind,
     genres: row.genres,
     language: row.original_language,
-    parent: parent ? { genres: parent.genres, language: parent.original_language } : null,
+    certification: row.certification,
+    parent: parent
+      ? {
+          genres: parent.genres,
+          language: parent.original_language,
+          certification: parent.certification,
+        }
+      : null,
   };
   return {
     genres: effectiveGenres(subject),
     language: effectiveLanguage(subject),
+    // Null for every caller that does not select the column, which is all of them but
+    // the feed. An absent field and an absent rating are the same answer.
+    certification: effectiveCertification(subject),
     seriesTitle: parent?.title ?? null,
   };
 }

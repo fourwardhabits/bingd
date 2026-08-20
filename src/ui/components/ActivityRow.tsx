@@ -34,13 +34,22 @@ export type ActivityRowProps = {
   onPressActor?: () => void;
   /** The verb between the actor and the title: "ranked", "watched", "finished". */
   verb: string;
+  /**
+   * The words after the title, for an activity whose object is not the last thing in
+   * the sentence: "added Dune (2021) **to their watchlist**".
+   *
+   * Absent for the three that read verb-then-object, which is most of them. It exists
+   * because forcing every type through one template would give "added to their
+   * watchlist Dune (2021)" — the founder asked for grammatical over uniform.
+   */
+  tail?: string | null;
   /** Names the actor said they watched it with (PRD §14). */
   companions?: string[];
   /** Already in its compact form — "Parks and Recreation, S2" (`lib/titles.ts`). */
   title: string | null;
   year?: number | null;
   posterUri?: string | null;
-  /** `148m · Sci-fi`, beneath the title inside the card. */
+  /** `PG-13 · 148m · Science Fiction · Adventure`, beneath the sentence. */
   metadata?: string | null;
   score?: number | null;
   bucket?: Bucket | null;
@@ -91,6 +100,48 @@ export type ActivityRowProps = {
  * controls, because "Watchlist" set in a footnote beside "Saved" was the widest thing
  * on the row and said the least.
  *
+ * ---------------------------------------------------------------------------
+ * THE SENTENCE IS ONE SENTENCE (founder Feed finalization, 2026-08-20, item 1)
+ *
+ * That rebuild kept the title on its own line below the actor, and the physical
+ * Android review found what that costs:
+ *
+ *     [avatar] Suraj Kandukuri ranked
+ *              21 (2008)
+ *
+ * The break is unconditional, so the film reads as a separate field rather than as
+ * the object of the verb — and on a short title it leaves a line half empty to do it.
+ * The two `Text` blocks are now one:
+ *
+ *     [avatar] Suraj Kandukuri ranked 21 (2008)
+ *
+ * **Wrapped by the layout, never by us.** There is no explicit break anywhere in
+ * here; a long title runs on and the text engine breaks it where the width runs out,
+ * which is why `numberOfLines` is 3 rather than 1. On the narrowest device this app
+ * supports the sentence column is about 192pt — 360 less two 16pt gutters, less the
+ * 40pt poster and the 40pt score badge with their 12pt gaps, less the 24pt avatar and
+ * its 8pt gap — so `Keep Your Hands Off Eizouken!, S1 (2020)` takes two lines and the
+ * watchlist form of it takes three. Three is where truncation starts, and it
+ * truncates the tail rather than breaking the row.
+ *
+ * **Weight carries the structure, not size.** One type size for the whole sentence,
+ * with the actor and the title in semibold Ink and the connective words in the
+ * secondary tone. Mixing 13pt and 15pt inside one wrapping paragraph gives a ragged
+ * baseline on the line where they meet, and the founder's own sketch —
+ * `**Suraj Kandukuri** ranked **21 (2008)**` — distinguishes the two entities by
+ * weight anyway. The year stays in the lighter tone so it reads as the title's
+ * qualifier rather than as a third entity, and is joined to the title by a
+ * **non-breaking space** so a wrap cannot strand it on a line of its own. Nesting it
+ * inside the title's `Text` shares the styling and the press target but not the line
+ * breaking, which is a distinction independent review had to point out.
+ *
+ * **The avatar aligns to the first line**, which is what `alignItems: 'flex-start'` on
+ * the `who` row buys: on a three-line sentence a centred face would float beside the
+ * middle of the paragraph, attached to nothing.
+ *
+ * The poster and the score badge stay centred on the row as a whole. That is their
+ * intended position and a taller sentence does not change it.
+ *
  * The poster is small on purpose and that is unchanged. Beli's feed is carried by
  * food photography that its users took; every Bingd activity for the same film shows
  * the same official poster, so artwork cannot be what distinguishes one row from the
@@ -101,6 +152,7 @@ export function ActivityRow({
   actorAvatarUri,
   onPressActor,
   verb,
+  tail = null,
   companions = [],
   title,
   year,
@@ -153,47 +205,58 @@ export function ActivityRow({
             >
               <Avatar size="xs" uri={actorAvatarUri} name={actorName} />
             </Pressable>
-            {/* Bolded entities inside one sentence, which is Beli's treatment and
-                what makes the row scannable without a separate header line. Both
-                entities are pressable, so the sentence is also the navigation. */}
-            <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.sentence}>
-              <Text variant="footnote" style={styles.entity} onPress={onPressActor}>
+            {/**
+              * One `Text`, and everything about the activity is inside it.
+              *
+              * Actor, verb, title, year, companions and tail are nested runs rather
+              * than sibling blocks, which is what makes this a sentence the layout
+              * can wrap instead of a stack of fields with a break between them. Both
+              * entities keep their `onPress`, so the sentence is still the
+              * navigation — a nested `Text` is pressable in React Native and does not
+              * need a `Pressable` around it, which is just as well because wrapping
+              * one here would reintroduce the block that was removed.
+              */}
+            <Text variant="subhead" tone="secondary" numberOfLines={3} style={styles.sentence}>
+              <Text variant="subhead" style={styles.entity} onPress={onPressActor}>
                 {actorName}
               </Text>
-              {` ${verb}`}
-              {/* Inside the sentence rather than on a line of its own. "Sai and
-                  Anna watched" is the fact; a separate "with Anna" row would be a
-                  second band for three words. */}
+              {` ${verb} `}
+              {/* The title and its year in one run, joined by a **non-breaking
+                  space**. Parenthesised and muted, the shape `TitleRow` prints and
+                  the founder's standard everywhere a title is named compactly:
+                  `The Last of Us, S1 (2023)`.
+
+                  The NBSP is the part that is load-bearing, and nesting alone did
+                  not buy it: one `Text` shares styling and press handling, but the
+                  text engine still breaks at any ordinary space inside it. With a
+                  plain space, a title that ends near the line width leaves `(2020)`
+                  stranded on a line of its own — the year separated from what it
+                  dates, which is the founder's rule and was the defect independent
+                  review found here. U+00A0 removes that break opportunity, so the
+                  wrap moves back into the title's own words where it belongs. */}
+              <Text variant="subhead" style={styles.entity} onPress={onPressTitle}>
+                {filmName}
+                {year ? (
+                  <Text variant="subhead" tone="secondary" style={styles.year}>
+                    {` (${year})`}
+                  </Text>
+                ) : null}
+              </Text>
+              {/* After the title now, not after the verb. "Suraj watched Dune (2021)
+                  with Anna" is a sentence; "Suraj watched with Anna Dune (2021)",
+                  which is what the old order became once the title joined the line,
+                  is not. */}
               {companions.length ? (
-                <Text variant="footnote" tone="secondary">
+                <Text variant="subhead" tone="secondary">
                   {' with '}
-                  <Text variant="footnote" style={styles.entity}>
+                  <Text variant="subhead" style={styles.entity}>
                     {companionNames(companions)}
                   </Text>
                 </Text>
               ) : null}
+              {tail ? ` ${tail}` : null}
             </Text>
           </View>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={filmName}
-            onPress={onPressTitle}
-            style={({ pressed }) => pressed && styles.pressed}
-          >
-            {/* Parenthesised, and the same shape `TitleRow` prints. The feed used to
-                set the year off with two spaces and every list used "(2023)", which
-                made one product write a title two ways. The founder's standard is
-                `The Last of Us, S1 (2023)`, everywhere a title is named compactly. */}
-            <Text variant="callout" numberOfLines={1}>
-              {filmName}
-              {year ? (
-                <Text variant="callout" tone="secondary">
-                  {` (${year})`}
-                </Text>
-              ) : null}
-            </Text>
-          </Pressable>
 
           {metadata ? (
             <Text variant="caption" tone="tertiary" numberOfLines={1}>
@@ -423,9 +486,24 @@ const styles = StyleSheet.create({
   },
   main: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
   copy: { flex: 1, gap: 2 },
-  who: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  /**
+   * `flex-start`, so the face sits beside the first line of a sentence that may run
+   * to three. Centred, it drifted to the middle of a wrapped paragraph and stopped
+   * looking like the person the sentence opens with.
+   */
+  who: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.space[2] },
   sentence: { flex: 1 },
   entity: { fontFamily: fontFamily.sansSemibold, color: theme.text.primary },
+  /**
+   * The year sits inside the title's run, but it is not part of the entity: `(2008)`
+   * is when the film is from, not what it is called. What stops a wrap orphaning it is
+   * the non-breaking space at the join, not this nesting — see the sentence above.
+   *
+   * `tone="secondary"` on that nested `Text` mutes the colour and `variant` puts the
+   * family back to the token's medium. This takes it one step further to the regular
+   * weight, so the three weights on the row read as entity, sentence, qualifier.
+   */
+  year: { fontFamily: fontFamily.sans },
   badge: { alignSelf: 'center' },
   // Indented to the poster's right edge, so a note reads as belonging to the row
   // above it rather than starting a new one.

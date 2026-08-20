@@ -761,9 +761,66 @@ Filtered search is intentional exploration, not recommendation. It supports comb
 
 Chronological, structured activity from people the user follows. No algorithmic ranking in v1.
 
-**Eligible events:** a title was ranked (with its position), a title was logged with a bucket, a season was completed, a list was created or added to, a milestone was reached, a user joined from an invitation.
+**Eligible events:** a title was ranked (with its position), a title was logged with a bucket, a season was completed, **a title was added to a watchlist**, a list was created or added to, a milestone was reached, a user joined from an invitation.
 
 **Privacy:** feed events inherit the actor's profile visibility. A private account's activity reaches only approved followers. Blocked users never appear in each other's feeds.
+
+### As built — 2026-08-20: the activity sentence, watchlist activity, and the metadata line
+
+Three founder decisions from the physical Android preview, taken together because they are one row.
+
+#### An activity is one sentence
+
+The row set the actor on one line and the title on the next, unconditionally:
+
+```
+[avatar] Suraj Kandukuri ranked
+         21 (2008)
+```
+
+which made the title read as a *field of the row* rather than as the object of the verb — and on a short title it left half a line empty to do it. **The actor, the verb and the title are now one text block that the layout wraps where the width runs out.** There is no explicit line break anywhere in the row.
+
+```
+[avatar] Suraj Kandukuri ranked 21 (2008)
+[avatar] Suraj Kandukuri ranked INVINCIBLE, S1 (2021)
+[avatar] Suraj Kandukuri added Dune (2021) to their watchlist
+```
+
+- **Weight carries the structure, not size.** One type size for the whole sentence, the actor and the title in semibold Ink, the connective words muted, the year lighter still. Not every word is bold.
+- **The year lives inside the title's run**, so a wrap can never orphan `(2008)` onto a line away from what it dates.
+- **A sentence may need words after the title.** "Added Dune (2021) **to their watchlist**" does; forcing every type through one template gives "added to their watchlist Dune (2021)". Grammatical beats uniform.
+- **Companions moved after the title** for the same reason: "Suraj watched Dune (2021) with Anna", not "Suraj watched with Anna Dune (2021)".
+- Three lines is where truncation starts, and it truncates the tail rather than breaking the row. The score circle, the poster and the action row keep their positions.
+
+The vocabulary is shared by the Feed tab, your own profile and somebody else's. It previously was not: the profile read `type === 'title_logged' ? 'watched' : 'ranked'`, so a finished season said "ranked" there and "finished" in the feed.
+
+#### Adding to a watchlist is activity — founder decision, 2026-08-20
+
+This is the active half of the [§22](#22-privacy-and-data-handling) decision that made the watchlist profile content. A shelf somebody has to go looking for is passive; **"Suraj added Dune to their watchlist" arriving in a follower's feed is an opening for "I want to watch that too"**, which is the product's core virality metric ([§28](#28-analytics-and-instrumentation)).
+
+- **Server-owned, in the same transaction as the watchlist row.** The event is written inside `set_watchlist`, not by the client. `feed_events` has no insert policy and never has; every event in the schema is written by a `security definer` function that has already authorised the caller. Migration `20260820000300`.
+- **One durable event per person and title**, enforced by a partial unique index rather than by convention. A retry of the same operation is absorbed by the operation ledger; a *second genuine call* — a double tap on two devices, a reconciliation that re-issues — is refused by the index.
+- **The event outlives the row.** Removing the title from the watchlist, watching it, ranking it, or unlogging it all leave the activity in place. "Added" is a past-tense fact and stays true; deleting it would take other people's reactions and comments with it through the cascade, destroying a conversation because its subject changed their mind. This is deliberately the opposite rule from `title_ranked`, which *is* a claim about current collection state and is deleted on removal (`20260818000100`).
+- **A re-add after a remove restores the row and inherits the original activity.** One event per pair for beta.
+- **Privacy is inherited, not restated.** Nothing was added to the read path: `feed_events_read` is `can_view_profile(auth.uid(), actor_id)`, which resolves the same visibility as the `watchlist` table's own `can_i_view(user_id)`. A blocked, private-and-unapproved, suspended or deleted actor discloses nothing new. *The one asymmetry:* after a remove or a watch the event outlives the row, so a viewer may learn somebody once added a title whose entry is now gone — a past-tense fact about an act, disclosed only to the audience already entitled to that person's activity.
+- **Reactions and comments work on it generically.** Neither `add_comment` nor `set_reaction` reads `feed_events.type`; both resolve existence and visibility from the event id alone. Recommend is offered except on a whole series, which cannot be ranked ([§10](#10-ranking-system)) — a guard that used to be theoretical and is now load-bearing, because `set_watchlist` is the one collection write that accepts a series.
+- **A watchlist add carries no note and no companions.** Both are matched on (actor, title) rather than on the event, so without an explicit gate a watchlist row for a film its actor later watched would render "added Dune to their watchlist with Anna" under a verdict on the film. An intention is not a viewing.
+
+#### The metadata line is standardised
+
+```
+movie    PG-13 · 148m · Science Fiction · Adventure
+season   TV-MA · 8 episodes · Action · Animation
+series   TV-MA · Drama · Thriller
+```
+
+- **Rating first**, which is what somebody scans before deciding whether to put a thing on, and the order the title page already prints.
+- **A season is counted in episodes and never in minutes.** A season has no runtime, and the only minutes near it are the parent series' `episode_run_time[0]` — *one episode*. Rendered where a reader scans for "how long is this", `50m` for a twenty-hour season is worse than a blank. A series shows no length for the same reason.
+- **A series-level episode total is never shown for a season.** The exact ranked or logged season is the canonical unit.
+- **Two genres maximum.** The line is the subordinate element on a row whose sentence column is about 192pt on the narrowest supported device.
+- **A season inherits its rating and genres from its series**, which is where TMDB publishes both — the same own-then-parent rule the genre resolution already used. Without it half the catalogue's feed rows carry a bare episode count.
+- **Absent parts vanish with their separator.** No `Unknown · 148m`, no leading or trailing `·`, no `· ·`. A row with nothing to say renders no line at all rather than holding space open.
+- **Sources.** The rating is `media_items.certification`, the US content certification TMDB publishes, stored since `20260817000900` and never fabricated. The episode count is `media_items.episode_count`, added by `20260820000400` from the per-season `episode_count` TMDB already returns on the series detail the adapter already fetches; a season enriched through its own route counts the episodes that route returns. Both are null until a title is next enriched, and both degrade to an omitted segment.
 
 > **Corrected 2026-08-13.** This section said unfollowing "removes future events; it does not retroactively rewrite history the user already saw." That describes an inbox written per follower, and the feed is assembled on read (AD-6), so it was not true of the system being built.
 >

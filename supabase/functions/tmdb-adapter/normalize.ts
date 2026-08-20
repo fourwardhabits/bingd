@@ -54,7 +54,20 @@ export type SeasonRow = {
   release_date: string | null;
   overview: string | null;
   poster_path: string | null;
+  /**
+   * How many episodes the season has (`20260820000400`).
+   *
+   * Null is a real answer and the SQL coalesces on it, so a path that cannot know
+   * the count leaves whatever the other path wrote. Never zero: a season TMDB
+   * reports as empty has not aired, and `0 episodes` in a metadata line reads as a
+   * fact about the show rather than an absence of data.
+   */
+  episode_count: number | null;
 };
+
+/** A count TMDB is willing to stand behind, or nothing. */
+const countOrNull = (value: number | null | undefined) =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : null;
 
 /** TMDB sends '' for a date it does not have, and '' is not a date. */
 const dateOrNull = (value: string | null | undefined) => (value ? value : null);
@@ -216,6 +229,8 @@ export function seasonsOf(detail: TmdbSeriesDetail): SeasonRow[] {
     release_date: dateOrNull(season.air_date),
     overview: textOrNull(season.overview),
     poster_path: season.poster_path ?? null,
+    // The series list is the only place TMDB publishes a per-season count.
+    episode_count: countOrNull(season.episode_count),
   }));
 }
 
@@ -227,6 +242,11 @@ export function fromSeasonDetail(detail: TmdbSeasonDetail): SeasonRow {
     release_date: dateOrNull(detail.air_date),
     overview: textOrNull(detail.overview),
     poster_path: detail.poster_path ?? null,
+    // This route sends no count, but it sends the episodes, so the count is exact
+    // rather than inferred. Without it a season enriched only through its own route
+    // — which is what `enrichOne` does for every season anchor — would never
+    // acquire one, and the SQL's coalesce would have nothing to keep.
+    episode_count: countOrNull(detail.episodes?.length),
   };
 }
 

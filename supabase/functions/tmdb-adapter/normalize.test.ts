@@ -17,10 +17,12 @@ import { assert, assertEquals } from '@std/assert';
 import {
   certificationOf,
   fromMovieDetail,
+  fromSeasonDetail,
   fromSearchResult,
   personCredits,
   personRecord,
   ratingOf,
+  seasonsOf,
 } from './normalize.ts';
 import type { TmdbPersonDetail } from './tmdb.ts';
 
@@ -275,4 +277,50 @@ Deno.test('a detail row carries the certification and a search row carries none'
 
   const searched = fromSearchResult({ id: 1, media_type: 'movie', title: 'Rated' }, GENRES);
   assertEquals(searched?.certification, null);
+});
+
+// ---------------------------------------------------------------------------
+// episode_count (20260820000400)
+//
+// The founder's feed subheading counts a season in episodes and never in minutes,
+// and the number has to come from somewhere. These pin *which* somewhere, because
+// the two write paths read it from two different shapes and only one of them is
+// obvious.
+// ---------------------------------------------------------------------------
+
+Deno.test('a season list carries the count TMDB publishes on it', () => {
+  const [first, second] = seasonsOf({
+    id: 1,
+    name: 'Severance',
+    seasons: [
+      { id: 10, season_number: 1, name: 'Season 1', episode_count: 9 },
+      { id: 11, season_number: 2, name: 'Season 2', episode_count: 10 },
+    ],
+  });
+
+  assertEquals(first.episode_count, 9);
+  assertEquals(second.episode_count, 10);
+});
+
+Deno.test('a season detail counts its own episodes, since the route sends no total', () => {
+  // Without this, every season enriched through /tv/{id}/season/{n} — which is what
+  // `enrichOne` does for a season anchor — would never acquire a count at all.
+  const row = fromSeasonDetail({
+    id: 11,
+    season_number: 2,
+    name: 'Season 2',
+    episodes: [{}, {}, {}, {}, {}, {}, {}, {}],
+  });
+
+  assertEquals(row.episode_count, 8);
+});
+
+Deno.test('an unaired season is null rather than zero', () => {
+  // Zero is not an absence of data, and "0 episodes" in a metadata line reads as a
+  // fact about the show. The SQL coalesces on null, so this also stops an announced
+  // season from blanking a count a later enrichment supplies.
+  assertEquals(seasonsOf({ id: 1, name: 'X', seasons: [{ id: 2, season_number: 3, episode_count: 0 }] })[0].episode_count, null);
+  assertEquals(seasonsOf({ id: 1, name: 'X', seasons: [{ id: 2, season_number: 3 }] })[0].episode_count, null);
+  assertEquals(fromSeasonDetail({ id: 2, season_number: 3 }).episode_count, null);
+  assertEquals(fromSeasonDetail({ id: 2, season_number: 3, episodes: [] }).episode_count, null);
 });

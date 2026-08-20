@@ -65,6 +65,119 @@ describe('the sentence', () => {
   });
 });
 
+/**
+ * Founder Feed finalization, 2026-08-20, item 1.
+ *
+ * The physical Android review found the row setting the actor on one line and the
+ * title on the next, unconditionally — which made the film read as a field of the row
+ * rather than as the object of the verb. These pin the sentence back together, and
+ * they pin the *mechanism*: one text node, no explicit break, the layout free to wrap.
+ */
+describe('the integrated sentence', () => {
+  /**
+   * The character between a title and its year.
+   *
+   * Written out rather than typed inline because it is invisible in a diff and it is
+   * the thing under test: a plain space here is a legal wrap point, and the founder's
+   * rule is that the year stays with what it dates.
+   */
+  const NBSP = ' ';
+  const withYear = (title: string, year: number) => `${title}${NBSP}(${year})`;
+
+  /**
+   * The exact characters a node renders, with no normalisation.
+   *
+   * The text queries run their matcher over *normalised* text, which folds a
+   * non-breaking space into an ordinary one. So a query cannot tell the two apart and
+   * cannot be the test for the thing under test here. Walking the tree gives the
+   * characters that actually rendered.
+   */
+  const rawText = (node: unknown): string =>
+    typeof node === 'string'
+      ? node
+      : (((node as { children?: unknown[] })?.children ?? []) as unknown[])
+          .map(rawText)
+          .join('');
+
+  it('is one sentence — actor, verb and title in a single text node', async () => {
+    const view = await render(<ActivityRow {...props} />);
+
+    // Composed across the nested runs. If the title were a sibling block again this
+    // query finds nothing, which is exactly the regression.
+    expect(view.getByText(`Suraj ranked ${withYear('Inception', 2010)}`)).toBeTruthy();
+  });
+
+  it('joins the year to the title with a space that cannot be broken', async () => {
+    // Independent review's finding, and the reason this is its own test. Nesting the
+    // year inside the title's `Text` shares the styling and the press target but not
+    // the line breaking: with an ordinary space, a title ending near the line width
+    // leaves "(1982)" stranded on a line by itself.
+    const view = await render(<ActivityRow {...props} title="Blade Runner" year={1982} />);
+
+    // The query normalises, so it is only used to find the node. The assertion is on
+    // the characters themselves.
+    const sentence = view.getByText('Suraj ranked Blade Runner (1982)');
+    expect(rawText(sentence)).toBe(`Suraj ranked ${withYear('Blade Runner', 1982)}`);
+    expect(rawText(sentence)).toContain(NBSP);
+    expect(rawText(sentence)).not.toContain('Blade Runner (1982)');
+  });
+
+  it('never breaks the line itself, however long the title is', async () => {
+    // The founder's long case. The row must let the text engine wrap it and must not
+    // insert a break of its own — an explicit "\n" is what makes a title look like a
+    // second field on a short one.
+    const view = await render(
+      <ActivityRow {...props} title="Keep Your Hands Off Eizouken!, S1" year={2020} />,
+    );
+
+    const sentence = view.getByText(
+      'Suraj ranked Keep Your Hands Off Eizouken!, S1 (2020)',
+    );
+    // The whole sentence, in one node, with no break of our own anywhere in it.
+    expect(rawText(sentence)).toBe(
+      `Suraj ranked ${withYear('Keep Your Hands Off Eizouken!, S1', 2020)}`,
+    );
+    expect(rawText(sentence)).not.toContain('\n');
+    // Wrapping is the layout's job, and it needs room to do it.
+    expect(sentence.props.numberOfLines).toBeGreaterThan(1);
+  });
+
+  it('puts a watchlist add’s clause after the title, still in one sentence', async () => {
+    const view = await render(
+      <ActivityRow
+        {...props}
+        verb="added"
+        tail="to their watchlist"
+        title="Dune"
+        year={2021}
+      />,
+    );
+
+    expect(
+      view.getByText(`Suraj added ${withYear('Dune', 2021)} to their watchlist`),
+    ).toBeTruthy();
+  });
+
+  it('names watch companions after the title, where they are grammatical', async () => {
+    // "Suraj watched with Anna Inception" is what the old ordering became once the
+    // title joined the line.
+    const view = await render(
+      <ActivityRow {...props} verb="watched" companions={['Anna']} />,
+    );
+
+    expect(
+      view.getByText(`Suraj watched ${withYear('Inception', 2010)} with Anna`),
+    ).toBeTruthy();
+  });
+
+  it('opens the title page from inside the sentence', async () => {
+    const view = await render(<ActivityRow {...props} />);
+    await fireEvent.press(view.getByText(withYear('Inception', 2010)));
+
+    expect(props.onPressTitle).toHaveBeenCalled();
+  });
+});
+
 describe('the score', () => {
   it('shows the snapshotted score, never a position', async () => {
     const view = await render(<ActivityRow {...props} score={8.7} bucket="loved" />);

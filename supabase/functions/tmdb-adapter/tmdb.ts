@@ -266,6 +266,14 @@ export type TmdbSeriesDetail = {
     air_date?: string | null;
     overview?: string;
     poster_path?: string | null;
+    /**
+     * How many episodes the season has, which TMDB publishes here and nowhere
+     * cheaper. The season *detail* route does not carry a count — it carries the
+     * episodes themselves — so this list, on a response the adapter already
+     * fetches for its titles and its seasons, is where the number for
+     * `media_items.episode_count` comes from (`20260820000400`).
+     */
+    episode_count?: number | null;
   }[];
 };
 
@@ -278,6 +286,16 @@ export type TmdbSeasonDetail = {
   poster_path?: string | null;
   credits?: TmdbCredits;
   videos?: TmdbVideos;
+  /**
+   * The season's episodes, which this route returns in full and the series list
+   * does not.
+   *
+   * Only ever counted, never stored: `media_items` has no episode table and the
+   * feed's subheading wants `8 episodes` and nothing else. It is declared as the
+   * empty shape on purpose, so that reading a field off one is a type error rather
+   * than a facet somebody starts filling in here (`20260820000400`).
+   */
+  episodes?: Record<never, never>[];
 };
 
 export function searchMulti(

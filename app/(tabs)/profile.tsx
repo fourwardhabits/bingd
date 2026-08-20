@@ -6,6 +6,7 @@ import { Alert, RefreshControl, ScrollView, Share, StyleSheet, View } from 'reac
 import { useCurrentProfile } from '@/features/auth';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
+import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { useReactions, useSetReaction, REACTION_GLYPH } from '@/features/feed/use-reactions';
@@ -192,10 +193,23 @@ export default function ProfileScreen() {
                 key={event.id}
                 actorName={event.actorName}
                 actorAvatarUri={event.actorAvatarUri}
-                verb={event.type === 'title_logged' ? 'watched' : 'ranked'}
+                // The shared vocabulary, not a local guess. This line used to read
+                // `type === 'title_logged' ? 'watched' : 'ranked'`, which called a
+                // finished season "ranked" here and "finished" in the feed — one
+                // event saying two things on two screens.
+                verb={verbFor(event.type)}
+                tail={tailFor(event.type)}
+                companions={event.companions}
                 title={event.title}
                 year={event.year}
                 posterUri={posterUri(event.posterPath)}
+                metadata={activityMetadata({
+                  kind: event.kind,
+                  genres: event.genres,
+                  certification: event.certification,
+                  runtimeMinutes: event.runtimeMinutes,
+                  episodeCount: event.episodeCount,
+                })}
                 score={event.score}
                 bucket={event.bucket}
                 note={event.note?.text ?? null}

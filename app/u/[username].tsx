@@ -4,6 +4,7 @@ import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
+import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { useActorActivity } from '@/features/feed/use-feed';
@@ -307,11 +308,19 @@ export default function PublicProfileScreen() {
                   key={event.id}
                   actorName={event.actorName}
                   actorAvatarUri={event.actorAvatarUri}
-                  verb={VERB[event.type]}
+                  verb={verbFor(event.type)}
+                  tail={tailFor(event.type)}
                   companions={event.companions}
                   title={event.title}
                   year={event.year}
                   posterUri={posterUri(event.posterPath)}
+                  metadata={activityMetadata({
+                    kind: event.kind,
+                    genres: event.genres,
+                    certification: event.certification,
+                    runtimeMinutes: event.runtimeMinutes,
+                    episodeCount: event.episodeCount,
+                  })}
                   score={event.score}
                   bucket={event.bucket}
                   note={event.note?.text ?? null}
@@ -349,12 +358,6 @@ export default function PublicProfileScreen() {
     </Screen>
   );
 }
-
-const VERB = {
-  title_ranked: 'ranked',
-  title_logged: 'watched',
-  season_completed: 'finished',
-} as const;
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
