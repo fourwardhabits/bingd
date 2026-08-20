@@ -92,13 +92,20 @@ const ALLOWED_PASSTHROUGH = new Set([
   '--build-logger-level',
   '--help',
   '-h',
-  // Waiting behaviour, and build-cache and credential handling. None of these decides
-  // what goes into the artifact or where it is sent.
+  // Waiting behaviour, build-cache handling, and a flag that only ever *prevents* a
+  // credential change. None of these decides what goes into the artifact or where it goes.
   '--wait',
   '--no-wait',
   '--clear-cache',
   '--freeze-credentials',
-  '--refresh-ad-hoc-provisioning-profile',
+  //
+  // **`--refresh-ad-hoc-provisioning-profile` is deliberately absent**, and it was here for
+  // one round. It rewrites the Apple provisioning profile to cover every device currently
+  // registered to the team — so it changes what is embedded in the artifact and **which
+  // phones may install it**, which is precisely the class this list exists to keep out.
+  // Review 28e. It is not needed by anything documented here: the founder's first iOS
+  // build creates the profile interactively, and adding a device later is a credentials
+  // operation rather than a build flag.
 ]);
 
 const rejected = passthrough.filter((arg) => {

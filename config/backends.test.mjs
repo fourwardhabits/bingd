@@ -288,6 +288,9 @@ describe('the release scripts, which are the only supported way to publish', () 
       ['--what-to-test', 'anything'],
       ['--republish'],
       ['--group', 'some-group-id'],
+      // Changes which phones may install the artifact, by rewriting the provisioning
+      // profile to cover every device registered to the team. Review 28e.
+      ['--refresh-ad-hoc-provisioning-profile'],
       ['--a-flag-invented-after-this-test-was-written'],
     ];
 
