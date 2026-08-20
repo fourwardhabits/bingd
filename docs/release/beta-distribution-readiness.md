@@ -103,9 +103,17 @@ not; external testers and the public link do. Budget a day or two for the first 
 ### The submission, when it is time — not now
 
 ```
-npx eas build --platform ios --profile beta        # interactive the first time
+npm run build:beta -- --platform ios               # interactive the first time
 npx eas submit --platform ios --profile beta       # needs the ASC app record
 ```
+
+**`npm run build:beta`, not `eas build --profile beta`.** The wrapper is what runs the
+clean-tree, branch and exact-commit release-gate checks, and what supplies `BINGD_LANE` and
+`APP_VARIANT` — and this document printed the bare command for a round, which is a
+documented bypass rather than the residual the other pages acknowledge. Review 28c.
+
+`eas submit` is deliberately still the raw command: it uploads an artifact that has already
+been built and gated, and it needs credentials this wrapper does not handle.
 
 ---
 

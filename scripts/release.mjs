@@ -54,6 +54,52 @@ const profile = eas.build[lane];
 const GUARDED = new Set(['beta', 'production']);
 
 // ---------------------------------------------------------------------------
+// Nothing passed through may redefine the lane
+// ---------------------------------------------------------------------------
+
+/**
+ * The flags this script exists to control, refused in the passthrough.
+ *
+ * Independent review 28c: `npm run update:preview -- --branch beta` published Preview code
+ * to the Beta branch, past the Beta gate, using a supported command. The trusted options
+ * were built *before* `...passthrough`, and `eas` takes the last occurrence — so appending
+ * one silently won.
+ *
+ * Refusing is better than reordering. Putting the trusted values last would make the
+ * duplicate lose quietly, and somebody typing `--branch beta` deserves to be told that this
+ * is not how a lane is chosen, not to have it ignored.
+ *
+ * `--auto-submit` is here for a different reason and the same shape: it turns a build into
+ * a store upload, which is a distribution decision this wrapper does not make.
+ */
+const LANE_DEFINING = [
+  '--profile',
+  '-e',
+  '--branch',
+  '--environment',
+  '--channel',
+  '--auto-submit',
+  '-s',
+  '--auto-submit-with-profile',
+];
+
+const smuggled = passthrough.filter((arg) =>
+  LANE_DEFINING.some((flag) => arg === flag || arg.startsWith(`${flag}=`)),
+);
+
+if (smuggled.length) {
+  console.error(
+    `\nRefusing: ${smuggled.join(' ')} would redefine the lane this command is for.\n\n` +
+      `  The lane is the first argument and it decides the profile, the branch, the\n` +
+      `  environment, BINGD_LANE and APP_VARIANT together. A flag that changes one of\n` +
+      `  them changes what is published without changing which gate ran — which is how\n` +
+      `  \`update:preview --branch beta\` reached friend testers past the Beta checks.\n\n` +
+      `  Use the script for the lane you mean: npm run build:beta, npm run update:beta.\n`,
+  );
+  process.exit(2);
+}
+
+// ---------------------------------------------------------------------------
 // The gate, for the lanes other people install
 // ---------------------------------------------------------------------------
 

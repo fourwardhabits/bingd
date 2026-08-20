@@ -241,7 +241,7 @@ no identifiers in anything user-facing — and it applies to a public release, n
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | EAS env `development`, `preview` | yes | publishable key, bounded by RLS |
 | `EXPO_PUBLIC_SENTRY_DSN` | EAS env `development`, `preview` | yes | accepts events only |
 | `EXPO_PUBLIC_POSTHOG_KEY` | EAS env `development`, `preview` | yes | write-only project token |
-| `EXPO_PUBLIC_POSTHOG_HOST` | `eas.json` → `base.env` | yes | `https://us.i.posthog.com` |
+| `EXPO_PUBLIC_POSTHOG_HOST` | `eas.json` → `base.env`* | yes | `https://us.i.posthog.com` |
 | `APP_VARIANT` | `eas.json` per profile | as `extra.variant` | selects the variant table |
 | `BINGD_LANE` | `eas.json` per profile | as `extra.lane` | the profile's own name |
 | `SENTRY_DISABLE_AUTO_UPLOAD` | `eas.json` per profile | **no** | `true` — see below |
@@ -249,7 +249,16 @@ no identifiers in anything user-facing — and it applies to a public release, n
 | `TMDB_ACCESS_TOKEN` | **Supabase function secret** | **never** | server-side only |
 | `SUPABASE_SERVICE_ROLE_KEY` | `.env.local`, git-ignored | **never** | operator scripts only |
 
-Four things this table is asserting, each of which was checked rather than assumed:
+\* **`base.env` reaches builds and not updates.** Anything under `eas.json` →
+`build.<profile>.env` — including everything inherited from `base` — is read by `eas build`
+and by nothing else; `eas update` takes an *environment*, and an EAS environment holds only
+the four `EXPO_PUBLIC_*` variables above it. It happens not to matter for this one, because
+`app.config.ts` defaults `posthogHost` to the same value, and it matters a great deal for
+`APP_VARIANT` and `BINGD_LANE`, which is why `scripts/release.mjs` supplies those two by
+hand. Noted here rather than left to be rediscovered on the next variable somebody adds to
+`base.env`. (Review 28c.)
+
+Five things this table is asserting, each of which was checked rather than assumed:
 
 - **The `production` EAS environment is empty.** Verified with `eas env:list --environment production`.
 - **No service-role key is reachable from any client path.** `.env.local` is read by
@@ -259,6 +268,10 @@ Four things this table is asserting, each of which was checked rather than assum
   Supabase secret (AD-8, PRD §19).
 - **The client bundle was scanned for secrets** during the security tranche and was clean.
   See `docs/security/beta-security-review.md`.
+- **`scripts/release.mjs` passes no credential.** It supplies `BINGD_LANE` and
+  `APP_VARIANT` and nothing else; everything above comes from the EAS environment the
+  profile names. A secret routed through that script would be a secret in a process listing
+  and in a shell history.
 
 ### Sentry source maps — the one configured gap
 

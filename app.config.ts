@@ -32,9 +32,11 @@ const current = variants[variant];
  * anything, and the allowlist was global, so the day a production project exists a Beta
  * build could quietly use it.
  *
- * `BINGD_LANE` is set on every profile in `eas.json`. Absent — a local `expo start`, a CI
- * config resolution — the union of every lane's backends is accepted, because there is no
- * lane to be wrong about.
+ * `BINGD_LANE` is set on every profile in `eas.json`, and by `scripts/release.mjs` for
+ * `eas update`, which does not read a build profile. Absent — a local `expo start`, a CI
+ * config resolution — the **development** lane's backends are accepted: a resolution with
+ * no lane is somebody's laptop, and the union of every lane's would hand a bare
+ * `eas update` a production ref the day one exists.
  */
 const lane = process.env.BINGD_LANE;
 

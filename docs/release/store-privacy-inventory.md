@@ -181,10 +181,13 @@ transferred to any third party for their own purposes, sold, or used for adverti
 | Personal info → **Other info** *(date of birth)* | Yes | No | Required | App functionality — age eligibility |
 | Photos and videos → **Photos** | Yes | No | Optional | App functionality — profile picture |
 | App activity → **Other user-generated content** | Yes | No | Optional | App functionality |
-| App activity → **App interactions** | Yes | No | Optional | Analytics |
-| App info and performance → **Crash logs** | Yes | No | Optional | App functionality — diagnostics |
-| App info and performance → **Diagnostics** | Yes | No | Optional | App functionality — diagnostics |
-| App activity → **In-app search history**¹ | **Yes** | No | Optional | App functionality |
+| App activity → **App interactions** | Yes | No | **Required**² | Analytics |
+| App info and performance → **Crash logs** | Yes | No | **Required**² | App functionality — diagnostics |
+| App info and performance → **Diagnostics** | Yes | No | **Required**² | App functionality — diagnostics |
+| App activity → **In-app search history**¹ | **Yes** | No | **Required**² | App functionality |
+
+² **Required, because nothing in Bingd lets a user turn telemetry off.** See the note under
+"Two answers that are easy to get wrong" below.
 
 ¹ **Declare it. Whether you may mark it "processed ephemerally" depends on the same
 homework as Apple's row, and is not settled.**
@@ -215,9 +218,17 @@ other IDs.
   In-app search history is the one row it could apply to here — and it is a *qualifier on a
   declared type*, never a reason to leave the type off the form. Whether Bingd is entitled
   to it is open; see note 1 above.
-- **"Required"** means the app cannot function without it. Email and user id are required;
-  a bio, a photo and a note are optional. Marking everything required is inaccurate and
-  reads as boilerplate.
+- **"Required" is about the user's choice, not about the product's dependencies.** This is
+  the one Play definition worth reading twice, and getting it backwards is what review 28c
+  caught here. Optional means **the user can decide whether this data is collected**.
+
+  A bio, a profile photo and a note are optional: nobody has to write one. **Analytics,
+  crash logs, diagnostics and search history are Required**, because `app/_layout.tsx`
+  initialises PostHog and Sentry before the first render, `src/lib/analytics.ts` sets
+  `disabled: false`, and **there is no opt-out anywhere in the app.** "The app would still
+  work without it" is not the question being asked.
+
+  If a telemetry opt-out is ever added, these four move to Optional in the same change.
 
 ---
 

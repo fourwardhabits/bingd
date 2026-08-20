@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -247,6 +248,41 @@ describe('the release scripts, which are the only supported way to publish', () 
         assert.fail(`${name} calls eas ${script} directly instead of scripts/release.mjs`);
       }
     }
+  });
+
+  it('refuses a passthrough flag that would redefine the lane', () => {
+    /**
+     * Review 28c: `npm run update:preview -- --branch beta` published Preview code to the
+     * Beta branch, **past the Beta gate**, using a supported command. The trusted options
+     * were assembled before `...passthrough`, and `eas` takes the last occurrence of a
+     * flag, so appending one silently won.
+     *
+     * The lane is the first argument and it decides the profile, the branch, the
+     * environment, `BINGD_LANE` and `APP_VARIANT` together. Any flag that moves one of
+     * them moves what is published without moving which gate ran.
+     */
+    const smuggle = ['--branch', '--profile', '--environment', '--channel', '--auto-submit', '-e', '-s'];
+
+    for (const flag of smuggle) {
+      for (const form of [[flag, 'beta'], [`${flag}=beta`]]) {
+        const run = spawnSync(
+          process.execPath,
+          [join(root, 'scripts', 'release.mjs'), 'update', 'preview', ...form],
+          { encoding: 'utf8' },
+        );
+        assert.notEqual(run.status, 0, `${form.join(' ')} was accepted`);
+        assert.match(run.stderr, /would redefine the lane/, form.join(' '));
+      }
+    }
+
+    // And the flags that are none of its business are still passed through. `--help` makes
+    // eas print usage and exit 0 without touching anything.
+    const ok = spawnSync(
+      process.execPath,
+      [join(root, 'scripts', 'release.mjs'), 'update', 'preview', '--platform', 'android', '--help'],
+      { encoding: 'utf8' },
+    );
+    assert.doesNotMatch(ok.stderr, /would redefine the lane/);
   });
 });
 
