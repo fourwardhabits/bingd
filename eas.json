@@ -4,6 +4,7 @@
     "version": ">= 21.7.1",
     "appVersionSource": "remote"
   },
+
   "build": {
     "base": {
       "node": "22.16.0",
@@ -14,9 +15,11 @@
 
     "development": {
       "extends": "base",
+      "environment": "development",
       "developmentClient": true,
       "distribution": "internal",
       "channel": "development",
+      "autoIncrement": true,
       "env": {
         "APP_VARIANT": "development",
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
@@ -27,8 +30,10 @@
 
     "preview": {
       "extends": "base",
+      "environment": "preview",
       "distribution": "internal",
       "channel": "preview",
+      "autoIncrement": true,
       "env": {
         "APP_VARIANT": "preview",
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
@@ -36,8 +41,22 @@
       "android": { "buildType": "apk" }
     },
 
+    "beta": {
+      "extends": "base",
+      "environment": "preview",
+      "distribution": "store",
+      "channel": "beta",
+      "autoIncrement": true,
+      "env": {
+        "APP_VARIANT": "production",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+      },
+      "android": { "buildType": "app-bundle" }
+    },
+
     "production": {
       "extends": "base",
+      "environment": "production",
       "distribution": "store",
       "channel": "production",
       "autoIncrement": true,
@@ -49,6 +68,15 @@
   },
 
   "submit": {
+    "beta": {
+      "ios": {
+        "appleTeamId": "98729PG8GD"
+      },
+      "android": {
+        "track": "alpha",
+        "releaseStatus": "draft"
+      }
+    },
     "production": {}
   }
 }

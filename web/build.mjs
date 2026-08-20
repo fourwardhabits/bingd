@@ -352,7 +352,10 @@ ${body}
         </p>
       </div>
 
-      <footer><a href="mailto:hello@bingd.app">hello@bingd.app</a></footer>
+      <footer>
+        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> &middot;
+        <a href="/privacy">Privacy</a> &middot; <a href="/support">Support</a>
+      </footer>
     </main>
 
     <script type="application/json" id="bingd-config">${jsonBlock({
@@ -410,6 +413,303 @@ const GENERIC_BODY = `        <p>
           and this page will become the app&rsquo;s public face when it opens up.
         </p>`;
 
+/**
+ * The one address in this project a stranger is told to write to.
+ *
+ * Both stores publish it in the listing, so it has to be a mailbox somebody reads
+ * rather than a plausible-looking string. It was already in the router's footer; it is
+ * a constant now because three more pages say it and a support address that differs
+ * between pages is a support address people stop trusting.
+ */
+const SUPPORT_EMAIL = 'hello@bingd.app';
+
+/**
+ * The date on the documents.
+ *
+ * A literal rather than `new Date()`. A build stamp would move every time Cloudflare
+ * rebuilt the site — a redeploy with no text change would claim the policy had been
+ * revised, which is the one thing a date on a privacy policy is for.
+ */
+const DOCUMENT_DATE = '20 August 2026';
+
+const PRIVACY_BODY = `      <p class="lede">
+        Bingd is a closed beta. This describes what it actually stores, why, and who else
+        sees it &mdash; written against the database schema rather than from a template.
+      </p>
+
+      <h2>Who runs Bingd</h2>
+      <p>
+        Bingd is made by one independent developer. Questions about anything on this page,
+        including a request to see or remove what is held about you, go to
+        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.
+      </p>
+
+      <h2>What Bingd stores about you</h2>
+
+      <h3>Your account</h3>
+      <ul>
+        <li>Your <strong>email address</strong>, and if you signed in with Apple or Google,
+          the account identifier that provider returns. Signing in with Apple using
+          &ldquo;Hide My Email&rdquo; means Bingd only ever holds the relay address.</li>
+        <li>Your <strong>date of birth</strong>, used only to check that you are 13 or
+          older. It is never returned by any part of the app, including to you &mdash; only
+          a yes/no answer derived from it is readable.</li>
+      </ul>
+
+      <h3>Your profile</h3>
+      <ul>
+        <li>Your handle, display name, an optional short bio, an optional profile picture,
+          and whether your account is public or private.</li>
+      </ul>
+
+      <h3>What you do in the app</h3>
+      <ul>
+        <li>The films and seasons you rank, log, or add to a watchlist, and the order you
+          put them in.</li>
+        <li>Notes and reviews you write, comments you leave, and reactions you give.</li>
+        <li>Recommendations you send and receive, and who you tag as having watched
+          something with you.</li>
+        <li>Who you follow, who follows you, follow requests, and anyone you block.</li>
+        <li>Watch goals you set.</li>
+      </ul>
+
+      <h3>Invitations</h3>
+      <ul>
+        <li>If you joined through an invitation link, Bingd records which account invited
+          you. That is how the inviter is credited.</li>
+      </ul>
+
+      <h2>What Bingd never sends anywhere</h2>
+      <p>
+        Product analytics carry <strong>no</strong> free text and no content. Enforced by an
+        allowlist in the code and asserted by tests, these never leave your device as
+        analytics: your email, handle, display name, bio, date of birth, any film or series
+        title, anything you typed into search, any note, review or comment, and any
+        invitation token. Automatic capture of screens and taps is switched off and stays
+        off &mdash; in a film app it would record the titles in your collection.
+      </p>
+      <p>
+        Bingd shows no advertising, runs no advertising or attribution SDK, does not track
+        you across other apps or websites, and does not sell or rent anything about you.
+      </p>
+
+      <h2>Who else sees it</h2>
+      <ul>
+        <li><strong>Supabase</strong> hosts the database, authentication and file storage.
+          Everything above is stored there.</li>
+        <li><strong>Cloudflare</strong> serves this website.</li>
+        <li><strong>PostHog</strong> receives product analytics: which steps of the app
+          were used, plus your account identifier, the app version and which build you are
+          running. No content and no free text.</li>
+        <li><strong>Sentry</strong> receives crash and error reports. Personal information
+          is switched off, the user object is reduced to an account identifier, request
+          bodies, cookies and query strings are stripped, and console logs are dropped.
+          Error messages and stack traces are kept, because a crash report without them
+          reports nothing.</li>
+        <li><strong>TMDB</strong> supplies film and series information. Bingd&rsquo;s
+          server asks TMDB for it; your device does not, except that <strong>posters and
+          images load directly from TMDB&rsquo;s servers</strong>, which means TMDB sees the
+          request the way any website you load an image from would.</li>
+        <li><strong>Apple</strong> and <strong>Google</strong>, if you use their sign-in.</li>
+      </ul>
+      <p>
+        Nobody else. There is no data broker, no advertising network and no analytics
+        partner beyond the two named above.
+      </p>
+
+      <h2>Who can see your profile inside Bingd</h2>
+      <p>
+        A <strong>public</strong> account can be found and read by any other Bingd user. A
+        <strong>private</strong> account can only be read by followers you have approved,
+        and follow requests wait for your answer. Blocking someone is a barrier in both
+        directions, not a filter. You can change this at any time in Settings &rsaquo;
+        Privacy.
+      </p>
+
+      <h2>How long it is kept</h2>
+      <p>
+        Your account data is kept for as long as your account exists. Delete the account
+        and it is removed &mdash; see <a href="/account-deletion">deleting your account</a>
+        for exactly what goes, what is anonymised, and the one category that is kept.
+        Analytics and crash reports are held by PostHog and Sentry under their own
+        retention settings and are not removed by deleting your Bingd account; they carry
+        an account identifier and no content.
+      </p>
+
+      <h2>Age</h2>
+      <p>
+        Bingd is for people aged 13 and over. An account whose date of birth is under 13 is
+        refused at sign-up and nothing is retained for it.
+      </p>
+
+      <h2>Your choices</h2>
+      <ul>
+        <li>Edit or clear your profile, bio and picture in Settings &rsaquo; Edit Profile.</li>
+        <li>Make your account private in Settings &rsaquo; Privacy.</li>
+        <li>Revoke your invitation link in Settings &rsaquo; Privacy, which stops it working
+          for anyone who has it.</li>
+        <li>Delete your account, permanently, in Settings &rsaquo; Account &amp; Data.</li>
+        <li>Ask for a copy of what is held about you by writing to
+          <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</li>
+      </ul>
+
+      <h2>Changes</h2>
+      <p>
+        If this changes in a way that affects what is collected or who sees it, the date at
+        the top changes and testers are told in the app.
+      </p>
+
+      <h2>Attribution</h2>
+      <p>
+        This product uses the TMDB API but is not endorsed or certified by TMDB.
+      </p>`;
+
+const SUPPORT_BODY = `      <p class="lede">
+        Bingd is in closed testing. There is no help desk &mdash; there is one address, and
+        it is read by the person who builds the app.
+      </p>
+
+      <h2>Getting help</h2>
+      <p>
+        Write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>. Expect a reply
+        within a few days.
+      </p>
+
+      <h2>What to include</h2>
+      <p>
+        Almost every question is answered faster with these four things:
+      </p>
+      <ul>
+        <li>Your Bingd handle.</li>
+        <li>The <strong>version and build number</strong>, from Settings &rsaquo; scroll to
+          the bottom. It reads like <em>Bingd 0.1.0 (7)</em>.</li>
+        <li>Whether you are on iPhone or Android.</li>
+        <li>What you tapped, what you expected, and what happened instead.</li>
+      </ul>
+
+      <h2>Things that are not faults</h2>
+      <ul>
+        <li><strong>Bingd sends no push notifications.</strong> Notifications appear in the
+          app&rsquo;s own inbox and nowhere else. That is deliberate for this beta.</li>
+        <li><strong>An invitation link does not follow you through an install.</strong> If
+          you install Bingd from a store or from TestFlight and open it from your home
+          screen, the invitation is not carried across. Go back to the link you were sent
+          and tap &ldquo;I already have Bingd&rdquo;.</li>
+        <li><strong>A private account stays private from a link.</strong> Opening someone&rsquo;s
+          profile link does not bypass their privacy setting.</li>
+      </ul>
+
+      <h2>Account and data</h2>
+      <p>
+        What is stored and who sees it is on the <a href="/privacy">privacy page</a>.
+        Deleting your account is done inside the app and is explained on
+        <a href="/account-deletion">this page</a>.
+      </p>
+
+      <h2>Reporting something serious</h2>
+      <p>
+        Abuse, impersonation, or a security problem: write to
+        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> with the word
+        <strong>URGENT</strong> in the subject. Please do not post security findings
+        publicly before they are fixed.
+      </p>`;
+
+const DELETION_BODY = `      <p class="lede">
+        You can delete your Bingd account yourself, from inside the app, without asking
+        anybody. It is immediate and it cannot be undone.
+      </p>
+
+      <h2>How</h2>
+      <ul>
+        <li>Open Bingd and go to <strong>Settings &rsaquo; Account &amp; Data</strong>.</li>
+        <li>Type your own handle to confirm &mdash; a yes/no dialog is a mistap, and this is
+          the one action in Bingd nothing can reverse.</li>
+        <li>Tap <strong>Delete for good</strong>.</li>
+      </ul>
+      <p>
+        If you cannot get into the app, write to
+        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> from the email address on the
+        account and it will be done for you.
+      </p>
+      <p>
+        There is no &ldquo;deactivate&rdquo;. Bingd does not offer a temporary hidden state,
+        because a control that pretends to hide an account and only signs it out is worse
+        than not having one. To disappear without deleting, set your account to private in
+        Settings &rsaquo; Privacy.
+      </p>
+
+      <h2>What is deleted</h2>
+      <p>Everything below goes, permanently:</p>
+      <ul>
+        <li>Your login &mdash; email address, phone if present, Apple and Google identities,
+          and every signed-in session.</li>
+        <li>Your profile: handle, display name, bio, privacy setting, and your date of
+          birth.</li>
+        <li>Your profile picture, removed from file storage.</li>
+        <li>Your whole collection: every ranking, comparison and ranking session, everything
+          logged, your watchlist and your watch goals.</li>
+        <li>Everything you wrote or reacted to: notes, reviews, comments, reactions and
+          feed activity.</li>
+        <li>Every follow in and out, every follow request, and every block.</li>
+        <li>Watch tags &mdash; both the ones you applied to other people and the ones other
+          people applied to you.</li>
+        <li>Every notification you sent or received, and your notification settings.</li>
+        <li>Any list, share link or invitation link you created.</li>
+        <li>Everything derived about you: match scores and recommendation history.</li>
+      </ul>
+
+      <h2>What is kept without pointing at you</h2>
+      <ul>
+        <li><strong>Your released handle</strong> stays reserved &mdash; as a word and a
+          date, with nothing linking it to you. Otherwise somebody else could take it and
+          inherit links that used to be yours.</li>
+        <li><strong>Invitation credit</strong> for people who are still here. If you invited
+          someone, the record that they arrived through an invitation survives; the pointer
+          to your account does not.</li>
+        <li>If someone you invited is still using Bingd, their account is untouched.</li>
+      </ul>
+
+      <h2>What is kept, and is not anonymous</h2>
+      <p>
+        <strong>Safety records.</strong> If an account has been reported, or if a moderator
+        acted on it, that report and that action are retained &mdash; including the account
+        identifier and any text the reporter wrote. This is deliberate: a safety record any
+        subject can erase by closing their account is not a safety record. Reports you
+        <em>made</em> about other people also survive, with your identity removed from them.
+      </p>
+
+      <h2>What deletion does not reach</h2>
+      <p>
+        Analytics and crash reports already sent to PostHog and Sentry are held by those
+        services under their own retention settings. They carry an account identifier and
+        never any content &mdash; no titles, no notes, no search text. See the
+        <a href="/privacy">privacy page</a>.
+      </p>`;
+
+const DOCUMENTS = [
+  {
+    dir: 'privacy',
+    title: 'Privacy — Bingd',
+    heading: 'Privacy',
+    stamp: `Last updated ${DOCUMENT_DATE}. Bingd is in closed testing.`,
+    body: PRIVACY_BODY,
+  },
+  {
+    dir: 'support',
+    title: 'Support — Bingd',
+    heading: 'Support',
+    stamp: `Last updated ${DOCUMENT_DATE}.`,
+    body: SUPPORT_BODY,
+  },
+  {
+    dir: 'account-deletion',
+    title: 'Deleting your Bingd account',
+    heading: 'Deleting your account',
+    stamp: `Last updated ${DOCUMENT_DATE}.`,
+    body: DELETION_BODY,
+  },
+];
+
 const ROUTES = [
   {
     dir: 'i',
@@ -450,6 +750,109 @@ for (const route of ROUTES) {
   await writeFile(join(dist, route.dir, 'index.html'), page(route));
 }
 
+// ---------------------------------------------------------------------------
+// The three documents both stores require a URL for
+// ---------------------------------------------------------------------------
+
+/**
+ * `/privacy`, `/support`, `/account-deletion`.
+ *
+ * These are not marketing pages and they are not the router. They exist because App
+ * Store Connect and Play Console each ask for a URL, refuse a submission without one,
+ * and fetch it themselves — and because until 2026-08-20 all three of these paths
+ * returned Cloudflare Pages' fallback `index.html` with a **200**. A reviewer following
+ * the privacy link would have been shown the generic "Bingd is in closed testing" page
+ * and would reasonably have concluded there was no policy.
+ *
+ * Three rules they are written under:
+ *
+ *   - **Nothing here is aspirational.** Every sentence describes what the schema and the
+ *     client actually do today. The deletion inventory is the one in the header of
+ *     `20260817000600_account.sql`, in the same categories, because a deletion claim that
+ *     is not checkable against the migration is the claim most worth getting wrong.
+ *   - **No JavaScript and no `page.mjs`.** The router decides where to send somebody who
+ *     tapped an invitation; these are documents, and a document that needs a script to
+ *     render is a document a crawler cannot read.
+ *   - **Deliberately unclaimed by the app.** They are absent from `appPaths`, so neither
+ *     the Apple file nor the Android manifest hands them to the app — which has no screen
+ *     for any of them. `web/router.test.mjs` asserts that, in both directions.
+ */
+const documentStyles = `
+      ${styles}
+
+      /* Long-form overrides. The router's pages are one card centred in the viewport;
+         these are read top to bottom, so the grid centring above is undone. */
+      body { display: block; padding: 3rem 1.5rem 4rem; }
+      main { max-width: 42rem; margin: 0 auto; text-align: left; }
+      h1 { font-size: clamp(2rem, 8vw, 2.75rem); margin-bottom: 0.25rem; }
+      h2 {
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-weight: 400;
+        font-size: 1.4rem;
+        margin: 2.5rem 0 0.75rem;
+        color: var(--ink);
+      }
+      h3 { font-size: 1rem; font-weight: 500; margin: 1.5rem 0 0.5rem; color: var(--ink); }
+      p, li { color: var(--secondary); font-size: 1rem; line-height: 1.65; }
+      ul { padding-left: 1.25rem; margin: 0 0 1rem; }
+      li { margin-bottom: 0.4rem; }
+      strong { color: var(--ink); font-weight: 500; }
+      a { color: var(--maroon); text-underline-offset: 2px; }
+      .stamp {
+        font-size: 0.8125rem;
+        color: var(--secondary);
+        margin: 0 0 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .lede { font-size: 1.05rem; color: var(--ink); }
+      footer {
+        margin-top: 3rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--hairline);
+        font-size: 0.8125rem;
+      }
+`;
+
+const document_ = ({ title, heading, stamp, body }) => `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="referrer" content="no-referrer" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>${documentStyles}</style>
+  </head>
+
+  <body>
+    <main>
+      <h1>${heading}</h1>
+      <p class="stamp">${stamp}</p>
+${body}
+      <footer>
+        <a href="/privacy">Privacy</a> &middot; <a href="/support">Support</a> &middot;
+        <a href="/account-deletion">Delete your account</a> &middot;
+        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>
+      </footer>
+    </main>
+  </body>
+</html>
+`;
+
+for (const doc of DOCUMENTS) {
+  await mkdir(join(dist, doc.dir), { recursive: true });
+  await writeFile(join(dist, doc.dir, 'index.html'), document_(doc));
+}
+
 /**
  * Cloudflare Pages rewrites, so `/i/<anything>` serves the invitation page.
  *
@@ -472,6 +875,7 @@ console.log(
 );
 console.log(`  assetlinks.json             ${assetlinks.length} package(s)`);
 console.log(`  router                      ${ROUTES.map((r) => `/${r.dir}/*`).join(' ')}`);
+console.log(`  documents                   ${DOCUMENTS.map((d) => `/${d.dir}`).join(' ')}`);
 
 const configured = DESTINATIONS.filter(([, value]) => value != null).map(([name]) => name);
 console.log(

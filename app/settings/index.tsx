@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Application from 'expo-application';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { Stack, useRouter } from 'expo-router';
@@ -223,7 +224,24 @@ function About() {
  */
 function BuildDetails() {
   const version = Constants.expoConfig?.version ?? '?';
-  const build = Constants.expoConfig?.android?.versionCode ?? '—';
+
+  /**
+   * **The build number is read from the installed binary, not from the config.**
+   *
+   * This line used to say `Constants.expoConfig?.android?.versionCode`, and it was
+   * wrong twice over. `app.config.ts` sets no `versionCode` at all — `appVersionSource`
+   * is `remote`, so the number is assigned by EAS at build time and lives on EAS's
+   * servers — and even where a value did appear, the key is the *Android* one, so every
+   * iPhone in the beta showed `Bingd 0.1.0 (—)`. The one screen whose job is to let a
+   * tester tell a support conversation which build they are on could not name it on
+   * half the fleet.
+   *
+   * `Application.nativeBuildVersion` is `versionCode` on Android and `CFBundleVersion`
+   * on iOS, read out of the package that is actually installed. It is the same source
+   * `lib/release.ts` uses for the `build_number` on every analytics event and every
+   * Sentry report, so what a tester reads aloud matches what the dashboards say.
+   */
+  const build = Application.nativeBuildVersion ?? '—';
 
   return (
     <View style={styles.block}>
@@ -243,11 +261,32 @@ function BuildDetails() {
               runtime {short(Updates.runtimeVersion)} ·{' '}
               {Updates.isEmbeddedLaunch ? 'embedded' : `update ${short(Updates.updateId)}`}
             </Text>
+            {/* Which backend this build is talking to.
+
+                Not a secret — the project ref is the hostname the app connects to and is
+                in the bundle already — and it is the one fact that cannot be inferred
+                from anything else on this screen. A Preview build pointed at the wrong
+                Supabase project looks identical to a right one: it signs in, and the
+                collection is simply empty. `app.config.ts` refuses to build against a
+                project that is not on its allowlist, and this is how the founder
+                confirms which one it chose without opening a dashboard. */}
+            <Text variant="caption" tone="tertiary">
+              backend {backendRef(env.supabaseUrl)}
+            </Text>
           </>
         ) : null}
       </View>
     </View>
   );
+}
+
+/** `https://abheeqyjzekiowkztfxv.supabase.co` reads as `abheeqyjzekiowkztfxv`. */
+function backendRef(url: string) {
+  try {
+    return new URL(url).hostname.split('.')[0];
+  } catch {
+    return '—';
+  }
 }
 
 /** A full fingerprint is 40 characters and unreadable aloud; the first eight identify it. */
