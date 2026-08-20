@@ -17,7 +17,7 @@ grounds for removal from Play, and an inaccurate App Privacy label is a review r
 |---|---|---|---|
 | Email address | `auth.users` | yes | sign-in |
 | Apple / Google account identifier | `auth.identities` | yes | sign-in |
-| Date of birth | `profiles.date_of_birth` | yes | the 13+ gate, and nothing else. Never returned by any API, including to its owner |
+| Date of birth | **`profile_private.date_of_birth`** | yes | the 13+ gate, and nothing else. Never returned by any API, including to its owner. It was moved out of `profiles` by `20260813001400_security_fixes.sql` precisely so that no profile read could reach it |
 | Handle, display name, bio | `profiles` | yes | the profile |
 | Profile picture | Supabase Storage, `avatars/{uuid}/` | yes | the profile |
 | Public/private setting | `profiles.visibility` | yes | who can read the account |
@@ -95,18 +95,39 @@ ask permission for, and asking is itself a rejection risk.
 | Diagnostics → **Crash Data** | Yes | No | App Functionality |
 | Diagnostics → **Performance Data** | Yes | No | App Functionality |
 | Diagnostics → **Other Diagnostic Data** | Yes | No | App Functionality |
-| Sensitive Info → **Other Sensitive Info** *(date of birth)* | Yes | No | App Functionality |
+| Other Data → **Other Data Types** *(date of birth)*¹ | Yes | No | App Functionality |
+| Usage Data → **Search History**² | **FOUNDER — see below** | No | App Functionality |
+
+¹ **Not "Sensitive Info".** Apple's Sensitive Info type covers racial or ethnic data,
+sexual orientation, pregnancy, disability, religious belief, trade union membership,
+political opinion, genetic and biometric data. An ordinary date of birth is none of those,
+so it belongs under Other Data Types. Review 28 corrected an earlier version of this table
+that said Sensitive Info. **Verify against the live questionnaire** — Apple's category list
+changes.
+
+² **Search History — decide this, do not inherit it.** An earlier version of this document
+said "do not declare", and independent review 28 was right to call that inaccurate rather
+than merely arguable.
+
+The case for not declaring: Apple defines *collect* as transmitting data off the device in
+a way that allows access **for longer than necessary to service the request in real time**.
+A Bingd search is answered and discarded — nothing is written to any table, and the
+analytics allowlist specifically excludes query text.
+
+The case for declaring: the query does leave the device, and Supabase's own request logging
+is a retention surface nobody in this project has actually measured.
+
+**So this is a founder decision with one piece of homework**: check what the nonprod
+Supabase project's log retention captures for PostgREST requests. If query text is retained
+in logs, declare Search History. If you cannot establish it, **declare it** — the cost of an
+over-declaration is a line on a label, and the cost of an under-declaration is a rejected
+submission or a removal.
 
 ### Do **not** declare these
 
-Location · Health & Fitness · Financial Info · Contacts · Browsing History · Search
-History¹ · Purchases · Audio Data · Device ID · Advertising Data · Physical Address ·
-Phone Number · Email or Text Messages · Gameplay Content · Customer Support · Other Data
-Types.
-
-¹ **Search History is deliberately not declared.** Apple's definition is search history
-*stored or transmitted*. Bingd transmits a search query to the server to answer it and
-stores nothing, and the analytics allowlist specifically excludes query text.
+Location · Health & Fitness · Financial Info · Contacts · Browsing History · Purchases ·
+Audio Data · Device ID · Advertising Data · Physical Address · Phone Number · Email or Text
+Messages · Gameplay Content · Customer Support.
 
 ### Notes for the reviewer form
 
@@ -163,21 +184,27 @@ transferred to any third party for their own purposes, sold, or used for adverti
 | App activity → **App interactions** | Yes | No | Optional | Analytics |
 | App info and performance → **Crash logs** | Yes | No | Optional | App functionality — diagnostics |
 | App info and performance → **Diagnostics** | Yes | No | Optional | App functionality — diagnostics |
+| App activity → **In-app search history**¹ | **Yes** | No | Optional | App functionality |
+
+¹ **Declare it, and mark it "processed ephemerally".** This is the one place Play's form is
+clearer than Apple's, and it is why the answer here differs from the Apple table above.
+Google provides *processed ephemerally* precisely for data that is transmitted, used to
+service the request, and not retained — which is what a Bingd search is. Declaring it that
+way is accurate and costs nothing; omitting it entirely is a claim that the query never
+leaves the device, and it does. Review 28 corrected an earlier version of this document
+that omitted the row.
 
 ### Do **not** declare these
 
 Location (approximate or precise) · Financial info · Health and fitness · Messages ·
-Audio · Files and docs · Calendar · Contacts · App activity → **In-app search history**¹ ·
-Web browsing · Installed apps · Device or other IDs.
-
-¹ Same reasoning as Apple: queries are transmitted to be answered and are neither stored
-nor sent to analytics.
+Audio · Files and docs · Calendar · Contacts · Web browsing · Installed apps · Device or
+other IDs.
 
 ### Two answers that are easy to get wrong
 
-- **"Processed ephemerally"** is for data that is used in memory and never persisted. It
-  is tempting for search queries — but Play's schema has no row for a type you are not
-  declaring, so the honest answer is simply not to declare in-app search history at all.
+- **"Processed ephemerally"** is for data used to service a request and never persisted.
+  In-app search history is the one row it applies to here — and note that it is a
+  *qualifier on a declared type*, not a reason to leave the type off the form.
 - **"Required"** means the app cannot function without it. Email and user id are required;
   a bio, a photo and a note are optional. Marking everything required is inaccurate and
   reads as boilerplate.
@@ -243,8 +270,11 @@ the app.
 4. **Confirm the retention settings** on the PostHog project and the Sentry project, and
    put the actual numbers on the privacy page. Both currently say "under their own
    retention settings", which is true and vague.
-5. **Answer the age-rating questionnaires honestly** — both stores, both have UGC
+5. **Check Supabase's request-log retention** for the nonprod project, and settle the
+   Search History question above (§2 note 2) for Apple. Google's row is already decided:
+   declare it, marked ephemeral.
+6. **Answer the age-rating questionnaires honestly** — both stores, both have UGC
    questions, and Bingd has notes, reviews and comments.
-6. **Have the privacy page read by a lawyer before public launch.** Not before the friend
+7. **Have the privacy page read by a lawyer before public launch.** Not before the friend
    beta. What is there now is an accurate description of behaviour, which is what a beta
    owes its testers; it is not a document that has been reviewed for GDPR/CCPA sufficiency.

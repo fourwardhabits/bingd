@@ -1,5 +1,10 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
+// Expo resolves this file as CommonJS, and `config/backends.cjs` has to be importable by
+// `node --test` as well — which is the whole reason the lane rule lives outside this file.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { assertBackendIsAllowed } = require('./config/backends.cjs');
+
 /**
  * Three variants per docs/architecture/client.md §8. Selected by APP_VARIANT so
  * all three can sit on one home screen and be told apart at a glance.
@@ -17,67 +22,23 @@ const variants: Record<Variant, { name: string; bundleId: string; scheme: string
 const current = variants[variant];
 
 /**
- * Which Supabase project a build is allowed to be pointed at.
+ * Which Supabase project this lane may talk to.
  *
- * The failure this exists to prevent is the quiet one. A Preview or Beta binary built
- * against the wrong project does not crash, does not warn and does not look different:
- * it signs in, shows an empty collection, and every acceptance result taken on it is
- * about a backend nobody meant to test. Nothing downstream can detect that — the URL is
- * read from an EAS environment whose value lives in a dashboard, and a dashboard is
- * edited by hand.
+ * The rule and its reasoning live in `config/backends.cjs`, which is a plain CommonJS
+ * module for one reason: this file is loaded by Expo's config resolver and cannot be
+ * imported by a test, so a rule written here is a rule nothing can exercise. Independent
+ * review 28 raised that as a BLOCKER along with the two substantive holes it hid — the
+ * check only ran on EAS Build, so an `eas update` could publish a bundle compiled against
+ * anything, and the allowlist was global, so the day a production project exists a Beta
+ * build could quietly use it.
  *
- * So the allowlist is compiled in, and a build that does not match one refuses at
- * configuration time naming the ref it was actually given.
- *
- * **There is exactly one entry, because there is exactly one backend.** No production
- * Supabase project exists. When one does it is added here in the same change that
- * creates it, which is a visible edit in a reviewed diff rather than a value typed into
- * a web form.
+ * `BINGD_LANE` is set on every profile in `eas.json`. Absent — a local `expo start`, a CI
+ * config resolution — the union of every lane's backends is accepted, because there is no
+ * lane to be wrong about.
  */
-const ALLOWED_SUPABASE_REFS: Record<string, string> = {
-  abheeqyjzekiowkztfxv: 'bingd-nonprod',
-};
+const lane = process.env.BINGD_LANE;
 
-/**
- * Enforced on EAS builds only.
- *
- * That is the whole population of artifacts that reach a phone. Local `expo start`,
- * CI's `expo customize` step — which passes `https://ci.invalid` deliberately — and a
- * contributor pointing at their own Supabase project are all outside it, and a rule
- * that fired there would be a rule people learn to route around.
- */
-function supabaseProjectRef(url: string | undefined): string | null {
-  if (!url) return null;
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-  // Parsed rather than pattern-matched. A regex over a URL string is the shape of
-  // check that says yes to `https://evil.example/?x=abheeqyjzekiowkztfxv.supabase.co`,
-  // and this one decides which backend a shipped binary talks to.
-  if (parsed.protocol !== 'https:') return null;
-  const suffix = '.supabase.co';
-  if (!parsed.hostname.endsWith(suffix)) return null;
-  const ref = parsed.hostname.slice(0, -suffix.length);
-  return ref.includes('.') || ref.length === 0 ? null : ref.toLowerCase();
-}
-
-function assertBackendIsAllowed(url: string | undefined) {
-  if (process.env.EAS_BUILD !== 'true') return;
-  const ref = supabaseProjectRef(url);
-  if (ref && ref in ALLOWED_SUPABASE_REFS) return;
-  throw new Error(
-    `EXPO_PUBLIC_SUPABASE_URL is "${url ?? 'unset'}", which is not an allowed Bingd ` +
-      `backend. Allowed: ${Object.entries(ALLOWED_SUPABASE_REFS)
-        .map(([ref_, name]) => `${ref_} (${name})`)
-        .join(', ')}. Check the EAS environment this build profile names, or add the ` +
-      'project to ALLOWED_SUPABASE_REFS in app.config.ts if it is genuinely intended.',
-  );
-}
-
-assertBackendIsAllowed(process.env.EXPO_PUBLIC_SUPABASE_URL);
+assertBackendIsAllowed(process.env.EXPO_PUBLIC_SUPABASE_URL, lane);
 
 /**
  * `eas init` could not write this itself: it edits app.json, and this project uses a
@@ -308,6 +269,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     eas: { projectId: EAS_PROJECT_ID },
 
     variant,
+    /**
+     * The release lane, which is not the same question as the variant.
+     *
+     * `beta` builds the *production* variant — a bundle identifier cannot change between
+     * a TestFlight build and the App Store release that replaces it — so `variant` alone
+     * cannot tell a friend beta apart from a public release. Everything gated on "is this
+     * a build somebody is testing" has to ask this instead, and review 28 was right that
+     * gating the diagnostics block on the variant hid the backend from precisely the
+     * people running a production-variant binary against a nonproduction database.
+     *
+     * Undefined outside an EAS build, where there is no lane.
+     */
+    lane,
     supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
     supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
     // Both are publishable by design: a Sentry DSN only accepts events, and a

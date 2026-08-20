@@ -91,23 +91,35 @@ Updates go to a **branch**; a branch is mapped to a **channel**; a build listens
 channel named in its `eas.json` profile. Today: `development → development`,
 `preview → preview`. `beta` and `production` are created by the first build that names them.
 
+**`--environment` is not optional, and leaving it off is the quiet failure.** `eas update`
+compiles the bundle on *your machine*, from *your* `.env`, and `EXPO_PUBLIC_SUPABASE_URL` is
+baked into what it publishes. Without `--environment`, an update takes whatever local
+configuration happens to be lying around and pushes it to every device on that channel.
+
+`config/backends.cjs` now refuses an update compiled against a project the lane may not use
+— that is what closes the hole rather than the flag — but the flag is what makes the update
+carry the *right* values rather than merely a permitted set.
+
 ### Preview — the founder's own build
 
 ```
-npx eas update --branch preview --message "what changed, in one line"
+npx eas update --branch preview --environment preview --message "what changed, in one line"
 ```
 
 ### Beta — friend testers. Intentional releases only.
 
 ```
-npx eas update --branch beta --message "what changed, in one line"
+npm run update:beta -- --message "what changed, in one line"
 ```
 
-**Before running the beta one, run the release gate** (§6). An update to `beta` reaches
-every friend tester's phone the next time they bring the app to the foreground —
-`src/lib/updates.ts` checks on foreground and applies immediately, which turns "days" into
-"the next time they pick up their phone" and also means there is no window to notice a
-mistake in.
+Not `eas update` directly. That script is `eas update --branch beta --environment preview`
+behind `scripts/release-guard.mjs`, which refuses unless the working tree is clean, HEAD is
+on `main` or `release/*`, and **the release gate passed for this exact commit**.
+
+An update to `beta` reaches every friend tester's phone the next time they bring the app to
+the foreground — `src/lib/updates.ts` checks on foreground and applies immediately, which
+turns "days" into "the next time they pick up their phone" and also means there is no window
+in which to notice a mistake.
 
 ### Check what you are about to hit, first
 
@@ -184,7 +196,7 @@ npx eas build:list --platform android --buildProfile preview --limit 1
 #    Note the runtimeVersion. It must match what step 3 reports.
 
 # 2. Publish a harmless update — no code change needed, this republishes current HEAD.
-npx eas update --branch preview --message "update drill"
+npx eas update --branch preview --environment preview --message "update drill"
 
 # 3. Confirm it landed on the right runtime and nothing else.
 npx eas channel:view preview
@@ -229,15 +241,23 @@ npm run test:race
 npm run test:race:mutants
 npm run test:web
 npm run test:web:mutants
+npm run test:config
 npm run functions:check
 npm run functions:lint
 npx expo export --platform android
 ```
 
-**Run the gate before a Beta build and before any `eas update --branch beta`.** It is the
-only thing standing between unfinished work and a friend's phone; channels and runtimes
-protect against the wrong *build* receiving an update, not against the wrong *code* being
-in one.
+**`npm run build:beta` and `npm run update:beta` will not run until this gate has passed on
+the exact commit they are about to publish.** That is `scripts/release-guard.mjs`, and it
+checks the SHA rather than the branch: a gate that passed two commits ago did not run on
+what is about to ship.
+
+Being precise about what that buys, because an earlier version of this line said the gate
+was "the only thing standing between unfinished work and a friend's phone" and independent
+review 28 was right that this overstates it. Channels and runtimes protect against the wrong
+*build* receiving an update; they say nothing about the wrong *code* being in one. The guard
+covers the documented path. **`eas` is still a command anybody can type**, so what the guard
+converts is an accident into a deliberate act — not a possibility into an impossibility.
 
 ---
 

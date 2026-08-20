@@ -75,12 +75,21 @@ jest.mock('@/features/auth', () => ({
 // are about, and it would otherwise reach expo-image-picker.
 jest.mock('@/features/profile/AvatarPicker', () => ({ AvatarPicker: () => null }));
 
-// A release build, because that is the reader the diagnostics question is about: the
-// detailed block is gated on `variant !== 'production'`, so asserting its absence in a
-// development test would assert nothing at all.
+// A public release build, because that is the reader the diagnostics question is about:
+// the detailed block is gated on `isRelease`, so asserting its absence on any other lane
+// would assert nothing at all.
+//
+// `lane` rather than `variant` since review 28. A **Beta** build is `variant: 'production'`
+// and is not a release — it carries the store bundle identifier against the nonproduction
+// backend — so the old gate hid the diagnostics from the friend beta, which is the one
+// audience that needed them. Mocking `variant: 'production'` alone would now leave
+// `isRelease` undefined and quietly re-enable the block, so the lane is stated too.
+// `src/lib/env.test.ts` covers the derivation itself.
 jest.mock('@/lib/env', () => ({
-  env: { variant: 'production' },
+  env: { variant: 'production', lane: 'production' },
+  lane: 'production',
   isProduction: true,
+  isRelease: true,
   showEnvironmentBadge: false,
 }));
 

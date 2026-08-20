@@ -56,6 +56,7 @@ jobs:
       - run: npm run test:db
       - run: npm run test:web
       - run: npm run test:web:mutants
+      - run: npm run test:config
       - run: npm run functions:check
       - run: npm run functions:lint
 
@@ -89,35 +90,69 @@ jobs:
       - name: Site build
         run: npm run build:web
 
-      # eas.json and app.config.ts have to resolve for all four lanes. This catches a
-      # profile that names an environment that does not exist, or a variant table that
-      # no longer produces the identifiers the .well-known files claim — without
-      # needing EAS credentials, because config resolution is local.
-      - name: Resolve every lane's app config
+      # Every lane's config resolved with that lane's real variant, lane and backend, as
+      # an EAS build would resolve it. `EAS_BUILD=true` matters: it closes the local
+      # escape hatch in config/backends.cjs, so this exercises the rule a build gets
+      # rather than the rule a laptop gets.
+      #
+      # An earlier version of this step set only APP_VARIANT and passed https://ci.invalid,
+      # which is not a Supabase URL at all — so it resolved four configs and asserted
+      # nothing whatever about backends. Independent review 28 found that; the comment
+      # claimed a check the step did not perform, which is the failure this repository
+      # keeps writing tests about.
+      - name: Every lane resolves against its own backend
         run: |
           set -e
-          for variant in development preview production; do
-            echo "--- APP_VARIANT=$variant"
-            APP_VARIANT=$variant npx expo config --type public --json > /dev/null
-          done
-        env:
-          EXPO_PUBLIC_SUPABASE_URL: https://ci.invalid
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: ci
-
-      - name: eas.json is valid and names four lanes
-        run: |
           node -e "
+            const { execFileSync } = require('node:child_process');
+            const { LANE_BACKENDS } = require('./config/backends.cjs');
             const eas = require('./eas.json');
-            const want = ['development', 'preview', 'beta', 'production'];
-            for (const profile of want) {
-              const p = eas.build[profile];
-              if (!p) throw new Error(profile + ' is missing from eas.json');
-              if (!p.channel) throw new Error(profile + ' has no channel');
-              if (!p.environment) throw new Error(profile + ' does not name an environment');
+
+            for (const [lane, refs] of Object.entries(LANE_BACKENDS)) {
+              const variant = eas.build[lane].env.APP_VARIANT;
+              if (refs.length === 0) {
+                console.log(\`--- \${lane}: no backend declared, nothing to resolve\`);
+                continue;
+              }
+              for (const ref of refs) {
+                const env = {
+                  ...process.env,
+                  EAS_BUILD: 'true',
+                  BINGD_LANE: lane,
+                  APP_VARIANT: variant,
+                  EXPO_PUBLIC_SUPABASE_URL: \`https://\${ref}.supabase.co\`,
+                  EXPO_PUBLIC_SUPABASE_ANON_KEY: 'ci',
+                };
+                const out = execFileSync('npx', ['expo', 'config', '--type', 'public', '--json'], {
+                  env, encoding: 'utf8', shell: process.platform === 'win32',
+                });
+                const config = JSON.parse(out);
+                if (config.extra.lane !== lane) throw new Error(lane + ': extra.lane is ' + config.extra.lane);
+                if (config.extra.variant !== variant) throw new Error(lane + ': extra.variant is ' + config.extra.variant);
+                console.log(\`--- \${lane}: \${config.android.package} on \${ref} — resolved\`);
+              }
             }
-            const channels = want.map((p) => eas.build[p].channel);
-            if (new Set(channels).size !== channels.length) {
-              throw new Error('two build profiles share a channel: ' + channels.join(', '));
-            }
-            console.log('four lanes, four channels: ' + channels.join(', '));
           "
+
+      # And the mirror image: a lane pointed at a project it may not use has to FAIL.
+      # A check that only ever proves the good case proves that nothing throws.
+      - name: A lane pointed at the wrong backend fails the build
+        run: |
+          set -e
+          if EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
+             EXPO_PUBLIC_SUPABASE_URL=https://someotherproject.supabase.co \
+             EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
+             npx expo config --type public --json > /dev/null 2>&1; then
+            echo "The beta lane resolved against an unlisted Supabase project. The guard is inert."
+            exit 1
+          fi
+          echo "beta + unlisted project: refused, as it must be"
+
+          if EAS_BUILD=true BINGD_LANE=production APP_VARIANT=production \
+             EXPO_PUBLIC_SUPABASE_URL=https://abheeqyjzekiowkztfxv.supabase.co \
+             EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
+             npx expo config --type public --json > /dev/null 2>&1; then
+            echo "The production lane resolved against bingd-nonprod. The lane mapping is inert."
+            exit 1
+          fi
+          echo "production + nonprod: refused, as it must be"

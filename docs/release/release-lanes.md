@@ -3,8 +3,10 @@
 Which builds exist, who is allowed to install them, which backend they talk to, and what
 keeps one lane's work out of another lane's phone.
 
-Everything here is enforced by `eas.json`, `app.config.ts` and `web/deep-links.config.json`
-rather than by convention. Where a rule is only a convention, it says so.
+Everything here is enforced by `eas.json`, `config/backends.cjs`, `app.config.ts` and
+`web/deep-links.config.json` rather than by convention. **Where a rule is only a convention,
+it says so** — independent review 28 found two places where this document claimed more than
+the implementation delivered, and both are corrected below rather than quietly softened.
 
 ---
 
@@ -22,7 +24,7 @@ rather than by convention. Where a rule is only a convention, it says so.
 | **EAS channel** | `development` | `preview` | `beta` | `production` |
 | **Backend** | bingd-nonprod | bingd-nonprod | bingd-nonprod | *does not exist* |
 | **Android artifact** | APK | APK | AAB | AAB |
-| **In-app diagnostics** | shown | shown | hidden | hidden |
+| **In-app diagnostics** | shown | shown | **shown** | hidden |
 | **Exists today** | yes | yes | not built | not built |
 
 ### Two rows that look like mistakes and are not
@@ -34,10 +36,12 @@ change between a Play closed test and the production track — a tester who inst
 So Beta *is* the production application. What makes it a beta is the channel it listens
 on and the backend it talks to, not its name.
 
-The visible consequence: **a Beta build hides the diagnostics block in Settings**, because
-that block is gated on `env.variant !== 'production'`. Testers get one line —
-`Bingd 0.1.0 (7)` — which is what a support conversation starts with. Everything else is
-recoverable from that build number in the EAS dashboard.
+That is also why the in-app diagnostics block is gated on the **lane** rather than the
+variant. It was gated on the variant until independent review 28, which meant a Beta build
+— production identity, nonproduction database — showed nothing but its version line, and
+the people best placed to notice a wrong backend were the only ones who could not see it.
+`isRelease` in `src/lib/env.ts` is the gate now, and only a real `production` lane is a
+release.
 
 **Beta reads the `preview` EAS environment.** EAS has exactly three environments and they
 are not extensible; `beta` is a build profile, not an environment. Pointing it at
@@ -50,35 +54,57 @@ on the name-matching default, so it is a written decision rather than an acciden
 
 ## Isolation, and what actually enforces it
 
-### Development work cannot reach a Preview or Beta phone
+### The development *channel* cannot reach a Preview or Beta phone
 
-Three independent reasons, and any one of them is sufficient:
+This heading used to read "Development work cannot reach a Preview or Beta phone", and
+independent review 28 raised it as a Blocker because it is not true and the difference
+matters. Here is what is actually guaranteed and what is not.
+
+**Guaranteed, by configuration, with no human in the loop:**
 
 1. **A different application.** `app.bingd.dev` is a different package and a different
    bundle identifier from either. An update published to any channel is served to builds
-   of a matching *runtime*, and a Preview build simply never asks the development branch
-   for anything.
+   of a matching *runtime*, and a Preview build never asks the development branch for
+   anything.
 2. **A different channel.** A development build's channel is `development`. `eas update`
-   publishes to a branch, a branch is mapped to a channel, and a build only ever receives
-   its own channel's branch.
+   publishes to a branch, a branch maps to a channel, and a build only ever receives its
+   own channel's branch.
 3. **A development build runs Metro.** `src/lib/updates.ts` disables update checks under
-   `__DEV__` entirely, so a dev client does not have an update mechanism to misdirect.
+   `__DEV__` entirely, so a dev client has no update mechanism to misdirect.
 
-The remaining way for unfinished work to reach a tester is the ordinary one and has
-nothing to do with channels: **someone builds Beta from a branch that is not ready.** That
-is a git decision, and the gate for it is the release CI job in
-[`safe-update-runbook.md`](./safe-update-runbook.md#the-release-gate), not a configuration
-key.
+**Not guaranteed, and nothing in a repository can guarantee it:** somebody running
+`eas update --branch beta` or `eas build --profile beta` from a half-finished checkout.
+Channels stop the *development channel* crossing over; they have nothing to say about which
+*code* is published to the Beta branch. That is the way unfinished work actually reaches a
+friend's phone, and it is a decision rather than a leak.
 
-### A build cannot talk to an unapproved backend
+What exists against it is a guard on the documented path:
 
-`app.config.ts` holds a one-entry allowlist of Supabase project refs and **throws during
-configuration resolution** on any EAS build whose `EXPO_PUBLIC_SUPABASE_URL` resolves to
-something else:
+```
+npm run build:beta   -- --platform android
+npm run update:beta  -- --message "what changed"
+```
 
-```ts
-const ALLOWED_SUPABASE_REFS: Record<string, string> = {
-  abheeqyjzekiowkztfxv: 'bingd-nonprod',
+`scripts/release-guard.mjs` refuses unless the working tree is clean, HEAD is on `main` or
+`release/*`, **and the release gate passed for that exact commit** — `gh run list --commit
+<sha>`, not "recently", not "on this branch". Where it cannot read the gate's result it
+refuses, because an unverifiable gate reported as green is worse than no gate.
+
+**`eas` remains a command anybody can type.** The guard makes publishing an unreviewed tree
+to friend testers a deliberate act — somebody bypassing a check that told them why — rather
+than an accident. That is the whole claim, and it is the honest one.
+
+### A build cannot talk to a backend its lane is not allowed
+
+`config/backends.cjs` maps each lane to the Supabase project refs it may use, and throws
+during configuration resolution otherwise:
+
+```js
+const LANE_BACKENDS = {
+  development: ['abheeqyjzekiowkztfxv'],
+  preview:     ['abheeqyjzekiowkztfxv'],
+  beta:        ['abheeqyjzekiowkztfxv'],
+  production:  [],                        // there is no production backend
 };
 ```
 
@@ -87,25 +113,52 @@ variable — a value in a web dashboard, edited by hand — and a build pointed 
 project does not crash, warn, or look different. It signs in and shows an empty collection,
 and every acceptance result taken on it is about a database nobody meant to test.
 
-The check runs only when `EAS_BUILD=true`, which is exactly the population of artifacts
-that reach a phone. Local `expo start`, CI's `expo customize` step (which passes
-`https://ci.invalid` on purpose) and a contributor pointing at their own project are all
-outside it — a rule that fired there would be a rule people learn to route around.
+**Three properties, each of which was a finding before it was a property.** Independent
+review 28 raised the first two as a Blocker against a version of this that lived inside
+`app.config.ts`:
 
-**When a production Supabase project is created, it is added to that object in the same
-change,** which is a visible line in a reviewed diff.
+- **It covers `eas update`, not only `eas build`.** The rule used to be gated on
+  `EAS_BUILD=true`. But `eas update` resolves the config on the developer's own machine and
+  compiles the URL into the bundle it publishes, so an update could carry any backend to any
+  channel. The gate is gone.
+- **It is per lane, not one flat set.** A single allowlist meant that the day a production
+  ref is added, *every* lane could use it — a Beta build on production, a Production build
+  on nonprod, neither failing. `production: []` is also why a `--profile production` build
+  refuses today by name rather than quietly succeeding against nonprod.
+- **It is testable.** The logic is a CommonJS module because `app.config.ts` cannot be
+  imported by a test, and a rule nothing can exercise is a rule nobody can check.
+  `npm run test:config` — 18 assertions covering URL parsing (userinfo, path, fragment and
+  suffix impostors all rejected), cross-lane swaps, the empty production lane, the escape
+  hatch, and agreement with `eas.json`. It runs in the **pull request** gate, because what
+  it protects arrives on pull requests.
 
-The second half of the same question — *which* backend did this build actually choose —
-is answered on the device: Settings shows `backend abheeqyjzekiowkztfxv` on any
-non-production build. The URL is in the bundle already and the anon key is public by
-construction, so there is no secret in that line.
+The escape hatch for a contributor running their own Supabase project is
+`BINGD_ALLOW_UNLISTED_BACKEND=yes-i-am-testing-locally`, which is refused when
+`EAS_BUILD=true`. A URL that is not a Supabase URL at all — CI's `https://ci.invalid`, a
+local stack on `127.0.0.1` — passes through; `src/lib/env.ts` is what refuses an unusable
+one at startup.
+
+**When a production Supabase project is created, its ref is added to the `production` lane
+and to nothing else,** in the same reviewed change that creates it.
+
+The second half of the same question — *which* backend did this build actually choose — is
+answered on the device: Settings shows `backend abheeqyjzekiowkztfxv` on **every lane but
+`production`**, Beta included. The URL is in the bundle already and the anon key is public
+by construction, so there is no secret in that line.
 
 ### Nothing points at a production backend, because there is none
 
-There is no production Supabase project. The `production` EAS environment has **no
-variables at all**, which means a `--profile production` build fails at startup: `src/lib/env.ts`
-parses `extra` with zod and throws on a missing `supabaseUrl`. That is the intended
-behaviour — a loud failure rather than a build that silently talks to nothing.
+There is no production Supabase project, and a `--profile production` build fails twice
+over — the first failure is the earlier one:
+
+1. **At configuration resolution, on the build machine.** `LANE_BACKENDS.production` is
+   empty, so any Supabase URL at all is refused by name: *"Permitted: nothing — this lane
+   has no backend yet."* The build never gets as far as compiling.
+2. **At app startup, if it somehow did.** The `production` EAS environment has no variables,
+   and `src/lib/env.ts` parses `extra` with zod and throws on a missing `supabaseUrl`.
+
+Both are loud. An earlier version of this document named only the second, which was true but
+described the wrong moment.
 
 ---
 
@@ -141,7 +194,7 @@ project does not set and which is Android's regardless, so every iPhone showed
 
 ### What a diagnostics block may and may not show
 
-Development and Preview show, under the version line:
+Every lane except `production` shows, under the version line:
 
 ```
 preview · preview
@@ -149,10 +202,14 @@ runtime 5d60b7b0 · embedded
 backend abheeqyjzekiowkztfxv
 ```
 
-variant, channel, runtime fingerprint, update state, backend ref. **No DSN, no project
-token, no anon key, no service key, no user identifier.** None of the five values above
-reads anything back from anywhere, which is why they can be on a screen at all. Beta and
-Production show the version line only.
+lane, channel, runtime fingerprint, update state, backend ref. **No DSN, no project token,
+no anon key, no service key, no user identifier.** None of the five values above reads
+anything back from anywhere, which is why they can be on a screen at all — the project ref
+is the hostname in the bundle, and the anon key it pairs with is public by construction and
+bounded by row level security.
+
+**A Production build shows the version line only.** That is the store rule from PRD §23 —
+no identifiers in anything user-facing — and it applies to a public release, not to a beta.
 
 ---
 
@@ -166,6 +223,7 @@ Production show the version line only.
 | `EXPO_PUBLIC_POSTHOG_KEY` | EAS env `development`, `preview` | yes | write-only project token |
 | `EXPO_PUBLIC_POSTHOG_HOST` | `eas.json` → `base.env` | yes | `https://us.i.posthog.com` |
 | `APP_VARIANT` | `eas.json` per profile | as `extra.variant` | selects the variant table |
+| `BINGD_LANE` | `eas.json` per profile | as `extra.lane` | the profile's own name |
 | `SENTRY_DISABLE_AUTO_UPLOAD` | `eas.json` per profile | **no** | `true` — see below |
 | `SENTRY_AUTH_TOKEN` | **not configured** | **no** | *founder action* |
 | `TMDB_ACCESS_TOKEN` | **Supabase function secret** | **never** | server-side only |

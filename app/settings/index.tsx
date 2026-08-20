@@ -7,7 +7,7 @@ import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { signOut, useCurrentProfile } from '@/features/auth';
 import { pendingRequestCount, useNotifications } from '@/features/notifications/use-notifications';
-import { env } from '@/lib/env';
+import { env, isRelease, lane } from '@/lib/env';
 import { Button, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -216,11 +216,15 @@ function About() {
  * version and a build number, which is what a support conversation actually starts
  * with.
  *
- * The rest is not deleted, it is moved: `env.variant !== 'production'` still gates the
- * detailed block, so a preview build carries the diagnostics for Beta Hardening and a
- * release build shows one line. That is the same rule as before with the *default*
- * inverted — it used to show everything outside production, and now it shows the line
- * everywhere and the detail only where somebody is testing.
+ * The rest is not deleted, it is moved: `isRelease` gates the detailed block, so every
+ * build somebody is testing carries the diagnostics for Beta Hardening and a release
+ * build shows one line. That is the same rule as before with the *default* inverted — it
+ * used to show everything outside production, and now it shows the line everywhere and
+ * the detail only where somebody is testing.
+ *
+ * The gate was `env.variant !== 'production'` until review 28, and that was wrong for the
+ * one lane it mattered most in. Beta builds the production variant, so a friend beta —
+ * production identity, nonproduction database — showed nothing but the version line.
  */
 function BuildDetails() {
   const version = Constants.expoConfig?.version ?? '?';
@@ -251,11 +255,18 @@ function BuildDetails() {
         </Text>
 
         {/* Only where somebody is testing. PRD §23 keeps identifiers out of anything
-            user-facing, and a fingerprint is an identifier. */}
-        {env.variant !== 'production' ? (
+            user-facing, and a fingerprint is an identifier.
+
+            Gated on the **lane**, not the variant. A Beta build carries the production
+            variant — the bundle identifier cannot change between TestFlight and the App
+            Store release that replaces it — while talking to the nonproduction backend,
+            so `variant !== 'production'` hid these four lines from precisely the people
+            running a production-looking binary against a test database. Independent
+            review 28 called that the wrong trade and it was. */}
+        {!isRelease ? (
           <>
             <Text variant="caption" tone="tertiary">
-              {env.variant} · {Updates.channel ?? 'no channel'}
+              {lane} · {Updates.channel ?? 'no channel'}
             </Text>
             <Text variant="caption" tone="tertiary">
               runtime {short(Updates.runtimeVersion)} ·{' '}

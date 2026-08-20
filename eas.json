@@ -22,6 +22,7 @@
       "autoIncrement": true,
       "env": {
         "APP_VARIANT": "development",
+        "BINGD_LANE": "development",
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       },
       "ios": { "simulator": false },
@@ -36,6 +37,7 @@
       "autoIncrement": true,
       "env": {
         "APP_VARIANT": "preview",
+        "BINGD_LANE": "preview",
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       },
       "android": { "buildType": "apk" }
@@ -49,6 +51,7 @@
       "autoIncrement": true,
       "env": {
         "APP_VARIANT": "production",
+        "BINGD_LANE": "beta",
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       },
       "android": { "buildType": "app-bundle" }
@@ -61,7 +64,8 @@
       "channel": "production",
       "autoIncrement": true,
       "env": {
-        "APP_VARIANT": "production"
+        "APP_VARIANT": "production",
+        "BINGD_LANE": "production"
       },
       "android": { "buildType": "app-bundle" }
     }

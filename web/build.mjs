@@ -556,7 +556,8 @@ const PRIVACY_BODY = `      <p class="lede">
       <h2>Changes</h2>
       <p>
         If this changes in a way that affects what is collected or who sees it, the date at
-        the top changes and testers are told in the app.
+        the top of this page changes. During the closed beta this page is the record; there
+        is no mailing list and no in-app announcement to promise you.
       </p>
 
       <h2>Attribution</h2>
@@ -565,14 +566,15 @@ const PRIVACY_BODY = `      <p class="lede">
       </p>`;
 
 const SUPPORT_BODY = `      <p class="lede">
-        Bingd is in closed testing. There is no help desk &mdash; there is one address, and
-        it is read by the person who builds the app.
+        Bingd is in closed testing. There is no help desk and there is no support team
+        &mdash; there is one address, and one person on the other end of it.
       </p>
 
       <h2>Getting help</h2>
       <p>
-        Write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>. Expect a reply
-        within a few days.
+        Write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>. Replies are not
+        instant and there is no queue you can check; a closed beta run by one person is
+        exactly as informal as that sounds.
       </p>
 
       <h2>What to include</h2>
@@ -645,7 +647,13 @@ const DELETION_BODY = `      <p class="lede">
           and every signed-in session.</li>
         <li>Your profile: handle, display name, bio, privacy setting, and your date of
           birth.</li>
-        <li>Your profile picture, removed from file storage.</li>
+        <li>Your profile picture. The app deletes every image you have ever uploaded from
+          file storage, and the server removes any record of them that is left. One
+          residual is worth stating rather than glossing: if the storage request does not
+          complete, the image file itself can remain in the bucket with nothing pointing at
+          it &mdash; no link resolves to it, because the link is served from the record that
+          was deleted, but the bytes sit there until an operator removes them. The app tells
+          you when this has happened rather than claiming otherwise.</li>
         <li>Your whole collection: every ranking, comparison and ranking session, everything
           logged, your watchlist and your watch goals.</li>
         <li>Everything you wrote or reacted to: notes, reviews, comments, reactions and
@@ -681,9 +689,16 @@ const DELETION_BODY = `      <p class="lede">
       <h2>What deletion does not reach</h2>
       <p>
         Analytics and crash reports already sent to PostHog and Sentry are held by those
-        services under their own retention settings. They carry an account identifier and
-        never any content &mdash; no titles, no notes, no search text. See the
-        <a href="/privacy">privacy page</a>.
+        services under their own retention settings. They carry an account identifier.
+      </p>
+      <p>
+        Analytics events carry no content of any kind &mdash; no titles, no notes, no
+        search text &mdash; and that is enforced by an allowlist rather than by care.
+        <strong>Crash reports are different and the difference is worth stating.</strong>
+        Personal information is switched off and request bodies, cookies and query strings
+        are stripped, but the error message and the stack trace are kept, because a crash
+        report without them reports nothing &mdash; and an error message can in principle
+        quote something you typed. See the <a href="/privacy">privacy page</a>.
       </p>`;
 
 const DOCUMENTS = [
