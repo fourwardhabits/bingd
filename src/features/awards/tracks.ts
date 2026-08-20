@@ -684,9 +684,98 @@ export const AWARD_TRACKS: AwardTrack[] = [
     next: (n) => `Watch ${count(n)} different ${plural(n, 'genre', 'genres')}`,
     earned: (n) => `Watched ${count(n)} different ${plural(n, 'genre', 'genres')}`,
     /**
-     * **12 / 14 / 16 over a vocabulary of eighteen**, re-audited after the founder's
-     * Preview pass. Dabbler was 8 and the founder's read of it was right: it was being
-     * earned for watching a handful of ordinary films.
+     * **14 / 16 / 17 over a vocabulary of eighteen**, measured rather than felt.
+     *
+     * ### The correction that produced these numbers
+     *
+     * This note previously carried a table of "median units logged to reach N distinct
+     * genres" that **nothing reproduced** — a one-off calibration run quoted as a result.
+     * The founder's Preview brief then carried a *different* table for the same quantity.
+     * Two irreconcilable numbers under the thing the whole ladder rests on.
+     *
+     * `scripts/awards/genre-ladder-report.mjs` settles it. It reads the seeded catalogue,
+     * applies `genres.ts`'s own vocabulary, and simulates acquisition; the vocabulary is
+     * held identical to `genres.ts` by a test rather than by good intentions. Both prior
+     * tables turn out to be *right about different columns*:
+     *
+     *   - the old table here is close to the **taste-weighted median** (13/24/54 against a
+     *     measured 13/25/56 at 12/14/16), so the earlier audit's method was sound;
+     *   - the founder's brief quoted **p10** — the fastest tenth of readers — as though it
+     *     were the median. 12 → 9 units, 14 → 15, 16 → 30 are the tenth percentile. The
+     *     medians are 15, 27 and 62.
+     *
+     * **Every number below is the uniform column, which is the slower of the two models at
+     * every median.** Independent review caught the report claiming its taste-weighted
+     * model was the pessimistic one. It is not, and why is a finding in itself: on a
+     * catalogue whose two rarest genres are 6 and 10 rows of 1,814, **scarcity dominates
+     * preference**. Disliking documentaries costs a reader almost nothing when there is
+     * almost nothing to dislike, while liking anything at all speeds up the first fourteen
+     * genres, which are plentiful in every direction.
+     *
+     * So taste-weighting measures slightly *faster at the median* — though not at every
+     * percentile: at 18 genres its p90 runs longer, because the reader who dislikes the
+     * tail is the one who waits longest for it. **Neither model bounds real difficulty.**
+     * The thresholds were chosen against medians, which is why the median is the
+     * comparison stated. What is unmodelled is in the last section here.
+     *
+     * That correction does not overturn the founder's conclusion; it strengthens it. The
+     * old ladder was even easier than the number that prompted the complaint suggested.
+     *
+     * ### What the old ladder actually cost, in logged units
+     *
+     * Uniform reader, 20,000 simulated readers, p10 / median / p90:
+     *
+     * | | Bronze | Silver | Gold |
+     * |---|---|---|---|
+     * | **12 / 14 / 16 (old)** | 9 / **15** / 26 | 15 / **27** / 51 | 30 / **62** / 128 |
+     * | **14 / 16 / 17 (new)** | 15 / **27** / 51 | 30 / **62** / 128 | 49 / **116** / 270 |
+     *
+     * Every other Gold in this file that counts the watched collection sits at 250–300
+     * titles — Time Traveler 300, Globetrotter 250, Cartoon Chaos 250 — and each of those
+     * needs a *subset* of them, so the true logged count is higher again. A Gold at a
+     * median of 62 units was an order of magnitude out of line with its own family. At 17
+     * it is 116, which is still the gentle end of the band and no longer a different sport.
+     *
+     * ### Why Gold is 17 and not 18, which is the only genuinely close call
+     *
+     * Seventeen means the reader may miss **any one** genre. Eighteen means they may miss
+     * none, and the two the catalogue barely has are Documentary (6 of 1,814 loggable rows)
+     * and Animation (10). The simulation prices the difference directly:
+     *
+     * | step | extra units, p10 / median / p90 |
+     * |---|---|
+     * | 16 → 17 | 6 / **45** / 183 |
+     * | 17 → 18 | 16 / **126** / 448 |
+     *
+     * At exactly sixteen genres a reader is missing two, and 49% are missing both
+     * Documentary and Animation — but the other 51% can finish on Western, Music or War
+     * instead. **Seventeen leaves a choice; eighteen names the rarest row in the catalogue
+     * and demands it.** That is the line between a long-term achievement and the
+     * rare-genre scavenger hunt the brief rules out, and it is why the ceiling is 17 even
+     * though 18 is where the vocabulary ends.
+     *
+     * ### Why Bronze is 14
+     *
+     * Dabbler at 12 was a median of 15 logged units and a p10 of 9 — the founder's "earned
+     * after a handful of ordinary multi-genre titles", almost exactly, because one title
+     * carries 2.68 canonical genres on average. At 14 the fastest tenth still needs 15, and
+     * the median is 27. Silver at 16 is 2.3× that, and Gold 4.3×: roughly doubling, which
+     * is the intended shape. The old ladder's tiers were evenly spaced in *genres* and
+     * therefore bunched in effort, because the marginal cost of genre 17 is nothing like
+     * the marginal cost of genre 12.
+     *
+     * ### What is not modelled, and which way it points
+     *
+     * These numbers are over the 1,814 **seeded** rows. `media_items` grows as the TMDB
+     * adapter caches what people search for, and Documentary and Animation are far better
+     * represented in TMDB at large than at 6 and 10 rows. That is the largest unmodelled
+     * effect and it points toward the tail being **easier** in production than measured
+     * here — the safe direction for a threshold to be wrong in.
+     *
+     * A direction, not a bound. A real reader also logs titles no model here contains, and
+     * whether *they* would ever pick a documentary is the thing neither column can answer.
+     * **The beta settles that**, which is why the evidence is a script that can be re-run
+     * rather than a table quoted once — the failure this whole note exists to correct.
      *
      * ### The catalogue, counted properly
      *
@@ -711,43 +800,22 @@ export const AWARD_TRACKS: AwardTrack[] = [
      * Those are the counts among the 382 *movies*. The conclusion happened to survive the
      * correction; the reasoning is restated here from the numbers it actually rests on.
      *
-     * ### Why 8 was too low, in logged units rather than in feeling
+     * ### Why the tail table above is the one that decides the ceiling
      *
-     * Simulated over the real catalogue, a viewer reaches N distinct genres after a
-     * median of:
+     * Documentary at 6 rows and Animation at 10 are 0.9% of the loggable catalogue between
+     * them. Everything above Western (23) is common enough that a reader meets it without
+     * trying. That gap is why the tiers are not evenly spaced: genres 1–14 arrive on their
+     * own, 15 and 16 take deliberate breadth, and 17 is the first one that can require
+     * looking for something.
      *
-     * | distinct genres | 8 | 10 | 12 | 14 | 16 | 17 | 18 |
-     * |---|---|---|---|---|---|---|---|
-     * | median units logged | **5** | 8 | **13** | **24** | **54** | 98 | 249 |
-     *
-     * Eight is five films. That is the founder's "handful of ordinary multi-genre
-     * movies", almost exactly, and 83% of five-title samples already clear it.
-     *
-     * ### Why 12 / 14 / 16
-     *
-     * **Dabbler at 12** — two-thirds of the vocabulary, about thirteen logged units.
-     * Past a handful, and still the entry tier.
-     *
-     * **Mixer stays at 14** — about twenty-four units, close to double Dabbler's effort.
-     *
-     * **Chaos Collector stays at 16**, and this is the one the tail decides. Sixteen of
-     * eighteen means a reader may miss **any two**, and the two they will miss are
-     * Documentary (6 units) and Animation (10). Seventeen forces one of those two: median
-     * 98 units, 90th percentile 243. Eighteen forces both: median 249. Both are the
-     * "pathological rare-title hunt" the brief rules out, so the ceiling stays where the
-     * data puts it.
-     *
-     * The thresholds are evenly spaced and the *effort* between them is not — 13, 24 and
-     * 54 units, roughly doubling — which is the intended shape: the last genres are much
-     * harder to find than the first, and the tier numbers should not pretend otherwise.
-     *
-     * ### Raising Dabbler takes it back from anybody who has 8 to 11 genres
+     * ### Raising a threshold takes the tier back from anybody below the new one
      *
      * **Independent review 29 named this and it is real.** Awards are computed live from
      * table reads with no unlock ledger (`src/features/awards`), so a tier is not a thing
      * an account *holds* — it is recomputed every time the sheet opens. Moving the
-     * threshold does not migrate anybody; it silently un-earns Dabbler for every reader
-     * between 8 and 11 distinct genres the next time they look.
+     * threshold does not migrate anybody; it silently un-earns a tier the next time the
+     * reader looks. This pass moves all three, so Dabbler goes back for anybody on 12 or
+     * 13 distinct genres, Mixer for 14 or 15, and Chaos Collector for exactly 16.
      *
      * Accepted rather than mitigated, for reasons that are specific to right now:
      *
@@ -766,9 +834,9 @@ export const AWARD_TRACKS: AwardTrack[] = [
      * ledger lands, changing a tier becomes a migration rather than an edit.
      */
     tiers: tiers(
-      ['dabbler', 'Dabbler', 12],
-      ['mixer', 'Mixer', 14],
-      ['chaos-collector', 'Chaos Collector', 16],
+      ['dabbler', 'Dabbler', 14],
+      ['mixer', 'Mixer', 16],
+      ['chaos-collector', 'Chaos Collector', 17],
     ),
   },
   {

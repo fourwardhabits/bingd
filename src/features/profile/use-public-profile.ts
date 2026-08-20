@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { avatarUri } from '@/lib/images';
+import { compactName } from '@/lib/titles';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 
@@ -168,6 +169,128 @@ export function useProfileNotes(userId: string | null) {
           };
         })
         .filter(Boolean) as ProfileNote[];
+    },
+  });
+}
+
+/**
+ * How many titles the profile shelf asks for.
+ *
+ * Twelve, which is between three and four screens of the shelf at its measured width —
+ * `PosterShelf` solves for three cards plus a 0.7 peek on a normal phone, so a twelve-item
+ * shelf scrolls about three times. Enough that scrolling has somewhere to go, short enough
+ * that the read is one indexed page rather than somebody's entire backlog: the profile is a
+ * glance at what they want to watch next, and Collection is where the whole list lives.
+ */
+export const PROFILE_WATCHLIST_LIMIT = 12;
+
+export type ProfileWatchlistEntry = {
+  mediaItemId: string;
+  /** Already compacted for a season: `The Last of Us, S1`. */
+  title: string;
+  kind: 'movie' | 'series' | 'season';
+  seriesTitle: string | null;
+  seasonNumber: number | null;
+  posterPath: string | null;
+  year: number | null;
+};
+
+const yearOf = (date: string | null) => (date ? Number(date.slice(0, 4)) : null);
+
+/**
+ * Somebody's watchlist, bounded, most recently added first.
+ *
+ * ## Why this is not `useWatchlist`
+ *
+ * `collection/use-collection.ts` already reads this table and stays the canonical hook for
+ * the *owner's* watchlist — Collection, the Feed's saved set and Queue Dragon all read it,
+ * and it pages through **every** row on purpose, because a set missing its thousand-and-first
+ * member draws the wrong bookmark on a row.
+ *
+ * That is the wrong read for a profile shelf. Twelve posters do not justify paging a
+ * stranger's entire backlog, and on somebody else's profile that is exactly what it would
+ * do. So this is a second *read* of the same canonical table — the relationship
+ * `useProfileNotes` already has to `public_notes` — and deliberately not a second copy of
+ * the state: nothing here caches membership, and every write still goes through
+ * `set_watchlist`. `invalidateAfterWatchlistChange` invalidates this key alongside the
+ * collection one, so saving a title on any surface moves the shelf on the next read.
+ *
+ * ## Privacy
+ *
+ * There is no visibility check in this function, and that is the design. `watchlist_read`
+ * (`20260820000200`) is `can_i_view(user_id)`, the same oracle `rankings_read` uses, so a
+ * profile the viewer may not see returns **zero rows** — not an error, not a count, not a
+ * poster. The section hides itself on an empty result, so an unviewable profile and a
+ * genuinely empty watchlist are indistinguishable from the outside, which is what PRD §16
+ * asks for everywhere else.
+ *
+ * A client-side `if (isPrivate)` was the alternative and is strictly worse: it is a second
+ * copy of a rule that already exists, and the rows would have crossed the wire before it ran.
+ *
+ * ## Movie / Season semantics
+ *
+ * `parent:parent_id(title)` is the same self-join every other title read uses, and
+ * `compactName` turns a season into `Series, S2` here rather than at each call site. A
+ * **series** row can be watchlisted — `20260814001131` is explicit that a series is
+ * watchlistable but never loggable — so `kind` is carried through rather than assumed to be
+ * one of two.
+ */
+export function useProfileWatchlist(userId: string | null, limit = PROFILE_WATCHLIST_LIMIT) {
+  return useQuery({
+    queryKey: ['profile-watchlist', userId, limit],
+    enabled: Boolean(userId),
+    queryFn: async (): Promise<ProfileWatchlistEntry[]> => {
+      const { data, error } = await supabase
+        .from('watchlist')
+        .select(
+          'media_item_id, created_at, media_items(kind, title, season_number, release_date, poster_path, parent:parent_id(title))',
+        )
+        .eq('user_id', userId!)
+        // Most recently added first: "what they want to watch next" is a statement about
+        // the recent end of the list, not about all of it. `media_item_id` breaks the tie so
+        // two titles saved in the same millisecond cannot swap places between reads and
+        // re-key the shelf.
+        .order('created_at', { ascending: false })
+        .order('media_item_id', { ascending: true })
+        .limit(limit);
+      if (error) throw error;
+
+      return ((data ?? []) as unknown as {
+        media_item_id: string;
+        media_items: {
+          kind: ProfileWatchlistEntry['kind'];
+          title: string;
+          season_number: number | null;
+          release_date: string | null;
+          poster_path: string | null;
+          parent: { title: string } | { title: string }[] | null;
+        } | null;
+      }[])
+        .map((row) => {
+          const item = row.media_items;
+          // A watchlist row whose catalogue row has gone is not a poster. The foreign key
+          // makes it unlikely, but an embed can come back null and a shelf that renders
+          // `undefined` is worse than a shelf one item shorter.
+          if (!item) return null;
+          const parent = Array.isArray(item.parent) ? item.parent[0] : item.parent;
+          const seriesTitle = parent?.title ?? null;
+          return {
+            mediaItemId: row.media_item_id,
+            title:
+              compactName({
+                kind: item.kind,
+                title: item.title,
+                seriesTitle,
+                seasonNumber: item.season_number ?? null,
+              }) ?? item.title,
+            kind: item.kind,
+            seriesTitle,
+            seasonNumber: item.season_number ?? null,
+            posterPath: item.poster_path,
+            year: yearOf(item.release_date),
+          } satisfies ProfileWatchlistEntry;
+        })
+        .filter((entry): entry is ProfileWatchlistEntry => entry !== null);
     },
   });
 }

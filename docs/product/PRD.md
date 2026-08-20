@@ -329,7 +329,7 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 | Collection | The user's own working surface | Ranked (Movies / TV Seasons), Logged, Watchlist, Lists; title search in the header |
 | **+** (center action) | Log and rank | Search, mark watched, choose bucket, tag people, compare |
 | Recommendations | Instant personalized suggestions | Guarded slate, explanations, add to watchlist, dismiss |
-| Profile | Public identity and social standing | Basic stats, top of the ranking, match, leaderboard, followers and following, people search, invite entry point, settings |
+| Profile | Public identity and social standing | Basic stats, top of the ranking, **Watchlist**, match, leaderboard, followers and following, people search, invite entry point, settings |
 | Settings | Account, privacy, notifications, offline state | Invite Friends, privacy toggle, notification preferences, data export, cache and sync status, account deletion |
 
 > **Decided 2026-08-13, superseding Provisional INF-4.** Five tabs: **Feed, Collection, +, Recommendations, Profile.** The collection gets a top-level tab rather than sitting inside Profile, because it is the surface a user returns to daily and the artifact the product exists to produce; Profile stays the public-facing identity page. There is no Search tab — searching for a title is how you log one, so the center **+** and title search are the same entry point, with a header affordance on Feed and Collection. People search lives in Profile and the invite flow. Sharing appears contextually on artifacts, never as a tab. Reasoning and evidence in `../design/screens.md` §2.
@@ -717,6 +717,20 @@ These apply identically to Free, Early Access, and any future Pro recommendation
 | Quality evaluation | Optimize for later watch, save, and positive personal rank alongside novelty, diversity, coverage, and low repetition. **Not click-through alone** | Later satisfaction dashboard |
 | Graceful degradation | When data is sparse, label the result as popular, content-similar, friend-driven, or curated rather than pretending deep personalization | Reason and source accuracy |
 
+> ### As built — 2026-08-20: what **Refresh** promises, and what it does not
+>
+> For You ships with an explicit **Refresh** control in the filter row. It is the only thing that rearranges the wall: not a bookmark, not a reaction, not a navigation, not a cache invalidation. The founder's Preview pass found it failing its own promise — two consecutive presses kept **eight of the nine visible posters** and changed their order — so the semantics are stated here rather than left to the algorithm.
+>
+> **Refresh changes membership, not arrangement.** With a candidate pool deep enough to support it, roughly **65–80% of the first visible nine change**; measured, it is seven of nine. Up to **two** posters may survive, and only ones that are genuinely the two strongest candidates the engine has for this reader — relevance stays primary, and a Refresh that discarded the single best recommendation would be a reset rather than a refresh. A wall whose head is weak keeps nothing.
+>
+> **Session exposure, in memory, with no schema behind it.** The app remembers which titles it has already put on screen this session and prefers ones it has not. There is no exposure ledger in the database, no analytics dependency, and **no persistence across launches** — a genuinely fresh process starts with a clean slate. Durable cross-session impression history is the *Impression history* guardrail above and remains deferred: [`deferred-roadmap.md`](./deferred-roadmap.md).
+>
+> **Replacements stay inside the bounded, relevant pool.** Rotation reorders within the best `3 × slate` candidates by score and cannot promote anything from below it. Novelty never buys a weak title: where the pool genuinely runs out of strong unseen candidates, **overlap increases gracefully** and the wall stays full, rather than the wall getting shorter or the engine reaching further down to hit a turnover number. That target is a UX goal conditional on candidate depth, not an invariant.
+>
+> **Repeated Refresh keeps working.** #2 and #3 keep introducing session-unseen titles; the pool is three walls deep, so by the third press novelty is exhausted and the exposure penalty relaxes progressively. Even fully exhausted, the visible wall still turns over rather than settling into two alternating arrangements.
+>
+> **It costs no network request and produces no loading state.** Which titles are good is cached for half an hour; which arrangement is on screen is derived from that cache. So a Refresh is a sort: no skeleton, no white flash, no scroll jump, no new cache key. The same split is what stops a watchlist change from disturbing the wall at all.
+
 ### Delivery pipeline
 
 | Stage | Requirement |
@@ -813,6 +827,12 @@ v0.6 listed Achievements under §8 **Deferred** and specified them in [`backlog.
 - Tiered, with progress shown on anything countable, and each track states what earns it.
 - **No social surface**: no comparison, no leaderboard, and nothing is told to anybody else.
 - **Ten of the twenty tracks still render an emoji placeholder** rather than drawn art, asserted by test so the number cannot drift silently. [`deferred-roadmap.md`](./deferred-roadmap.md) §14.
+
+**Genre Gremlin is 14 / 16 / 17 distinct genres, rebalanced 2026-08-20.** It was 12 / 14 / 16, and the founder's Preview verdict was that the whole ladder was too easy and too compressed rather than that one number was wrong. Measured over the loggable catalogue by `scripts/awards/genre-ladder-report.mjs` — which is reproducible, unlike the calibration the previous thresholds rested on — the old ladder cost a median of **15 / 27 / 62** logged titles, against 250–300 for every other Gold in the set. The new one costs **27 / 62 / 116**, roughly doubling at each step.
+
+**Gold is 17 of 18 and deliberately not 18.** Seventeen lets a reader miss any one genre; eighteen names the rarest row in the catalogue and demands it. Documentary is carried by 6 of 1,814 loggable rows and Animation by 10, and the last genre costs a median of **126** further titles against 45 for the seventeenth — so 18 would convert breadth into a scavenger hunt, which is the one thing the award is not for.
+
+**Moving a threshold un-earns a tier, and that was accepted rather than mitigated.** Awards are derived live with no unlock ledger, so a tier is recomputed rather than held: Dabbler goes back from anybody on 12 or 13 genres, Mixer from 14 or 15, Chaos Collector from exactly 16. The population that can affect is the founder's account and test users — there is no external tester — and grandfathering would need the durable ledger that award *notifications* are already waiting on. **This is the last threshold change that can be made for free.**
 
 **Invite Instigator counts activated invitees and therefore reads zero.** It counts `invite_attributions.activated_at is not null`, which nothing writes — see §17's As-built block. It previously counted link creations, which made it a badge for pressing a button, and the founder's instruction was that the award is for bringing people to Bingd. So the metric was moved to the honest one immediately and the number left at zero rather than the semantic left wrong until the backend caught up. It renders **0 / 3**, not an error: the read succeeded, the table is real, and the answer is genuinely none.
 
@@ -1356,18 +1376,32 @@ Rationale: a social discovery product whose core loops are leaderboards, match s
 |---|---|
 | Display name, username, avatar | Watch dates |
 | Top titles and rankings | Notes |
-| **The Logged collection and its buckets** | Watchlist |
-| Public lists | Import history |
-| Feed activity | Email and account identifiers |
-| Reactions given | Capability and Early Access state |
+| **The Logged collection and its buckets** | Import history |
+| **The watchlist** — moved 2026-08-20, see below | Email and account identifiers |
+| Public lists | Capability and Early Access state |
+| Feed activity | |
+| Reactions given | |
 
 > **Founder decision, 2026-08-13.** The **Logged collection inherits profile visibility**, exactly as rankings do. The collection is part of the profile and follows the same rules; it is not a separate privacy domain. This table previously listed neither state for it, so the behaviour was going to be decided by whoever wrote the view.
 >
 > Three boundaries this does **not** move, all of which stay as they are:
 >
 > - **Notes and watch dates remain always-private**, even on a public profile and even on a title whose bucket is public. A visible Logged entry is the title and the bucket, nothing else.
-> - **The watchlist remains always-private at every visibility level.** It is intent about things you have not watched, which is a different disclosure from a reaction to something you have — closer to a search history than to an opinion. Say so if you want it public; it is a one-line change and a separate decision.
+> - ~~**The watchlist remains always-private at every visibility level.**~~ **Superseded by the founder decision of 2026-08-20 — see the block immediately below.** The original reasoning stands as written: it is intent about things you have not watched, which is a different disclosure from a reaction to something you have, and it was left private pending an explicit decision.
 > - **A private profile's Logged collection is visible to approved followers only**, on the same terms as its rankings.
+
+> **Founder decision, 2026-08-20.** **The watchlist now inherits profile visibility**, on the same terms as rankings and the Logged collection. This is the separate decision the 2026-08-13 note invited, and it was taken for a product reason: Top Ranked says what somebody loves, and the watchlist says what they want to watch next. The second is the socially actionable half — "I want to watch that too" is a reason to message somebody, and a private watchlist cannot produce one.
+>
+> Implemented as one line of RLS. `watchlist_own` (`user_id = auth.uid()`) became `watchlist_read` (`can_i_view(user_id)`), which is the oracle `rankings_read` already uses — migration `20260820000200`. No new table, no new column, no client-side visibility check. So:
+>
+> - a public account's watchlist is readable;
+> - a private account's is readable by **approved followers only**;
+> - a block in either direction hides it;
+> - an account the viewer may not see returns **zero rows**, and the section renders nothing — no titles, no count, and no "nothing saved yet", because a placeholder is itself a statement about an account the reader is not entitled to.
+>
+> **Writes were not widened and could not have been.** `watchlist` has never had an insert, update or delete policy; `set_watchlist` is `security definer` and checks the caller. **Notes and watch dates are unaffected** and remain always-private on every profile. This moves one row of the table above and nothing adjacent to it.
+>
+> `created_at` becomes visible to a viewer who can see the row, which is intended: the shelf is ordered most-recently-added first. It is a *save* time, not a watch date.
 
 Rationale, and the reason this needed deciding rather than defaulting: a public Logged collection is what makes a profile worth visiting before someone has ranked much. A new user with 200 imported titles and 12 ranked ones has a profile that is mostly empty if only rankings show, which is the same cold-start problem private-by-default would have caused, applied to the individual profile instead of the network.
 
@@ -1511,7 +1545,7 @@ Typecheck and lint on every change. Unit tests for ranking insertion, bucket-ban
 
 **Notifications:** each v1 event generates exactly one inbox item; per-category preferences suppress correctly; the master off switch suppresses everything; the preference screen reflects denied OS permission honestly; **the conditional nudge sends nothing when there is no qualifying content**; sync-failure notices never push.
 
-**Privacy and safety:** RLS denies by default; a block removes follows in both directions and hides all surfaces; block and report are never enqueued; private accounts are absent from public web pages; the 13+ gate cannot be bypassed; account deletion removes data and invalidates tokens; **a public profile's Logged collection is readable by others while its notes, watch dates, and watchlist are not**; **every view is read from a second user's session and returns exactly what a direct table query would**; a suspended account is invisible everywhere and cannot write; a deleted account's username cannot be re-registered.
+**Privacy and safety:** RLS denies by default; a block removes follows in both directions and hides all surfaces; block and report are never enqueued; private accounts are absent from public web pages; the 13+ gate cannot be bypassed; account deletion removes data and invalidates tokens; **a public profile's Logged collection and watchlist are readable by others while its notes and watch dates are not**; **every view is read from a second user's session and returns exactly what a direct table query would**; a suspended account is invisible everywhere and cannot write; a deleted account's username cannot be re-registered.
 
 **Authentication:** the [`../architecture/auth.md`](../architecture/auth.md) §7 matrix in full. The load-bearing case is a second sign-in method carrying an **unverified** email that matches an existing account — it must be refused, never linked. That is the only test in the suite that fails *open*: a wrong implementation looks entirely correct from the outside, because the user does reach an account.
 
@@ -1716,8 +1750,8 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 
 1. New accounts default to public, and a Private toggle exists in Settings.
 2. Switching to private gates new followers without removing existing ones.
-3. Watch dates, notes, watchlist, import history, email, and capability state never appear on any public surface.
-4. **A public profile's Logged collection and its buckets are visible to other users; a private profile's are visible to approved followers only.** Notes, watch dates, and the watchlist stay hidden on both, including on a title whose bucket is visible.
+3. Watch dates, notes, import history, email, and capability state never appear on any public surface. The watchlist does, on the same terms as the rankings — §22, founder decision 2026-08-20.
+4. **A public profile's Logged collection, its buckets and its watchlist are visible to other users; a private profile's are visible to approved followers only.** Notes and watch dates stay hidden on both, including on a title whose bucket is visible. An unviewable profile leaks neither the watchlist's titles nor its count: the read returns nothing and the section is absent.
 5. **Every view returns the same rows a direct table query would**, asserted from a second user's session rather than from the view definition. A view created without `security_invoker` bypasses RLS while the table policy still reads correctly, which makes this the one privacy test that cannot be replaced by inspection.
 6. A block removes follows in both directions and hides both users across feed, leaderboard, discovery, match, tagging, and public web pages immediately.
 7. A report flow exists for profiles, display names, lists, list titles, usernames, tags, and reactions, with a reason taxonomy, and a filed report is visible in the operator queue.

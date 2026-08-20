@@ -489,13 +489,23 @@ mounting neighbours versus rendering them lazily.
 
 ---
 
-## 17. Recommendation freshness beyond a session seed
+## 17. Recommendation freshness beyond a session's own memory
 
-**What it is.** The parts of recommendation freshness that a per-session seed does *not*
-buy. **The seed itself shipped** in the 2026-08-20 Preview micropass — see
-`docs/architecture/recommendations.md` §7 — so this entry is only the remainder.
+**What it is.** The parts of recommendation freshness that in-memory session exposure does
+*not* buy. **The seed shipped** in the 2026-08-20 Preview micropass and **session exposure
+shipped in the micropass after it** — see `docs/architecture/recommendations.md` §7 — so
+this entry is only the remainder.
 
-**What shipped.** Scoring and arrangement were split. The query caches the scored
+**What shipped, second pass (2026-08-20).** The seed alone turned out not to be enough,
+and the founder's physical test is the record of it: two consecutive Refreshes kept eight of
+the nine visible posters and changed their order. A seed perturbs a *ranking*, and nothing
+in the pipeline knew which titles were already on screen, so turnover was a by-product of
+how far a random draw happened to move a title. **The session now remembers what it has
+presented** and the ranker prefers what it has not — held in module memory, reset by a fresh
+process, with no schema and no write path. Measured turnover in the first visible nine is
+seven of nine, with up to two score-anchors retained.
+
+**What shipped, first pass.** Scoring and arrangement were split. The query caches the scored
 candidates; the wall is drawn from them by seeded sampling over a bounded high-quality pool
 (Gumbel top-k, temperature 0.12, pool of three times the wall). A visit is stable, a new
 launch is a new **seed**, and an explicit Refresh control changes the seed without a
@@ -513,10 +523,18 @@ including the false ones — are in `docs/architecture/recommendations.md` §7.
 
 **What it does not do, and is deferred:**
 
-- **No memory of what has already been shown.** Two sessions can draw overlapping walls,
-  because nothing records what the reader saw. A durable "seen" ledger is a schema and a
-  write on every impression, and the brief for the micropass ruled out adding schema for
-  recommendation history.
+- **No memory of what has already been shown *across* sessions**, which is the headline
+  remainder and is deliberately preserved here. Exposure lives in module memory and dies
+  with the process, so two launches can draw overlapping walls and a reader who refreshed
+  through the pool yesterday starts from the top today. A durable impression ledger is a
+  schema and a write on every impression — the same ledger PRD §13's *Impression history*
+  guardrail and the cooldown rules it specifies both need, and the same one award
+  notifications wait on (§5). The micropass brief ruled out adding schema for
+  recommendation history, twice, on purpose.
+- **No cooldown, and no "repeatedly ignored" signal.** Within a session a title is
+  preferred-against once it has been shown; nothing distinguishes a title the reader
+  scrolled past four times from one they never reached, and nothing carries either fact
+  into tomorrow. PRD §13 specifies both.
 - **No novelty or recency term in the score.** Freshness is presentational. A title that
   entered the catalogue yesterday is not favoured over one that has been there a year.
 - **No exploration feedback.** Nothing learns from whether an explored title was opened,
@@ -525,13 +543,17 @@ including the false ones — are in `docs/architecture/recommendations.md` §7.
   lists for weeks (`media_cache`), so refreshing rearranges a fixed set. Genuinely new
   candidates need more anchors, a second candidate source, or a shorter cache life.
 
-**Revisit when.** The beta produces evidence about whether the seed was enough. The founder
-reporting that Refresh still shows familiar titles is the signal, and it is a different
-complaint from the one that pass fixed.
+**Revisit when.** The beta produces evidence about whether *session* memory was enough.
+The signal to watch for is a reader who says the recommendations feel familiar **on opening
+the app** rather than on pressing Refresh — that is the cross-session gap and cannot be
+closed without the ledger. A complaint about Refresh itself would mean something regressed,
+not that this entry came due.
 
-**Depends on.** A decision on impression logging and its privacy cost · a candidate-source
-or cache-lifetime change · PRD §13's explainability rule, which any novelty term has to stay
-inside.
+**Depends on.** A decision on impression logging and its privacy cost — a durable record
+of what somebody was *shown* is a new category of stored data and PRD §22 has no row for it
+· a candidate-source or cache-lifetime change, since a deeper pool is what a cross-session
+ledger would need to draw from · PRD §13's explainability rule, which any novelty term has
+to stay inside.
 
 ---
 

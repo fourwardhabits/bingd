@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 
 import { bandSizes, scoreFor } from '@/features/collection/score';
 import { useRankedCollection, type RankedEntry } from '@/features/collection/use-collection';
@@ -25,7 +25,7 @@ import {
   type Scored,
   type Taste,
 } from './rank';
-import { useRecommendationSeed } from './session-seed';
+import { noteSlateOnScreen, useRecommendationArrangement } from './session-seed';
 
 /**
  * The data half of For You: anchors, candidates, and what to leave out.
@@ -391,8 +391,9 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
   // `useWatchlist` was read here too and no longer is: see the note on `inputs`.
   const watched = useWatched(userId);
 
-  // Which arrangement this session is showing. Not part of the key — see `select`.
-  const seed = useRecommendationSeed();
+  // Which arrangement this session is showing, and what it has already shown. Not part
+  // of the key — see `select`.
+  const arrangement = useRecommendationArrangement();
 
   const ranked = medium === 'movies' ? movies : seasons;
   // The filtered subset of *this* medium, which is what the founder asked the slate to
@@ -437,7 +438,19 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
     setFingerprint(watched.data ?? []),
   ].join('|');
 
-  return useQuery({
+  /**
+   * Which wall this is, for exposure purposes.
+   *
+   * Medium and filters, because those are the two things that make a genuinely different
+   * slate; the anchors and the watched set are not here on purpose, since a title the
+   * reader has seen on the Movies wall has been seen whether or not they have since
+   * ranked something. Deliberately *not* the query key — that carries `inputs`, which
+   * moves whenever a ranking does, and exposure keyed on it would forget everything the
+   * reader had been shown the moment they logged a film.
+   */
+  const wallKey = `${medium}|${JSON.stringify(filters ?? emptyFilters())}`;
+
+  const slate = useQuery({
     // The filters are part of the key: the same anchors and the same candidates with
     // a different genre picked are a different slate, and a shared key would serve
     // whichever the reader asked for first.
@@ -456,15 +469,25 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
      * above for bookmarks. `select` re-derives from data that is already there: no
      * network, no pending state, no remount.
      *
-     * Memoised on the seed alone, so a re-render for any other reason returns the
+     * Memoised on the arrangement alone, so a re-render for any other reason returns the
      * identical `items` array and the wall does not so much as re-key.
+     *
+     * **The arrangement carries the session's exposure as well as its seed, and it only
+     * ever changes inside `refreshRecommendations`.** That is what keeps this stable: the
+     * wall is parked as "on screen" by the effect below, but parking is silent, so
+     * nothing here re-derives until the reader actually presses Refresh. A live exposure
+     * read would have changed the wall on a navigation — and, worse, would have looped:
+     * new wall, parked, new exposure, new wall.
      */
     select: useCallback(
       (scoring: ForYouScoring): ForYouSlate => ({
         ...scoring,
-        items: diversify(scoring.scored, SLATE_SIZE, seed),
+        items: diversify(scoring.scored, SLATE_SIZE, arrangement.seed, {
+          current: arrangement.current,
+          seen: arrangement.seen,
+        }),
       }),
-      [seed],
+      [arrangement],
     ),
     queryFn: async (): Promise<ForYouScoring> => {
       const taste = tasteFrom(
@@ -554,4 +577,27 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
       };
     },
   });
+
+  /**
+   * Tell the session what this wall is showing, so the next Refresh can rotate past it.
+   *
+   * In the hook rather than in the screen so that every consumer contributes its
+   * exposure without having to remember to — a second surface that renders a For You
+   * wall and forgets this line would quietly get the old behaviour back.
+   *
+   * `noteSlateOnScreen` does not notify, so this effect cannot cause the re-render that
+   * would run it again. That is the whole reason the session module has a silent writer:
+   * a notifying one is an infinite loop, and it is the obvious way to write this.
+   *
+   * The whole wall is recorded, not the first nine. A reader who scrolls has seen the
+   * twentieth poster, and a wall that only counted what fitted on screen would keep
+   * re-offering the bottom half as though it were new.
+   */
+  const items = slate.data?.items;
+  useEffect(() => {
+    if (!items) return;
+    noteSlateOnScreen(wallKey, items.map((item) => item.mediaItemId));
+  }, [wallKey, items]);
+
+  return slate;
 }

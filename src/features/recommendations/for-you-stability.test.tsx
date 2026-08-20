@@ -7,7 +7,7 @@ import { renderWithProviders } from '@/test-utils/render';
 // app-directory.test.ts.
 import RecommendationsScreen from '../../../app/(tabs)/recommendations';
 
-import { setRecommendationSeed } from './session-seed';
+import { resetRecommendationSession } from './session-seed';
 
 /**
  * The founder's Android Preview bug, and the freshness control added beside it.
@@ -173,7 +173,10 @@ beforeEach(() => {
   for (const key of Object.keys(mockReads)) delete mockReads[key];
   // A fixed arrangement, so a test that asserts "the wall did not move" is not quietly
   // asserting against a wall that was random to begin with.
-  setRecommendationSeed(12345);
+  // A fresh process, not merely a fresh seed: exposure is module state and Jest keeps
+  // modules between tests in a file, so a suite asserting "the first Refresh rotates"
+  // would otherwise inherit whatever the previous test had already presented.
+  resetRecommendationSession(12345);
 });
 
 /** Every `for-you` entry currently in the cache. One, always — see the tests. */

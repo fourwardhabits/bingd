@@ -394,8 +394,103 @@ one sort over data already in the cache: no network, no pending state, no remoun
 Filters are unaffected: sampling runs over the already-filtered scored pool, so a
 refreshed wall is still Comedy if Comedy was chosen.
 
+## 8. Rotation — the second audit, and why the seed was not enough, 2026-08-20
+
+The founder tested two consecutive Refresh states on the Preview build after §7 shipped.
+The visible wall kept **eight of the nine posters** and rearranged them. Their verdict:
+this is *shuffle the same recommendations*, not *show me different recommendations*, and
+it is a product failure whatever the mechanism.
+
+### The audit
+
+§7's mechanism was doing exactly what it was designed to do, which is the finding again.
+
+| | What it was | Verdict |
+|---|---|---|
+| Candidate pool | Every eligible scored candidate, typically 100–160 | Not the constraint |
+| Rotation pool | Top `3 × limit` = **60** by score | Deep enough; not the constraint |
+| Score distribution | A real gradient — an anchored head well above the body | **Part of the cause** |
+| Perturbation | `T = 0.12 × spread`, Gumbel | **Calibrated to preserve the leader.** §7 tuned it so the best title leads >⅓ of visits and an outsider leads <1/10. Head retention is that guarantee seen from the other side |
+| Top-k selection | Top 20 of the perturbed 60 | Not the constraint |
+| Seed behaviour | Advances; no fixed point, no two-cycle | Working. A promise about the *seed*, never about the wall |
+| Diversification | Three hard ceilings over the sampled order | Unchanged, not the cause |
+| **Current-slate exclusion** | **None** | **Primary cause** |
+| **Session exposure memory** | **None** | **Primary cause** |
+
+Measured against the real scorer across pool shapes, retention in the first nine ran
+**52–72%**, and the founder's screenshot is the tail of that distribution. So the verdict
+is a *combination*, and the two rows in bold are the ones worth fixing: **nothing in the
+pipeline knew which titles were on screen**, so turnover was a by-product of how far a
+random draw happened to move a title rather than something the algorithm was trying to
+achieve.
+
+Raising the temperature was the other available lever and was rejected. It buys turnover
+by spending the relevance guarantee §7 measured, and what it buys is still turnover by
+luck — the same mechanism, louder.
+
+### What changed
+
+Deliberately the smallest coherent change, and none of it touches scoring.
+
+- **The session arrangement is no longer a number.** `session-seed.ts` holds a seed plus
+  `current` (what is on the wall) and `seen` (how many arrangements have contained each
+  title, capped at three).
+- **`explore` orders by staleness tier first, then by the same perturbed score.** The
+  current wall is the worst tier; never-shown is the best. A comparison rather than an
+  arithmetic penalty, because a penalty is a magnitude that must be tuned against a score
+  spread nobody controls — which is how `T` came to need three review rounds. A tier
+  cannot be too small to matter.
+- **Up to two anchors are exempt**, and only titles that are the two strongest candidates
+  in the whole pool by true score. Relevance stays primary: a Refresh that discarded the
+  single best recommendation would be a reset rather than a refresh. A wall whose head is
+  weak keeps nothing and rotates completely.
+- **The pool bound is unchanged at `3 × limit`.** Rotation happens *inside* the bounded
+  pool, so §7's one guarantee — sampling cannot promote a title from outside it — holds
+  exactly as before. Widening the pool to buy a fourth novel refresh would put the
+  hundredth-best candidate on the visible wall, which is the trade the quality bound rules
+  out.
+
+### The loop that had to be avoided
+
+Exposure is recorded by the thing that renders, which makes a feedback cycle the obvious
+failure mode: render → record → exposure changes → new wall → record. So
+`noteSlateOnScreen` is **silent** — it parks what is on screen without notifying
+subscribers — and only `refreshRecommendations` promotes the parked value into the
+arrangement and notifies.
+
+Two things follow. The exposure the ranker reads is **frozen between presses**, so a
+navigation, a re-render or a bookmark re-derives the identical wall. And parking is keyed
+per wall, so switching medium does not erase what the other one showed and then hand it
+straight back on the next press.
+
+### Measured behaviour
+
+Over a pool of 60 or more, per press, with a wall of 20 and nine posters visible:
+
+| | retained of 9 | session-new of 9 |
+|---|---|---|
+| Refresh #1 | 2 | 7 |
+| Refresh #2 | 2 | 7 |
+| Refresh #3 | 2 | 4–6 |
+| Refresh #4+ | 2 | 0 |
+
+**Turnover holds at 78% even after novelty is exhausted**, which is the property that
+matters most. The rotation pool is three walls deep, so by the third press there is
+little unseen left; from there the tiers rotate titles by relative staleness instead, and
+the wall neither settles into two alternating arrangements nor gets shorter.
+
+On a constrained pool — 22 candidates for a wall of 20 — retention rises to 3–5 of 9 and
+the wall stays full. That is the graceful degradation the brief asks for, rather than a
+turnover target forcing weak titles onto the screen.
+
+`src/features/recommendations/rotation.test.ts` asserts every row above, and carries the
+founder's failure as a named mutant: *permutes the same titles instead of replacing them,
+if rotation is removed* runs the old path over the identical fixture and asserts that it
+retains more than a third of the visible nine.
+
 ### What this does not do
 
-No memory of what was already shown, no novelty or recency term in the score, no learning
-from what an explored title did, and no widening of the candidate pool itself. Those are
+No memory of what was shown **in a previous session** — exposure dies with the process —
+no novelty or recency term in the score, no learning from what an explored title did, and
+no widening of the candidate pool itself. Those are
 `docs/product/deferred-roadmap.md` §17, with the reasoning for each.

@@ -9,6 +9,7 @@ import { useCommentCounts } from '@/features/feed/use-comments';
 import { useActorActivity } from '@/features/feed/use-feed';
 import { FollowControl } from '@/features/profile/FollowControl';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
+import { ProfileWatchlist } from '@/features/profile/ProfileWatchlist';
 import { TopRanked } from '@/features/profile/TopRanked';
 import {
   useProfileIdentity,
@@ -249,6 +250,14 @@ export default function PublicProfileScreen() {
           <TopRanked
             userId={subjectId}
             otherName={isSelf ? null : profile.data.name}
+            onPressTitle={(id: string) => router.push(`/title/${id}`)}
+          />
+
+          {/* Same position as the own profile, deliberately: the founder pass that made
+              these two screens share ProfileIdentity and TopRanked exists so a reader can
+              tell that what they see on somebody else is what others see on them. */}
+          <ProfileWatchlist
+            userId={subjectId}
             onPressTitle={(id: string) => router.push(`/title/${id}`)}
           />
 

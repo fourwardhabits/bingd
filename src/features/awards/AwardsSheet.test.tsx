@@ -262,13 +262,20 @@ describe('what a row is called', () => {
   const genres = (names: string[]) =>
     names.map((genre, i) => watched(`g${i}`, { title: `Film ${i}`, genres: [genre] }));
 
-  /** Twelve genres: Dabbler, since the founder's Preview re-audit moved it from eight. */
-  const TWELVE = [
+  /**
+   * Fourteen genres: Dabbler, after the 2026-08-20 rebalance moved the ladder to
+   * 14 / 16 / 17. The whole vocabulary is eighteen, so these are named out in full rather
+   * than sliced from `CANONICAL_GENRES` — a fixture that tracked the constant would keep
+   * passing if the constant and the threshold moved together, which is the one thing
+   * these tests exist to catch.
+   */
+  const FOURTEEN = [
     'Action',
     'Adventure',
     'Animation',
     'Comedy',
     'Crime',
+    'Documentary',
     'Drama',
     'Family',
     'Fantasy',
@@ -276,35 +283,46 @@ describe('what a row is called', () => {
     'Horror',
     'Music',
     'Mystery',
+    'Romance',
   ];
-  const FOURTEEN = [...TWELVE, 'Romance', 'Thriller'];
+  const SIXTEEN = [...FOURTEEN, 'Science Fiction', 'Thriller'];
 
   it('shows the family name and the requirement while locked', async () => {
-    seed('user_media', genres(TWELVE.slice(0, 6)));
+    seed('user_media', genres(FOURTEEN.slice(0, 6)));
     await open();
     expect(screen.getByText('Genre Gremlin')).toBeTruthy();
-    expect(screen.getByText('Next: Watch 12 different genres')).toBeTruthy();
-    expect(count('6 / 12')).toBeTruthy();
+    expect(screen.getByText('Next: Watch 14 different genres')).toBeTruthy();
+    expect(count('6 / 14')).toBeTruthy();
     // The reward is not spent early: the tier's name is nowhere on the sheet.
     expect(screen.queryByText('Dabbler')).toBeNull();
   });
 
   it('becomes the tier name once it is earned, with no separate earned line', async () => {
-    seed('user_media', genres(TWELVE));
+    seed('user_media', genres(FOURTEEN));
     await open();
     expect(screen.getByText('Dabbler')).toBeTruthy();
-    expect(screen.getByText('Next: Watch 14 different genres')).toBeTruthy();
+    expect(screen.getByText('Next: Watch 16 different genres')).toBeTruthy();
     // Both the old line and the next tier's name are absent.
     expect(screen.queryByText('Dabbler earned')).toBeNull();
     expect(screen.queryByText('Mixer')).toBeNull();
   });
 
   it('advances to the second tier name', async () => {
-    seed('user_media', genres(FOURTEEN));
+    seed('user_media', genres(SIXTEEN));
     await open();
     expect(screen.getByText('Mixer')).toBeTruthy();
+    expect(screen.getByText('Next: Watch 17 different genres')).toBeTruthy();
     expect(screen.queryByText('Genre Gremlin')).toBeNull();
     expect(screen.queryByText('Chaos Collector')).toBeNull();
+  });
+
+  it('reaches the top tier one genre short of the whole vocabulary', async () => {
+    // Seventeen, not eighteen, and this is the fixture that says so on the sheet itself:
+    // the reader who has never logged a Western is still Chaos Collector.
+    seed('user_media', genres([...SIXTEEN, 'War']));
+    await open();
+    expect(screen.getByText('Chaos Collector')).toBeTruthy();
+    expect(screen.getByText('Watched 17 different genres')).toBeTruthy();
   });
 
   it('keeps the family name on a generic Bronze/Silver/Gold track', async () => {
@@ -777,8 +795,9 @@ describe('the breakdowns', () => {
     expect(screen.getByText('Action')).toBeTruthy();
     expect(screen.getByText('2 titles')).toBeTruthy();
     expect(screen.getByText('Comedy')).toBeTruthy();
-    // Two genre rows against a numerator of two.
-    expect(screen.getByText(/2 \/ 12/)).toBeTruthy();
+    // Two genre rows against a numerator of two, and the denominator is Dabbler's
+    // threshold — the tier being worked toward, not the size of the vocabulary.
+    expect(screen.getByText(/2 \/ 14/)).toBeTruthy();
   });
 
   it('Two-Screen Life shows both sides with their own caps', async () => {

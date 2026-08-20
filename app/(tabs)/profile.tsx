@@ -13,6 +13,7 @@ import { useFeed } from '@/features/feed/use-feed';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { GoalsSection } from '@/features/goals/GoalsSection';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
+import { ProfileWatchlist } from '@/features/profile/ProfileWatchlist';
 import { TopRanked } from '@/features/profile/TopRanked';
 import { useProfileStats } from '@/features/profile/use-public-profile';
 import { posterUri } from '@/lib/images';
@@ -167,6 +168,10 @@ export default function ProfileScreen() {
         />
 
         <TopRanked userId={profile.id} onPressTitle={(id) => router.push(`/title/${id}`)} />
+
+        {/* Immediately after Top Ranked, and that order is the product decision rather
+            than a layout one: what somebody loves, then what they want to watch next. */}
+        <ProfileWatchlist userId={profile.id} onPressTitle={(id) => router.push(`/title/${id}`)} />
 
         <View style={styles.section}>
           <SectionHeader title="Recent activity" />

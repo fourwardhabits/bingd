@@ -495,11 +495,20 @@ export function diversify(
   limit: number = SLATE_SIZE,
   /** See {@link explore}. Zero — the default — is the old strict score order. */
   seed: number = 0,
+  /**
+   * What this session has already put in front of the reader.
+   *
+   * Omitted — the default — is exactly the behaviour every caller had before rotation
+   * existed: a perturbed order over the same bounded pool, with no opinion about which
+   * titles were on screen a moment ago. The initial slate of a session passes an empty
+   * exposure and gets the same wall it always did.
+   */
+  exposure?: Exposure,
 ): Scored[] {
   const byScore =
     seed === 0
       ? [...scored].sort((a, b) => b.explanation.total - a.explanation.total)
-      : explore(scored, limit, seed);
+      : explore(scored, limit, seed, exposure);
 
   const perGenre = new Map<string, number>();
   const perAnchor = new Map<string, number>();
@@ -619,6 +628,52 @@ export function diversify(
  * bounds` — **including the two that are false**, so no later round can restore them. A
  * claim about relevance that no test exercises is how this came to be overstated twice.
  */
+/**
+ * What the session has already shown, as this module needs to read it.
+ *
+ * Structurally identical to `session-seed.ts`'s `Arrangement` minus the seed, and
+ * declared here rather than imported from there because this module is pure: it takes
+ * exposure as an argument and holds none of it. A test hands it two collections; the app
+ * hands it the session's.
+ */
+export type Exposure = {
+  /** On the wall the reader is looking at right now. */
+  current: ReadonlySet<string>;
+  /** How many arrangements this session have contained each title. */
+  seen: ReadonlyMap<string, number>;
+};
+
+/**
+ * How many presentations deep the staleness ordering goes before it flattens.
+ *
+ * Mirrors `EXPOSURE_TIERS` in `session-seed.ts`, which is where the counting happens and
+ * which caps what it stores at the same number, so a larger value can never arrive here.
+ * Held separately rather than imported to keep this module free of session state, and
+ * exported only so `rotation.test.ts` can assert the two agree — a duplicated constant is
+ * safe only when something fails the moment the copies drift.
+ */
+export const EXPOSURE_TIERS = 3;
+
+/**
+ * How many of the wall's strongest titles survive an explicit Refresh.
+ *
+ * **Two, and this is the number that makes Refresh a product rather than a reset.** The
+ * founder's brief asks for roughly 65–80% of the first visible nine to change, and
+ * explicitly permits keeping "1–2 particularly high-confidence anchor recommendations".
+ * Two anchors out of nine visible is 78% turnover, which is the middle of that band.
+ *
+ * Zero would be simpler and is wrong: it would mean the single best thing the engine has
+ * for this reader disappears the moment they ask to see something else, and the founder's
+ * first constraint is that relevance stays primary. Refresh means "show me more of what I
+ * have not seen", not "throw away the best answer you have".
+ *
+ * The exemption is by *rank in the whole pool*, not by "was on the wall". A title only
+ * survives if it is genuinely one of the two strongest candidates that exist for this
+ * reader — so a wall whose head is weak keeps nothing and rotates completely, which is
+ * the right behaviour when there is no high-confidence recommendation to protect.
+ */
+const REFRESH_ANCHORS = 2;
+
 const FRESHNESS_POOL_MULTIPLE = 3;
 
 /**
@@ -733,7 +788,12 @@ function unitRandom(seed: number, key: string): number {
  * refreshed wall obeys the franchise, genre and anchor caps exactly as the strict one
  * does — the ordering is what varies, never the constraints.
  */
-function explore(scored: readonly Scored[], limit: number, seed: number): Scored[] {
+function explore(
+  scored: readonly Scored[],
+  limit: number,
+  seed: number,
+  exposure?: Exposure,
+): Scored[] {
   const byScore = [...scored].sort((a, b) => b.explanation.total - a.explanation.total);
 
   const poolSize = Math.min(byScore.length, Math.max(limit, limit * FRESHNESS_POOL_MULTIPLE));
@@ -743,10 +803,36 @@ function explore(scored: readonly Scored[], limit: number, seed: number): Scored
   const best = pool[0]?.explanation.total ?? 0;
   const worst = pool[pool.length - 1]?.explanation.total ?? 0;
   const spread = best - worst;
+
+  // The titles a Refresh is allowed to keep: the strongest few in the *whole* pool, by
+  // true score and before any draw. Taken here rather than inside `tierOf` so that
+  // "high confidence" means one fixed thing per call and cannot depend on the order
+  // candidates are visited in. Empty when there is no exposure to rotate against, which
+  // is what makes the un-rotated path below byte-for-byte the old behaviour.
+  const anchors = new Set(
+    exposure ? pool.slice(0, REFRESH_ANCHORS).map((candidate) => candidate.mediaItemId) : [],
+  );
+
+  /**
+   * How stale a candidate is, lowest first. Zero is "not presented this session".
+   *
+   * The current wall is worse than anything merely seen earlier, and that single line is
+   * what turns Refresh from a reordering into a change of *membership*: "show me
+   * different recommendations" is, first of all, a statement about the posters that are
+   * on screen at the moment it is pressed.
+   */
+  const tierOf = (candidate: Scored): number => {
+    if (!exposure || anchors.has(candidate.mediaItemId)) return 0;
+    if (exposure.current.has(candidate.mediaItemId)) return EXPOSURE_TIERS + 1;
+    return Math.min(EXPOSURE_TIERS, exposure.seen.get(candidate.mediaItemId) ?? 0);
+  };
+
   // Every candidate scored identically — a popularity-only wall where nothing is
-  // popular, say. There is no near-tie to break, so leave the order alone rather than
-  // manufacturing one out of the hash.
-  if (spread <= 0) return byScore;
+  // popular, say. There is no near-tie to break, and before rotation existed the honest
+  // answer was to leave the order alone. It still is *within* a tier; but whether a title
+  // is already on screen is not a near-tie question, so the tiers still apply.
+  const jitter = spread <= 0 ? 0 : FRESHNESS_TEMPERATURE * spread;
+  if (jitter === 0 && !exposure) return byScore;
 
   const shuffled = pool
     .map((candidate) => {
@@ -754,9 +840,19 @@ function explore(scored: readonly Scored[], limit: number, seed: number): Scored
       // The Gumbel transform. Unbounded in principle, which is what lets an outsider
       // occasionally lead; bounded in practice by the pool it is drawn from.
       const gumbel = -Math.log(-Math.log(uniform));
-      return { candidate, key: candidate.explanation.total + FRESHNESS_TEMPERATURE * spread * gumbel };
+      return {
+        candidate,
+        tier: tierOf(candidate),
+        key: candidate.explanation.total + jitter * gumbel,
+      };
     })
-    .sort((a, b) => b.key - a.key)
+    // Tier first, then the perturbed score. A comparison rather than an arithmetic
+    // penalty, on purpose: a penalty is a magnitude that has to be tuned against a score
+    // spread nobody controls, and the review rounds spent tuning FRESHNESS_TEMPERATURE
+    // are the evidence for how that goes. A tier cannot be too small to matter, and it
+    // cannot be so large it reaches outside the pool — the pool bound is still where the
+    // relevance guarantee lives, and nothing below is promoted into it.
+    .sort((a, b) => a.tier - b.tier || b.key - a.key)
     .map((entry) => entry.candidate);
 
   return [...shuffled, ...tail];
@@ -795,8 +891,14 @@ export function buildSlate({
   exclude,
   limit,
   seed,
-}: SlateInput & { seed?: number }): Scored[] {
-  return diversify(scoreSlate({ candidates, anchors, taste, exclude }), limit ?? SLATE_SIZE, seed);
+  exposure,
+}: SlateInput & { seed?: number; exposure?: Exposure }): Scored[] {
+  return diversify(
+    scoreSlate({ candidates, anchors, taste, exclude }),
+    limit ?? SLATE_SIZE,
+    seed,
+    exposure,
+  );
 }
 
 /**

@@ -117,6 +117,7 @@ beforeEach(() => {
   tableRows.user_media = [];
   tableRows.media_items = [];
   tableRows.watch_tags = [];
+  tableRows.watchlist = [];
 });
 
 const open = async () => renderWithProviders(<PublicProfileScreen />);
@@ -207,6 +208,48 @@ describe('what this person likes', () => {
     await waitFor(() => expect(view.getByLabelText('Top ranked')).toBeTruthy());
     // Two loved titles: the top of the band takes 10.0 and the bottom takes 7.0.
     await waitFor(() => expect(view.getAllByLabelText(/10\.0 out of 10/).length).toBeGreaterThan(0));
+  });
+
+  it('shows what they want to watch next, right after what they love', async () => {
+    /**
+     * The founder's ordering decision, on the screen it is aimed at: this is somebody
+     * else's profile, and their watchlist is the socially actionable half — "I want to
+     * watch that too" is a reason to reach out, which their finished rankings never give.
+     *
+     * The section is here at all because `20260820000200` moved the watchlist behind
+     * `can_i_view`. A profile this viewer could not see would return no rows from the same
+     * query and the section would be absent — proved from a real second session in
+     * `supabase/tests/rls.test.mjs`, and at the component level in
+     * `ProfileWatchlist.test.tsx`.
+     */
+    tableRows.watchlist = [
+      {
+        user_id: 'anna-id',
+        media_item_id: 'w1',
+        created_at: '2026-08-19T10:00:00Z',
+        media_items: {
+          kind: 'movie',
+          title: 'Sicario',
+          season_number: null,
+          release_date: '2015-01-01',
+          poster_path: null,
+          parent: null,
+        },
+      },
+    ];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Watchlist')).toBeTruthy());
+    expect(view.getByLabelText(/^Sicario/)).toBeTruthy();
+  });
+
+  it('has no Watchlist section when the read comes back empty', async () => {
+    // Which is both cases at once, and deliberately indistinguishable: an account that has
+    // saved nothing, and an account this viewer is not authorised to see.
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('Top ranked')).toBeTruthy());
+    expect(view.queryByLabelText('Watchlist')).toBeNull();
   });
 
   it('shows one wall rather than a wall and then the same list again', async () => {
