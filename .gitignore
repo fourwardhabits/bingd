@@ -72,3 +72,9 @@ expo-env.d.ts
 # Agent review workflow artifacts (independent Codex review packets and findings).
 # Engineering process evidence, not product source.
 .agent-workflow/
+
+# Agent tooling configuration, on the same reasoning as .agent-workflow/ above. Also:
+# `npm run build:beta` refuses on any untracked file, because Metro bundles what a
+# committed file imports whether or not git has heard of it (review 28b), so local-only
+# scratch has to be ignored rather than merely uncommitted.
+.claude/

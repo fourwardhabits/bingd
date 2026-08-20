@@ -85,10 +85,21 @@ npm run build:beta   -- --platform android
 npm run update:beta  -- --message "what changed"
 ```
 
-`scripts/release-guard.mjs` refuses unless the working tree is clean, HEAD is on `main` or
-`release/*`, **and the release gate passed for that exact commit** — `gh run list --commit
-<sha>`, not "recently", not "on this branch". Where it cannot read the gate's result it
-refuses, because an unverifiable gate reported as green is worse than no gate.
+`scripts/release.mjs` refuses unless the working tree is clean — **untracked files
+included**, because Metro bundles whatever committed code imports whether or not git has
+heard of it — HEAD is on `main` or `release/*`, **and the release gate passed for that
+exact commit** (`gh run list --commit <sha>`, not "recently", not "on this branch"). Where
+it cannot read the gate's result it refuses: an unverifiable gate reported as green is
+worse than no gate.
+
+The same script is also **the only supported way to publish an update**, and that half is
+not about the gate at all. `eas update` reads `--branch` and `--environment`; it does
+**not** read a build profile, so `APP_VARIANT` and `BINGD_LANE` — which live in `eas.json`
+under `build.<profile>.env` — are simply absent. A bare `eas update --branch beta`
+therefore resolves the config with no variant, **defaults to `development`**, and publishes
+a manifest telling every friend tester's device it is a development build: environment
+badge on, `isProduction` false, the lane gone. The native side stays correct, which is what
+makes it invisible. `scripts/release.mjs` supplies both, read from `eas.json`.
 
 **`eas` remains a command anybody can type.** The guard makes publishing an unreviewed tree
 to friend testers a deliberate act — somebody bypassing a check that told them why — rather
@@ -132,11 +143,20 @@ review 28 raised the first two as a Blocker against a version of this that lived
   hatch, and agreement with `eas.json`. It runs in the **pull request** gate, because what
   it protects arrives on pull requests.
 
-The escape hatch for a contributor running their own Supabase project is
-`BINGD_ALLOW_UNLISTED_BACKEND=yes-i-am-testing-locally`, which is refused when
-`EAS_BUILD=true`. A URL that is not a Supabase URL at all — CI's `https://ci.invalid`, a
-local stack on `127.0.0.1` — passes through; `src/lib/env.ts` is what refuses an unusable
-one at startup.
+**There is no escape hatch, and there was one for a round.**
+`BINGD_ALLOW_UNLISTED_BACKEND` was refused only when `EAS_BUILD=true` — and **`eas update`
+never sets that**, so the one variable meant to close the hatch for shipped artifacts was
+absent on the path that ships them (review 28b). It is gone rather than narrowed; anybody
+who genuinely needs another project adds its ref to the development lane, which is a line
+in a diff somebody reads.
+
+**An undeclared lane gets the development lane's permissions, not the union of every
+lane's.** The union is safe only while there is exactly one backend, and it is a trap that
+springs later: a bare `eas update` supplies no lane, and the day a production ref exists it
+could otherwise compile production credentials and publish them to any channel.
+
+A URL that is not a Supabase URL at all — CI's `https://ci.invalid`, a local stack on
+`127.0.0.1` — passes through; `src/lib/env.ts` is what refuses an unusable one at startup.
 
 **When a production Supabase project is created, its ref is added to the `production` lane
 and to nothing else,** in the same reviewed change that creates it.

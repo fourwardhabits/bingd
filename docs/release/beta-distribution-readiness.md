@@ -208,9 +208,12 @@ the founder's own builds, which is exactly where they get tested.
 
 ## 5. Order of operations
 
-1. ✅ Preview builds exist.
+1. **Preview builds.** The Android one exists. **The iOS one does not** and is one founder
+   command — see [`ios-preview-acceptance.md`](./ios-preview-acceptance.md), which opens
+   with it.
 2. **Founder Preview acceptance** — [Android](./android-preview-acceptance.md),
-   [iOS](./ios-preview-acceptance.md). Nothing below starts until this passes.
+   [iOS](./ios-preview-acceptance.md). Nothing below starts until this passes on **both**
+   platforms.
 3. TMDB logo added (`store-privacy-inventory.md` §5). Pre-beta blocker.
 4. `hello@bingd.app` confirmed. Demo account created for App Review.
 5. Release gate green (`safe-update-runbook.md` §6).

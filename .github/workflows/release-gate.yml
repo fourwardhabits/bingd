@@ -90,17 +90,23 @@ jobs:
       - name: Site build
         run: npm run build:web
 
-      # Every lane's config resolved with that lane's real variant, lane and backend, as
-      # an EAS build would resolve it. `EAS_BUILD=true` matters: it closes the local
-      # escape hatch in config/backends.cjs, so this exercises the rule a build gets
-      # rather than the rule a laptop gets.
+      # Each lane's config resolved with that lane's real variant, lane and backend, the
+      # way an EAS build resolves it — and asserting that `extra.lane` and `extra.variant`
+      # come back as the lane declared, which is the pair an `eas update` gets wrong when
+      # it is run without `scripts/release.mjs`.
       #
-      # An earlier version of this step set only APP_VARIANT and passed https://ci.invalid,
-      # which is not a Supabase URL at all — so it resolved four configs and asserted
-      # nothing whatever about backends. Independent review 28 found that; the comment
-      # claimed a check the step did not perform, which is the failure this repository
-      # keeps writing tests about.
-      - name: Every lane resolves against its own backend
+      # Two earlier versions of this step were wrong and both were found by review rather
+      # than by the step. The first set only APP_VARIANT and passed https://ci.invalid,
+      # which is not a Supabase URL at all, so it asserted nothing about backends. The
+      # second called itself "every lane" and skipped production in a `continue`.
+      #
+      # Named for what it does. It resolves the **three lanes that have a backend** —
+      # development, preview, beta — and asserts that `production` has none, which is why
+      # it is not among them. Review 28b caught the earlier version calling itself "every
+      # lane" while skipping production in a `continue`; the negative step below is what
+      # actually covers production, and saying so is the difference between a skip and a
+      # silent gap.
+      - name: The three lanes with a backend resolve against it
         run: |
           set -e
           node -e "
@@ -108,12 +114,21 @@ jobs:
             const { LANE_BACKENDS } = require('./config/backends.cjs');
             const eas = require('./eas.json');
 
-            for (const [lane, refs] of Object.entries(LANE_BACKENDS)) {
+            const withBackend = Object.entries(LANE_BACKENDS).filter(([, refs]) => refs.length);
+            const without = Object.entries(LANE_BACKENDS).filter(([, refs]) => !refs.length);
+
+            if (without.length !== 1 || without[0][0] !== 'production') {
+              throw new Error(
+                'Exactly one lane may have no backend and it must be production. Lanes without one: ' +
+                  (without.map(([l]) => l).join(', ') || 'none') +
+                  '. If a production Supabase project now exists, this step and its name need updating ' +
+                  'in the same change that adds it.'
+              );
+            }
+            console.log('production: no backend declared, covered by the negative step below');
+
+            for (const [lane, refs] of withBackend) {
               const variant = eas.build[lane].env.APP_VARIANT;
-              if (refs.length === 0) {
-                console.log(\`--- \${lane}: no backend declared, nothing to resolve\`);
-                continue;
-              }
               for (const ref of refs) {
                 const env = {
                   ...process.env,

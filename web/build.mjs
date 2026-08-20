@@ -532,8 +532,11 @@ const PRIVACY_BODY = `      <p class="lede">
         and it is removed &mdash; see <a href="/account-deletion">deleting your account</a>
         for exactly what goes, what is anonymised, and the one category that is kept.
         Analytics and crash reports are held by PostHog and Sentry under their own
-        retention settings and are not removed by deleting your Bingd account; they carry
-        an account identifier and no content.
+        retention settings and are not removed by deleting your Bingd account. Both carry
+        an account identifier. <strong>Analytics carry no content</strong> &mdash; that is
+        enforced by the allowlist described above, not by care. <strong>Crash reports are
+        the exception</strong>: the error message and stack trace are kept, for the reason
+        given above, and an error message can quote something you typed.
       </p>
 
       <h2>Age</h2>

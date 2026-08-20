@@ -91,19 +91,27 @@ Updates go to a **branch**; a branch is mapped to a **channel**; a build listens
 channel named in its `eas.json` profile. Today: `development → development`,
 `preview → preview`. `beta` and `production` are created by the first build that names them.
 
-**`--environment` is not optional, and leaving it off is the quiet failure.** `eas update`
-compiles the bundle on *your machine*, from *your* `.env`, and `EXPO_PUBLIC_SUPABASE_URL` is
-baked into what it publishes. Without `--environment`, an update takes whatever local
-configuration happens to be lying around and pushes it to every device on that channel.
-
-`config/backends.cjs` now refuses an update compiled against a project the lane may not use
-— that is what closes the hole rather than the flag — but the flag is what makes the update
-carry the *right* values rather than merely a permitted set.
+> **Do not call `eas update` directly. Use the npm scripts.**
+>
+> `eas update` compiles the bundle on *your machine* and takes `--branch` and
+> `--environment`. An EAS **environment** holds only the four `EXPO_PUBLIC_*` variables.
+> `APP_VARIANT` and `BINGD_LANE` live in `eas.json` under `build.<profile>.env`, and
+> **`eas update` does not read a build profile at all.**
+>
+> So `eas update --branch beta --environment preview` resolves `app.config.ts` with no
+> variant, which **defaults to `development`** — and publishes a manifest that tells every
+> device taking it that it is a development build. `Constants.expoConfig` comes from the
+> manifest, so the environment badge appears, `isProduction` goes false, and the lane
+> disappears. The native side is untouched and correct, which is exactly why nobody would
+> notice.
+>
+> `scripts/release.mjs` supplies both, read from `eas.json`. Independent review 28b found
+> this; it is not hypothetical.
 
 ### Preview — the founder's own build
 
 ```
-npx eas update --branch preview --environment preview --message "what changed, in one line"
+npm run update:preview -- --message "what changed, in one line"
 ```
 
 ### Beta — friend testers. Intentional releases only.
@@ -112,9 +120,11 @@ npx eas update --branch preview --environment preview --message "what changed, i
 npm run update:beta -- --message "what changed, in one line"
 ```
 
-Not `eas update` directly. That script is `eas update --branch beta --environment preview`
-behind `scripts/release-guard.mjs`, which refuses unless the working tree is clean, HEAD is
-on `main` or `release/*`, and **the release gate passed for this exact commit**.
+Not `eas update` directly, and the gate is only half the reason. `scripts/release.mjs`
+refuses unless the tree is clean — untracked files included — HEAD is on `main` or
+`release/*`, and **the release gate passed for this exact commit**; then it runs
+`eas update --branch beta --environment preview` **with `BINGD_LANE` and `APP_VARIANT`
+supplied**, which is the part `eas` cannot do for itself. See the box above §3.
 
 An update to `beta` reaches every friend tester's phone the next time they bring the app to
 the foreground — `src/lib/updates.ts` checks on foreground and applies immediately, which
@@ -174,8 +184,8 @@ update contains. A new binary is required when:
   failure mode `runtimeVersion` exists to prevent, and it is unrecoverable over the air.
 
 ```
-npx eas build --platform android --profile preview
-npx eas build --platform ios --profile preview
+npm run build:preview -- --platform android
+npm run build:preview -- --platform ios
 ```
 
 ### Which one, in one line
@@ -196,7 +206,7 @@ npx eas build:list --platform android --buildProfile preview --limit 1
 #    Note the runtimeVersion. It must match what step 3 reports.
 
 # 2. Publish a harmless update — no code change needed, this republishes current HEAD.
-npx eas update --branch preview --environment preview --message "update drill"
+npm run update:preview -- --message "update drill"
 
 # 3. Confirm it landed on the right runtime and nothing else.
 npx eas channel:view preview
@@ -248,7 +258,7 @@ npx expo export --platform android
 ```
 
 **`npm run build:beta` and `npm run update:beta` will not run until this gate has passed on
-the exact commit they are about to publish.** That is `scripts/release-guard.mjs`, and it
+the exact commit they are about to publish.** That is `scripts/release.mjs`, and it
 checks the SHA rather than the branch: a gate that passed two commits ago did not run on
 what is about to ship.
 

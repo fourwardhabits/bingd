@@ -186,13 +186,22 @@ transferred to any third party for their own purposes, sold, or used for adverti
 | App info and performance → **Diagnostics** | Yes | No | Optional | App functionality — diagnostics |
 | App activity → **In-app search history**¹ | **Yes** | No | Optional | App functionality |
 
-¹ **Declare it, and mark it "processed ephemerally".** This is the one place Play's form is
-clearer than Apple's, and it is why the answer here differs from the Apple table above.
-Google provides *processed ephemerally* precisely for data that is transmitted, used to
-service the request, and not retained — which is what a Bingd search is. Declaring it that
-way is accurate and costs nothing; omitting it entirely is a claim that the query never
-leaves the device, and it does. Review 28 corrected an earlier version of this document
-that omitted the row.
+¹ **Declare it. Whether you may mark it "processed ephemerally" depends on the same
+homework as Apple's row, and is not settled.**
+
+Three states, and this document has been through all of them. It first omitted the row
+entirely — review 28 was right that this is a claim the query never leaves the device, and
+it does. It then declared it *and* asserted the ephemeral qualifier — review 28b was right
+that this asserts the very thing the Apple note says nobody has established. So:
+
+- **Declare the row.** That part is not conditional. A search query is transmitted, and
+  Play's schema has a type for exactly this.
+- **Mark it ephemeral only if the Supabase request-log check comes back clean.** Google's
+  *processed ephemerally* means used to service the request and **not retained**. If
+  Supabase's logging retains PostgREST query parameters, the retention is real and the
+  qualifier is wrong on this form for the same reason it would be wrong on Apple's.
+- **If it cannot be established, declare it without the qualifier.** Over-declaring costs a
+  line on a label; under-declaring is grounds for removal from Play.
 
 ### Do **not** declare these
 
@@ -203,8 +212,9 @@ other IDs.
 ### Two answers that are easy to get wrong
 
 - **"Processed ephemerally"** is for data used to service a request and never persisted.
-  In-app search history is the one row it applies to here — and note that it is a
-  *qualifier on a declared type*, not a reason to leave the type off the form.
+  In-app search history is the one row it could apply to here — and it is a *qualifier on a
+  declared type*, never a reason to leave the type off the form. Whether Bingd is entitled
+  to it is open; see note 1 above.
 - **"Required"** means the app cannot function without it. Email and user id are required;
   a bio, a photo and a note are optional. Marking everything required is inaccurate and
   reads as boilerplate.
@@ -270,9 +280,10 @@ the app.
 4. **Confirm the retention settings** on the PostHog project and the Sentry project, and
    put the actual numbers on the privacy page. Both currently say "under their own
    retention settings", which is true and vague.
-5. **Check Supabase's request-log retention** for the nonprod project, and settle the
-   Search History question above (§2 note 2) for Apple. Google's row is already decided:
-   declare it, marked ephemeral.
+5. **Check Supabase's request-log retention** for the nonprod project. One fact settles the
+   Search History question on **both** forms: whether Apple's row is declared at all, and
+   whether Google's — which is declared either way — may carry the *processed ephemerally*
+   qualifier. Answer neither from memory.
 6. **Answer the age-rating questionnaires honestly** — both stores, both have UGC
    questions, and Bingd has notes, reviews and comments.
 7. **Have the privacy page read by a lawyer before public launch.** Not before the friend

@@ -81,14 +81,10 @@ describe('supabaseProjectRef', () => {
 });
 
 describe('assertBackendIsAllowed', () => {
-  const clean = {}; // no BINGD_ALLOW_UNLISTED_BACKEND, no EAS_BUILD
-
   it('allows each lane its own backend', () => {
     for (const [lane, refs] of Object.entries(LANE_BACKENDS)) {
       for (const ref of refs) {
-        assert.doesNotThrow(() =>
-          assertBackendIsAllowed(`https://${ref}.supabase.co`, lane, clean),
-        );
+        assert.doesNotThrow(() => assertBackendIsAllowed(`https://${ref}.supabase.co`, lane));
       }
     }
   });
@@ -99,10 +95,7 @@ describe('assertBackendIsAllowed', () => {
      * build against nonprod would otherwise succeed and look exactly like a real release.
      */
     assert.deepEqual(LANE_BACKENDS.production, []);
-    assert.throws(
-      () => assertBackendIsAllowed(NONPROD, 'production', clean),
-      /this lane has no backend yet/,
-    );
+    assert.throws(() => assertBackendIsAllowed(NONPROD, 'production'), /this lane has no backend yet/);
   });
 
   it('refuses a cross-lane swap once a second project exists', () => {
@@ -129,7 +122,7 @@ describe('assertBackendIsAllowed', () => {
   it('refuses an unknown project on any lane', () => {
     for (const lane of Object.keys(LANE_BACKENDS)) {
       assert.throws(
-        () => assertBackendIsAllowed('https://someotherproject.supabase.co', lane, clean),
+        () => assertBackendIsAllowed('https://someotherproject.supabase.co', lane),
         /may not use/,
         lane,
       );
@@ -138,7 +131,7 @@ describe('assertBackendIsAllowed', () => {
 
   it('names the offending project in the error', () => {
     assert.throws(
-      () => assertBackendIsAllowed('https://someotherproject.supabase.co', 'preview', clean),
+      () => assertBackendIsAllowed('https://someotherproject.supabase.co', 'preview'),
       /someotherproject/,
     );
   });
@@ -146,16 +139,68 @@ describe('assertBackendIsAllowed', () => {
   it('refuses a lane name that is not a lane', () => {
     // The typo case. `"BINGD_LANE": "previev"` must not resolve to "no lane, allow
     // anything" — which is exactly what an `undefined` lookup would have meant.
-    assert.throws(() => assertBackendIsAllowed(NONPROD, 'previev', clean), /not a Bingd release lane/);
+    assert.throws(() => assertBackendIsAllowed(NONPROD, 'previev'), /not a Bingd release lane/);
   });
 
-  it('accepts any known backend when no lane is declared', () => {
-    // A local `expo start` or a CI config resolution. There is no lane to be wrong about.
-    assert.doesNotThrow(() => assertBackendIsAllowed(NONPROD, undefined, clean));
+  it('gives an undeclared lane the development lane, not the union of every lane', () => {
+    /**
+     * Review 28b, as a test. The fallback used to be the union of all four lanes, which
+     * is safe only while there is exactly one backend — and it is a trap that springs
+     * later. The day a production ref is added, a lane-less resolution (a bare
+     * `eas update`, which supplies no `BINGD_LANE` because it does not read a build
+     * profile) could compile production credentials and publish them to any channel.
+     */
+    assert.doesNotThrow(() => assertBackendIsAllowed(NONPROD, undefined));
     assert.throws(
-      () => assertBackendIsAllowed('https://someotherproject.supabase.co', undefined, clean),
-      /may not use/,
+      () => assertBackendIsAllowed('https://someotherproject.supabase.co', undefined),
+      /development permissions/,
     );
+
+    // Stated positively so the intent survives a refactor: the fallback IS the
+    // development lane, not something that happens to equal it today.
+    const withProduction = { ...LANE_BACKENDS, production: ['prodprojectrefxxxxx'] };
+    assert.ok(
+      !withProduction.development.includes('prodprojectrefxxxxx'),
+      'a lane-less resolution must never inherit a production ref',
+    );
+  });
+
+  it('has no escape hatch', () => {
+    /**
+     * There was one, for exactly one round: `BINGD_ALLOW_UNLISTED_BACKEND`, refused when
+     * `EAS_BUILD=true`. Review 28b found that **`eas update` does not set `EAS_BUILD`** —
+     * it resolves the config on a laptop and compiles the URL into the bundle it
+     * publishes — so the variable meant to close the hatch for shipped artifacts was
+     * never set on the path that ships them.
+     *
+     * Asserted rather than merely deleted, so that reintroducing it is a red test rather
+     * than a plausible-looking convenience.
+     */
+    const source = readFileSync(join(here, 'backends.cjs'), 'utf8');
+    const code = source.replace(/\/\*\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    assert.doesNotMatch(code, /process\.env/, 'the rule reads no environment variable of its own');
+    assert.doesNotMatch(code, /ALLOW_UNLISTED/);
+
+    // And behaviourally, with both variables the old hatch used set to the values that
+    // used to open it. Static and dynamic, because "the string is gone" and "the
+    // behaviour is gone" are different claims and only the second one matters.
+    const restore = {
+      BINGD_ALLOW_UNLISTED_BACKEND: process.env.BINGD_ALLOW_UNLISTED_BACKEND,
+      EAS_BUILD: process.env.EAS_BUILD,
+    };
+    try {
+      process.env.BINGD_ALLOW_UNLISTED_BACKEND = 'yes-i-am-testing-locally';
+      process.env.EAS_BUILD = 'false';
+      assert.throws(
+        () => assertBackendIsAllowed('https://someotherproject.supabase.co', 'beta'),
+        /may not use/,
+      );
+    } finally {
+      for (const [key, value] of Object.entries(restore)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 
   it('ignores anything that is not a Supabase URL at all', () => {
@@ -163,37 +208,45 @@ describe('assertBackendIsAllowed', () => {
     // is a Bingd project by any reading, and `src/lib/env.ts` is what refuses an
     // unusable one at startup.
     for (const url of ['https://ci.invalid', 'http://127.0.0.1:54321', undefined, '']) {
-      assert.doesNotThrow(() => assertBackendIsAllowed(url, 'preview', clean));
+      assert.doesNotThrow(() => assertBackendIsAllowed(url, 'preview'));
+    }
+  });
+});
+
+describe('the release scripts, which are the only supported way to publish', () => {
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+
+  it('routes every build and update through the lane-supplying wrapper', () => {
+    /**
+     * The other half of review 28b's first Blocker. `eas update` takes `--branch` and
+     * `--environment`; an EAS *environment* holds only the four `EXPO_PUBLIC_*` variables.
+     * `APP_VARIANT` and `BINGD_LANE` live in the build profile's `env`, which `eas update`
+     * never reads — so a documented bare `eas update --branch beta` resolves the config
+     * with **no variant at all**, defaults to `development`, and publishes a manifest that
+     * tells every friend tester's device it is a development build.
+     *
+     * `scripts/release.mjs` supplies both, read from `eas.json`. These assertions exist so
+     * that "just call eas directly" cannot quietly come back as a script.
+     */
+    for (const [name, lane] of [
+      ['build:preview', 'preview'],
+      ['update:preview', 'preview'],
+      ['build:beta', 'beta'],
+      ['update:beta', 'beta'],
+    ]) {
+      const script = pkg.scripts[name];
+      assert.ok(script, `${name} is missing`);
+      assert.match(script, /scripts\/release\.mjs/, `${name} does not go through the wrapper`);
+      assert.match(script, new RegExp(`\\b${lane}\\b`), `${name} does not name its lane`);
     }
   });
 
-  describe('the local escape hatch', () => {
-    it('opens only for its exact value', () => {
-      const other = 'https://someotherproject.supabase.co';
-      assert.doesNotThrow(() =>
-        assertBackendIsAllowed(other, 'preview', {
-          BINGD_ALLOW_UNLISTED_BACKEND: 'yes-i-am-testing-locally',
-        }),
-      );
-      for (const value of ['1', 'true', 'yes', '', 'YES-I-AM-TESTING-LOCALLY']) {
-        assert.throws(
-          () => assertBackendIsAllowed(other, 'preview', { BINGD_ALLOW_UNLISTED_BACKEND: value }),
-          /may not use/,
-          value,
-        );
+  it('publishes no lane by a bare eas command', () => {
+    for (const [name, script] of Object.entries(pkg.scripts)) {
+      if (/(^|[^-\w])eas\s+(build|update)\b/.test(script)) {
+        assert.fail(`${name} calls eas ${script} directly instead of scripts/release.mjs`);
       }
-    });
-
-    it('is closed on EAS, where the artifacts that reach a phone are made', () => {
-      assert.throws(
-        () =>
-          assertBackendIsAllowed('https://someotherproject.supabase.co', 'preview', {
-            BINGD_ALLOW_UNLISTED_BACKEND: 'yes-i-am-testing-locally',
-            EAS_BUILD: 'true',
-          }),
-        /may not use/,
-      );
-    });
+    }
   });
 });
 

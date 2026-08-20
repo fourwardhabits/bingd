@@ -87,47 +87,52 @@ function supabaseProjectRef(url) {
 }
 
 /**
- * The escape hatch, and it is deliberately awkward to reach.
+ * THERE IS NO ESCAPE HATCH, AND THERE USED TO BE.
  *
- * A contributor running against their own Supabase project is a real case and blocking
- * it would make this a rule people route around. What it must not be is something a
- * build inherits by accident, so it is an explicit variable with an explicit value that
- * appears nowhere else in the project — and it is refused on EAS, where the artifacts
- * that reach a phone are made.
+ * `BINGD_ALLOW_UNLISTED_BACKEND=yes-i-am-testing-locally` existed for one round, refused
+ * only when `EAS_BUILD=true`, and was meant for a contributor running against their own
+ * Supabase project. Independent review 28b found the hole, and it is worth recording
+ * rather than quietly deleting: **`eas update` does not set `EAS_BUILD`.** It resolves the
+ * config on a laptop and compiles the URL into the bundle it publishes, so the one
+ * variable that was supposed to close the hatch for shipped artifacts was never set on the
+ * path that ships them. The hatch could publish an unlisted backend to the Beta channel.
+ *
+ * It is gone rather than narrowed. It existed for a contributor this project does not
+ * have, and anybody who genuinely needs another project adds its ref to the development
+ * lane above — a line in a diff somebody reads, and about as much work.
  */
-function unlistedBackendAllowed(env) {
-  return env.BINGD_ALLOW_UNLISTED_BACKEND === 'yes-i-am-testing-locally' && env.EAS_BUILD !== 'true';
-}
 
 /**
  * Throws unless this configuration is allowed to talk to this backend.
  *
- * `lane` comes from `BINGD_LANE`, set on every profile in `eas.json`. When it is absent
- * — a local `expo start`, a CI config resolution — the union of every lane's refs is
- * accepted, because there is no lane to be wrong about. When it is present the lane's
- * own list is the only thing accepted.
+ * `lane` comes from `BINGD_LANE`. Every profile in `eas.json` sets it, and
+ * `scripts/release.mjs` sets it for `eas update` too — which does **not** read a build
+ * profile's `env`, the second half of the same review-28b finding and the reason those npm
+ * scripts exist rather than a documented `eas` invocation.
  *
- * A URL that is not a Supabase URL at all passes: `https://ci.invalid` is what CI uses
- * on purpose, and a local stack on `http://127.0.0.1:54321` is not a Bingd project by
- * any reading. `src/lib/env.ts` refuses an unusable one at startup, loudly, which is the
- * check that belongs there rather than here.
+ * **An undeclared lane gets the development lane's permissions, not the union of every
+ * lane's.** A resolution with no lane is somebody's laptop. The union was the earlier
+ * behaviour and it is a trap that springs later: the day a production ref is added, a
+ * lane-less resolution could compile production credentials and publish them anywhere.
+ *
+ * A URL that is not a Supabase URL at all passes: `https://ci.invalid` is what CI uses on
+ * purpose, and a local stack on `http://127.0.0.1:54321` is not a Bingd project by any
+ * reading. `src/lib/env.ts` refuses an unusable one at startup, loudly, which is the check
+ * that belongs there rather than here.
  */
-function assertBackendIsAllowed(url, lane, env = process.env) {
+function assertBackendIsAllowed(url, lane) {
   const ref = supabaseProjectRef(url);
   if (ref === null) return;
 
-  const known = Object.values(LANE_BACKENDS).flat();
-  const allowed = lane ? LANE_BACKENDS[lane] : known;
-
-  if (allowed === undefined) {
+  if (lane !== undefined && LANE_BACKENDS[lane] === undefined) {
     throw new Error(
       `BINGD_LANE is "${lane}", which is not a Bingd release lane. Expected one of: ` +
         `${Object.keys(LANE_BACKENDS).join(', ')}. It is set per profile in eas.json.`,
     );
   }
 
+  const allowed = lane ? LANE_BACKENDS[lane] : LANE_BACKENDS.development;
   if (allowed.includes(ref)) return;
-  if (unlistedBackendAllowed(env)) return;
 
   const name = (r) => (REF_NAMES[r] ? `${r} (${REF_NAMES[r]})` : r);
   const permitted = allowed.length
@@ -136,9 +141,12 @@ function assertBackendIsAllowed(url, lane, env = process.env) {
 
   throw new Error(
     `EXPO_PUBLIC_SUPABASE_URL resolves to the Supabase project ${name(ref)}, which the ` +
-      `${lane ? `"${lane}"` : 'current'} lane may not use. Permitted: ${permitted}. ` +
-      'Check the EAS environment this build profile names, or add the project to the ' +
-      'right lane in config/backends.cjs if it is genuinely intended.',
+      `${lane ? `"${lane}" lane` : 'undeclared lane, which gets development permissions,'} ` +
+      `may not use. Permitted: ${permitted}. Check the EAS environment this build profile ` +
+      'names, or add the project to the right lane in config/backends.cjs if it is ' +
+      'genuinely intended. Publish with `npm run update:preview` or `npm run update:beta` ' +
+      'rather than `eas update` directly — those set the lane, and a bare `eas update` ' +
+      'cannot.',
   );
 }
 
