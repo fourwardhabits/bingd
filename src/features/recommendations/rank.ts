@@ -490,8 +490,16 @@ function leadOf(terms: {
  * narrow. In practice that is rare: the trending fallback supplies twenty candidates
  * with no anchor at all, and a candidate no anchor points at spends no anchor's quota.
  */
-export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE): Scored[] {
-  const byScore = [...scored].sort((a, b) => b.explanation.total - a.explanation.total);
+export function diversify(
+  scored: readonly Scored[],
+  limit: number = SLATE_SIZE,
+  /** See {@link explore}. Zero — the default — is the old strict score order. */
+  seed: number = 0,
+): Scored[] {
+  const byScore =
+    seed === 0
+      ? [...scored].sort((a, b) => b.explanation.total - a.explanation.total)
+      : explore(scored, limit, seed);
 
   const perGenre = new Map<string, number>();
   const perAnchor = new Map<string, number>();
@@ -547,6 +555,214 @@ export function diversify(scored: readonly Scored[], limit: number = SLATE_SIZE)
 }
 
 // ---------------------------------------------------------------------------
+// Freshness: the same relevance, presented differently
+// ---------------------------------------------------------------------------
+
+/**
+ * How many candidates deep the exploration pool goes, as a multiple of the wall.
+ *
+ * Three, so a wall of twenty is *sampled* from the best sixty.
+ *
+ * **This bound is where the relevance guarantee lives, and independent review 29 found
+ * the guarantee had been written one word too strong.** It said nothing outside the pool
+ * could be drawn. What is true is narrower and is the thing that actually matters:
+ * **sampling cannot promote a title from outside the pool.** The greedy pass in
+ * {@link diversify} still walks the tail in strict score order afterwards, so a
+ * sufficiently constrained wall — one where the genre, franchise and anchor ceilings
+ * reject most of the top sixty — can reach position 61 and beyond.
+ *
+ * That is not a freshness defect: **`diversify` has always been one greedy pass over
+ * every scored candidate**, the ceilings are hard, and when they reject the head the
+ * wall has always been filled from further down. Reaching the tail is a property of the
+ * candidates and the caps, not of the seed.
+ *
+ * **What seeding does change is which titles get chosen, and how many**, which took
+ * three review rounds to state correctly. The ceilings intersect and are spent in the
+ * order they are met, so a different arrangement of the pool leaves different quota for
+ * everything behind it.
+ *
+ * **There is exactly one guarantee, and it is the ordering one:**
+ *
+ *   > No draw promotes a title from outside the pool. Every pool member precedes every
+ *   > tail member, for every seed.
+ *
+ * **Three** things that were claimed here and are **false**, each found by its own round:
+ *
+ *   - *the same titles are chosen* — 29b. Order spends the quotas, so the set moves.
+ *   - *the wall never gets shorter* — 29c, with a counterexample this file now carries
+ *     as a test: six candidates over two genres and two franchises at `limit: 5` give a
+ *     wall of four in strict order and **three** under seed 76.
+ *   - *the tail is reached under identical conditions* — 29c. Which pool members are
+ *     rejected depends on the order they are met in, so how far down the wall has to
+ *     reach depends on it too.
+ *
+ * The shortening is a real cost and is accepted rather than papered over. **It needs the
+ * ceilings to be near-binding, not a pool that cannot fill the wall** — 29d disproved
+ * that weaker excuse with a seven-candidate set that *does* fill a wall of five in
+ * strict order and returns four under seed 76, in about 2% of seeds. That case is a
+ * test too.
+ *
+ * What can be said, and is asserted rather than asserted-about: **on the five pool shapes
+ * the suite tests, the length does not move.** `rank.test.ts` runs 60 and 200 candidates
+ * over eighteen genres, a five-genre wall, a franchise-heavy wall, and 25 candidates for
+ * a wall of 20, across 200 seeds each, and the wall is twenty every time. Five fixtures
+ * are five fixtures rather than a proof about every pool, which is the strength 29e
+ * asked for; the measurement lives in the suite at all because 29d could not reproduce
+ * it from prose.
+ *
+ * Topping the wall back up would mean relaxing a ceiling, and a previous round killed
+ * exactly that: a cap that yields when it is inconvenient is not a cap. Truncating the
+ * input to the pool was also considered and rejected — it shortens the wall *more*, and
+ * unconditionally.
+ *
+ * All four propositions are asserted in `rank.test.ts`, `what the exploration pool
+ * bounds` — **including the two that are false**, so no later round can restore them. A
+ * claim about relevance that no test exercises is how this came to be overstated twice.
+ */
+const FRESHNESS_POOL_MULTIPLE = 3;
+
+/**
+ * How hard the sampling pushes, as a fraction of the pool's own score spread.
+ *
+ * Relative rather than absolute, because a slate's scores are 0–1 but a real pool
+ * occupies a small band inside that — an anchored wall runs about 0.33 down to 0.02, a
+ * popularity-only one about 0.11 down to 0.07. A fixed jitter would be a total reshuffle
+ * of the second and invisible on the first.
+ *
+ * **0.12 was measured against the real scorer rather than chosen.** Across 3,000 seeds
+ * on a sixty-candidate pool, by how many anchors the reader has.
+ *
+ * **This table is a one-off calibration run and the suite does not reproduce it** —
+ * review 29e was right to say so, and it is recorded here as the reason for the number
+ * rather than as a maintained result. What the suite *does* hold, over 300 seeds in
+ * `still leads with the best title when there genuinely is a best title`, are exactly
+ * two bounds: the single best candidate leads **more than a third** of visits
+ * (`> 100/300`), and a title from outside the top ten leads **less than a tenth**
+ * (`< 30/300`). Those are the literal assertions — 29f caught this note saying "well
+ * over" and "well under", which the numbers do not support — and they are deliberately
+ * loose so a scorer tweak reports rather than flakes. The "roughly six hundred distinct
+ * top-sixes" figure below is from the calibration run alone and nothing reproduces it.
+ * Re-run the calibration before changing the constant; do not trust the table to have
+ * aged.
+ *
+ * | temp | 1 anchor: lead in top 10 | 3 anchors | 6 anchors | lead outside top 20 | distinct top sixes |
+ * |---|---|---|---|---|---|
+ * | 0.10 | 100% | 98% | 82% | 0% | 307 |
+ * | **0.12** | **99%** | **95%** | **78%** | **≤1%** | **604** |
+ * | 0.15 | 96% | 92% | 73% | 3% | 1,209 |
+ * | 0.20 | 86% | 85% | 67% | 11% | 2,299 |
+ *
+ * 0.25 was the first draft, measured against a hand-built pool with a steeper head than
+ * this scorer produces, and it was far too hot — at 0.20 a title the reader's own
+ * favourites point at is already buried outside the top twenty on a tenth of visits.
+ * At 0.12 that is at most one visit in a hundred, and six hundred distinct top-sixes is
+ * more variety than anybody refreshing a few times a session can exhaust.
+ *
+ * The founder's constraint is the binding one here: relevance stays primary, and
+ * novelty does not get to cost it. Where the two traded off, this took relevance.
+ *
+ * On a **popularity-only** pool the same setting behaves close to uniform sampling
+ * inside the pool, and that is correct rather than a defect: those scores differ by a
+ * few thousandths, so no title is distinctly the best one and the honest answer is that
+ * any of the sixty most popular could lead. Sampling proportional to score gives exactly
+ * that — a clear favourite usually wins, and where there is no clear favourite there is
+ * no favourite to protect.
+ */
+const FRESHNESS_TEMPERATURE = 0.12;
+
+/**
+ * A stable number in (0, 1) from a seed and an id.
+ *
+ * Deterministic on purpose: the same seed and the same candidate always give the same
+ * draw, which is what makes a visit *stable*. A `Math.random()` per render would reshuffle
+ * the wall on every re-render — the exact thing the brief forbids — and would be
+ * untestable besides.
+ *
+ * FNV-1a with an avalanche finaliser. Not a security hash and nothing here needs one;
+ * the finaliser is there because raw FNV leaves ids differing by one character sorted
+ * next to each other, which would make the "reordering" a rotation of the same list.
+ */
+function unitRandom(seed: number, key: string): number {
+  let hash = (0x811c9dc5 ^ (seed >>> 0)) >>> 0;
+  for (let index = 0; index < key.length; index += 1) {
+    hash ^= key.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x7feb352d);
+  hash ^= hash >>> 15;
+  hash = Math.imul(hash, 0x846ca68b);
+  hash ^= hash >>> 16;
+  // Strictly inside the open interval: the Gumbel transform below is undefined at both
+  // ends, and `hash >>> 0` can be exactly 0.
+  return ((hash >>> 0) + 0.5) / 0x100000000;
+}
+
+/**
+ * Score order, softened — the ordering an explicit Refresh produces.
+ *
+ * The founder's report was that For You showed essentially the same titles every visit,
+ * and the audit agreed: `buildSlate` is a pure function of rankings and the provider
+ * cache, so with neither changing it returned the same twenty in the same order for as
+ * long as the account existed. Nothing was stale; there was simply only ever one answer.
+ *
+ * This is the standard re-ranking answer to that, and it is deliberately the *smallest*
+ * one: **perturbed top-k over a bounded pool**, sometimes called Gumbel top-k, which is
+ * weighted sampling without replacement expressed as a sort. Adding a Gumbel draw to a
+ * score and taking the best is equivalent to sampling proportionally to the exponential
+ * of that score — so a stronger title is genuinely more likely to lead, rather than
+ * every title being equally likely as a shuffle would have it.
+ *
+ * Three properties, and each is one of the founder's constraints:
+ *
+ *   **Relevance stays primary.** Sampling happens only inside the top
+ *   {@link FRESHNESS_POOL_MULTIPLE}× `limit` by score, so **no draw can promote a title
+ *   from below the pool**. Everything below it keeps its strict score order and stays
+ *   behind every pool title. That is the guarantee — and it is *not* a promise that the
+ *   same titles are chosen, because the ceilings are spent in the order they are met.
+ *   See {@link FRESHNESS_POOL_MULTIPLE} for what this bound does and does not promise.
+ *
+ *   **A visit is stable.** The seed is fixed for the session, so the same slate and the
+ *   same seed give the same wall — on a re-render, after a bookmark, after a navigation.
+ *   Only a new seed moves it.
+ *
+ *   **Refresh is not a shuffle.** Scores still decide; the draw only says how much a
+ *   near-tie is allowed to matter.
+ *
+ * The three hard ceilings in {@link diversify} run over this order unchanged, so a
+ * refreshed wall obeys the franchise, genre and anchor caps exactly as the strict one
+ * does — the ordering is what varies, never the constraints.
+ */
+function explore(scored: readonly Scored[], limit: number, seed: number): Scored[] {
+  const byScore = [...scored].sort((a, b) => b.explanation.total - a.explanation.total);
+
+  const poolSize = Math.min(byScore.length, Math.max(limit, limit * FRESHNESS_POOL_MULTIPLE));
+  const pool = byScore.slice(0, poolSize);
+  const tail = byScore.slice(poolSize);
+
+  const best = pool[0]?.explanation.total ?? 0;
+  const worst = pool[pool.length - 1]?.explanation.total ?? 0;
+  const spread = best - worst;
+  // Every candidate scored identically — a popularity-only wall where nothing is
+  // popular, say. There is no near-tie to break, so leave the order alone rather than
+  // manufacturing one out of the hash.
+  if (spread <= 0) return byScore;
+
+  const shuffled = pool
+    .map((candidate) => {
+      const uniform = unitRandom(seed, candidate.mediaItemId);
+      // The Gumbel transform. Unbounded in principle, which is what lets an outsider
+      // occasionally lead; bounded in practice by the pool it is drawn from.
+      const gumbel = -Math.log(-Math.log(uniform));
+      return { candidate, key: candidate.explanation.total + FRESHNESS_TEMPERATURE * spread * gumbel };
+    })
+    .sort((a, b) => b.key - a.key)
+    .map((entry) => entry.candidate);
+
+  return [...shuffled, ...tail];
+}
+
+// ---------------------------------------------------------------------------
 // The whole pipeline
 // ---------------------------------------------------------------------------
 
@@ -572,7 +788,31 @@ export type SlateInput = {
  * are marked Saved: wanting to see something is not having seen it, and a wall that
  * hid everything you saved would quietly punish saving.
  */
-export function buildSlate({ candidates, anchors, taste, exclude, limit }: SlateInput): Scored[] {
+export function buildSlate({
+  candidates,
+  anchors,
+  taste,
+  exclude,
+  limit,
+  seed,
+}: SlateInput & { seed?: number }): Scored[] {
+  return diversify(scoreSlate({ candidates, anchors, taste, exclude }), limit ?? SLATE_SIZE, seed);
+}
+
+/**
+ * Eligibility and scoring, stopping short of diversity.
+ *
+ * The two halves are split because they answer to different clocks. Everything here is
+ * a function of the catalogue and the viewer's rankings, so it is what the query caches;
+ * {@link diversify} is presentation, and For You re-runs it whenever the reader asks for
+ * a fresh arrangement. Keeping them in one function meant a Refresh had to refetch the
+ * candidates to reorder them, which is a network round trip to shuffle a list that was
+ * already in memory.
+ *
+ * {@link buildSlate} remains the whole pipeline for every caller that wants one answer —
+ * the quality report, and the tests that assert on the ceilings.
+ */
+export function scoreSlate({ candidates, anchors, taste, exclude }: SlateInput): Scored[] {
   const seen = new Set<string>();
   const eligible: Candidate[] = [];
 
@@ -590,12 +830,9 @@ export function buildSlate({ candidates, anchors, taste, exclude, limit }: Slate
   // whose failure would be the most obviously stupid thing the feature could do.
   const anchorIds = new Set(anchors.map((anchor) => anchor.mediaItemId));
 
-  return diversify(
-    eligible
-      .filter((candidate) => !anchorIds.has(candidate.mediaItemId))
-      .map((candidate) => scoreCandidate(candidate, anchors, taste)),
-    limit ?? SLATE_SIZE,
-  );
+  return eligible
+    .filter((candidate) => !anchorIds.has(candidate.mediaItemId))
+    .map((candidate) => scoreCandidate(candidate, anchors, taste));
 }
 
 // ---------------------------------------------------------------------------

@@ -169,7 +169,7 @@ describe('the thresholds', () => {
     'truth-worm': [15, 50, 150],
     'passport-mode': [15, 75, 250],
     'time-hopper': [25, 100, 300],
-    'genre-gremlin': [8, 14, 16],
+    'genre-gremlin': [12, 14, 16],
     'two-screen-life': [30, 100, 300],
     'heart-magnet': [50, 250, 1000],
     'mutual-mania': [5, 25, 100],
@@ -187,12 +187,34 @@ describe('the thresholds', () => {
   });
 
   it('sets the distinct-genre top tier inside the vocabulary it counts', () => {
-    // Sixteen of eighteen: the audit is in the config's own comment. Documentary is two
-    // titles in the seeded catalogue and Animation is eight, so a reader must be free to
-    // miss any two rather than hunt one documentary.
+    // Sixteen of eighteen: the audit is in the config's own comment. Over the 1,814
+    // loggable rows Documentary is carried by six and Animation by ten, so a reader must
+    // be free to miss any two rather than hunt one documentary.
     const top = track('genre-gremlin').tiers[2].threshold;
     expect(top).toBeLessThanOrEqual(CANONICAL_GENRES.length);
     expect(CANONICAL_GENRES.length - top).toBe(2);
+  });
+
+  /**
+   * The founder's Preview note: Dabbler was being earned for watching a handful of
+   * ordinary films, because one title carries 2.68 canonical genres on average.
+   *
+   * The audit is in `tracks.ts`. What is asserted here is the *shape* the audit
+   * concluded, so that moving one threshold without the others fails: an entry tier
+   * that a handful of titles cannot reach, and a ceiling that does not require the two
+   * genres the catalogue barely has.
+   */
+  it('sets the distinct-genre entry tier above what a handful of titles yields', () => {
+    const [bronze, silver, gold] = track('genre-gremlin').tiers.map((tier) => tier.threshold);
+
+    // Five titles at 2.68 genres each is about eight distinct genres before any overlap
+    // is taken off. Eight was the old threshold and it is what the founder hit.
+    expect(bronze).toBeGreaterThan(8);
+    // Still the entry tier: two thirds of the vocabulary, not all of it.
+    expect(bronze).toBeLessThan(CANONICAL_GENRES.length * 0.75);
+    // Monotonic and distinct, so no two tiers can be earned by the same collection.
+    expect(bronze).toBeLessThan(silver!);
+    expect(silver).toBeLessThan(gold!);
   });
 });
 
@@ -515,15 +537,15 @@ describe('what a row is called', () => {
   it('shows the family name before the first tier', () => {
     const locked = gremlin(6);
     expect(locked.title).toBe('Genre Gremlin');
-    expect(locked.detailLine).toBe('Next: Watch 8 different genres');
-    expect(locked.countLabel).toBe('6 / 8');
+    expect(locked.detailLine).toBe('Next: Watch 12 different genres');
+    expect(locked.countLabel).toBe('6 / 12');
   });
 
   it('becomes the first tier name once it is earned', () => {
-    const tier1 = gremlin(10);
+    const tier1 = gremlin(12);
     expect(tier1.title).toBe('Dabbler');
     expect(tier1.detailLine).toBe('Next: Watch 14 different genres');
-    expect(tier1.countLabel).toBe('10 / 14');
+    expect(tier1.countLabel).toBe('12 / 14');
   });
 
   it('becomes the second tier name at the second threshold', () => {
@@ -544,7 +566,7 @@ describe('what a row is called', () => {
     // the reward, and a tier-1 row that said "Mixer" would give away the next one.
     for (const [reached, forbidden] of [
       [6, ['Dabbler', 'Mixer', 'Chaos Collector']],
-      [10, ['Mixer', 'Chaos Collector']],
+      [12, ['Mixer', 'Chaos Collector']],
       [14, ['Chaos Collector']],
     ] as const) {
       const progress = gremlin(reached);
@@ -595,7 +617,7 @@ describe('what a row is called', () => {
   it('fills one dot per tier earned', () => {
     // `earnedTierIndex` is what `TierDots` draws: -1 is three empty, 0 is bronze only.
     expect(gremlin(6).earnedTierIndex).toBe(-1);
-    expect(gremlin(10).earnedTierIndex).toBe(0);
+    expect(gremlin(12).earnedTierIndex).toBe(0);
     expect(gremlin(14).earnedTierIndex).toBe(1);
     expect(gremlin(16).earnedTierIndex).toBe(2);
   });

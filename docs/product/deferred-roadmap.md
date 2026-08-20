@@ -396,6 +396,145 @@ changes no logic, no schema and no test.
 
 ---
 
+## 15. Marketing and reminder nudges — "Recommendations & reminders"
+
+**What it is.** Optional prompts that bring somebody back to Bingd when nothing they did
+caused them: *something good to watch tonight*, *fresh film recommendations*, *fresh TV
+recommendations*. A category of its own, separate from the eight that exist, because every
+one of those is somebody else doing something to you and none of these is.
+
+**Founder brief, 2026-08-20.** Recorded in full so the shape does not have to be
+re-derived:
+
+- A **separate Marketing / Reminders section** in notification settings, not folded into
+  Social or Recommendations & invites. A reminder from the app is a different kind of thing
+  from a person recommending you a film, and one switch must never govern both.
+- A user-facing label along the lines of **"Recommendations & reminders"** — a plain
+  description of what arrives, not a euphemism for marketing.
+- **Default OFF.** The opposite of every functional category, and deliberately so: the
+  others are consequences of something the user did, and this one is the app asking for
+  attention it was not given.
+- **No dark patterns and no engagement spam.** Opting out has to be one obvious control
+  that stays opted out.
+- **Cadence controls if the volume ever justifies them** — a frequency choice rather than
+  only on and off. Not before there is traffic to control.
+
+**Why it is deferred, and why no toggle ships now.** *Delivery does not exist.* Native push
+is §4 and is not built: nothing writes `device_tokens`, and no client imports
+`expo-notifications` beyond the config plugin. The architecture was re-read during the
+2026-08-20 micropass rather than assumed, and **there is no scheduled delivery of any
+kind**. A notification preference gates *row creation* inside a before-insert trigger, so a
+"reminder" today could only be a row the user discovers the next time they open the app of
+their own accord.
+
+That is the whole argument. A nudge whose entire purpose is to reach somebody who is *not*
+in the app cannot be served by something only visible to somebody who already is. Shipping
+the switch first would put a control in Settings that does nothing, and the instruction for
+that pass was explicit: a dead toggle is worse than an absent one.
+
+**Revisit when.** §4 lands. This is a section of that work rather than something to build
+beside it.
+
+**Depends on.** §4 native push · a scheduling path (an Edge Function on a cron, or the
+provider's own scheduling) · a ninth notification category and its default · the
+preference-axis decision recorded in §4.
+
+---
+
+## 16. Collection: swipe between tabs
+
+**What it is.** Swiping left and right to move between the Collection segments — Watched,
+Watchlist and Unranked — instead of only tapping the segmented control.
+
+**Why it is wanted.** Founder suggestion, 2026-08-20. It is the gesture the segments look
+like they should support, and every app with a segmented row over a list has trained people
+to try it.
+
+**Why it is deferred.** Audited against the current primitives during the Preview micropass,
+and it is not the small change it looks like. Four findings, any one of which is enough:
+
+- **Only the active segment is mounted.** `app/(tabs)/collection.tsx` renders exactly one of
+  `Watched`, `Watchlist` or `Unranked`. Paging needs the neighbours mounted and laid out
+  side by side, which means three collections in memory and three queries live instead of
+  one.
+- **The segment set is dynamic.** Unranked appears and disappears with `unrankedCount`, so a
+  pager's page *indices* would change underneath the reader — and the screen already derives
+  a fallback for the case where the segment somebody is standing on vanishes. Page-index
+  arithmetic over a list that mutates is its own class of bug.
+- **A pager is a native dependency.** `react-native-pager-view` is not installed, and
+  installing it moves the native fingerprint — which this release lane cannot absorb without
+  new Preview and Beta binaries.
+- **The hand-rolled alternative is gesture arbitration, not layout.** Reanimated and
+  `react-native-gesture-handler` are both present, so it is *possible* without a new
+  dependency. But a horizontal pan over a vertically scrolling list has to be arbitrated
+  against that list, against the sheet dismissals, and against the horizontal poster shelves
+  elsewhere in the app. That is a gesture-architecture pass, not a screen change.
+
+The brief for the micropass was to implement this **only if it were genuinely trivial with
+existing primitives and required no native or runtime change**. It is neither.
+
+**Intended behaviour when it is built.** A swipe moves one segment in that direction and
+stops at the ends — no wrap-around, because wrapping makes the last segment feel like a
+mistake. The segmented control stays, stays authoritative, and animates with the gesture.
+`viewState` — the filters, the sort and the List/Wall choice — is shared across segments
+today and must stay shared, so a swipe changes which list is shown and nothing about how it
+is shown. Unranked appearing or disappearing must not move the reader.
+
+**Revisit when.** There is a reason to touch the gesture layer anyway, and a tranche that
+can carry new native binaries.
+
+**Depends on.** A pager primitive (a native dependency) or a Reanimated pager written here ·
+nested-gesture arbitration against `FlashList` and the poster shelves · a decision on
+mounting neighbours versus rendering them lazily.
+
+---
+
+## 17. Recommendation freshness beyond a session seed
+
+**What it is.** The parts of recommendation freshness that a per-session seed does *not*
+buy. **The seed itself shipped** in the 2026-08-20 Preview micropass — see
+`docs/architecture/recommendations.md` §7 — so this entry is only the remainder.
+
+**What shipped.** Scoring and arrangement were split. The query caches the scored
+candidates; the wall is drawn from them by seeded sampling over a bounded high-quality pool
+(Gumbel top-k, temperature 0.12, pool of three times the wall). A visit is stable, a new
+launch is a new **seed**, and an explicit Refresh control changes the seed without a
+network call. A new seed is almost always a new arrangement rather than necessarily one —
+a zero-spread pool returns strict order for every seed.
+
+**What the pool bound does and does not promise.** The one guarantee is that **sampling
+cannot promote a title from outside the pool**. It is *not* a promise that the wall is
+drawn only from the top sixty, *not* a promise that the same titles are chosen, and *not*
+a promise that the wall stays the same length — the ceilings intersect and are spent in the
+order they are met. Reviews 29, 29b and 29c each found a phrasing here claiming one of
+those three. The measured cost of the last (nil on the five pool shapes the suite tests), the
+rejected truncate-to-pool alternative, and the tests that pin all four propositions down —
+including the false ones — are in `docs/architecture/recommendations.md` §7.
+
+**What it does not do, and is deferred:**
+
+- **No memory of what has already been shown.** Two sessions can draw overlapping walls,
+  because nothing records what the reader saw. A durable "seen" ledger is a schema and a
+  write on every impression, and the brief for the micropass ruled out adding schema for
+  recommendation history.
+- **No novelty or recency term in the score.** Freshness is presentational. A title that
+  entered the catalogue yesterday is not favoured over one that has been there a year.
+- **No exploration feedback.** Nothing learns from whether an explored title was opened,
+  saved or ignored, so the temperature is a constant rather than something that adapts.
+- **The candidate pool itself does not widen.** The same anchors return the same `similar`
+  lists for weeks (`media_cache`), so refreshing rearranges a fixed set. Genuinely new
+  candidates need more anchors, a second candidate source, or a shorter cache life.
+
+**Revisit when.** The beta produces evidence about whether the seed was enough. The founder
+reporting that Refresh still shows familiar titles is the signal, and it is a different
+complaint from the one that pass fixed.
+
+**Depends on.** A decision on impression logging and its privacy cost · a candidate-source
+or cache-lifetime change · PRD §13's explainability rule, which any novelty term has to stay
+inside.
+
+---
+
 ## Carried forward from earlier decisions
 
 Still deferred, still agreed, recorded so that nothing is lost between documents:

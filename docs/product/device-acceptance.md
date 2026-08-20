@@ -124,10 +124,17 @@ starting, or the report will be about code that is not on the device.
 - [ ] **Genre, Language, Decade and Anime** are the filters, and **Anime is peer-level**
       with the other three rather than buried inside Genre. **There is no actor filter** —
       its absence is correct.
-- [ ] **Languages read as full names** in the filter sheet — `Telugu`, not `te` — for any
-      language the device can name. The sheet **deliberately falls back to the raw code**
-      when `Intl.DisplayNames` cannot resolve one, so a code against an obscure or
-      malformed language is not a failure; a code against a common one is.
+- [ ] **Languages read as full names** in the filter sheet — `Telugu`, not `te`. This was
+      the founder's Android Preview finding and it was a real bug: the app resolved names
+      through `Intl.DisplayNames`, which Hermes does not implement, so every device fell
+      back to the code while every test passed on Node's full ICU. Names now come from a
+      shipped table (`src/lib/language.ts`) that covers every language in the seed and
+      everything TMDB enrichment brings in, **so every code this catalogue can produce
+      must read as a word, and a raw code here is a failure.** A code outside the table
+      still falls back to the code by design, so that an option present in the data stays
+      selectable — which is why the check is "report *which* code you saw" rather than
+      "no code anywhere": an unrecognised provider value is a different and much smaller
+      thing than the Hermes defect, which showed *every* code on *every* device.
 - [ ] **The heading never shows a raw code.** It falls back to the neutral `For you`
       instead, so `te for you` on the heading is a failure in every case.
 - [ ] **One filter names the heading** — `Comedy for you`, `Telugu picks for you`,

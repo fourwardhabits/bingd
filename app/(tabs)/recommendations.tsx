@@ -17,6 +17,7 @@ import { useLoggedCollection, useWatchlist } from '@/features/collection/use-col
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { headlineFor } from '@/features/recommendations/rank';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
+import { refreshRecommendations } from '@/features/recommendations/session-seed';
 import { useForYou, type ForYouItem, type Medium } from '@/features/recommendations/use-for-you';
 import {
   asCollectionItem as recommendationAsItem,
@@ -116,14 +117,28 @@ export default function RecommendationsScreen() {
       track({ name: 'watchlist_added', props: { surface: 'for_you' } });
     }
 
-    // Reconciled on an unknown outcome as well as on success — the same rule the other
-    // three bookmark surfaces follow (`lib/write-outcome.ts`). Independent review 21e.
+    /**
+     * Reconciled on an unknown outcome as well as on success — the same rule the other
+     * three bookmark surfaces follow (`lib/write-outcome.ts`). Independent review 21e,
+     * and unchanged: the canonical watchlist is refetched, so the bookmark ends up
+     * showing what the server actually holds rather than what the tap intended.
+     *
+     * **What is gone is the second line, and it was the founder's Preview bug.** This
+     * also did `invalidateQueries(['for-you', profile.id])`, because the slate used to
+     * carry `saved` on every item and had to be refetched to redraw one icon. Between
+     * that and the watchlist being part of the slate's query key, a bookmark discarded
+     * the whole wall: skeleton, white flash, a new `ScrollView`, and the reader back at
+     * the top of a list they were halfway down.
+     *
+     * The wall is not a function of the watchlist. `buildSlate` says so — a saved title
+     * stays on the wall and is marked, rather than being removed — so the only thing
+     * that changed is which bookmark is filled, and that is read live from
+     * `useWatchlist` below. Watchlist state changing is not the recommendation wall
+     * becoming wrong.
+     */
     if (mustReconcile(result)) {
       // The watchlist and Queue Dragon, which counts it (`collection/invalidate.ts`).
       invalidateAfterWatchlistChange(queryClient, profile.id);
-      // The slate carries `saved` on each item, so it has to be refetched to redraw the
-      // bookmark. Keyed by prefix: both media, and whatever anchors are current.
-      await queryClient.invalidateQueries({ queryKey: ['for-you', profile.id] });
     }
 
     if (result.outcome === 'failed') {
@@ -237,6 +252,41 @@ export default function RecommendationsScreen() {
           selected={activeCount > 0}
           onPress={() => setFiltering(true)}
         />
+        {/* **Refresh rearranges; it does not reload.**
+            The founder's report was that For You showed essentially the same titles
+            every visit, and it did: the slate is a pure function of the rankings and the
+            provider cache, so with neither moving there was one answer and the app kept
+            giving it. This asks for a different arrangement of the same scored
+            candidates — a new session seed, which `rank.ts` samples an order from.
+
+            **A new seed, and so almost always a new arrangement rather than certainly
+            one.** `session-seed.ts` carries the two cases where the wall can come back
+            identical — an all-equal pool, where there is no near-tie to break; and two
+            seeds simply surviving the ceilings to the same twenty, which needs no ties
+            at all and gets likelier as the pool shrinks toward the wall's size.
+            Independent review 29c found this comment implying more than that, and 29d
+            found the first correction lumping the two cases together as though both
+            required a pool with nothing to choose between. Only the first does.
+
+            It costs no network. Nothing is refetched, no query key changes, and the
+            reader's filters and medium are untouched: a refreshed wall is still Comedy
+            if Comedy was picked.
+
+            Not shown over Sent to you. That list is other people's recommendations in
+            the order the server sent them, so there is no arrangement to sample — a
+            control that could never do anything is worse than an absent one. */}
+        {!sentOnly ? (
+          <FilterChip
+            icon="refresh"
+            label="Refresh"
+            accessibilityLabel="Refresh recommendations"
+            // No telemetry. `ANALYTICS_EVENTS` is a closed union with a privacy
+            // boundary asserted around it, and this Preview pass has no reason to widen
+            // it — whether Refresh gets used is a question for the tranche that decides
+            // whether freshness worked, not for founder acceptance.
+            onPress={refreshRecommendations}
+          />
+        ) : null}
         {isFiltered(filters) ? (
           <FilterChip icon="close" label="Clear all" onPress={() => setFilters(emptyFilters())} />
         ) : null}
@@ -279,7 +329,10 @@ export default function RecommendationsScreen() {
               title: item.title,
               year: item.year,
               posterUri: posterUri(item.posterPath, 'card'),
-              saved: item.saved,
+              // Read live from the watchlist query, not carried on the slate. That is
+              // what lets a bookmark redraw one icon instead of replacing the wall —
+              // see `toggleSaveById`.
+              saved: savedIds.has(item.mediaItemId),
               // Deliberately no score. Nothing here has been watched, so a score would
               // have to be somebody else's, and a rating filter over unseen titles is
               // the thing the collection filter sheet already refuses.
@@ -287,7 +340,7 @@ export default function RecommendationsScreen() {
             onPressTile={(tile) => router.push(`/title/${tile.id}`)}
             onToggleSave={(tile) => {
               const item = items.find((candidate) => candidate.mediaItemId === tile.id);
-              if (item) void toggleSaveById(item.mediaItemId, !item.saved);
+              if (item) void toggleSaveById(item.mediaItemId, !savedIds.has(item.mediaItemId));
             }}
             onLongPressTile={(tile) => {
               const item = items.find((candidate) => candidate.mediaItemId === tile.id);

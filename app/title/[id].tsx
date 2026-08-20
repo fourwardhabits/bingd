@@ -41,6 +41,7 @@ import { useTitleVideos } from '@/features/title/use-title-extras';
 import { useTitleReviews, type ReviewSort } from '@/features/title/use-title-reviews';
 import { diagnose } from '@/lib/diagnose';
 import { heroArtwork } from '@/lib/hero';
+import { languageName } from '@/lib/language';
 import { track } from '@/lib/analytics';
 import { posterUri, profileUri, videoUri } from '@/lib/images';
 import { resolveMetadata } from '@/lib/media-metadata';
@@ -843,16 +844,17 @@ export default function TitleScreen() {
             change the rating. Founder correction. */}
         {!isSeries ? (
           <ScoresSection
-            // The reader's own people, above everybody's. Both rows are always drawn:
-            // a grey circle and "Not enough ratings" is a real answer, and a row that
-            // appears when the data does is a page that moves under the reader.
-            following={{
-              score: following.data?.score ?? null,
-              ratingCount: following.data?.ratingCount ?? 0,
-            }}
+            // Everybody's, then the reader's own people — the founder's order from the
+            // Preview pass. Both units are always drawn: a grey circle and "Not enough
+            // ratings" is a real answer, and a unit that appears when the data does is
+            // a page that moves under the reader.
             bingd={{
               score: community.data?.score ?? null,
               ratingCount: community.data?.ratingCount ?? 0,
+            }}
+            following={{
+              score: following.data?.score ?? null,
+              ratingCount: following.data?.ratingCount ?? 0,
             }}
           />
         ) : null}
@@ -1227,20 +1229,6 @@ function formatDate(date: string | null) {
     month: 'long',
     year: 'numeric',
   });
-}
-
-/**
- * Renders a language name from its code using the platform's own tables, so
- * "ja" reads as "Japanese" in English and as "japonais" in French. Falls back
- * to the raw code rather than to nothing — a code is at least true.
- */
-function languageName(code: string | null | undefined) {
-  if (!code) return null;
-  try {
-    return new Intl.DisplayNames(undefined, { type: 'language' }).of(code) ?? code;
-  } catch {
-    return code;
-  }
 }
 
 /** Tall enough that the poster still overlaps something when there is no

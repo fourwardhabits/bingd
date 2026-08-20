@@ -1,11 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
+import { useCallback } from 'react';
 
 import { bandSizes, scoreFor } from '@/features/collection/score';
-import {
-  useRankedCollection,
-  useWatchlist,
-  type RankedEntry,
-} from '@/features/collection/use-collection';
+import { useRankedCollection, type RankedEntry } from '@/features/collection/use-collection';
 import {
   applyFilters,
   emptyFilters,
@@ -19,13 +16,16 @@ import { AdapterError, cacheSimilar } from '@/lib/tmdb-adapter';
 
 import {
   ANCHOR_LIMIT,
-  buildSlate,
+  SLATE_SIZE,
+  diversify,
+  scoreSlate,
   tasteFrom,
   type Anchor,
   type Candidate,
   type Scored,
   type Taste,
 } from './rank';
+import { useRecommendationSeed } from './session-seed';
 
 /**
  * The data half of For You: anchors, candidates, and what to leave out.
@@ -47,10 +47,15 @@ import {
 
 export type Medium = 'movies' | 'tv';
 
-export type ForYouItem = Scored & {
-  /** On the viewer's watchlist. Shown, and marked, rather than filtered out. */
-  saved: boolean;
-};
+/**
+ * A scored candidate, and nothing about the viewer's watchlist.
+ *
+ * **`saved` used to be on here and its removal is the founder's Preview bug.** The
+ * bookmark on a For You poster is drawn from `useWatchlist` at the screen instead —
+ * see the note on {@link useForYou} for why carrying it through the query made every
+ * bookmark press reload the wall.
+ */
+export type ForYouItem = Scored;
 
 /**
  * A candidate as the collection filter sheet sees it.
@@ -79,8 +84,24 @@ export const asCollectionItem = (candidate: Candidate): CollectionItem => ({
   watchedOn: null,
 });
 
-export type ForYouSlate = {
-  items: ForYouItem[];
+/**
+ * What the query caches: the scoring, and nothing about how it is arranged.
+ *
+ * The split is the freshness fix. Which titles are good is a function of the reader's
+ * rankings and the provider cache and has one right answer, so it is cached for half an
+ * hour. *Which arrangement of them is on screen* is a function of the session seed, so
+ * it is derived in `select` — which reads the cache and never touches the network.
+ * Refresh therefore costs one sort, not a round trip.
+ */
+export type ForYouScoring = {
+  /**
+   * Every eligible candidate, scored, in no particular order.
+   *
+   * The whole set rather than the top twenty, because {@link ForYouSlate.items} is drawn
+   * from a pool three times the wall's size and a Refresh has to be able to reach the
+   * part of it that is not currently on screen.
+   */
+  scored: Scored[];
   /**
    * Every candidate considered, *before* the reader's filters.
    *
@@ -102,6 +123,18 @@ export type ForYouSlate = {
    * covered `headlineFor` and not its caller. Independent review found it.
    */
   taste: Taste;
+};
+
+/**
+ * What the screen reads: the scoring, plus the wall drawn from it.
+ *
+ * `items` is not cached. It is derived from {@link ForYouScoring.scored} and the session
+ * seed every time either moves, which is what makes Refresh instant and what makes a
+ * bookmark not move it at all.
+ */
+export type ForYouSlate = ForYouScoring & {
+  /** The wall, in order: at most `SLATE_SIZE`, under all three diversity ceilings. */
+  items: ForYouItem[];
 };
 
 const KIND_FOR: Record<Medium, 'movie' | 'series'> = { movies: 'movie', tv: 'series' };
@@ -351,11 +384,15 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
   const movies = useRankedCollection(userId, 'movies');
   const seasons = useRankedCollection(userId, 'tv_seasons');
 
-  // Read through their own hooks rather than inside the query, so they are *inputs*
-  // with keys of their own rather than hidden reads inside a cached result. Both are
-  // already cached and already invalidated by `invalidateAfterCollectionChange`.
+  // Read through its own hook rather than inside the query, so it is an *input* with a
+  // key of its own rather than a hidden read inside a cached result. Already cached and
+  // already invalidated by `invalidateAfterCollectionChange`.
+  //
+  // `useWatchlist` was read here too and no longer is: see the note on `inputs`.
   const watched = useWatched(userId);
-  const watchlist = useWatchlist(userId);
+
+  // Which arrangement this session is showing. Not part of the key — see `select`.
+  const seed = useRecommendationSeed();
 
   const ranked = medium === 'movies' ? movies : seasons;
   // The filtered subset of *this* medium, which is what the founder asked the slate to
@@ -365,11 +402,30 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
   /**
    * Everything the *viewer* controls that changes this slate, as one string.
    *
-   * The key carried only the selected medium's anchor ids, and independent review
-   * found three ways that served a stale wall for half an hour: re-bucketing changes
-   * the taste vector without changing which ids are anchors; editing TV rankings
-   * changes the taste behind the Movies wall, because taste spans both media; and
-   * logging or saving a title changes what is excluded and what reads as Saved.
+   * The key carried only the selected medium's anchor ids, and independent review found
+   * two ways that served a stale wall for half an hour: re-bucketing changes the taste
+   * vector without changing which ids are anchors, and editing TV rankings changes the
+   * taste behind the Movies wall, because taste spans both media. Both are in here.
+   *
+   * ## The watchlist is deliberately **not**, and that is the founder's Preview bug
+   *
+   * It was, as a third fingerprint, on the reasoning that saving a title "changes what
+   * reads as Saved". That was true and it was the wrong place to fix it. The watchlist
+   * is a key of this query, so bookmarking a poster invalidated the watchlist, which
+   * refetched, which changed `inputs`, **which changed the query key** — and a changed
+   * key is a different cache entry with no data in it. The screen fell to
+   * `slate.isPending`, swapped the wall for a skeleton, and mounted a *new* `ScrollView`
+   * when the data came back. That is the whole of what the founder saw: a white flash, a
+   * reload, and the wall back at the top.
+   *
+   * A watchlisted title is not excluded from a slate — `buildSlate` says so explicitly —
+   * so its membership changes exactly one thing, which bookmark is filled. That is
+   * presentation, and presentation is read live from `useWatchlist` at the screen. The
+   * canonical state still refreshes on every write; it just no longer discards twenty
+   * scored candidates to redraw one icon.
+   *
+   * `watched` stays in the key and must: a logged title is excluded from the wall
+   * outright, so the slate really is a different slate.
    *
    * What remains outside the key is the catalogue side — the `similar` facets and the
    * trending fallback. Those change on provider-cache clocks measured in hours
@@ -379,7 +435,6 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
   const inputs = [
     rankingFingerprint(movies.data ?? [], seasons.data ?? []),
     setFingerprint(watched.data ?? []),
-    setFingerprint((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
   ].join('|');
 
   return useQuery({
@@ -387,16 +442,31 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
     // a different genre picked are a different slate, and a shared key would serve
     // whichever the reader asked for first.
     queryKey: ['for-you', userId, medium, inputs, filters ?? emptyFilters()],
-    enabled:
-      Boolean(userId) &&
-      movies.isSuccess &&
-      seasons.isSuccess &&
-      watched.isSuccess &&
-      watchlist.isSuccess,
+    enabled: Boolean(userId) && movies.isSuccess && seasons.isSuccess && watched.isSuccess,
     // See the note on `inputs`: everything the viewer can change is in the key, and
     // what is left changes on a six-hour clock at fastest.
     staleTime: 30 * 60_000,
-    queryFn: async (): Promise<ForYouSlate> => {
+    /**
+     * The wall, derived from the cache rather than fetched.
+     *
+     * This is where the session seed enters, and where it must enter. Putting it in the
+     * *key* would have made Refresh a different cache entry with no data in it — the
+     * screen would fall to `isPending`, swap the wall for a skeleton and mount a fresh
+     * `ScrollView`, which is precisely the flash-and-jump defect being fixed a few lines
+     * above for bookmarks. `select` re-derives from data that is already there: no
+     * network, no pending state, no remount.
+     *
+     * Memoised on the seed alone, so a re-render for any other reason returns the
+     * identical `items` array and the wall does not so much as re-key.
+     */
+    select: useCallback(
+      (scoring: ForYouScoring): ForYouSlate => ({
+        ...scoring,
+        items: diversify(scoring.scored, SLATE_SIZE, seed),
+      }),
+      [seed],
+    ),
+    queryFn: async (): Promise<ForYouScoring> => {
       const taste = tasteFrom(
         [...(movies.data ?? []), ...(seasons.data ?? [])].map((entry) => ({
           score: scoreFor(
@@ -456,7 +526,6 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
       // title stays and is marked Saved: wanting to see something is not having seen
       // it, and a wall that hid everything you saved would quietly punish saving.
       const exclude = watched.data ?? new Set<string>();
-      const saved = new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId));
 
       /**
        * Filtered **before** scoring, not after.
@@ -474,10 +543,10 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
           )
         : candidates;
 
-      const slate = buildSlate({ candidates: pool, anchors, taste, exclude });
-
+      // Scored, and stopping there. The arrangement is `select`'s job, so that changing
+      // it costs a sort rather than everything above this line.
       return {
-        items: slate.map((item) => ({ ...item, saved: saved.has(item.mediaItemId) })),
+        scored: scoreSlate({ candidates: pool, anchors, taste, exclude }),
         candidatePool: candidates.map(asCollectionItem),
         anchorsUsed,
         lowData: anchorsUsed === 0,

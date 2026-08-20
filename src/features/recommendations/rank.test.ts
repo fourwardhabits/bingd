@@ -6,6 +6,7 @@ import {
   headlineFor,
   maxPerAnchor,
   maxPerFranchise,
+  maxPerGenre,
   scoreCandidate,
   tasteFrom,
   type Anchor,
@@ -478,5 +479,466 @@ describe('what counts as one franchise', () => {
     // is two of twenty, so this costs a row only when three or more collide.
     expect(same('Heat', 'Heat')).toBe(true);
     expect(same('Crash', 'Crash: A Different Story')).toBe(true);
+  });
+});
+
+/**
+ * Freshness: the same relevance, arranged differently.
+ *
+ * The founder's report was that For You showed essentially the same recommendations
+ * every visit. It did, and nothing was broken: `diversify` was a deterministic top-k, so
+ * with the rankings and the provider cache unchanged there was exactly one answer.
+ *
+ * The seed adds a *presentation* axis and nothing else. What has to stay true is
+ * everything the three ceilings and the scoring already guaranteed — the founder's rule
+ * is that relevance stays primary and this is not a shuffle — so most of what follows
+ * asserts the constraints across a hundred seeds rather than asserting that one seed
+ * produces one particular list.
+ */
+describe('a seeded arrangement', () => {
+  /** A pool with a real score gradient: sixty candidates, each a little less popular. */
+  const pool = (count = 60) =>
+    Array.from({ length: count }, (_, index) =>
+      scoreCandidate(
+        candidate({
+          mediaItemId: `c${index}`,
+          title: `Candidate ${index}`,
+          genres: [['Drama', 'Comedy', 'Horror', 'Action', 'Crime'][index % 5]!],
+          popularity: 900 - index * 14,
+        }),
+        [],
+        tasteFrom([]),
+      ),
+    );
+
+  const ids = (list: readonly { mediaItemId: string }[]) => list.map((item) => item.mediaItemId);
+
+  it('is the strict score order when there is no seed', () => {
+    // Seed 0 is the default and it is the behaviour every other test in this file was
+    // written against. Freshness had to be opt-in or it would have silently rewritten
+    // what "the best twenty" means.
+    const strict = diversify(pool(), 20);
+    const unseeded = diversify(pool(), 20, 0);
+    expect(ids(unseeded)).toEqual(ids(strict));
+  });
+
+  it('gives the same wall for the same seed, every time', () => {
+    // Rule A. A visit is stable, so the arrangement cannot be a function of anything but
+    // the seed — no `Math.random`, no clock, no insertion order.
+    const once = diversify(pool(), 20, 7);
+    const twice = diversify(pool(), 20, 7);
+    expect(ids(twice)).toEqual(ids(once));
+  });
+
+  it('gives a different wall for a different seed', () => {
+    const a = diversify(pool(), 20, 7);
+    const b = diversify(pool(), 20, 8);
+    expect(ids(b)).not.toEqual(ids(a));
+  });
+
+  it('changes the top of the wall, not merely the tail', () => {
+    // "Avoids showing an identical top set whenever adequate alternatives exist". A
+    // reordering that left the first six posters alone would look, to the founder,
+    // exactly like the bug being fixed.
+    const first = new Set(ids(diversify(pool(), 20, 7)).slice(0, 6));
+    const second = ids(diversify(pool(), 20, 8)).slice(0, 6);
+    expect(second.some((id) => !first.has(id))).toBe(true);
+  });
+
+  it('draws only from the high-quality pool while the ceilings leave room', () => {
+    /**
+     * The relevance guarantee, and the reason this is sampling rather than shuffling.
+     *
+     * The pool is the top `3 × limit` by score. With a limit of 20 that is the best 60
+     * of the 300 below, so the worst a lucky draw can do is promote the 60th-best
+     * candidate. Asserted over a hundred seeds, because the whole point of a stochastic
+     * rule is that one sample proves nothing.
+     *
+     * **This was called "never reaches outside the high-quality pool", and independent
+     * review 29 was right that the fixture cannot support that name.** These candidates
+     * spread across five genres and share no franchise, so the ceilings never bite and
+     * the greedy pass never needs the tail. Where they do bite it reaches past sixty —
+     * with a seed and without one alike — which is what
+     * `what the exploration pool bounds` asserts below.
+     */
+    const candidates = pool(300);
+    const ranked = [...candidates].sort(
+      (a, b) => b.explanation.total - a.explanation.total,
+    );
+    const eligible = new Set(ids(ranked.slice(0, 60)));
+
+    for (let seed = 1; seed <= 100; seed += 1) {
+      for (const id of ids(diversify(candidates, 20, seed))) {
+        expect([seed, id, eligible.has(id)]).toEqual([seed, id, true]);
+      }
+    }
+  });
+
+  it('keeps every diversity ceiling across a hundred seeds', () => {
+    // The ceilings are hard and the ordering is what varies. A reordering that let a
+    // franchise or a genre through would be the "twenty sequels" failure arriving by a
+    // new route.
+    const candidates = pool(300);
+    for (let seed = 1; seed <= 100; seed += 1) {
+      const slate = diversify(candidates, 20, seed);
+      expect(slate.length).toBeLessThanOrEqual(20);
+
+      const perGenre = new Map<string, number>();
+      for (const item of slate) {
+        const primary = item.genres[0];
+        if (primary) perGenre.set(primary, (perGenre.get(primary) ?? 0) + 1);
+      }
+      for (const [genre, count] of perGenre) {
+        expect([seed, genre, count <= 8]).toEqual([seed, genre, true]);
+      }
+    }
+  });
+
+  it('draws no duplicates', () => {
+    for (let seed = 1; seed <= 50; seed += 1) {
+      const drawn = ids(diversify(pool(), 20, seed));
+      expect([seed, drawn.length]).toEqual([seed, new Set(drawn).size]);
+    }
+  });
+
+  it('still leads with the best title when there genuinely is a best title', () => {
+    /**
+     * "Relevance remains primary", measured rather than asserted — and measured on the
+     * pool shape where the phrase means something.
+     *
+     * An **anchored** pool has a steep head: a handful of titles the reader's own
+     * favourites point at, scoring several times what the popularity tail does. That is
+     * the case where burying the best title would be a real loss, so that is the case
+     * the temperature was tuned against, and the claim is that the top-scoring candidate
+     * still leads the wall most of the time.
+     *
+     * The first draft measured this on a popularity-only pool and against the bottom
+     * *thirty* of sixty, and it failed — correctly, on both counts. Those scores differ
+     * by thousandths, so no title is distinctly best and sampling rightly treats them as
+     * interchangeable; and comparing ten candidates against thirty would have been an
+     * unfair count even if it had passed.
+     *
+     * The finding underneath it stood, though, and it moved the constant twice: the
+     * temperature was 0.25, tuned against a hand-built pool with a steeper head than the
+     * real scorer produces. It is 0.12, measured against this one.
+     */
+    const anchor: Anchor = {
+      mediaItemId: 'loved',
+      title: 'Loved',
+      score: 9,
+      similarIds: Array.from({ length: 10 }, (_, index) => `c${index}`),
+    };
+    const candidates = Array.from({ length: 60 }, (_, index) =>
+      scoreCandidate(
+        candidate({
+          mediaItemId: `c${index}`,
+          title: `Candidate ${index}`,
+          genres: [['Drama', 'Comedy', 'Horror', 'Action', 'Crime'][index % 5]!],
+          popularity: 900 - index * 14,
+        }),
+        [anchor],
+        tasteFrom([]),
+      ),
+    );
+
+    const byScore = [...candidates].sort((a, b) => b.explanation.total - a.explanation.total);
+    const best = byScore[0]!.mediaItemId;
+    const topTen = new Set(ids(byScore.slice(0, 10)));
+
+    let bestLeads = 0;
+    let ledFromOutsideTopTen = 0;
+    for (let seed = 1; seed <= 300; seed += 1) {
+      const lead = diversify(candidates, 20, seed)[0]?.mediaItemId;
+      if (lead === best) bestLeads += 1;
+      if (lead && !topTen.has(lead)) ledFromOutsideTopTen += 1;
+    }
+
+    // The single best candidate leads about half of all visits — against 1-in-60 if
+    // this were a shuffle. Asserted with margin, because it is a measured rate.
+    expect(bestLeads).toBeGreaterThan(100);
+    // And the tail essentially never leads: exploration inside the pool, not a lottery.
+    // Measured at roughly 1%; the bound is loose so a scorer tweak reports rather than
+    // flakes.
+    expect(ledFromOutsideTopTen).toBeLessThan(30);
+  });
+
+  it('leaves an all-equal pool alone rather than inventing an order', () => {
+    // No spread means no near-tie to break, and a hash is not a reason to prefer one
+    // title over another. The strict order stands.
+    const flat = Array.from({ length: 30 }, (_, index) =>
+      scoreCandidate(candidate({ mediaItemId: `f${index}`, popularity: null }), [], tasteFrom([])),
+    );
+    expect(ids(diversify(flat, 20, 9))).toEqual(ids(diversify(flat, 20, 0)));
+  });
+
+  it('degrades to the strict order when there is barely a pool', () => {
+    // Twenty candidates for twenty slots: there is nothing to choose between, so a
+    // refresh honestly changes very little. The founder's "whenever adequate
+    // alternatives exist" cuts both ways.
+    const scarce = pool(20);
+    expect(new Set(ids(diversify(scarce, 20, 5)))).toEqual(new Set(ids(diversify(scarce, 20, 0))));
+  });
+});
+
+/**
+ * What the exploration pool bounds — independent review 29 and 29b.
+ *
+ * `rank.ts` claimed nothing outside the top `3 × limit` could be drawn. That is false:
+ * `diversify` runs one greedy pass with hard ceilings over the whole sequence, so when
+ * the caps reject the head it fills from the tail.
+ *
+ * **Round 29b then found the first attempt at these tests vacuous, and it was right.**
+ * They passed `limit: 200`, which makes the pool all two hundred candidates and the
+ * "outside the pool" split at index 60 meaningless; and they used popularities of
+ * `900 - index`, every one of which saturates `POPULARITY_CEILING` (500) to an identical
+ * score, so `spread <= 0` disabled the seeded path entirely. A green test that never ran
+ * the code under test is worse than no test, and it is the same shape of mistake as the
+ * claim it was written to pin down.
+ *
+ * Fixed here: **`limit: 20`, so the pool really is the top sixty**, and popularities
+ * strictly under the ceiling so the scores strictly decrease and the sampler runs.
+ */
+describe('what the exploration pool bounds', () => {
+  const ids = (scored: readonly { mediaItemId: string }[]) => scored.map((s) => s.mediaItemId);
+  /** Position in the original score order, recovered from the id. With `limit: 20` the
+   *  exploration pool is the top sixty, so `< 60` is exactly the pool boundary. */
+  const inPool = (id: string) => Number(id.slice(1)) < 60;
+
+  /** Strictly decreasing and well under `POPULARITY_CEILING`, so the scores have spread. */
+  const popularity = (index: number) => 400 - index * 1.5;
+
+  /**
+   * The first sixty share one genre and one franchise, so the franchise ceiling rejects
+   * all but two of the pool and the greedy pass is forced into the tail — the case the
+   * overstated claim said could not happen.
+   */
+  const constrained = (count: number) =>
+    Array.from({ length: count }, (_, index) =>
+      scoreCandidate(
+        candidate({
+          mediaItemId: `x${index}`,
+          title: index < 60 ? `Saga: Part ${index}` : `Standalone ${index}`,
+          genres: index < 60 ? ['Drama'] : ['Comedy'],
+          popularity: popularity(index),
+        }),
+        [],
+        emptyTaste,
+      ),
+    );
+
+  /** Five genres, no shared franchise: the ceilings never bite. */
+  const roomy = (count: number) =>
+    Array.from({ length: count }, (_, index) =>
+      scoreCandidate(
+        candidate({
+          mediaItemId: `x${index}`,
+          title: `Title ${index}`,
+          genres: [['Drama', 'Comedy', 'Horror', 'Action', 'Crime'][index % 5]!],
+          popularity: popularity(index),
+        }),
+        [],
+        emptyTaste,
+      ),
+    );
+
+  it('keeps the wall inside the pool while the ceilings leave room', () => {
+    // The guarantee doing its work: over a hundred seeds, nothing below the best sixty
+    // is ever drawn, because the greedy pass never needs to look that far.
+    const scored = roomy(200);
+    for (let seed = 1; seed <= 100; seed += 1) {
+      expect([seed, ids(diversify(scored, 20, seed)).every(inPool)]).toEqual([seed, true]);
+    }
+  });
+
+  it('reaches the tail with a seed and without one alike', () => {
+    // What review 29 found: the pool is not a bound on what the greedy pass may select.
+    // Asserted both ways because the point is that the seed did not introduce it —
+    // `diversify` has always filled from further down when the ceilings reject the head.
+    // It is *not* a claim that the two reach it under identical conditions; they need
+    // not, since order decides which pool members are rejected.
+    const scored = constrained(200);
+    const fromTail = (seed: number) => ids(diversify(scored, 20, seed)).filter((id) => !inPool(id));
+
+    expect(fromTail(0).length).toBeGreaterThan(0);
+    expect(fromTail(7).length).toBeGreaterThan(0);
+  });
+
+  it('never draws a title from outside the pool ahead of one inside it', () => {
+    /**
+     * **This is the whole guarantee, and it is the only one of this shape that holds.**
+     *
+     * `explore` permutes the pool and leaves every lower-scoring candidate behind all of
+     * it, so the greedy pass meets the pool first and the tail only after. What that does
+     * *not* promise is the next test.
+     */
+    const scored = constrained(200);
+    for (let seed = 1; seed <= 100; seed += 1) {
+      const wall = ids(diversify(scored, 20, seed));
+      const inside = wall.flatMap((id, index) => (inPool(id) ? [index] : []));
+      const outside = wall.flatMap((id, index) => (inPool(id) ? [] : [index]));
+      expect([seed, inside.length > 0, outside.length > 0]).toEqual([seed, true, true]);
+      expect([seed, Math.max(...inside) < Math.min(...outside)]).toEqual([seed, true]);
+    }
+  });
+
+  it('does change which titles are chosen, because order spends the ceilings', () => {
+    /**
+     * **The claim review 29b killed, kept as a test so it cannot come back.**
+     *
+     * An earlier round asserted the selected set was identical with and without a seed.
+     * It is not, and it cannot be: the ceilings are spent in the order they are met, so
+     * a different arrangement of the pool leaves different quota for what follows. That
+     * is not relevance leaking — every candidate involved is still inside the pool or
+     * still in strict score order behind it — but the *set* genuinely moves, and saying
+     * otherwise was how the top-60 claim got overstated in the first place.
+     */
+    const scored = constrained(200);
+    const walls = [0, 1, 7, 4242].map((seed) => JSON.stringify([...ids(diversify(scored, 20, seed))].sort()));
+    expect(new Set(walls).size).toBeGreaterThan(1);
+  });
+
+  it('can return a shorter wall than strict order, because the ceilings intersect', () => {
+    /**
+     * **The second false claim, found by review 29c, kept as a test so it cannot return.**
+     *
+     * An earlier round asserted the wall never gets shorter, over a fixture where the
+     * length was invariant by construction — every pool candidate shared one genre and
+     * one franchise, so every permutation accepted exactly two. It executed `explore`
+     * and still could not see the behaviour it was named for.
+     *
+     * This is the reviewer's counterexample, run against the real scorer: two genres
+     * (`Drama`/`Comedy`) across two franchises (`Yankee`/`Xray`) at `limit: 5`, where
+     * the genre ceiling is 2 and the franchise ceiling is 2. Strict order takes four.
+     * Seed 76 takes three, because it meets `AX1` early and spends Drama's second slot
+     * on a franchise that then blocks `BX2`.
+     */
+    const spec: [string, string, string][] = [
+      ['AY1', 'Drama', 'Yankee'],
+      ['AY2', 'Drama', 'Yankee'],
+      ['BX1', 'Comedy', 'Xray'],
+      ['BX2', 'Comedy', 'Xray'],
+      ['AX1', 'Drama', 'Xray'],
+      ['AX2', 'Drama', 'Xray'],
+    ];
+    const scored = spec.map(([id, genre, franchise], index) =>
+      scoreCandidate(
+        candidate({
+          mediaItemId: id,
+          title: `${franchise}: ${id}`,
+          genres: [genre],
+          popularity: 400 - index * 20,
+        }),
+        [],
+        emptyTaste,
+      ),
+    );
+
+    expect(maxPerGenre(5)).toBe(2);
+    expect(maxPerFranchise()).toBe(2);
+    expect(diversify(scored, 5, 0)).toHaveLength(4);
+    expect(diversify(scored, 5, 76)).toHaveLength(3);
+  });
+
+  it('can shorten a wall the candidates could have filled, so scarcity is not the excuse', () => {
+    /**
+     * **Review 29d, and it killed the mitigation rather than the finding.**
+     *
+     * The round before this said the shortening "needs a pool that cannot fill the wall
+     * in the first place". It does not. Add one unconstrained candidate to the six
+     * above — its own genre, its own franchise — and strict order fills all five slots
+     * while seed 76 still returns four. The wall was fillable; the ordering lost a row.
+     *
+     * What is actually required is that the intersecting ceilings be near-binding. That
+     * is a much narrower condition than "any pool", and much broader than "a pool that
+     * was already too small", which is why it is asserted here rather than described.
+     */
+    const spec: [string, string, string][] = [
+      ['AY1', 'Drama', 'Yankee'],
+      ['AY2', 'Drama', 'Yankee'],
+      ['BX1', 'Comedy', 'Xray'],
+      ['BX2', 'Comedy', 'Xray'],
+      ['AX1', 'Drama', 'Xray'],
+      ['AX2', 'Drama', 'Xray'],
+      ['CZ1', 'Action', 'Zulu'],
+    ];
+    const scored = spec.map(([id, genre, franchise], index) =>
+      scoreCandidate(
+        candidate({
+          mediaItemId: id,
+          title: `${franchise}: ${id}`,
+          genres: [genre],
+          popularity: 400 - index * 20,
+        }),
+        [],
+        emptyTaste,
+      ),
+    );
+
+    // Strict order fills the wall, so this set is not "too small to fill it".
+    expect(diversify(scored, 5, 0)).toHaveLength(5);
+    expect(diversify(scored, 5, 76)).toHaveLength(4);
+
+    // And it is uncommon rather than typical, even here. Measured at 41 in 2,000 — about
+    // one seed in fifty — and bracketed tightly enough to protect that number: `< 200`
+    // was the first bound and review 29e was right that it would survive a fivefold
+    // regression and leave the prose false. A change that moves this legitimately should
+    // update both the bound and the sentence that quotes it.
+    let shortened = 0;
+    for (let seed = 1; seed <= 2000; seed += 1) {
+      if (diversify(scored, 5, seed).length < 5) shortened += 1;
+    }
+    expect(shortened).toBeGreaterThanOrEqual(20);
+    expect(shortened).toBeLessThanOrEqual(70);
+  });
+
+  it('does not move the wall length on any of five realistic pool shapes', () => {
+    /**
+     * **The measurement, in the suite rather than in a comment.**
+     *
+     * 29d could not reproduce the "2,000 seeds on five realistic shapes" claim from the
+     * prose around it, and was right not to accept it — an empirical claim with no
+     * harness is an assertion. These are the five shapes, and they run.
+     *
+     * The condition for shortening is near-binding intersecting ceilings. Every shape
+     * here gives the caps slack, which is the state For You is in whenever it has enough
+     * candidates to show a wall at all.
+     */
+    const genres = [
+      'Drama', 'Comedy', 'Horror', 'Action', 'Crime', 'Thriller', 'Romance', 'Sci-Fi',
+      'Fantasy', 'Mystery', 'War', 'Music', 'Family', 'History', 'Animation', 'Western',
+      'Documentary', 'Adventure',
+    ];
+    const build = (count: number, genreOf: (i: number) => string, titleOf: (i: number) => string,
+      step: number) =>
+      Array.from({ length: count }, (_, index) =>
+        scoreCandidate(
+          candidate({
+            mediaItemId: `c${index}`,
+            title: titleOf(index),
+            genres: [genreOf(index)],
+            popularity: 400 - index * step,
+          }),
+          [],
+          emptyTaste,
+        ),
+      );
+
+    const shapes: [string, ReturnType<typeof build>][] = [
+      ['60 candidates, eighteen genres', build(60, (i) => genres[i % 18]!, (i) => `Film ${i}`, 3)],
+      ['200 candidates, eighteen genres', build(200, (i) => genres[i % 18]!, (i) => `Film ${i}`, 1.5)],
+      ['200 candidates, five genres', build(200, (i) => genres[i % 5]!, (i) => `Film ${i}`, 1.5)],
+      [
+        '200 candidates, franchise-heavy',
+        build(200, (i) => genres[i % 18]!, (i) => `Saga${Math.floor(i / 3)}: Part ${i}`, 1.5),
+      ],
+      ['25 candidates for a wall of 20', build(25, (i) => genres[i % 6]!, (i) => `Film ${i}`, 8)],
+    ];
+
+    for (const [name, scored] of shapes) {
+      expect([name, diversify(scored, 20, 0).length]).toEqual([name, 20]);
+      for (let seed = 1; seed <= 200; seed += 1) {
+        expect([name, seed, diversify(scored, 20, seed).length]).toEqual([name, seed, 20]);
+      }
+    }
   });
 });

@@ -1,3 +1,5 @@
+import { languageName } from '@/lib/language';
+
 import { canonicalGenres, hasAnyGenre, type CanonicalGenre } from './genres';
 
 /**
@@ -682,17 +684,89 @@ export const AWARD_TRACKS: AwardTrack[] = [
     next: (n) => `Watch ${count(n)} different ${plural(n, 'genre', 'genres')}`,
     earned: (n) => `Watched ${count(n)} different ${plural(n, 'genre', 'genres')}`,
     /**
-     * **Sixteen, and the number was audited rather than picked.**
+     * **12 / 14 / 16 over a vocabulary of eighteen**, re-audited after the founder's
+     * Preview pass. Dabbler was 8 and the founder's read of it was right: it was being
+     * earned for watching a handful of ordinary films.
      *
-     * `genres.ts` knows eighteen and all eighteen appear in the seeded catalogue — but
-     * the tail is one or two titles deep: over the 1,814 countable rows in
-     * `supabase/seed/catalogue.json`, Documentary is carried by two titles, Animation by
-     * eight and Western by fourteen, while every other genre has at least twenty-one.
-     * Sixteen is the largest tier that never depends on a genre with fewer than fourteen
-     * titles behind it, so a reader may miss any two rather than hunt one documentary.
+     * ### The catalogue, counted properly
+     *
+     * The loggable universe is **movies plus seasons** — `_assert_loggable` refuses a
+     * series, and a season inherits its series' genres (`lib/media-metadata.ts`). That is
+     * 382 + 1,432 = **1,814 rows, of which 1,551 carry at least one canonical genre**.
+     * Mean genres per countable row: **2.68**.
+     *
+     * The tail is genuinely thin, and thinner than the note here used to claim:
+     *
+     * | | units | | | units |
+     * |---|---|---|---|---|
+     * | Drama | 1,102 | | War | 69 |
+     * | Action | 451 | | Family | 54 |
+     * | Thriller | 355 | | Music | 39 |
+     * | … | … | | Western | 23 |
+     * | Mystery | 124 | | **Animation** | **10** |
+     * | History | 108 | | **Documentary** | **6** |
+     *
+     * **The previous note quoted movie-only figures** — "Documentary is two titles,
+     * Animation eight, Western fourteen" — while claiming they were over the 1,814 rows.
+     * Those are the counts among the 382 *movies*. The conclusion happened to survive the
+     * correction; the reasoning is restated here from the numbers it actually rests on.
+     *
+     * ### Why 8 was too low, in logged units rather than in feeling
+     *
+     * Simulated over the real catalogue, a viewer reaches N distinct genres after a
+     * median of:
+     *
+     * | distinct genres | 8 | 10 | 12 | 14 | 16 | 17 | 18 |
+     * |---|---|---|---|---|---|---|---|
+     * | median units logged | **5** | 8 | **13** | **24** | **54** | 98 | 249 |
+     *
+     * Eight is five films. That is the founder's "handful of ordinary multi-genre
+     * movies", almost exactly, and 83% of five-title samples already clear it.
+     *
+     * ### Why 12 / 14 / 16
+     *
+     * **Dabbler at 12** — two-thirds of the vocabulary, about thirteen logged units.
+     * Past a handful, and still the entry tier.
+     *
+     * **Mixer stays at 14** — about twenty-four units, close to double Dabbler's effort.
+     *
+     * **Chaos Collector stays at 16**, and this is the one the tail decides. Sixteen of
+     * eighteen means a reader may miss **any two**, and the two they will miss are
+     * Documentary (6 units) and Animation (10). Seventeen forces one of those two: median
+     * 98 units, 90th percentile 243. Eighteen forces both: median 249. Both are the
+     * "pathological rare-title hunt" the brief rules out, so the ceiling stays where the
+     * data puts it.
+     *
+     * The thresholds are evenly spaced and the *effort* between them is not — 13, 24 and
+     * 54 units, roughly doubling — which is the intended shape: the last genres are much
+     * harder to find than the first, and the tier numbers should not pretend otherwise.
+     *
+     * ### Raising Dabbler takes it back from anybody who has 8 to 11 genres
+     *
+     * **Independent review 29 named this and it is real.** Awards are computed live from
+     * table reads with no unlock ledger (`src/features/awards`), so a tier is not a thing
+     * an account *holds* — it is recomputed every time the sheet opens. Moving the
+     * threshold does not migrate anybody; it silently un-earns Dabbler for every reader
+     * between 8 and 11 distinct genres the next time they look.
+     *
+     * Accepted rather than mitigated, for reasons that are specific to right now:
+     *
+     *   - **The only accounts that exist are the founder's and test users.** There is no
+     *     TestFlight build, no Play track and no external tester
+     *     (`docs/release/beta-distribution-readiness.md`), so the population this can
+     *     take an award from is one person, and that person asked for the change.
+     *   - **The alternative is worse and permanent.** Grandfathering needs the durable
+     *     unlock ledger that `deferred-roadmap.md` §5 defers — the same ledger award
+     *     *notifications* wait on — and building it here to protect one account would be
+     *     the scope creep this pass is explicitly not doing.
+     *   - It only ever gets more expensive. Any threshold this project wants to correct
+     *     should be corrected before there are readers to take it from.
+     *
+     * **This is the last threshold change that can be made for free**, and the day the
+     * ledger lands, changing a tier becomes a migration rather than an edit.
      */
     tiers: tiers(
-      ['dabbler', 'Dabbler', 8],
+      ['dabbler', 'Dabbler', 12],
       ['mixer', 'Mixer', 14],
       ['chaos-collector', 'Chaos Collector', 16],
     ),
@@ -799,16 +873,14 @@ export const AWARD_TRACKS: AwardTrack[] = [
 /**
  * An ISO 639-1 code as a word, for Passport Mode's rows.
  *
- * `Intl.DisplayNames` uses the platform's own tables — the same helper `lib/language.ts`
- * wraps for the filter sheet. Falls back to the code rather than to nothing: a row that
- * said only "Ringu" would leave the reader wondering why it was in this list.
+ * Falls back to the code uppercased rather than to nothing: a row that said only "Ringu"
+ * would leave the reader wondering why it was in this list.
  */
 function languageLabel(code: string | null): string | null {
   if (!code) return null;
-  try {
-    const name = new Intl.DisplayNames(undefined, { type: 'language' }).of(code);
-    return name && name !== code ? name : code.toUpperCase();
-  } catch {
-    return code.toUpperCase();
-  }
+  // `lib/language.ts`, like every other language label in the app. This was a third
+  // copy of `Intl.DisplayNames`, and Hermes does not implement it — so on the founder's
+  // Android Preview every row in this breakdown read "KO" or "TE" rather than Korean or
+  // Telugu. The uppercase fallback is what made it look intentional.
+  return languageName(code) ?? code.toUpperCase();
 }

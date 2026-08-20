@@ -4,15 +4,14 @@ import { useWindowDimensions } from 'react-native';
 import { ScoresSection } from './ScoresSection';
 
 /**
- * Two columns rather than two rows, and the copy rules that survived the change.
+ * The composition the founder asked for after the Android Preview, and the copy rules
+ * that have to survive it.
  *
- * The founder's final pass: Following and Bingd were conceptually right and vertically
- * tall — a circle beside two short lines, twice, mostly saying "Not enough ratings".
- * Side by side they read as the comparison they are and cost about half the height.
- *
- * What must not change with the layout is what the section is willing to claim. Below
- * the sample threshold there is a grey circle and four words, and never a number, a
- * countdown or a faded figure standing in for one.
+ * Three things changed: Bingd leads, each unit is a circle with its words beside it
+ * rather than above them, and an inset rule separates the block from the actions over
+ * it. What must *not* change is what the section is willing to claim. Below the sample
+ * threshold there is a grey circle and four words, and never a number, a countdown or a
+ * faded figure standing in for one.
  */
 
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions');
@@ -25,24 +24,75 @@ const setViewport = (width: number, fontScale = 1) =>
 
 beforeEach(() => setViewport(412));
 
+/** A style prop, flattened, whichever form the component passed it in. */
+const flatten = (style: unknown) =>
+  (Array.isArray(style) ? Object.assign({}, ...style) : (style ?? {})) as Record<string, unknown>;
+
 /** Which layout was drawn, read off the container the two scores share. */
-const isSideBySide = () => {
-  const style = screen.getByTestId('scores-layout').props.style;
-  const flat = Array.isArray(style) ? Object.assign({}, ...style) : (style ?? {});
-  return flat.flexDirection === 'row';
-};
+const isSideBySide = () => flatten(screen.getByTestId('scores-layout').props.style).flexDirection === 'row';
 
 const both = {
-  following: { score: null, ratingCount: 0 },
   bingd: { score: null, ratingCount: 0 },
+  following: { score: null, ratingCount: 0 },
 };
 
 describe('the scores row', () => {
-  it('puts Following and Bingd side by side on an ordinary phone', async () => {
+  it('puts Bingd and Following side by side on an ordinary phone', async () => {
     await render(<ScoresSection {...both} />);
-    expect(screen.getByText('Following')).toBeTruthy();
     expect(screen.getByText('Bingd')).toBeTruthy();
+    expect(screen.getByText('Following')).toBeTruthy();
     expect(isSideBySide()).toBe(true);
+  });
+
+  it('leads with Bingd, then Following', async () => {
+    // The founder's ordering, and the one a screen reader walks in. Asserted on the
+    // rendered order rather than on the props, because the props are named and could be
+    // passed either way round without changing what anybody sees.
+    await render(
+      <ScoresSection
+        bingd={{ score: 7.4, ratingCount: 128 }}
+        following={{ score: 8.2, ratingCount: 4 }}
+      />,
+    );
+    const labels = screen
+      .getAllByText(/^(Bingd|Following)$/)
+      .map((node) => node.props.children);
+    expect(labels).toEqual(['Bingd', 'Following']);
+  });
+
+  it('draws each circle beside its words rather than above them', async () => {
+    // The compositional half of the founder's note, and the part a label assertion
+    // cannot see: both units read left-to-right, and so does the container holding
+    // them, which is what makes the pair one line.
+    await render(<ScoresSection {...both} />);
+    const units = screen.getAllByTestId('scores-unit');
+    expect(units).toHaveLength(2);
+    for (const unit of units) {
+      expect(flatten(unit.props.style).flexDirection).toBe('row');
+    }
+    expect(isSideBySide()).toBe(true);
+  });
+
+  it('keeps the circle beside the words in the narrow fallback too', async () => {
+    // The fallback is a wider line, not a different design. This is the assertion that
+    // stops it drifting back to a stack the next time the breakpoint moves.
+    setViewport(320);
+    await render(<ScoresSection {...both} />);
+    for (const unit of screen.getAllByTestId('scores-unit')) {
+      expect(flatten(unit.props.style).flexDirection).toBe('row');
+    }
+  });
+
+  it('separates the block with an inset rule rather than a full-width one', async () => {
+    await render(<ScoresSection {...both} />);
+    const divider = flatten(screen.getByTestId('scores-divider').props.style);
+    // Inset: it stops short of both screen edges by the page gutter.
+    expect(divider.marginHorizontal).toBe(16);
+    // Light: a hairline, and a top border rather than a filled bar.
+    expect(divider.borderTopWidth).toBeLessThanOrEqual(1);
+    expect(divider.borderTopColor).toBeTruthy();
+    expect(divider.height).toBeUndefined();
+    expect(divider.backgroundColor).toBeUndefined();
   });
 
   it('falls back to stacked rows on a narrow device rather than cramming', async () => {
@@ -60,7 +110,19 @@ describe('the scores row', () => {
     expect(isSideBySide()).toBe(false);
   });
 
-  it('says the same four words in both columns when there is nothing to average', async () => {
+  it('keeps the order and the circle-first composition in the fallback', async () => {
+    setViewport(320);
+    await render(
+      <ScoresSection
+        bingd={{ score: 7.4, ratingCount: 128 }}
+        following={{ score: 8.2, ratingCount: 4 }}
+      />,
+    );
+    const labels = screen.getAllByText(/^(Bingd|Following)$/).map((n) => n.props.children);
+    expect(labels).toEqual(['Bingd', 'Following']);
+  });
+
+  it('says the same four words in both units when there is nothing to average', async () => {
     await render(<ScoresSection {...both} />);
     expect(screen.getAllByText('Not enough ratings')).toHaveLength(2);
     // Never a countdown: "2 more needed" invites the reader to watch a number they
@@ -74,8 +136,8 @@ describe('the scores row', () => {
     // person's opinion; two strangers is not a crowd. Ten is the server's number.
     await render(
       <ScoresSection
-        following={{ score: 8.2, ratingCount: 1 }}
         bingd={{ score: null, ratingCount: 9 }}
+        following={{ score: 8.2, ratingCount: 1 }}
       />,
     );
 
@@ -89,21 +151,21 @@ describe('the scores row', () => {
   it('shows the sample behind a number once there is one', async () => {
     await render(
       <ScoresSection
-        following={{ score: 8.2, ratingCount: 4 }}
         bingd={{ score: 7.4, ratingCount: 128 }}
+        following={{ score: 8.2, ratingCount: 4 }}
       />,
     );
 
-    expect(screen.getByText('4 people you follow')).toBeTruthy();
     expect(screen.getByText('128 ratings')).toBeTruthy();
+    expect(screen.getByText('4 people you follow')).toBeTruthy();
   });
 
   it('draws an empty circle rather than a faded number', async () => {
     await render(<ScoresSection {...both} />);
     // The empty badge announces itself; a greyed figure would be a fact the page does
     // not believe.
-    expect(screen.getByLabelText('Following: Not enough ratings')).toBeTruthy();
     expect(screen.getByLabelText('Bingd: Not enough ratings')).toBeTruthy();
+    expect(screen.getByLabelText('Following: Not enough ratings')).toBeTruthy();
   });
 
   it('is absent entirely when there is nothing to put in it', async () => {

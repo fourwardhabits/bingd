@@ -262,7 +262,8 @@ describe('what a row is called', () => {
   const genres = (names: string[]) =>
     names.map((genre, i) => watched(`g${i}`, { title: `Film ${i}`, genres: [genre] }));
 
-  const EIGHT = [
+  /** Twelve genres: Dabbler, since the founder's Preview re-audit moved it from eight. */
+  const TWELVE = [
     'Action',
     'Adventure',
     'Animation',
@@ -271,21 +272,25 @@ describe('what a row is called', () => {
     'Drama',
     'Family',
     'Fantasy',
+    'History',
+    'Horror',
+    'Music',
+    'Mystery',
   ];
-  const FOURTEEN = [...EIGHT, 'History', 'Horror', 'Music', 'Mystery', 'Romance', 'Thriller'];
+  const FOURTEEN = [...TWELVE, 'Romance', 'Thriller'];
 
   it('shows the family name and the requirement while locked', async () => {
-    seed('user_media', genres(EIGHT.slice(0, 6)));
+    seed('user_media', genres(TWELVE.slice(0, 6)));
     await open();
     expect(screen.getByText('Genre Gremlin')).toBeTruthy();
-    expect(screen.getByText('Next: Watch 8 different genres')).toBeTruthy();
-    expect(count('6 / 8')).toBeTruthy();
+    expect(screen.getByText('Next: Watch 12 different genres')).toBeTruthy();
+    expect(count('6 / 12')).toBeTruthy();
     // The reward is not spent early: the tier's name is nowhere on the sheet.
     expect(screen.queryByText('Dabbler')).toBeNull();
   });
 
   it('becomes the tier name once it is earned, with no separate earned line', async () => {
-    seed('user_media', genres(EIGHT));
+    seed('user_media', genres(TWELVE));
     await open();
     expect(screen.getByText('Dabbler')).toBeTruthy();
     expect(screen.getByText('Next: Watch 14 different genres')).toBeTruthy();
@@ -773,7 +778,7 @@ describe('the breakdowns', () => {
     expect(screen.getByText('2 titles')).toBeTruthy();
     expect(screen.getByText('Comedy')).toBeTruthy();
     // Two genre rows against a numerator of two.
-    expect(screen.getByText(/2 \/ 8/)).toBeTruthy();
+    expect(screen.getByText(/2 \/ 12/)).toBeTruthy();
   });
 
   it('Two-Screen Life shows both sides with their own caps', async () => {

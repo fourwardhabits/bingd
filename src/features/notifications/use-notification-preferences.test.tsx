@@ -314,7 +314,7 @@ describe('the screen', () => {
     expect(view.getByLabelText('All Social notifications').props.value).toBe(false);
     // Recommendations & invites was untouched, so its master is still on. A master
     // that reported the whole app rather than its own section would fail here.
-    expect(view.getByLabelText('All Recommendations & Invites notifications').props.value).toBe(
+    expect(view.getByLabelText('All Recommendations & invites notifications').props.value).toBe(
       true,
     );
   });
@@ -385,20 +385,36 @@ describe('the screen', () => {
     expect(view.queryByLabelText('Reactions')).toBeNull();
   });
 
-  it('says plainly that invite and award notifications are not being sent yet', async () => {
+  it('says plainly that award notifications are not being sent yet', async () => {
     const view = await renderLoaded();
 
-    // Three things say it and they are not the same thing: a badge under each of the two
-    // pending settings, and the section footnote explaining why the switches are still
-    // worth setting. The footnote renders from the first frame; the badges appear only
+    // **One badge, not two, since 2026-08-20.** `invites` had a writer from
+    // `20260819000500` and kept its `pending` flag anyway, so the screen spent a day
+    // telling readers a working feature was not built.
+    //
+    // Two things say it and they are not the same thing: a badge under the one pending
+    // setting, and the explainer saying why the switch is still worth setting. The
+    // explainer renders from the first frame; the badge appears only
     // once the read lands. So `getByText(/not being sent yet/i)` matched one element
     // while loading and three afterwards, and threw "found multiple" the moment the data
     // arrived — it passed only when polling happened to catch the loading window, which
     // is the opposite race to the rest of this file and why it flaked in both directions.
     //
-    // Asserted separately and exactly, so any one of the three going missing is its own
-    // failure rather than being absorbed by the other two.
-    expect(view.getAllByText('Not being sent yet.')).toHaveLength(2);
-    expect(view.getByText(/^Invite and Award notifications are not being sent yet\./)).toBeTruthy();
+    // Asserted separately and exactly, so either one going missing is its own failure
+    // rather than being absorbed by the other.
+    expect(view.getAllByText('Not being sent yet.')).toHaveLength(1);
+    expect(view.getByText(/^Award notifications are not being sent yet\./)).toBeTruthy();
+  });
+
+  it('marks Bingd Awards as unwritten and no longer marks invites', async () => {
+    // The badge has to be on the right row. Asserting the count alone would pass if the
+    // flag had merely moved from Awards to Invites.
+    const view = await renderLoaded();
+
+    expect(view.getByText('Bingd Awards')).toBeTruthy();
+    expect(
+      view.getByText('Somebody you invited joins Bingd and ranks their first ten titles.'),
+    ).toBeTruthy();
+    expect(view.queryByText(/Invite and Award/)).toBeNull();
   });
 });
