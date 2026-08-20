@@ -1,8 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { Stack, useRouter } from 'expo-router';
+import { useRef, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { newOperationId } from '@/features/collection/writes';
+import { revokeInviteLink } from '@/features/invite';
 import { useMyBlocks, useSocialWrites } from '@/features/profile/use-social';
 import { useAccountWrites } from '@/features/settings/use-account';
 import { supabase } from '@/lib/supabase';
@@ -12,7 +15,7 @@ import { theme } from '@/ui/tokens';
 /**
  * Privacy.
  *
- * Two controls, both of which already had complete backend semantics and no way to
+ * Three controls, each of which already had complete backend semantics and no way to
  * reach them. Nothing on this screen is a switch that does nothing, which was the
  * founder's explicit bar: `profiles.visibility` decides whether a follow is approved
  * or pending, whether the account appears in `search_users`, and whether
@@ -100,6 +103,51 @@ export default function PrivacyScreen() {
     }
     await visibility.refetch();
   };
+
+  /**
+   * One operation id per *decision*, held across the retries a failure invites.
+   *
+   * The rule `lib/operation-intent.ts` states, and it matters more here than most
+   * places: a revocation that commits and loses its reply has already rotated the link,
+   * and a retry carrying a fresh id would rotate it a **second** time — detaching
+   * everybody who was given the one in between. The held id is answered
+   * `already_applied` instead, with the link that is live now.
+   */
+  const replaceIntent = useRef<string | null>(null);
+  const [replacing, setReplacing] = useState(false);
+
+  const replaceLink = async () => {
+    if (replacing) return;
+    setReplacing(true);
+    try {
+      const operationId = (replaceIntent.current ??= newOperationId());
+      const result = await revokeInviteLink(operationId);
+      if (result.outcome === 'failed') {
+        Alert.alert('Could not replace your link', result.message);
+        // Held only when the outcome was never established, so the retry is recognised
+        // as the same decision rather than as a second rotation.
+        if (!result.changed) replaceIntent.current = null;
+        return;
+      }
+      replaceIntent.current = null;
+      Alert.alert(
+        'Your invite link has been replaced',
+        'The old link no longer works. Share the new one from anywhere you would normally invite somebody.',
+      );
+    } finally {
+      setReplacing(false);
+    }
+  };
+
+  const confirmReplaceLink = () =>
+    Alert.alert(
+      'Replace your invite link?',
+      'Anybody still holding the old link will not be able to use it, and there is no way to bring it back. People who already joined on it stay attributed to you.',
+      [
+        { text: 'Keep it', style: 'cancel' },
+        { text: 'Replace', style: 'destructive', onPress: () => void replaceLink() },
+      ],
+    );
 
   return (
     <Screen includeBottomInset>
@@ -209,6 +257,43 @@ export default function PrivacyScreen() {
               body="You can block somebody from their profile."
             />
           )}
+        </View>
+
+        {/**
+         * The safety valve for a link that has gone somewhere it should not.
+         *
+         * A personal invite link is reusable, never expires and is meant to be pasted
+         * into group chats — so the one thing it needs and did not have is a way to
+         * take it back. PRD §17's token model has promised "revoke and regenerate from
+         * Settings" since v0.6; `invite_tokens.revoked_at` has existed since
+         * 20260813001300 with no writer, and independent review 26 found the gap at
+         * the moment it started to matter, because 20260819000500 is what made a
+         * leaked link worth anything.
+         *
+         * Confirmed, and the confirmation names the cost rather than asking "are you
+         * sure": replacing the link detaches everybody who already holds it, and that
+         * is not recoverable. Same rule as blocking (api.md §3).
+         */}
+        <View style={styles.section}>
+          <SectionHeader title="Your invite link" />
+          <View style={styles.explain}>
+            <Text variant="caption" tone="tertiary">
+              Your personal invite link never expires and anybody can use it. Replace it
+              if it has ended up somewhere you did not intend — the old link stops
+              working, and people who already joined on it stay attributed to you.
+            </Text>
+          </View>
+          <View style={styles.explain}>
+            <Text
+              variant="callout"
+              tone="action"
+              onPress={confirmReplaceLink}
+              accessibilityRole="button"
+              accessibilityLabel="Replace your invite link"
+            >
+              {replacing ? 'Replacing…' : 'Replace my invite link'}
+            </Text>
+          </View>
         </View>
 
         <View style={styles.section}>

@@ -13,7 +13,7 @@
 > **Do people activate, run the core loop, use the social side — and which build were
 > they on when they did it?**
 
-That is the whole brief. Eleven events. Everything a mature analytics practice would add
+That is the whole brief. Thirteen events. Everything a mature analytics practice would add
 — retention cohorts, an activation funnel with D1/D7/D28, paid attribution, sponsorship
 reporting, an experimentation platform — is in [`deferred-roadmap.md`](./deferred-roadmap.md)
 §9–§12 with the reason it is not here.
@@ -38,7 +38,9 @@ secret: a PostHog project token is write-only and a Sentry DSN only accepts even
 
 ## 2. The canonical event set
 
-Eleven events. The union in `src/lib/analytics.ts` is the enforcement — there is no
+Thirteen events, eleven of them since 2026-08-18 and two added on 2026-08-19 when the
+invitation resolver gave them writers. The union in `src/lib/analytics.ts` is the
+enforcement — there is no
 `track(name: string, props: object)` to reach for, so inventing an event is a compile
 error rather than a decision somebody makes at 2am before a demo.
 
@@ -72,6 +74,8 @@ error rather than a decision somebody makes at 2am before a demo.
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
 | `invite_link_created` | `create_invite_link` wrote an `invite_link_creations` row | the inviter | `surface`, `has_title` |
+| `invite_redeemed` | `redeem_invite` answered `ok` — an `invite_attributions` row was inserted **by this call** | the **invitee** | none |
+| `invite_activated` | `_rank_finalize` answered `activated: true` — this transaction flipped `activated_at` | the **invitee** | none |
 
 ---
 
@@ -147,21 +151,55 @@ never sent.** Neither is the handle or the display name.
 > nothing in this app will ever know either way. Any metric named `invite_sent` that
 > counts share-sheet opens is a number that will be believed and is wrong.
 
+**`invite_redeemed`** is an attribution row, not a link opened and not an install. It is
+emitted only on `redeem_invite`'s `ok`, which is the one answer meaning *this call wrote
+the row*. `already_applied` is a replay of a redemption already counted; every refusal
+wrote nothing. It carries **no properties at all** — the inviter is another person, and
+who is attributed to whom is a join on `invite_attributions` rather than a property on a
+vendor's timeline.
+
+**`invite_activated`** is ten ranked titles by an attributed invitee (§28), and it is
+**owned by the invitee** because they are the one who ranked. The server decides, not the
+client: `_maybe_activate_invite` flips `activated_at` under a row lock and reports whether
+*this* transaction was the one that flipped it, so two devices finishing the tenth ranking
+together produce one event and a retry produces none. An app that counted rankings locally
+would emit this for accounts with no attribution and again after every reinstall.
+
+> **What the invite funnel systematically under-counts, and it is not small.** A token does
+> not survive a trip through the App Store, TestFlight or Play. Universal Links and App
+> Links carry one only when the app is **already installed**, and Bingd has no install
+> referrer and no attribution SDK — deliberately, because the alternatives are
+> fingerprinting and clipboard reading (PRD §17).
+>
+> So somebody who taps an invitation, installs Bingd, and then launches it **from their
+> home screen instead of returning to the invitation page** arrives with no token. No
+> `invite_redeemed`, no attribution, no `invite_activated`, and no row in Invite
+> Instigator — for a person who genuinely was invited. Nothing detects this and nothing
+> corrects for it.
+>
+> Every invite number is therefore a **floor**, and the gap is largest exactly where it
+> matters most: new installs, which is the population the whole mechanic exists to reach.
+> Say so whenever one of these numbers is reported. Do not scale them up by a guessed
+> factor — the honest response to an unmeasured population is to name it, not to model it.
+
 ---
 
 ## 4. Events that are named but cannot be emitted
 
-Three names are declared in `DEFERRED_EVENTS` and are **deliberately absent from the
-emittable union**, so sending one is a compile error until the state behind it exists.
+One name is declared in `DEFERRED_EVENTS` and is **deliberately absent from the emittable
+union**, so sending it is a compile error until the state behind it exists.
 
 | Name | What it would mean | What is missing |
 |---|---|---|
-| `invite_redeemed` | attribution redeemed | `redeem_invite`. `invite_attributions.accepted_at` has had no writer since `20260813001300` |
-| `invite_activated` | an attributed invitee reached activation (PRD §28: ten ranked titles) | the activation writer. `activated_at` has no writer |
 | `award_earned` | an award tier was crossed | a durable unlock ledger. Tiers are computed on the device from raw reads, so a *crossing* cannot be distinguished from a *state* |
 
-Declaring the names now settles the taxonomy without faking the data. Roadmap items §5
-and §7 are where they come from.
+Declaring the name now settles the taxonomy without faking the data. Roadmap item §5 is
+where it comes from.
+
+> **`invite_redeemed` and `invite_activated` left this list on 2026-08-19**, and that is
+> the mechanism working rather than the list eroding. `20260819000500` gave both of them a
+> writer, so both moved into the emittable union in the same change that made them true —
+> which is the only way a name should ever leave this table.
 
 ---
 
@@ -183,18 +221,23 @@ to something that no longer exists. It is passed into the sheets as a prop rathe
 read from the router: three screens mount the ranking sheet, and the route underneath is
 not the same question as where somebody decided to rank something.
 
-### Prepared, nullable, and set by nobody yet
+### Prepared, nullable, and one of them now written
 
 | Property | Future values |
 |---|---|
 | `acquisition_source` | `friend_direct`, `launch_party`, `beli`, `letterboxd`, `amc_alist`, `reddit`, `instagram`, `organic_store`, `invite`, `other` |
 | `beta_cohort` | a free string the founder assigns, e.g. `amc_alist_01`, `beli_01` |
 
-`setAcquisition()` exists, is tested, and **is called from nowhere**. That is the state
-being recorded rather than a gap to fill in. The only mechanism that could set
-`acquisition_source` honestly is invite redemption, which has no writer — so on the day the
-referral resolver lands (roadmap §7), redemption calls it with `'invite'` and every event
-from that point carries it.
+`setAcquisition()` has **exactly one caller**: a successful `redeem_invite`, which sets
+`acquisition_source: 'invite'`. That is the one mechanism that establishes how somebody
+arrived without inferring it. Every other value, and `beta_cohort`, are still set by
+nobody.
+
+**It is registered rather than back-filled, so it is not retroactive.** PostHog
+super-properties attach to events from that moment on; the `signup_completed` two screens
+earlier does not gain a source. That is the honest shape — the app did not know then — and
+it is why the invite funnel is joined in the database on `invite_attributions`, with this
+as a cheap cross-check rather than as the record.
 
 **Nothing may infer a source from behaviour.** "They followed three people in the first
 minute, so it must be a friend referral" is exactly the reasoning this section forbids.
@@ -356,6 +399,8 @@ a number that looks like growth and is not.
 |---|---|---|
 | `signup_completed` | **structurally unique** | `already_exists` is a replay, not a signup |
 | `invite_link_created` | **structurally unique** | a replayed operation id answers `already_applied` with the same token — the share works, no row is written, nothing is emitted |
+| `invite_redeemed` | **structurally unique** | the primary key on `invitee_id` means only one call can insert; a replay is `already_applied`, a second token is `already_attributed`, and both emit nothing |
+| `invite_activated` | **structurally unique** | the server reports the transition, not the state: only the transaction whose guarded UPDATE flipped `activated_at` is told `activated: true` |
 | `title_logged` | approximately once | `already_applied` is one intent replayed; only `ok` counts |
 | `ranking_completed` | approximately once | `failed && changed` is the lost-reply case and emits nothing |
 | `recommendation_sent` | approximately once | a refusal inside a 200 is not a send; an unknown outcome holds its id for the retry and emits nothing |

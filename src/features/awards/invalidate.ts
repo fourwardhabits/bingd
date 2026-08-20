@@ -101,9 +101,12 @@ export const AWARD_SOURCES = [
   {
     metric: 'invitedSignups',
     awards: 'Invite Instigator',
-    // `activated_at` is written by nothing yet: there is no link resolver and
-    // `app/i/[token].tsx` is a placeholder. When one exists it belongs in this table.
-    mutations: 'an invitee activating — no writer exists yet',
+    // `activated_at` has had a writer since 20260819000500, and this row still says
+    // false — which is the distinction this table is for. The write happens when the
+    // *invitee* ranks their tenth title, on the invitee's device. Nothing this reader
+    // can do moves their own Invite Instigator count, so no mutation here owes it an
+    // invalidation; it refreshes on the ordinary staleTime like every other read.
+    mutations: 'an invitee activating, which happens on somebody else’s device',
     writer: null,
     invalidates: false,
   },

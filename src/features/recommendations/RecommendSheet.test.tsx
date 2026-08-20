@@ -350,7 +350,7 @@ describe('sharing with somebody who is not on Bingd', () => {
     );
 
     const shared = (Share.share as jest.Mock).mock.calls[0][0] as { message: string };
-    expect(shared.message).toContain('https://bingd.app/title/movie/film-1');
+    expect(shared.message).toContain('https://bingd.app/title/film-1');
     expect(shared.message).toContain('https://bingd.app/i/abc123');
   });
 
@@ -364,7 +364,7 @@ describe('sharing with somebody who is not on Bingd', () => {
 
     await waitFor(() => expect(Share.share as jest.Mock).toHaveBeenCalled());
     const shared = (Share.share as jest.Mock).mock.calls[0][0] as { message: string };
-    expect(shared.message).toContain('https://bingd.app/title/movie/film-1');
+    expect(shared.message).toContain('https://bingd.app/title/film-1');
     expect(shared.message).not.toContain('/i/');
   });
 

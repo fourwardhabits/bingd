@@ -86,12 +86,13 @@ export type Bucket = 'loved' | 'fine' | 'not_for_me';
 /**
  * Where a person came from, when that is ever known.
  *
- * **Nothing sets this today and nothing infers it.** The only mechanism that could
- * establish it honestly is invite redemption, which has no writer — see
- * `docs/product/growth-instrumentation.md` §1 and the roadmap's referral-resolver
- * item. Deriving it from behaviour ("they followed three people quickly, so it must
- * be a friend referral") is the thing this type exists to make somebody argue for out
- * loud rather than do quietly.
+ * **One value has a writer, and only one.** `invite` is set by `redeem_invite`
+ * succeeding (`features/invite/redeem.ts`), which is the single mechanism that
+ * establishes how somebody arrived without inferring it. Every other value is still
+ * unset and must stay that way until something can state it: deriving a source from
+ * behaviour ("they followed three people quickly, so it must be a friend referral") is
+ * the thing this type exists to make somebody argue for out loud rather than do
+ * quietly.
  */
 export type AcquisitionSource =
   | 'friend_direct'
@@ -220,7 +221,32 @@ export type AnalyticsEvent =
    * A replayed operation id answers `already_applied` and writes no creation row, so it
    * emits nothing — the event follows the row, not the tap.
    */
-  | { name: 'invite_link_created'; props: { surface: Surface; has_title: boolean } };
+  | { name: 'invite_link_created'; props: { surface: Surface; has_title: boolean } }
+  /**
+   * A real account claimed a valid invitation and `invite_attributions` gained a row.
+   *
+   * The redemption, not the open and not the install. `redeem_invite` answers `ok`
+   * exactly for the call whose insert landed, so a replay, a second device and a lost
+   * reply all emit nothing — the event follows the row, as `invite_link_created` does.
+   *
+   * **No properties at all.** The inviter is another person, and the token is in
+   * `FORBIDDEN_PROPERTY_KEYS`. What the founder needs from this event is that it
+   * happened and who it is attributed to, and the second half is a database join rather
+   * than a property on a vendor's timeline.
+   */
+  | { name: 'invite_redeemed'; props?: undefined }
+  /**
+   * An attributed invitee reached activation: ten ranked titles (PRD §28).
+   *
+   * Emitted by the **invitee's** session, because they are the one who ranked. The
+   * server decides: `_rank_finalize` returns `activated: true` only for the transaction
+   * whose guarded UPDATE flipped `activated_at`, so two devices finishing the tenth
+   * ranking at the same moment produce one event and a retry produces none.
+   *
+   * Nothing is inferred here. An app that counted rankings client-side would emit this
+   * for accounts with no attribution at all, and would emit it again after a reinstall.
+   */
+  | { name: 'invite_activated'; props?: undefined };
 
 /** The emittable names, for tests and for the spec to be checked against. */
 export const ANALYTICS_EVENTS = [
@@ -235,6 +261,8 @@ export const ANALYTICS_EVENTS = [
   'recommendation_opened',
   'member_search_result_opened',
   'invite_link_created',
+  'invite_redeemed',
+  'invite_activated',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
@@ -244,12 +272,13 @@ export const ANALYTICS_EVENTS = [
  * without the ability to send it is the point: it records the taxonomy on the day the
  * state exists, and it makes emitting one a compile error until then rather than a
  * judgement somebody makes at 2am before a demo.
+ *
+ * **`invite_redeemed` and `invite_activated` left this list on 2026-08-19**, which is
+ * the mechanism working as designed: `20260819000500` gave both of them a writer, so
+ * both moved into the union above and became emittable in the same change that made
+ * them true. One entry remains.
  */
 export const DEFERRED_EVENTS = {
-  /** Attribution redeemed. `invite_attributions.accepted_at` has had no writer since 20260813001300. */
-  invite_redeemed: 'needs redeem_invite — see deferred-roadmap.md §7',
-  /** An attributed invitee reached activation (PRD §28: ten ranked titles). `activated_at` has no writer. */
-  invite_activated: 'needs the activation writer — see deferred-roadmap.md §7',
   /**
    * An award tier was crossed. Tiers are computed on the device from raw reads and no
    * durable record says which tier an account had reached, so a *crossing* cannot be
@@ -503,13 +532,18 @@ export function resetAnalyticsForTests() {
 /**
  * Where this person came from, and which beta group they belong to.
  *
- * **Nothing calls this yet, and that is the state being recorded rather than a gap to
- * fill in.** Both fields are nullable by design and neither may be inferred from
- * behaviour. The one mechanism that could set `acquisition_source` honestly is invite
- * redemption, which has no writer — so on the day the referral resolver lands
- * (`deferred-roadmap.md` §7), redemption calls this with `'invite'` and every event from
- * that point carries it. Anything else needs a founder decision about where the value
- * came from, not a client-side guess.
+ * **It has exactly one caller, and it is the one this function was written for.** A
+ * successful `redeem_invite` calls it with `'invite'`, and every event this install
+ * sends from that point carries the source. Both fields stay nullable by design and
+ * neither may be inferred from behaviour; `beta_cohort` and every other source still
+ * have no writer, and each needs a founder decision about where the value came from
+ * rather than a client-side guess.
+ *
+ * **Registered rather than sent, so it is not retroactive.** PostHog super-properties
+ * attach to events from here on; the `signup_completed` that happened two screens ago
+ * does not gain a source. That is the honest shape — the app did not know then — and it
+ * means the invite funnel is joined in the database on `invite_attributions`, with this
+ * as the cheap cross-check rather than the record.
  */
 export function setAcquisition(input: {
   source?: AcquisitionSource | null;

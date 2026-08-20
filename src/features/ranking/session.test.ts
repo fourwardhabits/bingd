@@ -61,7 +61,31 @@ describe('reading the server\u2019s answer', () => {
       bucket: 'loved',
       score: 10,
       adjustable: false,
+      // Absent from the response above, and false here rather than undefined. An older
+      // backend — anything before 20260819000500 — answers without the key, and the
+      // reading has to be "no activation" rather than "unknown": `RankingSheet` emits
+      // `invite_activated` from this flag, and a truthy undefined would be a growth
+      // event fired on a missing field.
+      activated: false,
     });
+  });
+
+  it('reports an activation only when the server says one happened', async () => {
+    /**
+     * PRD §28's tenth ranking, and the flag is the server's.
+     *
+     * `_maybe_activate_invite` flips `invite_attributions.activated_at` under a row
+     * lock and returns true only for the transaction that flipped it — so two devices
+     * finishing the tenth ranking together produce one true and one false, and a retry
+     * produces false. Counting on the client would emit for accounts that were never
+     * invited and again after a reinstall.
+     */
+    mockRpc.mockResolvedValue({
+      data: { done: true, position: 4, category: 'movies', bucket: 'loved', activated: true },
+      error: null,
+    });
+
+    expect(await rankStart(subject, 'loved')).toMatchObject({ state: 'placed', activated: true });
   });
 
   it('carries the adjustable flag rather than inferring it', async () => {

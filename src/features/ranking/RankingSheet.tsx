@@ -149,6 +149,19 @@ function Session({
             rebucket: subject.mode === 'rebucket',
           },
         });
+        /**
+         * `invite_activated`, from the same answer and under the same rule.
+         *
+         * The flag is the server's: `_maybe_activate_invite` returns true only for the
+         * transaction whose guarded UPDATE flipped `activated_at`, so this fires at most
+         * once for an account, never for one that was not invited, and never on the
+         * `failed && changed` branch below — where the ranking may have landed and the
+         * client cannot tell. Emitting there would put a growth number on a maybe.
+         *
+         * No properties. The inviter is another person and is not this event's subject;
+         * who was activated by whom is a join on `invite_attributions`.
+         */
+        if (next.activated) track({ name: 'invite_activated' });
       } else if (next.state === 'failed' && next.changed) {
         /**
          * **A failed answer can still have placed the title.**

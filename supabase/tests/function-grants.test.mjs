@@ -276,6 +276,39 @@ const ALLOWED = {
   // only within the sane range" as three policies is three places to get it wrong.
   // Not anon — a goal needs an auth.uid() to belong to.
   'set_watch_goal(integer,ranking_category,integer)': ['authenticated'],
+
+  // Added 2026-08-19 with the invitation resolver (20260819000500).
+  //
+  // `record_invite_open` is **the only writer in this schema granted to anon**, and
+  // that grant is the thing to look hard at. The caller is the static page at
+  // bingd.app/i/<token>, which has no session and never will — so the alternative to
+  // an anon grant is not a safer grant, it is no open metric at all.
+  //
+  // Three properties make it safe to hold. It **returns void in every case**, so an
+  // unknown, revoked or cross-environment token is indistinguishable from a live one
+  // and the function is not a token oracle. It reaches exactly one table, which has
+  // no select policy and is revoked from both client roles, so nothing written
+  // through it can be read back through it. And it is **capped per token per hour**,
+  // because an anonymous caller has no identity to rate-limit — past the ceiling the
+  // call still succeeds and simply stops writing.
+  //
+  // `redeem_invite` names no other account: the inviter is resolved from a token the
+  // caller already holds, never from a parameter naming a person. Blocks in either
+  // direction and a suspended inviter are refused, and the primary key on
+  // `invitee_id` is what stops a replay moving an attribution somebody else already
+  // holds. Not anon — an attribution needs an account to belong to, which is the
+  // whole of PRD §17's "the recipient must have an account".
+  //
+  // `_maybe_activate_invite` is deliberately absent, and for the reason `_notifies`
+  // is: it reads a third party's attribution and writes somebody else's inbox row. It
+  // is reached only from `_rank_finalize`, which no client may call either.
+  // `revoke_invite_link` takes no target at all and acts only on `owner_id =
+  // auth.uid()`, so the grant buys no reach over anybody else's row. It is the safety
+  // valve for a reusable, non-expiring link that has been pasted somewhere public, and
+  // it exists because 20260819000500 is what made such a link worth anything.
+  'record_invite_open(text,text)': ['anon', 'authenticated'],
+  'redeem_invite(uuid,text)': ['authenticated'],
+  'revoke_invite_link(uuid)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {

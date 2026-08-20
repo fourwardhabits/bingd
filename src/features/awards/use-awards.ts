@@ -369,13 +369,19 @@ async function readFacts(userId: string): Promise<AwardFacts> {
       /**
        * People who joined on this reader's invitation, not links they made.
        *
-       * The founder's correction of 2026-08-18, unchanged by this pass: it counts
-       * `invite_attributions` where `activated_at` is set. **Nothing writes that column
-       * yet** — there is no link resolver, `app/i/[token].tsx` is a placeholder, and no
-       * migration inserts an attribution — so this is a true zero rather than a missing
-       * read, and the drill-down is honestly empty. See
-       * `docs/product/growth-instrumentation.md` §1 for the five pieces Beta Hardening
-       * owes it.
+       * The founder's correction of 2026-08-18: it counts `invite_attributions` where
+       * `activated_at` is set, rather than links created — which had made it a badge for
+       * pressing a button.
+       *
+       * **That read is unchanged and now returns people.** `20260819000500` gave the
+       * column its writer, so this stopped being a structural zero without a line of this
+       * file changing — which is the whole argument for having moved the metric to the
+       * honest stage while it still read zero.
+       *
+       * What it counts and what it does not: a link created does not count, a link opened
+       * does not count, and a redemption without activation does not count. See
+       * `docs/product/growth-instrumentation.md` §1, including the store-install gap that
+       * makes this number a floor.
        */
       readAllByKey<InviteRow>(
         (cursor, limit) =>

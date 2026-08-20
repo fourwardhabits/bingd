@@ -134,11 +134,11 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
         unavailable('That recommendation is no longer available.'),
       ];
 
-    /** The person who joined. Nothing writes this yet; see `use-notifications`. */
+    /** The person who joined, filed by `_maybe_activate_invite` at their tenth ranking. */
     case 'invite_activated':
       return [...profile, unavailable('That account is no longer available.')];
 
-    /** Nothing writes this yet either, and the sheet is real regardless. */
+    /** Nothing writes this one yet, and the sheet is real regardless. */
     case 'award_earned':
       return [{ kind: 'awards' }];
   }

@@ -85,13 +85,15 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the eleven canonical names and nothing else', () => {
+  it('is the thirteen canonical names and nothing else', () => {
     // Pinned deliberately. Adding a twelfth is a product decision that has to be made in
     // `docs/product/analytics.md` as well as here, and this failing is the reminder.
     expect([...ANALYTICS_EVENTS].sort()).toEqual(
       [
         'follow_created',
+        'invite_activated',
         'invite_link_created',
+        'invite_redeemed',
         'member_search_result_opened',
         'onboarding_completed',
         'ranking_completed',
@@ -119,11 +121,10 @@ describe('the event vocabulary', () => {
     // Each of these describes a state the app cannot observe yet. The names exist so the
     // taxonomy is settled; the union does not admit them, so emitting one is a compile
     // error rather than a judgement call.
-    expect(Object.keys(DEFERRED_EVENTS).sort()).toEqual([
-      'award_earned',
-      'invite_activated',
-      'invite_redeemed',
-    ]);
+    // `invite_activated` and `invite_redeemed` left this list on 2026-08-19, which is the
+    // mechanism working rather than the list eroding: 20260819000500 gave both a writer,
+    // so both moved into the union in the same change that made them true.
+    expect(Object.keys(DEFERRED_EVENTS).sort()).toEqual(['award_earned']);
     for (const name of Object.keys(DEFERRED_EVENTS)) {
       expect(ANALYTICS_EVENTS as readonly string[]).not.toContain(name);
     }

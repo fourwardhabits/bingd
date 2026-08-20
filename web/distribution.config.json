@@ -1,0 +1,75 @@
+{
+  "$comment": [
+    "Where somebody who does not have Bingd is sent, per platform.",
+    "",
+    "This file exists so that the *shared* link never has to change. What a person",
+    "pastes into a group chat is https://bingd.app/i/<token> and it is permanent:",
+    "it survives development, Preview, TestFlight, a Play closed test, an open",
+    "test, and eventually both public stores. Only the destination behind it moves,",
+    "and it moves here — one file, no app rebuild, no reissued invitations.",
+    "",
+    "That is also why no TestFlight or Play URL appears anywhere in app/ or src/.",
+    "A temporary distribution URL compiled into the client is a URL that outlives",
+    "its own build.",
+    "",
+    "NOTHING HERE IS A SECRET. These are public install pages.",
+    "",
+    "null means 'not available yet', and the page says exactly that rather than",
+    "guessing. A store button that 404s is worse than an honest empty state: the",
+    "person concludes Bingd does not exist, and the inviter never finds out."
+  ],
+
+  "ios": {
+    "$comment": [
+      "The public TestFlight link, of the form https://testflight.apple.com/join/XXXXXXXX.",
+      "Public rather than an email allowlist, deliberately: friend-of-friend is the",
+      "whole shape of this beta, and an allowlist means the founder is asked to add",
+      "an address every time somebody forwards a link — which is the moment the",
+      "invitation stops working. Set this once the build is approved for external",
+      "testing; the App Store URL replaces it at public release."
+    ],
+    "betaUrl": null,
+    "storeUrl": null
+  },
+
+  "android": {
+    "$comment": [
+      "Google Play closed testing. The developer account is recent, so open testing",
+      "is not yet available and closed is the initial track.",
+      "",
+      "There are two URLs and they are not interchangeable. `optInUrl` is the",
+      "closed-test opt-in page (https://play.google.com/apps/testing/app.bingd),",
+      "which is where a tester has to go FIRST — Play shows the app as unavailable",
+      "to anybody who has not opted in, from the store page and from a direct link",
+      "alike. `betaUrl` is the ordinary store listing, which only works after that.",
+      "",
+      "So the page leads with `optInUrl` while it is set. Tester eligibility and any",
+      "Google Group membership are administered in Play Console and deliberately",
+      "not modelled here: Bingd does not run a tester list."
+    ],
+    "optInUrl": null,
+    "betaUrl": null,
+    "storeUrl": null
+  },
+
+  "app": {
+    "$comment": [
+      "The custom scheme used by the page's 'I already have Bingd' button, and by",
+      "nothing else. It is never shared and never shown as a URL.",
+      "",
+      "It has to exist, and the reason is an iOS rule rather than a preference: a",
+      "link to bingd.app clicked ON bingd.app is a same-domain navigation, and iOS",
+      "deliberately does not hand those to the app. So the one button that has to",
+      "work immediately after an install — 'I have it, open it' — cannot be an",
+      "https link to this same site. A custom scheme is the only thing that opens",
+      "an installed app from its own web page.",
+      "",
+      "`bingd` is the production variant (app.config.ts). TestFlight and the Play",
+      "closed test both distribute the production variant, so this is the scheme",
+      "every beta tester will have. A development or Preview build installed by hand",
+      "registers bingd-dev / bingd-preview instead and will not answer this button —",
+      "which is a founder-device case, not a tester one."
+    ],
+    "scheme": "bingd"
+  }
+}

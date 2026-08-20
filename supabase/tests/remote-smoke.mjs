@@ -602,6 +602,80 @@ expectRefused(
   await rpc('_notification_categories', {}),
 );
 
+// ---------------------------------------------------------------------------
+// 20260819000500 — the invitation resolver
+//
+// `record_invite_open` is **the only writer in this schema granted to anon**, so it is
+// the one that most deserves probing from an unauthenticated client rather than from a
+// migration file. Three things are checked here that the local suite cannot see, because
+// PostgREST is the surface an attacker actually reaches:
+//
+//   1. it is reachable at all, and returns *nothing* — a body carrying any information
+//      would make it a token oracle;
+//   2. a fabricated token is answered identically to a live one, which is the same claim
+//      from the outside;
+//   3. everything else the migration added is closed to anon.
+// ---------------------------------------------------------------------------
+
+{
+  const res = await rpc('record_invite_open', { p_token: '0'.repeat(32), p_platform: 'ios' });
+  report(
+    'anon can execute record_invite_open, by design',
+    res.status === 200 || res.status === 204 ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+  // A void return. Anything else would be a value in which validity could be read back.
+  report(
+    'record_invite_open discloses nothing in its body',
+    res.body.trim() === '' || res.body.trim() === 'null' ? 'pass' : 'fail',
+    res.body.slice(0, 200),
+  );
+}
+
+{
+  // The same call with a malformed token. Identical status and identical body is the
+  // externally visible form of "no value and no error reveals validity".
+  const shaped = await rpc('record_invite_open', { p_token: 'a'.repeat(32) });
+  const malformed = await rpc('record_invite_open', { p_token: 'not-a-token' });
+  report(
+    'record_invite_open answers a malformed token exactly as it answers a shaped one',
+    shaped.status === malformed.status && shaped.body.trim() === malformed.body.trim()
+      ? 'pass'
+      : 'fail',
+    `${shaped.status}/${shaped.body.slice(0, 60)} vs ${malformed.status}/${malformed.body.slice(0, 60)}`,
+  );
+}
+
+// Redemption needs an account — PRD §17, "the recipient must have an account" — so there
+// is nothing for an anonymous caller to attribute and a grant would only widen the
+// surface. Revocation acts on the caller's own row and has the same answer.
+expectRefused(
+  'anon cannot execute redeem_invite',
+  await rpc('redeem_invite', { p_operation_id: NIL, p_token: '0'.repeat(32) }),
+);
+expectRefused(
+  'anon cannot execute revoke_invite_link',
+  await rpc('revoke_invite_link', { p_operation_id: NIL }),
+);
+
+// The activation writer reads a third party's attribution and writes somebody else's
+// inbox row, which is why it is internal in the same sense `_notifies` is.
+expectRefused(
+  'anon cannot execute _maybe_activate_invite',
+  await rpc('_maybe_activate_invite', { p_user: NIL }),
+);
+
+// The opens table has RLS on and no policy at all, plus a revoke. An inviter learning
+// their link was opened four times is a product decision nobody has taken.
+{
+  const res = await get('invite_link_opens?select=id&limit=1');
+  report(
+    'anon cannot read invite_link_opens',
+    res.status === 401 || res.status === 403 || res.status === 404 ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
 // The bulk preference writer is a session's own settings, so it is authenticated-only
 // like its single-category sibling.
 expectRefused(

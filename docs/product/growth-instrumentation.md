@@ -13,115 +13,122 @@ share-sheet opens is a number that will be believed and is wrong.
 
 ## 1. The invite funnel
 
+**Rewritten 2026-08-19.** Every stage below had "No" in the second column until
+`20260819000500`. The table now says what each stage measures and, just as importantly,
+what it misses.
+
 | Stage | Reliable today | Where it lives |
 |---|---|---|
 | **Link created** | **Yes** | `invite_link_creations`, one row per `create_invite_link` call |
-| **Link opened** | **No** | nothing to write it |
-| **Redeemed / signup attributed** | **No** | `invite_attributions.accepted_at`, column exists, no writer |
-| **Activated** | **No** | `invite_attributions.activated_at`, column exists, no writer |
+| **Link opened** | **Yes, for the web page only** | `invite_link_opens`, one row per load of `bingd.app/i/<token>` for a live token. A tap that opened the *app* directly is not an open — the page was never loaded — so this measures the uninstalled half of the funnel and nothing else |
+| **Redeemed / signup attributed** | **Yes, with a named hole** | `invite_attributions.accepted_at`, written by `redeem_invite` |
+| **Activated** | **Yes** | `invite_attributions.activated_at`, written by `_maybe_activate_invite` at ten ranked titles |
 
-### The one place a stage of this funnel is now on screen
+### The named hole, and it is the biggest number on this page
 
-**Bingd Awards has an Invite Instigator track, and as of 2026-08-18 it reads the bottom
-row of that table rather than the top one.** It counts
+**A token does not survive a store install.** Universal Links and App Links carry one only
+when the app is already installed. Bingd has no Play Install Referrer path and no deferred
+deep-link vendor, and will not get one built on fingerprinting, probabilistic matching or
+clipboard reading — that was decided in PRD §17 and is not being revisited for a beta.
+
+So the invitation flow has two shapes, and only one of them is measured end to end:
+
+| Recipient | What happens | Attributed? |
+|---|---|---|
+| **Already has Bingd** | the link opens the app, the token reaches `app/i/[token].tsx`, they tap Accept | **Yes** |
+| **Signed out, has Bingd** | the token is held on the device across sign-in and profile creation, then redeemed | **Yes** |
+| **No Bingd, returns to the page after installing** | taps *I already have Bingd*, the custom scheme opens the app with the token | **Yes** |
+| **No Bingd, launches from TestFlight or the home screen** | arrives with no token | **No, and permanently** |
+
+The last row is not recoverable and is not detected. There is no signal anywhere that says
+"this person was invited and we lost it". **Every invite number is a floor**, and the gap
+is largest exactly where the mechanic matters most — new installs. Report them that way.
+Do not scale them up by a guessed factor: the honest response to an unmeasured population
+is to name it, not to model it.
+
+The landing page tells the visitor this before they leave it, in as many words. That is
+the only mitigation there is, and it is a real one: the mechanism costs the person one tap
+and no typing.
+
+### The award that now counts people
+
+**Bingd Awards' Invite Instigator** reads
 
 ```sql
 select count(*) from invite_attributions
  where inviter_id = auth.uid() and activated_at is not null;
 ```
 
-which is **zero for every account and will stay zero until §1's wiring lands**. That is
-the intended state, and it is the reason this section exists rather than a footnote.
+which is **unchanged from the day it was written** and has stopped being structurally
+zero. That is the outcome the deliberate choice on 2026-08-18 was made for: the metric was
+moved to the honest stage while it still read zero, rather than being left wrong until the
+backend caught up, so nothing about it had to be rewritten when the backend arrived. Its
+tiers — 3, 15, 50 — were set on the assumption that they were being counted honestly, and
+now they are.
 
-The award previously counted `invite_link_creations`, which made it a badge for pressing
-a button — exactly the confusion the rule at the top of this document exists to prevent,
-promoted to a reward. The founder's instruction was that the award is for bringing people
-to Bingd, so the metric was changed to the honest one immediately and the number left at
-zero, rather than the semantic being left wrong until the backend caught up.
+Links created do not count. Links opened do not count. A redemption without activation
+does not count. The drill-down shows only genuinely activated invitees, through
+`invite_attributions_read`, which admits only the two parties to a row.
 
-**`activated_at` rather than `accepted_at`**, of the two unwritten columns. Both mean a
-real account with reliable attribution; activation additionally means the invitee did
-something with it, which is what makes a reward farm-resistant — the reason
-`20260813001300` put the column there in the first place. Moving the award to
-`accepted_at` later is a one-line change in `use-awards.ts` and a product decision, not a
-correction.
+### What each writer will and will not do
 
-**What Beta Hardening owes this award** is nothing of its own: items 1–5 below are the
-whole dependency. The day `redeem_invite` and the activation writer exist, Invite
-Instigator starts counting with no client change, no migration and no threshold rewrite.
-Its tiers — 3, 15, 50 — are set on the assumption that they are being counted honestly.
+**`create_invite_link(operation_id, media_item_id)`** returns the caller's **one reusable
+personal link** (PRD §17), minting it on first use and never rotating it, and records one
+`invite_link_creations` row per call with the title that was on screen. It is deliberately
+*not* called a send.
 
-Until then the row shows `0 / 3` and `Next: Bring 3 people to Bingd`. It is deliberately
-**not** rendered as unavailable: the read succeeds, the table is real, and the answer is
-genuinely none. A row that said "could not load this one" would be claiming a failure
-that did not happen.
+**`record_invite_open(token, platform)`** is anonymous, because the page that calls it is.
+It **returns void in every case**, so no value and no error distinguishes an unknown,
+revoked or cross-environment token from a live one. It stores no address, no user agent
+and no identifier; `platform` is the one thing the page states about itself. Nobody may
+read the table.
 
-### What "created" actually means
+Two limits on that, both named by independent review 26 and both worth stating rather than
+discovering. A live token causes strictly more work — a count, and usually an insert — so
+repeated measurement can separate live from invented **statistically**. That is not an
+enumeration path: separating one candidate from another is worth nothing against 2^122 of
+them, and anybody holding a specific token can establish its validity for certain by
+redeeming it from an account they create. And the hourly cap is a check followed by an
+insert with no lock, so simultaneous loads can overshoot it by roughly the concurrency —
+it is a bound that keeps a publicly-posted link from filling the table, not an exact
+ceiling.
 
-`create_invite_link(operation_id, media_item_id)` returns the caller's **one reusable
-personal link** (PRD §17), minting it on first use and never rotating it. It writes one
-row to `invite_link_creations` every time it is called, carrying the title that was on
-screen when the reader tapped *Share with someone not on Bingd*.
+**`redeem_invite(operation_id, token)`** writes the attribution and `profiles.invited_by`,
+creates PRD §17's one-way follow — a *request* when the inviter is private — and files the
+inviter's notification. The primary key on `invitee_id` is the rule that matters: **a
+person is invited once, and no replay, no second token and no second device can move it.**
+Refusals are *returned* rather than raised, so a wrong token spends a slot against the
+ceiling — this is the one writer in the schema where a refused attempt is what an attack
+looks like.
 
-So the metric is **"how many times did this person reach for their link, and about
-what"**. That is a real intent signal and it is the strongest one available without a web
-property. It is deliberately *not* called a send.
+The token row is read `for share`, so a revocation cannot commit inside the call.
+`for share` and not `for update`, because a personal link is meant to be claimed by many
+people and an exclusive lock would serialise every invitee of one link against every
+other.
 
-The count is not exposed anywhere in the app. No profile number, no leaderboard, no
-badge, no reward. The founder asked for the instrumentation without the promise, and a
-visible number is the promise.
+**One consequence for the numbers, and it is worth knowing before reading them.** A
+refusal spends its operation id — `_claim_operation` commits for every settled answer — so
+the client releases the id before retrying a recoverable one. Without that release the
+retry is answered `already_applied` and nothing is reconsidered, which is a redemption
+that never happens and therefore an arrival never counted. Independent review 26b.
 
-```sql
--- Who reaches for their link, and how often.
-select inviter_id, count(*) as links_created, max(created_at) as last
-  from invite_link_creations
- group by inviter_id
- order by links_created desc;
+**`_maybe_activate_invite(user)`** runs from `_rank_finalize`, the single place a
+`rankings` row is created, and sets `activated_at` the first time an attributed invitee
+has ten. The transition is once, from a row lock rather than an ordering argument, and the
+inviter's `invite_activated` notification hangs off that transition. The activation is
+recorded even when the inviter has gone, been suspended, or blocked the invitee; the
+notification is not.
 
--- Which titles people share off-platform.
-select m.title, count(*) as shares
-  from invite_link_creations c
-  join media_items m on m.id = c.media_item_id
- group by m.title
- order by shares desc;
-```
+**`revoke_invite_link(operation_id)`** revokes the caller's live link and mints its
+replacement in one transaction, which is the only sequence `invite_tokens_one_live` allows
+that never leaves an account without a link. Attributions already accepted against the old
+token are untouched — revoking withdraws the invitation, it does not un-invite anybody —
+and the old link then answers `invalid`, the same answer a token that never existed gets.
+Rate-limited tightly, because rotating detaches everybody holding the old one.
 
-### The exact wiring Beta Hardening has to add
-
-Nothing below is guessed at; each is a named missing piece.
-
-1. **A link resolver at `https://bingd.app/i/<token>`.** There is no web property. The
-   route `app/i/[token].tsx` exists inside the app and says invitations are not active in
-   this build, which is true. A resolver has to serve a page, record the open, and hand
-   the token to the store or to the app.
-
-2. **`record_invite_open(token)`** — a new RPC or an edge function, called by that page.
-   It needs to be callable by `anon`, must not confirm whether a token is valid (or it
-   becomes a token oracle), and should write to a new `invite_link_opens` table rather
-   than to `invite_tokens`, so one link opened by five people is five rows.
-
-3. **Deferred deep linking, or nothing.** Android App Links and iOS Universal Links carry
-   a token only if the app is *already installed*. For a fresh install the token has to
-   survive the store round trip, which needs Play Install Referrer / a deferred deep-link
-   provider. **Do not approximate this with fingerprinting** — IP-and-timestamp matching
-   is both a privacy problem and wrong often enough to poison the metric it produces.
-   If deferred attribution is not built, redemption is limited to people who already had
-   the app, and that limit must be stated wherever the number is shown.
-
-4. **`redeem_invite(operation_id, token)`** — called after profile creation, never
-   before. It writes `invite_attributions (invitee_id, inviter_id, token_id,
-   accepted_at)`. The table's primary key is `invitee_id`, so a person is invited once
-   and a second call is a no-op rather than a second attribution. It must refuse a token
-   whose `env` does not match the running environment (PRD §17), must refuse
-   self-invitation (`no_self_invite` already does), and must refuse where a block exists
-   in either direction.
-
-5. **Activation** is already defined: PRD §28 says ten ranked titles. Set
-   `activated_at` from the ranking writer, or derive it — see §3 on preferring derivation.
-
-6. **`block` already voids unaccepted attributions between a pair** and deliberately
-   leaves accepted ones alone, because an accepted attribution is historical fact about
-   how somebody joined. That behaviour is in `20260817000200` and needs no change.
+**`block` voids only unaccepted attributions** and deliberately leaves accepted ones alone
+(`20260817000200`), because an accepted attribution is historical fact about how somebody
+joined. Unchanged by this work.
 
 ---
 

@@ -921,7 +921,7 @@ Each type has an ordered chain whose last link always resolves. Staleness is rea
 
 - **Push is dark.** `expo-notifications` and its config plugin are in every build, as §15 intends — and nothing on any client writes `device_tokens`, no client imports the module, and no delivery path exists. **Push delivery is not "flagged off"; it has never been built** (AD-10). [`deferred-roadmap.md`](./deferred-roadmap.md) §4.
 - **The scheduled nudge** ships with push, so it does not exist either.
-- **`invite_activated` has no writer.** The type, its category, its preference and its route all exist; nothing generates the event, because invite activation depends on the referral resolver. [`deferred-roadmap.md`](./deferred-roadmap.md) §7.
+- **`invite_activated` gained its writer on 2026-08-19** (`20260819000500`) and is no longer in this list. It is filed by `_maybe_activate_invite` at the activation transition — server-side, once, and not from a client observing a column. It respects the `invites` category, is not written across a block, and is not written when the inviter has gone. §17 As built.
 - **`award_earned` has no writer**, and this is a disposition rather than an omission. Award tiers are computed entirely on the device from raw table reads; **no durable state records which tier an account has reached**, so a *crossing* cannot be distinguished from a *state*, and exactly-once delivery is impossible without an unlock ledger. An award notification that fires twice is worse than one that never fires. [`deferred-roadmap.md`](./deferred-roadmap.md) §5.
 
 ---
@@ -1014,7 +1014,7 @@ A share or invite token is a **routing and attribution identifier, never authori
 >
 > The measurement rule above is right and has been kept; the event list is a specification for a share funnel that was never instrumented, and **six of the nine describe states this app cannot observe at all** — there is no web property, so a link open, an app open from a link, an install click, an attributed signup and an attributed activation have nothing to record them.
 >
-> The friend-beta event set is eleven events and is defined in [`analytics.md`](./analytics.md). The one growth event that exists is **`invite_link_created`**, which follows the `invite_link_creations` row rather than the tap. Sharing is otherwise uninstrumented, deliberately: **opening an OS share sheet is not a share completed**, which is the same rule this section already states.
+> The friend-beta event set is thirteen events and is defined in [`analytics.md`](./analytics.md). The growth events are **`invite_link_created`**, which follows the `invite_link_creations` row rather than the tap, and — since 2026-08-19 — **`invite_redeemed`** and **`invite_activated`**, which follow the attribution row and the activation transition. Sharing is otherwise uninstrumented, deliberately: **opening an OS share sheet is not a share completed**, which is the same rule this section already states.
 
 ---
 
@@ -1090,30 +1090,38 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 
 ---
 
-> ### As built — 2026-08-19: the link exists, the resolver does not
+> ### As built — 2026-08-19 (second pass): the resolver exists, deferred install does not
 >
-> Everything above from **Acceptance semantics** onward is a specification, and **none of it is implemented**. This block states which half of §17 is real, because the difference is the friend beta's growth mechanic.
+> This block replaces "the link exists, the resolver does not". `20260819000500` gave `accepted_at` and `activated_at` their first writers, and `bingd.app` gained a router. What is still missing is named at the bottom, and it is one thing.
 >
-> **What is built and reviewed:**
+> **The invitation contract, and it is permanent.** What a person shares is `https://bingd.app/i/<token>` and nothing else. Not a TestFlight URL, not a Play URL, not a `bingd://` URL — those are *destinations behind* the link, configured in `web/distribution.config.json`, and changing them changes no invitation anybody has already sent. The same URL is valid across development, Preview, TestFlight, a Play closed test, an open test, and both public stores.
 >
-> - **`create_invite_link(operation_id, media_item_id)`** — mints the caller's **one reusable personal link** on first use and never rotates it, exactly as the token model above describes. It carries a short code, and it is environment-scoped: a non-production token does not resolve in production.
-> - **One `invite_link_creations` row per call**, carrying the title that was on screen. That is the honest measure — *how many times did this person reach for their link, and about what* — and it is a real intent signal, the strongest available without a web property.
-> - **`invite_link_created`** analytics, emitted from the row rather than from the tap: a replayed operation id answers `already_applied`, writes no row, and emits nothing.
-> - **`block` already voids unaccepted attributions** between a pair, and deliberately leaves accepted ones alone — an accepted attribution is historical fact about how somebody joined.
+> **What is now built:**
 >
-> **What is not built:**
+> - **`record_invite_open(token, platform)`** — anonymous, and **returns void in every case**, so an unknown, revoked or cross-environment token is indistinguishable from a live one. It is not a token oracle. Capped per token per hour, because an anonymous caller has no identity to rate-limit. Writes to `invite_link_opens`, which no client may read.
+> - **`redeem_invite(operation_id, token)`** — authenticated, after profile creation. Writes `invite_attributions (invitee_id, inviter_id, token_id, accepted_at)` and `profiles.invited_by`. Unknown, revoked and cross-environment are **one refusal**. Self-invitation, blocks in either direction, and a suspended or deleted inviter are all refused. The primary key on `invitee_id` is what makes it idempotent: **no replay, no second token and no second device can move an attribution once written.**
+> - **Activation** — `_maybe_activate_invite`, called from `_rank_finalize`, the single place a `rankings` row is created. The criterion is §28's: **ten ranked titles**, across both categories. The transition is once, from the row lock on a guarded `UPDATE ... WHERE activated_at IS NULL` rather than from any ordering assumption.
+> - **The `invite_activated` notification** now has its writer. One row, to the inviter, at the activation transition — not from a client observing a column. Respects the `invites` preference category, and is not written across a block or to an account that has gone.
+> - **`invite_redeemed` and `invite_activated` analytics**, both emitted from a server outcome. `acquisition_source: 'invite'` has its first honest writer.
+> - **The web router at `bingd.app`** — `/i/*`, `/u/*`, `/title/*`, `/lists/*`, plus the two `.well-known` files. Static, no server, no third-party SDK. Platform routing offers iPhone or Android their own destination and offers a desktop browser both, never guessing.
 >
-> - **There is no web property**, so `https://bingd.app/i/<token>` resolves to nothing. `app/i/[token].tsx` is a stub that says invitations are not active in this build, which is true.
-> - **`record_invite_open` does not exist.** Link opens are unmeasurable.
-> - **`redeem_invite` does not exist.** `invite_attributions.accepted_at` has had a column and no writer since `20260813001300`, so **no acceptance semantics of any kind run** — not the follow, not the request, not the notification, not the attribution.
-> - **Activation has no writer.** `invite_attributions.activated_at` is likewise a column nothing sets.
-> - Consequently `invite_link_opened`, `invite_install_clicked`, `invite_signup_attributed`, `invite_accepted`, `invite_activated` and `invite_revoked` **do not exist**, and `invite_redeemed` / `invite_activated` are declared-but-unemittable in [`analytics.md`](./analytics.md) §4 so that faking one is a compile error.
+> **Acceptance semantics above are implemented in full.** Redemption writes the attribution, creates the one-way follow of clause 2, files a **request** instead when the inviter is private (clause 3), and notifies the inviter (clause 4) — who is never auto-followed. Clauses 1, 5, 6 and 7 were already met: the tap is explicit, the recipient is unnamed until it commits, a block voids the invitation, and the attribution is written independently of the follow.
 >
-> **The one place a stage of this funnel is on screen** is Bingd Awards' Invite Instigator track, and it reads the honest end: `count(*) where activated_at is not null`. It shows **0 / 3** for every account and will until the resolver lands. That is the intended state — it previously counted link creations, which made it a badge for pressing a button.
+> The screen also carries clause "an option to switch": it names the account that will be attributed *before* the tap and offers to sign out. The switch first makes **the invitation on screen** the pending one, then signs out — so the invitation survives the switch, and it is the invitation the person was actually looking at. Merely *opening* a second link still does not move anything, because a link tapped is not a decision.
 >
-> Full disposition, and the five named pieces the wiring needs, in [`growth-instrumentation.md`](./growth-instrumentation.md) §1 and [`deferred-roadmap.md`](./deferred-roadmap.md) §7. **§7 is a friend-beta blocker as well as a roadmap item**, and is carried in the hardening documents for that reason.
+> **The first version of this run shipped the attribution and no follow**, recorded here as a deliberate narrowing. Independent review 26 rejected that and was right to: a specification is not amended by a note saying it was not implemented. The reasons offered — a smaller concurrency surface, a stricter reading of the privacy clauses — were arguments for an implementation convenience, not authorisation to change what acceptance means.
 >
-> The **Required** half of Rewards above still stands and is unaffected: any future reward must count activated invitees only.
+> **Revocation is now real, and it is here rather than in a later run for a specific reason.** The token model above has promised "revoke and regenerate from Settings" since v0.6, and `invite_tokens.revoked_at` has existed since `20260813001300` with no writer. Until this migration a leaked link resolved to nothing, so the gap cost nothing; this migration makes a leaked link a live attribution vector, so the same change owes the control that takes it back. `revoke_invite_link` revokes and mints the replacement in one transaction — `invite_tokens_one_live` permits exactly one live token, and an account with none is a state the Share control cannot answer — and Settings › Privacy has the confirmed control. Attributions already accepted against the old link are untouched: revoking withdraws the invitation, it does not un-invite anybody.
+>
+> **An invitation refused because the inviter was momentarily unreachable is retried, up to a point.** A block in either direction and a suspended inviter both produce the same refusal, and both get lifted — so the device keeps the invitation and tries again on later launches, with a fresh operation id each time, up to five refusals in total. It gives up after that because the same refusal also covers a *deleted* inviter, which never recovers. Independent review 26 found the first version discarding these permanently, and 26b found the retry inert because it reused a spent operation id.
+>
+> **Deferred install attribution is NOT built, and this is stated plainly rather than approximated.** Universal Links and App Links carry a token only when the app is **already installed**. There is no Play Install Referrer path and no attribution SDK, and there will not be one built on fingerprinting, probabilistic matching, clipboard reading or any hidden identifier. The honest mechanism is: the landing page keeps the token in the address bar, and after installing, the visitor **returns to the same page** and taps *I already have Bingd*. If they instead launch Bingd from TestFlight or from Play, **attribution is lost** — silently, and permanently for that person. The page says so before they leave it. Analytics under-counts accordingly and no number anywhere is adjusted for it.
+>
+> **Invite Instigator counts real people now.** The query is unchanged — `count(*) where inviter_id = auth.uid() and activated_at is not null` — and it has stopped being structurally zero. Links created do not count, links opened do not count, and a redemption without activation does not count.
+>
+> **What is still not built, and it is one thing:** a **live `bingd.app` deployment**. The site builds, its tests pass, and the two `.well-known` files are generated from one config — but nothing is hosted yet, so **Universal Links and App Links cannot verify and have never been tested on a physical device**. Until that happens the invitation link opens a browser that 404s. This is the one remaining gap between the resolver being written and the resolver working, and it is a founder action rather than an engineering one.
+>
+> The **Required** half of Rewards above still stands: any future reward must count activated invitees only, which is now a number that exists.
 
 ---
 
@@ -1799,14 +1807,14 @@ v0.5 used two near-definitions interchangeably; this is the canonical one. See I
 >
 > The table above is the metric practice for a public alpha. **Almost none of it is instrumented, on purpose.** The friend beta is thirty to sixty people on four different builds, and the failure mode there is not too little data — it is a hundred event types nobody has agreed the meaning of, half of them counting taps instead of outcomes.
 >
-> So the implemented set is **eleven events**, sized to one question: *do people activate, run the core loop, use the social side — and which build were they on when they did it.* The canonical definitions, the exact once-per semantics of each, the privacy exclusions and the release-identity fields are in **[`analytics.md`](./analytics.md)**, which is the document to read rather than this table.
+> So the implemented set is **thirteen events**, sized to one question: *do people activate, run the core loop, use the social side — and which build were they on when they did it.* The canonical definitions, the exact once-per semantics of each, the privacy exclusions and the release-identity fields are in **[`analytics.md`](./analytics.md)**, which is the document to read rather than this table.
 >
 > | Area of the table above | Status |
 > |---|---|
 > | Activation | **partly** — `signup_completed` → `onboarding_completed` → `ranking_completed`. No 24-hour bound, no funnel infrastructure |
 > | Collection, Engagement | **partly** — `title_logged`, `ranking_completed` with its comparison count, `watchlist_added` |
 > | Social | **partly** — `follow_created` (approved vs pending), `recommendation_sent`, `recommendation_opened`, `member_search_result_opened` |
-> | Invitations | **link creations only** — the rest of the funnel has no writer (§17 As built) |
+> | Invitations | **created, opened, redeemed, activated** — the whole funnel has writers as of `20260819000500`, with one honest gap: a token does not survive a store install, so redemptions from a fresh install are under-counted (§17 As built) |
 > | Import | **not measured** — import is not built |
 > | Notifications, Recommendations quality, Offline, Metadata, Monetization intent | **not measured** |
 > | Retention at day 7 / day 30, cohorts | **not built** — [`deferred-roadmap.md`](./deferred-roadmap.md) §9 |

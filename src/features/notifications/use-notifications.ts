@@ -21,16 +21,18 @@ export type NotificationKind =
   | 'watch_tag'
   | 'recommendation'
   /**
-   * Somebody who was invited joined. **Nothing writes this yet.**
+   * Somebody this reader invited reached activation — ten ranked titles (PRD §28).
    *
-   * The type, its preference category and its route all exist ahead of the writer,
-   * which is a deliberate order rather than an oversight: `invite_attributions`
-   * has had an `activated_at` column since 20260813001300 with no writer, because
-   * https://bingd.app/i/<token> resolves to nothing and `app/i/[token].tsx` is a
-   * stub with a no-op Accept button. There is no attributable activation to
-   * observe, and 20260817001300's header is explicit that inventing one is the
-   * thing not to do. When the resolver lands, the row it writes is already
-   * rendered, already silenceable and already routed.
+   * **The writer arrived on 2026-08-19** (`20260819000500`), and the order it arrived
+   * in is the point. The type, its preference category and its route were all built
+   * first, deliberately, while `invite_attributions.activated_at` still had no writer:
+   * so when `_maybe_activate_invite` filed its first row, that row was already
+   * rendered, already silenceable through the `invites` category, and already routed
+   * to the person who joined. Nothing here had to change.
+   *
+   * Written server-side at the activation transition, once — never from a client
+   * observing the column, which could not tell a crossing from a state. That is the
+   * same distinction `award_earned` below is still waiting on.
    */
   | 'invite_activated'
   /**

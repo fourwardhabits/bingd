@@ -61,6 +61,20 @@ export type Placed = {
    * cannot be shown in the wrong circumstances.
    */
   adjustable: boolean;
+  /**
+   * **This ranking was the tenth**, and it activated an invitation (PRD §28).
+   *
+   * The server's word, and it has to be. `_maybe_activate_invite` flips
+   * `invite_attributions.activated_at` under a row lock and reports whether *this*
+   * transaction was the one that flipped it — so a second device finishing the tenth
+   * ranking at the same moment is told false, and so is a retry. Counting rankings on
+   * the client instead would emit for accounts with no attribution at all, and would
+   * emit again after a reinstall.
+   *
+   * True for at most one ranking in an account's life, and false for every account that
+   * was never invited.
+   */
+  activated: boolean;
 };
 
 export type SessionEnded = { state: 'ended' };
@@ -102,6 +116,7 @@ type RankResponse = {
   bucket?: string;
   score?: number;
   adjustable?: boolean;
+  activated?: boolean;
   cancelled?: boolean;
   skipped?: boolean;
 };
@@ -156,6 +171,10 @@ const step = (data: RankResponse | null, subjectId: string): SessionStep => {
       bucket: data.bucket ?? '',
       score: data.score ?? 0,
       adjustable: Boolean(data.adjustable),
+      // Absent on a backend that predates 20260819000500, which reads as false — the
+      // safe direction: an event never sent is an undercount, and one sent on a guess
+      // is a number that looks like growth and is not.
+      activated: Boolean(data.activated),
     };
   }
 

@@ -176,7 +176,21 @@ export function RecommendSheet({
     const operationId = (shareIntent.current ??= newOperationId());
     const invite = await createInviteLink(mediaItemId, operationId, surface);
     if (invite) shareIntent.current = null;
-    const titleUrl = `https://bingd.app/title/${kind}/${mediaItemId}`;
+    /**
+     * One segment, and it used to be two.
+     *
+     * This built `/title/<kind>/<id>`, and **no route serves that** — not
+     * `app/title/[id].tsx`, which matches a single segment, and not the web router. So
+     * every off-platform title share sent a link that opened the app onto
+     * `+not-found` for anybody who had it, and onto a 404 for anybody who did not.
+     * The kind was never needed: `media_items.id` identifies a film or a season on its
+     * own, and the screen reads the kind from the row.
+     *
+     * Not renamed to something shorter, deliberately. `/title/*` is already claimed in
+     * the Apple App Site Association file and already sits inside links people have
+     * been sent; the fix is the segment that was wrong, and nothing else.
+     */
+    const titleUrl = `https://bingd.app/title/${mediaItemId}`;
     const message = invite
       ? `${name} on Bingd\n${titleUrl}\n\nJoin me on Bingd: ${invite}`
       : `${name} on Bingd\n${titleUrl}`;

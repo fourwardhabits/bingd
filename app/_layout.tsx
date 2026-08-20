@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, AuthStatusOverlay, useAuthRouting } from '@/features/auth';
+import { useRedeemPendingInvite } from '@/features/invite';
 import { initAnalytics } from '@/lib/analytics';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
 import { createQueryClient } from '@/lib/query';
@@ -91,6 +92,15 @@ function RootLayout() {
  */
 function Navigation() {
   useAuthRouting();
+  /**
+   * An invitation opened before there was an account to attribute it to.
+   *
+   * Here rather than in the signup screen because there are three ways to reach a ready
+   * session and only one of them passes through that screen — see the hook. It reads
+   * device storage on each transition into `ready` and does nothing on the launches,
+   * which are almost all of them, where there is nothing held.
+   */
+  useRedeemPendingInvite();
 
   return (
     <>

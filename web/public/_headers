@@ -18,3 +18,11 @@
   X-Robots-Tag: noindex, nofollow
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
+
+# The router's two modules. Cloudflare Pages types .mjs correctly today; stated
+# anyway, because a module served as text/plain is refused by the browser outright
+# and the page then renders with no buttons at all — which looks exactly like the
+# install destinations not being configured.
+/*.mjs
+  Content-Type: text/javascript; charset=utf-8
+  Cache-Control: public, max-age=300

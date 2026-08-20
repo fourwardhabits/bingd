@@ -20,9 +20,10 @@ read as *"nice things, later"* — and filing a blocker among them is how a bloc
 being one. Those live in `.agent-workflow/continuation.md` and
 `.agent-workflow/feature-completion-status.md`, and they stay there.
 
-**One entry breaks that rule on purpose and says so out loud.** §7, the invite and
-referral resolver, is genuinely both: a product capability *and* a friend-beta growth
-blocker. It is cross-referenced rather than quietly filed under "later".
+**§7 used to break that rule and no longer does.** The invite and referral resolver was
+carried here *and* on the hardening list, because it was genuinely both. It was built on
+2026-08-19; what is left under that heading is the store-distribution half, which was
+always release-phase work and belongs here without qualification.
 
 Each entry states: **what it is · why it is wanted · why it is not being built now · what
 should bring it back · what it depends on.**
@@ -191,55 +192,61 @@ the notification routing chain (already built and ordered, `notifications/routin
 
 ---
 
-## 7. Invite and referral activation resolver
+## 7. Public store distribution for the invite resolver
 
-> ### ⚠ This is also a friend-beta growth blocker, not only a roadmap item.
+> ### ✅ The resolver itself is DONE — 2026-08-19, `20260819000500`.
 >
-> It is carried in `.agent-workflow/continuation.md` and
-> `.agent-workflow/feature-completion-status.md` as a release-hardening item, and it stays
-> there. It appears here because it is genuinely a product capability too — **not** so that
-> it can be read as optional.
+> This item used to be "the invite and referral activation resolver", and it was carried
+> as a friend-beta growth blocker. **That blocker is closed.** What remains under this
+> heading is the distribution half, which was always release-phase work.
 
-**What it is.** The half of direct invitations below the link: a resolver at
-`https://bingd.app/i/<token>`, an open record, redemption, and activation.
+**What was built.** `record_invite_open`, `redeem_invite` — including §17's acceptance
+semantics, the one-way follow and the private-account request — `revoke_invite_link` with
+its Settings control, and the activation writer, plus the `bingd.app` router at `/i/*`,
+`/u/*`, `/title/*` and `/lists/*` and the two `.well-known` files that make a tapped link
+open the app. `invite_attributions.accepted_at`
+and `activated_at` have writers for the first time since `20260813001300`; Invite
+Instigator counts real people; `invite_redeemed` and `invite_activated` are emittable and
+emitted; `acquisition_source: 'invite'` has its first honest caller. The full disposition
+is in [`growth-instrumentation.md`](./growth-instrumentation.md) §1 and PRD §17's As-built
+block.
 
-**Why it is wanted.** It is the friend beta's growth mechanic. Without it, "invite a
-friend" is a link somebody can send and nobody can count.
+**What is deferred, and it is two things.**
 
-**What exists today.** `create_invite_link` mints the caller's one reusable personal link
-and records one `invite_link_creations` row per share — a real intent signal, and the
-strongest one available without a web property. `invite_attributions` has had
-`accepted_at` and `activated_at` since `20260813001300` **with nothing writing them**.
-`app/i/[token].tsx` is a stub that says invitations are not active in this build, which is
-true. Bingd Awards' Invite Instigator track counts `activated_at is not null`, so it reads
-zero for every account and will until this lands — deliberately, because the alternative
-was a badge for pressing a button.
+**1. Deferred install attribution.** A token does not survive a trip through the App Store,
+TestFlight or Play. The beta mechanism is honest and manual: the landing page keeps the
+token in the address bar, and after installing, the visitor returns to it and taps *I
+already have Bingd*. Somebody who instead launches from their home screen arrives with no
+token and is **not attributed, permanently and undetectably**. Every invite number is a
+floor.
 
-**What has to be built** (each item is a named missing piece, not a guess):
+Closing this needs Play Install Referrer on Android, and on iOS a deferred deep-link
+vendor — Branch, AppsFlyer or Adjust. **None is being added for a beta**: each is an SDK,
+a privacy review, a native build, and a data-sharing relationship, bought to recover a
+population nobody has yet measured. Revisit when the landing page's own numbers show the
+drop-off is large enough to justify all four costs, which is a question the current
+instrumentation can now actually answer.
 
-1. **A link resolver** at `https://bingd.app/i/<token>`. There is no web property at all.
-2. **`record_invite_open(token)`** — callable by `anon`, must **not** confirm whether a
-   token is valid or it becomes a token oracle, writing to a new `invite_link_opens` table
-   so that one link opened by five people is five rows.
-3. **Deferred deep linking, or an honest limitation.** App Links and Universal Links carry
-   a token only if the app is *already installed*. A fresh install needs Play Install
-   Referrer or a deferred deep-link provider. **Do not approximate this with
-   fingerprinting** — IP-and-timestamp matching is both a privacy problem and wrong often
-   enough to poison the metric. If it is not built, redemption is limited to people who
-   already had the app, and that limit must be stated wherever the number is shown.
-4. **`redeem_invite(operation_id, token)`** — after profile creation, never before. Primary
-   key `invitee_id`, so a person is invited once and a second call is a no-op. Must refuse
-   a token whose `env` does not match the running environment (PRD §17), refuse
-   self-invitation, and refuse where a block exists in either direction.
-5. **Activation**, already defined: PRD §28 says ten ranked titles.
+**Never** by fingerprinting, IP-and-timestamp matching or clipboard reading. That is a
+privacy position, not a cost trade-off, and it is not open for revisiting.
 
-**What it unlocks the moment it lands.** `invite_redeemed` and `invite_activated` become
-emittable; `acquisition_source: 'invite'` gets its first honest writer
-([`analytics.md`](./analytics.md) §4–5); Invite Instigator starts counting with no client
-change, no migration and no threshold rewrite.
+**2. The distribution destinations themselves.** `web/distribution.config.json` has a slot
+for a public TestFlight URL and a Play closed-test opt-in URL, and both are `null` — so
+every route currently shows *the Bingd beta is not open for this device yet*, which is
+true. Filling them in changes no invitation link anybody has already sent, and needs no
+app rebuild. **A live `bingd.app` deployment is the harder prerequisite**: until the site
+is hosted, Universal Links and App Links cannot verify at all.
 
-**Revisit when.** Immediately — it is the next growth-side item, and it is on the hardening
-list rather than waiting for a roadmap slot.
+**Revisit when.** The hosting and the two URLs are founder actions on the beta-release
+path, not roadmap work. The vendor question is genuinely deferred.
+
+> **Scope of the ✅ above, stated exactly.** It means the resolver's *code* is complete and
+> reviewed: every stage has a writer, every clause of §17's acceptance semantics runs, and
+> revocation exists. It does **not** mean invitations work on a phone today. Nothing is
+> hosted at `bingd.app`, so Universal Links and App Links have never verified and have
+> never been tested on a physical device — and until they do, a tapped invitation opens a
+> browser that 404s. That is a founder action, and it is the first line of the next phase
+> rather than a footnote to this one.
 
 ---
 

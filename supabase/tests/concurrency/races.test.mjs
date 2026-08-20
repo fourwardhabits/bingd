@@ -8,6 +8,7 @@ import lockPair from './races/lock-pair.mjs';
 import followMatrix from './races/follow-matrix.mjs';
 import recommendation from './races/recommendation.mjs';
 import inviteToken from './races/invite-token.mjs';
+import inviteRedeem from './races/invite-redeem.mjs';
 import rateLimit from './races/rate-limit.mjs';
 import stress from './races/stress.mjs';
 
@@ -37,5 +38,6 @@ lockPair();
 followMatrix();
 recommendation();
 inviteToken();
+inviteRedeem();
 rateLimit();
 stress();
