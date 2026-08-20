@@ -2,7 +2,18 @@
 module.exports = {
   preset: 'jest-expo',
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
-  testPathIgnorePatterns: ['/node_modules/', '/design-references/', '/.expo/'],
+  /**
+   * `supabase/functions` is Deno, not Node. `normalize.test.ts` there uses `Deno.test`
+   * and imports from `jsr:`, neither of which Jest can evaluate — it is run by
+   * `npm run functions:test`. Jest found it by name the moment it was added, which is
+   * how a green suite became a failing one without a line of application code changing.
+   */
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/design-references/',
+    '/.expo/',
+    '/supabase/functions/',
+  ],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },

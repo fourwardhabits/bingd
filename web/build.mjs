@@ -1,14 +1,26 @@
 #!/usr/bin/env node
 /**
- * Builds the static site for bingd.app, whose only job in v1 is to serve the two
- * files that let a tapped link open the app instead of the browser.
+ * Builds the static site for bingd.app.
  *
- * Why this is generated rather than committed by hand: both files repeat the same
- * identifiers in different shapes, Apple's needs a team prefix that Android's does
- * not, and a mistake in either is invisible. There is no error message when an
- * Apple App Site Association file is malformed — iOS fetches it, fails to parse
- * it, and links quietly keep opening Safari. So the identifiers live in one JSON
- * file and this script refuses to produce output while any of them is missing.
+ * Two jobs, and the second one is new as of the invitation resolver.
+ *
+ * **1. The two files that let a tapped link open the app instead of the browser.**
+ * Generated rather than committed by hand: both repeat the same identifiers in
+ * different shapes, Apple's needs a team prefix that Android's does not, and a mistake
+ * in either is invisible. There is no error message when an Apple App Site Association
+ * file is malformed — iOS fetches it, fails to parse it, and links quietly keep opening
+ * Safari. So the identifiers live in one JSON file and this script refuses to produce
+ * output while any of them is missing.
+ *
+ * **2. The router.** Four pages that answer *you have arrived at a Bingd link and you
+ * do not have Bingd*. They exist because a Universal Link that cannot open the app
+ * falls back to the web, and what was there before was a single page that said Bingd is
+ * in closed testing — which is a dead end for the one visitor who was actually invited.
+ *
+ * The router is not a marketing site and must not become one. Each page is: what this
+ * link is, one dominant install button, and a way to open the app if it is already
+ * there. Everything that decides anything is in `src/router.mjs`, which
+ * `web/router.test.mjs` runs directly.
  */
 
 import { mkdir, readFile, writeFile, cp } from 'node:fs/promises';
@@ -19,6 +31,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, 'dist');
 
 const config = JSON.parse(await readFile(join(here, 'deep-links.config.json'), 'utf8'));
+const distribution = JSON.parse(await readFile(join(here, 'distribution.config.json'), 'utf8'));
 
 const problems = [];
 
@@ -54,19 +67,52 @@ for (const variant of config.variants) {
   }
 }
 
+/**
+ * Distribution URLs are checked for *shape* and never for presence.
+ *
+ * Null is the correct value today — no TestFlight link exists — and a build that
+ * refused it would block the site on a thing that is not ready. What is refused is a
+ * URL that is set and wrong: anything that is not `https://`, because every one of
+ * these becomes the destination of a button on a page people reach from an invitation,
+ * and that is the single most valuable place in this project to plant a link somewhere
+ * else.
+ */
+const DESTINATIONS = [
+  ['ios.betaUrl', distribution.ios?.betaUrl],
+  ['ios.storeUrl', distribution.ios?.storeUrl],
+  ['android.optInUrl', distribution.android?.optInUrl],
+  ['android.betaUrl', distribution.android?.betaUrl],
+  ['android.storeUrl', distribution.android?.storeUrl],
+];
+
+for (const [name, value] of DESTINATIONS) {
+  if (value == null) continue;
+  if (typeof value !== 'string' || !/^https:\/\/[a-z0-9.-]+\//i.test(value)) {
+    problems.push(
+      `distribution.config.json ${name} is "${value}", which is not an absolute https URL.`,
+    );
+  }
+}
+
+if (distribution.app?.scheme && !/^[a-z][a-z0-9+.-]*$/.test(distribution.app.scheme)) {
+  problems.push(`distribution.config.json app.scheme "${distribution.app.scheme}" is not a scheme.`);
+}
+
 if (problems.length > 0) {
-  console.error('\nCannot build the deep-link files:\n');
+  console.error('\nCannot build the site:\n');
   for (const problem of problems) console.error(`  - ${problem}`);
   console.error(
-    '\nDeploying with these missing would not break the site. It would make every\n' +
-      'invitation and share link open the browser instead of the app, with no error\n' +
-      'anywhere to explain why. Refusing instead.\n',
+    '\nDeploying with these missing or wrong would not break the site. It would make\n' +
+      'every invitation and share link open the browser instead of the app, or send\n' +
+      'somebody somewhere Bingd does not control, with no error anywhere to explain\n' +
+      'why. Refusing instead.\n',
   );
   process.exit(1);
 }
 
 await mkdir(join(dist, '.well-known'), { recursive: true });
 await cp(join(here, 'public'), dist, { recursive: true });
+await cp(join(here, 'src'), dist, { recursive: true });
 
 /**
  * Apple. `applinks` claims the paths; `webcredentials` is what lets the keychain
@@ -117,9 +163,320 @@ await writeFile(
   `${JSON.stringify(assetlinks, null, 2)}\n`,
 );
 
+// ---------------------------------------------------------------------------
+// The router
+// ---------------------------------------------------------------------------
+
+/**
+ * Supabase, for the one call the invitation page makes.
+ *
+ * Read from the environment and **optional**. Absent, the page still renders and
+ * simply records no open, which is what a local `npm run build:web` does. The anon key
+ * is public by construction — it is in the mobile bundle already, and it is bounded by
+ * row level security — so there is no secret here to leak by baking it in.
+ */
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? null;
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? null;
+
+/**
+ * The distribution config with its `$comment` keys dropped.
+ *
+ * They are documentation for whoever edits the file and are several hundred bytes of
+ * prose per page otherwise. Stripped rather than kept: what ships should be what the
+ * page reads.
+ */
+const stripComments = (value) => {
+  if (Array.isArray(value)) return value.map(stripComments);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !key.startsWith('$'))
+        .map(([key, inner]) => [key, stripComments(inner)]),
+    );
+  }
+  return value;
+};
+
+const shippedDistribution = stripComments(distribution);
+
+/**
+ * `</script>` inside a JSON block would close the tag it is written in. Nothing in
+ * these values can currently contain one — they are URLs from a committed file — but
+ * the escape costs nothing and the failure it prevents is script injection into every
+ * page of the site.
+ */
+const jsonBlock = (value) =>
+  JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+
+const styles = `
+      /* Values copied from src/ui/tokens/color.ts. The app is the source of truth;
+         these pages do not justify a build step to share them. */
+      :root {
+        --parchment: #f5ebdd;
+        --raised: #fcf6ec;
+        --maroon: #773744;
+        --ink: #242326;
+        --secondary: #5f5a56;
+        --hairline: rgba(36, 35, 38, 0.08);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 2rem 1.5rem;
+        background: var(--parchment);
+        color: var(--ink);
+        font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      main { max-width: 26rem; width: 100%; text-align: center; }
+
+      h1 {
+        margin: 0 0 0.5rem;
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: clamp(2.5rem, 11vw, 3.75rem);
+        font-weight: 400;
+        letter-spacing: -0.01em;
+        color: var(--maroon);
+      }
+
+      .tagline {
+        margin: 0 0 2rem;
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-style: italic;
+        font-size: clamp(1.05rem, 4.5vw, 1.3rem);
+        line-height: 1.4;
+      }
+
+      .card {
+        background: var(--raised);
+        border: 1px solid var(--hairline);
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        box-shadow: 0 1px 2px rgba(36, 35, 38, 0.06);
+        text-align: left;
+      }
+
+      p { margin: 0 0 0.75rem; font-size: 0.975rem; line-height: 1.6; color: var(--secondary); }
+      p:last-child { margin-bottom: 0; }
+
+      .subject {
+        font-family: 'DM Serif Display', Georgia, serif;
+        font-size: 1.35rem;
+        color: var(--ink);
+        margin: 0 0 1.25rem;
+        word-break: break-word;
+      }
+
+      /* One dominant action, and a quieter one under it. Tap targets are 48px so a
+         thumb on a phone is the case being designed for. */
+      .actions { display: grid; gap: 0.625rem; margin-top: 1.5rem; }
+
+      a.button {
+        display: block;
+        min-height: 48px;
+        padding: 0.875rem 1.25rem;
+        border-radius: 0.625rem;
+        background: var(--maroon);
+        color: var(--raised);
+        font-size: 1rem;
+        font-weight: 500;
+        text-decoration: none;
+      }
+
+      a.button.secondary {
+        background: transparent;
+        color: var(--maroon);
+        border: 1px solid var(--maroon);
+      }
+
+      [hidden] { display: none !important; }
+
+      footer { margin-top: 2rem; font-size: 0.8125rem; color: var(--secondary); }
+      footer a { color: var(--maroon); text-underline-offset: 2px; }
+`;
+
+/**
+ * One page.
+ *
+ * `noindex` on every route, by founder decision (decision log §3) and reinforced by
+ * the `X-Robots-Tag` in `_headers` — a `/u/<handle>` route that Google indexed would
+ * publish a list of Bingd's members, which is a thing no privacy setting in the app
+ * would then be able to take back.
+ */
+const page = ({ title, kind, heading, tagline, body }) => `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="referrer" content="no-referrer" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>${styles}</style>
+  </head>
+
+  <body>
+    <main>
+      <h1>Bingd</h1>
+      <p class="tagline">${tagline}</p>
+
+      <div class="card">
+${body}
+
+        <div class="actions">
+          <a class="button" id="primary-install" hidden href="#"></a>
+
+          <span id="desktop-choices" hidden>
+            <a class="button" id="install-ios" hidden href="#"></a>
+            <a class="button" id="install-android" hidden href="#"></a>
+          </span>
+
+          <a class="button secondary" id="open-app" hidden href="#"></a>
+        </div>
+
+        <p id="no-destination" hidden>
+          The Bingd beta is not open for this device yet. ${heading}
+        </p>
+      </div>
+
+      <footer><a href="mailto:hello@bingd.app">hello@bingd.app</a></footer>
+    </main>
+
+    <script type="application/json" id="bingd-config">${jsonBlock({
+      page: kind,
+      distribution: shippedDistribution,
+      supabaseUrl,
+      supabaseAnonKey,
+    })}</script>
+    <script type="module" src="/page.mjs"></script>
+  </body>
+</html>
+`;
+
+/**
+ * The invitation page's copy, which is the only copy on this site anybody will read
+ * twice.
+ *
+ * The second paragraph is the deferred-install limitation, stated to the person it
+ * affects rather than only in a document. It is there because the alternative is
+ * somebody installing from TestFlight, launching Bingd from their home screen, and
+ * silently losing the invitation with nothing anywhere to say what happened.
+ */
+const INVITE_BODY = `        <span id="invite-intro">
+          <p class="subject">You have been invited to Bingd.</p>
+          <p>
+            Bingd is where you rank what you have watched and see what your friends
+            really think. It is in closed testing, and this invitation is how you get in.
+          </p>
+          <p>
+            <strong>Come back to this page once Bingd is installed</strong> and tap
+            &ldquo;I already have Bingd&rdquo;. Opening the app straight from TestFlight
+            or Play works too, but the invitation will not follow you there.
+          </p>
+        </span>
+        <p id="invite-broken" hidden>
+          That invitation link is incomplete &mdash; messaging apps sometimes cut long
+          links in half. Ask for it again, or get Bingd below and use the link from
+          inside the app.
+        </p>`;
+
+const PROFILE_BODY = `        <p class="subject" id="handle"></p>
+        <p>
+          This is a Bingd profile. Open it in the app to see what they have ranked and
+          what they have written &mdash; a private account stays private, whichever way
+          you arrive.
+        </p>`;
+
+const TITLE_BODY = `        <p class="subject">A film or series on Bingd</p>
+        <p>
+          Open it in Bingd to see where your friends placed it, and where you would.
+        </p>`;
+
+const GENERIC_BODY = `        <p>
+          Bingd is in closed testing. Invitations are going out to a small first group,
+          and this page will become the app&rsquo;s public face when it opens up.
+        </p>`;
+
+const ROUTES = [
+  {
+    dir: 'i',
+    kind: 'invite',
+    title: 'You have been invited to Bingd',
+    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    heading: 'Ask whoever invited you to let you know when it is.',
+    body: INVITE_BODY,
+  },
+  {
+    dir: 'u',
+    kind: 'profile',
+    title: 'A profile on Bingd',
+    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    heading: 'Bingd is in closed testing.',
+    body: PROFILE_BODY,
+  },
+  {
+    dir: 'title',
+    kind: 'title',
+    title: 'A title on Bingd',
+    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    heading: 'Bingd is in closed testing.',
+    body: TITLE_BODY,
+  },
+  {
+    dir: 'lists',
+    kind: 'generic',
+    title: 'A list on Bingd',
+    tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
+    heading: 'Bingd is in closed testing.',
+    body: GENERIC_BODY,
+  },
+];
+
+for (const route of ROUTES) {
+  await mkdir(join(dist, route.dir), { recursive: true });
+  await writeFile(join(dist, route.dir, 'index.html'), page(route));
+}
+
+/**
+ * Cloudflare Pages rewrites, so `/i/<anything>` serves the invitation page.
+ *
+ * A 200 and not a 301. A redirect would change the address bar, and the address bar is
+ * the thing the visitor has to be able to come back to after installing — that URL is
+ * the whole deferred-install mechanism this site has.
+ *
+ * `.well-known` is deliberately not listed and must never be: a rewrite over it would
+ * serve HTML where iOS expects JSON, which is the exact failure `_headers` was written
+ * to prevent, arriving from the other direction.
+ */
+await writeFile(
+  join(dist, '_redirects'),
+  ROUTES.map((route) => `/${route.dir}/*  /${route.dir}/index.html  200`).join('\n') + '\n',
+);
+
 console.log(`Built ${dist}`);
-console.log(`  apple-app-site-association  ${appleAppIds.length} app IDs, ${config.appPaths.length} paths`);
+console.log(
+  `  apple-app-site-association  ${appleAppIds.length} app IDs, ${config.appPaths.length} paths`,
+);
 console.log(`  assetlinks.json             ${assetlinks.length} package(s)`);
+console.log(`  router                      ${ROUTES.map((r) => `/${r.dir}/*`).join(' ')}`);
+
+const configured = DESTINATIONS.filter(([, value]) => value != null).map(([name]) => name);
+console.log(
+  `  install destinations        ${configured.length ? configured.join(', ') : 'none configured'}`,
+);
 
 if (assetlinks.length === 0) {
   console.log('');
@@ -128,4 +485,20 @@ if (assetlinks.length === 0) {
   console.log('  web/deep-links.config.json once an Android build exists — from');
   console.log('  `eas credentials`, or from Play Console > Setup > App integrity if Play');
   console.log('  re-signs the app.');
+}
+
+if (configured.length === 0) {
+  console.log('');
+  console.log('  No install destination is configured, so every route shows "the Bingd beta');
+  console.log('  is not open for this device yet". That is the honest state until a public');
+  console.log('  TestFlight link and a Play closed-test opt-in URL exist. Set them in');
+  console.log('  web/distribution.config.json — no rebuild of the app, and no reissued');
+  console.log('  invitation links, are needed when they arrive.');
+}
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.log('');
+  console.log('  EXPO_PUBLIC_SUPABASE_URL / _ANON_KEY were not set, so the invitation page');
+  console.log('  records no opens. The page is otherwise complete. Set both in the deploy');
+  console.log('  environment to turn the top of the invite funnel on.');
 }

@@ -203,10 +203,11 @@ Listed so they are not silently resolved.
 | Item | Who decides |
 |---|---|
 | Analytics provider | Engineering; PostHog is the working recommendation |
-| Web hosting for `bingd.app` | Engineering; Cloudflare Pages is the working recommendation |
 | Rate-limit numeric thresholds | Engineering, from observed traffic |
 | Letterboxd title-matching thresholds | Engineering, tuned against real exports |
 
 > **Settled 2026-08-12.** Bucket bands partition the ranking (formerly INF-3). This document and [`ranking.md`](./ranking.md) both assume it, and it is now a founder decision rather than an assumption.
 >
 > **Settled 2026-08-13.** Navigation is Feed · Collection · + · Recommendations · Profile ([`client.md`](./client.md) §2). TMDB is no longer a gate: Bingd connects on a free developer key, caps TMDB-derived cache retention under six months, and buys the self-serve commercial plan before charging anyone ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)).
+>
+> **Settled 2026-08-19, and it had been settled for five days without anybody writing it down.** `bingd.app` is on **Cloudflare Pages**, git-connected to `main`, and has been serving since 2026-08-14 — the working recommendation was already the deployment. What that means for a tapped link, which builds can open one, and what is still only config-verified rather than proven on hardware, is in [`web-deployment.md`](./web-deployment.md).

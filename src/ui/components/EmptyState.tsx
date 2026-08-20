@@ -17,15 +17,16 @@ export type EmptyStateProps = {
   /** Written in the Curious Collector voice: "Nothing here yet", not "No results found." */
   body: string;
   action?: { label: string; onPress: () => void };
+  compact?: boolean;
 };
 
-export function EmptyState({ kind, title, body, action }: EmptyStateProps) {
+export function EmptyState({ kind, title, body, action, compact = false }: EmptyStateProps) {
   return (
-    <View style={styles.container} accessibilityRole="summary">
-      <Text variant="title2" style={styles.centered}>
+    <View style={[styles.container, compact && styles.compact]} accessibilityRole="summary">
+      <Text variant={compact ? 'callout' : 'title2'} style={styles.centered}>
         {title}
       </Text>
-      <Text variant="body" tone="secondary" style={styles.centered}>
+      <Text variant={compact ? 'footnote' : 'body'} tone="secondary" style={styles.centered}>
         {body}
       </Text>
       {action ? (
@@ -46,6 +47,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: theme.space[4],
     padding: theme.space[8],
+  },
+  compact: {
+    gap: theme.space[2],
+    paddingVertical: theme.space[4],
+    paddingHorizontal: theme.layout.gutter,
   },
   centered: { textAlign: 'center' },
 });

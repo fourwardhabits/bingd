@@ -1,4 +1,17 @@
-export { brand, border, bucket, color, inkAlpha, semantic, surface, text } from './color';
+export {
+  brand,
+  border,
+  bucket,
+  bucketInk,
+  color,
+  inkAlpha,
+  paperAlpha,
+  semantic,
+  surface,
+  text,
+  tier,
+  type BucketKey,
+} from './color';
 export { fontFamily, typography, type TypographyToken } from './typography';
 export {
   duration,

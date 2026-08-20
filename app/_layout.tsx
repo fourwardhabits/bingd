@@ -17,7 +17,8 @@ import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, AuthStatusOverlay, useAuthRouting } from '@/features/auth';
-import { initAnalytics, track } from '@/lib/analytics';
+import { useRedeemPendingInvite } from '@/features/invite';
+import { initAnalytics } from '@/lib/analytics';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
 import { createQueryClient } from '@/lib/query';
 import { startUpdateChecks } from '@/lib/updates';
@@ -55,9 +56,10 @@ function RootLayout() {
     }
   }, [navigationRef]);
 
-  useEffect(() => {
-    track({ name: 'app_opened' });
-  }, []);
+  // `app_opened` used to be emitted here and has been removed. PostHog's own
+  // `captureAppLifecycleEvents` already sends Application Opened for the same launch,
+  // and it gets the background-to-foreground case right where a mount effect does not.
+  // Two events for one launch is the duplicate-capture problem in miniature.
 
   useEffect(() => startUpdateChecks(), []);
 
@@ -90,6 +92,15 @@ function RootLayout() {
  */
 function Navigation() {
   useAuthRouting();
+  /**
+   * An invitation opened before there was an account to attribute it to.
+   *
+   * Here rather than in the signup screen because there are three ways to reach a ready
+   * session and only one of them passes through that screen — see the hook. It reads
+   * device storage on each transition into `ready` and does nothing on the launches,
+   * which are almost all of them, where there is nothing held.
+   */
+  useRedeemPendingInvite();
 
   return (
     <>
@@ -97,11 +108,26 @@ function Navigation() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: theme.surface.base },
+          headerStyle: { backgroundColor: theme.surface.base },
+          headerTintColor: theme.text.primary,
         }}
       >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(auth)" />
-        <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="title/[id]" options={{ headerShown: true, title: 'Title' }} />
+        <Stack.Screen name="u/[username]" options={{ headerShown: true, title: 'Profile' }} />
+        {/* Reached from a cast strip. The header title is set by the screen once
+            the person resolves, so it is empty here rather than "Person". */}
+        <Stack.Screen name="person/[id]" options={{ headerShown: true, title: '' }} />
+        <Stack.Screen name="lists/[id]" options={{ headerShown: true, title: 'List' }} />
+        {/* No header and no back: it is the first thing a new account sees, and there
+            is nowhere behind it to return to. Leaving is an explicit choice made on
+            the screen itself. */}
+        <Stack.Screen name="onboarding/taste" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="settings"
+          options={{ presentation: 'modal', headerShown: true, title: 'Settings' }}
+        />
       </Stack>
       <AuthStatusOverlay />
     </>

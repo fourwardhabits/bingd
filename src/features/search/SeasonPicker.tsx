@@ -1,8 +1,10 @@
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useSeasonEnrichment } from '@/features/title/use-enrichment';
 import { theme } from '@/ui/tokens';
-import { EmptyState, Text } from '@/ui/components';
+import { EmptyState, Poster, Text } from '@/ui/components';
+import { posterUri } from '@/lib/images';
 
 import { useSeasons, yearOf } from './use-title-search';
 
@@ -14,6 +16,8 @@ export type SeasonPickerProps = {
     title: string;
     year: number | null;
     posterPath: string | null;
+    /** Travels with the season so the log sheet can head itself "The Last of Us, S1". */
+    seasonNumber: number;
   }) => void;
 };
 
@@ -24,7 +28,12 @@ export type SeasonPickerProps = {
  * rather than failing with an error the user did nothing to deserve.
  */
 export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
-  const { data: seasons = [], isPending, isError } = useSeasons(series?.id ?? null);
+  const { data: seasons = [], isPending, isError, isFetched } = useSeasons(series?.id ?? null);
+
+  // A series found through search has no season rows yet, and this is the first
+  // moment they are needed. `isFetched` matters: without it the empty array that
+  // exists before the first read looks identical to a series with no seasons.
+  const { enriching } = useSeasonEnrichment(series?.id ?? null, isFetched && seasons.length === 0);
 
   if (!series) return null;
 
@@ -64,7 +73,7 @@ export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
             title="Could not load seasons"
             body="Check your connection and try again."
           />
-        ) : isPending ? (
+        ) : isPending || enriching ? (
           <View style={styles.padded}>
             <Text variant="body" tone="tertiary">
               Loading seasons…
@@ -73,8 +82,8 @@ export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
         ) : seasons.length === 0 ? (
           <EmptyState
             kind="nothingYet"
-            title="No seasons yet"
-            body="The catalogue has this series but none of its seasons."
+            title="No seasons listed"
+            body="This series has no seasons on record yet. Try again later."
           />
         ) : (
           <ScrollView contentContainerStyle={styles.list}>
@@ -91,16 +100,20 @@ export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
                     title: season.title,
                     year: yearOf(season.release_date),
                     posterPath: season.poster_path,
+                    seasonNumber: season.season_number,
                   })
                 }
                 style={styles.row}
               >
-                <Text variant="headline">{season.title}</Text>
-                {season.release_date ? (
-                  <Text variant="footnote" tone="tertiary">
-                    {yearOf(season.release_date)}
-                  </Text>
-                ) : null}
+                <Poster uri={posterUri(season.poster_path)} title={season.title} size="xs" />
+                <View style={styles.rowText}>
+                  <Text variant="headline">{season.title}</Text>
+                  {season.release_date ? (
+                    <Text variant="footnote" tone="tertiary">
+                      {yearOf(season.release_date)}
+                    </Text>
+                  ) : null}
+                </View>
               </Pressable>
             ))}
           </ScrollView>
@@ -123,9 +136,11 @@ const styles = StyleSheet.create({
   list: { paddingBottom: theme.space[8] },
   row: {
     minHeight: theme.layout.rowMinHeight,
-    justifyContent: 'center',
-    gap: theme.space[1],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[3],
     paddingVertical: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
   },
+  rowText: { flex: 1, gap: theme.space[1] },
 });

@@ -14,9 +14,20 @@ export const queryKeys = {
   myProfile: (userId: string) => ['my-profile', userId] as const,
   collection: (userId: string) => ['collection', userId] as const,
   rankings: (userId: string, category: string) => ['rankings', userId, category] as const,
-  feed: (cursor?: string) => ['feed', { cursor }] as const,
+  feed: (userId: string, cursor?: string) => ['feed', userId, { cursor }] as const,
   recommendations: (userId: string) => ['recommendations', userId] as const,
   title: (mediaItemId: string) => ['title', mediaItemId] as const,
+  // What the log sheet opens onto: the user's own bucket, note, watch date and
+  // whether the title is ranked. Separate from `title` for the same reason
+  // `comparisonCard` is — a different shape read by a different screen.
+  // Keyed by the account as well as the title, like every other per-user key here.
+  // It was not, and independent review found what that costs: this entry holds a
+  // note, and a note is the one thing in the collection PRD §22 keeps private at
+  // every visibility level. `queryClient.clear()` on sign-out (session.tsx) is what
+  // has been preventing the leak in practice, which is a second mechanism doing this
+  // one's job — and `myProfile` above is keyed this way for exactly the reason given
+  // in its own comment. One argument is a cheaper guarantee than a lifecycle.
+  logState: (userId: string, mediaItemId: string) => ['log-state', userId, mediaItemId] as const,
   // Deliberately separate from `title`: the comparison card reads three columns, and
   // sharing a key with a full title row would let whichever query ran first serve the
   // other a shape it did not ask for.
@@ -24,9 +35,23 @@ export const queryKeys = {
   // Not keyed by user: the catalogue is the same for everyone, so a sign-out need not
   // discard it and two accounts on one device share the cache.
   search: (query: string) => ['search', query] as const,
+  // Separate from `search`, and separately cached, because the two passes have very
+  // different costs: the local one is a table read and the provider one spends a TMDB
+  // request against a shared quota. Sharing a key would let an invalidation of the cheap
+  // pass silently re-spend the expensive one.
+  providerSearch: (query: string) => ['search', 'provider', query] as const,
   seasons: (seriesId: string) => ['seasons', seriesId] as const,
   profile: (username: string) => ['profile', username] as const,
+  // Targets and progress for one year. Keyed by the account for the reason `logState`
+  // records above — a goal is own-read only, so an entry holding one must not be
+  // reachable from a second account signed in on the same device.
+  goals: (userId: string, year: number) => ['goals', userId, year] as const,
   notifications: () => ['notifications'] as const,
+  // Whether this account has ever ranked or logged anything, read once on arrival.
+  // Deliberately *not* under `collection`, which the ranking flow invalidates: sharing
+  // that prefix would answer "no longer new" the moment the first film was placed and
+  // evict the user from the flow they were in the middle of.
+  tasteOnboarding: (userId: string) => ['taste-onboarding', userId] as const,
 } as const;
 
 export const createQueryClient = () =>

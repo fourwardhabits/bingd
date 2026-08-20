@@ -70,12 +70,249 @@ const ALLOWED = {
   // _media_kind and _assert_unranked answer questions about a row, _claim_operation
   // called directly would let a client burn an operation id so that a later genuine
   // write returns success without happening.
-  'log_watched(uuid,uuid,date,text)': ['authenticated'],
+  //
+  // log_watched and save_note gained note_visibility and a spoiler flag on
+  // 2026-08-16. The old four- and three-argument forms were dropped rather than
+  // left as overloads: PostgREST resolves an RPC by the argument names present in
+  // the body, and two candidates whose argument sets nest resolve ambiguously.
+  'log_watched(uuid,uuid,date,text,note_visibility,boolean)': ['authenticated'],
   'set_bucket(uuid,uuid,taste_bucket)': ['authenticated'],
   'unlog(uuid,uuid)': ['authenticated'],
   'set_watchlist(uuid,uuid,boolean)': ['authenticated'],
   'set_season_progress(uuid,uuid,season_progress)': ['authenticated'],
-  'save_note(uuid,uuid,text,timestamp with time zone)': ['authenticated'],
+  'save_note(uuid,uuid,text,timestamp with time zone,note_visibility,boolean)': ['authenticated'],
+
+  // Added 2026-08-16 with social notes. Both are definer reads, and both take a
+  // subject rather than a viewer, so neither can be pointed at someone else's
+  // perspective the way 20260813001900 describes. public_notes projects only the
+  // note columns, because the row it reads also carries the watch date, which PRD
+  // §22 keeps private at every visibility level. Not anon: the public web pages do
+  // not render notes yet, and a grant should follow a surface rather than precede it.
+  'public_notes(uuid[],uuid[],integer)': ['authenticated'],
+  'community_score(uuid)': ['authenticated'],
+
+  // Added 2026-08-16 with the Following score (20260816001100). A definer read taking
+  // a title rather than a viewer: the population is `auth.uid()`'s own approved
+  // followees, so it cannot be pointed at somebody else's perspective, which is
+  // 20260813001900's rule. Not anon — `auth.uid()` is the whole population filter, so
+  // an anon caller could only ever get the empty answer.
+  'following_score(uuid)': ['authenticated'],
+
+  // Added 2026-08-16 with reactions (PRD §14). The only writer for a table that has
+  // a select policy and, deliberately, no insert policy: a policy cannot express
+  // "and only on an event you are allowed to see", which is the check that stops a
+  // leaked event id becoming a way to put your name against a private account's
+  // activity.
+  'set_reaction(uuid,uuid,text)': ['authenticated'],
+
+  // Added 2026-08-17 with Comments V1 (20260817000100). Same shape as set_reaction
+  // and for the same reason: `comments` has a select policy and no insert policy,
+  // because a policy cannot express "and only on an event you are allowed to see".
+  //
+  // All three refuse with P0002 for a row that is missing *and* for one the caller
+  // may not touch, so a comment id or an event id learned from a screenshot or a
+  // crash report confirms nothing. `_assert_comment_length` is deliberately absent:
+  // nothing outside these three needs it.
+  'add_comment(uuid,uuid,text,boolean)': ['authenticated'],
+  'edit_comment(uuid,uuid,text,boolean)': ['authenticated'],
+  'delete_comment(uuid,uuid)': ['authenticated'],
+
+  // Added 2026-08-17 with the social graph writers (20260817000200). `follows` and
+  // `blocks` had read policies and no writers at all until this migration, so the
+  // whole visibility architecture rested on edges no user could create.
+  //
+  // `follow` is the one writer in this schema that deliberately does **not** gate on
+  // can_view_profile — a private account fails it by definition, and gating would make
+  // the pending state unreachable. `_assert_reachable` is its gate instead, and it is
+  // deliberately absent from this list: it answers "does this account exist, is it
+  // active, is there a block" about a named third party, which is exactly what
+  // 20260813001900 revoked can_view_profile for.
+  'follow(uuid,uuid)': ['authenticated'],
+  'unfollow(uuid,uuid)': ['authenticated'],
+  'respond_follow_request(uuid,uuid,boolean)': ['authenticated'],
+  'remove_follower(uuid,uuid)': ['authenticated'],
+  'block(uuid,uuid)': ['authenticated'],
+  'unblock(uuid,uuid)': ['authenticated'],
+
+  // security invoker, so it can only report what follows_read and blocks_read already
+  // admit — the caller's own edges. It cannot be pointed at a pair the caller is not
+  // part of, which is why a function that takes a list of user ids is safe here.
+  'follow_state_with(uuid[])': ['authenticated'],
+
+  // Added 2026-08-17 with user discovery (20260817000300). Definer, and takes no
+  // viewer: the perspective is always auth.uid()'s own. Not anon — there is no
+  // signed-out surface that lists people, and a grant should follow a surface rather
+  // than precede it, which is the rule public_notes set.
+  'search_users(text,integer)': ['authenticated'],
+  // 20260819000100. Identity-only, behind the discovery predicate. It cannot reach a
+  // private account's content: `can_view_profile` is untouched and still gates every
+  // content read in the schema.
+  //
+  // `can_discover_profile` is deliberately **absent** from this list. It was granted by
+  // 20260819000100 and revoked by 20260819000200: a definer helper that takes a viewer
+  // as an argument answers questions about other people, and given two ids known to be
+  // active a `false` means a block between them. 20260813001900 is the same finding
+  // about two other functions. Both callers are definer and need no grant.
+  'profile_identity(text)': ['authenticated'],
+
+  // Added 2026-08-17 with the social graph writers. Definer, and it must be: blocking
+  // makes the profile unreadable to the blocker as well, so naming the account
+  // requires reading past profiles_read. It takes no argument at all, which is the
+  // strongest form of 20260813001900's rule — there is nothing to point elsewhere.
+  'my_blocks()': ['authenticated'],
+
+  // Added 2026-08-17 with Taste Match (20260817000400). A definer read taking a
+  // subject rather than a viewer: one half of the pair is always auth.uid(). Every
+  // ranking it folds in belongs to an account rankings_read already lets the caller
+  // select individually, which is the same safety argument following_score records.
+  'taste_match(uuid)': ['authenticated'],
+
+  // Added 2026-08-17 with Settings (20260817000600). Every one of these is about the
+  // caller's own account and none takes a target, which is 20260813001900's rule in
+  // its strongest form: there is nothing to point at anybody else.
+  //
+  // `save_profile` and `set_profile_visibility` write columns `profiles` has no
+  // update policy for by design (20260813000200: writes go through definer functions),
+  // so definer is the mechanism rather than an escalation.
+  //
+  // `save_profile` replaced `update_profile` and `change_username` on 2026-08-17. One
+  // transaction, because a screen with two saves can leave the name written and the
+  // handle refused; the two it replaced are **dropped** rather than overloaded, since
+  // PostgREST resolves by argument name and nesting argument sets resolve ambiguously.
+  // It carries the 90-day redirect machinery's only entry point with it, and the
+  // cooldown fires only when the handle actually changes — a rename is a scarcity
+  // limit, not a rate limit, because every one retires a handle permanently.
+  //
+  // `my_notifications` is definer for the reason `my_blocks` is, and the reason is
+  // sharper here — a private account requesting to follow another private account
+  // fails can_view_profile, so an invoker query could not name the one person whose
+  // request the caller has to answer. The filter is `recipient_id = auth.uid()` and it
+  // is not a parameter.
+  //
+  // `delete_account` takes only a confirmation string. It deletes `auth.uid()` and
+  // there is no signature by which it could delete anybody else.
+  'save_profile(uuid,text,text,text)': ['authenticated'],
+  'set_profile_visibility(uuid,profile_visibility)': ['authenticated'],
+  'my_notifications(integer)': ['authenticated'],
+  'mark_notifications_read()': ['authenticated'],
+  'delete_account(text)': ['authenticated'],
+
+  // Added 2026-08-17 with friend recommendations (20260817001300).
+  //
+  // `recommend_title` names a recipient, which is the reason to look hard at it — and
+  // the reason it is safe is that it decides nothing from what the caller sends. The
+  // recipient must be a mutual follow, which is a fact about the caller's own edges,
+  // and every disqualifying case raises through `_assert_reachable` with one message.
+  //
+  // `recommendations_to_me` and `mark_recommendation_opened` take no recipient at all:
+  // both filter on `recipient_id = auth.uid()`, and the filter is not a parameter.
+  // `recommendations_to_me` is additionally `security invoker`, so it can return only
+  // rows `title_recommendations_read` already admits.
+  //
+  // `create_invite_link` returns the caller's own reusable personal link (PRD §17) and
+  // records that it was created. It exposes no count and no other account.
+  //
+  // `_is_mutual_follow` is deliberately absent, for the reason `_can_tag` is: it
+  // answers a question about somebody else's follow graph, which is what
+  // 20260813001900 exists to prevent.
+  'recommend_title(uuid,uuid,uuid)': ['authenticated'],
+  'recommendations_to_me(integer)': ['authenticated'],
+  'mark_recommendation_opened(uuid)': ['authenticated'],
+  'create_invite_link(uuid,uuid)': ['authenticated'],
+
+  // Added 2026-08-17 with Bingd Reviews (20260817000800). Definer, and it reuses
+  // `public_notes`' own visibility predicate rather than a second copy of it — getting
+  // that wrong is how a private account's writing leaks, and there is exactly one
+  // correct expression of it in this schema. Not anon, following the rule public_notes
+  // set: a grant follows a surface, and there is no signed-out title page.
+  'title_reviews(uuid,text,integer)': ['authenticated'],
+
+  // Added 2026-08-17. The first writer and the first reader for a table that has
+  // existed since 20260813000900 with nothing consulting it. Both are about the
+  // caller's own settings and neither takes a target.
+  //
+  // `_notifies` and `_apply_notification_preference` are deliberately absent. The first
+  // answers whether a *named third party* has muted you, which is exactly what
+  // 20260813001900 revoked can_view_profile for; the second is a trigger function and a
+  // client holding it could suppress anybody's inbox row.
+  // `set_notification_preferences` (plural) was added 2026-08-19 with the taxonomy.
+  // It is what a section master switch calls: one transaction over several
+  // categories, because five sequential single-category writes can end up half
+  // applied and leave a master switch disagreeing with its own children.
+  //
+  // `_notification_categories` and `_notification_default` join the internal side.
+  // Both are pure and disclose nothing about anybody, but the allow-list is the
+  // artefact that gets reviewed and an entry here should follow a surface -- no
+  // client calls either, so no client may.
+  'set_notification_preference(text,boolean)': ['authenticated'],
+  'set_notification_preferences(text[],boolean)': ['authenticated'],
+  'my_notification_preferences()': ['authenticated'],
+
+  // Added 2026-08-16 with watch tagging (PRD §14). `set_watch_tags` replaces the
+  // whole companion list for one of the caller's own watches; `hide_watch_tag` is
+  // the tagged person's side of it.
+  //
+  // Their helpers are deliberately absent. `_can_tag` answers "may I tag this
+  // person", which folds an approved follow in either direction together with a
+  // block — granting it would answer questions about somebody else's follow graph,
+  // which is what 20260813001900 exists to prevent. `_assert_operation_rate` would
+  // report how much another account has been doing today.
+  'set_watch_tags(uuid,uuid,uuid[])': ['authenticated'],
+  'hide_watch_tag(uuid,uuid)': ['authenticated'],
+
+  // Added 2026-08-15 with avatar upload. Writes only the caller's own
+  // profiles.avatar_path, and only to a path under the caller's own uuid
+  // folder, so the grant buys no reach over anybody else's row. Not anon: it
+  // needs an auth.uid() to validate the path against.
+  //
+  // storage_public_url is deliberately absent — the URL is composed on the
+  // client from the project it is already talking to, so no such function
+  // exists to grant.
+  'set_avatar(text)': ['authenticated'],
+
+  // Added 2026-08-16 with yearly watch goals. The only writer for a table that has
+  // a select policy and no write policies, for the usual reason: the clear path is
+  // a delete and the set path is an upsert, and expressing "and only your own, and
+  // only within the sane range" as three policies is three places to get it wrong.
+  // Not anon — a goal needs an auth.uid() to belong to.
+  'set_watch_goal(integer,ranking_category,integer)': ['authenticated'],
+
+  // Added 2026-08-19 with the invitation resolver (20260819000500).
+  //
+  // `record_invite_open` is **the only writer in this schema granted to anon**, and
+  // that grant is the thing to look hard at. The caller is the static page at
+  // bingd.app/i/<token>, which has no session and never will — so the alternative to
+  // an anon grant is not a safer grant, it is no open metric at all.
+  //
+  // Three properties make it safe to hold. It **returns void in every case**, so an
+  // unknown, revoked or cross-environment token gets the same answer as a live one and
+  // the function is not a token oracle. (The same *answer*: a live token counts and
+  // inserts, so a residual timing difference remains for anybody willing to measure one
+  // candidate repeatedly. Review 27's wording note — it is not enumeration against 32
+  // hex characters, and it is not a thing a return value can close.) It reaches one
+  // table, which has
+  // no select policy and is revoked from both client roles, so nothing written
+  // through it can be read back through it. And it is **capped per token per hour**,
+  // because an anonymous caller has no identity to rate-limit — past the ceiling the
+  // call still succeeds and simply stops writing.
+  //
+  // `redeem_invite` names no other account: the inviter is resolved from a token the
+  // caller already holds, never from a parameter naming a person. Blocks in either
+  // direction and a suspended inviter are refused, and the primary key on
+  // `invitee_id` is what stops a replay moving an attribution somebody else already
+  // holds. Not anon — an attribution needs an account to belong to, which is the
+  // whole of PRD §17's "the recipient must have an account".
+  //
+  // `_maybe_activate_invite` is deliberately absent, and for the reason `_notifies`
+  // is: it reads a third party's attribution and writes somebody else's inbox row. It
+  // is reached only from `_rank_finalize`, which no client may call either.
+  // `revoke_invite_link` takes no target at all and acts only on `owner_id =
+  // auth.uid()`, so the grant buys no reach over anybody else's row. It is the safety
+  // valve for a reusable, non-expiring link that has been pasted somewhere public, and
+  // it exists because 20260819000500 is what made such a link worth anything.
+  'record_invite_open(text,text)': ['anon', 'authenticated'],
+  'redeem_invite(uuid,text)': ['authenticated'],
+  'revoke_invite_link(uuid)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {

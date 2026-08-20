@@ -1,0 +1,992 @@
+import { fireEvent, screen, waitFor } from '@testing-library/react-native';
+
+import { renderWithProviders } from '@/test-utils/render';
+
+import { AwardsSheet } from './AwardsSheet';
+
+/**
+ * The sheet, against a stubbed database — what the founder's Android checklist looks at.
+ *
+ * The arithmetic lives in `awards.test.ts` and is not repeated here. What this file is
+ * for is the join: that the reads it issues are the ones the row copy claims to be
+ * about, that a row is titled by the tier it has reached, that a read which fails costs
+ * its own award rather than the whole sheet, and that **every** row opens into what it
+ * is made of.
+ */
+
+/**
+ * A PostgREST that applies what the reads say (`test-utils/postgrest.ts`).
+ *
+ * **The filters are honoured, and that is not decoration.** These reads page to
+ * exhaustion by keyset, so a stub that ignored `gt` and `limit` and handed back the
+ * whole seeded array every time would make the loop look like it worked while testing
+ * nothing — and would hide the opposite bug, a loop that never ends because every page
+ * looks full. `follows` is read twice, once per direction, and only a mock that applies
+ * `eq` can tell the two apart at all.
+ */
+jest.mock('@/lib/supabase', () => {
+  // Everything is inside the factory because `jest.mock` is hoisted above the imports
+  // *and* above this file's own `const`s — a table object declared out here would be
+  // captured as `undefined`.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createPostgrest } = require('@/test-utils/postgrest');
+  const client = createPostgrest();
+  (globalThis as { __pg?: unknown }).__pg = client;
+  return { supabase: { from: client.from }, startSessionRefresh: () => () => {} };
+});
+
+const pg = () =>
+  (globalThis as unknown as { __pg: import('@/test-utils/postgrest').Postgrest }).__pg;
+
+/** Rows per table, keyed by the table the query builder resolved to. */
+const mockTables = pg().tables;
+
+const OWNER = 'me';
+
+/**
+ * The columns each read filters on, stamped onto whatever a test seeds.
+ *
+ * They are here rather than in every literal because they are not what any test is
+ * about — but they cannot be *skipped*, because a stand-in that ignored `eq(user_id)`
+ * would answer a scoped read and an unscoped one identically, which is the shape of
+ * half the defects this suite exists for. Seeded rows spell out only what their test
+ * cares about; this makes them rows the shipped query would actually match.
+ */
+const SCOPE: Record<string, (row: Record<string, unknown>, index: number) => unknown> = {
+  user_media: (row) => ({ user_id: OWNER, ...row }),
+  rankings: (row) => ({ user_id: OWNER, ...row }),
+  watchlist: (row, i) => ({
+    user_id: OWNER,
+    created_at: `2026-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+    ...row,
+  }),
+  invite_attributions: (row) => ({ inviter_id: OWNER, activated_at: null, ...row }),
+  comments: (row) => ({ author_id: OWNER, ...row }),
+  title_recommendations: (row) => ({ sender_id: OWNER, ...row }),
+  // A reaction is keyed by the pair, and two reactions on one event come from two
+  // people — which is also what keeps the composite cursor's keys distinct.
+  reactions: (row, i) => ({
+    user_id: `reactor-${i}`,
+    ...row,
+    feed_events: { actor_id: OWNER, ...((row.feed_events as object) ?? {}) },
+  }),
+  follows: (row) => ({ state: 'approved', ...row }),
+};
+
+const seed = (table: string, rows: unknown[]) => {
+  const stamp = SCOPE[table] ?? ((row: unknown) => row);
+  mockTables[table] = rows.map((row, i) => stamp(row as Record<string, unknown>, i));
+};
+/** Reads that fail. */
+const mockBroken = () => pg().broken;
+/** Every table this render actually asked for, so a read can be asserted by name. */
+const mockAsked = () => pg().reads.map((read) => read.table);
+/** How many requests each table was asked for, so paging can be asserted. */
+const mockRequests = () => pg().requests;
+
+const media = (over: Record<string, unknown> = {}) => ({
+  kind: 'movie',
+  title: 'A Film',
+  season_number: null,
+  poster_path: null,
+  release_date: '2020-01-01',
+  genres: [],
+  original_language: 'en',
+  parent: null,
+  ...over,
+});
+
+const watched = (id: string, over: Record<string, unknown> = {}) => ({
+  media_item_id: id,
+  watched_on: null,
+  note: null,
+  note_visibility: null,
+  media_items: media(over),
+});
+
+/**
+ * `n` films. The ids are zero-padded because the read is ordered by them.
+ *
+ * `m10` sorts before `m2`, so unpadded ids would put Film 10 ahead of Film 2 in every
+ * breakdown and make the pagination assertions below about nothing in particular. Real
+ * ids are UUIDs, whose text order is their byte order; padding is how a readable id
+ * behaves the same way.
+ */
+const movies = (n: number, over: Record<string, unknown> = {}) =>
+  Array.from({ length: n }, (_, i) =>
+    watched(`m${String(i).padStart(4, '0')}`, { title: `Film ${i}`, ...over }),
+  );
+
+const profile = (username: string, name = username) => ({
+  id: `id-${username}`,
+  username,
+  display_name: name,
+  avatar_path: null,
+});
+
+beforeEach(() => {
+  for (const key of Object.keys(mockTables)) delete mockTables[key];
+  for (const key of Object.keys(pg().requests)) delete pg().requests[key];
+  pg().reads.length = 0;
+  pg().broken.clear();
+  pg().between = () => {};
+});
+
+/**
+ * The count on the right of a row.
+ *
+ * `includeHiddenElements` because the row hides it from the accessibility tree on
+ * purpose — the whole row is one announcement, and a second reading of "84 / 200" as
+ * "eighty-four slash two hundred" helps nobody.
+ */
+const count = (text: string) => screen.getByText(text, { includeHiddenElements: true });
+
+const open = async (props: Partial<React.ComponentProps<typeof AwardsSheet>> = {}) => {
+  const view = await renderWithProviders(
+    <AwardsSheet userId="me" onClose={() => {}} {...props} />,
+  );
+  await waitFor(() => expect(screen.getByText('Movie Muncher')).toBeTruthy());
+  return view;
+};
+
+/** Opens one award's breakdown. Rows are found by the name they are titled with. */
+const drillInto = async (rowTitle: string) => {
+  fireEvent.press(screen.getByLabelText(new RegExp(`^${rowTitle}\\.`)));
+  await waitFor(() => expect(screen.getByText('Close')).toBeTruthy());
+};
+
+describe('the sheet', () => {
+  it('lists all twenty tracks whether or not anything is earned', async () => {
+    await open();
+    for (const name of ['Movie Muncher', 'Passport Mode', 'Mutual Mania', 'Two-Screen Life']) {
+      expect(screen.getByText(name)).toBeTruthy();
+    }
+  });
+
+  it('opens with its own name and no scoreline above the rows', async () => {
+    seed('user_media', movies(60));
+    await open();
+    expect(screen.getByText('Bingd Awards')).toBeTruthy();
+    expect(screen.queryByText(/awards earned/)).toBeNull();
+  });
+
+  it('shows the goal still to reach, with the count beside it', async () => {
+    seed('user_media', movies(7));
+    await open();
+    expect(screen.getByText('Next: Watch 50 movies')).toBeTruthy();
+    expect(count('7 / 50')).toBeTruthy();
+  });
+
+  it('loses one award to a failed read rather than the whole sheet, and says which', async () => {
+    seed('user_media', movies(60));
+    mockBroken().add('follows');
+    await open();
+
+    expect(screen.getByLabelText('Mutual Mania. Could not load this one')).toBeTruthy();
+    expect(count('—')).toBeTruthy();
+    // Nineteen still loaded.
+    expect(screen.getByLabelText(/^Movie Muncher\. Bronze earned/)).toBeTruthy();
+  });
+
+  /**
+   * A collection that cannot be read costs the awards made of it, and no others.
+   *
+   * It used to reject the whole sheet, on the reasoning that thirteen tracks are
+   * meaningless without the collection. Thirteen are — and seven are not, so refusing
+   * those seven was the same wrong answer in the other direction. Review 21b's nit, and
+   * it matters most in exactly the case the ceiling was built for: a collection too
+   * large to read is no reason to withhold Mutual Mania.
+   */
+  it('costs the awards made of the collection, and keeps the ones that are not', async () => {
+    mockBroken().add('user_media');
+    seed('follows', [
+      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
+      { follower_id: 'id-ada', followee_id: 'me', follower: profile('ada', 'Ada'), followee: profile('me') },
+    ]);
+    await open();
+
+    expect(screen.getByLabelText('Movie Muncher. Could not load this one')).toBeTruthy();
+    expect(screen.queryByText('Could not load your awards')).toBeNull();
+    // Mutual Mania has nothing to do with the collection and still knows its number.
+    expect(count('1 / 5')).toBeTruthy();
+  });
+
+  it('still gives up on the whole sheet when nothing at all can be read', async () => {
+    // Per-field degradation is right for one failed read and wrong for a device with no
+    // signal: twenty rows of dashes is a worse sentence than one that says so and offers
+    // Try again.
+    for (const table of [
+      'user_media',
+      'rankings',
+      'watchlist',
+      'invite_attributions',
+      'comments',
+      'title_recommendations',
+      'reactions',
+      'follows',
+    ]) {
+      mockBroken().add(table);
+    }
+
+    await renderWithProviders(<AwardsSheet userId="me" onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('Could not load your awards')).toBeTruthy());
+  });
+
+  it('takes the written count with the collection, since public notes live on it', async () => {
+    // Comment Gremlin counts comments *and* public notes, and the notes are rows on
+    // `user_media`. Falling back to the comments alone would be a confident undercount,
+    // which is the failure the whole unavailable state exists to prevent.
+    mockBroken().add('user_media');
+    seed('comments', [
+      {
+        id: 'c1',
+        created_at: '2026-01-02T00:00:00Z',
+        feed_event_id: 'e1',
+        feed_events: { media_item_id: 'b', media_items: media({ title: 'Heat' }) },
+      },
+    ]);
+    await open();
+
+    expect(screen.getByLabelText('Comment Gremlin. Could not load this one')).toBeTruthy();
+  });
+});
+
+/**
+ * **The row is titled by the tier it has reached, and that is the reward.**
+ *
+ * It used to keep the family name and add a third line reading "Dabbler earned", which
+ * stated the achievement and celebrated it nowhere.
+ */
+describe('what a row is called', () => {
+  /** One film per genre, which is the cheapest way to move Genre Gremlin. */
+  const genres = (names: string[]) =>
+    names.map((genre, i) => watched(`g${i}`, { title: `Film ${i}`, genres: [genre] }));
+
+  const EIGHT = [
+    'Action',
+    'Adventure',
+    'Animation',
+    'Comedy',
+    'Crime',
+    'Drama',
+    'Family',
+    'Fantasy',
+  ];
+  const FOURTEEN = [...EIGHT, 'History', 'Horror', 'Music', 'Mystery', 'Romance', 'Thriller'];
+
+  it('shows the family name and the requirement while locked', async () => {
+    seed('user_media', genres(EIGHT.slice(0, 6)));
+    await open();
+    expect(screen.getByText('Genre Gremlin')).toBeTruthy();
+    expect(screen.getByText('Next: Watch 8 different genres')).toBeTruthy();
+    expect(count('6 / 8')).toBeTruthy();
+    // The reward is not spent early: the tier's name is nowhere on the sheet.
+    expect(screen.queryByText('Dabbler')).toBeNull();
+  });
+
+  it('becomes the tier name once it is earned, with no separate earned line', async () => {
+    seed('user_media', genres(EIGHT));
+    await open();
+    expect(screen.getByText('Dabbler')).toBeTruthy();
+    expect(screen.getByText('Next: Watch 14 different genres')).toBeTruthy();
+    // Both the old line and the next tier's name are absent.
+    expect(screen.queryByText('Dabbler earned')).toBeNull();
+    expect(screen.queryByText('Mixer')).toBeNull();
+  });
+
+  it('advances to the second tier name', async () => {
+    seed('user_media', genres(FOURTEEN));
+    await open();
+    expect(screen.getByText('Mixer')).toBeTruthy();
+    expect(screen.queryByText('Genre Gremlin')).toBeNull();
+    expect(screen.queryByText('Chaos Collector')).toBeNull();
+  });
+
+  it('keeps the family name on a generic Bronze/Silver/Gold track', async () => {
+    seed('user_media', movies(60));
+    await open();
+    // Earned at Bronze and still called Movie Muncher. A row headed "Bronze" would say
+    // nothing about what was done.
+    expect(screen.getByText('Movie Muncher')).toBeTruthy();
+    expect(screen.queryByText('Bronze')).toBeNull();
+    // The tier is still announced, so a screen reader is told what a sighted reader
+    // sees in the art and the dots.
+    expect(screen.getByLabelText(/^Movie Muncher\. Bronze earned/)).toBeTruthy();
+  });
+
+  it('says a locked track is locked without naming what it would become', async () => {
+    await open();
+    expect(screen.getByLabelText(/^Season Snacker\. Bronze locked/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Genre Gremlin\. Dabbler locked/)).toBeTruthy();
+  });
+});
+
+/**
+ * Every row opens. The founder's principle: a number the reader is shown is a number
+ * they are entitled to check.
+ */
+describe('every award is explainable', () => {
+  it('makes all twenty rows tappable', async () => {
+    seed('user_media', movies(3));
+    await open({ onPressTitle: () => {} });
+    const awardRows = screen
+      .getAllByRole('button')
+      .filter((node) => /\. (Next:|[A-Z][a-z]+ (earned|locked))/.test(String(node.props.accessibilityLabel ?? '')));
+    expect(awardRows).toHaveLength(20);
+  });
+
+  it('opens even where there is no navigation to offer', async () => {
+    // The breakdown is worth showing on its own; only the links inside it need a route.
+    seed('user_media', movies(3));
+    await open();
+    await drillInto('Movie Muncher');
+    expect(screen.getByText(/3 \/ 50/)).toBeTruthy();
+  });
+
+  it('leaves a row whose number could not be read unpressable', async () => {
+    mockBroken().add('follows');
+    await open({ onPressTitle: () => {} });
+    expect(
+      screen.getByLabelText('Mutual Mania. Could not load this one').props.accessibilityRole,
+    ).toBe('text');
+  });
+});
+
+/**
+ * A big collection must not be a big render.
+ *
+ * The founder's stated worst case is 1,000 movies and 500 ranked titles, and Movie
+ * Muncher's gold tier is exactly 1,000 — so the sheet's ceiling and the collection's are
+ * the same number. A `ScrollView` mounts every child it is handed, `maxHeight` bounds only
+ * the viewport, and each title row carries a poster: before the cap, opening that award
+ * mounted a thousand rows and started a thousand image requests in one frame.
+ *
+ * These tests are about the *mount*, which is why they count rendered rows rather than
+ * asserting a number in the header. The header's number is the award's own and is proved
+ * elsewhere — and the point of the cap is precisely that the two are allowed to differ,
+ * as long as the sheet says so.
+ */
+/**
+ * A count past the page size is still the whole count.
+ *
+ * PostgREST caps an unbounded select at 1,000 rows on this project — measured, not
+ * assumed: `media_items` holds 2,835 and a select with no range returns exactly 1,000,
+ * with the only evidence in a `Content-Range` header supabase-js throws away. Silent, so
+ * the award simply reports a smaller number than the truth.
+ *
+ * It lands worst on the one track where the numbers coincide: **Movie Muncher's gold tier
+ * is 1,000 movies.** A reader with 1,000 films and any television at all has more than
+ * 1,000 rows in `user_media`, so before this fix the read came back short and the badge
+ * they had earned could not be unlocked, for a reason nothing on screen could explain.
+ */
+describe('a collection past the page size', () => {
+  it('counts every title rather than the first page of them', async () => {
+    // 1,200 films: past the 1,000-row cap, and past Movie Muncher's gold tier.
+    seed('user_media', movies(1200));
+    await open();
+
+    // Every tier earned, so the label is the bare total rather than a fraction.
+    expect(count('1,200')).toBeTruthy();
+    // Two requests, not one: the first page came back full, so there had to be a second.
+    expect(mockRequests().user_media).toBe(2);
+  });
+
+  it('asks once more when the total lands exactly on a page boundary', async () => {
+    seed('user_media', movies(1000));
+    await open();
+
+    expect(count('1,000')).toBeTruthy();
+    // A full page cannot be known to be the last one, so the empty page is the price of
+    // not guessing — and 1,000 is precisely the total a gold Movie Muncher has.
+    expect(mockRequests().user_media).toBe(2);
+  });
+
+  it('makes one request when the first page is short', async () => {
+    seed('user_media', movies(30));
+    await open();
+    expect(mockRequests().user_media).toBe(1);
+  });
+
+  it('refuses rather than reporting a partial count past the ceiling', async () => {
+    // Twelve full pages and no thirteenth request to prove exhaustion. A truncated array
+    // here would be a confident wrong number; the dash is the honest one.
+    seed('user_media', movies(12_001));
+    await open();
+
+    expect(screen.getByLabelText('Movie Muncher. Could not load this one')).toBeTruthy();
+  }, 30_000);
+});
+
+/**
+ * **The number stays right while somebody else is writing.**
+ *
+ * Independent review 21b: `.range()` paging is not snapshot-consistent, because every
+ * page is its own request and its own `READ COMMITTED` transaction. A title logged on
+ * another device between two pages shifts the offsets underneath the read — the boundary
+ * row arrives twice and one row is never seen — and the total still looks plausible.
+ * Codex's sequence is 999 films assembling to 1,000 and unlocking Movie Muncher Gold on
+ * an account that has not earned it.
+ *
+ * The mechanics of that are proved in `lib/read-all.test.ts`, against both strategies.
+ * What these two are for is that the *shipped queries* carry the cursor — that the
+ * predicate reaches PostgREST rather than living in a helper nothing calls.
+ */
+describe('while another device is writing', () => {
+  it('does not count a film twice when one is logged between two pages', async () => {
+    seed('user_media', movies(1500));
+    pg().between = (table, requests, tables) => {
+      if (table !== 'user_media' || requests !== 1) return;
+      // Sorts before page one's boundary — the position that breaks offset paging.
+      (tables.user_media as unknown[]).push({
+        user_id: OWNER,
+        media_item_id: 'm0000-a',
+        watched_on: null,
+        note: null,
+        note_visibility: null,
+        media_items: media({ title: 'Logged on the tablet' }),
+      });
+    };
+
+    await open();
+
+    // 1,500, not 1,501. The row that landed behind the cursor is outside this read
+    // rather than duplicated into it, and nothing arrives twice.
+    expect(count('1,500')).toBeTruthy();
+  }, 30_000);
+
+  it('pages every read on a cursor rather than an offset', async () => {
+    seed('user_media', movies(1500));
+    await open();
+
+    const paged = pg().reads.filter((read) => read.table === 'user_media');
+    expect(paged[0]!.gt).toEqual([]);
+    expect(paged[1]!.gt).toEqual([['media_item_id', 'm0999']]);
+    // No offsets anywhere on the sheet: `range` is what shifts under a concurrent write.
+    expect(pg().reads.every((read) => !('range' in read))).toBe(true);
+  }, 30_000);
+});
+
+/**
+ * The two reads whose keys are pairs, and what each of them does about it.
+ *
+ * `follows` splits into one request per direction, which makes the other half of the pair
+ * unique and the cursor a single column. `reactions` has no direction to split on, so it
+ * is the one composite cursor in the app.
+ */
+describe('a key that is a pair', () => {
+  /**
+   * **One request, both directions.**
+   *
+   * This was briefly two requests, one per direction, which makes each cursor a single
+   * column and is the obvious thing to do. Independent review 21c killed it: an
+   * intersection taken from two snapshots can report a pair that never coexisted — read
+   * `me → A`, have it deleted, have `A → me` approved, read the other direction — and
+   * Mutual Mania is a present-tense claim about a pair.
+   */
+  it('reads follows in one request, with both directions and both privacy markers', async () => {
+    seed('follows', [
+      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
+      { follower_id: 'id-ada', followee_id: 'me', follower: profile('ada', 'Ada'), followee: profile('me') },
+    ]);
+    await open();
+
+    const reads = pg().reads.filter((read) => read.table === 'follows');
+    expect(reads).toHaveLength(1);
+    expect(reads[0]!.filters).toEqual({ state: 'approved' });
+    expect(reads[0]!.or).toBe('follower_id.eq.me,followee_id.eq.me');
+    expect((reads[0]!.columns.match(/!inner/g) ?? []).length).toBe(2);
+    expect(count('1 / 5')).toBeTruthy();
+  });
+
+  it('cannot report a mutual whose two edges never existed at once', async () => {
+    // The sequence review 21c named, run against the stand-in. With one request there is
+    // no window between the directions for it to happen in — the write below lands after
+    // the only page has been served, so it cannot reach the intersection at all.
+    seed('follows', [
+      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
+    ]);
+    pg().between = (table, requests, tables) => {
+      if (table !== 'follows' || requests !== 1) return;
+      tables.follows = [
+        {
+          state: 'approved',
+          follower_id: 'id-ada',
+          followee_id: 'me',
+          follower: profile('ada', 'Ada'),
+          followee: profile('me'),
+        },
+      ];
+    };
+
+    await open();
+
+    // Ada follows back only after the read; `me → Ada` was already gone by then. Neither
+    // state was ever a mutual, and the sheet does not invent one.
+    expect(count('0 / 5')).toBeTruthy();
+  });
+
+  /**
+   * **Past one page, the number is refused rather than stated.**
+   *
+   * One request is one `READ COMMITTED` transaction and therefore one snapshot. Two are
+   * not: page one can hold `me → A`, that edge can be deleted, `A → me` can be approved,
+   * and page two holds the reverse — so the assembled arrays name a mutual that existed
+   * at no instant. A count survives being read across pages; an intersection invents a
+   * member.
+   *
+   * Review 21c rejected the two-request version of this and I fixed only the version I
+   * had written; 21d pointed out that the multi-page case is the same defect with a
+   * higher threshold, and that "every real account is under a thousand edges" is not an
+   * invariant anything enforces.
+   */
+  it('pages the pair, and refuses to state a mutual count taken from two snapshots', async () => {
+    seed(
+      'follows',
+      Array.from({ length: 1200 }, (_, i) => ({
+        follower_id: 'me',
+        followee_id: `id-${String(i).padStart(5, '0')}`,
+        follower: profile('me'),
+        followee: profile(`u${i}`),
+      })),
+    );
+    await open();
+
+    const reads = pg().reads.filter((read) => read.table === 'follows');
+    expect(reads).toHaveLength(2);
+    // The cursor and the direction filter share one `or=`, which is what keeps every page
+    // a single request.
+    expect(reads[1]!.or).toMatch(
+      /^and\(follower_id\.gt\..+,or\(follower_id\.eq\.me,followee_id\.eq\.me\)\),and\(follower_id\.eq\..+,followee_id\.gt\..+,or\(.+\)\)$/,
+    );
+    // A dash, not a zero and not a number: the read was complete but not atomic.
+    expect(screen.getByLabelText('Mutual Mania. Could not load this one')).toBeTruthy();
+  }, 30_000);
+
+  it('states the count at exactly one full page, which takes two requests', async () => {
+    // Review 21e's first finding, and the sharpest possible landing: a full page is always
+    // followed by an exhaustion probe, so 1,000 edges is two requests and one snapshot.
+    // Counting requests rather than pages-with-rows put "could not load this one" on an
+    // account that was read perfectly.
+    seed(
+      'follows',
+      Array.from({ length: 1000 }, (_, i) => ({
+        follower_id: 'me',
+        followee_id: `id-${String(i).padStart(5, '0')}`,
+        follower: profile('me'),
+        followee: profile(`u${i}`),
+      })),
+    );
+    await open();
+
+    expect(pg().requests.follows).toBe(2);
+    // One-way follows, so the honest answer is zero — a number, not a dash.
+    expect(count('0 / 5')).toBeTruthy();
+    expect(screen.queryByLabelText('Mutual Mania. Could not load this one')).toBeNull();
+  }, 30_000);
+
+  it('states the count when one request was enough, which is every real account', async () => {
+    seed('follows', [
+      { follower_id: 'me', followee_id: 'id-ada', follower: profile('me'), followee: profile('ada', 'Ada') },
+      { follower_id: 'id-ada', followee_id: 'me', follower: profile('ada', 'Ada'), followee: profile('me') },
+    ]);
+    await open();
+
+    expect(pg().requests.follows).toBe(1);
+    expect(count('1 / 5')).toBeTruthy();
+  });
+
+  it('counts every reaction on an event that straddles a page boundary', async () => {
+    // 1,002 events × 2 reactions is 2,004 rows, so both boundaries fall inside a group.
+    // A cursor on `feed_event_id` alone would skip the rest of the boundary event, which
+    // is a silent undercount of Heart Magnet — the exact shape of the defect.
+    seed(
+      'reactions',
+      Array.from({ length: 1002 }, (_, e) =>
+        Array.from({ length: 2 }, () => ({
+          feed_event_id: `e${String(e).padStart(5, '0')}`,
+          feed_events: {
+            media_item_id: `t${String(e).padStart(5, '0')}`,
+            media_items: media({ title: `Title ${e}` }),
+          },
+        })),
+      ).flat(),
+    );
+    await open();
+
+    expect(count('2,004')).toBeTruthy();
+    expect(mockRequests().reactions).toBe(3);
+    // The cursor is the pair, spelled the way PostgREST spells a tuple comparison.
+    const second = pg().reads.filter((read) => read.table === 'reactions')[1]!;
+    expect(second.or).toMatch(/^feed_event_id\.gt\..+,and\(feed_event_id\.eq\..+,user_id\.gt\..+\)$/);
+  }, 30_000);
+});
+
+describe('a long breakdown is revealed in pages', () => {
+  /**
+   * A title row, by the label the row announces itself with.
+   *
+   * Not `getByText`: `TitleRow` draws the year inside the same `Text` as the title, so
+   * "Film 0" renders as "Film 0 (2020)" and an anchored text match silently finds
+   * nothing. The accessibility label is the exact string and is what a screen reader
+   * would read out, which makes it the better assertion anyway.
+   */
+  const film = (n: number) => screen.queryByLabelText(`Film ${n}, 2020`);
+
+  /**
+   * Presses a `Button` by its role.
+   *
+   * `Button` wraps its label in a `View` with `pointerEvents="none"`, so pressing the
+   * text node does nothing at all — the press is swallowed and the test goes on to
+   * assert against a sheet that never changed. Found the hard way: the first version of
+   * these tests pressed the text and failed three assertions downstream for a reason
+   * that looked like a pagination bug.
+   */
+  const press = (name: string) => fireEvent.press(screen.getByRole('button', { name }));
+
+  it('mounts a page of rows rather than the whole collection', async () => {
+    seed('user_media', movies(400));
+    await open({ onPressTitle: () => {} });
+    await drillInto('Movie Muncher');
+
+    // Film 0..49 are mounted; Film 50 onward is not, which is the whole point: the
+    // ScrollView would otherwise hold four hundred rows and four hundred posters.
+    expect(film(0)).toBeTruthy();
+    expect(film(49)).toBeTruthy();
+    expect(film(50)).toBeNull();
+    expect(film(399)).toBeNull();
+  });
+
+  it('says how many of how many, rather than hiding behind "more"', async () => {
+    seed('user_media', movies(400));
+    await open({ onPressTitle: () => {} });
+    await drillInto('Movie Muncher');
+
+    // The count above is 400; the list shows 50. A reader who counts the rows to check
+    // the badge is owed the reason they do not match.
+    expect(screen.getByText('Showing 50 of 400')).toBeTruthy();
+  });
+
+  it('reveals the next page on request, and stops offering when there are none', async () => {
+    seed('user_media', movies(120));
+    await open({ onPressTitle: () => {} });
+    await drillInto('Movie Muncher');
+
+    press('Show 50 more');
+    await waitFor(() => expect(film(99)).toBeTruthy());
+    expect(screen.getByText('Showing 100 of 120')).toBeTruthy();
+
+    // The last page is short, and the control says so rather than over-promising.
+    press('Show 20 more');
+    await waitFor(() => expect(film(119)).toBeTruthy());
+    expect(screen.queryByText(/^Showing /)).toBeNull();
+    expect(screen.queryByText(/^Show \d+ more$/)).toBeNull();
+  });
+
+  it('offers nothing to expand when the whole breakdown already fits', async () => {
+    seed('user_media', movies(12));
+    await open({ onPressTitle: () => {} });
+    await drillInto('Movie Muncher');
+
+    expect(film(11)).toBeTruthy();
+    expect(screen.queryByText(/^Showing /)).toBeNull();
+    expect(screen.queryByText(/^Show \d+ more$/)).toBeNull();
+  });
+
+  it('starts a freshly opened award at the first page rather than the last one expanded', async () => {
+    seed('user_media', movies(400));
+    await open({ onPressTitle: () => {} });
+
+    await drillInto('Movie Muncher');
+    press('Show 50 more');
+    await waitFor(() => expect(screen.getByText('Showing 100 of 400')).toBeTruthy());
+    press('Close');
+
+    await waitFor(() => expect(screen.queryByText(/^Showing /)).toBeNull());
+    await drillInto('Movie Muncher');
+    expect(screen.getByText('Showing 50 of 400')).toBeTruthy();
+  });
+});
+
+describe('the breakdowns', () => {
+  it('Movie Muncher lists the films, with the date where there is one', async () => {
+    seed('user_media', [
+      watched('a', { title: 'Ringu', release_date: '1998-01-31' }),
+      { ...watched('b', { title: 'Airplane!' }), watched_on: '2026-02-03' },
+    ]);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Movie Muncher');
+
+    expect(screen.getByText(/Ringu/)).toBeTruthy();
+    expect(screen.getByText(/Airplane!/)).toBeTruthy();
+    expect(screen.getByText(/^Watched /)).toBeTruthy();
+  });
+
+  it('Season Snacker names a season by its show', async () => {
+    seed('user_media', [
+      watched('s1', {
+        kind: 'season',
+        title: 'Season 1',
+        season_number: 1,
+        release_date: '2023-01-15',
+        parent: { title: 'The Last of Us', genres: ['Drama'], original_language: 'en' },
+      }),
+    ]);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Season Snacker');
+    expect(screen.getByText(/The Last of Us, S1/)).toBeTruthy();
+  });
+
+  it('a genre award includes a TV season through its series genres', async () => {
+    // The whole point of the metadata inheritance: the season carries no genres of its
+    // own, and Softie Hours counts it because the show is a drama.
+    seed('user_media', [
+      watched('s1', {
+        kind: 'season',
+        title: 'Season 1',
+        season_number: 1,
+        parent: { title: 'The Last of Us', genres: ['Drama'], original_language: 'en' },
+      }),
+    ]);
+    await open({ onPressTitle: () => {} });
+    expect(count('1 / 25')).toBeTruthy();
+    await drillInto('Softie Hours');
+    expect(screen.getByText(/The Last of Us, S1/)).toBeTruthy();
+  });
+
+  it('Passport Mode names the language rather than printing its code', async () => {
+    seed('user_media', [watched('a', { title: 'Ringu', original_language: 'ja' })]);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Passport Mode');
+    expect(screen.getByText('Japanese')).toBeTruthy();
+  });
+
+  it('Genre Gremlin lists genres, not titles, and the rows are the numerator', async () => {
+    seed('user_media', [
+      watched('a', { genres: ['Action'] }),
+      watched('b', { genres: ['Action'] }),
+      watched('c', { genres: ['Comedy'] }),
+    ]);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Genre Gremlin');
+
+    expect(screen.getByText('Action')).toBeTruthy();
+    expect(screen.getByText('2 titles')).toBeTruthy();
+    expect(screen.getByText('Comedy')).toBeTruthy();
+    // Two genre rows against a numerator of two.
+    expect(screen.getByText(/2 \/ 8/)).toBeTruthy();
+  });
+
+  it('Two-Screen Life shows both sides with their own caps', async () => {
+    seed('user_media', [
+      ...movies(3),
+      ...Array.from({ length: 2 }, (_, i) =>
+        watched(`s${i}`, {
+          kind: 'season',
+          title: `Season ${i + 1}`,
+          season_number: i + 1,
+          parent: { title: 'A Show', genres: [], original_language: 'en' },
+        }),
+      ),
+    ]);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Two-Screen Life');
+
+    expect(screen.getByText('Movies')).toBeTruthy();
+    expect(screen.getByText('3 / 15')).toBeTruthy();
+    expect(screen.getByText('TV seasons')).toBeTruthy();
+    expect(screen.getByText('2 / 15')).toBeTruthy();
+    // And the award's own line, which is the sum.
+    expect(screen.getByText(/5 \/ 30/)).toBeTruthy();
+  });
+
+  it('Rating Rascal shows the score the reader gave', async () => {
+    seed('user_media', movies(1));
+    seed('rankings', [
+      {
+        media_item_id: 'm0',
+        bucket: 'loved',
+        position: 1,
+        category: 'movies',
+        media_items: media({ title: 'Heat' }),
+      },
+    ]);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Rating Rascal');
+    expect(screen.getByText(/Heat/)).toBeTruthy();
+    // A single loved title sits at the top of its band.
+    expect(screen.getByText('10.0')).toBeTruthy();
+  });
+
+  it('Queue Dragon lists the watchlist being held now', async () => {
+    seed('watchlist', [{ media_item_id: 'w1', media_items: media({ title: 'Dune' }) }]);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Queue Dragon');
+    expect(screen.getByText(/Dune/)).toBeTruthy();
+  });
+
+  it('Comment Gremlin distinguishes a comment from a public note', async () => {
+    seed('user_media', [
+      {
+        ...watched('a', { title: 'Arrival' }),
+        note: 'Loved the structure.',
+        note_visibility: 'public',
+      },
+    ]);
+    seed('comments', [
+      {
+        id: 'c1',
+        created_at: '2026-01-02T00:00:00Z',
+        feed_event_id: 'e1',
+        feed_events: { media_item_id: 'b', media_items: media({ title: 'Heat' }) },
+      },
+    ]);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Comment Gremlin');
+
+    expect(screen.getByText('Public note')).toBeTruthy();
+    expect(screen.getByText(/^Comment · /)).toBeTruthy();
+    // Never the writing itself.
+    expect(screen.queryByText(/Loved the structure/)).toBeNull();
+  });
+
+  it('Hype Courier names the title and who it went to', async () => {
+    seed('title_recommendations', [
+      {
+        id: 'r1',
+        recommended_at: '2026-01-02T00:00:00Z',
+        recipient_id: 'id-ada',
+        media_items: media({ title: 'Heat' }),
+        recipient: profile('ada', 'Ada'),
+      },
+    ]);
+    await open({ onPressTitle: () => {} });
+    await drillInto('Hype Courier');
+    expect(screen.getByText(/Heat/)).toBeTruthy();
+    expect(screen.getByText(/To Ada/)).toBeTruthy();
+  });
+
+  it('Heart Magnet counts reactions per item, and the rows sum to the number', async () => {
+    seed('reactions', [
+      {
+        feed_event_id: 'e1',
+        feed_events: { media_item_id: 'a', media_items: media({ title: 'Heat' }) },
+      },
+      {
+        feed_event_id: 'e1',
+        feed_events: { media_item_id: 'a', media_items: media({ title: 'Heat' }) },
+      },
+      {
+        feed_event_id: 'e2',
+        feed_events: { media_item_id: 'b', media_items: media({ title: 'Arrival' }) },
+      },
+    ]);
+    await open({ onPressTitle: () => {} });
+    expect(count('3 / 50')).toBeTruthy();
+    await drillInto('Heart Magnet');
+
+    expect(screen.getByText('2 reactions')).toBeTruthy();
+    expect(screen.getByText('1 reaction')).toBeTruthy();
+    // Who reacted is nowhere on the sheet.
+    expect(screen.queryByText(/@/)).toBeNull();
+  });
+
+  it('Mutual Mania lists the people who follow back', async () => {
+    seed('follows', [
+      {
+        follower_id: 'me',
+        followee_id: 'id-ada',
+        follower: profile('me'),
+        followee: profile('ada', 'Ada'),
+      },
+      {
+        follower_id: 'id-ada',
+        followee_id: 'me',
+        follower: profile('ada', 'Ada'),
+        followee: profile('me'),
+      },
+      // One direction only: not a mutual, and not in the list.
+      {
+        follower_id: 'id-bo',
+        followee_id: 'me',
+        follower: profile('bo', 'Bo'),
+        followee: profile('me'),
+      },
+    ]);
+    await open({ onPressTitle: () => {} });
+    expect(count('1 / 5')).toBeTruthy();
+    await drillInto('Mutual Mania');
+
+    expect(screen.getByText('Ada')).toBeTruthy();
+    expect(screen.getByText('@ada')).toBeTruthy();
+    expect(screen.queryByText('Bo')).toBeNull();
+  });
+
+  it('Invite Instigator is tappable and truthfully empty', async () => {
+    await open({ onPressTitle: () => {} });
+    await drillInto('Invite Instigator');
+    expect(screen.getByText('No activated invites yet.')).toBeTruthy();
+  });
+
+  it('leads to a title', async () => {
+    const onPressTitle = jest.fn();
+    seed('user_media', [watched('a', { title: 'Ringu' })]);
+
+    await open({ onPressTitle });
+    await drillInto('Movie Muncher');
+    fireEvent.press(screen.getByText(/Ringu/));
+
+    expect(onPressTitle).toHaveBeenCalledWith('a');
+  });
+
+  it('leads to a profile', async () => {
+    const onPressProfile = jest.fn();
+    seed('follows', [
+      {
+        follower_id: 'me',
+        followee_id: 'id-ada',
+        follower: profile('me'),
+        followee: profile('ada', 'Ada'),
+      },
+      {
+        follower_id: 'id-ada',
+        followee_id: 'me',
+        follower: profile('ada', 'Ada'),
+        followee: profile('me'),
+      },
+    ]);
+
+    await open({ onPressProfile });
+    await drillInto('Mutual Mania');
+    fireEvent.press(screen.getByText('Ada'));
+
+    expect(onPressProfile).toHaveBeenCalledWith('ada');
+  });
+});
+
+/**
+ * The reads are the authorization, and the drill-downs inherit it.
+ *
+ * Nothing here asks for more than the count already counted — the same rows, rendered.
+ */
+describe('privacy', () => {
+  it('shows a person the reader may not see without disclosing them', async () => {
+    // `can_i_view` filters the embed, so a blocked or suspended account comes back with
+    // no profile. The follow still counts; the row says nothing about who it is.
+    seed('follows', [
+      { follower_id: 'me', followee_id: 'id-x', follower: profile('me'), followee: null },
+      { follower_id: 'id-x', followee_id: 'me', follower: null, followee: profile('me') },
+    ]);
+    await open({ onPressProfile: () => {} });
+    expect(count('1 / 5')).toBeTruthy();
+    await drillInto('Mutual Mania');
+
+    expect(screen.getByText('Someone on Bingd')).toBeTruthy();
+    expect(screen.getByText('This account is not available to you')).toBeTruthy();
+  });
+
+  it('reads attributed signups and never invite link creations', async () => {
+    await open();
+    expect(mockAsked()).toContain('invite_attributions');
+    expect(mockAsked()).not.toContain('invite_link_creations');
+  });
+});

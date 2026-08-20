@@ -1,17 +1,25 @@
 # bingd. — Product Requirements Document
 
-**Version:** v0.6 (public-alpha final)
-**Status:** Build-ready for public-alpha architecture
+**Version:** v0.6 (public-alpha final), with **as-built corrections through 2026-08-19**
+**Status:** Build-ready for public-alpha architecture. **Product scope re-frozen 2026-08-19.**
 **Date:** 2026-08-12, corrected 2026-08-13 after independent review — see [`change-log-v0.6.md`](./change-log-v0.6.md) §7
 **Supersedes:** `Bingd_PRD_v0.5_Finalization_Draft_20260812.pdf`
 
-**Companion documents:** [`decision-log.md`](./decision-log.md) · [`open-questions.md`](./open-questions.md) · [`change-log-v0.6.md`](./change-log-v0.6.md)
+**Companion documents:** [`decision-log.md`](./decision-log.md) · [`open-questions.md`](./open-questions.md) · [`change-log-v0.6.md`](./change-log-v0.6.md) · [`analytics.md`](./analytics.md) · [`deferred-roadmap.md`](./deferred-roadmap.md) · [`growth-instrumentation.md`](./growth-instrumentation.md)
 
 ---
 
 > **Precedence.** If this document and the decision log disagree, the **decision log wins** and this document must be corrected. If this document and any source PDF in `docs/reference/` disagree, **this document wins**.
 >
 > **For implementation agents.** Items marked `Open`, `Provisional`, or listed in `open-questions.md` may **not** be resolved by choosing a plausible answer. Stop and ask. Items marked `Required` are not preferences and may not be traded away for simplicity.
+
+> ### As-built corrections, and how to read them
+>
+> This document was written before implementation and has since been overtaken in places. Blocks headed **As built** carry a date and describe **what the reviewed code actually does**. Where an As-built block and the surrounding v0.6 specification disagree, **the As-built block wins and the specification text around it is stale** — it is left in place only where it still records the reasoning behind a decision.
+>
+> A section with no As-built block is either unchanged from the specification or **not built at all**. The one document that says which is [`deferred-roadmap.md`](./deferred-roadmap.md), and the release-blocking half of that list lives in `.agent-workflow/continuation.md` rather than in any roadmap.
+>
+> **Product scope is re-frozen as of 2026-08-19.** No further product feature ships before the friend beta unless a Preview test exposes a blocker, a hardening requirement forces a product behaviour change, or the founder breaks the freeze deliberately.
 
 ---
 
@@ -63,7 +71,7 @@
 |---|---|
 | **Decided** | The rankable units are movies and TV seasons. Episodes are never ranked. Whole-series ranking is not the primary TV unit. |
 | **Decided** | Rating happens in two steps: a three-bucket reaction (**Loved it / It was fine / Not for me**), then pairwise comparison within that bucket. |
-| **Decided for public alpha** | The ranking output shown to users is an exact ordinal position, e.g. `#18 in Movies`. There is no 0–10 score, no 0–100 score, and no percentile. |
+| **Decided 2026-08-15 (supersedes the ordinal-only rule)** | The ranking output shown to users is a **0–10 score with one decimal**, derived from the title's position inside its bucket band. The exact ordinal remains the stored ground truth and is shown as secondary detail on a title page. There is still no 0–100 score and no percentile. |
 | **Decided** | A title is either **Logged** (watched, optionally bucketed) or **Ranked** (has an exact position from comparisons). Positions are never derived from an imported rating. |
 | **Decided** | The product is social: profiles, one-way follows, a chronological feed, people discovery, match scores, recommendations, reactions, watch tagging, outward sharing, and direct invitations. |
 | **Decided for public alpha** | Public alpha is free. There is no billing code, no store products, no purchase UI, and nobody is displayed as "Pro". |
@@ -119,7 +127,7 @@ Has built a meaningful collection, roughly 25–50+ ranked titles, and returns t
 
 1. **Comparison over calibration.** Relative choices beat arbitrary numeric self-rating.
 2. **Structured signals over writing burden.** Logging and ranking are fast. Long reviews are not the product.
-3. **A position must be earned.** An exact ordinal position is only ever produced by comparisons. It is never inferred, estimated, or imported.
+3. **A position must be earned.** An exact ordinal position is only ever produced by comparisons. It is never inferred, estimated, or imported. The displayed score is a function of that position and inherits the same rule.
 4. **Taste compatibility must be legible.** Match scores show confidence and overlap rather than pretending sparse data is precise.
 5. **The social graph improves recommendations.** Following changes discovery value, not just a follower count.
 6. **Movies and TV should feel coherent but not identical.** TV is ranked by season.
@@ -147,7 +155,13 @@ Beli is the closest product-mechanics and go-to-market reference: log an experie
 
 Publicly documented Beli mechanics that informed this PRD: three-bucket classification before comparison; binary-search comparison within the chosen classification; skip and back affordances during comparison; tagging friends in a log; match scores between users; separate ranking categories by type.
 
-**One deliberate divergence.** Beli produces a calibrated 0–10 score. Bingd shows ordinal position only. Beli's own store reviews cite the automatic score as a recurring complaint — that it makes places "seem worse than they are, or sometimes better." An ordinal position makes a weaker and more defensible claim.
+**Score display — reversed 2026-08-15.** This section previously recorded a deliberate divergence: Beli produces a calibrated 0–10 score, and Bingd would show ordinal position only, on the reasoning that Beli's own store reviews cite the automatic score as a recurring complaint — that it makes places "seem worse than they are, or sometimes better."
+
+The founder has decided Bingd shows a 0–10 score, because an ordinal fails at the thing a collection app is for: `#18 in Movies` is unreadable without knowing how long the list is, it changes for reasons the user did not cause, and it cannot be compared between two people at all. A score answers "how much did I like this" in one glance, which is the question a row in a list is actually being asked.
+
+The complaint in those reviews is real and is answered by construction rather than by omission. It is a complaint about *calibration* — a score that claims to measure the film. Bingd's score claims nothing about the film. It is a restatement of where the title sits among the ones this user has already compared it against, so its meaning is bounded by the user's own list, and §10 keeps it honest: the score is derived from comparisons and from nothing else, never from an imported rating, and it is never aggregated across users into a public average.
+
+Mechanically nothing diverges from what this document already specified. Comparisons still produce a position; the score is a presentation of that position.
 
 ### Evidence boundary — Required
 
@@ -177,7 +191,8 @@ Publicly documented Beli mechanics that informed this PRD: three-bucket classifi
 
 | Color | Hex | Role |
 |---|---|---|
-| Parchment | `#F5EBDD` | Primary background: collection, profile, rankings, onboarding, standard share cards |
+| Paper | `#FBF8F4` | Primary background, from 2026-08-15. A warm near-white: same hue family as Parchment, most of the saturation removed |
+| Parchment | `#F5EBDD` | Warm accent surface: grouped wells, inputs, chips, selected tabs, poster placeholders, standard share cards. Was the primary background until 2026-08-15 |
 | Bingd Maroon | `#773744` | Primary identity and action: wordmark, selected states, rank emphasis |
 | Ink | `#242326` | Primary text and structural contrast |
 | Antique Amber | `#D4A64C` | Awards, milestones, reveals, exploration prompts, special share moments |
@@ -196,7 +211,7 @@ Primary voice **Curious Collector**: warm, simple, observant, personal, lightly 
 |---|---|---|
 | Bucket prompt | "How was it?" | "Rate this film" |
 | Comparison | "Which did you like more?" | "Which film is objectively better?" |
-| Ranking result | "Where does it land?" / "#18." | Calibration language |
+| Ranking result | "Where does it land?" / "8.7." | Calibration language, and any claim the number describes the film rather than the user's ordering |
 | Match | "92% match · 143 shared" | Similarity coefficients |
 | Recommendation | "Try this next." | Algorithm terminology |
 | Unranked library | "142 ranked · 380 logged" | "380 remaining", progress bars toward 100% |
@@ -214,7 +229,7 @@ Derived from the brand system above at founder instruction. See decision log §1
 | Emphasis | Poster-dominant on content surfaces; typographic on reveals, milestones, and share cards. |
 | Tone | Restrained by default. Playful only where Antique Amber appears. |
 | Data display | Minimal in v1. One modest stats block on Profile. |
-| Theme | Parchment light only. Tokens structured so a Midnight dark theme is purely additive later. |
+| Theme | Light only. **Amended 2026-08-15:** the base surface is Paper `#FBF8F4` and Parchment is the warm accent above it, because Parchment is chromatic and left artwork no headroom on a poster-heavy screen. Tokens structured so a Midnight dark theme is purely additive later. |
 | Corner radius | 12px cards, 8px inputs, full-round for avatars only. No pill buttons. |
 | Motion | Minimal, with one exception: the ranking reveal earns real animation. |
 
@@ -321,6 +336,22 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 >
 > **Renamed from v0.5.** The area formerly called "Settings / Subscription" is now **Settings**. Plan management and restore are paid-beta-only and do not exist in v1.
 
+> ### As built — 2026-08-19: the centre tab is **Search**
+>
+> **Five tabs: Feed · Collection · Search · For you · Profile.** The founder renamed the centre tab from **+** to **Search**, and the sentence above beginning "There is no Search tab" is stale.
+>
+> The reasoning is that the surface is where you *find* something — a title **or a member** — and logging is what happens after you have chosen one. Calling it Log named the second step and hid the first, which is also why member discovery had been sitting behind a chip nobody had a reason to press. The icon moved with the label: a `+` under the word Search describes neither. The route is still `log`; renaming a file to match a label is a deep-link and history change bought for nothing.
+>
+> **Search returns Titles and Members as grouped sections, not as a filtered list.**
+>
+> - The three filter chips — **All · Movies · TV** — narrow **titles only**. Members are a different kind of thing and were never narrowed by them, so a fourth "Users" chip made one control mean two things.
+> - **Titles stay dominant** (founder addendum, 2026-08-16). Members appear when somebody's handle or display name is actually *started* by the query, three at a time, with **See all** lifting the display cap in place. See all is not a route and cannot fail: everything it reveals is already in hand.
+> - **`@` raises Members without suppressing Titles.** Typing `@suraj` means "the member suraj" and passes the relevance gate outright — it is a hint, not a mode, and the title results stay on screen.
+>
+> **Private accounts are discoverable by identity; their collections stay gated.** `20260819000100` built an identity-only profile surface for exactly this: somebody can be found by handle or name, and can be sent a follow request, without any of their ratings, collection, notes or activity being readable. Being unfindable is not what "private" was ever supposed to mean, and an account nobody can find cannot be followed.
+>
+> **People and actor search is deferred** — see [`deferred-roadmap.md`](./deferred-roadmap.md) §1. The person detail page exists and is reached only from a cast strip.
+
 ---
 
 ## 8. Scope by product stage
@@ -362,6 +393,14 @@ Final pricing and localization. Staged store rollouts. Destination-specific shar
 ### Deferred
 
 Comments, DMs, discussion boards, and long-form reviews. Destination-specific social SDKs and inbound share extensions. Contact-book and social-network importing. Full offline-first sync and offline ranking replay. Full catalog mirror or image rehosting. LLM-generated recommendations or explanations. Algorithmic feed ranking, collaborative lists, episode-level ratings, whole-series ranking. Lifetime access, multiple tiers, family plans, gifting, web checkout. Dark mode. Invite rewards. Tagging users who are not on Bingd.
+
+> ### As built — 2026-08-19: three corrections to the staging above
+>
+> - **Comments shipped.** They are on feed activity, rate-limited, with their own notification type and category. The Deferred line is stale on that one word; DMs, discussion boards and long-form reviews remain deferred.
+> - **Achievements shipped as Bingd Awards** (2026-08-18) and are no longer a backlog item. See §14's As-built block.
+> - **Letterboxd import is listed as a v1 must-have and has not been built.** No import screen, no CSV parser, no matching pipeline. It is not a friend-beta blocker — the cohort is building collections by hand, which is the behaviour the beta exists to observe — but it is the largest single gap between this list and the app.
+>
+> Everything else this document calls Deferred is still deferred. The canonical register, with the reasoning and the revisit trigger for each, is [`deferred-roadmap.md`](./deferred-roadmap.md).
 
 ---
 
@@ -464,13 +503,35 @@ This is the mechanism that keeps ranking cheap: comparisons only ever search wit
 - **Skip** re-anchors the comparison to a different title in the same bucket.
 - **Back** returns to the previous comparison and lets the user change the answer.
 - After **3 skips** on a single insertion, the title is placed at the midpoint of the remaining uncertainty range, and the user is told the position is adjustable from Rankings.
-- **No ties.** Two titles never share a position. Exact ordinal display makes ties incoherent, and they would contaminate match calculation, share cards, and every ranking query.
+- **No ties.** Two titles never share a position. They may round to the same displayed score, which is fine and expected in a long band — but the underlying order is always total, because ties would contaminate match calculation, share cards, and every ranking query.
 
-### Display — Decided for public alpha
+### Display — Decided 2026-08-15
 
-Show exact ordinal placement as the only ranking output, for example `#18 in Movies`.
+Show a **0–10 score with one decimal**, for example `8.7`. It is the primary ranking output everywhere a title appears: collection rows, the title page, the feed, the ranking reveal, and share cards.
 
-> **Required.** Do **not** display a 0–10 score, a 0–100 score, or a percentile anywhere in public alpha. A derived numeric value may exist in storage for internal ordering, but it is never rendered. This corrects three places in v0.5 that described a "derived display score or percentile."
+The score is **derived, not stored**. Each bucket owns a fixed range, and a title's score is its position interpolated across the range of the band it sits in:
+
+| Bucket | Range |
+|---|---|
+| Loved it | 10.0 → 7.0 |
+| It was fine | 6.9 → 3.5 |
+| Not for me | 3.4 → 0.0 |
+
+```
+score = high - (rankInBand - 1) × (high - low) / max(bandSize - 1, 1)
+```
+
+A title alone in its band scores that band's high. Ranges do not overlap, so a bucket can always be read back off a score — which is what makes the number mean the same thing to the person who set it and the friend who sees it in a feed.
+
+Three properties this is required to keep:
+
+- **Comparisons are still the only source.** The score is a function of `rankings.position` and the band sizes, and a position is only ever written by a comparison session (§11). No rating, import, or estimate can produce one.
+- **A score moves when the list moves.** Ranking a new title reflows the scores around it, because the number was always a statement about relative position. The interface never presents a score as a fixed property of the film.
+- **Scores are never aggregated across users.** There is no public average, no community score, and no per-title score on any surface that is not scoped to one person's list. Averaging would turn a personal ordering into the calibrated rating this product exists to avoid.
+
+> **Required.** Do **not** display a 0–100 score or a percentile anywhere. The exact ordinal remains available as secondary detail on a title page, in the form `#18 of 142 in Movies` — with the denominator, because a bare ordinal is unreadable without it.
+>
+> **History.** Public alpha was specified as ordinal-only, and this section forbade a 0–10 score outright. Reversed by the founder on 2026-08-15; the reasoning is in §4.
 
 ### Open and provisional
 
@@ -492,7 +553,7 @@ Show exact ordinal placement as the only ranking output, for example `#18 in Mov
 | State | Means | Has a position? |
 |---|---|---|
 | **Logged** | The user has watched it. It may have a bucket, a watch date, a note, and tags. | No |
-| **Ranked** | The user has compared it against other titles in its bucket. | Yes — an exact ordinal position |
+| **Ranked** | The user has compared it against other titles in its bucket. | Yes — an exact ordinal position, displayed as a 0–10 score (§10) |
 
 A title moves from Logged to Ranked only by comparison. **There is no other path.**
 
@@ -612,6 +673,23 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 - Exact mathematics — rank correlation or pairwise agreement, transformed to 0–100 — is an architecture-stage decision.
 - A match involving a private user is only displayed to that user's approved followers.
 
+> ### As built — 2026-08-19: two scores on a title, named **Bingd** and **Following**
+>
+> A title page carries the reader's own position and, beside it, exactly **two** aggregate scores. There is no third and no carousel.
+>
+> | Score | What it averages |
+> |---|---|
+> | **Bingd** | every rating on Bingd that the reader is allowed to see |
+> | **Following** | ratings from **accounts the reader follows** |
+>
+> **"Following" means followees, not followers**, and the direction is asserted by test rather than by the label: `following_score` joins `f.follower_id = auth.uid()` and `r.user_id = f.followee_id`. Approved follows only, and `can_view_profile` applied from the caller's own perspective — a private followee's rating counts only where the reader may see it. Audited on 2026-08-19 and found correct, so nothing was changed.
+>
+> **Bingd**, not "Community". The old label described a population where the new one names the product, and it excludes raters who have blocked the reader in either direction — a mean that included them made a blocked rater's score recoverable by subtraction.
+>
+> **A Followers score is deferred** — see [`deferred-roadmap.md`](./deferred-roadmap.md) §3. In a cohort where almost every follow is mutual, the two numbers would be nearly identical.
+>
+> **An absent score is not a zero.** A title nobody has ranked, a Following mean with no followee who has seen it, and a read that failed are three different states, and the badge distinguishes them.
+
 ### Recommendation engine — public-alpha design
 
 - Runs behind the scenes. The Recommendations surface opens directly to useful suggestions.
@@ -724,6 +802,24 @@ The invite hand-off is the point of this feature as a growth mechanism: it place
 
 ---
 
+### As built — Bingd Awards, shipped 2026-08-18
+
+v0.6 listed Achievements under §8 **Deferred** and specified them in [`backlog.md`](./backlog.md) §1. They shipped. This block is the record of what shipped, and the specification in the backlog is now historical.
+
+**Twenty tracks, thirty badges, and no table behind any of it.**
+
+- Reached from **Profile → Awards**, as a sheet. A grid where locked and unlocked sit together, because the locked slots are the reason to come back and they only read that way beside the unlocked ones.
+- **Every award is derived from canonical tables** — `user_media`, `rankings`, `watchlist`, `follows`, `title_recommendations`, `invite_attributions`, notes. There is no award table, no event log and no stored progress. An achievement system with its own event log is a second source of truth about somebody's collection, free to disagree with the first.
+- Tiered, with progress shown on anything countable, and each track states what earns it.
+- **No social surface**: no comparison, no leaderboard, and nothing is told to anybody else.
+- **Ten of the twenty tracks still render an emoji placeholder** rather than drawn art, asserted by test so the number cannot drift silently. [`deferred-roadmap.md`](./deferred-roadmap.md) §14.
+
+**Invite Instigator counts activated invitees and therefore reads zero.** It counts `invite_attributions.activated_at is not null`, which nothing writes — see §17's As-built block. It previously counted link creations, which made it a badge for pressing a button, and the founder's instruction was that the award is for bringing people to Bingd. So the metric was moved to the honest one immediately and the number left at zero rather than the semantic left wrong until the backend caught up. It renders **0 / 3**, not an error: the read succeeded, the table is real, and the answer is genuinely none.
+
+**Award notifications are deferred**, and this is a disposition rather than an oversight. Tiers are computed entirely on the device from raw reads, so **no durable state records which tier an account has reached** — and notifying only on a *crossing* needs exactly that. The `award_earned` type, the `awards` category defaulting off, its preference row and its route to this sheet all exist; only the writer is missing. §15's As-built block and [`deferred-roadmap.md`](./deferred-roadmap.md) §5.
+
+---
+
 ## 15. Notifications and activity awareness
 
 **New in v0.6.** This resolves a structural absence in v0.5, where the brand system referenced notifications but no notification feature existed anywhere in scope, information architecture, entities, tests, or metrics.
@@ -771,6 +867,62 @@ A **Notifications** sub-page under Settings with:
 ### Permission timing — Recommended
 
 Never request push permission at first launch. Request after the user's first successful invite or first follow, when the value is concrete.
+
+---
+
+### As built — 2026-08-19: taxonomy, categories, and what a preference actually governs
+
+Reviewed at 23f PASS. Where this block and the v1 event set above disagree, this block is what ships.
+
+**Nine notification types.** The canonical names are `follow`, `follow_request`, `follow_approved`, `comment`, `reaction`, `watch_tag`, `recommendation`, `invite_activated`, `award_earned`.
+
+**Eight categories, one per kind, each with its own default.** `recommendation` had been in no category at all, so the trigger's `case` returned null, the unmapped-type rule delivered the row unconditionally, and **a recommendation could not be switched off** — by accident rather than by decision. That is the defect the settings screen would otherwise have shipped on top of.
+
+| Category | Types | Default |
+|---|---|---|
+| `follows` | `follow` | **on** |
+| `follow_accepted` | `follow_approved` | **on** |
+| `comments` | `comment` | **on** |
+| `reactions` | `reaction` | **off** |
+| `watch_tags` | `watch_tag` | **on** |
+| `recommendations` | `recommendation` | **on** |
+| `invites` | `invite_activated` | **on** |
+| `awards` | `award_earned` | **off** |
+
+`reactions` defaults off because it is the only event whose median notification carries nothing beyond "somebody saw this". `awards` defaults off because **nothing writes one**.
+
+**Absence means the default, not "enabled".** There is no preference row per category per signup and no backfill when a category is added; absence resolves to the category's own default. The data migration therefore expanded only `enabled = false` rows — under the old semantics a `true` row was indistinguishable from no row, so expanding one would have manufactured a deliberate opt-in out of silence.
+
+**A preference governs creation, not delivery.** The gate is a **before-insert trigger that returns null**: off means the row was never written. There is no second channel to suppress, because there is no push. When push arrives it has to decide for itself whether these switches govern it too — a row that was never written cannot be pushed, so the current contract is *"off here means it never existed"*. See [`deferred-roadmap.md`](./deferred-roadmap.md) §4.
+
+**`follow_request` is unsilenceable**, stated as its own condition in the trigger. It is a task rather than news: somebody is waiting on an answer.
+
+**Settings offers a switch per category plus two master groups** — everything social, and everything about you — over a **Turn all off**, and it reflects the OS permission state honestly.
+
+#### Routing
+
+Each type has an ordered chain whose last link always resolves. Staleness is read from the holes `my_notifications` already leaves — a null actor handle, a null media item — rather than from a second existence query, which would be a second authorisation surface and the one most likely to get it wrong.
+
+| Type | Target | Fallback |
+|---|---|---|
+| `follow_request` | requester's profile | unavailable notice |
+| `follow` | follower's profile | unavailable notice |
+| `follow_approved` | approver's profile | unavailable notice |
+| `comment` | the title | unavailable notice |
+| `reaction` | the title | unavailable notice |
+| `watch_tag` | the Movie or Season | unavailable notice |
+| `recommendation` | the Movie or Season | recommender's profile, then unavailable |
+| `invite_activated` | the joined user's profile | unavailable notice |
+| `award_earned` | the Awards sheet | — |
+
+**Comment and reaction route to the title rather than to the exact feed event, deliberately.** There is no per-event route, and the feed tab is a paginated list of *followees'* activity — a reader's own event does not appear in it at all. Routing to a screen that cannot contain the subject is worse than routing to its parent. Deferred as [`deferred-roadmap.md`](./deferred-roadmap.md) §6.
+
+#### What is **not** built
+
+- **Push is dark.** `expo-notifications` and its config plugin are in every build, as §15 intends — and nothing on any client writes `device_tokens`, no client imports the module, and no delivery path exists. **Push delivery is not "flagged off"; it has never been built** (AD-10). [`deferred-roadmap.md`](./deferred-roadmap.md) §4.
+- **The scheduled nudge** ships with push, so it does not exist either.
+- **`invite_activated` gained its writer on 2026-08-19** (`20260819000500`) and is no longer in this list. It is filed by `_maybe_activate_invite` at the activation transition — server-side, once, and not from a client observing a column. It respects the `invites` category, is not written across a block, and is not written when the inviter has gone. §17 As built.
+- **`award_earned` has no writer**, and this is a disposition rather than an omission. Award tiers are computed entirely on the device from raw table reads; **no durable state records which tier an account has reached**, so a *crossing* cannot be distinguished from a *state*, and exactly-once delivery is impossible without an unlock ledger. An award notification that fires twice is worse than one that never fires. [`deferred-roadmap.md`](./deferred-roadmap.md) §5.
 
 ---
 
@@ -858,6 +1010,12 @@ A share or invite token is a **routing and attribution identifier, never authori
 
 > **Measurement rule.** `share_sheet_opened` and `share_returned` are **never** recorded as "share completed." Destination feedback is inconsistent across platforms. The meaningful signals are link opens, app opens, attributed signups, and attributed activation.
 
+> ### As built — 2026-08-19: none of those nine events exists
+>
+> The measurement rule above is right and has been kept; the event list is a specification for a share funnel that was never instrumented, and **six of the nine describe states this app cannot observe at all** — there is no web property, so a link open, an app open from a link, an install click, an attributed signup and an attributed activation have nothing to record them.
+>
+> The friend-beta event set is thirteen events and is defined in [`analytics.md`](./analytics.md). The growth events are **`invite_link_created`**, which follows the `invite_link_creations` row rather than the tap, and — since 2026-08-19 — **`invite_redeemed`** and **`invite_activated`**, which follow the attribution row and the activation transition. Sharing is otherwise uninstrumented, deliberately: **opening an OS share sheet is not a share completed**, which is the same rule this section already states.
+
 ---
 
 ## 17. Direct friend invitations
@@ -913,7 +1071,9 @@ A deferred-deep-link vendor is optional later, only if measured install-to-resum
 
 However — **Required** — record `invited_by` and `founding_member` on every account from day one. These cost nothing now and are impossible to reconstruct later, and they preserve the option of granting retroactive recognition or capability grants at any future point.
 
-Any future reward must count **activated** invitees only (recipient ranked at least one title), so it cannot be farmed with throwaway accounts.
+Any future reward must count **activated** invitees only, so it cannot be farmed with throwaway accounts.
+
+> **Corrected 2026-08-19.** This clause read "recipient ranked at least one title", which contradicts §28's canonical definition — **activation is ten ranked titles** — and would have handed the future resolver two incompatible contracts to write `invite_attributions.activated_at` against. §28 wins, here and everywhere: one ranked title is a tap, and the whole point of gating a reward on activation is that it is not farmable.
 
 ### Privacy and abuse — Required
 
@@ -927,6 +1087,41 @@ Any future reward must count **activated** invitees only (recipient ranked at le
 ### Analytics
 
 `invite_link_created`, `invite_link_opened`, `invite_install_clicked`, `invite_signup_attributed`, `invite_accepted`, `invite_activated`, `invite_revoked`, plus abuse events. Returning from the share sheet is never treated as delivery.
+
+---
+
+> ### As built — 2026-08-19 (second pass): the resolver exists, deferred install does not
+>
+> This block replaces "the link exists, the resolver does not". `20260819000500` gave `accepted_at` and `activated_at` their first writers, and `bingd.app` gained a router. What is still missing is named at the bottom, and it is one thing.
+>
+> **The invitation contract, and it is permanent.** What a person shares is `https://bingd.app/i/<token>` and nothing else. Not a TestFlight URL, not a Play URL, not a `bingd://` URL — those are *destinations behind* the link, configured in `web/distribution.config.json`, and changing them changes no invitation anybody has already sent. The same URL is valid across development, Preview, TestFlight, a Play closed test, an open test, and both public stores.
+>
+> **What is now built:**
+>
+> - **`record_invite_open(token, platform)`** — anonymous, and **returns void in every case**, so an unknown, revoked or cross-environment token is indistinguishable from a live one. It is not a token oracle. Capped per token per hour, because an anonymous caller has no identity to rate-limit. Writes to `invite_link_opens`, which no client may read.
+> - **`redeem_invite(operation_id, token)`** — authenticated, after profile creation. Writes `invite_attributions (invitee_id, inviter_id, token_id, accepted_at)` and `profiles.invited_by`. Unknown, revoked and cross-environment are **one refusal**. Self-invitation, blocks in either direction, and a suspended or deleted inviter are all refused. The primary key on `invitee_id` is what makes it idempotent: **no replay, no second token and no second device can move an attribution once written.**
+> - **Activation** — `_maybe_activate_invite`, called from `_rank_finalize`, the single place a `rankings` row is created. The criterion is §28's: **ten ranked titles**, across both categories. The transition is once, from the row lock on a guarded `UPDATE ... WHERE activated_at IS NULL` rather than from any ordering assumption.
+> - **The `invite_activated` notification** now has its writer. One row, to the inviter, at the activation transition — not from a client observing a column. Respects the `invites` preference category, and is not written across a block or to an account that has gone.
+> - **`invite_redeemed` and `invite_activated` analytics**, both emitted from a server outcome. `acquisition_source: 'invite'` has its first honest writer.
+> - **The web router at `bingd.app`** — `/i/*`, `/u/*`, `/title/*`, `/lists/*`, plus the two `.well-known` files. Static, no server, no third-party SDK. Platform routing offers iPhone or Android their own destination and offers a desktop browser both, never guessing.
+>
+> **Acceptance semantics above are implemented in full.** Redemption writes the attribution, creates the one-way follow of clause 2, files a **request** instead when the inviter is private (clause 3), and notifies the inviter (clause 4) — who is never auto-followed. Clauses 1, 5, 6 and 7 were already met: the tap is explicit, the recipient is unnamed until it commits, a block voids the invitation, and the attribution is written independently of the follow.
+>
+> The screen also carries clause "an option to switch": it names the account that will be attributed *before* the tap and offers to sign out. The switch first makes **the invitation on screen** the pending one, then signs out — so the invitation survives the switch, and it is the invitation the person was actually looking at. Merely *opening* a second link still does not move anything, because a link tapped is not a decision.
+>
+> **The first version of this run shipped the attribution and no follow**, recorded here as a deliberate narrowing. Independent review 26 rejected that and was right to: a specification is not amended by a note saying it was not implemented. The reasons offered — a smaller concurrency surface, a stricter reading of the privacy clauses — were arguments for an implementation convenience, not authorisation to change what acceptance means.
+>
+> **Revocation is now real, and it is here rather than in a later run for a specific reason.** The token model above has promised "revoke and regenerate from Settings" since v0.6, and `invite_tokens.revoked_at` has existed since `20260813001300` with no writer. Until this migration a leaked link resolved to nothing, so the gap cost nothing; this migration makes a leaked link a live attribution vector, so the same change owes the control that takes it back. `revoke_invite_link` revokes and mints the replacement in one transaction — `invite_tokens_one_live` permits exactly one live token, and an account with none is a state the Share control cannot answer — and Settings › Privacy has the confirmed control. Attributions already accepted against the old link are untouched: revoking withdraws the invitation, it does not un-invite anybody.
+>
+> **An invitation refused because the inviter was momentarily unreachable is retried, up to a point.** A block in either direction and a suspended inviter both produce the same refusal, and both get lifted — so the device keeps the invitation and tries again on later launches, with a fresh operation id each time, up to five refusals in total. It gives up after that because the same refusal also covers a *deleted* inviter, which never recovers. Independent review 26 found the first version discarding these permanently, and 26b found the retry inert because it reused a spent operation id.
+>
+> **Deferred install attribution is NOT built, and this is stated plainly rather than approximated.** Universal Links and App Links carry a token only when the app is **already installed**. There is no Play Install Referrer path and no attribution SDK, and there will not be one built on fingerprinting, probabilistic matching, clipboard reading or any hidden identifier. The honest mechanism is: the landing page keeps the token in the address bar, and after installing, the visitor **returns to the same page** and taps *I already have Bingd*. If they instead launch Bingd from TestFlight or from Play, **attribution is lost** — silently, and permanently for that person. The page says so before they leave it. Analytics under-counts accordingly and no number anywhere is adjusted for it.
+>
+> **Invite Instigator counts real people now.** The query is unchanged — `count(*) where inviter_id = auth.uid() and activated_at is not null` — and it has stopped being structurally zero. Links created do not count, links opened do not count, and a redemption without activation does not count.
+>
+> **What is still not built, and it is one thing:** a **live `bingd.app` deployment**. The site builds, its tests pass, and the two `.well-known` files are generated from one config — but nothing is hosted yet, so **Universal Links and App Links cannot verify and have never been tested on a physical device**. Until that happens the invitation link opens a browser that 404s. This is the one remaining gap between the resolver being written and the resolver working, and it is a founder action rather than an engineering one.
+>
+> The **Required** half of Rewards above still stands: any future reward must count activated invitees only, which is now a number that exists.
 
 ---
 
@@ -1025,7 +1220,7 @@ Bingd connects now on a **free developer key**, because it charges nobody and se
 >
 > The two share paths are not equivalent. An **on-device share card** fetches artwork from the provider CDN and composites it on the user's phone, then the user shares the result — no Bingd server touches the image, and this stays poster-forward as designed. An **Open Graph link preview** is a PNG generated by Bingd's server and served from Bingd's infrastructure to any crawler that requests it, indefinitely, with no user involved. That is rehosting, whatever the surrounding layout does, so "never rehosted" and "poster-bearing link previews" could not both hold.
 >
-> **v1 Open Graph cards are typographic** — ordinal, title, wordmark, no artwork. The cost is small and arguably negative: the poster is the one element every competitor's preview also has. Revisit once the commercial plan is active and the question has a definite answer.
+> **v1 Open Graph cards are typographic** — score, title, wordmark, no artwork. The cost is small and arguably negative: the poster is the one element every competitor's preview also has. Revisit once the commercial plan is active and the question has a definite answer.
 
 Details and the triggers for revisiting: [`docs/reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 
@@ -1223,8 +1418,8 @@ A user-initiated deletion path that removes personal data, invalidates tokens, r
 | Media metadata | TMDB via a Bingd-owned adapter and cache |
 | Notifications | `expo-notifications`, delivery behind a feature flag |
 | Payments | RevenueCat — **paid beta only** |
-| Crash monitoring | Sentry, with release tagging and source maps |
-| Analytics | First-party event schema; PostHog is the working recommendation |
+| Crash monitoring | Sentry, with release tagging and source maps — **source-map upload is disabled for `development` *and* `preview` in `eas.json`, so a Preview build's stack traces are minified.** Right for a dev client, a decision outstanding for Preview: it needs `SENTRY_AUTH_TOKEN` as an EAS secret, and it is a release-hardening gate rather than a founder nicety |
+| Analytics | First-party event schema, PostHog. **Implemented** — [`analytics.md`](./analytics.md) |
 | Web surfaces | Static or edge-rendered pages on `bingd.app`; Cloudflare Pages is the working recommendation |
 | Source control and CI | GitHub with required checks |
 | Builds and OTA | EAS Build, EAS Submit, EAS Update |
@@ -1300,7 +1495,7 @@ Typecheck and lint on every change. Unit tests for ranking insertion, bucket-ban
 
 ### Required test matrices
 
-**Ranking:** insertion correctness within a bucket; band partitioning is never violated; bucket change re-runs comparisons in the new band; skip re-anchors; 3 skips places at midpoint; back restores prior state; no two titles ever share a position; no ranking mutation is ever enqueued offline; **no 0–10, 0–100, or percentile value is rendered anywhere**.
+**Ranking:** insertion correctness within a bucket; band partitioning is never violated; bucket change re-runs comparisons in the new band; skip re-anchors; 3 skips places at midpoint; back restores prior state; no two titles ever share a position; no ranking mutation is ever enqueued offline; **no 0–100 or percentile value is rendered anywhere**; **the derived score is within its bucket's range for every band size including one, and the ranges never overlap**.
 
 **Collection state:** a Logged title never displays a position; a bucket alone never produces a position; the header reports ranked and logged counts; no progress-toward-complete UI exists.
 
@@ -1364,8 +1559,8 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 2. Choosing a bucket with no prior ranked titles in that bucket places the title without comparisons.
 3. Choosing a bucket with existing ranked titles runs pairwise comparisons **only against titles in the same bucket**.
 4. A bucket of 64 ranked titles resolves in at most 7 comparisons.
-5. On completion, the app reveals an exact ordinal position in the form `#18 in Movies`.
-6. No 0–10 score, 0–100 score, or percentile is rendered on any screen or share artifact.
+5. On completion, the app reveals a 0–10 score with one decimal, derived from the title's position within its bucket band per §10.
+6. No 0–100 score or percentile is rendered on any screen or share artifact. No score is ever aggregated across users.
 7. Every *Loved it* title ranks above every *It was fine* title, which ranks above every *Not for me* title, at all times.
 8. Changing a title's bucket moves it into the new band and re-runs comparisons there.
 9. Skip re-anchors to a different title in the same bucket; Back returns to the previous comparison and permits a changed answer.
@@ -1378,7 +1573,7 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 ### 26.4 Logged and Ranked states
 
 1. A title can be marked watched and bucketed without running any comparison, and is then displayed as Logged.
-2. A Logged title displays its bucket and no position — not a position, not `#—`, not a placeholder.
+2. A Logged title displays no score and no position. Where a score would sit it shows an empty, clearly unfilled affordance labelled with the action that would earn one — never `0.0`, `#—`, or a greyed-out number.
 3. The Rankings header reports both counts in the form `142 ranked · 380 logged`.
 4. No screen displays a progress bar, percentage, or "remaining" count toward ranking the full collection.
 5. A Logged title can be ranked from its detail page, and afterward has a position.
@@ -1543,6 +1738,14 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 6. `main` is protected, requires passing checks, and rejects direct pushes.
 7. An EAS Update reaches an installed preview build without a new store submission.
 
+> ### As built — 2026-08-19: two of these seven are not met, and one is met differently
+>
+> **4 is not met for Preview.** `eas.json` sets `SENTRY_DISABLE_AUTO_UPLOAD=true` for `development` **and** `preview`, so a Preview build's stack traces are minified. Correct for a dev client, wrong for the build the friend beta will run on, and it needs `SENTRY_AUTH_TOKEN` as an EAS secret. **This is an unmet release-hardening gate**, not a founder nicety, and it is carried as such. Every build does trace to a commit, and Sentry now also carries `environment`, `app_version`, `build_number`, `runtime_version`, `eas_channel`, `eas_update_id` and `build_kind` as tags (see [`analytics.md`](./analytics.md) §6).
+>
+> **5 is met for four of its seven, and the others describe features that do not exist.** Onboarding, ranking and invitations (link creation only) fire; sharing, import, gate hits and recommendation feedback do not, because there is no share funnel, no import, no capability gate instrumentation and no feedback event. The criterion's second half — **contains no private content** — is met and is enforced three ways rather than asserted: a typed union, a property allowlist, and scalar-only values. See §28's As-built block.
+>
+> **1, 2, 3, 6 and 7 stand as written.** The three variants install side by side with distinct names, bundle ids and schemes; non-production shows the environment badge; non-production points at `bingd-nonprod` and **there is no production Supabase project to read at all**; and the `fingerprint` runtime policy is what makes 7 safe rather than merely true.
+
 ---
 
 ## 27. Public-release requirements
@@ -1599,6 +1802,29 @@ v0.5 used two near-definitions interchangeably; this is the canonical one. See I
 | Offline | Queued operations per user; sync success rate; median time to sync; failed-operation rate |
 | Metadata | Cache hit ratio; provider calls per active user; image bandwidth per user; provider error rate |
 | Monetization intent | Gate hits by capability and screen; % reaching the three-list ceiling **via in-app creation only**; median collection size at first gate hit |
+
+> ### As built — 2026-08-19: what is actually measured before the friend beta
+>
+> The table above is the metric practice for a public alpha. **Almost none of it is instrumented, on purpose.** The friend beta is thirty to sixty people on four different builds, and the failure mode there is not too little data — it is a hundred event types nobody has agreed the meaning of, half of them counting taps instead of outcomes.
+>
+> So the implemented set is **thirteen events**, sized to one question: *do people activate, run the core loop, use the social side — and which build were they on when they did it.* The canonical definitions, the exact once-per semantics of each, the privacy exclusions and the release-identity fields are in **[`analytics.md`](./analytics.md)**, which is the document to read rather than this table.
+>
+> | Area of the table above | Status |
+> |---|---|
+> | Activation | **partly** — `signup_completed` → `onboarding_completed` → `ranking_completed`. No 24-hour bound, no funnel infrastructure |
+> | Collection, Engagement | **partly** — `title_logged`, `ranking_completed` with its comparison count, `watchlist_added` |
+> | Social | **partly** — `follow_created` (approved vs pending), `recommendation_sent`, `recommendation_opened`, `member_search_result_opened` |
+> | Invitations | **created, opened, redeemed, activated** — the whole funnel has writers as of `20260819000500`, with one honest gap: a token does not survive a store install, so redemptions from a fresh install are under-counted (§17 As built) |
+> | Import | **not measured** — import is not built |
+> | Notifications, Recommendations quality, Offline, Metadata, Monetization intent | **not measured** |
+> | Retention at day 7 / day 30, cohorts | **not built** — [`deferred-roadmap.md`](./deferred-roadmap.md) §9 |
+>
+> **Activation stays defined as ten ranked titles.** Nothing about the thin instrumentation changes the definition; `ranking_completed` is what will count toward it.
+>
+> Two rules from that document are product decisions rather than implementation details, and belong here:
+>
+> - **No free text, ever.** No event carries a title, a username, a note, a search query, a bio or a date of birth. Autocapture and session replay are off and stay off, because in a mobile app they record whatever was on screen — which here is somebody's private collection (§22).
+> - **An event follows a server outcome, never a tap.** A write that commits and loses its reply is deliberately **under-counted**; a retry is never counted twice. Undercounting a lost reply is a small bias in a known direction, and double-counting a retry is a number that looks like growth and is not.
 
 ---
 
@@ -1746,7 +1972,9 @@ Plain-language definitions of the terms used in this document.
 
 **Open Graph** — The metadata that produces a link preview card in messages and social apps.
 
-**Ordinal position** — Exact placement in an ordered list, such as `#18`. Not a score.
+**Ordinal position** — Exact placement in an ordered list, such as `#18`. The stored ground truth, written only by a comparison session. Displayed as secondary detail; the primary display is the score.
+
+**Score** — A 0–10 value with one decimal, derived from a title's ordinal position within its bucket band (§10). A statement about where a title sits in one person's list, never a rating of the film and never averaged across users.
 
 **Outbox** — The local queue holding changes made offline until they sync.
 

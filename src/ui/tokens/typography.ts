@@ -19,7 +19,7 @@ export const fontFamily = {
 type TypeToken = TextStyle & { maxFontSizeMultiplier?: number };
 
 export const typography = {
-  /** The ordinal in the ranking reveal. Nowhere else. */
+  /** The score in the ranking reveal. Nowhere else. */
   reveal: {
     fontFamily: fontFamily.serif,
     fontSize: 88,
@@ -44,6 +44,36 @@ export const typography = {
     fontSize: 12,
     lineHeight: 16,
     letterSpacing: 0.2,
+  },
+  /**
+   * The number inside a score badge. Tabular so a column of badges does not
+   * jitter between `8.7` and `10.0`. Inter rather than serif: DM Serif has no
+   * bold, and a serif score reads as editorial rather than as data.
+   */
+  score: {
+    fontFamily: fontFamily.sansSemibold,
+    fontSize: 17,
+    lineHeight: 20,
+    fontVariant: ['tabular-nums'],
+  },
+  ordinal: {
+    fontFamily: fontFamily.sansSemibold,
+    fontSize: 15,
+    lineHeight: 20,
+    fontVariant: ['tabular-nums'],
+  },
+  /**
+   * Section headers, set in Maroon (design-system.md §4). They were `subhead`
+   * in `text.tertiary`, which is small, low-contrast and low-weight all at
+   * once — technically passing at 5.2:1 and reading as a disclaimer rather
+   * than as structure.
+   */
+  sectionHeader: {
+    fontFamily: fontFamily.sansSemibold,
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
 } as const satisfies Record<string, TypeToken>;
 

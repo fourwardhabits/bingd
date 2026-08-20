@@ -7,6 +7,70 @@ No language model. Recommendations are derived from human ranking behavior, cont
 
 ---
 
+## 0. What actually shipped — For You V1, 2026-08-16
+
+**Everything from §1 down describes `recs-builder`, which does not exist.** It is the design this converges on and it is still the design. What ships now is a smaller, on-device subset, and the difference matters enough to state before anything else.
+
+| | `recs-builder` (§1–§7) | For You V1 (shipped) |
+|---|---|---|
+| Where it runs | Edge Function, on a schedule | On the device, when the tab opens |
+| Candidate families | five, including two social ones | `similar` facets for ≤6 anchors, plus the trending week list |
+| Bingd cross-user data | `match_scores`, followed users' rankings | **none** |
+| Evidence | composed server-side, stored on the row | computed from the viewer's own inputs, returned with the score |
+| Storage | `recommendation_generations` / `recommendations` | nothing persisted |
+
+**The client composes the sentence, and that is not a violation of §5.** The rule that the client "has no path to compose a reason of its own" exists to stop **fabricated social proof** — "3 people with similar taste loved this" asserted about people who did not — and it is enforced server-side because the client cannot be trusted with, and must not have, other users' rankings.
+
+V1 uses **no other Bingd user's data**. Its three inputs are the viewer's own rankings (own-only under RLS), TMDB's association between titles (`media_cache` facet `similar`, world-readable), and genre/language/popularity from `media_items`. There is therefore no social claim available to fabricate, and every sentence it can produce is of the form "because of something *you* did".
+
+> **The stronger phrasing — "no cross-user signal at all" — is false, and independent review said so.** TMDB's recommendations are derived from what *their* users did, and popularity is a crowd measure. Both are external, public, about titles rather than about people, and identical for every viewer, so neither can be attributed to a person and neither is something one Bingd account learns about another. That is the claim; the stronger one was overreach.
+>
+> One residual side channel, recorded rather than closed: `similar` answers `reason: "cached"` faster than it answers a fetch, so an authenticated caller can infer that *some* account caused a given title's facet to be filled within its TTL. That is a weak cross-user signal and should be described as one rather than as nothing: for an obscure enough title, outside knowledge could make one person the likely requester. What it never exposes is an identity, a score, a time, or which of several people it was — and any signed-in user may ask about any title anyway, so the observation is available to everyone equally. Closing it would mean padding the response to a constant latency, which costs more than the channel is worth.
+
+**The moment a social family is added, scoring moves server-side.** That is not a preference; at that point the client would need other people's rankings in order to score, which is the thing the rule protects.
+
+Two further properties are worth recording because they are what keep the sentence honest:
+
+- The headline is derived from `lead`, which is whichever *weighted* term actually carried the score. A title that scored on popularity cannot be described as "because you loved X" — the arithmetic decides the wording, not the author.
+- A taste built from fewer than five rankings is not asserted in words. The signal is still used; the sentence falls back to "Popular right now" rather than telling somebody what they like on the evidence of two films.
+
+**Anchors are bounded at six.** Each is one provider request the first time it is used and free for every user afterwards, because the answer lands in `media_cache` under the shared facet TTL. A request per ranked title — the obvious implementation — is four hundred TMDB calls for a user with four hundred rankings.
+
+### Diversity in V1 — what is enforced, exactly
+
+Three hard ceilings, applied by one greedy pass in score order. A candidate that would breach any of them is **dropped**, so a narrow candidate pool yields a short wall rather than a full wall with a relaxed cap.
+
+| Ceiling | Value | Keyed on |
+|---|---|---|
+| Per anchor | ≤ 4 of 20 | every anchor the candidate is attributed to |
+| Per franchise | ≤ 2 of 20 | `franchiseKey(title)`, a documented proxy |
+| Per primary genre | ≤ `ceil(limit × 0.4)` | the candidate's first genre |
+
+All three are absolute counts against the *requested* twenty, never shares of the wall that results.
+
+**The anchor ceiling counts every attribution, not the lead.** Six review rounds landed on the lead-only version, and the seventh found what was wrong with it: it bounded how often a favourite could be *quoted* on the wall, not how much of the wall it *decided*. A title carried mostly by anchor A but recorded against B — because B's list placed it higher — spent B's quota and none of A's, so one rating could sit behind twenty rows while never appearing to lead more than four. Counting every anchor in `explanation.anchors` gives the guarantee the founder decision actually asks for: **no single ranked title lies behind more than four of the twenty, by any route this module can see.** It is strictly stronger and it costs slate length when several anchors point at the same titles — which is the overfitting the ceiling exists for.
+
+**§4's franchise constraint is implemented against a title-derived proxy, not TMDB's collection id.** `belongs_to_collection` appears only on a title's *detail* response, so keying on it would mean one provider request per candidate — several hundred per slate — against an architecture that budgets six. Storing it would mean a column that is null for every catalogue row until something re-enriches it: a ceiling that cannot fire, dressed as one that can.
+
+`franchiseKey(title)` therefore groups on the leading stem of a title: everything before a subtitle separator, minus a leading article, minus a **named** sequel marker — `Part`, `Chapter`, `Volume`, `Vol`, `Episode` — with its number.
+
+**A bare trailing number is never read as a sequel marker**, and getting there cost two review rounds, each with a counterexample:
+
+| Rule | What killed it |
+|---|---|
+| Strip any trailing number | `Apollo 11`, `Apollo 13`, `Apollo 18` → one franchise |
+| Strip one only when the unnumbered original is also present | `Room`, `Room 237`, `Room 203` → one franchise, an unrelated 2015 drama supplying the stem |
+
+A bare number is a sequel index in `Iron Man 2` and part of the name in `Apollo 13`, and nothing available at slate-build time distinguishes them. The second rule reduced the false positives without eliminating them, which is not the same thing — so `Iron Man 2` is a documented **miss**, because a ceiling that drops an unrelated film is worse than one that misses a franchise.
+
+What the proxy misses, all of it under-grouping: the numbered sequel, a shared universe under different names, a renamed entry, a retitled reboot. What it can over-group, stated rather than denied: two unrelated films whose leading *stems* are identical get one key. That is two films with the same title — `Heat` (1995) and `Heat` (2022) — and also the weaker case where one film's whole title is what precedes another's subtitle, which the subtitle split collides. Only the provider's collection id could separate either. At ≤ 2 of 20 that costs a row only when three or more collide. Every case above, in both directions, is held as a test in `rank.test.ts`.
+
+§4's remaining constraints — most-popular band, candidate-family minimum, exploration slots — are **not** implemented in V1, because V1 has no candidate families to count and no exploration slot to reserve. They belong to `recs-builder`.
+
+`src/features/recommendations/rank.ts` is the whole rule and carries the reasoning. `src/features/recommendations/quality.test.ts` measures it against the failures the founder decision names by name, and `npm run report:recommendations` writes `.agent-workflow/recommendation-quality.md` from it. Both diversity assertions there are verified by mutation: removing either ceiling from `diversify` fails the test that names it.
+
+---
+
 ## 1. Generation model
 
 Slates are built **ahead of time** by `recs-builder`, not on request. Opening the Recommendations tab reads the most recent generation.
@@ -67,6 +131,8 @@ A weighted sum over normalized signals, with weights in `app_config`:
 **Bucket signal is why an importer gets useful recommendations on day one.** A user who imports 400 Letterboxd films and ranks nothing has 118 titles in `loved`, which is ample content-similarity signal. They have no `match_scores` rows yet, so the collaborative families contribute nothing — and the slate is labeled accordingly at stage 5.
 
 ### Stage 4 — Re-ranking
+
+> **What of this V1 implements, and how, is §0.** The franchise and genre constraints are enforced today; the family minimum, popular band and exploration slots are not, because V1 has no candidate families. `belongs_to_collection` is unavailable at slate-build time, so franchise identity is a documented title-derived proxy rather than the provider's collection id.
 
 The scored pool is reduced to 20 under hard constraints. Implemented as greedy selection: take the highest remaining score that violates nothing, repeat.
 

@@ -168,6 +168,26 @@ for (const table of ['profiles', 'user_media', 'rankings', 'follows', 'reactions
   expectRefused(`anon cannot insert into ${table}`, await insert(table, {}));
 }
 
+// `public_profiles` is **dropped and recreated** by `20260817000800`, and a `drop view`
+// takes its grants with it — the `grant select ... to anon, authenticated` that
+// `20260813001400` made is against an object that no longer exists. Nothing in the founder
+// pass re-grants it, so what the deployed view actually permits depends on the project's
+// default privileges rather than on anything written in a migration.
+//
+// That is precisely the kind of thing the local suite cannot answer: it builds its schema
+// from the files as the table owner, for whom the question never arises. Independent
+// review 17i asked for the recreated boundary to be asserted rather than assumed, and this
+// is that assertion — the view must still be readable, because the public profile route
+// and user search both read it.
+{
+  const res = await get('public_profiles?select=username&limit=1');
+  report(
+    'the recreated public_profiles view is still readable, grants and all',
+    res.status === 200 ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
 // Private columns live in their own table with no read policy, so a future
 // permissive policy on profiles cannot expose a date of birth.
 {
@@ -213,6 +233,481 @@ expectRefused('anon cannot execute blocked_between', await rpc('blocked_between'
 // The replacements, which take no identity and so must stay reachable.
 expectAllowed('anon can execute can_i_view, by design', await rpc('can_i_view', { subject: NIL }));
 expectAllowed('anon can execute watch_tag_visible, by design', await rpc('watch_tag_visible', { tag_id: NIL }));
+
+// ---------------------------------------------------------------------------
+// The TMDB adapter's write path (20260815000000)
+//
+// These four functions write the catalogue and run as service_role. The local
+// suite asserts the same thing, but only about migrations it just replayed —
+// whether the *deployed* database revoked EXECUTE is a separate claim, and it is
+// the one that matters. An unguarded tmdb_upsert_titles would let anyone rewrite
+// every title in the app.
+// ---------------------------------------------------------------------------
+
+expectRefused(
+  'anon cannot execute tmdb_upsert_titles',
+  await rpc('tmdb_upsert_titles', { p_items: [] }),
+);
+expectRefused(
+  'anon cannot execute tmdb_upsert_seasons',
+  await rpc('tmdb_upsert_seasons', { p_parent_id: NIL, p_seasons: [] }),
+);
+expectRefused(
+  'anon cannot execute tmdb_put_facet',
+  await rpc('tmdb_put_facet', { p_media_item_id: NIL, p_facet: 'credits', p_payload: {} }),
+);
+expectRefused(
+  'anon cannot execute tmdb_note_request',
+  await rpc('tmdb_note_request', { p_user_id: NIL }),
+);
+// Added 2026-08-16 with the trending cache. It is the only writer of a
+// world-readable table, so a stranger reaching it could rewrite what the Feed shows
+// everyone.
+expectRefused(
+  'anon cannot execute tmdb_put_list',
+  await rpc('tmdb_put_list', { p_list_key: 'trending.movie.day', p_payload: { ids: [] } }),
+);
+// Added 2026-08-16 with yearly goals. `authenticated` only — there is no auth.uid()
+// for a goal to belong to otherwise, and the function would write a null-owned row
+// or fail obscurely.
+// Added 2026-08-16 with For You. A client holding this could evict any cached facet
+// in the catalogue by claiming it and never fetching, two minutes at a time.
+expectRefused(
+  'anon cannot execute tmdb_claim_facet',
+  await rpc('tmdb_claim_facet', { p_media_item_id: NIL, p_facet: 'similar' }),
+);
+expectRefused(
+  'anon cannot execute set_watch_goal',
+  await rpc('set_watch_goal', { p_year: 2026, p_category: 'movies', p_target: 1 }),
+);
+// Added 2026-08-17 with the Following score. It is `authenticated` only because
+// `auth.uid()` is its entire population filter, so anon could only ever receive the
+// empty answer — but the grant is what makes that a decision rather than an accident.
+// This probe does double duty: `refused` proves the signature resolved, so it also
+// asserts the migration is actually on the deployed database and not merely on disk.
+expectRefused(
+  'anon cannot execute following_score',
+  await rpc('following_score', { p_media_item_id: NIL }),
+);
+// Added 2026-08-17 with Comments V1. Three writers on the first table in this schema
+// that holds free text somebody else wrote. Each probe doubles as an assertion that
+// the migration is on the deployed database: `refused` means the signature resolved.
+expectRefused(
+  'anon cannot execute add_comment',
+  await rpc('add_comment', { p_operation_id: NIL, p_feed_event_id: NIL, p_body: 'x', p_has_spoilers: false }),
+);
+expectRefused(
+  'anon cannot execute edit_comment',
+  await rpc('edit_comment', { p_operation_id: NIL, p_comment_id: NIL, p_body: 'x', p_has_spoilers: false }),
+);
+expectRefused(
+  'anon cannot execute delete_comment',
+  await rpc('delete_comment', { p_operation_id: NIL, p_comment_id: NIL }),
+);
+// Added 2026-08-17 with the social graph writers. These are the first writers this
+// database has ever had for `follows` and `blocks` — the two tables `can_view_profile`
+// consults — so an anon caller reaching any of them would be able to manufacture the
+// relationships every visibility decision is made from.
+expectRefused(
+  'anon cannot execute follow',
+  await rpc('follow', { p_operation_id: NIL, p_followee_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute unfollow',
+  await rpc('unfollow', { p_operation_id: NIL, p_followee_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute respond_follow_request',
+  await rpc('respond_follow_request', {
+    p_operation_id: NIL,
+    p_requester_id: NIL,
+    p_approve: true,
+  }),
+);
+expectRefused(
+  'anon cannot execute remove_follower',
+  await rpc('remove_follower', { p_operation_id: NIL, p_follower_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute block',
+  await rpc('block', { p_operation_id: NIL, p_blocked_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute unblock',
+  await rpc('unblock', { p_operation_id: NIL, p_blocked_id: NIL }),
+);
+expectRefused('anon cannot execute follow_state_with', await rpc('follow_state_with', { p_user_ids: [NIL] }));
+// No argument at all, so it cannot hide behind a 404 the way an argument mismatch can
+// — which makes this one of the few probes here whose refusal is unambiguous.
+expectRefused('anon cannot execute my_blocks', await rpc('my_blocks', {}));
+// Added 2026-08-17 with user discovery. A people search reachable without an account
+// would be an enumeration endpoint over every public profile in the database.
+expectRefused('anon cannot execute search_users', await rpc('search_users', { p_query: 'a', p_limit: 5 }));
+// Added 2026-08-17 with Taste Match. auth.uid() is one half of the pair, so anon has
+// no catalogue to compare — but the grant is what makes that a decision.
+expectRefused('anon cannot execute taste_match', await rpc('taste_match', { p_user_id: NIL }));
+
+// Own-read only, and a stranger is not the owner. An empty array is the correct
+// answer under RLS; a row would mean the policy is not doing its job.
+{
+  const res = await get('watch_goals?select=*&limit=1');
+  const ok = classify(res) === 'refused' || res.body.trim() === '[]';
+  report(
+    'anon cannot read anyone’s goals',
+    ok ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
+// The revoke, checked on the running database rather than in the migration.
+//
+// `comments` is the first table here that holds free text somebody else wrote, and the
+// RLS policy alone would *admit* an anonymous reader for a public author on a public
+// actor's event — which is right for feed_events and reactions and wrong for this.
+// The grant is what makes the difference, and a grant revoked in a migration and a
+// grant revoked on the running database are different claims.
+//
+// A 200 with `[]` would be a FAIL here, not a pass: that is what a policy denial looks
+// like through PostgREST, and the whole point is that the refusal happens a layer
+// earlier. So this asserts a refusal, not an empty result.
+{
+  const res = await get('comments?select=body&limit=1');
+  report(
+    'anon is refused comments at the grant, not the policy',
+    classify(res) === 'refused' ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
+// World-readable *by design*, like media_items and media_cache: it is catalogue
+// metadata and says nothing about any account. Asserted rather than assumed, because
+// the Feed's shelf depends on an unauthenticated-shaped read succeeding.
+// Note what this can and cannot tell you: PostgREST answers a policy denial and an
+// empty table identically, with `200 []`. So this proves the relation exists and is
+// not refused outright; it does not prove a row would come back. The row half is
+// covered once the adapter has been deployed and `npm run trending:refresh` has run.
+expectAllowed(
+  'anon can read the trending cache, by design',
+  await get('provider_list_cache?select=list_key&limit=1'),
+);
+
+// RLS with no policy at all. How often someone searches is not their own business
+// to read and is certainly not a stranger's.
+{
+  const res = await get('tmdb_request_log?select=*&limit=1');
+  const ok = classify(res) === 'refused' || res.body.trim() === '[]';
+  report(
+    'anon cannot read the adapter request log',
+    ok ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
+// The catalogue is world-readable by design (media_items has `using (true)`), and
+// after the backfill that is worth confirming rather than assuming: a search
+// result with no artwork is the symptom the whole integration exists to remove.
+{
+  const res = await get('media_items?select=id&kind=eq.movie&poster_path=not.is.null&limit=1');
+  let hasArtwork = false;
+  try {
+    hasArtwork = JSON.parse(res.body).length === 1;
+  } catch {
+    // Left false; the report below says what came back instead.
+  }
+  report(
+    'the catalogue is readable and has artwork',
+    hasArtwork ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
+// AD-8's client-facing half. The provider quota sits behind this function, so an
+// unauthenticated caller must not reach it — verify_jwt refuses the request before
+// the function starts, and the function refuses again if it ever does not.
+{
+  const res = await fetch(`${url}/functions/v1/tmdb-adapter`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'search', query: 'inception' }),
+  });
+  const body = await res.text();
+  report(
+    'anon cannot reach TMDB through the adapter',
+    res.status === 401 ? 'pass' : 'fail',
+    `${res.status} ${body.slice(0, 200)}`,
+  );
+}
+
+// Added 2026-08-17 with Phase E. `person_cache` is a third sibling of `media_cache`
+// and `provider_list_cache`, and its two writers are service_role only for the same
+// reasons the facet writers are: one could write any filmography onto any person id
+// and every viewer of that page would render it, and the other could keep any person
+// blank indefinitely, two minutes at a time. Each probe also asserts the migration is
+// on the deployed database rather than merely on disk -- `refused` means the signature
+// resolved.
+expectRefused(
+  'anon cannot execute tmdb_put_person',
+  await rpc('tmdb_put_person', { p_person_id: 1, p_payload: { person: {}, credits: [] } }),
+);
+expectRefused(
+  'anon cannot execute tmdb_claim_person',
+  await rpc('tmdb_claim_person', { p_person_id: 1 }),
+);
+
+// The person cache is world-readable, like every other catalogue table. A filmography
+// is what TMDB publishes on a public page and nothing viewer-relative is stored in it.
+{
+  const res = await get('person_cache?select=tmdb_person_id&limit=1');
+  report(
+    'anon can read the person cache, by design',
+    res.status === 200 ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 160)}`,
+  );
+}
+
+// Added 2026-08-17 with Settings. Every one of these is about the caller's own account
+// and `auth.uid()` is null for anon, so a grant would buy nothing but a surface --
+// and `delete_account` reaching an unauthenticated caller would be the worst of them.
+// `update_profile` and `change_username` were **dropped** by `20260817000800` and replaced
+// by one `save_profile` -- the founder's "one Save" correction, which made a name, a handle
+// and a bio a single atomic write rather than three buttons that could half-succeed.
+//
+// Their probes were left behind, and this run's `test:remote` is what exposed it: both came
+// back `inconclusive` with PGRST202, which is the suite correctly reporting that it had
+// verified *nothing*. Two probes aimed at functions that no longer exist, while the function
+// that replaced them -- the one that can now rename an account and rewrite its bio -- had no
+// deployed anon probe at all. That is the more serious half, and it is why these are
+// replaced rather than deleted.
+expectRefused(
+  'anon cannot execute save_profile',
+  await rpc('save_profile', {
+    p_operation_id: NIL,
+    p_display_name: 'x',
+    p_username: 'nobody_at_all',
+    p_bio: 'x',
+  }),
+);
+// The rest of what `20260817000800` added, none of which had a boundary probe until
+// independent review 17h swept for the same rot that left the two dead ones behind.
+//
+// `title_reviews` matters most of the three. It is the function this entire deployment was
+// about, it was **recreated** by `20260817001100`, and `create or replace` is precisely the
+// operation that has silently dropped a guarantee in this schema before -- so a probe that
+// resolves its signature *and* finds anon refused is worth more here than anywhere else in
+// this file. It follows `public_notes`' rule: a note is readable by people, not by the
+// internet.
+expectRefused(
+  'anon cannot execute title_reviews',
+  await rpc('title_reviews', { p_media_item_id: NIL, p_sort: 'top', p_limit: 1 }),
+);
+// `social`, not an invented category. The function accepts only `social` and `follows`,
+// and a rejected *input* would be classified `executed` and fail this probe rather than
+// pass it — so the value cannot manufacture a false pass either way. It is correct here so
+// that the probe would reach normal behaviour if the grant ever regressed, which is the
+// only state in which the argument matters. Independent review 17i.
+expectRefused(
+  'anon cannot execute set_notification_preference',
+  await rpc('set_notification_preference', { p_category: 'social', p_enabled: true }),
+);
+// The two definer helpers the same migration added. `_notifies` is the sensitive one: it
+// answers a question about a *named third party's* settings, so an execute grant reaching
+// anon would be a disclosure about somebody who never called anything.
+expectRefused(
+  'anon cannot execute _notifies',
+  await rpc('_notifies', { p_recipient: NIL, p_category: 'social' }),
+);
+// `_apply_notification_preference()` is the third object `20260817000800` revoked, and it
+// is **deliberately not probed here**: it returns `trigger`, which PostgREST cannot expose
+// as an RPC at all, so a probe would resolve nothing and report `inconclusive` forever.
+// The limitation is written down rather than left as a silent omission, because a missing
+// probe and an unprobeable object look identical in a passing run — which is how the two
+// dead probes above survived. Its grant is covered locally by `function-grants.test.mjs`.
+expectRefused(
+  'anon cannot execute my_notification_preferences',
+  await rpc('my_notification_preferences', {}),
+);
+expectRefused(
+  'anon cannot execute set_profile_visibility',
+  await rpc('set_profile_visibility', { p_operation_id: NIL, p_visibility: 'public' }),
+);
+expectRefused('anon cannot execute my_notifications', await rpc('my_notifications', { p_limit: 1 }));
+expectRefused('anon cannot execute mark_notifications_read', await rpc('mark_notifications_read', {}));
+expectRefused('anon cannot execute delete_account', await rpc('delete_account', { p_confirmation: 'x' }));
+
+// ---------------------------------------------------------------------------
+// Friend recommendations (20260817001300)
+//
+// Two new tables that hold facts about two named accounts, and four new functions,
+// three of which name a person. This is the only place the deployed grants on them can
+// be observed: the local suite builds its schema from the files and runs as the table
+// owner, for whom `revoke all ... from anon` is a question that never comes up. That
+// is the "owner is not the caller" blind spot that cost `public_profiles` two days.
+// ---------------------------------------------------------------------------
+
+for (const table of ['title_recommendations', 'invite_link_creations']) {
+  const res = await get(`${table}?select=id&limit=1`);
+  // Either the grant is absent (401/403) or RLS returns nothing. Both are correct and
+  // neither may return a row: every row in these tables is about somebody by name.
+  report(
+    `anon reads no rows from ${table}`,
+    res.status >= 400 || res.body.trim() === '[]' ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 160)}`,
+  );
+  expectRefused(`anon cannot insert into ${table}`, await insert(table, {}));
+}
+
+expectRefused(
+  'anon cannot execute recommend_title',
+  await rpc('recommend_title', { p_operation_id: NIL, p_recipient_id: NIL, p_media_item_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute recommendations_to_me',
+  await rpc('recommendations_to_me', { p_limit: 1 }),
+);
+expectRefused(
+  'anon cannot execute mark_recommendation_opened',
+  await rpc('mark_recommendation_opened', { p_recommendation_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute create_invite_link',
+  await rpc('create_invite_link', { p_operation_id: NIL, p_media_item_id: null }),
+);
+
+// The two internals. `_is_mutual_follow` answers a question about somebody else's
+// follow graph and `_can_tag` now delegates to it, so both are revoked from every
+// client role — the rule 20260813001900 exists to enforce.
+expectRefused('anon cannot execute _is_mutual_follow', await rpc('_is_mutual_follow', { p_other: NIL }));
+expectRefused('anon cannot execute _can_tag', await rpc('_can_tag', { p_tagged: NIL }));
+
+// The same rule again, and this one was granted by mistake and revoked by
+// 20260819000200. Given two ids known to name active accounts, a `false` from it means
+// a block between two strangers — the one thing `blocks_read` exists to keep in.
+// Probed against the deployed database rather than only in the local harness, because
+// what matters is the grant that is actually in place.
+expectRefused(
+  'anon cannot execute can_discover_profile',
+  await rpc('can_discover_profile', { viewer: NIL, subject: NIL }),
+);
+
+// 20260819000300's internals. `_notification_default` and `_notification_categories`
+// are pure and disclose nothing about anybody, which is exactly why the grant is the
+// thing worth probing: an entry in the allow-list should follow a surface, and no
+// client calls either.
+expectRefused(
+  'anon cannot execute _notification_default',
+  await rpc('_notification_default', { p_category: 'comments' }),
+);
+expectRefused(
+  'anon cannot execute _notification_categories',
+  await rpc('_notification_categories', {}),
+);
+
+// ---------------------------------------------------------------------------
+// 20260819000500 — the invitation resolver
+//
+// `record_invite_open` is **the only writer in this schema granted to anon**, so it is
+// the one that most deserves probing from an unauthenticated client rather than from a
+// migration file. Three things are checked here that the local suite cannot see, because
+// PostgREST is the surface an attacker actually reaches:
+//
+//   1. it is reachable at all, and returns *nothing* — a body carrying any information
+//      would make it a token oracle;
+//   2. a fabricated token is answered identically to a live one, which is the same claim
+//      from the outside;
+//   3. everything else the migration added is closed to anon.
+// ---------------------------------------------------------------------------
+
+{
+  const res = await rpc('record_invite_open', { p_token: '0'.repeat(32), p_platform: 'ios' });
+  report(
+    'anon can execute record_invite_open, by design',
+    res.status === 200 || res.status === 204 ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+  // A void return. Anything else would be a value in which validity could be read back.
+  report(
+    'record_invite_open discloses nothing in its body',
+    res.body.trim() === '' || res.body.trim() === 'null' ? 'pass' : 'fail',
+    res.body.slice(0, 200),
+  );
+}
+
+{
+  // The same call with a malformed token. Identical status and identical body is the
+  // externally visible form of "no value and no error reveals validity".
+  const shaped = await rpc('record_invite_open', { p_token: 'a'.repeat(32) });
+  const malformed = await rpc('record_invite_open', { p_token: 'not-a-token' });
+  report(
+    'record_invite_open answers a malformed token exactly as it answers a shaped one',
+    shaped.status === malformed.status && shaped.body.trim() === malformed.body.trim()
+      ? 'pass'
+      : 'fail',
+    `${shaped.status}/${shaped.body.slice(0, 60)} vs ${malformed.status}/${malformed.body.slice(0, 60)}`,
+  );
+}
+
+// Redemption needs an account — PRD §17, "the recipient must have an account" — so there
+// is nothing for an anonymous caller to attribute and a grant would only widen the
+// surface. Revocation acts on the caller's own row and has the same answer.
+expectRefused(
+  'anon cannot execute redeem_invite',
+  await rpc('redeem_invite', { p_operation_id: NIL, p_token: '0'.repeat(32) }),
+);
+expectRefused(
+  'anon cannot execute revoke_invite_link',
+  await rpc('revoke_invite_link', { p_operation_id: NIL }),
+);
+
+// The activation writer reads a third party's attribution and writes somebody else's
+// inbox row, which is why it is internal in the same sense `_notifies` is.
+expectRefused(
+  'anon cannot execute _maybe_activate_invite',
+  await rpc('_maybe_activate_invite', { p_user: NIL }),
+);
+
+// The opens table has RLS on and no policy at all, plus a revoke. An inviter learning
+// their link was opened four times is a product decision nobody has taken.
+{
+  const res = await get('invite_link_opens?select=id&limit=1');
+  report(
+    'anon cannot read invite_link_opens',
+    res.status === 401 || res.status === 403 || res.status === 404 ? 'pass' : 'fail',
+    `${res.status} ${res.body.slice(0, 200)}`,
+  );
+}
+
+// The bulk preference writer is a session's own settings, so it is authenticated-only
+// like its single-category sibling.
+expectRefused(
+  'anon cannot execute set_notification_preferences',
+  await rpc('set_notification_preferences', { p_categories: ['comments'], p_enabled: false }),
+);
+
+// The inbox stopped being a client-readable table in 20260819000300: the recipient-only
+// policy was one of two read paths, and the one it did not cover let a row that raced a
+// block be read straight off the table. Probed here because what closes it is a grant on
+// the deployed database rather than anything in a function body.
+expectRefused(
+  'anon cannot select the notifications table',
+  await get('notifications?select=id&limit=1'),
+);
+
+// Maintenance actions are service_role only. The anon key is a valid JWT, so
+// verify_jwt lets it through and resolveCaller is what stops it — which means this
+// probe is testing the function's own logic rather than the platform's.
+{
+  const res = await fetch(`${url}/functions/v1/tmdb-adapter`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'enrich', limit: 1 }),
+  });
+  const body = await res.text();
+  report(
+    'anon cannot trigger a bulk enrichment',
+    res.status === 401 || res.status === 403 ? 'pass' : 'fail',
+    `${res.status} ${body.slice(0, 200)}`,
+  );
+}
 
 // The one thing the local suite structurally cannot check: citext is shimmed as a
 // domain in PGlite, so no local function carries an extension dependency and the

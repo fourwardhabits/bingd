@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { classifyWrite } from '@/lib/write-outcome';
 
 /**
  * The client half of `create_profile` (20260813002200). The server owns every rule;
@@ -13,7 +14,17 @@ export type CreateProfileResult =
   | { outcome: 'under_13' }
   | { outcome: 'username_taken' }
   | { outcome: 'invalid'; message: string }
-  | { outcome: 'failed'; message: string };
+  /**
+   * `changed` means the profile may exist anyway: the request went unanswered rather
+   * than being declined, and `create_profile` may have committed. The same flag, and
+   * the same rule, as `collection/writes.ts` — see `lib/write-outcome.ts`.
+   *
+   * It matters here more than most places, because the screen the person is looking at
+   * is the one thing standing between them and an account they already have. Retrying
+   * does converge — the second attempt answers `already_exists` — but it should not
+   * take a second attempt to find out.
+   */
+  | { outcome: 'failed'; message: string; changed?: boolean };
 
 /**
  * SQLSTATEs, not messages. The database raises standard codes and the messages are
@@ -49,7 +60,13 @@ export async function createProfile(input: {
       case CODES.unauthenticated:
         return { outcome: 'failed', message: 'Your session expired. Sign in again.' };
       default:
-        return { outcome: 'failed', message: error.message };
+        // Everything the four cases above do not name. Only a code this app raises on
+        // purpose proves the insert did not happen.
+        return {
+          outcome: 'failed',
+          message: error.message,
+          changed: classifyWrite(error) === 'unknown',
+        };
     }
   }
 

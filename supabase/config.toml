@@ -1,0 +1,23 @@
+project_id = "bingd"
+
+# ---------------------------------------------------------------------------
+# Edge Functions
+#
+# This file exists for this block. Everything else the CLI needs it already had:
+# the linked project ref lives in supabase/.temp, and `db push` has never read a
+# config. Per-function settings have nowhere else to go.
+# ---------------------------------------------------------------------------
+
+[functions.tmdb-adapter]
+# The platform rejects a request with no valid JWT before the function starts, so
+# an unauthenticated caller never reaches the provider quota. It is not sufficient
+# on its own — the anon key is itself a valid JWT — which is why index.ts resolves
+# the caller to a real user or to service_role before doing any work.
+#
+# DO NOT SET THIS TO FALSE without reading resolveCaller in index.ts. The two
+# maintenance actions recognise service_role from the `role` claim, and they trust
+# that claim precisely because this flag means the signature was already verified
+# against the project's JWT secret. Turning it off leaves user search working and
+# makes `enrich` and `refresh` forgeable, which is the worst shape a regression can
+# have: invisible, and only in the privileged path.
+verify_jwt = true

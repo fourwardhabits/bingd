@@ -115,7 +115,7 @@ export const color = {
   parchment: '#F5EBDD',   // primary background
   maroon:    '#773744',   // identity, action, selected
   ink:       '#242326',   // text, structure
-  amber:     '#D4A64C',   // awards, milestones, reveals
+  amber:     '#D4A64C',   // awards, milestones
   sage:      '#92A895',   // watched, progress, completion
   midnight:  '#19242D',   // reserved — dark theme, not built in v1
 } as const;
@@ -135,7 +135,9 @@ PRD §5 grants exactly one surface real animation, and this is it. Everything el
 
 The comparison sequence is deliberately plain — two posters, one question, no decoration — so the reveal lands by contrast. The reveal uses DM Serif Display at display size and a single transition. It is the product's payoff moment and the thing most likely to be screenshotted.
 
-**Corrected 2026-08-13.** This section previously specified Antique Amber for the ordinal. Amber measures 1.9:1 against Parchment and fails WCAG at every text size, so the ordinal is set in Ink on an Amber panel instead — 7.0:1, same visual emphasis. The composition is in [`../design/design-system.md`](../design/design-system.md) §9.
+**Corrected 2026-08-13.** This section previously specified Antique Amber for the ordinal. Amber measures 1.9:1 against Parchment and fails WCAG at every text size, so the number was set on an Amber panel instead rather than in Amber ink.
+
+**Corrected 2026-08-16.** Two further changes, both founder decisions made on a device. The reveal states the **score**, not the ordinal (2026-08-15). And the panel is **Maroon carrying Parchment at 7.4:1**, not Amber carrying Ink — the reveal was the only place stating a score that did not use the score system, so the payoff moment and the badge it resolves into were different colours. The composition is in [`../design/design-system.md`](../design/design-system.md) §9.
 
 **Corrected 2026-08-14.** This section previously claimed comparison cards prefetch the next pivot's poster while the user is deciding. Nothing prefetches, and nothing can: `rank_answer` chooses the next pivot from the answer being given, so its identity does not exist until the response arrives. The claim was written before the screen was, and the first code measured against it did not hold it.
 

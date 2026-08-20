@@ -40,10 +40,19 @@ const migrationsDir = join(here, '..', 'migrations');
  *     `resolve_capabilities` became callable for arbitrary users, so a lockdown
  *     has to be written explicitly and can then be tested.
  */
-const SHIM = `
+/**
+ * Parameterised on one line only, and the parameter exists because of the concurrency
+ * harness in `concurrency/harness.mjs`. That one runs against a **real** PostgreSQL,
+ * where `citext` is a real extension rather than a gap to be papered over — so it asks
+ * for `citext: 'extension'` and the migrations' own `create extension` is left to run.
+ *
+ * Exported rather than copied. Two shims for two harnesses is the drift that ends with
+ * a race test passing against a schema production does not have.
+ */
+export const buildShim = ({ citext = 'domain' } = {}) => `
   create schema if not exists auth;
   create table auth.users (id uuid primary key);
-  create domain citext as text;
+  ${citext === 'extension' ? 'create extension if not exists citext;' : 'create domain citext as text;'}
 
   create role anon         nologin noinherit;
   create role authenticated nologin noinherit;
@@ -71,7 +80,56 @@ const SHIM = `
   $shim$;
 
   grant execute on function auth.uid() to anon, authenticated, service_role;
+
+  -- Storage, in the two tables and one function the avatars migration touches.
+  --
+  -- Thin on purpose, and the thinness is the point: the avatar rules are
+  -- ordinary row policies over an ordinary table, so once the table exists
+  -- Postgres enforces them here exactly as it does in production. What is not
+  -- simulated is Supabase's upload path -- the size and mime limits on the
+  -- bucket row are theirs to apply, and a test asserting them would be
+  -- asserting this shim.
+  create schema if not exists storage;
+
+  create table storage.buckets (
+    id                 text primary key,
+    name               text not null,
+    public             boolean not null default false,
+    file_size_limit    bigint,
+    allowed_mime_types text[],
+    created_at         timestamptz not null default now()
+  );
+
+  create table storage.objects (
+    id         uuid primary key default gen_random_uuid(),
+    bucket_id  text not null references storage.buckets(id),
+    name       text not null,
+    owner      uuid,
+    metadata   jsonb,
+    created_at timestamptz not null default now(),
+    unique (bucket_id, name)
+  );
+
+  alter table storage.objects enable row level security;
+
+  -- Supabase's own definition. Everything before the final slash, split on
+  -- slashes -- so 'uid/face.jpg' yields {uid} and a bare 'face.jpg' yields {}.
+  create or replace function storage.foldername(name text) returns text[]
+  language plpgsql immutable as $shim$
+  declare
+    parts text[];
+  begin
+    parts := string_to_array(name, '/');
+    return parts[1 : array_length(parts, 1) - 1];
+  end;
+  $shim$;
+
+  grant usage on schema storage to anon, authenticated, service_role;
+  grant all on storage.buckets, storage.objects to anon, authenticated, service_role;
+  grant execute on function storage.foldername(text) to anon, authenticated, service_role;
 `;
+
+const SHIM = buildShim({ citext: 'domain' });
 
 /**
  * The migrated database, dumped once and reloaded for each test database.
@@ -88,22 +146,72 @@ const SHIM = `
  */
 let migratedSnapshot;
 
-const applyMigrations = async (db) => {
-  const files = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
+export const migrationFiles = async () =>
+  (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
 
-  for (const file of files) {
-    let sql = await readFile(join(migrationsDir, file), 'utf8');
-    // The shim already defines citext as a domain.
-    sql = sql.replace(/create extension if not exists citext;/g, '');
-    try {
-      await db.exec(sql);
-    } catch (e) {
-      throw new Error(`Migration ${file} failed: ${e.message}`);
-    }
+/**
+ * One migration's SQL, as the harness applying it needs it.
+ *
+ * `citext: 'domain'` strips the extension statement, because PGlite has no such
+ * extension and the shim has already declared a domain of that name. `'extension'`
+ * leaves the statement alone, which is what a real PostgreSQL wants — and is the
+ * more faithful of the two, since case-insensitive uniqueness is then genuinely
+ * exercised rather than noted as a known gap.
+ */
+export const migrationSql = async (file, { citext = 'domain' } = {}) => {
+  const sql = await readFile(join(migrationsDir, file), 'utf8');
+  return citext === 'extension'
+    ? sql
+    : sql.replace(/create extension if not exists citext;/g, '');
+};
+
+const applyOne = async (db, file) => {
+  const sql = await migrationSql(file, { citext: 'domain' });
+  try {
+    await db.exec(sql);
+  } catch (e) {
+    throw new Error(`Migration ${file} failed: ${e.message}`);
   }
+};
+
+const applyMigrations = async (db, upTo) => {
+  const all = await migrationFiles();
+  // Filenames are timestamp-prefixed and applied in sort order, so "everything
+  // before file X" is a plain string comparison over that same order.
+  const files = upTo ? all.filter((f) => f < upTo) : all;
+
+  for (const file of files) await applyOne(db, file);
 
   return files;
 };
+
+/**
+ * A database with the migrations applied only up to (and not including) `stopBefore`.
+ *
+ * This exists so a migration that *transforms existing rows* can be tested for what it
+ * does to them. The ordinary `createTestDb` reloads a snapshot in which every migration
+ * has already run, so a backfill has necessarily already executed — against an empty
+ * database, where it is a guaranteed no-op. Asserting anything about it afterwards
+ * measures the triggers instead and passes whether or not the backfill works at all.
+ *
+ * Deliberately uncached: the whole point is a database in a state the snapshot cannot
+ * represent, and one uncached run in one file is a few seconds.
+ */
+export async function createTestDbBefore(stopBefore) {
+  // Checked before any work, and before the filter below silently applies a prefix:
+  // a renamed or mistyped migration would otherwise produce a database missing an
+  // arbitrary tail of the schema, and the failure would surface much later as a
+  // confusing "relation does not exist".
+  if (!(await migrationFiles()).includes(stopBefore)) {
+    throw new Error(`createTestDbBefore: no migration named ${stopBefore}`);
+  }
+
+  const db = await PGlite.create();
+  await db.exec(SHIM);
+  const files = await applyMigrations(db, stopBefore);
+
+  return { ...testApi(db, files), applyMigration: (file) => applyOne(db, file) };
+}
 
 export async function createTestDb() {
   let db;
@@ -119,6 +227,10 @@ export async function createTestDb() {
     migratedSnapshot = { dump: await db.dumpDataDir('none'), files };
   }
 
+  return testApi(db, files);
+}
+
+function testApi(db, files) {
   return {
     db,
     appliedMigrations: files,
@@ -293,7 +405,12 @@ export async function createTestDb() {
         if (comparisons > 64) throw new Error('insertion did not converge');
       }
 
-      return { position: result.position, comparisons, adjustable: result.adjustable };
+      return {
+        position: result.position,
+        score: result.score,
+        comparisons,
+        adjustable: result.adjustable,
+      };
     },
 
     async close() {

@@ -60,7 +60,7 @@ create table profiles (
   id                  uuid primary key references auth.users(id) on delete cascade,
   username            citext not null unique,
   display_name        text   not null,
-  avatar_url          text,
+  avatar_path         text,   -- object path in the public avatars bucket, always {id}/{file}
   visibility          profile_visibility not null default 'public',
   invited_by          uuid   references profiles(id) on delete set null,
   founding_member     boolean not null default true,
@@ -256,7 +256,7 @@ Two known blemishes in the data, both from the source rather than the pipeline: 
 ```sql
 create table media_cache (
   media_item_id uuid not null references media_items(id) on delete cascade,
-  facet         text not null,          -- 'credits' | 'keywords' | 'providers' | 'similar'
+  facet         text not null,          -- 'credits' | 'keywords' | 'providers' | 'similar' | 'videos'
   payload       jsonb not null,
   fetched_at    timestamptz not null default now(),
   expires_at    timestamptz not null,
@@ -268,6 +268,36 @@ create index on media_cache (expires_at);
 
 Facet-level TTLs match PRD §19: availability expires in hours, credits and keywords in weeks. `expires_at` is computed by `tmdb-adapter` from configuration in `app_config`, **not** from a constant. Bingd caps all TMDB-derived retention under six months to stay inside the API terms ([`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)), and that window must be adjustable without a migration.
 
+**A provider list is not a facet.** Added 2026-08-16 with trending. Every facet above answers "what does TMDB say about *this title*", and the primary key says so: `media_item_id` is `not null` and references `media_items`. Trending answers "what is TMDB featuring right now", which belongs to no title and has no id to key on. So `provider_list_cache` is a sibling with the same lifecycle contract — jsonb payload, `fetched_at`, `expires_at` from `app_config`, a closed key set, world-readable — keyed on the list instead:
+
+```sql
+create table provider_list_cache (
+  list_key   text not null,          -- 'trending.movie.day' | '.week' | 'trending.series.day' | '.week'
+  payload    jsonb not null,         -- {"ids": [...]}, most trending first
+  fetched_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  primary key (list_key)
+);
+```
+
+The payload holds `media_items` ids and nothing else. The titles are written through `tmdb_upsert_titles` before the list row is, so a trending poster comes from `media_items` and expires on the retention clock rather than on this six-hour one — one copy, one expiry. Replacing the row whole is what keeps a refreshed list free of the previous generation, which is the property a facet row per trending title could not have offered.
+
+**A person is neither.** Added 2026-08-17 with the person page (`20260817000500`). A person is the first provider entity here that is not a title and not a global list: `media_cache` has no id to key it on, and `provider_list_cache` has a closed set of four literal keys and a writer that enforces `{"ids": [...]}`. Widening either would leave one table whose contract is "anything", which is how a cache stops being checkable. So a third sibling, with the same lifecycle again and TMDB's own person id as the key — there is no Bingd person, deliberately, because minting one would be a second identity to reconcile with the provider on every refresh:
+
+```sql
+create table person_cache (
+  tmdb_person_id bigint not null check (tmdb_person_id > 0),
+  payload        jsonb not null,      -- {"person": {...}, "credits": [{"id", "kind", "role", "as"}], "credit_total": n}
+  fetched_at     timestamptz not null default now(),
+  expires_at     timestamptz not null,
+  primary key (tmdb_person_id)
+);
+```
+
+Same rule as trending: the credited titles are written through `tmdb_upsert_titles` first, so the payload holds `media_items` ids plus the two facts a title row cannot hold — which Bingd id it is, and what this person did in it. A character name is a property of the pairing, not of the film. Seven-day TTL from `app_config`, capped at the same six-month window; the credits are ordered by provider popularity and capped at forty, with `credit_total` recording how many TMDB had.
+
+Nothing viewer-relative is stored in it. Whether the reader has ranked, watched or saved a credited title is answered by the tables that already answer it, under the policies that already gate them — which is why this table can be world-readable alongside the other two.
+
 > **Corrected 2026-08-13.** `media_cache` had an expiry; `media_items` did not. Title, overview, poster path, and genres are the bulk of the provider-derived data, and they carried only `fetched_at` — with no index on it and no job defined to act on it. A row referenced by somebody's ranking and untouched for seven months was retained provider data that nothing could find.
 >
 > `title` is also `not null`, so the "reduce to a bare identifier" fallback described in the integration note was not actually available without a schema change.
@@ -276,7 +306,7 @@ Facet-level TTLs match PRD §19: availability expires in hours, credits and keyw
 
 
 
-> **Read access is public** on `media_items` and `media_cache`. Catalog metadata is not user data. This is the only unrestricted read in the schema.
+> **Read access is public** on `media_items`, `media_cache`, `provider_list_cache` and `person_cache`. Catalog metadata is not user data. These are the only unrestricted reads in the schema.
 
 ### Search — added 2026-08-14
 
@@ -389,7 +419,40 @@ Other users never read `user_media` directly. The bucket, where it should be vis
 >
 > This is what the schema already did, and it is why the column split matters. `visible_collection` exposes `media_item_id`, `bucket`, and `progress`. It does **not** expose `note` or `watched_on`, which stay always-private regardless of profile visibility, and it is not a path to `watchlist`, which stays owner-only at every visibility level. A watchlist is forward-looking intent about things you have not watched, which is a different kind of disclosure from a reaction to something you have; PRD §22 keeps it private and this decision does not change that.
 
+### Yearly goals — added 2026-08-16
 
+> **Founder decision, 2026-08-16.** One row per `(user_id, year, medium)`. Movies and TV goals are independently optional and independently editable.
+
+```sql
+create table watch_goals (
+  user_id  uuid             not null references profiles(id) on delete cascade,
+  year     integer          not null,
+  category ranking_category not null,   -- 'movies' | 'tv_seasons'
+  target   integer          not null,
+  primary key (user_id, year, category)
+);
+```
+
+**Absence is the only representation of "no goal".** There is no nullable target and nothing seeds a row, so "never set one", "set one and cleared it", and "set one for the other medium" are not three states a reader has to tell apart. The alternative — one row per `(user, year)` with two nullable targets — makes independence a convention rather than a consequence of the key.
+
+The medium is `ranking_category` and not a new enum, because that split already *is* what this app means by medium: it is how rankings are kept, how the collection screen filters, and what `rankable_category` maps a media kind onto. `'tv_seasons'` reads slightly oddly on a goal; two enums to keep in step by hand would read worse.
+
+Own-read only, matching `user_media` rather than `rankings`. No specification has placed a goal on a shareable surface, and private is the half of that choice that can be widened later without having published anything first.
+
+**How progress is counted — decided 2026-08-16, and deliberately not in the database.** The table stores the target and nothing counts against it in SQL. The rule lives in `src/features/goals/goals.ts`, where it can be read as prose and tested as arithmetic:
+
+- **`watched_on` is the only clock.** Never `created_at`. The date a row entered Bingd is a fact about the app, and an import would otherwise credit a decade of watching to one afternoon.
+- **A null `watched_on` counts for nothing.** Onboarding logs historical favourites with no date on purpose (§Onboarding), so this is a live case rather than a hypothetical.
+- **A series never counts.** `rankable_category` returns null for a series and the TV goal counts seasons, so a nine-season show is neither one tick nor nine.
+- **Distinct entities.** Counting is over `media_item_id`, so a rewatch is one. `user_media`'s primary key makes that true already; stating it here is what stops a future watch-history table turning a goal of 52 into a goal of 52 viewings.
+
+> **Known limitation, recorded 2026-08-16 by independent review.** `user_media` holds **one** `watched_on` per `(user, media item)`, and `log_watched` replaces it when a non-null date is supplied. So a film watched in 2025 and rewatched in 2026 does not count once in each year: logging the rewatch moves its only recorded date forward, and 2025's count silently drops by one.
+>
+> This is not fixable without a watch-history table, and the founder decision that specified goals ruled that out in as many words — "do not create a complicated historical-backfill system; yearly goals are intentionally simple". It is accepted rather than overlooked.
+>
+> Its practical reach today is nil, because the only year any screen displays is the current one and a rewatch inside the current year cannot lose a count it is also adding. It becomes visible the day a year-in-review or a past-year selector ships, and that surface must not ship before this is resolved. Carried on the Beta Hardening list.
+
+There is no `watch_goal_progress` RPC, and that is a choice. Both halves are the caller's own rows under policies that already say so (`watch_goals_own`, `user_media_own`), so a function would be either a query with a grant attached or a screen's arithmetic promoted to `security definer` code taking a year from the client. The read is one person's own rows for one year, bounded by a range filter on `watched_on`.
 
 ---
 
@@ -515,6 +578,16 @@ create table device_tokens (
 `device_tokens` is populated in v1 even though push delivery is off (PRD §15, AD-10). Collecting tokens from the start means that enabling push does not begin with an empty table and a wait for every user to reopen the app.
 
 Preferences default to enabled by absence: a missing row means enabled. This avoids writing seven rows per signup and avoids a backfill every time a category is added.
+
+> **As built, 2026-08-19 — absence resolves to the *category's* default.** `20260819000300` replaced "absence means enabled" with `_notification_default(category)`, because `reactions` and `awards` default **off** and the old rule could not express that without a row per account per signup. Six of the eight categories still default on, so for those nothing changed. The paragraph above describes the v0.6 design.
+
+> **As built, 2026-08-19 — a block is a barrier, not a filter.** Every writer that acts on a *pair* of accounts takes `_lock_pair` before the check that reads `follows` or `blocks`, and holds it through the `notifications` insert. Without it a writer's check passes, `block()` commits and deletes both inboxes, and the writer's row lands afterwards — a row that cannot exist under the product model, because `block` removes every row between the pair and every writer is refused thereafter.
+>
+> `20260819000400` brought `add_comment`, `set_reaction` and `set_watch_tags` under the rule the other seven writers already followed. The order is **check → lock → check again**: the pair is not known until the feed event has been read, and moving the check after the lock instead of repeating it makes the refusal *timeable*, which is an oracle rather than a refactor — see the migration header. `set_watch_tags` holds one lock per companion, **ordered by uuid**, because it is the only writer holding more than one.
+>
+> This is demonstrated rather than argued: `supabase/tests/concurrency` races real PostgreSQL sessions and correlates each wait against the exact advisory key the function computes. `npm run test:race`, and `npm run test:race:mutants` for the proof that removing the lock turns it red.
+>
+> **Still un-locked, and correctly so:** the per-day cap on `reports` (§10) is counted without a lock and is advisory by design; its idempotency is a partial unique index, which concurrency cannot defeat.
 
 ---
 

@@ -1,30 +1,57 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { formatGenreRank, genreRanksFor } from '@/features/collection/genre-rank';
+import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
+import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
+import { track, type Surface } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
+import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
+import { useReducedMotion } from '@/ui/motion';
 import { theme } from '@/ui/tokens';
-import { Button, Poster, Text, type BucketId } from '@/ui/components';
+import { Button, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
 import {
   rankAnswer,
   rankBack,
   rankCancel,
+  rankRebucket,
   rankSkip,
   rankStart,
   type SessionStep,
 } from './session';
 
+export type RankingSubject = {
+  id: string;
+  title: string;
+  bucket: BucketId;
+  posterUri?: string | null;
+  /**
+   * `rebucket` when the title already had a position and the user changed its band.
+   * It selects `rank_rebucket`, which unranks and re-opens in one call. Defaults to a
+   * first ranking.
+   */
+  mode?: 'start' | 'rebucket';
+};
+
 export type RankingSheetProps = {
   /** The title being placed, with the bucket the user already chose for it. */
-  subject: { id: string; title: string; bucket: BucketId; posterUri?: string | null } | null;
+  subject: RankingSubject | null;
   onClose: () => void;
   /** "Rank another" — closes this and sends the user back to search. */
   onRankAnother?: () => void;
+  /**
+   * Which screen opened this, for `ranking_completed` alone.
+   *
+   * Passed in rather than inferred from the route: the sheet is mounted by three
+   * different screens and the route it happens to be over is not the same question as
+   * where the person decided to rank something.
+   */
+  surface: Surface;
 };
 
 /**
@@ -39,13 +66,19 @@ export type RankingSheetProps = {
  * of the mechanic. Decided by the founder, 2026-08-13. The position is visible everywhere
  * else in the app, which is why this component fetches only titles.
  */
-export function RankingSheet({ subject, onClose, onRankAnother }: RankingSheetProps) {
+export function RankingSheet({ subject, onClose, onRankAnother, surface }: RankingSheetProps) {
   if (!subject) return null;
 
   // Keyed by the title, so moving to a different one starts a genuinely new component
   // rather than leaving one session's answers counted against the next.
   return (
-    <Session key={subject.id} subject={subject} onClose={onClose} onRankAnother={onRankAnother} />
+    <Session
+      key={subject.id}
+      subject={subject}
+      onClose={onClose}
+      onRankAnother={onRankAnother}
+      surface={surface}
+    />
   );
 }
 
@@ -53,6 +86,7 @@ function Session({
   subject,
   onClose,
   onRankAnother,
+  surface,
 }: RankingSheetProps & { subject: NonNullable<RankingSheetProps['subject']> }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
@@ -61,6 +95,16 @@ function Session({
   // Starts true: the session is already being opened by the time anything renders.
   const [busy, setBusy] = useState(true);
   const [answered, setAnswered] = useState(0);
+  /**
+   * The same count, kept in a ref because `ranking_completed` needs it *now*.
+   *
+   * `act` queues `setAnswered` and then calls `apply` in the same tick, so the state
+   * `apply` closes over is the value from before the comparison that finished the
+   * session — the placing answer would be missing from every event. A ref is updated
+   * synchronously, so the number in the event is the number of comparisons the person
+   * actually answered.
+   */
+  const answeredCount = useRef(0);
 
   // The session the server is still holding, if any — what closing owes a rank_cancel to.
   // A ref because it has to be right in the same tick as the press, and because it has to
@@ -77,20 +121,93 @@ function Session({
 
       setStep(next);
       if (next.state === 'placed') {
-        // The position is the server's, and it changed this category and this collection.
-        // Nothing else needs to know (client.md §3).
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.rankings(profile.id, next.category),
+        // Everything a finished ranking changes, named in one place so the two
+        // writers cannot drift. This used to be three keys inline, and the feed was
+        // not among them — which is why a just-ranked film did not appear in it.
+        invalidateAfterCollectionChange(queryClient, profile.id, subject.id, {
+          category: next.category,
         });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.collection(profile.id) });
+        /**
+         * `ranking_completed`, and **only here**.
+         *
+         * `placed` is the server saying the title has a position — the one answer that
+         * proves the ranking finished. The `failed && changed` branch below is the
+         * lost-reply case, where the ranking *may* have landed, and it deliberately
+         * emits nothing: an event on a maybe is how a retry becomes two rankings. The
+         * cost is a small undercount in a known direction, which is the trade this
+         * app has taken everywhere else (`lib/write-outcome.ts`).
+         *
+         * `next.category` is the server's own vocabulary, so the media kind comes from
+         * what was actually written rather than from what the client thought it sent.
+         */
+        track({
+          name: 'ranking_completed',
+          props: {
+            media_kind: next.category === 'tv_seasons' ? 'tv_season' : 'movie',
+            surface,
+            comparisons: answeredCount.current,
+            rebucket: subject.mode === 'rebucket',
+          },
+        });
+        /**
+         * `invite_activated`, from the same answer and under the same rule.
+         *
+         * The flag is the server's: `_maybe_activate_invite` returns true only for the
+         * transaction whose guarded UPDATE flipped `activated_at`, so this fires at most
+         * once for an account, never for one that was not invited, and never on the
+         * `failed && changed` branch below — where the ranking may have landed and the
+         * client cannot tell. Emitting there would put a growth number on a maybe.
+         *
+         * No properties. The inviter is another person and is not this event's subject;
+         * who was activated by whom is a join on `invite_attributions`.
+         */
+        if (next.activated) track({ name: 'invite_activated' });
+      } else if (next.state === 'failed' && next.changed) {
+        /**
+         * **A failed answer can still have placed the title.**
+         *
+         * `rank_answer` finalises inside its own transaction, so one that commits and
+         * loses its reply reaches here as a failure over a collection that has already
+         * moved. No category, because a failure carries none and a rebucket can move a
+         * title between them — `invalidate.ts` refreshes both when it is not told.
+         */
+        invalidateAfterCollectionChange(queryClient, profile.id, subject.id);
       }
     },
-    [profile.id, queryClient],
+    [profile.id, queryClient, subject.id, subject.mode, surface],
   );
 
   useEffect(() => {
     let live = true;
-    void rankStart(subject.id, subject.bucket).then((next) => {
+    const open = subject.mode === 'rebucket' ? rankRebucket : rankStart;
+    void open(subject.id, subject.bucket).then((next) => {
+      /**
+       * **A rebucket has already happened by the time this resolves**, and that is the
+       * whole reason this is here rather than only in `apply`.
+       *
+       * `rank_rebucket` calls `rank_unrank` and updates `user_media.bucket` before it
+       * opens a session (`20260813000700`). Both are committed. So a reader who moves a
+       * film from Loved to Fine and then closes the sheet without answering a single
+       * comparison has changed their collection — the ranking is gone, the bucket has
+       * moved — while the ranked list, the score denominators and Rating Rascal all still
+       * describe the ranking that no longer exists. Invalidating only on `placed` left
+       * that standing for the full one-minute `staleTime`. Independent review 21c.
+       *
+       * `rank_start` is not a mutation and needs none of this: it opens a session and
+       * writes nothing else.
+       *
+       * **On every resolution, including `failed`.** A Postgres exception does roll the
+       * whole `rank_rebucket` transaction back — but a transaction can commit and its
+       * HTTP response can then be lost, and the client maps that to `failed` too. There
+       * is no answer here that distinguishes "refused" from "committed, reply dropped",
+       * so the only safe reading is that it may have landed. A definite rollback costs a
+       * redundant refetch; the other way costs a screen describing a ranking that is
+       * gone. Independent review 21d.
+       */
+      if (subject.mode === 'rebucket') {
+        invalidateAfterCollectionChange(queryClient, profile.id, subject.id);
+      }
+
       if (live) {
         setBusy(false);
         apply(next);
@@ -107,14 +224,17 @@ function Session({
     return () => {
       live = false;
     };
-  }, [subject, apply]);
+  }, [subject, apply, profile.id, queryClient]);
 
   const act = async (run: () => Promise<SessionStep>, progress = 0) => {
     if (busy) return;
     setBusy(true);
     const next = await run();
     setBusy(false);
-    if (progress) setAnswered((n) => Math.max(0, n + progress));
+    if (progress) {
+      answeredCount.current = Math.max(0, answeredCount.current + progress);
+      setAnswered(answeredCount.current);
+    }
     apply(next);
   };
 
@@ -128,19 +248,16 @@ function Session({
   };
 
   return (
-    <Modal
-      visible
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={() => void close()}
-      accessibilityViewIsModal
-    >
-      <SafeAreaView style={styles.sheet} edges={['top', 'bottom', 'left', 'right']}>
+    <Sheet visible onClose={() => void close()} label={`Rank ${subject.title}`}>
+      <View style={styles.sheet}>
         {step?.state === 'placed' ? (
           <Reveal
+            score={step.score}
             position={step.position}
             category={step.category}
+            bucket={step.bucket}
             adjustable={step.adjustable}
+            subjectId={subject.id}
             title={subject.title}
             onDone={() => void close()}
             onRankAnother={() => {
@@ -192,8 +309,8 @@ function Session({
             <Button label="Close" kind="secondary" onPress={() => void close()} />
           </Centred>
         )}
-      </SafeAreaView>
-    </Modal>
+      </View>
+    </Sheet>
   );
 }
 
@@ -266,8 +383,7 @@ function Comparison({
   return (
     <View style={styles.comparison}>
       <TopBar onClose={onClose} />
-
-      <Text variant="title2" style={styles.centre}>
+      <Text variant="headline" style={styles.centre} accessibilityRole="header">
         Which did you like more?
       </Text>
 
@@ -278,6 +394,13 @@ function Comparison({
           disabled={waiting}
           onPress={() => onPick(subject.id)}
         />
+        {/* Beli's device (beli-252). It turns two pictures side by side into a
+            question, and it costs one 32pt circle. */}
+        <View style={styles.or} accessibilityElementsHidden importantForAccessibility="no">
+          <Text variant="caption" tone="secondary">
+            OR
+          </Text>
+        </View>
         <Card
           title={pivot?.title ?? '…'}
           posterUri={posterUri(pivot?.poster_path, 'card')}
@@ -297,6 +420,8 @@ function Comparison({
             : 'Getting closer'}
       </Text>
 
+      {/* One row, and subordinate. Two stacked full-width buttons read as the main
+          event on a screen whose main event is the two posters. */}
       <View style={styles.controls}>
         <Button
           label="Back"
@@ -310,7 +435,7 @@ function Comparison({
             user has to think about for no reason. */}
         <Button
           label="Too tough to call"
-          kind="secondary"
+          kind="tertiary"
           onPress={onSkip}
           disabled={busy}
           disabledReason="Waiting for the last answer to save."
@@ -356,55 +481,101 @@ function Card({
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
-      <Poster uri={posterUri} title={title} size="xl" />
-      <Text variant="headline" numberOfLines={2} style={styles.centre}>
-        {title}
-      </Text>
+      <Poster uri={posterUri} title={title} width="fill" size="md" />
+      <View style={styles.cardTitleBox}>
+        <Text variant="callout" numberOfLines={2} style={styles.centre}>
+          {title}
+        </Text>
+      </View>
     </Pressable>
   );
 }
 
 /**
- * The reveal (design-system.md §9): an Amber panel, the ordinal in Ink at display size,
- * category and title below.
+ * The reveal (design-system.md §9): a deep Maroon panel with the **score** in Parchment
+ * at display size, then the title, then rank context.
+ *
+ * Maroon since 2026-08-16, on the founder's device report. It was Amber, which is the
+ * milestone colour — so the one moment the app states a score at its largest was the
+ * one place that did not use the score system. `ScoreBadge` has been Maroon in every
+ * list and on every title page for weeks; a reveal in a different colour reads as a
+ * different kind of number, and then the badge the user meets a second later looks
+ * like a demotion. Both are now `semantic.score`, and the pair is asserted at 7.4:1.
+ *
+ * The number keeps carrying the meaning. There is deliberately still no red/yellow/green
+ * grading here — that reasoning is in `color.ts` and survives the colour change intact.
+ *
+ * The score is the hero, not the ordinal — founder decision, 2026-08-15. This screen
+ * had not caught up: it rendered `#{position}` at `reveal` size while `score.ts` sat
+ * unused. The reasoning for the swap is worth keeping: `#4` counting up from zero
+ * passes through three numbers that are each a lie about a different film, and `#118`
+ * is an anticlimax where `9.1` is not — and the reveal fires most often for the
+ * people who have ranked the most.
  *
  * Share is absent because share cards are not built. An action that does nothing would be
  * worse than one that is not offered yet.
  */
 function Reveal({
+  score,
   position,
   category,
+  bucket,
   adjustable,
+  subjectId,
   title,
   onDone,
   onRankAnother,
 }: {
+  score: number;
   position: number;
   category: string;
+  bucket: string;
   adjustable: boolean;
+  subjectId: string;
   title: string;
   onDone: () => void;
   onRankAnother: () => void;
 }) {
+  const profile = useCurrentProfile();
   const readableCategory = category === 'tv_seasons' ? 'TV seasons' : 'Movies';
+  const shown = useCountUp(score, bucket);
+
+  // The ranked list for this category, which the collection already caches under the
+  // key `apply` invalidated when the title was placed — so this resolves to the list
+  // *including* it, and no new query or endpoint is needed to derive a genre rank.
+  const { data: ranked } = useRankedCollection(profile.id, category as RankingCategory);
+  const genres = ranked ? genreRanksFor(subjectId, ranked) : [];
+
+  const context = [
+    `#${position} ${readableCategory}`,
+    ...genres.map(formatGenreRank),
+  ].join('  ·  ');
 
   return (
     <View style={styles.reveal}>
       <View
         style={styles.panel}
         accessibilityRole="summary"
-        accessibilityLabel={`${title} is number ${position} in ${readableCategory}`}
+        accessibilityLabel={`${title} scored ${formatScore(score)} out of 10. ${context}`}
       >
-        <Text variant="reveal" tone="onFill" accessibilityElementsHidden>
-          #{position}
-        </Text>
-        <Text variant="caption" tone="onFill">
-          IN {readableCategory.toUpperCase()}
+        <Text variant="reveal" tone="inverse" accessibilityElementsHidden>
+          {formatScore(shown)}
         </Text>
       </View>
 
       <Text variant="title2" style={styles.centre}>
         {title}
+      </Text>
+
+      {/* Secondary by construction: footnote, tertiary, one line. The ordinal is
+          still true and still useful, it is just no longer the claim. */}
+      <Text
+        variant="footnote"
+        tone="tertiary"
+        style={styles.centre}
+        accessibilityElementsHidden
+      >
+        {context}
       </Text>
 
       {adjustable ? (
@@ -416,7 +587,7 @@ function Reveal({
         </Text>
       ) : null}
 
-      <View style={styles.controls}>
+      <View style={styles.revealControls}>
         <Button label="Rank another" onPress={onRankAnother} />
         <Button label="Done" kind="secondary" onPress={onDone} />
       </View>
@@ -424,45 +595,123 @@ function Reveal({
   );
 }
 
+/**
+ * Counts from the low end of the title's own band up to its score.
+ *
+ * Not from zero: a *Not for me* title would sprint through the whole scale to land at
+ * 1.2, which reads as the app deciding the film was better than it was and then
+ * correcting itself. Starting inside the band makes the animation say what actually
+ * happened — the user chose a bucket, and this is where the title landed inside it
+ * (design-system.md §9, `revealFloor` in score.ts).
+ *
+ * Plain state on a timer rather than Reanimated: the value is *text*, and a worklet
+ * cannot drive a string through the JS bridge without re-rendering anyway.
+ */
+function useCountUp(target: number, bucket: string) {
+  const reduced = useReducedMotion();
+  const floor = revealFloor((bucket as Bucket) ?? 'loved');
+
+  // Progress rather than the value itself, so the reduced-motion case is a plain
+  // branch on the way out instead of a state write. Nothing is set during the
+  // effect body — only from the timer — which keeps the render pass clean.
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (reduced) return;
+
+    const started = Date.now();
+    const id = setInterval(() => {
+      const elapsed = Date.now() - started;
+      const next = Math.min(1, elapsed / theme.duration.revealCount);
+      setProgress(next);
+      if (next >= 1) clearInterval(id);
+    }, 16);
+
+    return () => clearInterval(id);
+  }, [reduced]);
+
+  if (reduced) return target;
+
+  // Ease out, so it decelerates into the number rather than stopping dead.
+  const eased = 1 - (1 - progress) ** 3;
+  return floor + (target - floor) * eased;
+}
+
 function Centred({ children }: { children: React.ReactNode }) {
   return <View style={styles.centredBox}>{children}</View>;
 }
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1, backgroundColor: theme.surface.base },
+  // No flex: 1. The Sheet sizes itself to its content, which is the whole point of
+  // moving off a full-height page sheet — a comparison is a small question.
+  sheet: { paddingBottom: theme.space[2] },
+  // No flex anywhere in here. Both halves of the old layout stretched: the screen was
+  // a full-height page sheet, and the card row inside it was `flex: 1` with the posters
+  // pinned to its top — so a tall device reserved ~500pt for ~330pt of content and put
+  // the surplus underneath as blank Paper. The sheet now sizes to this block, and this
+  // block sizes to the posters.
   comparison: {
-    flex: 1,
     padding: theme.layout.gutter,
-    gap: theme.layout.sectionGap,
+    gap: theme.space[5],
   },
+  // In flow, not absolute. Absolute put it over the question once the sheet stopped
+  // being full height and the content moved up to meet it.
   topBar: { alignItems: 'flex-end' },
   cards: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: theme.space[2],
+  },
+  card: {
     flex: 1,
+    alignItems: 'center',
+    // poster.md, not poster.xl. At 180×270 two cards plus their gutters overflow a
+    // 375pt screen and the mechanic starts to feel like an event; at 88×132 both
+    // posters stay legible and the answer feels quick, which is the point.
+    maxWidth: theme.poster.md.width,
+    gap: theme.space[2],
+  },
+  or: {
+    width: 32,
+    height: 32,
+    borderRadius: theme.radius.full,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.border.hairline,
+    backgroundColor: theme.surface.sunken,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardTitleBox: {
+    minHeight: 36,
+    justifyContent: 'flex-start',
+  },
+  pressed: { opacity: 0.85 },
+  // A row, not a stack. Two full-width buttons under the posters read as the primary
+  // action on a screen whose primary action is tapping a poster.
+  controls: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: theme.space[4],
   },
-  card: { flex: 1, alignItems: 'center', gap: theme.space[3] },
-  pressed: { opacity: 0.85 },
-  controls: { gap: theme.space[3] },
+  // The reveal is an airy surface (PRD §5) and its two actions are the only thing to
+  // do on it, so they stack full-width rather than sharing a row.
+  revealControls: { gap: theme.space[3], alignSelf: 'stretch' },
   centre: { textAlign: 'center' },
   centredBox: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: theme.space[4],
     padding: theme.space[8],
   },
   reveal: {
-    flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
     gap: theme.space[6],
     padding: theme.layout.gutter,
   },
   panel: {
-    backgroundColor: theme.semantic.emphasis,
+    backgroundColor: theme.semantic.score,
     borderRadius: theme.radius.card,
     paddingVertical: theme.space[8],
     paddingHorizontal: theme.space[12],

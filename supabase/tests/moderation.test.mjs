@@ -279,6 +279,68 @@ describe('the guard is wired in, not merely present', () => {
     // Reachable only because search_titles runs as the caller and folds the query through
     // it. Pure, and writes nothing.
     'media_fold',
+    // 20260816000000. Both are stable reads that apply AD-5 from the caller's own
+    // perspective. A suspended account calling either changes nothing and learns
+    // nothing it could not learn while active — can_view_profile already refuses a
+    // suspended *subject*, which is the direction that matters.
+    'public_notes',
+    'community_score',
+    // 20260816001100. A stable read whose entire population is the caller's own
+    // approved followees, filtered by can_view_profile from the caller's side. A
+    // suspended account calling it learns nothing new: can_view_profile already
+    // refuses a suspended *subject*, so a suspended followee is absent from anybody's
+    // number, and a suspended *caller* only ever sees their own following list — which
+    // suspension does not hide from the person it was applied to.
+    'following_score',
+    // 20260817000300, widened by 20260819000100. A stable read filtered through
+    // can_discover_profile from the caller's own side. A suspended account calling it
+    // learns nothing new — and a suspended *subject* is still absent from everybody's
+    // results, which is the direction that matters and which the new predicate keeps.
+    'search_users',
+    // 20260819000100. Identity only — handle, display name, avatar, visibility — for an
+    // account the caller may find. It exists so a private account discovered in search
+    // leads somewhere a follow request can be made from. Same predicate, same silence
+    // for a blocked or suspended account.
+    'profile_identity',
+    // 20260817000200. security invoker, so it reads only the caller's own edges
+    // through follows_read and blocks_read. Suspension does not hide a person's own
+    // follow list from them, and this reports nothing else.
+    'follow_state_with',
+    // 20260817000200. Reads the caller's own block rows and projects the handle. A
+    // suspended account can still see who it blocked, which is its own data.
+    'my_blocks',
+    // 20260817000400. A stable pairwise read, filtered by can_view_profile from the
+    // caller's own side. A suspended *subject* is already absent from it.
+    'taste_match',
+    // 20260817000600. The caller's own inbox and nothing else. Suspension is about
+    // what an account may do *to other people*; it does not make somebody unable to
+    // read what was sent to them, and hiding a pending follow request from a
+    // suspended account would leave it unanswerable if the suspension is lifted.
+    'my_notifications',
+    // 20260817001300. security invoker, so it can only ever return rows
+    // title_recommendations_read already admits — which is the caller's own inbox.
+    // Suspension is about what an account may do to other people; it does not make
+    // somebody unable to read what was sent to them.
+    'recommendations_to_me',
+    // 20260817000800. A stable read of public notes on one title, filtered through
+    // can_view_profile from the caller's own side. A suspended *author* is already
+    // absent from it, which is the direction that matters.
+    'title_reviews',
+    // 20260817000800. The caller's own two switches, defaulted on. Suspension does not
+    // hide somebody's own settings from them.
+    'my_notification_preferences',
+    // 20260817000600, and the one entry here that is not a read.
+    //
+    // `delete_account` skips the guard **deliberately**, which is why it is declared
+    // here rather than fixed. Suspension is a moderation state about what somebody may
+    // do to other people; erasure is not that. Refusing it would mean the accounts
+    // most likely to want out are precisely the ones that cannot leave, and it would
+    // make a suspension into an indefinite hold on somebody's data.
+    //
+    // It is the only writer in the schema that skips it, and it is safe to: it takes
+    // no target, acts only on auth.uid(), and its effect is to remove the account
+    // rather than to reach anybody else.
+    'delete_account',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

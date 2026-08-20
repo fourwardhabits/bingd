@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { classifyWrite } from '@/lib/write-outcome';
 import type { BucketId } from '@/ui/components';
 
 /**
@@ -44,11 +45,36 @@ export type Placed = {
   category: string;
   bucket: string;
   /**
+   * The 0–10 score, computed server-side by `score_for` at finalize and returned
+   * alongside the position (20260815010000).
+   *
+   * Taken from the server rather than derived here, even though `score.ts` could do
+   * the arithmetic. The band sizes the client holds are the ones it had *before* this
+   * insertion, so deriving locally would either be off by one or need a refetch first
+   * — and the number the reveal shows would be a different number from the one
+   * written into the feed event for the same moment.
+   */
+  score: number;
+  /**
    * The server's word for "this landed at the midpoint because you skipped too often".
    * It comes from the server so that PRD §10's "you can change this from Rankings" line
    * cannot be shown in the wrong circumstances.
    */
   adjustable: boolean;
+  /**
+   * **This ranking was the tenth**, and it activated an invitation (PRD §28).
+   *
+   * The server's word, and it has to be. `_maybe_activate_invite` flips
+   * `invite_attributions.activated_at` under a row lock and reports whether *this*
+   * transaction was the one that flipped it — so a second device finishing the tenth
+   * ranking at the same moment is told false, and so is a retry. Counting rankings on
+   * the client instead would emit for accounts with no attribution at all, and would
+   * emit again after a reinstall.
+   *
+   * True for at most one ranking in an account's life, and false for every account that
+   * was never invited.
+   */
+  activated: boolean;
 };
 
 export type SessionEnded = { state: 'ended' };
@@ -62,6 +88,21 @@ export type SessionFailed = {
    * to a comparison the user was never shown (api.md §8).
    */
   restart: boolean;
+  /**
+   * **The collection may have moved anyway.**
+   *
+   * `rank_answer` records a comparison and, on the last one, finalises the placement —
+   * it writes the `rankings` row, the score and the `feed_events` entry, all in the same
+   * transaction. So a `rank_answer` that commits and loses its reply is a title that is
+   * *placed*, reported here as a failure. The sheet used to invalidate only on `placed`,
+   * which left the ranked list, the score denominators, Rating Rascal and the feed all
+   * describing the ranking from before the one the reader just finished.
+   *
+   * Set for any outcome `lib/write-outcome.ts` cannot prove was a refusal. Reviews 21d
+   * and 21e established the same thing about `rank_rebucket` and about the collection
+   * writers; this is the third member of the family.
+   */
+  changed?: boolean;
 };
 
 export type SessionStep = Comparison | Placed | SessionEnded | SessionFailed;
@@ -73,12 +114,18 @@ type RankResponse = {
   position?: number;
   category?: string;
   bucket?: string;
+  score?: number;
   adjustable?: boolean;
+  activated?: boolean;
   cancelled?: boolean;
   skipped?: boolean;
 };
 
 const fail = (error: { code?: string; message: string }): SessionFailed => {
+  // Every branch below is a refusal this app raises on purpose except the default, and
+  // the default is where a dropped connection or an `08007` arrives.
+  const ambiguous = classifyWrite(error) === 'unknown' ? { changed: true as const } : {};
+
   switch (error.code) {
     case CODES.notFound:
       return {
@@ -106,12 +153,15 @@ const fail = (error: { code?: string; message: string }): SessionFailed => {
     case CODES.unauthenticated:
       return { state: 'failed', message: 'Your session expired. Sign in again.', restart: false };
     default:
-      return { state: 'failed', message: error.message, restart: false };
+      return { state: 'failed', message: error.message, restart: false, ...ambiguous };
   }
 };
 
 const step = (data: RankResponse | null, subjectId: string): SessionStep => {
-  if (!data) return { state: 'failed', message: 'The server said nothing.', restart: true };
+  // A 200 with an unusable body. The request was *answered*, so whatever it did is
+  // committed — which makes this the one failure here that is certainly a change.
+  if (!data)
+    return { state: 'failed', message: 'The server said nothing.', restart: true, changed: true };
 
   if (data.done) {
     return {
@@ -119,7 +169,12 @@ const step = (data: RankResponse | null, subjectId: string): SessionStep => {
       position: data.position ?? 0,
       category: data.category ?? '',
       bucket: data.bucket ?? '',
+      score: data.score ?? 0,
       adjustable: Boolean(data.adjustable),
+      // Absent on a backend that predates 20260819000500, which reads as false — the
+      // safe direction: an event never sent is an undercount, and one sent on a guess
+      // is a number that looks like growth and is not.
+      activated: Boolean(data.activated),
     };
   }
 
@@ -148,6 +203,26 @@ const call = async (fn: string, args: Record<string, unknown>, subjectId: string
  */
 export const rankStart = (mediaItemId: string, bucket: BucketId) =>
   call('rank_start', { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket] }, mediaItemId);
+
+/**
+ * Moves an already-ranked title into a different band, and opens the session that
+ * places it there.
+ *
+ * It lives beside `rankStart` rather than with the collection writes because it *is*
+ * one: the RPC ends with `return rank_start(...)`, so it answers with the same
+ * `SessionStep` shape and the sheet drives it identically from there.
+ *
+ * The position is genuinely discarded — the server unranks first, then recomputes the
+ * band bounds, then inserts fresh. PRD §10 requires that a bucket change re-runs
+ * comparisons rather than estimating a new position, so this cannot be made cheaper.
+ * That is why the caller confirms with the user before reaching it.
+ */
+export const rankRebucket = (mediaItemId: string, bucket: BucketId) =>
+  call(
+    'rank_rebucket',
+    { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket] },
+    mediaItemId,
+  );
 
 export const rankAnswer = (sessionId: string, winnerId: string, subjectId: string) =>
   call('rank_answer', { p_session_id: sessionId, p_winner: winnerId }, subjectId);

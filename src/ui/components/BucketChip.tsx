@@ -19,6 +19,39 @@ export type BucketChipProps = {
   onPress: () => void;
 };
 
+export type ChipProps = {
+  label: string;
+  selected?: boolean;
+  /** Omit for a chip that is a label rather than a control — the genre pills on
+   *  the title page are metadata, and a button that does nothing when tapped is
+   *  worse than plain text. */
+  onPress?: () => void;
+};
+
+export function Chip({ label, selected = false, onPress }: ChipProps) {
+  const content = (
+    <Text variant="callout" tone={selected ? 'primary' : 'secondary'}>
+      {label}
+    </Text>
+  );
+
+  if (!onPress) {
+    return <View style={styles.chip}>{content}</View>;
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={[styles.chip, selected && styles.chipSelected]}
+      hitSlop={theme.space[2]}
+    >
+      {content}
+    </Pressable>
+  );
+}
+
 /**
  * Selection is signalled by fill, checkmark, and border simultaneously, so
  * colour is never the only carrier of meaning.
@@ -63,6 +96,17 @@ export function BucketChip({ bucket, selected, onPress }: BucketChipProps) {
 const CIRCLE = 44;
 
 const styles = StyleSheet.create({
+  chip: {
+    minHeight: theme.layout.control.chipHeight,
+    borderRadius: theme.radius.control,
+    borderColor: theme.border.hairline,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    backgroundColor: theme.surface.raised,
+    paddingHorizontal: theme.space[3],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chipSelected: { backgroundColor: theme.surface.sunken },
   container: {
     flex: 1,
     alignItems: 'center',

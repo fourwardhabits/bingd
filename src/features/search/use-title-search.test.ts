@@ -1,9 +1,29 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 
+import { AdapterError } from '@/lib/tmdb-adapter';
+
 import { useDebounced, useSeasons, useTitleSearch, yearOf } from './use-title-search';
 
 const mockRpc = jest.fn();
 const mockSeasons = jest.fn();
+const mockSearchProvider = jest.fn();
+
+// The adapter is the network boundary this hook is allowed to cross, so it is faked
+// rather than reached. Its error type has to be a real class: the hook uses
+// `instanceof` to tell a rate limit apart from an ordinary failure.
+jest.mock('@/lib/tmdb-adapter', () => ({
+  searchProvider: (...args: unknown[]) => mockSearchProvider(...args),
+  AdapterError: class AdapterError extends Error {
+    code: string;
+    constructor(code: string, message: string) {
+      super(message);
+      this.code = code;
+    }
+    get isRateLimit() {
+      return this.code === 'BG429';
+    }
+  },
+}));
 
 type Read = { columns: string; filters: Record<string, unknown>; order: string[] };
 // Prefixed so jest allows the mock factory below to reach it.
@@ -22,6 +42,9 @@ jest.mock('@/lib/supabase', () => ({
           mockRead.filters[column] = value;
           return chain;
         },
+        // The genre and season-count joins the local pass makes once it has ids.
+        // Terminal, like `order`, so it resolves rather than returning the chain.
+        in: () => Promise.resolve({ data: [], error: null }),
         order: (column: string) => {
           mockRead.order.push(column);
           return mockSeasons();
@@ -42,18 +65,45 @@ jest.mock('@tanstack/react-query', () => {
     keepPreviousData: 'keepPreviousData',
     useQuery: ({ queryKey, queryFn, enabled }: any) => {
       const [data, setData] = useState(undefined);
+      const [error, setError] = useState(undefined);
+      const [fetching, setFetching] = useState(false);
+      const [fetched, setFetched] = useState(false);
+
       useEffect(() => {
         if (!enabled) return undefined;
         let live = true;
-        void Promise.resolve(queryFn()).then((value: unknown) => {
-          if (live) setData(value);
-        });
+        setFetching(true);
+        void Promise.resolve(queryFn())
+          .then((value: unknown) => {
+            if (live) setData(value);
+          })
+          .catch((cause: unknown) => {
+            if (live) setError(cause);
+          })
+          .finally(() => {
+            if (!live) return;
+            setFetching(false);
+            setFetched(true);
+          });
         return () => {
           live = false;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [JSON.stringify(queryKey), enabled]);
-      return { data, isPending: data === undefined && enabled, isError: false };
+
+      return {
+        data,
+        error,
+        isPending: data === undefined && enabled,
+        isError: Boolean(error),
+        // Always false here. The real flag marks the previous query's rows standing in
+        // for this one's; the stub resolves each queryFn into its own state, so there
+        // is no such thing, and reporting true would suppress the provider pass in
+        // every test below.
+        isPlaceholderData: false,
+        isFetching: fetching,
+        isFetched: fetched,
+      };
     },
   };
 });
@@ -64,6 +114,27 @@ beforeEach(() => {
   mockRead = { columns: '', filters: {}, order: [] };
   mockSeasons.mockReset();
   mockSeasons.mockResolvedValue({ data: [], error: null });
+  mockSearchProvider.mockReset();
+  mockSearchProvider.mockResolvedValue([]);
+});
+
+/** A row as `search_titles` returns it, before the hook joins genres onto it. */
+const localRow = (id: string, title: string) => ({
+  id,
+  kind: 'movie',
+  title,
+  release_date: '2010-01-01',
+  poster_path: null,
+  provenance: 'wikidata',
+});
+
+/** A row as the adapter returns it: already Bingd-shaped, and already enriched. */
+const remoteRow = (id: string, title: string) => ({
+  ...localRow(id, title),
+  poster_path: '/from-tmdb.jpg',
+  provenance: 'tmdb',
+  genres: ['Drama'],
+  runtime_minutes: 148,
 });
 
 describe('useDebounced', () => {
@@ -157,6 +228,130 @@ describe('useTitleSearch', () => {
     // The server caps at 50 regardless; asking for 25 keeps the payload to what a person
     // will actually scroll through before retyping.
     expect(mockRpc.mock.calls[0][1].p_limit).toBe(25);
+  });
+});
+
+/**
+ * The second pass, which is the difference between a catalogue that looks small and one
+ * that looks broken. The seed is a few hundred Wikidata titles, so most searches miss.
+ */
+describe('useTitleSearch reaching past the local catalogue', () => {
+  /** Past both debounces — the provider's is deliberately the slower of the two. */
+  const settle = () => wait(700);
+
+  it('asks the provider when the local catalogue comes back thin', async () => {
+    await renderHook(() => useTitleSearch('inception'));
+    await settle();
+
+    // Twenty, which is one TMDB page and the adapter's own cap. Asking for twelve
+    // fetched a page of twenty and threw eight of it away after paying for them.
+    expect(mockSearchProvider).toHaveBeenCalledWith('inception', 20);
+  });
+
+  /**
+   * The founder's `spiderman` report, as a test.
+   *
+   * The catalogue held six Spider-Man films and the provider gate let anything with six
+   * or more local rows through unasked, so the one title the user was looking for — the
+   * newest, most popular entry in the franchise — could not appear at any position.
+   * Typing *more* of the name found it, because a narrower query matched nothing locally
+   * and was therefore allowed out to TMDB.
+   *
+   * Deliberately no Spider-Man in this test. The bug is not about that franchise; it is
+   * about a row count being treated as evidence that the catalogue had answered, when
+   * the catalogue only ever holds what somebody already searched for.
+   */
+  it('still asks the provider when the local catalogue answered in full', async () => {
+    mockRpc.mockResolvedValue({
+      data: Array.from({ length: 9 }, (_, i) => localRow(`local-${i}`, `Film ${i}`)),
+      error: null,
+    });
+
+    await renderHook(() => useTitleSearch('inception'));
+    await settle();
+
+    expect(mockSearchProvider).toHaveBeenCalledWith('inception', 20);
+  });
+
+  it('waits longer than the local pass before spending a provider request', async () => {
+    // Typed rather than mounted with. useDebounced seeds its state with whatever it is
+    // first given, so a hook mounted straight onto a full query has nothing to debounce
+    // — which never happens on the screen, where input starts empty and grows.
+    const { rerender } = await renderHook<ReturnType<typeof useTitleSearch>, { q: string }>(
+      ({ q }) => useTitleSearch(q),
+      { initialProps: { q: '' } },
+    );
+
+    await rerender({ q: 'inception' });
+
+    // Past the local debounce and short of the provider's: the cheap query has gone and
+    // the expensive one has not.
+    await wait(300);
+    expect(mockRpc).toHaveBeenCalled();
+    expect(mockSearchProvider).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(mockSearchProvider).toHaveBeenCalled());
+  });
+
+  it('adds a provider result the local pass never had', async () => {
+    mockSearchProvider.mockResolvedValue([remoteRow('remote-1', 'Dune: Part Two')]);
+
+    const { result } = await renderHook(() => useTitleSearch('dune'));
+    await settle();
+
+    await waitFor(() => expect(result.current.results).toHaveLength(1));
+    expect(result.current.results[0]?.id).toBe('remote-1');
+  });
+
+  /**
+   * The merge is on id and it can be, because the adapter upserts before it answers: a
+   * title in both passes is genuinely one row. What makes this worth a test is which
+   * copy wins — the local one's poster is null and the provider just filled it in, so
+   * preferring local would show blank artwork for a title it had only just fetched.
+   */
+  it('prefers the provider copy of a row both passes returned', async () => {
+    mockRpc.mockResolvedValue({ data: [localRow('shared', 'Dune')], error: null });
+    mockSearchProvider.mockResolvedValue([remoteRow('shared', 'Dune')]);
+
+    const { result } = await renderHook(() => useTitleSearch('dune'));
+    await settle();
+
+    await waitFor(() => expect(result.current.results[0]?.poster_path).toBe('/from-tmdb.jpg'));
+    expect(result.current.results).toHaveLength(1);
+  });
+
+  it('reports a rate limit without throwing away the local results', async () => {
+    mockRpc.mockResolvedValue({ data: [localRow('local-1', 'Dune')], error: null });
+    mockSearchProvider.mockRejectedValue(new AdapterError('BG429', 'slow down'));
+
+    const { result } = await renderHook(() => useTitleSearch('dune'));
+    await settle();
+
+    await waitFor(() => expect(result.current.providerRateLimited).toBe(true));
+    expect(result.current.results).toHaveLength(1);
+    expect(result.current.isError).toBe(false);
+  });
+
+  it('does not call a failed lookup an exhaustive one', async () => {
+    // The distinction the empty state hangs on. A down adapter used to satisfy
+    // providerExhausted, so a missing TMDB key rendered as "nothing matches" —
+    // the catalogue confidently reporting the absence of a film it never
+    // managed to ask about.
+    mockSearchProvider.mockRejectedValue(new AdapterError('BG500', 'no key configured'));
+
+    const { result } = await renderHook(() => useTitleSearch('spiderman'));
+    await settle();
+
+    await waitFor(() => expect(result.current.providerFailed).toBe(true));
+    expect(result.current.providerExhausted).toBe(false);
+  });
+
+  it('calls a successful empty lookup exhaustive', async () => {
+    const { result } = await renderHook(() => useTitleSearch('zzzzzz'));
+    await settle();
+
+    await waitFor(() => expect(result.current.providerExhausted).toBe(true));
+    expect(result.current.providerFailed).toBe(false);
   });
 });
 

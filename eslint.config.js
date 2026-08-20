@@ -16,6 +16,11 @@ module.exports = [
       'dist/**',
       'android/**',
       'ios/**',
+      '.cursor/**',
+      '.agents/**',
+      // Deno, not React Native. Its imports carry .ts extensions and its globals are
+      // not Node's, so the Expo config flags correct code — `deno lint` covers it.
+      'supabase/functions/**',
     ],
   },
   {
@@ -26,8 +31,16 @@ module.exports = [
   },
   {
     // Command-line scripts, where printing a report is the whole point rather than
-    // a leftover debug statement.
-    files: ['supabase/**/*.mjs', 'web/*.mjs'],
+    // a leftover debug statement, and where Node's own globals are in scope.
+    files: ['supabase/**/*.mjs', 'web/*.mjs', 'scripts/**/*.mjs', 'assets/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        Buffer: 'readonly',
+        process: 'readonly',
+        console: 'readonly',
+        __dirname: 'readonly',
+      },
+    },
     rules: {
       'no-console': 'off',
     },

@@ -45,7 +45,29 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: 'portrait',
   scheme: current.scheme,
   userInterfaceStyle: 'light',
-  backgroundColor: '#F5EBDD',
+  // Paper. Mirrors surface.base in src/ui/tokens/color.ts — this file cannot
+  // import from src, so the value is duplicated and has to be changed in step.
+  backgroundColor: '#FBF8F4',
+  // Rendered from bingd-icon.svg by `npm run brand:render`, not drawn by hand.
+  icon: './assets/brand/icon.png',
+
+  // The Android system navigation bar is configured by omission, and it is
+  // worth writing down why there is no key for it here.
+  //
+  // SDK 57 draws edge to edge and dropped `androidNavigationBar` from the
+  // config entirely — under edge-to-edge the app draws *behind* that bar rather
+  // than colouring it, so a background colour had nothing left to mean. What
+  // shows through is whatever the app paints there, which on the tab screens is
+  // the tab bar: the navigator sizes it to `49 + insets.bottom`, so its
+  // `surface.raised` extends under the buttons.
+  //
+  // Button colour follows `userInterfaceStyle: 'light'` above, which is what
+  // makes them dark and legible on that surface — and dark buttons are also
+  // what stops Android drawing its own contrast scrim behind them, which was
+  // the grey band under the tab bar. `expo-navigation-bar` would let this be
+  // forced at runtime and is deliberately not installed: it is a native module,
+  // the fingerprint runtime policy means adding one puts every tester on a new
+  // build, and there is nothing here for it to fix.
 
   ios: {
     supportsTablet: false,
@@ -70,6 +92,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 
   android: {
     package: current.bundleId,
+    // A launcher masks this to its own shape and may crop the outer third of
+    // each axis, so the foreground is the mark well inside a Paper field rather
+    // than the square icon above.
+    adaptiveIcon: {
+      foregroundImage: './assets/brand/icon-adaptive.png',
+      backgroundColor: '#FBF8F4',
+    },
     intentFilters: [
       {
         action: 'VIEW',
@@ -123,18 +152,50 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-sharing',
     'expo-status-bar',
     'expo-web-browser',
-    // Sets the Android root view background, so the first frame is the brand cream
-    // rather than white. It is also what makes userInterfaceStyle above mean anything
+    // Sets the Android root view background, so the first frame is Paper rather
+    // than white. It is also what makes userInterfaceStyle above mean anything
     // on Android — prebuild says so out loud: "userInterfaceStyle: Install
     // expo-system-ui in your project to enable this feature."
     'expo-system-ui',
-    // expo-splash-screen is deliberately not configured here. Its plugin writes
-    // `windowSplashScreenAnimatedIcon="@drawable/splashscreen_logo"` into the theme
-    // whether or not an `image` was given, and generates that drawable only when one
-    // was — so configuring it with a colour alone fails the Android build at resource
-    // linking with "resource drawable/splashscreen_logo not found", ten minutes in.
-    // The package stays installed because the app calls preventAutoHideAsync; it gets
-    // its plugin entry back with a real logo in the brand asset pass (PRD §5).
+    // Configured now that there is an image to configure it with.
+    //
+    // This entry was omitted for a while, and the reason is worth keeping: the
+    // plugin writes `windowSplashScreenAnimatedIcon="@drawable/splashscreen_logo"`
+    // into the Android theme whether or not an `image` was given, but only
+    // generates that drawable when one was. A colour-only configuration therefore
+    // fails the Android build at resource linking with "resource
+    // drawable/splashscreen_logo not found", ten minutes in. So `image` is not
+    // optional here, and removing it is not a simplification.
+    [
+      'expo-splash-screen',
+      {
+        image: './assets/brand/splash.png',
+        backgroundColor: '#FBF8F4',
+        // The mark is 5:3, so a width in points reads more predictably across
+        // devices than `imageWidth` scaled from a square.
+        imageWidth: 180,
+        // Android 12+ draws the splash icon inside a masked circle regardless,
+        // which crops a wide mark. The in-app LoadingScreen is what carries the
+        // brand moment; this only has to not flash white.
+        resizeMode: 'contain',
+      },
+    ],
+    // Profile pictures, and nothing else. The strings matter: both stores
+    // reject a build whose photo-access prompt does not say what the photos are
+    // for, and "Allow Bingd to access your photos" is the version that gets
+    // rejected. No camera permission is requested — the picker offers the
+    // library only, because a profile picture taken on the spot is not a flow
+    // anyone asked for and the permission would have to be justified anyway.
+    [
+      'expo-image-picker',
+      {
+        photosPermission: 'Bingd uses your photos so you can choose a profile picture.',
+        // Drops NSCameraUsageDescription and the Android CAMERA permission
+        // outright, rather than shipping a permission the app never asks for
+        // and a reviewer has to ask about.
+        cameraPermission: false,
+      },
+    ],
     // Present in all variants from the first build (PRD §15). Delivery is
     // flagged off server-side in production rather than omitted here.
     // Icon and sound assets are added with the brand asset pass (PRD §5).

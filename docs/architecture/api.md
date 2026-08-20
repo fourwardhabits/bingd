@@ -108,7 +108,7 @@ Semantics are in [`ranking.md`](./ranking.md).
 | `remove_follower(follower_id)` | Remove someone who follows you | no |
 | `react(feed_event_id, kind)` | Add or change a reaction. Upsert on the primary key | no |
 | `unreact(feed_event_id)` | Remove a reaction | no |
-| `tag_watch(media_item_id, tagged_ids uuid[])` | Tag up to 10 people you follow or who follow you | no |
+| `tag_watch(media_item_id, tagged_ids uuid[])` | Tag up to 10 **mutual follows**. Shipped as `set_watch_tags`; narrowed from "follow either way" by `20260817001300` | no |
 | `remove_tag(tag_id)` | Callable by the tagged user. Sets `removed_by_tagged` | no |
 | `block(target_id)` | Block. Removes follows both ways, voids invitations, hides tags | no |
 | `unblock(target_id)` | Remove a block. Does **not** restore prior follows | no |
@@ -121,6 +121,60 @@ Semantics are in [`ranking.md`](./ranking.md).
 `unblock` deliberately does not restore follows. Restoring a relationship the user severed would be surprising, and the follow is one tap to recreate.
 
 ---
+
+
+---
+
+## 3a. Recommending a title — implemented 2026-08-17 (`20260817001300`)
+
+| Function | Purpose | Queueable |
+|---|---|---|
+| `recommend_title(operation_id, recipient_id, media_item_id)` | Recommend one exact title to one **mutual follow** | no |
+| `recommendations_to_me(limit)` | The caller's `Sent to you` list, unopened first then newest | — |
+| `mark_recommendation_opened(recommendation_id)` | The recipient's own read receipt, written once | — |
+
+**Recipient eligibility is a mutual follow and nothing weaker**: both `follows` rows
+present, both `approved`, neither party blocked, the recipient active. There is no
+friendship table — a mutual follow *is* the friendship in this schema, and a second table
+expressing the same fact would be a second thing to keep in step with `follow`,
+`unfollow`, `block` and `respond_follow_request`.
+
+The same rule now governs **who may be tagged as a companion**. `_can_tag` admitted a
+follow in *either* direction until this migration; it is `_is_mutual_follow` now, so
+tagging and recommending obey one rule. `set_watch_tags` grandfathers anybody already
+tagged on a watch, because it refuses the whole call rather than partially applying and
+would otherwise make an older list permanently unsaveable.
+
+**Refusals are returned, not raised.** `recommend_title` answers
+`{"status":"refused","reason":...}` with reasons `not_mutual`, `yourself` and
+`not_recommendable`. That is a rate-limit decision rather than a stylistic one: a `raise`
+rolls back the `processed_operations` claim the limiter counts, so a writer that refuses
+by raising charges nothing for a refusal and a script pointed at an ineligible recipient
+runs without limit. Independent review 18 found it, and it is true of **every writer in
+this schema** — recorded as debt rather than fixed everywhere in one pass.
+
+`not_mutual` covers a stranger, a one-way follow, a block in either direction, a
+suspension and a missing account as one answer, which discloses less than the two error
+codes it replaced: a caller who could tell them apart could tell they had been blocked.
+
+What still raises: `42501` from `assert_can_write` for a suspended caller, and `53400`
+from the rate limiter itself.
+
+**Duplicates.** One row per `(sender, recipient, media_item)`, for good. Re-sending moves
+`recommended_at` so the recommendation returns to the top of the recipient's list, leaves
+`opened_at` alone, and **files no second notification** — the rule `20260816000700` reached
+for watch tags, for the same reason: a notice that can be re-fired at will is a way to
+reach somebody who cannot stop it.
+
+**Notification.** Type `recommendation`, `subject_type = 'media_item'`, subject the exact
+title. `my_notifications` returns the title's kind and its parent series, so the row reads
+"Ada recommended a season" above "Parks and Recreation — Season 2". Tapping opens the
+title rather than the sender.
+
+**Human recommendations are not merged into For You.** `title_recommendations` is separate
+from `recommendations` / `recommendation_generations` by design: PRD §13 requires every
+reason the engine gives to be reproducible from stored signals, and a friend's opinion is
+not one.
 
 ## 4. Lists
 
@@ -184,20 +238,46 @@ So attribution and acceptance are separated. **First inviter wins the attributio
 
 ## 6. Notifications, capabilities, account
 
-| Function | Purpose |
-|---|---|
-| `mark_notifications_read(ids uuid[])` | Mark read. Empty array marks all |
-| `set_notification_preference(category, enabled)` | Per-category toggle |
-| `set_all_notifications(enabled)` | Master switch |
-| `register_device_token(token, platform)` | Register for push. Called in v1 even though delivery is off |
-| `my_capabilities()` | The caller's capability set, **for presentation only** |
-| `update_profile(display_name?, avatar_url?, visibility?)` | Profile edits |
-| `change_username(new_username)` | Enforces the 30-day rule and writes `username_history` |
-| `delete_account()` | Cascading delete, token invalidation, web-page removal |
+| Function | Purpose | Built |
+|---|---|---|
+| `my_notifications(limit)` | The caller's own inbox, with the actor named and the subject title resolved | 2026-08-17 |
+| `mark_notifications_read()` | Marks every unread row of the caller's read, and returns how many | 2026-08-17 |
+| `my_capabilities()` | The caller's capability set, **for presentation only** | 2026-08-13 |
+| `update_profile(operation_id, display_name)` | The display name, 1–50 characters on one line | 2026-08-17 |
+| `set_profile_visibility(operation_id, visibility)` | Public or private. Going public approves everybody waiting | 2026-08-17 |
+| `set_avatar(object_path)` | Points `profiles.avatar_path` at an object in the public `avatars` bucket. Takes a path, not a URL | 2026-08-15 |
+| `change_username(operation_id, username)` | 30-day cooldown; the triggers write `username_history` | 2026-08-17 |
+| `delete_account(confirmation)` | Removes the avatar objects, then the `auth.users` row, and lets the cascade do the rest | 2026-08-17 |
+| `set_notification_preference(category, enabled)` | Per-category toggle | **not built** |
+| `set_all_notifications(enabled)` | Master switch | **not built** |
+| `register_device_token(token, platform)` | Register for push | **not built** |
+
+**Three rows are marked not built and stay that way for V1.** `notification_preferences` and `device_tokens` exist and nothing writes either. There is one delivery channel — the inbox — it cannot be switched off without making follow requests unanswerable, and a screen of switches over a table nothing reads is a control that does nothing. Push delivery is off by AD-10, so a token registry would collect credentials for a channel that does not exist. Both wait for a push architecture, which is Beta Hardening.
+
+**`update_profile` lost its `visibility` parameter and gained an operation id.** Splitting the two is not cosmetic: a display name is an edit and visibility is a permission, they belong on different screens, and folding them into one call would mean every name change re-asserted a privacy setting the caller had not touched. `mark_notifications_read` lost its `ids` array for the opposite reason — there is no per-row surface, and the useful meaning of "read" on a list somebody opens is "has seen this screen".
+
+**`set_profile_visibility` approves pending requests when the account goes public, and does so silently.** Leaving them pending produces a state nothing else in the schema can reach: a public account where a new follower is approved instantly and the ones who asked first are still queued. It is silent because `respond_follow_request` sends `follow_approved` when somebody makes a decision about a specific person, and nobody made one here — the account stopped requiring one. Firing that notification would attribute an act the user did not perform. Going *private* deliberately does not remove existing followers; that is `remove_follower`'s job, and a retroactive revocation would sever relationships the user never named.
+
+**`my_notifications` is `security definer`, and it has to be.** A private account requesting to follow another private account fails `can_view_profile`, so an invoker-rights query returns the request with no name attached and the one control that resolves it cannot be drawn — the request would be permanently unanswerable, which makes the private setting a trap rather than a choice. It is the same shape as `my_blocks`: the filter is `recipient_id = auth.uid()`, it is not a parameter, and it cannot be made one. Suspended actors drop out, like everywhere else. The subject join for a `feed_event` is constrained to `actor_id = auth.uid()`, so it resolves the recipient's own activity and can never be pointed at anybody else's.
 
 `my_capabilities()` exists so the client can render a gate as *Coming soon* rather than as a broken button. **It is never the enforcement point.** Every guarded write re-resolves capabilities server-side, so a modified client that lies about its capability set still cannot create a fourth list.
 
-`delete_account()` deletes the caller's `auth.users` row and lets the cascade do the rest. Two things deliberately survive it, both by detaching rather than deleting: the **username reservation**, so the name cannot be claimed by an impersonator, and any **invite attribution** naming the caller as inviter, so growth provenance stays intact. Both are enforced in the schema rather than in this function, so a deletion performed from the Supabase console behaves identically (`data-model.md` §2, §11).
+`set_avatar` takes an object path rather than a URL for two reasons. Storing whatever URL a client sends would let any account point its avatar at an off-site address — a tracker that fires once per feed impression, or an image that is one thing during review and another after it. And the origin belongs to the deployment, not to the row, so a dump restored into a second project would otherwise leave every face pointing at the first. The path is validated to begin with the caller's own uuid folder, which is the same rule the storage policy applies to the upload; both are stated, because the two are enforced by different subsystems and neither can see the other. Resolve to a URL with `avatarUri` in `src/lib/images.ts`.
+
+`delete_account(confirmation)` deletes the caller's `auth.users` row and lets the cascade do the rest. **Four** things deliberately survive it, all by detaching rather than deleting, and all through the foreign key's own rule rather than through this function — so a deletion performed from the Supabase console behaves identically (`data-model.md` §2, §11):
+
+- the **username reservation**, so the name cannot be claimed by an impersonator inheriting old links (the INF-2 outcome `20260813002000` exists to prevent);
+- any **invite attribution** naming the caller as inviter, so growth provenance stays intact — `20260813001500` §2 made this SET NULL deliberately;
+- `profiles.invited_by` on accounts the caller invited, which are somebody else's rows;
+- **moderation reports**, in both directions. Deleting a report because the reporter left would let an account erase every complaint it made by closing itself, and deleting one because the subject left would erase the record of why an account was removed.
+
+Two things the function does itself, and both are load-bearing. It removes the caller's objects from the `avatars` bucket first — the only user data no foreign key reaches, and a public bucket URL contains nothing but the account's uuid, so an avatar left behind is a face that stays fetchable by anybody who kept a link. It is also the table `20260813002200` names as the likely *blocker* of a `delete from auth.users`, so clearing it is what keeps the delete possible at all. And it requires the caller's own handle as `confirmation`: a yes/no dialog is a mistap, and this is the one action in the app that cannot be undone by any means.
+
+It is **idempotent without an operation id**, deliberately. `_claim_operation` writes to `processed_operations`, which this operation deletes by cascade — the claim is destroyed by the thing it was meant to make repeatable. A second call finds no profile and returns `already_applied`.
+
+It is also the **only writer in the schema that does not call `assert_can_write()`**. A suspended account may delete itself: suspension is a moderation state about what somebody may do to other people, erasure is not that, and refusing it would mean the accounts most likely to want out are the ones that cannot leave. `moderation.test.mjs` declares it read-only-by-exception with that reasoning rather than letting the sweep pass silently.
+
+**There is no `deactivated` status and none is planned for V1.** `profile_status` is (`active`, `suspended`). Temporary deactivation is a third value every filter in the schema would have to learn about, and the store-required external deletion page is Beta Hardening rather than this run.
 
 ---
 
@@ -221,7 +301,7 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 
 | Function | Trigger | Role |
 |---|---|---|
-| `tmdb-adapter` | User request | Search and detail. Sole holder of the TMDB key (AD-8). Writes through to `media_items` and `media_cache` |
+| `tmdb-adapter` | User request, and an operator for the three maintenance actions | Search and detail. Sole holder of the TMDB key (AD-8). Writes through to `media_items`, `media_cache`, `provider_list_cache` and `person_cache`. **Built 2026-08-15** |
 | `import-worker` | Queue, after upload | Parse, match, build the preview, apply on confirmation, delete the source file |
 | `recs-builder` | Schedule + on significant ranking change | Generate a slate per user. See [`recommendations.md`](./recommendations.md) |
 | `match-builder` | Schedule | Materialize `match_scores` (AD-7) |
@@ -230,6 +310,101 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 | `og-render` | Web request | Server-render Open Graph images for share and invite pages |
 
 `nudge-scheduler` is worth calling out. PRD §15 makes the nudge conditional on real content, so the function's first action is a query for qualifying activity, and its most common outcome is to send nothing. That is the intended behavior, not a failure mode, and the metric to watch is the ratio of evaluations to sends.
+
+### `tmdb-adapter` — the seven actions
+
+Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may call it.
+
+| Action | Caller | Purpose |
+|---|---|---|
+| `search` | signed-in user | Searches TMDB, writes the results into `media_items`, returns them Bingd-shaped |
+| `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits, trailers, certification |
+| `similar` | signed-in user | Caches what TMDB associates with one title as the `similar` facet. The candidate source behind For You. Added 2026-08-16 |
+| `person` | signed-in user | Caches one person and the titles TMDB credits them on, writing those titles into the catalogue first. Added 2026-08-17 |
+| `trending` | `service_role` | Refreshes the four `provider_list_cache` lists. Added 2026-08-16 |
+| `enrich` | `service_role` | Drains `tmdb_enrich_due` — rows carrying a tmdb id that have never been fetched |
+| `refresh` | `service_role` | Drains `media_refresh_due` — the retention window in §AD-8 |
+
+**`detail` fetches its appended responses in one request.** `credits`, `videos` and the
+certification source (`release_dates` for a movie, `content_ratings` for a series) all arrive
+through TMDB's `append_to_response`, so trailers and the certificate cost nothing beyond the
+detail call that was already being made. A season appends only `credits,videos`.
+
+**TMDB Reviews were built on 2026-08-17 and removed the same day**, and the removal is the
+more useful thing to record. A `reviews` facet was added by `20260817000500`, filled from
+TMDB's `/reviews` endpoint and labelled with some care — heading, caption, ratings shown as
+"Rated 8 on TMDB" and a test asserting the words *critic*, *professional* and *community
+review* never appeared near them.
+
+The founder's correction was that scrupulous labelling was solving the wrong problem: a tab
+called Reviews on a social product should be **Bingd's** reviews. So the tab is now
+`title_reviews` over Bingd's own public Notes, the adapter no longer requests or stores
+TMDB's, and `20260817001000` deletes the facet and narrows `media_cache_known_facet` back to
+its previous set. Provider data with no reader is not free — PRD §19 puts every TMDB-derived
+row under a six-month retention obligation, and nothing sweeps `media_cache`.
+
+**The removal needed the adapter deployed first**, which independent review 17 caught and the
+session checkpoint had got wrong: the constraint forbids a facet the running adapter was still
+writing, so narrowing it before redeploying breaks every enrichment. Deploy, then push.
+
+**`person` is a user action for the same reason `similar` is.** Somebody tapped a face and no
+schedule knows which. Bounded on the same three sides: one page opens one person,
+`tmdb_claim_person` (`20260817000500`) lets exactly one caller in the world refresh a given
+person at a time using `person_cache`'s primary key as the lock, and every provider request is
+charged to the caller's hourly ceiling. It writes every credited title through
+`tmdb_upsert_titles` **before** it writes the cache row, which is what makes the person page a
+discovery surface rather than a filtered view of the reader's own catalogue: a credit is a
+real `media_items` row, so opening, ranking or saving one is the ordinary action. At most
+forty credits are kept, ordered by provider popularity, with the count TMDB actually had
+carried alongside so the screen can say what it is not showing.
+
+**`similar` is a user action, and bounded on three sides.** It spends provider quota, which
+normally argues for `service_role` — but what a slate needs depends on which titles *this*
+person ranked highest, and no schedule knows that. The bounds are: the client asks about at
+most six anchors; `tmdb_claim_facet` (`20260816001000`) lets exactly one caller in the world
+refresh a given facet at a time, using `media_cache`'s own primary key as the lock; and every
+provider request is charged to the caller's hourly ceiling.
+
+**Every request, not every invocation.** The first version of this recorded one request and
+made three — the recommendations call plus, on a cold isolate, both genre lists — so the
+ceiling permitted three times the provider traffic it claimed to. `noteRequest` now takes a
+count and `tmdb.genreRequestCost()` reports what the genre map is about to cost. `search` was
+wrong in both directions and is fixed with it: it charged for a query shorter than two
+characters, which spends nothing, and under-charged one that warms the genre map.
+
+A read-then-write freshness check cannot do what the claim does. Two accounts opening For You
+on the same anchor at the same moment both see it stale and both spend, and a *per-user*
+ceiling is no help at all when the callers are different users — which is exactly the
+population that shares an anchor.
+
+It writes the facet even when TMDB returns nothing. An obscure title genuinely has no
+recommendations, and caching that fact is what stops every slate rebuild asking again.
+
+**`trending` has no read half.** It writes `provider_list_cache`, which is world-readable like
+`media_items` and `media_cache`, so a client selects the list directly and joins the ids to
+`media_items` rather than asking the adapter for it. That is the same split the facet cache
+already uses, and it keeps a screen's read off the provider quota entirely. It is
+`service_role` because it spends four provider requests and eighty upserts per call on a
+schedule — not because the result is private.
+
+**A search result is already a catalogue row by the time the client sees it.** The adapter
+upserts before it answers and returns Bingd uuids, so there is no import step, no "add this
+title" affordance, and no identifier in the client that means something only to TMDB. It is
+also what lets the client merge local and remote results by `id`: a title in both really is
+one row, because the second pass upserted onto the first.
+
+**Writes go through SQL functions, not PostgREST.** `20260815000000` adds four, and the
+reason is not stylistic: `media_items_tmdb` is a *partial* unique index and PostgREST's
+`.upsert()` cannot name an index predicate, so the obvious client-side upsert fails to infer
+it. `media_cache.expires_at` has the same problem from the other direction — AD-8 requires it
+to be derived from `app_config`, and computing it in the adapter would put the retention
+window in TypeScript, which is exactly where a change in TMDB's terms would fail to reach it.
+
+**Enriching a Wikidata row flips its provenance to `tmdb`.** That is the compliance-relevant
+line in the whole feature. A seeded row is CC0 and exempt from the six-month window; once it
+carries TMDB's overview, poster path and genres it is not, and `media_refresh_due` filters on
+`provenance` to decide. Leaving the column alone would exempt real provider data from PRD §19
+by an accident of where the row originally came from.
 
 ---
 
@@ -246,6 +421,17 @@ One structured shape, so the client can respond to a class of failure rather tha
 | `BG409` | Conflict — already exists, already accepted, stale session | Refresh and retry |
 | `BG422` | Would violate an invariant | Report as a bug. Should be unreachable |
 | `BG429` | Rate limited | Back off, show a plain-language message |
+| `BG500` | Unhandled server fault | Show a generic failure. Reported |
+| `BG502` | An upstream provider failed or timed out | Say the catalogue is unavailable, keep local content on screen |
+
+**`BG500` and `BG502` are Edge Function codes and cannot come from an RPC.** They were added
+2026-08-15 with `tmdb-adapter`, which is the first surface with an upstream: every other
+function in this document either succeeds or raises a SQLSTATE from the table below, and
+neither case can produce "the thing we depend on did not answer". The distinction matters to
+the client because the two want opposite handling — `BG500` is a bug and should be reported,
+while `BG502` is TMDB being TMDB, which the position in
+[`../reference/tmdb-integration.md`](../reference/tmdb-integration.md) explicitly expects
+("there is no SLA") and which must never blank a screen that already has local results.
 
 **`BG404` covers both "does not exist" and "exists but you may not see it."** Distinguishing them would let an attacker enumerate private profiles and lists by comparing responses.
 
@@ -291,6 +477,8 @@ Applied per user and per IP on the surfaces PRD §17 and §22 call out as abuse-
 | `react` | Reactions per minute, so reactions cannot be used to flood someone's inbox |
 | `tag_watch` | Tags per hour, in addition to the hard limit of 10 per watch |
 | `report` | Reports per day, so reporting cannot itself be used to harass |
+| `recommend_title` | Per hour **and** per day, counted over `processed_operations` — so the ceiling is on attempts and cannot be widened by naming different titles |
+| `create_invite_link` | Link creations per day |
 | `tmdb-adapter` | Requests per user, protecting the provider quota and its cost |
 
 ---

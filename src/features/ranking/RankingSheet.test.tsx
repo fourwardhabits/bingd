@@ -1,4 +1,6 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { queryKeys } from '@/lib/query';
@@ -27,6 +29,12 @@ jest.mock('@/features/auth', () => ({
 }));
 
 const subject = { id: 'film-a', title: 'Film A', bucket: 'loved' as const, posterUri: null };
+
+/** What `renderWithProviders` passes; repeated here for the one test that owns its client. */
+const METRICS = {
+  frame: { x: 0, y: 0, width: 390, height: 844 },
+  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+};
 const SESSION = 'session-1';
 
 const comparison = (over: Record<string, unknown> = {}) => ({
@@ -35,7 +43,16 @@ const comparison = (over: Record<string, unknown> = {}) => ({
 });
 
 const placement = {
-  data: { done: true, position: 3, category: 'movies', bucket: 'loved', adjustable: false },
+  data: {
+    done: true,
+    position: 3,
+    category: 'movies',
+    bucket: 'loved',
+    // The reveal's hero number. Computed server-side at finalize (20260815010000),
+    // because the band sizes the client holds predate this insertion.
+    score: 8.7,
+    adjustable: false,
+  },
   error: null,
 };
 
@@ -72,7 +89,7 @@ beforeEach(() => {
 const openSheet = async (props: Partial<RankingSheetProps> = {}) => {
   const onClose = jest.fn();
   const view = await renderWithProviders(
-    <RankingSheet subject={subject} onClose={onClose} {...props} />,
+    <RankingSheet subject={subject} onClose={onClose} surface="search" {...props} />,
   );
 
   return {
@@ -226,7 +243,7 @@ describe('closing', () => {
     await fireEvent.press(sheet.close());
     expect(sheet.onClose).toHaveBeenCalled();
 
-    await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} />);
+    await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} surface="search" />);
     answer(comparison());
 
     await waitFor(() => expect(callsTo('rank_cancel')).toHaveLength(1));
@@ -260,7 +277,7 @@ describe('closing', () => {
     answering(placement);
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A is number 3 in Movies');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 Movies');
     await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
 
     expect(callsTo('rank_cancel')).toHaveLength(0);
@@ -295,17 +312,34 @@ describe('closing', () => {
 });
 
 describe('the reveal', () => {
-  it('shows the position the server gave and refreshes that category', async () => {
+  const REVEAL = 'Film A scored 8.7 out of 10. #3 Movies';
+
+  /**
+   * The score is the hero and the ordinal is context beneath it — founder decision,
+   * 2026-08-15. This screen rendered `#3` at display size until Slice 3; the assertion
+   * to keep is that the *number the user sees* is the score, not that a score exists
+   * somewhere on the page.
+   */
+  it('makes the score the hero and refreshes that category', async () => {
     answering(placement);
     const sheet = await openSheet();
     const invalidate = jest.spyOn(sheet.client, 'invalidateQueries');
 
-    await sheet.findByLabelText('Film A is number 3 in Movies');
-    expect(sheet.getByText('IN MOVIES')).toBeTruthy();
+    await sheet.findByLabelText(REVEAL);
+    // The panel's summary label is what a screen reader reads, so the numeral itself
+    // is hidden from the tree — hence includeHiddenElements. It counts up from the
+    // bottom of its band, so this waits for the value to settle.
+    await waitFor(() =>
+      expect(sheet.getByText('8.7', { includeHiddenElements: true })).toBeTruthy(),
+    );
+    // The ordinal is present, and is not the headline. Also hidden from the tree,
+    // because the panel's summary above already spoke it — reading it twice is worse
+    // than not reading it.
+    expect(sheet.getByText(/#3 Movies/, { includeHiddenElements: true })).toBeTruthy();
 
     // Rendering happened before the spy, so re-run the placement to observe it.
-    await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} />);
-    await sheet.rerender(<RankingSheet subject={subject} onClose={sheet.onClose} />);
+    await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} surface="search" />);
+    await sheet.rerender(<RankingSheet subject={subject} onClose={sheet.onClose} surface="search" />);
     await waitFor(() => expect(invalidate).toHaveBeenCalled());
 
     const keys = invalidate.mock.calls.map(([args]) => JSON.stringify(args?.queryKey));
@@ -317,7 +351,7 @@ describe('the reveal', () => {
     answering(placement);
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A is number 3 in Movies');
+    await sheet.findByLabelText(REVEAL);
     expect(sheet.queryByText(/estimate/)).toBeNull();
   });
 
@@ -326,6 +360,144 @@ describe('the reveal', () => {
     const sheet = await openSheet();
 
     await waitFor(() => expect(sheet.getByText(/estimate/)).toBeTruthy());
+  });
+});
+
+/**
+ * **A rebucket has already changed the collection before the first comparison.**
+ *
+ * `rank_rebucket` calls `rank_unrank` and updates `user_media.bucket`, then opens a
+ * session (`20260813000700`). Both writes are committed. So a reader who moves a film from
+ * Loved to Fine and closes the sheet without answering anything has changed their
+ * collection — and invalidating only on `placed` left the ranked list, the score
+ * denominators and Rating Rascal describing a ranking that no longer exists, for the whole
+ * one-minute `staleTime`. Independent review 21c.
+ */
+describe('moving a title to another band', () => {
+  const rebucket = { ...subject, mode: 'rebucket' as const };
+
+  /**
+   * Its own client, seeded before the sheet mounts.
+   *
+   * The invalidation happens in the effect that opens the session, so a spy installed
+   * after `render` returns has already missed it — and `renderWithProviders` sets
+   * `gcTime: 0`, which collects a seeded query before it can be inspected. Both problems
+   * go away by owning the client.
+   */
+  const KEYS = [
+    ['collection', 'user-1'],
+    ['rankings', 'user-1', 'movies'],
+    ['rankings', 'user-1', 'tv_seasons'],
+    ['awards', 'user-1'],
+  ];
+
+  const mount = async (props: Partial<RankingSheetProps> = {}) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    for (const key of KEYS) client.setQueryData(key, 'seeded');
+
+    const view = await render(
+      <QueryClientProvider client={client}>
+        <SafeAreaProvider initialMetrics={METRICS}>
+          <RankingSheet subject={subject} onClose={jest.fn()} surface="search" {...props} />
+        </SafeAreaProvider>
+      </QueryClientProvider>,
+    );
+    const invalidated = (key: unknown[]) => client.getQueryState(key)?.isInvalidated ?? false;
+    return { ...view, invalidated };
+  };
+
+  it('refreshes the collection and the awards as soon as the write lands', async () => {
+    answering(comparison());
+    // The session is open and nothing has been answered — exactly the state a reader is
+    // in when they change their mind and close the sheet.
+    const { invalidated } = await mount({ subject: rebucket });
+
+    await waitFor(() => expect(callsTo('rank_rebucket')).toHaveLength(1));
+    await waitFor(() => expect(invalidated(['awards', 'user-1'])).toBe(true));
+    expect(invalidated(['collection', 'user-1'])).toBe(true);
+    // Both categories, because a rebucket can move a title between them and nothing here
+    // knows which one this was.
+    expect(invalidated(['rankings', 'user-1', 'movies'])).toBe(true);
+    expect(invalidated(['rankings', 'user-1', 'tv_seasons'])).toBe(true);
+  });
+
+  /**
+   * **Including when it reports a failure**, which is the correction review 21d made.
+   *
+   * A Postgres exception does roll the whole `rank_rebucket` transaction back — but a
+   * transaction can commit and its HTTP response can then be lost, and the client maps
+   * that to `failed` too. Nothing on this side distinguishes "refused" from "committed,
+   * reply dropped", so the only safe reading is that it may have landed. A definite
+   * rollback costs one redundant refetch; the other way costs a screen describing a
+   * ranking that is gone.
+   */
+  it('refreshes even when the rebucket reports a failure, which may still have committed', async () => {
+    answering({ data: null, error: { code: '22023', message: 'title is already in that bucket' } });
+    const { invalidated } = await mount({ subject: rebucket });
+
+    await waitFor(() => expect(callsTo('rank_rebucket')).toHaveLength(1));
+    await waitFor(() => expect(invalidated(['awards', 'user-1'])).toBe(true));
+    expect(invalidated(['collection', 'user-1'])).toBe(true);
+  });
+
+  it('leaves a first ranking alone, which writes nothing until it is placed', async () => {
+    answering(comparison());
+    const { invalidated } = await mount();
+
+    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
+    expect(invalidated(['awards', 'user-1'])).toBe(false);
+  });
+
+  /**
+   * **An answer that fails can still have placed the title**, which is the same
+   * invariant one step further along the session.
+   *
+   * `rank_answer` records the comparison and, on the last one, finalises inside the same
+   * transaction — the `rankings` row, the score, the `feed_events` entry. So a
+   * `rank_answer` that commits and loses its reply arrives here as a failure over a
+   * collection that has already moved, and the sheet invalidated only on `placed`.
+   * `session.ts` now marks the outcomes it cannot prove were refusals
+   * (`lib/write-outcome.ts`), and this is the screen half of it.
+   */
+  it('refreshes when an answer was never resolved, since it may have placed the title', async () => {
+    answering(comparison(), { data: null, error: { code: '', message: 'TypeError: fail' } });
+    const view = await mount();
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(false),
+    );
+    await fireEvent.press(view.getByLabelText('Choose Film A'));
+
+    await waitFor(() => expect(callsTo('rank_answer')).toHaveLength(1));
+    await waitFor(() => expect(view.invalidated(['collection', 'user-1'])).toBe(true));
+    expect(view.invalidated(['awards', 'user-1'])).toBe(true);
+  });
+
+  it('refreshes on 08007 from an answer, which carries a code and proves nothing', async () => {
+    answering(comparison(), { data: null, error: { code: '08007', message: 'unknown' } });
+    const view = await mount();
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(false),
+    );
+    await fireEvent.press(view.getByLabelText('Choose Film A'));
+
+    await waitFor(() => expect(view.invalidated(['collection', 'user-1'])).toBe(true));
+  });
+
+  it('leaves the collection alone when an answer was refused outright', async () => {
+    // 22023 is the server declining — the pivot stopped being ranked mid-session, which
+    // it raises rather than guesses. Nothing was placed, so nothing needs refetching.
+    answering(comparison(), { data: null, error: { code: '22023', message: 'pivot is gone' } });
+    const view = await mount();
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(false),
+    );
+    await fireEvent.press(view.getByLabelText('Choose Film A'));
+
+    await waitFor(() => expect(callsTo('rank_answer')).toHaveLength(1));
+    expect(view.invalidated(['collection', 'user-1'])).toBe(false);
   });
 });
 

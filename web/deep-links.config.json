@@ -49,7 +49,14 @@
     "Only routes that have an in-app equivalent are claimed. Claiming a path the",
     "app cannot render means a tapped link opens the app and shows nothing, which",
     "is worse than opening the browser. Everything else — the marketing page,",
-    "privacy, terms, and .well-known itself — must stay unclaimed."
+    "privacy, terms, and .well-known itself — must stay unclaimed.",
+    "",
+    "Corrected 2026-08-19 with the invitation resolver: this said /list/* and the",
+    "route is app/lists/[id].tsx. The mismatch was silent in both directions and",
+    "is the exact failure the rule above describes — /list/x opened the app onto",
+    "+not-found, while /lists/x, the shape anything would actually generate, was",
+    "not claimed at all and opened Safari. Neither reads as a wrong path; both",
+    "read as the feature not working."
   ],
-  "appPaths": ["/u/*", "/list/*", "/title/*", "/i/*"]
+  "appPaths": ["/u/*", "/lists/*", "/title/*", "/i/*"]
 }

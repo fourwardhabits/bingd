@@ -142,6 +142,56 @@ describe('search_titles', () => {
     assert.equal((await search(spoken))[0], rows[0].title);
   });
 
+  describe('punctuation the user did not type', () => {
+    // 20260815020000. Before it, "Spiderman" returned nothing at all: the
+    // catalogue holds "Spider-Man", which indexes as 'spider-man', 'spider' and
+    // 'man', and 'spiderman:*' is a prefix of none of the three.
+    it('finds a hyphenated title typed as one word', async () => {
+      const results = await search('spiderman');
+      assert.ok(results.length > 0, '"spiderman" must not come back empty');
+      assert.ok(results.includes('Spider-Man'), `got ${JSON.stringify(results.slice(0, 5))}`);
+    });
+
+    it('leads with the film whose name was typed, punctuation or not', async () => {
+      // Finding it is half the job. Without the squashed sort key this returned
+      // Spider-Man 2 or Homecoming first, because the exact-title tier compares
+      // against the spaced sort key and "spiderman" is not "spider man".
+      assert.equal((await search('spiderman'))[0], 'Spider-Man');
+      assert.equal((await search('spider man'))[0], 'Spider-Man');
+      assert.equal((await search('Spider-Man'))[0], 'Spider-Man');
+    });
+
+    it('still narrows when the rest of the name follows', async () => {
+      assert.equal((await search('spiderman no way home'))[0], 'Spider-Man: No Way Home');
+      assert.equal((await search('spider man homecoming'))[0], 'Spider-Man: Homecoming');
+    });
+
+    it('matches across a period in an abbreviation', async () => {
+      assert.ok((await search('dr no')).includes('Dr. No'));
+      assert.ok((await search('drno')).includes('Dr. No'));
+    });
+
+    it('matches across an apostrophe, typographic or typed', async () => {
+      // The catalogue holds both spellings of the apostrophe — Life of Brian has
+      // the typographic ’ and Flying Circus the ASCII ' — and neither survives
+      // the squash, so one query has to reach both.
+      const results = await search('montypythons');
+      assert.equal(results.length, 2, `got ${JSON.stringify(results)}`);
+      assert.ok(results.every((title) => title.startsWith('Monty Python')));
+    });
+
+    it('does not let the squashed branch widen a single-token search', async () => {
+      // The concatenation is ORed in, which widens rather than narrows, so it is
+      // only added when there are two or more tokens. With one token the
+      // concatenation *is* the token and adding it would change nothing except
+      // to make the query harder to read.
+      const wide = await search('the');
+      const narrow = await search('the dark knight');
+      assert.ok(narrow.length < wide.length, 'more words must still mean fewer results');
+      assert.equal(narrow[0], 'The Dark Knight');
+    });
+  });
+
   it('keeps the prefix boost when the user types the space before the next word', async () => {
     // The boost used to compare against the raw query text, so "man " — which is what a
     // person types on the way to a second word — matched no title at all and turned the

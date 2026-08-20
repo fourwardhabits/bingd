@@ -1,13 +1,15 @@
 # Bingd — Screen Specification
 
-**Version:** v1 (public alpha)
+**Version:** v2
 **Status:** Draft for review
-**Date:** 2026-08-13
-**Specification:** [`../product/PRD.md`](../product/PRD.md) v0.6 · [`design-system.md`](./design-system.md)
+**Date:** 2026-08-15 (v1 was 2026-08-13)
+**Specification:** [`../product/PRD.md`](../product/PRD.md) v0.6 · [`design-system.md`](./design-system.md) v2
 
 What each screen is for, what is on it, and which states it must handle. Components and values come from [`design-system.md`](./design-system.md); this document does not restate them.
 
 Where a screen has an unresolved choice, it is marked **Open** and repeated in §17.
+
+> **What changed in v2.** The 0–10 score replaces the ordinal everywhere ([`design-system.md`](./design-system.md) §8), and the base surface is now Paper with Parchment as its warm accent (§1 there). Six screens were reworked against reference material on 2026-08-15: Collection §5, Title detail §6, Feed §7, Recommendations §8, Profile §9, Search §11. Reference archives are git-ignored under `design-references/`; screens cited by filename below are committed, resized, in [`references/`](./references/).
 
 ---
 
@@ -50,7 +52,7 @@ Where a screen has an unresolved choice, it is marked **Open** and repeated in �
 | Tab | Contents |
 |---|---|
 | **Feed** | Followed users' activity |
-| **Collection** | Ranked, Logged, Watchlist, Lists |
+| **Collection** | Watched, Watchlist, Unranked, Lists — §5, reworked 2026-08-15 |
 | **+** | Log and rank — opens directly into title search |
 | **Recommendations** | The generated slate |
 | **Profile** | Public identity, stats, match, leaderboard, settings |
@@ -117,73 +119,188 @@ Progress is shown as a quiet line rather than a bar, because the count is an est
 
 **No prefetch, and none is possible (corrected 2026-08-14).** This section previously claimed the next pivot's poster prefetches while the user decides. It cannot: the next pivot's identity is chosen by `rank_answer` from the answer being given, so it does not exist until the round trip returns. What is built instead is that neither card can be tapped until the opponent is on screen — answering against a card showing an ellipsis records a preference over something the user was never shown. A stall here still damages the mechanic, and the honest fix is the server round trip, not a prefetch.
 
-**The comparison card never shows the opponent's current rank.** Beli shows the opponent's score (`7.8` in the reference) and Bingd deliberately does not show the equivalent ordinal. "This is my #2" is an anchor that invites agreement rather than a real judgment, and the mechanic's whole value is unanchored preference. The position is visible everywhere else in the app. Decided by the founder on 2026-08-13.
+**The comparison card never shows the opponent's score.** Beli shows it (`7.8` in the reference) and Bingd deliberately does not. "This is my 9.2" is an anchor that invites agreement rather than a real judgment, and the mechanic's whole value is unanchored preference. The score is visible everywhere else in the app, which makes this the one screen where keeping it off has to be deliberate. Decided by the founder on 2026-08-13; unchanged by the move to scores on 2026-08-15, and more important now that the badge appears on every other surface.
 
 ### Reveal
 
-The composition in [`design-system.md`](./design-system.md) §9: an Amber panel, the ordinal in Ink at display size, category and title below.
+The composition in [`design-system.md`](./design-system.md) §9: an Amber panel, the **score** in Ink at display size, title and bucket below. The score counts up from the low end of its own band rather than from zero, so the animation reads as placing the title inside the bucket the user just chose.
 
 Below the panel, three actions: **Share**, **Rank another**, and **Done**. **Share is absent as built (2026-08-14)** — share cards do not exist, and an action that does nothing is worse than one that has not arrived. Beli celebrates the first rank specifically ([`references/beli-229-first-rank-celebration.jpg`](./references/beli-229-first-rank-celebration.jpg)) and Bingd should too — the first reveal is the moment the product explains itself, and it is worth a distinct line of copy.
 
 ---
 
-## 5. Collection
+## 5. Collection — reworked 2026-08-15
 
-The user's own working surface. Four segments: **Ranked · Logged · Watchlist · Lists**.
+The user's own working surface.
 
-**Ranked** is the artifact. Titles in position order, grouped under band headers — *Loved it*, *It was fine*, *Not for me* — which is how the bucket partition (INF-3, now decided) becomes legible rather than mysterious. Each row is a title row with its ordinal. A category switcher toggles Movies and TV seasons, which are separate rankings.
+### Ranked and Watched were the same list
 
-**Logged** holds watched titles without a position. Its header states the split plainly — "142 ranked · 380 logged" — which is the PRD §5 wording, and offers **"Rank a few"** to start a session over unranked titles. No progress bar toward 100% and no "380 remaining," per the same guidance. Someone importing 800 films must not open this tab and feel behind.
+v1 had four segments: **Ranked · Logged · Watchlist · Lists**. As built, Ranked and Watched showed largely the same titles in a different order, because almost everything a user logs they also rank. Two tabs that mostly agree force a choice with no meaning behind it, and the user has to learn which one is the "real" list.
 
-**"Rank a few" is not built (2026-08-14).** The `unranked_queue` RPC that would serve it exists and is unused. The tab lists the unranked titles and each one can be opened individually; what is missing is the batch entry point.
+**Decided: one list.** The segments are **Watched · Watchlist · Unranked**, and Unranked appears only when the count is non-zero — a tab that is always empty for most users is a permanent reminder of a chore.
 
-**Watchlist** is a simple list with the fastest possible path to logging.
+Watched is sorted by score descending, which *is* position order, so it reproduces v1's Ranked tab exactly while also containing the unranked titles. A ranked title shows its score; an unranked one shows the dashed `Rank` badge, which is a button into the ranking sheet. The list is therefore complete and honest at the same time, and the fastest path to ranking something is now sitting in the list the user already looks at.
 
-**Lists** shows the user's lists with the three-list limit expressed as a plain statement of what exists, not as a meter counting toward a wall.
+Unranked survives as a tab because it is a useful *filter* of that list, not a different list.
+
+### Header
+
+Beli's stacked header ([`references/beli-60-list-header.jpg`](./references/beli-60-list-header.jpg)): a category dropdown, then tabs, then utilities. Bingd's version, top to bottom:
+
+```
+bingd.                                    ⚙
+Movies ˅                                        ← title1, DM Serif, opens a sheet
+Watched      Watchlist      Unranked            ← active: Ink + Maroon underline
+⇅ Score                                         ← sort
+```
+
+**Movies / TV becomes a dropdown**, replacing v1's tap-to-cycle toggle. A control that changes value on tap without saying what it will change to cannot be read before it is used, and with only two options it happened to work — it would have broken the moment a third category existed. A dropdown states the current value and shows the alternatives on demand.
+
+### Rows
+
+The compact row from [`design-system.md`](./design-system.md) §8, which is Letterboxd's diary row ([`references/letterboxd-55-diary.jpg`](./references/letterboxd-55-diary.jpg)): 38 × 57 poster, title and year, `148m · Action · Adventure`, score badge right.
+
+**The band headers are gone.** *LOVED IT* / *IT WAS FINE* / *NOT FOR ME* section headers made the bucket partition legible when the only number on the row was an ordinal that said nothing about how much the user liked something. The score says it — the ranges do not overlap, and the badge is tinted by bucket — so the headers now caption information already present twice on every row.
+
+**The bucket label is gone from the subtitle** for the same reason. `Loved it · 148m · Action` next to a badge reading `8.7` spends the most valuable line on the row restating the badge.
+
+No progress bar toward 100% and no "380 remaining" (PRD §5). Someone importing 800 films must not open this tab and feel behind.
+
+**Lists is still absent**, deliberately: there is no list UI yet, and an empty tab that cannot be filled is worse than one that has not arrived.
 
 Beli puts a milestone tracker at the top of this surface — progress toward unlocking scores and recommendations ([`references/beli-30-collection-progress.jpg`](./references/beli-30-collection-progress.jpg)). Bingd should use this pattern **only** for the recommendation threshold, where the target is finite and reaching it unlocks something real. It must never appear over the ranked list itself, where there is no finish line.
 
 ---
 
-## 6. Title detail
+## 6. Title detail — redesigned 2026-08-15
 
-Poster at `poster.lg` with the title in `title2` beside it — not a full-bleed backdrop ([`design-system.md`](./design-system.md) §1). Letterboxd's dark treatment ([`references/letterboxd-34-title-detail.jpg`](./references/letterboxd-34-title-detail.jpg)) does not transfer to Parchment.
+### What was wrong
 
-Order: the user's own state first (bucket, rank, note, watch date), then the primary action, then friend signal — who among the people you follow has ranked it and where — then catalog metadata, then attribution.
+v1 specified a poster at `poster.lg` with the title beside it and explicitly no backdrop, because §1 of the design system forbade full-bleed artwork on Parchment. As built it was the weakest screen in the app, and the reason is structural rather than cosmetic: a title page whose largest element is a 132pt poster on a tan field has no focal point, so it reads as a form rather than as a page about a film. Every app in the reference set — Letterboxd, Apple TV, Max — opens a title page with a wide image, and they do it because artwork is the only thing on the screen the user recognises instantly.
 
-The user's own state comes first because this screen is most often opened by someone deciding whether they have already seen something.
+**Decided: this screen gets the app's one full-bleed hero** ([`design-system.md`](./design-system.md) §1, §7).
+
+### Composition
+
+The top half is Luma's event page, which solves a closely related problem — a hero image, an identity object overlapping it, then a dense block of state and metadata — and does it on a light background, which Letterboxd and Apple TV do not.
+
+```
+┌────────────────────────────────────────────┐
+│                                            │
+│   backdrop, 16:9, scrim to surface.base    │   ← the app's only full-bleed artwork
+│                                            │
+│                          ┌──────────────┐  │
+└──────────────────────────│ Sci-fi │ Action│──┘  ← genre pills straddle the hero edge
+   ┌──────────┐            └──────────────┘
+   │          │   Inception
+   │  poster  │   2010
+   │  poster.lg│
+   └──────────┘
+   A thief who steals corporate secrets through dream-sharing
+   technology is given the inverse task…              more
+   148m · Christopher Nolan · Leonardo DiCaprio, Elliot Page
+
+   ┌───────────────┐    ⬤        ↗
+   │    Ranked     │   8.7     Share
+   └───────────────┘
+   Watched 12 Aug 2026
+
+   ─────────────────────────────────────────────
+   Cast    Details    Reviews    Seasons
+```
+
+**Genre pills straddle the hero's bottom edge.** This is the position Luma gives its "Highlight" chip, and it earns its place for a reason beyond decoration: genre is the single most useful fact about a film the user has not seen, and it is the thing they are scanning for when deciding whether to add it. Putting it half onto the artwork makes the hero and the content one object rather than a banner with a page beneath it. Pills use `surface.raised` with a hairline, not a bucket color — they are metadata, and §1 allows exactly one chromatic UI element on a content surface, which is spent on the score.
+
+**Personal state sits above the fold, to the right of the primary action.** Rank/Ranked button, the watch date directly beneath it, then the score badge, then Share. Luma puts a map icon in that slot; the score is what belongs there in a collection app, because it is the answer to the question the user is asking when they open a film they have already seen.
+
+The badge shows the dashed unranked state when the title is logged but not compared, which makes the two adjacent controls read as one sentence: *Rank* → *no score yet*. Nothing about that state is presented as a failure (PRD §26.4 AC 2).
+
+**Order of the whole page:** the user's own state, then the primary action, then catalog metadata, then friend signal, then attribution. State comes first because this screen is most often opened by someone deciding whether they have already seen something.
+
+### Tabs
+
+Luma renders its secondary content as a scrolling row of pills. Bingd makes them real tabs — **Cast · Details · Reviews · Seasons** — because the content behind them is long and a user who wants the runtime should not scroll past the cast to find it. Apple TV's information layout ([`references/apple-tv-95-information.jpg`](./references/apple-tv-95-information.jpg)) is the model for Details: label above value, stacked, no table rules.
+
+- **Cast** — the cast strip, plus director and writer.
+- **Details** — released, runtime, genres, original language, and **the ordinal in full**: `#2 of 6 in Movies`, with the denominator, because a bare ordinal is unreadable without it (PRD §10).
+- **Reviews** — the user's own note. Friends' notes when the feed carries them. Absent entirely until there is something in it; a tab that is always empty is worse than a missing tab.
+- **Seasons** — series only. Per-season state, since the season is the rankable unit and the series is not (AD-1). This distinction is invisible in the data model and has to be made obvious here.
+
+Tabs whose content does not exist for a given title are not rendered. A film has no Seasons tab.
+
+### States
+
+**No backdrop.** Common — the seed catalogue ships without artwork of any kind (PRD §7.14). The hero collapses to a short `surface.sunken` band at the height of the pill row, so the poster still overlaps something and the layout does not shift into a different design. Never a grey box where an image failed, and never a stretched poster standing in for a backdrop.
+
+**No overview.** Omit the paragraph. Do not render a placeholder line.
 
 **Provider attribution** appears here. TMDB's requirements are published and specific — an approved logo, kept less prominent than Bingd's own mark, plus the exact notice "This product uses the TMDB API but is not endorsed or certified by TMDB" in an About or Credits section. The notice itself lives in Settings; this screen carries the source line. Details in [`../reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 
-For a series, seasons are listed with per-season state, since the season is the rankable unit and the series is not (AD-1). This distinction is invisible in the data model and has to be made obvious here.
-
 ---
 
-## 7. Feed
+## 7. Feed — reworked 2026-08-15
 
 Strictly chronological, no algorithmic ordering (PRD §14).
 
-![Beli's activity item](./references/beli-370-activity-item.jpg)
+### Cards were the wrong container
 
-Beli's item structure adapts almost directly, with tagged people rendered inline in the sentence — "Judy ranked SOOTHR LIC **with** Jesse Bendit, Allie, Eliot Frost." That inline treatment is the right home for Bingd's watch tagging: it makes tagging feel like part of the story rather than a metadata field.
+As built, each activity was a bordered card on `surface.raised`. Three items produced three rounded rectangles stacked with gaps, and the chrome outweighed the content — a feed of cards reads as a list of notifications, not as a stream of things people did.
 
-A Bingd item: avatar, then the sentence — **"Alex ranked *Sinners* with Jerry and Beth"** — then the rank badge, then the poster, then the note if any, then the reaction row and timestamp.
+Beli's feed is flat: white ground, hairline between items, no card ([`references/beli-374-activity-item-full.jpg`](./references/beli-374-activity-item-full.jpg)). Letterboxd's is the same. **Decided: divider-separated rows, no card.** Removing the border also removes the double-surface problem, where a `surface.raised` card holds a poster that needs its own hairline to separate from it.
 
-The rank badge replaces Beli's score. `#3 in Movies`, never a number out of ten.
+### What a movie feed has instead of photos
 
-The reaction row is reactions, share, and **add to watchlist**. Beli surfaces "19 bookmarks" as social proof, and the Bingd equivalent — how many people added a title to their watchlist from this activity — is also the product's core virality metric (PRD §28), so it earns its place.
+Beli's items are carried visually by food photography — a horizontal strip of square images per activity. That does not transfer, and the honest reason is that a movie app has no user photos to show. Every activity would carry the same official poster, and a wall of identical posters is not content.
+
+**The poster does the work at a smaller size, and the score does the rest.** A compact title card inside the item is enough to identify the film; the score badge gives each row a distinct thing to look at, which is what the photo strip was actually providing. User photos — a shot of the group on movie night — are a plausible later addition and are out of scope for this pass.
+
+### Anatomy
+
+```
+┌─────────────────────────────────────────────────┐
+  (S)  Suraj ranked Inception with Anna
+       ┌──┐
+       │▓▓│  Inception (2010)                 ⬤ 8.7
+       └──┘  148m · Sci-fi
+       "Third time and it still holds up."
+       ♡ 3    ↗    + Watchlist            13h ago
+─────────────────────────────────────────────────
+```
+
+- **Avatar** `sm`, then the sentence. Actor name and title are Inter 600 inside a `body` sentence, which is Beli's bolded-entity treatment and makes the row scannable without a separate header line.
+- **Tagged people render inline in the sentence** — "Suraj ranked *Inception* **with** Anna and Beth". This is Beli's pattern and it is the right home for Bingd's watch tagging: tagging reads as part of the story rather than as a metadata field.
+- **The compact title card** — `poster.xs`, title and year, `148m · Sci-fi` — is a button to the title page.
+- **The score badge** at `sm`, right-aligned against the title card. It replaces v1's rank badge.
+- **The note**, if any, in `body`. Two lines then "more". The row renders one when given one; the feed does not yet pass one, because a note lives in `user_media` behind its author's RLS and nothing copies it into `feed_events.payload`. Publishing a user's own words to their followers' feeds is a moderation decision (`20260813000600` kept reactions text-free for exactly that reason), not something to slip in with a layout change.
+- **The reaction row**: reactions, share, and **add to watchlist**. Beli surfaces "19 bookmarks" as social proof, and the Bingd equivalent — how many people added a title to their watchlist from this activity — is also the product's core virality metric (PRD §28), so it earns its place. Timestamp right-aligned on the same line.
 
 **No comment affordance.** Comments are deferred (PRD §14) and a disabled comment icon would be worse than none.
+
+### The actor must be named
+
+An activity item whose subject is "Someone" is not an activity item. The interface must not absorb a missing actor behind a plausible-looking fallback, which is exactly what happened: every item read "Someone ranked a title." and looked enough like a deliberate anonymity feature to survive to a screenshot.
+
+The cause was not the `profiles_read` policy, which admits your own row and every row you follow. `use-feed.ts` read the embedded profile as `row.profiles[0]`. PostgREST returns a to-one embed as an object and a to-many as an array, and its generated types claim array for both, so the index silently produced `undefined` and every fallback in the mapper fired at once — including on the user's own activity, where an unnamed actor is impossible by construction. `use-collection.ts` had already hit this and normalised with a small `media()` helper; the feed had not.
+
+Where an actor genuinely cannot be resolved, the item is **omitted**. A feed with three items is honest; a feed with five items, two of them about nobody, is not.
 
 Empty feed for a user following nobody: an invitation to find friends, not a spinner and not a blank page.
 
 ---
 
-## 8. Recommendations
+## 8. Recommendations — reworked 2026-08-15
 
 Opens directly to a slate, never to a "generate" button — the slate is built on a schedule ([`recommendations.md`](../architecture/recommendations.md)).
 
-Each card: `poster.lg`, title, and **the reason, stated in one plain sentence** — "Because you ranked *Sinners* #2 and Jordan ranked this #1." The reason is rendered from stored evidence and never composed on the client (AD-8). Actions: add to watchlist, log it, or dismiss with a reason.
+### Shelves, not a single list
+
+Max's home screen and Apple TV's ([`references/apple-tv-5-shelves.jpg`](./references/apple-tv-5-shelves.jpg)) are both stacks of titled horizontal shelves, and that structure fits recommendations better than a vertical list of cards for one reason: **the shelf title is where the explanation goes.** PRD §13 requires every recommendation to carry a reason derived from stored signals, and a reason that covers six titles at once — "Because you loved Inception" — costs one line instead of six.
+
+Each shelf: a section header carrying the reason, then `poster.md` artwork with the last card clipped ([`design-system.md`](./design-system.md) §8). Tapping a poster opens the title page; the actions — add to watchlist, log it, dismiss with a reason — live there rather than on the tile, because a poster wall with three buttons per tile is not a poster wall.
+
+Shelf titles are rendered from stored evidence and never composed on the client (AD-8). A shelf that cannot state its reason does not ship.
+
+**One shelf gets the detailed treatment**: the top slate keeps v1's card form — `poster.lg`, title, and the full sentence, "Because you ranked *Sinners* #2 and Jordan ranked this #1" — because the first recommendation should show its work. The shelves beneath it are for browsing.
 
 Before the threshold is reached, the tab shows what is missing and the fastest way to get there, which is the one place the milestone tracker from §5 belongs.
 
@@ -192,6 +309,20 @@ Before the threshold is reached, the tab shows what is missing and the fastest w
 ## 9. Profile, match, leaderboard
 
 **Profile** is the public artifact: avatar, name, username, one stats block (PRD §5 permits exactly one), the top of the ranking, and lists. Viewing someone else's profile shows the match score with its evidence count — `88% match · 126 shared` — and the shared-titles view is the interesting screen, because agreement is more legible as a list of specific films than as a number.
+
+**Top ranked is a poster wall, not rows** (2026-08-15). Three across, artwork only, each with its score chipped onto the corner ([`design-system.md`](./design-system.md) §8). Rows were the wrong form here: this is the one block on the profile that exists to be looked at rather than worked through, and three compact rows carrying runtime and genre give a visitor metadata they did not ask for while making the films themselves small. The wall is low-detail on purpose and every tile is a button.
+
+**The avatar is uploadable.** It was not, and a profile with a permanent set of initials where a photo belongs undercuts the whole surface — this is the screen the product asks people to share. `profiles.avatar_url` had existed since the first identity migration and no code path could write it.
+
+The control lives in **Settings**, not on the profile, because the profile is what other people see and changing your picture is an edit. Settings is also the only place it can live: `set_avatar` refuses a caller with no profile row, which keeps an avatar from existing during onboarding — where a storage object referencing `auth.users` would block the age gate's account deletion ([`20260813002200`](../../supabase/migrations/20260813002200_signup.sql) warned about exactly this).
+
+The picker crops square at the source, since every surface renders the avatar in a circle, and the client downscales to 512px before upload. Each upload writes a **new filename** and deletes the previous one — overwriting at a stable path leaves the CDN and every already-rendered image serving the old face, which reads as the upload having silently failed.
+
+**The stats block counts what it says.** `Watchlist` read `top.length`, the length of the top-six ranked slice, so an account with six rankings and an empty watchlist reported six.
+
+**Recent activity uses the feed item from §7**, including its rule that an item with no resolvable actor is omitted rather than rendered as "Someone". On one's own profile every actor is oneself, so an unnamed item here is unambiguously a bug — and it was one, on every row, until 2026-08-15.
+
+It is also **filtered to the profile's owner**. The underlying query spans everyone the user follows, and a friend's ranking under a heading on your own profile is a different claim from the one the heading makes.
 
 Low-confidence matches are visually downweighted per PRD §13. A `94% match · 8 shared` must not look more impressive than `88% match · 126 shared`, which is exactly what a bare percentage would do.
 
@@ -211,11 +342,41 @@ Two behaviors carry product weight:
 
 ---
 
-## 11. Search
+## 11. Search — reworked 2026-08-15
 
-One field, results as title rows, each with a log action. Fast enough that it feels like filtering rather than querying.
+One field, results as compact rows (§5), each with a log action. Fast enough that it feels like filtering rather than querying.
 
 The **+** tab opens here with the field focused. A separate people-search lives in Profile and in the invite flow.
+
+### The idle state is not empty
+
+An autofocused field over a blank screen is the most common state of this tab and v1 gave it a single line of prompt copy. **Recent searches** fill it instead: a section header, the last several queries as tappable rows, and a way to clear them. This is Spotify's library pattern and it is worth having because film search is genuinely repetitive — people look for the same title across several sessions before they watch it.
+
+### Filters
+
+A row of filter pills beneath the field: **All · Movies · TV**. The underlying RPC already restricts results to films and series, so this is a client-side narrowing of what came back and costs nothing.
+
+Deeper filters — year, decade, genre — are **Open** (§17). They need a server change and there is no evidence yet that a catalogue this size needs them.
+
+### Matching must survive punctuation
+
+"Spiderman" returning nothing while "Spider-Man" exists in the catalogue is the kind of failure that makes a user conclude the app has a small library. Titles are full of punctuation the user will not type: hyphens, colons, ampersands, apostrophes. Search must match across it in both directions — typing the punctuation when the title has none, and omitting it when the title has some.
+
+This is a server concern and the fix is in [`../architecture/api.md`](../architecture/api.md); the design requirement is only that **no result set is empty because of a character the user cannot be expected to guess.**
+
+### An empty screen has several meanings
+
+Search answers from two places — the local catalogue, then TMDB when the local answer was thin — and a blank list can mean five different things. Each gets its own copy, because the action they call for differs:
+
+| State | What it says | Action |
+| --- | --- | --- |
+| Still asking TMDB | Looking further afield… | none, it is in progress |
+| Both searched, nothing found | Nothing matches that | check the spelling |
+| Rate limited | Too many searches | wait |
+| TMDB errored | Could not search wider | Try again |
+| Filter hid every row | Nothing in this filter | switch to All |
+
+The fourth is the one worth naming. A failed wider lookup used to render as "nothing matches" — the app stating confidently that a film does not exist when what actually happened is that it never managed to ask. A missing provider key looked identical to an empty catalogue, which is how that failure stayed invisible.
 
 Beli's "Import your lists" entry point sits inside its list surface ([`references/beli-66-import-lists.jpg`](./references/beli-66-import-lists.jpg)); Bingd's equivalent belongs in Collection and in onboarding, not in search.
 
@@ -251,13 +412,13 @@ Beli's streak reminders are **not** adopted. Streaks manufacture obligation, and
 
 ## 14. Sharing
 
-The **Top 10 share card** is the polished artifact (PRD §16): ten posters, ordinals, and titles on Parchment, set in DM Serif Display, with the wordmark. Poster-forward, because artwork is what makes a shared image stop someone mid-scroll, and typographic enough that the card is recognizably Bingd rather than a generic grid.
+The **Top 10 share card** is the polished artifact (PRD §16): ten posters, scores, and titles on Parchment, set in DM Serif Display, with the wordmark. Parchment stays the share-card ground even though the app moved to Paper — a shared image has no surrounding interface to sit inside, so the warmth has to come from the card itself, and Parchment is what makes it recognisably Bingd in someone else's feed. Poster-forward, because artwork is what makes a shared image stop someone mid-scroll, and typographic enough that the card is recognizably Bingd rather than a generic grid.
 
 **Two canvases**, designed separately rather than one scaled:
 
 | Format | Layout |
 |---|---|
-| **Feed card**, 4:5 | Two columns of five. Ordinal and title beside each poster |
+| **Feed card**, 4:5 | Two columns of five. Score and title beside each poster |
 | **Story card**, 9:16 | Content confined to the middle 80% vertically, clear of platform chrome. Wordmark at the top of the safe area, ten items below |
 
 The story card matters most, because Stories is where this kind of image actually gets posted. Its trap is vertical safe area: every platform overlays a reply bar and a header, and a tenth title hidden underneath makes the card look broken.
@@ -292,9 +453,12 @@ Deliberately out of scope for v1, listed so their absence is not read as an over
 
 ## 17. Open
 
-Both of the blocking questions in this section were resolved by the founder on 2026-08-13: the tab structure in §2 and the comparison card in §4. What remains is not blocking.
+Nothing here is blocking. The questions that were — the tab structure in §2 and the comparison card in §4 — were resolved by the founder on 2026-08-13; the score display and base surface were resolved on 2026-08-15.
 
 | # | Question | Working answer |
 |---|---|---|
 | 1 | Illustration style for empty states and onboarding | Choose a source before the first build |
 | 2 | Ranking nudge copy and timing — PRD §15 | Draft alongside notification implementation |
+| 3 | Deeper search filters: year, decade, genre — §11 | Not built. Needs a server change, and no evidence yet that a catalogue this size needs them |
+| 4 | Sort options on Collection beyond score — §5 | Score descending is the only sort. Recently watched and A–Z are cheap to add once asked for |
+| 5 | User photos on feed items — §7 | Out of scope. Revisit if watch tagging shows people want to post movie-night pictures |

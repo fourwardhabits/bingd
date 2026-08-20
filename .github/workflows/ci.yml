@@ -38,3 +38,26 @@ jobs:
       # Migrations and RPCs run against real Postgres compiled to WebAssembly,
       # so the schema and the ranking invariants are verified without Docker.
       - run: npm run test:db
+
+      # bingd.app is built from this branch by Cloudflare Pages on every push to main,
+      # so this is the last gate before the site people reach from an invitation
+      # changes. Nothing above sees web/ at all: it is plain .mjs, outside tsconfig,
+      # and its build is a separate script. `test:web` runs that build as part of its
+      # setup, so a build that would fail on Pages fails here first — with the failure
+      # attached to the commit rather than to a deploy nobody was watching.
+      - run: npm run test:web
+
+      # And the check on that check. A deep link is a claim made in app.config.ts,
+      # deep-links.config.json, the .well-known files and the Expo Router tree, with no
+      # compiler between them; `/list/*` was claimed against app/lists/[id].tsx for
+      # weeks with every test green. Each way those four can drift is reintroduced here
+      # and required to go red.
+      - run: npm run test:web:mutants
+
+      # Edge Functions are Deno and are excluded from tsconfig and eslint, so the
+      # steps above cannot see them at all. Without this, tmdb-adapter is checked by
+      # nothing until a deploy fails. Deno is a devDependency rather than a setup
+      # action so these two commands behave the same here as on a developer machine.
+      - run: npm run functions:check
+
+      - run: npm run functions:lint

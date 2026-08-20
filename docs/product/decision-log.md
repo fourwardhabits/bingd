@@ -60,7 +60,7 @@ These were **not** explicitly decided by the founder. They are recorded here so 
 | Bucket semantics | Decided | Founder | Buckets partition the ranking into three ordered bands. A title cannot rank above a title in a higher band. Comparisons therefore only ever run within one band, which is how Beli avoids asking users to compare across reaction levels | If users report the partition feels wrong |
 | Media scope | Decided | Founder | Movies and TV seasons. Episodes are never ranked. Whole-series ranking is not the primary TV unit | Never for public alpha |
 | TV progress | Decided | Founder | A season may be marked *Watching*, but becomes rankable only when marked completed | — |
-| Ranking output | Decided for public alpha | Founder | Exact ordinal position only, e.g. `#18 in Movies`. **No 0–10 score, no 0–100 score, no percentile** | After alpha, only with evidence that a secondary number adds value |
+| Ranking output | **Decided 2026-08-15 — reverses the ordinal-only decision** | Founder | A **0–10 score with one decimal**, derived from the title's position inside its bucket band. Bands own non-overlapping ranges: Loved it 10.0–7.0, It was fine 6.9–3.5, Not for me 3.4–0.0. The ordinal stays the stored ground truth and appears as secondary detail on a title page, with its denominator. **Still no 0–100 score, no percentile, and no score aggregated across users** | If users read the number as a rating of the film rather than of their own ordering |
 | Ranking separation | Decided | Founder | Separate ordered rankings for Movies and TV Seasons | — |
 | Collection model | **Decided (new in v0.6)** | Founder | Two states: **Logged** (watched, optionally bucketed, no position) and **Ranked** (exact position from comparisons). Positions come only from comparisons and are never derived from an imported rating | Never — this protects match-score integrity and the shareable Top 10 |
 | Comparison uncertainty | Decided for public alpha | Founder | Skip re-anchors to a different title. After 3 skips on one insertion, place at the midpoint of the remaining range and tell the user it is adjustable | If completion rates suffer |
@@ -267,14 +267,15 @@ Derived from the brand system in PRD §5 at founder instruction, not separately 
 | Emphasis | Poster-dominant for content surfaces; typographic (DM Serif Display) for reveals, milestones, and share cards | The two-typeface split in §5 |
 | Tone | Restrained by default. Playful only where Antique Amber appears — awards, milestones, reveals | The two-voice system |
 | Data display | Minimal in v1. One modest stats block on Profile. Rich insight is a later capability | Free tier is "basic taste statistics" |
-| Theme | Parchment light only in v1. Tokens structured so Midnight dark mode is purely additive later | §5 frames Midnight as optional |
+| Theme | **Amended 2026-08-15.** Light only in v1, on a Paper `#FBF8F4` base with Parchment `#F5EBDD` demoted to the warm accent surface above it. Tokens structured so Midnight dark mode is purely additive later | Parchment is chromatic and left artwork no headroom once the design went poster-heavy, `../design/design-system.md` §1 |
 | Corner radius | 12px cards, 8px inputs, full-round for avatars only. No pill buttons | Serif type and pill shapes conflict |
 | Motion | Minimal, with one exception: the ranking reveal earns real animation | "Every surface should earn its place" |
 | Navigation | **Decided 2026-08-13.** Five tabs: Feed, Collection, center **+** to log, Recommendations, Profile. No Search tab — the **+** and title search are the same action | Reference evidence, `../design/screens.md` §2 |
 | Reference discipline | Apple TV, Apple Wallet, and Open inform **design language**. Spotify, Cash App, Strava, and Beli inform **flows only** | Founder instruction |
-| Comparison context | **Decided 2026-08-13.** A comparison card never shows the opponent's current rank | An ordinal is an anchor that invites agreement instead of a real judgment |
+| Comparison context | **Decided 2026-08-13.** A comparison card never shows the opponent's current rank or score | A number is an anchor that invites agreement instead of a real judgment |
 | Amber and Sage | **Decided 2026-08-13.** Fill colors only, never text. Both measure below 2.2:1 on Parchment and fail WCAG at every size | Measured, `../design/design-system.md` §1 |
-| Artwork on Parchment | **Decided 2026-08-13.** Posters are printed objects on a page — hairline border, soft shadow, real margins — and are the only color on any surface where they appear | Apple Wallet precedent, `../design/design-system.md` §1 |
+| Artwork on a light ground | **Amended 2026-08-15.** Posters stay printed objects — hairline border, soft shadow, real margins. They are no longer the *only* color on a content surface: the score badge is chromatic by design, and the title page carries one full-bleed hero. Both are named exceptions, and nothing else joins them without a decision here | The score badge has to be readable at a glance, and a title page with no hero was the weakest screen in the app, `../design/design-system.md` §1 |
+| Score badge color | **Decided 2026-08-15.** A filled circle in the title's bucket color with the number in the certified ink for that fill, not Beli's outline circle | An outline in Sage or Stone fails WCAG on a light ground at every size; the certified fill pairs in `../design/design-system.md` §3 all pass |
 
 ---
 

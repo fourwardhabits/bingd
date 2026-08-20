@@ -1,0 +1,378 @@
+import { fireEvent, render } from '@testing-library/react-native';
+
+import { Text } from 'react-native';
+
+import { ActivityRow } from './ActivityRow';
+
+const props = {
+  actorName: 'Suraj',
+  verb: 'ranked',
+  title: 'Inception',
+  year: 2010,
+  metadata: '148m · Sci-fi',
+  timeLabel: '13h ago',
+  onPressTitle: jest.fn(),
+};
+
+beforeEach(() => props.onPressTitle.mockReset());
+
+describe('the poster placeholder', () => {
+  it('initials the film, not the sentence around it', async () => {
+    // The SR bug. `ActivityCard` passed its whole sentence in as the poster's
+    // title, so with no artwork — which is every seeded row — "Someone ranked a
+    // title." initialised to a confident-looking "SR" on every item in the feed.
+    //
+    // A two-word film is what makes this visible: both the sentence and the
+    // title produce two initials, and only one of them is the film.
+    const view = await render(
+      <ActivityRow {...props} title="Blade Runner" posterUri={null} />,
+    );
+
+    expect(view.getByText('BR')).toBeTruthy();
+    expect(view.queryByText('SR')).toBeNull();
+  });
+});
+
+describe('the sentence', () => {
+  it('names the actor, and names the title exactly once', async () => {
+    // The title used to appear in the sentence *and* in the card below it. One of
+    // the two was always the redundant one, and dropping it from the sentence is
+    // what let the avatar move onto that line and the row lose a whole band.
+    const view = await render(<ActivityRow {...props} />);
+
+    expect(view.getByText(/Suraj/)).toBeTruthy();
+    expect(view.getAllByText(/Inception/)).toHaveLength(1);
+  });
+
+  it('says "a title" rather than nothing when the media row is missing', async () => {
+    const view = await render(<ActivityRow {...props} title={null} />);
+    expect(view.getAllByText(/a title/).length).toBeGreaterThan(0);
+  });
+
+  it('carries the full name of a season, since the feed never shows its series', async () => {
+    const view = await render(
+      <ActivityRow {...props} title="Parks and Recreation, S2" />,
+    );
+    expect(view.getByText(/Parks and Recreation, S2/)).toBeTruthy();
+  });
+
+  it('opens the actor’s profile when there is one to open', async () => {
+    const onPressActor = jest.fn();
+    const view = await render(<ActivityRow {...props} onPressActor={onPressActor} />);
+
+    await fireEvent.press(view.getByLabelText('Suraj’s profile'.replace('’', "'")));
+    expect(onPressActor).toHaveBeenCalled();
+  });
+});
+
+describe('the score', () => {
+  it('shows the snapshotted score, never a position', async () => {
+    const view = await render(<ActivityRow {...props} score={8.7} bucket="loved" />);
+
+    expect(view.getByText('8.7')).toBeTruthy();
+    expect(view.queryByText(/#\d/)).toBeNull();
+  });
+
+  it('shows nothing at all when the event predates the snapshot', async () => {
+    // Not a dashed unranked badge: that badge means "you have not ranked this",
+    // and this event is someone else's ranking whose number was never recorded.
+    const view = await render(<ActivityRow {...props} score={null} bucket={null} />);
+    expect(view.queryByLabelText(/out of 10/)).toBeNull();
+  });
+});
+
+describe('the title card', () => {
+  it('opens the title page', async () => {
+    const view = await render(<ActivityRow {...props} />);
+    await fireEvent.press(view.getByLabelText('Inception, 2010, 148m · Sci-fi'));
+
+    expect(props.onPressTitle).toHaveBeenCalled();
+  });
+});
+
+describe('the watchlist action', () => {
+  it('is absent when the row cannot offer one', async () => {
+    const view = await render(<ActivityRow {...props} />);
+    expect(view.queryByLabelText(/watchlist/i)).toBeNull();
+  });
+
+  it('says what it will do, and what it did', async () => {
+    const onPressWatchlist = jest.fn();
+    const view = await render(<ActivityRow {...props} onPressWatchlist={onPressWatchlist} />);
+
+    await fireEvent.press(view.getByLabelText('Add Inception to your watchlist'));
+    expect(onPressWatchlist).toHaveBeenCalled();
+
+    const saved = await render(
+      <ActivityRow {...props} onPressWatchlist={onPressWatchlist} inWatchlist />,
+    );
+    expect(saved.getByLabelText('Inception is in your watchlist')).toBeTruthy();
+  });
+});
+
+/**
+ * American Pie showed in the Feed with no runtime while other films had one.
+ *
+ * The cause is upstream and not a mapping bug: the row came from TMDB *search*, which
+ * returns no runtime, and detail enrichment only runs when someone opens the title
+ * page — which nobody had. `runtime_minutes` is genuinely null for 55 of 440 films.
+ *
+ * What the row owes is that one absent optional field costs exactly that field, and
+ * never a stray separator or a collapsed line.
+ */
+describe('incomplete metadata', () => {
+  it('shows the genre alone when the runtime is missing, with no dangling separator', async () => {
+    const view = await render(<ActivityRow {...props} metadata="Comedy" />);
+
+    expect(view.getByText('Comedy')).toBeTruthy();
+    expect(view.queryByText(/·\s*$/)).toBeNull();
+    expect(view.queryByText(/^\s*·/)).toBeNull();
+  });
+
+  it('renders the row at all when there is no metadata line whatsoever', async () => {
+    const view = await render(<ActivityRow {...props} metadata={null} />);
+
+    expect(view.getByText(/Inception/)).toBeTruthy();
+    expect(view.getByText(/Suraj/)).toBeTruthy();
+  });
+
+  it('keeps the year when the metadata line is empty', async () => {
+    const view = await render(<ActivityRow {...props} metadata={null} year={1999} />);
+    expect(view.getByText(/1999/)).toBeTruthy();
+  });
+});
+
+/**
+ * Recommend, which took the slot Share used to have.
+ *
+ * Sharing is not gone: it is the last row of the sheet this opens. What changed is
+ * that the row carries one control where it carried two, which is what stopped it
+ * running past the edge of a narrow screen.
+ */
+describe('the recommend action', () => {
+  it('is icon-first and carries no large text button', async () => {
+    const onPressRecommend = jest.fn();
+    const view = await render(<ActivityRow {...props} onPressRecommend={onPressRecommend} />);
+
+    // The label names the title, so a screen reader gets the context the glyph
+    // cannot carry. There is deliberately no visible word beside it.
+    expect(view.queryByText('Recommend')).toBeNull();
+    await fireEvent.press(view.getByLabelText('Recommend Inception to a friend'));
+    expect(onPressRecommend).toHaveBeenCalled();
+  });
+
+  it('names the exact entity, so a season does not read as the whole show', async () => {
+    const view = await render(
+      <ActivityRow
+        {...props}
+        title="Parks and Recreation, S2"
+        onPressRecommend={jest.fn()}
+      />,
+    );
+    expect(
+      view.getByLabelText('Recommend Parks and Recreation, S2 to a friend'),
+    ).toBeTruthy();
+  });
+
+  it('is absent when the surface has not wired it up', async () => {
+    const view = await render(<ActivityRow {...props} />);
+    expect(view.queryByLabelText(/^Recommend /)).toBeNull();
+    // And the control it replaced is gone rather than hidden.
+    expect(view.queryByLabelText(/^Share /)).toBeNull();
+  });
+});
+
+describe('the note', () => {
+  it('clamps to two lines until asked to expand', async () => {
+    const note = 'Third time and it still holds up.';
+    const view = await render(<ActivityRow {...props} note={note} />);
+
+    expect(view.getByText(note).props.numberOfLines).toBe(2);
+    await fireEvent.press(view.getByLabelText('Show the whole note'));
+    expect(view.getByText(note).props.numberOfLines).toBeUndefined();
+  });
+
+  /**
+   * The rule the whole spoiler feature rests on: a masked note is a note whose text
+   * is not in the tree. Clipping it to zero lines, blurring it or covering it would
+   * all leave the string where a screen reader reads it and a selection copies it.
+   */
+  it('does not render masked text at all, not even clipped', async () => {
+    const note = 'He was dead the whole time.';
+    const view = await render(
+      <ActivityRow {...props} note={note} noteHasSpoilers noteMasked />,
+    );
+
+    expect(view.queryByText(note)).toBeNull();
+    expect(view.getByText('Contains spoilers')).toBeTruthy();
+  });
+
+  it('reveals on a deliberate tap, and only for this reader', async () => {
+    const note = 'He was dead the whole time.';
+    const view = await render(
+      <ActivityRow {...props} note={note} noteHasSpoilers noteMasked />,
+    );
+
+    await fireEvent.press(view.getByLabelText('Contains spoilers for Inception. Show the note.'));
+    expect(view.getByText(note)).toBeTruthy();
+    // The claim survives the reveal — it is part of what the note says about
+    // itself, not just the lock.
+    expect(view.getAllByText('Contains spoilers')[0]).toBeTruthy();
+  });
+
+  it('shows a spoiler note unmasked, with its marker, to someone who has seen it', async () => {
+    const note = 'He was dead the whole time.';
+    const view = await render(
+      <ActivityRow {...props} note={note} noteHasSpoilers noteMasked={false} />,
+    );
+
+    expect(view.getByText(note)).toBeTruthy();
+    // The founder's "subtle spoiler indicator": somebody who has seen the film reads
+    // the words rather than tapping through to them, and the claim the author made is
+    // still part of what the note says about itself. The three words are the same ones
+    // the mask, the ranking sheet, the note control and the comment composer use.
+    expect(view.getByText('Contains spoilers')).toBeTruthy();
+    // And no "Show", because there is nothing hidden to reveal.
+    expect(view.queryByText('Show')).toBeNull();
+  });
+});
+
+describe('the reaction control', () => {
+  it('is absent unless the row is given one', async () => {
+    const view = await render(<ActivityRow {...props} />);
+    expect(view.queryByLabelText(/react/i)).toBeNull();
+  });
+
+  it('toggles on a plain tap and opens the picker on a long press', async () => {
+    const onPress = jest.fn();
+    const onLongPress = jest.fn();
+    const view = await render(
+      <ActivityRow {...props} reaction={{ count: 0, onPress, onLongPress }} />,
+    );
+
+    const control = view.getByLabelText(
+      "React to Suraj's activity about Inception. Long press for more reactions.",
+    );
+    await fireEvent.press(control);
+    expect(onPress).toHaveBeenCalled();
+
+    await fireEvent(control, 'longPress');
+    expect(onLongPress).toHaveBeenCalled();
+  });
+
+  it('marks the control as mine without repeating the glyph beside the summary', async () => {
+    // The same emoji appeared twice — once counted in the cluster, once on the
+    // control — and read as a duplicate rather than as two different statements.
+    // The control says whether I acted; the cluster says what everyone chose.
+    const view = await render(
+      <ActivityRow
+        {...props}
+        reaction={{ count: 1, mineGlyph: '😂', glyphs: ['😂'], onPress: jest.fn(), onPressSummary: jest.fn() }}
+      />,
+    );
+
+    expect(
+      view.getByLabelText('You reacted to Inception. Tap to remove, long press to change.'),
+    ).toBeTruthy();
+    expect(view.queryByText('You')).toBeNull();
+    // Exactly once on the row: in the summary cluster.
+    expect(view.getAllByText('😂', { includeHiddenElements: true })).toHaveLength(1);
+  });
+
+  /** The compact summary: glyphs and a total, never a per-kind tally in the row. */
+  describe('the summary', () => {
+    it('shows the glyphs present and the total, and nothing per kind', async () => {
+      const view = await render(
+        <ActivityRow
+          {...props}
+          reaction={{ count: 12, glyphs: ['❤️', '😂', '👍'], onPress: jest.fn(), onPressSummary: jest.fn() }}
+        />,
+      );
+
+      expect(view.getByText('12')).toBeTruthy();
+      // A per-kind breakdown in the row would put a scoreboard beside the film.
+      expect(view.queryByText('❤️ 5')).toBeNull();
+    });
+
+    it('caps the glyph cluster at three', async () => {
+      const view = await render(
+        <ActivityRow
+          {...props}
+          reaction={{
+            count: 20,
+            glyphs: ['❤️', '😂', '👍', '👎', '😮'],
+            onPress: jest.fn(),
+            onPressSummary: jest.fn(),
+          }}
+        />,
+      );
+
+      expect(view.queryByText('😮')).toBeNull();
+    });
+
+    it('opens the detail surface when tapped', async () => {
+      const onPressSummary = jest.fn();
+      const view = await render(
+        <ActivityRow {...props} reaction={{ count: 3, glyphs: ['❤️'], onPress: jest.fn(), onPressSummary }} />,
+      );
+
+      await fireEvent.press(view.getByLabelText('3 reactions. See who reacted.'));
+      expect(onPressSummary).toHaveBeenCalled();
+    });
+
+    it('is absent when nobody has reacted', async () => {
+      const view = await render(
+        <ActivityRow {...props} reaction={{ count: 0, onPress: jest.fn() }} />,
+      );
+      expect(view.queryByLabelText(/See who reacted/)).toBeNull();
+    });
+  });
+
+  it('renders the picker inside the row when it is open', async () => {
+    // Inside the row rather than floating over the screen: no measurement, no
+    // portal, and nothing to clip on Android.
+    const view = await render(
+      <ActivityRow
+        {...props}
+        reaction={{ count: 0, onPress: jest.fn(), picker: <Text>PICKER</Text> }}
+      />,
+    );
+    expect(view.getByText('PICKER')).toBeTruthy();
+  });
+});
+
+describe('the comment control', () => {
+  it('is absent unless the surface has wired it up', async () => {
+    // The rule that kept a placeholder off this row while comments were deferred.
+    // An icon that does nothing is worse than no icon.
+    const view = await render(<ActivityRow {...props} />);
+    expect(view.queryByLabelText(/[Cc]omment/)).toBeNull();
+  });
+
+  it('shows the count and never a preview of what was said', async () => {
+    // The founder's rule: no text preview may leak masked spoiler content. The row
+    // is not given a body to leak — it takes a number, and the bodies are fetched
+    // when the sheet opens. This asserts the prop shape as much as the render.
+    const view = await render(
+      <ActivityRow {...props} onPressComments={jest.fn()} commentCount={2} />,
+    );
+
+    expect(view.getByText('2')).toBeTruthy();
+    expect(
+      view.getByLabelText("2 comments on Suraj's activity about Inception. Open them."),
+    ).toBeTruthy();
+  });
+
+  it('invites the first comment rather than showing a zero', async () => {
+    const onPressComments = jest.fn();
+    const view = await render(
+      <ActivityRow {...props} onPressComments={onPressComments} commentCount={0} />,
+    );
+
+    expect(view.queryByText('0')).toBeNull();
+    await fireEvent.press(
+      view.getByLabelText("Comment on Suraj's activity about Inception"),
+    );
+    expect(onPressComments).toHaveBeenCalled();
+  });
+});
