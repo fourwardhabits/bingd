@@ -200,6 +200,43 @@ export function titleIdFromPath(pathname) {
  * identifier, so there is no input here that could turn this into a link to somewhere
  * else. Returns null when there is no identifier, rather than a bare `bingd://`, which
  * would open the app at whatever it happened to show last and look like a bug.
+ *
+ * ---------------------------------------------------------------------------
+ * What a custom scheme cannot do
+ * ---------------------------------------------------------------------------
+ *
+ * **A custom scheme proves nothing about who receives it.** `applinks:` is verified —
+ * the domain names the app and the OS checks it. `bingd://` is not: any app on the
+ * device may declare the same scheme, iOS's choice between two claimants is documented
+ * as undefined, and Android shows a chooser. So an app installed for the purpose can
+ * receive whatever this link carries.
+ *
+ * Review 27 raised that as a Major on the grounds that it leaks an invitation token.
+ * **It was downgraded, and the reason is what the token actually is.** `invite_tokens`
+ * holds *one reusable personal link per user* (PRD §17), and `create_invite_link`
+ * deliberately never rotates it — a link that changed on every share would detach
+ * everybody already holding the old one. It is built to be forwarded into group chats
+ * by people who do not know each other. It is a referral code, not a ticket and not a
+ * credential.
+ *
+ * So an app that intercepts one can do exactly what any forwarded recipient can do:
+ * redeem it under its own account, once, and be attributed to that inviter. It cannot
+ * authenticate as anyone, cannot take an attribution that already exists
+ * (`on conflict (invitee_id) do nothing`), and cannot deny the real invitee theirs —
+ * the token stays live and their redemption is a separate row. Redemption still
+ * requires an account, still refuses self-invites, blocks and inactive inviters.
+ *
+ * What is genuinely residual is smaller and worth naming: the token is a stable
+ * identifier for one inviter, so an app collecting them could correlate who is inviting
+ * whom, and a successful redemption returns the inviter's username. Both are true of
+ * the link itself in any group chat it is pasted into.
+ *
+ * Carried into the security tranche (hardening blocker F) at that severity rather than
+ * redesigned here — and the alternatives are worse in any case. The token has to reach
+ * the app somehow; iOS will not hand a same-domain navigation to the app, which rules
+ * out the https link on the one page that most needs it; and asking somebody to paste a
+ * link they already tapped moves the same value through the clipboard, which is read
+ * far more casually than a URL scheme is hijacked.
  */
 export function appLinkFor(scheme, route, identifier) {
   if (!scheme || !identifier) return null;

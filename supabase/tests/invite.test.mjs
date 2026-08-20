@@ -808,8 +808,15 @@ describe('record_invite_open', () => {
     const token = await mintLink(await newUser('opener'));
 
     // Compared against each other rather than against a literal: what matters is that a
-    // live token and a fabricated one are **indistinguishable**, and pinning the exact
+    // live token and a fabricated one produce **the same answer**, and pinning the exact
     // rendering of `void` would be asserting a driver detail instead of the property.
+    //
+    // "The same answer" and not "indistinguishable" — the wording matters, and review 27
+    // was right to pull it up. A live token does more work than an unknown one: it counts
+    // and it inserts. So the *return value* carries nothing, which is what this asserts
+    // and what stops the function being an oracle, while repeated timing of a single
+    // guessed candidate remains statistically informative. That is not enumeration
+    // against 32 hex characters, and it is not something a return value can fix.
     const answers = await t.asAnon(async () => {
       const seen = [];
       for (const candidate of [token, '0'.repeat(32), 'not-a-token', null]) {

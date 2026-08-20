@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -407,5 +407,257 @@ describe('the built site', () => {
     const source = read('page.mjs');
     assert.match(source, /record_invite_open/);
     assert.doesNotMatch(source, /posthog|sentry|google-analytics|gtag/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The identities on the other side of the link
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything above proves the site is internally consistent. Nothing above proves it
+ * describes *this app*.
+ *
+ * That gap is not hypothetical. `/list/*` was claimed for weeks against a route called
+ * `app/lists/[id].tsx`, and every test passed the whole time, because the two halves
+ * were only ever checked against themselves. The deployed Apple App Site Association
+ * file still carries that typo today.
+ *
+ * A deep link is a claim made in four places with no compiler between them —
+ * `app.config.ts` (the entitlement and the manifest), `deep-links.config.json` (the
+ * identifiers), the generated `.well-known` files, and the Expo Router tree that has to
+ * render whatever arrives. Every mismatch among them fails the same way: the link opens
+ * the browser, or opens the app onto `+not-found`, and there is no error anywhere. This
+ * block is the compiler.
+ */
+describe('the app the site claims to open', () => {
+  const appConfig = readFileSync(join(here, '..', 'app.config.ts'), 'utf8');
+  const links = JSON.parse(readFileSync(join(here, 'deep-links.config.json'), 'utf8'));
+  const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
+  const literal = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  /**
+   * `app.config.ts` is TypeScript and cannot be imported by `node --test`, so the
+   * variant table is read out of the source. Brittle on purpose: if the shape of that
+   * table changes this fails and somebody looks, which is the correct outcome. A softer
+   * read would return an empty list and quietly assert nothing.
+   */
+  const declaredVariants = [
+    ...appConfig.matchAll(/^ {2}(\w+): \{ name: '[^']*', bundleId: '([^']+)'/gm),
+  ].map(([, name, bundleId]) => ({ name, bundleId }));
+
+  it('reads every variant out of app.config.ts, or the rest of this block asserts nothing', () => {
+    assert.equal(declaredVariants.length, 3, `parsed ${JSON.stringify(declaredVariants)}`);
+    assert.deepEqual(
+      declaredVariants.map((v) => v.bundleId).sort(),
+      links.variants.map((v) => v.bundleId).sort(),
+      'app.config.ts and deep-links.config.json do not build the same set of applications',
+    );
+  });
+
+  it('claims the bundle identifiers the app is actually built with', () => {
+    /**
+     * The Apple App Site Association appID is `<team>.<bundle>`, and iOS compares it
+     * against the binary's own identifier with no tolerance. Rename a variant in
+     * app.config.ts and every Universal Link for that variant stops opening the app —
+     * silently, because a non-matching appID is indistinguishable on the device from a
+     * domain that never claimed the app at all.
+     */
+    const aasa = JSON.parse(read('.well-known', 'apple-app-site-association'));
+    const claimed = new Set(aasa.applinks.details[0].appIDs);
+
+    for (const variant of declaredVariants) {
+      const appId = `${links.appleTeamId}.${variant.bundleId}`;
+      assert.ok(
+        claimed.has(appId),
+        `${variant.name} builds ${variant.bundleId}, which is unclaimed as ${appId}`,
+      );
+    }
+    assert.equal(claimed.size, declaredVariants.length, 'the file claims an appID no variant builds');
+
+    // webcredentials carries the same list, and is what lets the keychain offer a saved
+    // password and Sign in with Apple's associated domain behave.
+    assert.deepEqual([...aasa.webcredentials.apps].sort(), [...claimed].sort());
+  });
+
+  it('is entitled for the domain it publishes the file on', () => {
+    /**
+     * The requirement stated as a test rather than as a sentence in a report: the binary
+     * has to carry `applinks:bingd.app` or the file on bingd.app is read by nobody. This
+     * is what keeps that true for the Preview and TestFlight builds nobody has made yet.
+     */
+    const domains = /associatedDomains: \[([^\]]*)\]/.exec(appConfig)?.[1] ?? '';
+    assert.match(domains, new RegExp(`'applinks:${literal(links.domain)}'`));
+  });
+
+  it('registers the Android intent filter for that same domain, and verifies it', () => {
+    // autoVerify is what makes Android fetch assetlinks.json at install time. Without it
+    // the intent filter still matches, but the app appears in a chooser instead of
+    // opening — which reads as the link not working rather than as a missing flag.
+    const filters = /intentFilters: \[([\s\S]*?)\n {4}\],/.exec(appConfig)?.[1] ?? '';
+    assert.match(filters, /autoVerify: true/);
+    assert.match(filters, /scheme: 'https'/);
+    assert.match(filters, new RegExp(`host: '${literal(links.domain)}'`));
+  });
+
+  it('claims no path the app has no screen for', () => {
+    /**
+     * The `/list/*` defect, made impossible to reintroduce.
+     *
+     * A claimed path with no Expo Router route opens the app onto `+not-found`, which is
+     * strictly worse than opening the browser: the visitor now believes Bingd is broken
+     * rather than that they need it. So the claim is checked against the router tree on
+     * disk, which is the only thing that decides what actually renders.
+     */
+    for (const claimed of links.appPaths) {
+      const segment = /^\/([^/]+)\/\*$/.exec(claimed)?.[1];
+      assert.ok(segment, `${claimed} is not a /<segment>/* claim`);
+
+      const routeDir = join(here, '..', 'app', segment);
+      assert.ok(existsSync(routeDir), `${claimed} is claimed and app/${segment}/ does not exist`);
+
+      const dynamic = readdirSync(routeDir).filter((file) => /^\[.+\]\.tsx$/.test(file));
+      assert.ok(
+        dynamic.length > 0,
+        `${claimed} matches any identifier and app/${segment}/ has no [param].tsx to receive one`,
+      );
+    }
+  });
+
+  it('writes an Android statement for every variant that has a certificate', () => {
+    /**
+     * Three variants, two statements, and the missing one is correct.
+     *
+     * `app.bingd.dev` has no fingerprint because no development build has been made, and
+     * a statement cannot be invented for a certificate that does not exist. The
+     * consequence is worth stating here rather than discovering on a device: **an
+     * Android development build cannot verify App Links.** Physical Android testing has
+     * to use the Preview build, whose fingerprint is present.
+     *
+     * The production entry is also not finished, and cannot be yet. It carries the EAS
+     * upload key only; Play re-signs with its own, so a build installed from Play
+     * presents a certificate that is not listed here and App Links silently fail. The
+     * Play app-signing fingerprint has to be *added alongside* it — never in place of
+     * it — once Play Console exists.
+     */
+    const statements = JSON.parse(read('.well-known', 'assetlinks.json'));
+    const declared = new Set(declaredVariants.map((v) => v.bundleId));
+    const withFingerprints = links.variants.filter((v) => v.androidSha256.length > 0);
+
+    assert.equal(statements.length, withFingerprints.length);
+
+    for (const statement of statements) {
+      assert.deepEqual(statement.relation, ['delegate_permission/common.handle_all_urls']);
+      assert.equal(statement.target.namespace, 'android_app');
+      assert.ok(
+        declared.has(statement.target.package_name),
+        `${statement.target.package_name} is not an applicationId app.config.ts builds`,
+      );
+      assert.ok(statement.target.sha256_cert_fingerprints.length > 0);
+      for (const fingerprint of statement.target.sha256_cert_fingerprints) {
+        assert.match(fingerprint, /^([A-F0-9]{2}:){31}[A-F0-9]{2}$/);
+      }
+    }
+  });
+
+  it('keeps the two .well-known files typed as JSON, which is the whole of whether they work', () => {
+    /**
+     * Apple requires apple-app-site-association be served as `application/json`, and it
+     * has no extension for a host to infer that from. Served as text/plain, iOS fetches
+     * it, declines to parse it, and every Universal Link keeps opening Safari with
+     * nothing anywhere to say why — the most expensive silent failure available on this
+     * domain, and it is one edit of `_headers` away at all times.
+     */
+    const headers = read('_headers');
+    for (const file of ['/.well-known/apple-app-site-association', '/.well-known/assetlinks.json']) {
+      assert.match(
+        headers,
+        new RegExp(`^${literal(file)}\\r?\\n(?: +.*\\r?\\n)*? +Content-Type: application/json`, 'm'),
+        `${file} is not typed application/json by _headers`,
+      );
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What the host is told to send
+// ---------------------------------------------------------------------------
+
+/**
+ * `_headers` is the only part of this site that is not code and cannot be run, and it
+ * is also the part with the most expensive silent failure in it — see the JSON typing
+ * test above. These are the rest of its guarantees, pinned so that editing the file
+ * has to be deliberate.
+ */
+describe('_headers', () => {
+  const headers = readFileSync(join(dist, '_headers'), 'utf8');
+
+  /** The directives under one `_headers` rule, as a map. */
+  const rule = (pattern) => {
+    const block = new RegExp(`^${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n((?: +.*\\r?\\n?)*)`, 'm');
+    const body = block.exec(headers)?.[1] ?? '';
+    return Object.fromEntries(
+      body
+        .split(/\r?\n/)
+        .filter((line) => line.trim())
+        .map((line) => {
+          const at = line.indexOf(':');
+          return [line.slice(0, at).trim(), line.slice(at + 1).trim()];
+        }),
+    );
+  };
+
+  it('refuses to be framed, by both the header browsers read and the one proxies do', () => {
+    // A store button rendered under somebody else's chrome sends a person to an
+    // install they did not choose, on the one domain an invitation taught them to
+    // trust. Nothing on this site is worth a session-riding attack; this is about the
+    // page being presented as something it is not.
+    const site = rule('/*');
+    assert.match(site['Content-Security-Policy'] ?? '', /frame-ancestors 'none'/);
+    assert.equal(site['X-Frame-Options'], 'DENY');
+  });
+
+  it('pins the base URI and form action, which are the two the pages never set', () => {
+    const site = rule('/*');
+    assert.match(site['Content-Security-Policy'], /base-uri 'none'/);
+    assert.match(site['Content-Security-Policy'], /form-action 'none'/);
+  });
+
+  it('states HSTS rather than depending on .app being preloaded', () => {
+    const site = rule('/*');
+    assert.match(site['Strict-Transport-Security'] ?? '', /max-age=\d{7,}/);
+  });
+
+  it('adds no directive that can stop the page painting its buttons', () => {
+    /**
+     * The guard on this file, and the reason the policy is three directives rather
+     * than nine.
+     *
+     * `script-src`, `style-src` and `default-src` are the ones that fail *quietly*: the
+     * page still renders, `page.mjs` is simply never executed, and what a visitor sees
+     * is a card with no install button — which is exactly what the site shows when no
+     * destination is configured, its honest state today. Nothing in this repository can
+     * tell those two apart, because there is no browser here to run the policy.
+     *
+     * So a loading directive may not be added from a test run. It may be added with a
+     * real browser pointed at a real deploy, and this assertion changed in the same
+     * commit that proves it.
+     */
+    const policy = rule('/*')['Content-Security-Policy'] ?? '';
+    for (const directive of ['default-src', 'script-src', 'style-src', 'font-src', 'connect-src', 'img-src']) {
+      assert.doesNotMatch(
+        policy,
+        new RegExp(`(^|;)\\s*${directive}\\b`),
+        `${directive} governs whether something loads and cannot be verified without a browser`,
+      );
+    }
+  });
+
+  it('keeps noindex on everything, including the files that are not HTML', () => {
+    // A /u/<handle> route that Google indexed would publish a list of Bingd's members,
+    // which no privacy setting in the app could then take back. A header rather than a
+    // meta tag, so it also covers the two .well-known files.
+    assert.equal(rule('/*')['X-Robots-Tag'], 'noindex, nofollow');
+    assert.equal(rule('/*')['X-Content-Type-Options'], 'nosniff');
   });
 });

@@ -285,8 +285,12 @@ const ALLOWED = {
   // an anon grant is not a safer grant, it is no open metric at all.
   //
   // Three properties make it safe to hold. It **returns void in every case**, so an
-  // unknown, revoked or cross-environment token is indistinguishable from a live one
-  // and the function is not a token oracle. It reaches exactly one table, which has
+  // unknown, revoked or cross-environment token gets the same answer as a live one and
+  // the function is not a token oracle. (The same *answer*: a live token counts and
+  // inserts, so a residual timing difference remains for anybody willing to measure one
+  // candidate repeatedly. Review 27's wording note — it is not enumeration against 32
+  // hex characters, and it is not a thing a return value can close.) It reaches one
+  // table, which has
   // no select policy and is revoked from both client roles, so nothing written
   // through it can be read back through it. And it is **capped per token per hour**,
   // because an anonymous caller has no identity to rate-limit — past the ceiling the

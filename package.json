@@ -15,6 +15,7 @@
     "test:race": "node --test --test-timeout=60000 \"supabase/tests/concurrency/*.test.mjs\"",
     "test:race:mutants": "node supabase/tests/concurrency/mutation-check.mjs",
     "test:web": "node --test \"web/router.test.mjs\"",
+    "test:web:mutants": "node web/mutation-check.mjs",
     "test:remote": "node supabase/tests/remote-smoke.mjs",
     "seed:fetch": "node supabase/seed/fetch-catalogue.mjs",
     "seed:migration": "node supabase/seed/make-seed-migration.mjs",
