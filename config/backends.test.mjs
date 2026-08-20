@@ -250,39 +250,89 @@ describe('the release scripts, which are the only supported way to publish', () 
     }
   });
 
-  it('refuses a passthrough flag that would redefine the lane', () => {
+  it('refuses every flag that could move what is published, or where', () => {
     /**
-     * Review 28c: `npm run update:preview -- --branch beta` published Preview code to the
-     * Beta branch, **past the Beta gate**, using a supported command. The trusted options
-     * were assembled before `...passthrough`, and `eas` takes the last occurrence of a
-     * flag, so appending one silently won.
+     * Two review rounds found two different ways past a denylist here, which is why the
+     * implementation is an allowlist and why this test asserts *that shape* rather than a
+     * list of known-bad flags.
      *
-     * The lane is the first argument and it decides the profile, the branch, the
-     * environment, `BINGD_LANE` and `APP_VARIANT` together. Any flag that moves one of
-     * them moves what is published without moving which gate ran.
+     *   - **28c:** `--branch beta` on the preview script published Preview code to the
+     *     Beta branch past the Beta gate — `eas` takes the last occurrence of a flag and
+     *     the trusted options were assembled first.
+     *   - **28d:** `--input-dir <export> --skip-bundler` gated the code here and published
+     *     a bundle produced somewhere else, with the config never resolved at all — so
+     *     neither the lane nor the backend rule ran on what actually shipped.
+     *
+     * The last case in the list is the point: an **invented** flag is refused too. That is
+     * the property a denylist cannot have.
      */
-    const smuggle = ['--branch', '--profile', '--environment', '--channel', '--auto-submit', '-e', '-s'];
+    const mustRefuse = [
+      ['--branch', 'beta'],
+      ['--branch=beta'],
+      ['--profile', 'beta'],
+      ['--profile=beta'],
+      ['--environment', 'production'],
+      ['--environment=production'],
+      ['--channel', 'beta'],
+      ['-e', 'beta'],
+      ['-e=beta'],
+      ['--auto-submit'],
+      ['-s'],
+      ['--auto-submit-with-profile', 'beta'],
+      ['--auto-submit-with-profile=beta'],
+      ['--input-dir', 'some-export'],
+      ['--input-dir=some-export'],
+      ['--skip-bundler'],
+      ['--auto'],
+      ['--local'],
+      ['--what-to-test', 'anything'],
+      ['--republish'],
+      ['--group', 'some-group-id'],
+      ['--a-flag-invented-after-this-test-was-written'],
+    ];
 
-    for (const flag of smuggle) {
-      for (const form of [[flag, 'beta'], [`${flag}=beta`]]) {
-        const run = spawnSync(
-          process.execPath,
-          [join(root, 'scripts', 'release.mjs'), 'update', 'preview', ...form],
-          { encoding: 'utf8' },
-        );
-        assert.notEqual(run.status, 0, `${form.join(' ')} was accepted`);
-        assert.match(run.stderr, /would redefine the lane/, form.join(' '));
-      }
+    for (const form of mustRefuse) {
+      const run = spawnSync(
+        process.execPath,
+        [join(root, 'scripts', 'release.mjs'), 'update', 'preview', ...form],
+        { encoding: 'utf8' },
+      );
+      assert.notEqual(run.status, 0, `${form.join(' ')} was accepted`);
+      assert.match(run.stderr, /is not passed through/, form.join(' '));
     }
+  });
 
-    // And the flags that are none of its business are still passed through. `--help` makes
-    // eas print usage and exit 0 without touching anything.
-    const ok = spawnSync(
+  it('passes the harmless flags through, in the invocation it actually composes', () => {
+    /**
+     * The other half, and the earlier version of this assertion was worth nothing: it
+     * checked only that the refusal message was absent, which is also true when `eas` is
+     * missing or dies immediately.
+     *
+     * The script prints the exact argument vector before spawning, so that line is what is
+     * asserted — it proves the trusted options are present *and* that the passthrough
+     * reached the invocation, without depending on `eas` being installed or reachable.
+     */
+    const run = spawnSync(
       process.execPath,
-      [join(root, 'scripts', 'release.mjs'), 'update', 'preview', '--platform', 'android', '--help'],
+      [
+        join(root, 'scripts', 'release.mjs'),
+        'update',
+        'preview',
+        '--platform',
+        'android',
+        '--json',
+        '--non-interactive',
+        '--help',
+      ],
       { encoding: 'utf8' },
     );
-    assert.doesNotMatch(ok.stderr, /would redefine the lane/);
+
+    assert.doesNotMatch(run.stderr, /is not passed through/);
+    assert.match(
+      run.stdout,
+      /eas update --branch preview --environment preview --platform android --json --non-interactive --help/,
+    );
+    assert.match(run.stdout, /BINGD_LANE=preview, APP_VARIANT=preview/);
   });
 });
 

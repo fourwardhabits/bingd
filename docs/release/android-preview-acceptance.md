@@ -13,21 +13,26 @@ strength of a passing test.**
 | App name on the home screen | **bingd preview** |
 | Channel | `preview` |
 | Backend | bingd-nonprod (`abheeqyjzekiowkztfxv`) |
-| Build | `0.1.0 (2)` — confirm in Settings, bottom of the screen |
-| Build page | https://expo.dev/accounts/fourward/projects/bingd/builds/d7d2ce76-ff24-4ef4-8c91-bbb34104cd18 |
+| Build | **`0.1.0 (4)`** — confirm in Settings, bottom of the screen |
+| Runtime | `e6c5f7da` |
+| Build page | https://expo.dev/accounts/fourward/projects/bingd/builds/ce8fc0ec-f5ec-4c85-8814-733c7c842044 |
 
 **Before anything else, open Settings and scroll to the bottom.** Four lines:
 
 ```
-Bingd 0.1.0 (2)
+Bingd 0.1.0 (4)
 preview · preview
-runtime 5d60b7b0 · embedded
+runtime e6c5f7da · embedded
 backend abheeqyjzekiowkztfxv
 ```
 
-If the version reads `(1)`, this is the old August 14 build and everything below is about
-the wrong binary. If `backend` reads anything but `abheeqyjzekiowkztfxv`, stop and report
-it — the app is talking to a database it was not meant to.
+**All four have to match, and the build number is the one that catches the likely
+mistake.** Three Preview APKs were produced on this branch — `(2)`, `(3)` and `(4)` — one
+per review round, because each round's changes moved the native fingerprint and an
+acceptance run against a superseded binary is an acceptance run against different code. If
+the version reads `(1)`, it is the August 14 build; anything below `(4)` is superseded. If
+`backend` reads anything but `abheeqyjzekiowkztfxv`, stop and report it — the app is
+talking to a database it was not meant to.
 
 ## Installing
 

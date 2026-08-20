@@ -29,8 +29,13 @@ So this is one founder command, run in an ordinary terminal, answered with the A
 its 2FA code:
 
 ```
-npx eas build --platform ios --profile preview
+npm run build:preview -- --platform ios
 ```
+
+**Not `eas build --profile preview`.** `scripts/release.mjs` supplies `BINGD_LANE` and
+`APP_VARIANT`, and it is the only supported way to build or publish a lane — a document
+printing the bare command is a documented bypass rather than the residual the other pages
+acknowledge. Review 28d found this line still doing it.
 
 When it asks which devices the ad hoc profile should cover, **select the iPhone**. It is
 already registered — it was added on 2026-08-18 for the development build — so no new

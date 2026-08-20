@@ -184,10 +184,17 @@ transferred to any third party for their own purposes, sold, or used for adverti
 | App activity → **App interactions** | Yes | No | **Required**² | Analytics |
 | App info and performance → **Crash logs** | Yes | No | **Required**² | App functionality — diagnostics |
 | App info and performance → **Diagnostics** | Yes | No | **Required**² | App functionality — diagnostics |
-| App activity → **In-app search history**¹ | **Yes** | No | **Required**² | App functionality |
+| App activity → **In-app search history**¹ | **Yes** | No | Optional³ | App functionality |
 
 ² **Required, because nothing in Bingd lets a user turn telemetry off.** See the note under
 "Two answers that are easy to get wrong" below.
+
+³ **Optional, and it is the one row where the answer differs from the three above it.**
+Telemetry is Required because it happens whether or not the user wants it. A search query
+is the opposite: it exists only because somebody typed it, and Bingd is entirely usable
+without ever opening search. Google's Optional is exactly that case — the user chooses
+whether to provide the data. This row was Required for one round on the reasoning that
+applies to telemetry; review 28d separated the two and was right to.
 
 ¹ **Declare it. Whether you may mark it "processed ephemerally" depends on the same
 homework as Apple's row, and is not settled.**
@@ -222,13 +229,17 @@ other IDs.
   the one Play definition worth reading twice, and getting it backwards is what review 28c
   caught here. Optional means **the user can decide whether this data is collected**.
 
-  A bio, a profile photo and a note are optional: nobody has to write one. **Analytics,
-  crash logs, diagnostics and search history are Required**, because `app/_layout.tsx`
-  initialises PostHog and Sentry before the first render, `src/lib/analytics.ts` sets
-  `disabled: false`, and **there is no opt-out anywhere in the app.** "The app would still
-  work without it" is not the question being asked.
+  A bio, a profile photo, a note and **a search query** are optional: nobody has to provide
+  one, and Bingd works without any of them. **App interactions, crash logs and diagnostics
+  are Required**, because `app/_layout.tsx` initialises PostHog and Sentry before the first
+  render, `src/lib/analytics.ts` sets `disabled: false`, and **there is no opt-out anywhere
+  in the app.** "The app would still work without it" is not the question being asked.
 
-  If a telemetry opt-out is ever added, these four move to Optional in the same change.
+  The line between those two groups is *whether the user decides*, not whether the data is
+  telemetry. Search history sits on the optional side for the same reason a bio does.
+
+  If a telemetry opt-out is ever added, the three Required rows move to Optional in the same
+  change.
 
 ---
 

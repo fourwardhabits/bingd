@@ -58,43 +58,67 @@ const GUARDED = new Set(['beta', 'production']);
 // ---------------------------------------------------------------------------
 
 /**
- * The flags this script exists to control, refused in the passthrough.
+ * **An allowlist, and it started life as a denylist.**
  *
- * Independent review 28c: `npm run update:preview -- --branch beta` published Preview code
- * to the Beta branch, past the Beta gate, using a supported command. The trusted options
- * were built *before* `...passthrough`, and `eas` takes the last occurrence — so appending
- * one silently won.
+ * Two consecutive reviews found two different holes in the denylist version, which is the
+ * argument for this shape rather than for a longer list:
  *
- * Refusing is better than reordering. Putting the trusted values last would make the
- * duplicate lose quietly, and somebody typing `--branch beta` deserves to be told that this
- * is not how a lane is chosen, not to have it ignored.
+ *   - **28c:** `npm run update:preview -- --branch beta` published Preview code to the
+ *     Beta branch past the Beta gate. The trusted options were assembled before
+ *     `...passthrough` and `eas` takes the last occurrence of a flag, so appending one
+ *     silently won.
+ *   - **28d:** `npm run update:beta -- --input-dir <export> --skip-bundler` gated the
+ *     current checkout and then published a bundle produced somewhere else entirely. The
+ *     config is not resolved during such an invocation at all, so neither the lane nor the
+ *     backend rule runs on what actually ships.
  *
- * `--auto-submit` is here for a different reason and the same shape: it turns a build into
- * a store upload, which is a distribution decision this wrapper does not make.
+ * A denylist has to anticipate every flag that moves what is published; an allowlist has to
+ * anticipate every flag that does not. Only the second list is one this project can keep
+ * correct, and being wrong about it costs a refusal rather than a silent bypass.
+ *
+ * Adding a flag here is a deliberate act: ask whether it changes **what is published, where
+ * it goes, or which gate ran**. If it does, it does not belong here.
  */
-const LANE_DEFINING = [
-  '--profile',
-  '-e',
-  '--branch',
-  '--environment',
-  '--channel',
-  '--auto-submit',
-  '-s',
-  '--auto-submit-with-profile',
-];
+const ALLOWED_PASSTHROUGH = new Set([
+  // Which platform. Chooses nothing about content or destination.
+  '--platform',
+  '-p',
+  // Annotation and output shape.
+  '--message',
+  '-m',
+  '--json',
+  '--non-interactive',
+  '--verbose-logs',
+  '--build-logger-level',
+  '--help',
+  '-h',
+  // Waiting behaviour, and build-cache and credential handling. None of these decides
+  // what goes into the artifact or where it is sent.
+  '--wait',
+  '--no-wait',
+  '--clear-cache',
+  '--freeze-credentials',
+  '--refresh-ad-hoc-provisioning-profile',
+]);
 
-const smuggled = passthrough.filter((arg) =>
-  LANE_DEFINING.some((flag) => arg === flag || arg.startsWith(`${flag}=`)),
-);
+const rejected = passthrough.filter((arg) => {
+  if (!arg.startsWith('-')) return false; // a value for the flag before it
+  const flag = arg.split('=')[0];
+  return !ALLOWED_PASSTHROUGH.has(flag);
+});
 
-if (smuggled.length) {
+if (rejected.length) {
   console.error(
-    `\nRefusing: ${smuggled.join(' ')} would redefine the lane this command is for.\n\n` +
-      `  The lane is the first argument and it decides the profile, the branch, the\n` +
-      `  environment, BINGD_LANE and APP_VARIANT together. A flag that changes one of\n` +
-      `  them changes what is published without changing which gate ran — which is how\n` +
-      `  \`update:preview --branch beta\` reached friend testers past the Beta checks.\n\n` +
-      `  Use the script for the lane you mean: npm run build:beta, npm run update:beta.\n`,
+    `\nRefusing: ${rejected.join(' ')} is not passed through by this script.\n\n` +
+      '  The lane is the first argument, and it decides the profile, the branch, the\n' +
+      '  environment, BINGD_LANE and APP_VARIANT together. Flags are allowlisted rather\n' +
+      '  than denied one by one because two review rounds found two different ways past a\n' +
+      '  denylist: `--branch beta` on the preview script, and `--input-dir` with\n' +
+      '  `--skip-bundler`, which publishes a bundle built somewhere else after gating the\n' +
+      '  code here.\n\n' +
+      '  Use the script for the lane you mean — npm run build:beta, npm run update:beta —\n' +
+      '  or, if the flag genuinely changes nothing about what is published or where it\n' +
+      '  goes, add it to ALLOWED_PASSTHROUGH in scripts/release.mjs with a reason.\n',
   );
   process.exit(2);
 }
