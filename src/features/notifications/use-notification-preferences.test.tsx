@@ -80,6 +80,45 @@ afterEach(() => {
 });
 
 /**
+ * The copy every row shows in place of its description until the query has answered.
+ * Rendered by `Row` in app/settings/notification-preferences.tsx.
+ */
+const CHECKING = 'Checking your current setting…';
+
+/**
+ * Renders the screen and waits for it to actually have an answer from the server.
+ *
+ * **Every switch here reads `false` while the query is in flight**, and that is
+ * deliberate: the screen draws `prefs ? prefs[key] : false` rather than inventing a
+ * default, because two of these categories genuinely default off and a guessed render is
+ * indistinguishable from a confirmed one. Independent review 14 found that defect on the
+ * privacy switch and the screen is written to avoid it.
+ *
+ * The cost lands in the tests. `false` on this screen is two different statements —
+ * *off*, and *not read yet* — so a `waitFor` anchored on `false` is satisfied by the
+ * loading tree, returns immediately, and every assertion after it that expects `true`
+ * runs against switches that have never been told anything. The same applies to a
+ * `fireEvent` on a control that is still `disabled`: the handler is never called and the
+ * write being asserted never happens.
+ *
+ * On a quiet machine the data arrives before `waitFor`'s first poll and the whole file
+ * passes, which is why this held for months. On a contended runner it does not. CI run
+ * 32323036230 failed exactly here — `Comments` expected `true`, received `false` — and
+ * deferring the mock by a single macrotask locally fails a *different* pair of tests in
+ * this same file. Which ones lose the race is a coin toss, so the anchor is the defect
+ * rather than any one line, and the fix belongs in one place that no test can skip.
+ *
+ * The anchor is the screen's own loading copy: the one signal that means *read*
+ * independently of what any preference turned out to be. It also covers the error state,
+ * where the rows are replaced wholesale and the copy goes with them.
+ */
+const renderLoaded = async () => {
+  const view = await renderWithProviders(<NotificationPreferencesScreen />);
+  await waitFor(() => expect(view.queryAllByText(CHECKING)).toHaveLength(0));
+  return view;
+};
+
+/**
  * The structure, before any of it is rendered.
  *
  * A category the screen forgot is a setting nobody can reach and an event nobody can
@@ -169,12 +208,12 @@ describe('what a master switch reads', () => {
 
 describe('the screen', () => {
   it('renders every group and every switch', async () => {
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
+    const view = await renderLoaded();
 
     // By label rather than by text: SectionHeader renders its title uppercased, and
     // asserting "SOCIAL" would be asserting a typographic choice rather than the
     // grouping. The accessible name is the one that carries the meaning.
-    await waitFor(() => expect(view.getByLabelText('Social')).toBeTruthy());
+    expect(view.getByLabelText('Social')).toBeTruthy();
     expect(view.getByLabelText('Recommendations & invites')).toBeTruthy();
     expect(view.getByLabelText('Achievements')).toBeTruthy();
 
@@ -187,9 +226,9 @@ describe('the screen', () => {
   });
 
   it('draws the two default-off categories off and the rest on', async () => {
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
+    const view = await renderLoaded();
 
-    await waitFor(() => expect(view.getByLabelText('Reactions').props.value).toBe(false));
+    expect(view.getByLabelText('Reactions').props.value).toBe(false);
     expect(view.getByLabelText('Bingd Awards').props.value).toBe(false);
     expect(view.getByLabelText('Comments').props.value).toBe(true);
     expect(view.getByLabelText('Follows').props.value).toBe(true);
@@ -198,15 +237,14 @@ describe('the screen', () => {
 
   it('reads its values from the server rather than assembling defaults itself', async () => {
     answerWith({ comments: false, reactions: true });
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
+    const view = await renderLoaded();
 
-    await waitFor(() => expect(view.getByLabelText('Comments').props.value).toBe(false));
+    expect(view.getByLabelText('Comments').props.value).toBe(false);
     expect(view.getByLabelText('Reactions').props.value).toBe(true);
   });
 
   it('writes one category when a child is toggled', async () => {
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
-    await waitFor(() => expect(view.getByLabelText('Comments')).toBeTruthy());
+    const view = await renderLoaded();
 
     fireEvent(view.getByLabelText('Comments'), 'valueChange', false);
 
@@ -225,8 +263,7 @@ describe('the screen', () => {
    * make impossible.
    */
   it('writes a whole section in one call when the master goes off', async () => {
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
-    await waitFor(() => expect(view.getByLabelText('All Social notifications')).toBeTruthy());
+    const view = await renderLoaded();
 
     fireEvent(view.getByLabelText('All Social notifications'), 'valueChange', false);
 
@@ -251,10 +288,8 @@ describe('the screen', () => {
       reactions: false,
       watch_tags: false,
     });
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
-    await waitFor(() =>
-      expect(view.getByLabelText('All Social notifications').props.value).toBe(false),
-    );
+    const view = await renderLoaded();
+    expect(view.getByLabelText('All Social notifications').props.value).toBe(false);
 
     fireEvent(view.getByLabelText('All Social notifications'), 'valueChange', true);
 
@@ -274,11 +309,9 @@ describe('the screen', () => {
       reactions: false,
       watch_tags: false,
     });
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
+    const view = await renderLoaded();
 
-    await waitFor(() =>
-      expect(view.getByLabelText('All Social notifications').props.value).toBe(false),
-    );
+    expect(view.getByLabelText('All Social notifications').props.value).toBe(false);
     // Recommendations & invites was untouched, so its master is still on. A master
     // that reported the whole app rather than its own section would fail here.
     expect(view.getByLabelText('All Recommendations & Invites notifications').props.value).toBe(
@@ -287,8 +320,7 @@ describe('the screen', () => {
   });
 
   it('leaves other sections alone when one master is used', async () => {
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
-    await waitFor(() => expect(view.getByLabelText('All Achievement notifications')).toBeTruthy());
+    const view = await renderLoaded();
 
     fireEvent(view.getByLabelText('All Achievement notifications'), 'valueChange', true);
 
@@ -302,8 +334,7 @@ describe('the screen', () => {
 
   it('tells the reader when a write is refused rather than showing the new position', async () => {
     mockRpcErrors.set_notification_preference = [{ code: '42501', message: 'nope' }];
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
-    await waitFor(() => expect(view.getByLabelText('Comments')).toBeTruthy());
+    const view = await renderLoaded();
 
     fireEvent(view.getByLabelText('Comments'), 'valueChange', false);
 
@@ -320,8 +351,7 @@ describe('the screen', () => {
    */
   it('refetches after an unknown outcome, not only after success', async () => {
     mockRpcErrors.set_notification_preferences = [{ code: '', message: 'socket died' }];
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
-    await waitFor(() => expect(view.getByLabelText('All Social notifications')).toBeTruthy());
+    const view = await renderLoaded();
 
     const readsBefore = mockRpc.mock.calls.filter(
       (c) => c[0] === 'my_notification_preferences',
@@ -348,18 +378,27 @@ describe('the screen', () => {
       { category: 'comments', enabled: true },
     ];
 
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
+    const view = await renderLoaded();
 
-    await waitFor(() =>
-      expect(view.getByText('Could not load your notification settings')).toBeTruthy(),
-    );
+    expect(view.getByText('Could not load your notification settings')).toBeTruthy();
     // Emphatically not a screen of switches drawn from invented values.
     expect(view.queryByLabelText('Reactions')).toBeNull();
   });
 
   it('says plainly that invite and award notifications are not being sent yet', async () => {
-    const view = await renderWithProviders(<NotificationPreferencesScreen />);
+    const view = await renderLoaded();
 
-    await waitFor(() => expect(view.getByText(/not being sent yet/i)).toBeTruthy());
+    // Three things say it and they are not the same thing: a badge under each of the two
+    // pending settings, and the section footnote explaining why the switches are still
+    // worth setting. The footnote renders from the first frame; the badges appear only
+    // once the read lands. So `getByText(/not being sent yet/i)` matched one element
+    // while loading and three afterwards, and threw "found multiple" the moment the data
+    // arrived — it passed only when polling happened to catch the loading window, which
+    // is the opposite race to the rest of this file and why it flaked in both directions.
+    //
+    // Asserted separately and exactly, so any one of the three going missing is its own
+    // failure rather than being absorbed by the other two.
+    expect(view.getAllByText('Not being sent yet.')).toHaveLength(2);
+    expect(view.getByText(/^Invite and Award notifications are not being sent yet\./)).toBeTruthy();
   });
 });

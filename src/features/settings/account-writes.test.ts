@@ -1,3 +1,5 @@
+import { act } from '@testing-library/react-native';
+
 import { renderHookWithProviders } from '@/test-utils/render';
 
 import { useAccountWrites } from './use-account';
@@ -47,10 +49,71 @@ const KEYS = [['my-profile', 'user-1'], ['profile'], ['relationships'], ['feed']
 
 const mount = async () => {
   const { result, client } = await renderHookWithProviders(() => useAccountWrites());
-  for (const key of KEYS) client.setQueryData(key, 'seeded');
+
+  for (const key of KEYS) {
+    /**
+     * Kept out of the collector's reach before it is seeded.
+     *
+     * The shared test client sets `gcTime: 0`, and these keys have no observer — nothing
+     * renders them — so React Query schedules their collection on a timer that fires the
+     * moment anything flushes one. Nothing used to, which is the only reason this worked.
+     * `act` flushes timers by design, so the seeded rows were collected before the writer
+     * ran and `getQueryState` returned `undefined`.
+     *
+     * That is the same ambiguity the seeding below exists to remove, arriving from the
+     * other side: a collected key and a never-invalidated one both read as "not
+     * invalidated", and every assertion here would have passed for the wrong reason.
+     */
+    client.setQueryDefaults(key, { gcTime: Infinity });
+    client.setQueryData(key, 'seeded');
+  }
+
+  /**
+   * The writers, each wrapped so React sees the state changes it makes.
+   *
+   * `useAccountWrites` flips `busy` either side of its await — that is the guard that
+   * refuses a second write while the first is in flight. A writer called straight from
+   * a test performs both of those updates outside React's knowledge, which is what
+   * printed pages of *"An update to HookContainer inside a test was not wrapped in
+   * act(...)"* into every CI log.
+   *
+   * **It was not only noise.** An unflushed update leaves `result.current` holding the
+   * closure from the previous render, so the second of two calls was reading a `busy`
+   * React had already moved past — and the paired-call tests below are precisely about
+   * what the second call sees. They were passing against a stale closure rather than
+   * against the state the screen would actually have.
+   *
+   * Wrapped at the mount rather than at each of the seventeen call sites, so a writer
+   * cannot be called un-acted by a test added later.
+   */
+  const writes = {
+    get current(): ReturnType<typeof useAccountWrites> {
+      const api = result.current;
+      return new Proxy(api, {
+        get: (target, key) => {
+          const value = target[key as keyof typeof target];
+          if (typeof value !== 'function') return value;
+          return (...args: unknown[]) =>
+            act(() => (value as (...a: unknown[]) => Promise<unknown>).apply(target, args));
+        },
+      });
+    },
+  };
+
   return {
-    writes: result,
-    invalidated: (key: unknown[]) => client.getQueryState(key)?.isInvalidated ?? false,
+    writes,
+    /**
+     * Reads the flag, and refuses to answer for a key that is not there.
+     *
+     * The old `?? false` is what let the collected-cache failure above look like an
+     * ordinary assertion failure. A missing key is not evidence of anything and saying so
+     * is the difference between a test that failed and a test that was never asking.
+     */
+    invalidated: (key: unknown[]) => {
+      const state = client.getQueryState(key);
+      if (!state) throw new Error(`${JSON.stringify(key)} is not in the cache to be invalidated`);
+      return state.isInvalidated;
+    },
   };
 };
 

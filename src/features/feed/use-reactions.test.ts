@@ -1,4 +1,4 @@
-import { waitFor } from '@testing-library/react-native';
+import { act, waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
@@ -61,9 +61,32 @@ describe('one operation id per reaction', () => {
   const idsSent = () =>
     mockRpc.mock.calls.map(([, args]) => (args as { p_operation_id: string }).p_operation_id);
 
+  /**
+   * The writer, wrapped so React sees the state it changes — the same treatment, and for
+   * the same reason, as `settings/account-writes.test.ts`.
+   *
+   * `useSetReaction` updates state around its await. Called straight from a test those
+   * updates happen outside React's knowledge, which is where this file's share of *"An
+   * update to HookContainer inside a test was not wrapped in act(...)"* came from. It is
+   * not only noise: until they are flushed, `result.current` is still the closure from
+   * the previous render, and the paired calls below are entirely about what the second
+   * call sees.
+   */
   const mount = async () => {
     const view = await renderHookWithProviders(() => useSetReaction('me'));
-    return view.result;
+    return {
+      get current(): ReturnType<typeof useSetReaction> {
+        const api = view.result.current;
+        return new Proxy(api, {
+          get: (target, key) => {
+            const value = target[key as keyof typeof target];
+            if (typeof value !== 'function') return value;
+            return (...args: unknown[]) =>
+              act(() => (value as (...a: unknown[]) => Promise<unknown>).apply(target, args));
+          },
+        });
+      },
+    };
   };
 
   it('replays an unanswered reaction under the id the first attempt used', async () => {

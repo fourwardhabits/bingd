@@ -63,8 +63,27 @@ const comment = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const open = (over: Partial<React.ComponentProps<typeof CommentSheet>> = {}) =>
-  renderWithProviders(
+/**
+ * Opens the sheet and waits for the comment query to have answered.
+ *
+ * The wait is the point. **The composer is always on screen, and it carries its own
+ * "Contains spoilers" toggle** — the file says so itself further down, where two matches
+ * are asserted and one of them is the composer. So
+ * `waitFor(() => getAllByText('Contains spoilers').length > 0)`, which is how most of the
+ * spoiler tests used to begin, is satisfied on its first poll by a control that is
+ * present before a single comment has loaded. It waited for nothing, and everything
+ * after it ran against a list still reading "Loading comments…".
+ *
+ * On a quiet machine the rows had arrived anyway and it did not matter. On a contended
+ * one they had not: CI run 32323036230 failed at `getByText('Show')` with the loading
+ * text still in the printed tree, one line after a `waitFor` that had "passed".
+ *
+ * So the anchor is the sheet's own loading copy, which is the one signal that means the
+ * rows are in. It covers the error and empty states too, where the list is replaced
+ * wholesale and the copy goes with it.
+ */
+const open = async (over: Partial<React.ComponentProps<typeof CommentSheet>> = {}) => {
+  const view = await renderWithProviders(
     <CommentSheet
       eventId="e1"
       mediaItemId={FILM}
@@ -76,6 +95,10 @@ const open = (over: Partial<React.ComponentProps<typeof CommentSheet>> = {}) =>
       {...over}
     />,
   );
+
+  await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
+  return view;
+};
 
 /**
  * Alert is a native module, so the confirmation button has to be invoked directly.
@@ -110,7 +133,9 @@ describe('spoilers', () => {
 
     const view = await open({ watched: new Set() });
 
-    await waitFor(() => expect(view.getAllByText('Contains spoilers').length).toBeGreaterThan(0));
+    // Two: the mask on the row, and the composer's own toggle. Counted rather than "at
+    // least one", which the composer satisfies by itself with no comment on screen.
+    expect(view.getAllByText('Contains spoilers')).toHaveLength(2);
     // Not "is clipped", not "is behind an overlay". Absent. A string in the tree is
     // read aloud by a screen reader and copied by a selection whatever is drawn on
     // top of it.
@@ -121,7 +146,7 @@ describe('spoilers', () => {
     mockCommentRows = [comment({ has_spoilers: true })];
 
     const view = await open({ watched: new Set() });
-    await waitFor(() => expect(view.getAllByText('Contains spoilers').length).toBeGreaterThan(0));
+    expect(view.getAllByText('Contains spoilers')).toHaveLength(2);
 
     await fireEvent.press(view.getByText('Show'));
 
@@ -151,7 +176,7 @@ describe('spoilers', () => {
 
     const view = await open({ mediaItemId: SEASON_2, watched: new Set([SEASON_1]) });
 
-    await waitFor(() => expect(view.getAllByText('Contains spoilers').length).toBeGreaterThan(0));
+    expect(view.getAllByText('Contains spoilers')).toHaveLength(2);
     expect(view.queryByText(/recontextualises/)).toBeNull();
   });
 
@@ -171,7 +196,7 @@ describe('spoilers', () => {
 
     const view = await open({ watched: undefined });
 
-    await waitFor(() => expect(view.getAllByText('Contains spoilers').length).toBeGreaterThan(0));
+    expect(view.getAllByText('Contains spoilers')).toHaveLength(2);
     expect(view.queryByText(/recontextualises/)).toBeNull();
   });
 });
