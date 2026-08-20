@@ -1,0 +1,123 @@
+name: Release gate
+
+# Everything ci.yml runs, plus the suites that are too slow or too heavy to put in
+# front of every ordinary commit — and the checks that only matter when something is
+# about to be handed to somebody else.
+#
+# Separate from ci.yml deliberately. The real multi-connection PostgreSQL concurrency
+# suite starts an actual PostgreSQL 17 server and runs 74 tests across many connections;
+# putting it on every pull request would make a one-line copy change cost several minutes
+# and would teach people to stop watching CI. Putting it nowhere would mean the ranking
+# and notification race invariants are only ever verified by the person who remembers to
+# run them.
+#
+# So it runs here: before a Beta build, before an `eas update --branch beta`, and before
+# anything is merged that a friend tester will end up running. See
+# docs/release/safe-update-runbook.md §6.
+#
+# Started by hand rather than on a schedule, because "a release candidate" is a decision
+# somebody makes rather than a state a branch drifts into. It also runs on any branch
+# named release/*, which is where candidates are prepared.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['release/**']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Full suite, real Postgres, export
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx expo customize tsconfig.json --non-interactive || true
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: https://ci.invalid
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ci
+
+      # ---- Everything ci.yml runs -------------------------------------------------
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test -- --ci
+      - run: npm run test:db
+      - run: npm run test:web
+      - run: npm run test:web:mutants
+      - run: npm run functions:check
+      - run: npm run functions:lint
+
+      # ---- And the part that only runs here ---------------------------------------
+      #
+      # Real PostgreSQL, many connections. `embedded-postgres` downloads and starts a
+      # genuine server, so these tests can interleave two transactions the way two
+      # phones do — which is the only way the ranking, redemption and block-barrier
+      # races can be observed at all. PGlite cannot express them: it is one connection.
+      - name: Concurrency suite (real PostgreSQL)
+        run: npm run test:race
+
+      # And the check on that check: each race invariant is deliberately broken and the
+      # suite is required to go red. A concurrency test that passes against a broken
+      # implementation is worse than no concurrency test.
+      - name: Concurrency mutation check
+        run: npm run test:race:mutants
+
+      # A bundle that cannot be produced is a build that cannot be made, and the failure
+      # arrives ten minutes into an EAS build otherwise.
+      - name: Android export
+        run: npx expo export --platform android
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: https://ci.invalid
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ci
+          APP_VARIANT: preview
+
+      # The site build refuses on a missing or malformed identifier rather than
+      # producing a file that makes every link open the browser. Cheap, and it is the
+      # last thing between deep-links.config.json and Apple's CDN.
+      - name: Site build
+        run: npm run build:web
+
+      # eas.json and app.config.ts have to resolve for all four lanes. This catches a
+      # profile that names an environment that does not exist, or a variant table that
+      # no longer produces the identifiers the .well-known files claim — without
+      # needing EAS credentials, because config resolution is local.
+      - name: Resolve every lane's app config
+        run: |
+          set -e
+          for variant in development preview production; do
+            echo "--- APP_VARIANT=$variant"
+            APP_VARIANT=$variant npx expo config --type public --json > /dev/null
+          done
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: https://ci.invalid
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ci
+
+      - name: eas.json is valid and names four lanes
+        run: |
+          node -e "
+            const eas = require('./eas.json');
+            const want = ['development', 'preview', 'beta', 'production'];
+            for (const profile of want) {
+              const p = eas.build[profile];
+              if (!p) throw new Error(profile + ' is missing from eas.json');
+              if (!p.channel) throw new Error(profile + ' has no channel');
+              if (!p.environment) throw new Error(profile + ' does not name an environment');
+            }
+            const channels = want.map((p) => eas.build[p].channel);
+            if (new Set(channels).size !== channels.length) {
+              throw new Error('two build profiles share a channel: ' + channels.join(', '));
+            }
+            console.log('four lanes, four channels: ' + channels.join(', '));
+          "
