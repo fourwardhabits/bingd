@@ -19,10 +19,13 @@
   "appleTeamId": "98729PG8GD",
 
   "$variantsComment": [
-    "production carries the EAS upload keystore only, which is NOT sufficient for",
-    "builds installed from Play: Play strips that signature and re-signs with its",
-    "own key, so a device checks a fingerprint that is not listed here and App Links",
-    "silently fail. The Play app-signing fingerprint has to be added alongside it.",
+    "production carries two fingerprints and both are load-bearing. The first is",
+    "the EAS upload keystore, which signs anything installed straight from EAS.",
+    "The second is the Google Play app-signing key (Play Console > Setup > App",
+    "integrity): Play strips the upload signature and re-signs with this key, so",
+    "it is the certificate every device that installed from the closed test",
+    "actually checks. Removing either silently breaks App Links for that install",
+    "path.",
     "",
     "preview's fingerprint arrived with the first preview build: EAS creates one",
     "keystore per application identifier, on first use, so each variant has its own.",
@@ -35,7 +38,10 @@
     {
       "name": "production",
       "bundleId": "app.bingd",
-      "androidSha256": ["A1:5B:92:A7:0F:AD:0D:78:77:FE:4C:6D:DE:EB:AE:DD:95:79:F1:31:70:2D:D7:79:CF:76:09:B1:BF:C9:B9:00"]
+      "androidSha256": [
+        "A1:5B:92:A7:0F:AD:0D:78:77:FE:4C:6D:DE:EB:AE:DD:95:79:F1:31:70:2D:D7:79:CF:76:09:B1:BF:C9:B9:00",
+        "D3:A1:05:A0:AD:F8:EE:42:6E:44:EE:90:27:BC:9E:4B:4C:2B:02:D4:D9:B0:D9:37:10:70:F0:2E:A8:D0:29:A7"
+      ]
     },
     {
       "name": "preview",
