@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -48,6 +49,33 @@ import { theme } from '@/ui/tokens';
  * and the two only mean anything together — so the rows now say which they are, and the
  * control is the only thing that changes it.
  */
+/**
+ * The gear in the navigation bar, as its own component so it can be looked at.
+ *
+ * `headerRight` is a function React Navigation calls, not something a screen renders,
+ * so an inline element here is unreachable from a test of the screen — which is how a
+ * control ends up shipping with no accessible name. Nothing else about it wants to be
+ * separate; being nameable is the whole reason.
+ */
+export function NotificationSettingsButton() {
+  const router = useRouter();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Notification settings"
+      onPress={() => router.push('/settings/notification-preferences')}
+      style={({ pressed }) => [styles.gear, pressed && styles.gearPressed]}
+    >
+      <Ionicons
+        name="settings-outline"
+        size={theme.layout.icon.md}
+        color={theme.semantic.action}
+      />
+    </Pressable>
+  );
+}
+
 export default function NotificationsScreen() {
   const profile = useCurrentProfile();
   const router = useRouter();
@@ -137,15 +165,23 @@ export default function NotificationsScreen() {
           headerShown: true,
           title: 'Notifications',
           headerBackTitle: 'Back',
-          // Where somebody looks the moment they decide they are getting too many of
-          // these, which is here rather than back in the Settings list.
-          headerRight: () => (
-            <Button
-              label="Settings"
-              kind="tertiary"
-              onPress={() => router.push('/settings/notification-preferences')}
-            />
-          ),
+          /**
+           * Where somebody looks the moment they decide they are getting too many of
+           * these, which is here rather than back in the Settings list.
+           *
+           * A gear rather than the word, which the founder asked for off the device.
+           * “Settings” in a navigation bar reads as a second destination competing with
+           * the title beside it — two labels of similar weight and no hierarchy between
+           * them — and it is the one control in the app whose meaning a glyph carries
+           * completely. The word survives for a screen reader, which is where it was
+           * doing the work.
+           *
+           * The `Pressable` is the full 44pt square and the glyph is 24 inside it. Not
+           * `hitSlop`: Android clips touches outside a parent's box, so slop around an
+           * icon is a target that measures right on iOS and is a 24pt tap on Android
+           * (`ActivityRow`, review 29a).
+           */
+          headerRight: () => <NotificationSettingsButton />,
         }}
       />
 
@@ -327,6 +363,20 @@ function UnreadDot({ show }: { show: boolean }) {
 
 const styles = StyleSheet.create({
   page: { paddingBottom: theme.space[10] },
+  /**
+   * A square the size of the minimum target, with the glyph centred in it. The
+   * negative right margin pulls the box back to the bar's own edge: the square is
+   * wider than the glyph, so without it the gear sits a gutter's width in from where
+   * the word “Settings” used to end and looks unaligned with the title opposite.
+   */
+  gear: {
+    width: theme.layout.minTapTarget,
+    height: theme.layout.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -theme.space[3],
+  },
+  gearPressed: { opacity: 0.6 },
   unread: { backgroundColor: theme.surface.raised },
   markAll: {
     flexDirection: 'row',

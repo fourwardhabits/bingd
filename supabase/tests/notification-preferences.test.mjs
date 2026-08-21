@@ -100,12 +100,21 @@ after(async () => {
 });
 
 describe('the defaults', () => {
-  it('answers for all eight categories, with reactions and awards off', async () => {
+  /**
+   * Seven on, one off, since 20260820000100 (founder Preview pass).
+   *
+   * `reactions` moved to on: the volume argument that put it off is an argument about
+   * a populated app, and in a friend beta a reaction is one of the few signals that
+   * anything is happening. `awards` stays off because **nothing writes one** — the
+   * category, the type and the trigger mapping all exist and no writer anywhere
+   * produces the row, so defaulting it on would be a claim rather than a setting.
+   */
+  it('answers for all eight categories, with only awards off', async () => {
     assert.deepEqual(await prefs(control), {
       follows: true,
       follow_accepted: true,
       comments: true,
-      reactions: false,
+      reactions: true,
       watch_tags: true,
       recommendations: true,
       invites: true,
@@ -121,11 +130,12 @@ describe('the defaults', () => {
     assert.equal(rows[0].n, 0, 'a default must not cost a row');
   });
 
-  it('delivers the six default-on kinds and drops the two default-off ones', async () => {
+  it('delivers the seven default-on kinds and drops the one default-off kind', async () => {
     for (const type of [
       'follow',
       'follow_approved',
       'comment',
+      'reaction',
       'watch_tag',
       'recommendation',
       'invite_activated',
@@ -134,11 +144,52 @@ describe('the defaults', () => {
       assert.equal(await deliver(control, type), true, `${type} defaults on`);
     }
 
-    for (const type of ['reaction', 'award_earned']) {
-      await clear(control);
-      assert.equal(await deliver(control, type), false, `${type} defaults off`);
-    }
     await clear(control);
+    assert.equal(await deliver(control, 'award_earned'), false, 'award_earned defaults off');
+    await clear(control);
+  });
+
+  /**
+   * **The founder's hard requirement, and the reason this needed no backfill.**
+   *
+   * Changing a product default must not reach into an account that already chose. It
+   * cannot here, structurally: `_notifies` coalesces to the account's own row and only
+   * falls through to `_notification_default` when there is no row. This asserts the
+   * property rather than trusting the structure, because the whole class of bug being
+   * avoided is a migration that helpfully 'fixes up' existing accounts.
+   */
+  it('leaves an account that switched reactions off switched off', async () => {
+    const chose = await t.createUser({ username: 'chose_prefs' });
+    await setOne(chose, 'reactions', false);
+
+    // The new default is on. This account said otherwise, so it stays off — and the
+    // control beside it proves the gate is still capable of delivering a reaction.
+    assert.equal((await prefs(chose)).reactions, false);
+    await clear(chose);
+    assert.equal(await deliver(chose, 'reaction'), false);
+    await clear(control);
+    assert.equal(await deliver(control, 'reaction'), true);
+  });
+
+  it('leaves an account that switched an already-on category off alone too', async () => {
+    // The same guarantee in the direction the default did not move, so the test is
+    // about explicit rows rather than about `reactions` specifically.
+    const chose = await t.createUser({ username: 'chose_comments' });
+    await setOne(chose, 'comments', false);
+    assert.equal((await prefs(chose)).comments, false);
+    await clear(chose);
+    assert.equal(await deliver(chose, 'comment'), false);
+  });
+
+  it('still writes no row for an account that has chosen nothing', async () => {
+    // The default is a function, not a backfill. If this migration had written rows,
+    // the next default change would have to write them again — and would overwrite the
+    // choices this one was careful not to touch.
+    const { rows } = await t.sql(
+      `select count(*)::int as n from notification_preferences where user_id = $1`,
+      [control],
+    );
+    assert.equal(rows[0].n, 0);
   });
 });
 
@@ -161,7 +212,7 @@ describe('each category gates exactly its own kind', () => {
     });
   }
 
-  it('reactions on delivers a reaction, which is the default-off case in reverse', async () => {
+  it('reactions off drops a reaction, and back on delivers one', async () => {
     await setOne(muted, 'reactions', true);
     await clear(muted);
     assert.equal(await deliver(muted, 'reaction'), true);
@@ -534,13 +585,28 @@ describe('a preference is the caller\'s own and nobody else\'s', () => {
   });
 
   it('writes only the caller', async () => {
-    await setOne(muted, 'watch_tags', false);
+    /**
+     * Before and after, rather than "no other account has a row at all".
+     *
+     * The absolute form passed until the default-preservation tests above created
+     * accounts that deliberately hold explicit rows, and then it failed for a reason
+     * that had nothing to do with what it is testing. What it means to assert is that
+     * *this call* touched nobody else, so that is what it now compares — which is also
+     * the stronger claim, since it would catch a writer that overwrote an existing row
+     * belonging to somebody else rather than only one that inserted a new one.
+     */
+    const others = async () => {
+      const { rows } = await t.sql(
+        `select user_id, category, enabled from notification_preferences
+          where user_id <> $1 order by user_id, category`,
+        [muted],
+      );
+      return JSON.stringify(rows);
+    };
 
-    const { rows } = await t.sql(
-      `select count(*)::int as n from notification_preferences where user_id <> $1`,
-      [muted],
-    );
-    assert.equal(rows[0].n, 0, 'no other account gained a row');
+    const before = await others();
+    await setOne(muted, 'watch_tags', false);
+    assert.equal(await others(), before, 'no other account was written to');
 
     await setOne(muted, 'watch_tags', true);
   });

@@ -17,7 +17,7 @@
  * the browser, or opens the app onto `+not-found`, and the reasonable conclusion for
  * whoever tapped it is that Bingd does not work.
  *
- * Seven mutants:
+ * Nine mutants:
  *
  *   1. `/lists/*` reverted to `/list/*`. The exact defect that shipped.
  *   2. A variant renamed in `app.config.ts` and not in `deep-links.config.json`, so the
@@ -30,6 +30,11 @@
  *   6. `apple-app-site-association` typed `text/plain`. iOS fetches it, declines to
  *      parse it, and every Universal Link keeps opening Safari.
  *   7. A path claimed against a folder with no `[param].tsx` to receive the identifier.
+ *   8. One Android `pathPrefix` dropped, so a route opens the app on iOS and opens Chrome
+ *      on Android — the `/list/*` failure again, on one platform only.
+ *   9. The Android filter widened back to the whole host, which is what it said before
+ *      2026-08-20. It claims /privacy, /support and /account-deletion, and Android hands
+ *      the store's own compliance links to the app to render as `+not-found`.
  *
  * **The Apple team id is not here, and cannot be.** It has exactly one source in this
  * repository and nothing to cross-check it against, so a wrong value is consistent
@@ -87,6 +92,21 @@ const MUTANTS = [
     name: 'a path claimed against a folder with no [param].tsx to receive the identifier',
     file: LINKS,
     apply: (s) => s.replace('"/i/*"', '"/settings/*"'),
+  },
+  {
+    name: 'an Android path prefix dropped, so one route opens the app on iOS and Chrome on Android',
+    file: APP_CONFIG,
+    apply: (s) =>
+      s.replace(/\r?\n\s+\{ scheme: 'https', host: 'bingd\.app', pathPrefix: '\/i\/' \},/, ''),
+  },
+  {
+    name: 'the Android filter widened back to the whole host, so /privacy opens the app',
+    file: APP_CONFIG,
+    apply: (s) =>
+      s.replace(
+        /data: \[(\r?\n\s+\{ scheme: 'https', host: 'bingd\.app', pathPrefix: '[^']+' \},)+\r?\n\s+\],/,
+        "data: [{ scheme: 'https', host: 'bingd.app' }],",
+      ),
   },
 ];
 

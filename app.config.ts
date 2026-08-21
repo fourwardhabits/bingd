@@ -1,5 +1,10 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
+// Expo resolves this file as CommonJS, and `config/backends.cjs` has to be importable by
+// `node --test` as well — which is the whole reason the lane rule lives outside this file.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { assertBackendIsAllowed } = require('./config/backends.cjs');
+
 /**
  * Three variants per docs/architecture/client.md §8. Selected by APP_VARIANT so
  * all three can sit on one home screen and be told apart at a glance.
@@ -15,6 +20,27 @@ const variants: Record<Variant, { name: string; bundleId: string; scheme: string
 };
 
 const current = variants[variant];
+
+/**
+ * Which Supabase project this lane may talk to.
+ *
+ * The rule and its reasoning live in `config/backends.cjs`, which is a plain CommonJS
+ * module for one reason: this file is loaded by Expo's config resolver and cannot be
+ * imported by a test, so a rule written here is a rule nothing can exercise. Independent
+ * review 28 raised that as a BLOCKER along with the two substantive holes it hid — the
+ * check only ran on EAS Build, so an `eas update` could publish a bundle compiled against
+ * anything, and the allowlist was global, so the day a production project exists a Beta
+ * build could quietly use it.
+ *
+ * `BINGD_LANE` is set on every profile in `eas.json`, and by `scripts/release.mjs` for
+ * `eas update`, which does not read a build profile. Absent — a local `expo start`, a CI
+ * config resolution — the **development** lane's backends are accepted: a resolution with
+ * no lane is somebody's laptop, and the union of every lane's would hand a bare
+ * `eas update` a production ref the day one exists.
+ */
+const lane = process.env.BINGD_LANE;
+
+assertBackendIsAllowed(process.env.EXPO_PUBLIC_SUPABASE_URL, lane);
 
 /**
  * `eas init` could not write this itself: it edits app.json, and this project uses a
@@ -99,11 +125,33 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       foregroundImage: './assets/brand/icon-adaptive.png',
       backgroundColor: '#FBF8F4',
     },
+    // Four path prefixes, not the whole host.
+    //
+    // This used to declare the scheme and the host with no path at all, which
+    // claims *every* URL on the domain. That was harmless only for as long as every
+    // path either had a screen or was the site root, and it stopped being true the day
+    // bingd.app started serving /privacy, /support and /account-deletion — pages the
+    // stores require, which Android would then have handed to the app to render as
+    // `+not-found`. Apple's file has always claimed only these four; this is the
+    // Android half finally saying the same thing.
+    //
+    // Each entry repeats scheme and host deliberately. Android unions the attributes of
+    // the <data> elements inside one intent filter independently, so a bare
+    // `{ pathPrefix }` would combine with any scheme and any host in the filter rather
+    // than only with this one.
+    //
+    // Kept in step with `web/deep-links.config.json` by `web/router.test.mjs`, which
+    // fails if the two path sets ever diverge.
     intentFilters: [
       {
         action: 'VIEW',
         autoVerify: true,
-        data: [{ scheme: 'https', host: 'bingd.app' }],
+        data: [
+          { scheme: 'https', host: 'bingd.app', pathPrefix: '/u/' },
+          { scheme: 'https', host: 'bingd.app', pathPrefix: '/lists/' },
+          { scheme: 'https', host: 'bingd.app', pathPrefix: '/title/' },
+          { scheme: 'https', host: 'bingd.app', pathPrefix: '/i/' },
+        ],
         category: ['BROWSABLE', 'DEFAULT'],
       },
     ],
@@ -223,6 +271,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     eas: { projectId: EAS_PROJECT_ID },
 
     variant,
+    /**
+     * The release lane, which is not the same question as the variant.
+     *
+     * `beta` builds the *production* variant — a bundle identifier cannot change between
+     * a TestFlight build and the App Store release that replaces it — so `variant` alone
+     * cannot tell a friend beta apart from a public release. Everything gated on "is this
+     * a build somebody is testing" has to ask this instead, and review 28 was right that
+     * gating the diagnostics block on the variant hid the backend from precisely the
+     * people running a production-variant binary against a nonproduction database.
+     *
+     * Undefined outside an EAS build, where there is no lane.
+     */
+    lane,
     supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
     supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
     // Both are publishable by design: a Sentry DSN only accepts events, and a

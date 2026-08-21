@@ -35,6 +35,11 @@ export type NotificationSetting = {
    * True where the category is defined, silenceable and routed, but **nothing writes
    * it yet**. The screen says so rather than presenting a switch that implies traffic
    * the app does not produce.
+   *
+   * It is also what decides the default. A category nothing writes defaults off, so the
+   * app is not claiming a feature it does not have; every category that works defaults
+   * on. `awards` is the only one left — `invites` lost this flag on 2026-08-20, having
+   * had a writer since `20260819000500`.
    */
   pending?: boolean;
 };
@@ -100,7 +105,7 @@ export const SECTIONS: readonly NotificationSection[] = [
   {
     key: 'recommendations',
     title: 'Recommendations & invites',
-    masterLabel: 'All Recommendations & Invites notifications',
+    masterLabel: 'All Recommendations & invites notifications',
     settings: [
       {
         key: 'recommendations',
@@ -110,8 +115,11 @@ export const SECTIONS: readonly NotificationSection[] = [
       {
         key: 'invites',
         label: 'Friend joined via invite',
-        description: 'Somebody you invited joins Bingd.',
-        pending: true,
+        // No longer `pending`. `20260819000500` gave `invite_activated` a writer, so
+        // this switch governs real traffic — the flag was left behind by the migration
+        // that made it work, and the screen was telling readers a working feature was
+        // not built yet.
+        description: 'Somebody you invited joins Bingd and ranks their first ten titles.',
       },
     ],
   },
@@ -187,9 +195,12 @@ export function masterOn(
  *
  * Read from `my_notification_preferences`, which returns all eight every time with
  * each one defaulted by its own category. The screen never assembles a default: a
- * default written in two places is a default that disagrees with itself, and the
- * two that differ from the rest — reactions and awards, both off — are exactly the
- * ones a second copy would get wrong.
+ * default written in two places is a default that disagrees with itself, and the one
+ * that differs from the rest — awards, off because nothing writes one — is exactly the
+ * one a second copy would get wrong.
+ *
+ * Seven of the eight default on as of `20260820000100`. `reactions` was the eighth
+ * until the founder's Preview pass.
  */
 export function useNotificationPreferences(viewerId: string) {
   return useQuery({

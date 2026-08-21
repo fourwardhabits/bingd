@@ -1,6 +1,6 @@
 # Deferred roadmap — product capability that is specified, wanted, and not being built yet
 
-**Status:** current as of 2026-08-19, at the product re-freeze.
+**Status:** current as of 2026-08-21, at the Founder Preview known-issues closeout.
 
 **Companion documents:** [`PRD.md`](./PRD.md) · [`analytics.md`](./analytics.md) ·
 [`growth-instrumentation.md`](./growth-instrumentation.md) · [`backlog.md`](./backlog.md) ·
@@ -393,6 +393,277 @@ changes no logic, no schema and no test.
 **Revisit when.** There is design capacity, and before any public launch.
 
 **Depends on.** Design time · `assets/brand` render pipeline (already exists).
+
+---
+
+## 15. Marketing and reminder nudges — "Recommendations & reminders"
+
+**What it is.** Optional prompts that bring somebody back to Bingd when nothing they did
+caused them: *something good to watch tonight*, *fresh film recommendations*, *fresh TV
+recommendations*. A category of its own, separate from the eight that exist, because every
+one of those is somebody else doing something to you and none of these is.
+
+**Founder brief, 2026-08-20.** Recorded in full so the shape does not have to be
+re-derived:
+
+- A **separate Marketing / Reminders section** in notification settings, not folded into
+  Social or Recommendations & invites. A reminder from the app is a different kind of thing
+  from a person recommending you a film, and one switch must never govern both.
+- A user-facing label along the lines of **"Recommendations & reminders"** — a plain
+  description of what arrives, not a euphemism for marketing.
+- **Default OFF.** The opposite of every functional category, and deliberately so: the
+  others are consequences of something the user did, and this one is the app asking for
+  attention it was not given.
+- **No dark patterns and no engagement spam.** Opting out has to be one obvious control
+  that stays opted out.
+- **Cadence controls if the volume ever justifies them** — a frequency choice rather than
+  only on and off. Not before there is traffic to control.
+
+**Why it is deferred, and why no toggle ships now.** *Delivery does not exist.* Native push
+is §4 and is not built: nothing writes `device_tokens`, and no client imports
+`expo-notifications` beyond the config plugin. The architecture was re-read during the
+2026-08-20 micropass rather than assumed, and **there is no scheduled delivery of any
+kind**. A notification preference gates *row creation* inside a before-insert trigger, so a
+"reminder" today could only be a row the user discovers the next time they open the app of
+their own accord.
+
+That is the whole argument. A nudge whose entire purpose is to reach somebody who is *not*
+in the app cannot be served by something only visible to somebody who already is. Shipping
+the switch first would put a control in Settings that does nothing, and the instruction for
+that pass was explicit: a dead toggle is worse than an absent one.
+
+**Revisit when.** §4 lands. This is a section of that work rather than something to build
+beside it.
+
+**Depends on.** §4 native push · a scheduling path (an Edge Function on a cron, or the
+provider's own scheduling) · a ninth notification category and its default · the
+preference-axis decision recorded in §4.
+
+---
+
+## 16. Collection: swipe between tabs
+
+**What it is.** Swiping left and right to move between the Collection segments — Watched,
+Watchlist and Unranked — instead of only tapping the segmented control.
+
+**Why it is wanted.** Founder suggestion, 2026-08-20. It is the gesture the segments look
+like they should support, and every app with a segmented row over a list has trained people
+to try it.
+
+**Why it is deferred.** Audited against the current primitives during the Preview micropass,
+and it is not the small change it looks like. Four findings, any one of which is enough:
+
+- **Only the active segment is mounted.** `app/(tabs)/collection.tsx` renders exactly one of
+  `Watched`, `Watchlist` or `Unranked`. Paging needs the neighbours mounted and laid out
+  side by side, which means three collections in memory and three queries live instead of
+  one.
+- **The segment set is dynamic.** Unranked appears and disappears with `unrankedCount`, so a
+  pager's page *indices* would change underneath the reader — and the screen already derives
+  a fallback for the case where the segment somebody is standing on vanishes. Page-index
+  arithmetic over a list that mutates is its own class of bug.
+- **A pager is a native dependency.** `react-native-pager-view` is not installed, and
+  installing it moves the native fingerprint — which this release lane cannot absorb without
+  new Preview and Beta binaries.
+- **The hand-rolled alternative is gesture arbitration, not layout.** Reanimated and
+  `react-native-gesture-handler` are both present, so it is *possible* without a new
+  dependency. But a horizontal pan over a vertically scrolling list has to be arbitrated
+  against that list, against the sheet dismissals, and against the horizontal poster shelves
+  elsewhere in the app. That is a gesture-architecture pass, not a screen change.
+
+The brief for the micropass was to implement this **only if it were genuinely trivial with
+existing primitives and required no native or runtime change**. It is neither.
+
+**Intended behaviour when it is built.** A swipe moves one segment in that direction and
+stops at the ends — no wrap-around, because wrapping makes the last segment feel like a
+mistake. The segmented control stays, stays authoritative, and animates with the gesture.
+`viewState` — the filters, the sort and the List/Wall choice — is shared across segments
+today and must stay shared, so a swipe changes which list is shown and nothing about how it
+is shown. Unranked appearing or disappearing must not move the reader.
+
+**Revisit when.** There is a reason to touch the gesture layer anyway, and a tranche that
+can carry new native binaries.
+
+**Depends on.** A pager primitive (a native dependency) or a Reanimated pager written here ·
+nested-gesture arbitration against `FlashList` and the poster shelves · a decision on
+mounting neighbours versus rendering them lazily.
+
+---
+
+## 17. Recommendation freshness beyond a session's own memory
+
+**What it is.** The parts of recommendation freshness that in-memory session exposure does
+*not* buy. **The seed shipped** in the 2026-08-20 Preview micropass and **session exposure
+shipped in the micropass after it** — see `docs/architecture/recommendations.md` §7 — so
+this entry is only the remainder.
+
+**What shipped, second pass (2026-08-20).** The seed alone turned out not to be enough,
+and the founder's physical test is the record of it: two consecutive Refreshes kept eight of
+the nine visible posters and changed their order. A seed perturbs a *ranking*, and nothing
+in the pipeline knew which titles were already on screen, so turnover was a by-product of
+how far a random draw happened to move a title. **The session now remembers what it has
+presented** and the ranker prefers what it has not — held in module memory, reset by a fresh
+process, with no schema and no write path. Measured turnover in the first visible nine is
+seven of nine, with up to two score-anchors retained.
+
+**What shipped, first pass.** Scoring and arrangement were split. The query caches the scored
+candidates; the wall is drawn from them by seeded sampling over a bounded high-quality pool
+(Gumbel top-k, temperature 0.12, pool of three times the wall). A visit is stable, a new
+launch is a new **seed**, and an explicit Refresh control changes the seed without a
+network call. A new seed is almost always a new arrangement rather than necessarily one —
+a zero-spread pool returns strict order for every seed.
+
+**What the pool bound does and does not promise.** The one guarantee is that **sampling
+cannot promote a title from outside the pool**. It is *not* a promise that the wall is
+drawn only from the top sixty, *not* a promise that the same titles are chosen, and *not*
+a promise that the wall stays the same length — the ceilings intersect and are spent in the
+order they are met. Reviews 29, 29b and 29c each found a phrasing here claiming one of
+those three. The measured cost of the last (nil on the five pool shapes the suite tests), the
+rejected truncate-to-pool alternative, and the tests that pin all four propositions down —
+including the false ones — are in `docs/architecture/recommendations.md` §7.
+
+**What it does not do, and is deferred:**
+
+- **No memory of what has already been shown *across* sessions**, which is the headline
+  remainder and is deliberately preserved here. Exposure lives in module memory and dies
+  with the process, so two launches can draw overlapping walls and a reader who refreshed
+  through the pool yesterday starts from the top today. A durable impression ledger is a
+  schema and a write on every impression — the same ledger PRD §13's *Impression history*
+  guardrail and the cooldown rules it specifies both need, and the same one award
+  notifications wait on (§5). The micropass brief ruled out adding schema for
+  recommendation history, twice, on purpose.
+- **No cooldown, and no "repeatedly ignored" signal.** Within a session a title is
+  preferred-against once it has been shown; nothing distinguishes a title the reader
+  scrolled past four times from one they never reached, and nothing carries either fact
+  into tomorrow. PRD §13 specifies both.
+- **No novelty or recency term in the score.** Freshness is presentational. A title that
+  entered the catalogue yesterday is not favoured over one that has been there a year.
+- **No exploration feedback.** Nothing learns from whether an explored title was opened,
+  saved or ignored, so the temperature is a constant rather than something that adapts.
+- **The candidate pool itself does not widen.** The same anchors return the same `similar`
+  lists for weeks (`media_cache`), so refreshing rearranges a fixed set. Genuinely new
+  candidates need more anchors, a second candidate source, or a shorter cache life.
+
+**Revisit when.** The beta produces evidence about whether *session* memory was enough.
+The signal to watch for is a reader who says the recommendations feel familiar **on opening
+the app** rather than on pressing Refresh — that is the cross-session gap and cannot be
+closed without the ledger. A complaint about Refresh itself would mean something regressed,
+not that this entry came due.
+
+**Depends on.** A decision on impression logging and its privacy cost — a durable record
+of what somebody was *shown* is a new category of stored data and PRD §22 has no row for it
+· a candidate-source or cache-lifetime change, since a deeper pool is what a cross-session
+ledger would need to draw from · PRD §13's explainability rule, which any novelty term has
+to stay inside.
+
+---
+
+## 18. Recommendation Engine V2
+
+**What it is.** The recommender rebuilt on evidence rather than on the one signal it has
+today. What ships for the friend beta scores candidates from a single reader's ranking
+history and arranges them freshly (§17); V2 is the version that also knows what a reader
+has *watched*, what people with the same taste liked, and what this reader has already been
+shown.
+
+**Founder decision, 2026-08-20: current quality is accepted for the initial friend beta and
+tuning stops here.** That is not a claim the recommendations are good. It is a claim that
+the next honest improvement cannot be made from the desk — every lever below needs
+behaviour from more than one account, and tuning weights against a single founder's
+collection produces a model fitted to one person that has to be thrown away the first week
+real accounts arrive.
+
+**The three families of signal, none of them built:**
+
+*Content.* Ranking history beyond the anchors currently used · watch history, including
+what was logged and never ranked · the Watchlist as a statement of intent rather than as a
+list to exclude · genre affinity learnt rather than assumed · cast and crew, which is the
+signal a film person would name first and the app already stores · original language ·
+era. Today's ranker reaches for `similar` off a handful of anchors and stops.
+
+*Collaborative.* Taste Match already exists and is already computed between two accounts —
+it is a **display** value with no path into the ranker. V2 turns it into a weight: the
+rankings of highly matched users, what similar users watched, what they liked and
+explicitly what they **disliked** — a Not-for-me from three close matches is the strongest
+negative signal the product will ever have, and nothing consumes it. Following is a signal
+here too, but a weaker and more careful one: people follow friends they do not share taste
+with, so it informs and must not dominate.
+
+*Novelty.* A durable exposure ledger, so freshness survives a process restart ·
+cross-session turnover · a deliberate exploration term, so the wall is not only the safest
+nine titles. §17 is the presentational half of this and shipped; the persistent half is
+here because it is the half that needs schema.
+
+**Why not now.** Every family above is a *ratio* problem — how much a co-viewer's dislike
+should outweigh a genre match — and a ratio cannot be chosen against one account's data.
+Collaborative filtering with one user is not a cold start, it is an empty one. The beta
+exists to produce exactly this: 30–60 people ranking heavily against overlapping
+catalogues, which is the smallest dataset any of it can be fitted to.
+
+**Revisit when.** The friend beta has run long enough that Taste Match between real pairs
+is stable rather than swinging on every new ranking, and there is enough overlap for a
+"people who ranked this Loved also ranked" query to return more than noise.
+
+**Depends on.** The impression ledger and its privacy row in PRD §22 (§17) · PRD §13's
+explainability rule, which every added term still has to stay inside — a recommendation
+the app cannot say a sentence about does not ship, however well it scores · analytics that
+can tell an improvement from a change, which today's event set cannot.
+
+---
+
+## 19. Rewatch and repeated viewing history
+
+**What it is.** A title watched more than once, recorded as more than once. Today the
+collection holds one `user_media` row per title and one canonical ranking, and a second
+viewing has nowhere to go: re-logging a film overwrites the date it carries rather than
+adding to it, and the interface has no way to say "again".
+
+**Why it matters more than it sounds.** Rewatching is not an edge case in film culture, it
+is most of what affection looks like — and Bingd is a product about what somebody loves.
+An app that cannot tell a film seen once from one seen every year is missing the strongest
+statement its own data could make.
+
+**The shape it should take:**
+
+- **Many view events, one canonical rank.** Multiple legitimate watch/log events per title,
+  while `rankings` keeps exactly one row and one position. The invariant that a title holds
+  at most one place in a list is load-bearing across the whole ranking system and does not
+  move.
+- **A summary in the interface** — "Watched 3 times", on the title page and in the
+  collection — which is the whole feature as far as most readers are concerned.
+- **Optional movement over rewatches.** A film that climbs on second viewing is a real and
+  interesting thing to show; whether it is worth a chart or a sentence is a design question
+  that is not answered yet.
+- **Legitimate rewatch Feed events.** A rewatch is genuine activity and should be able to
+  appear, with its own verb rather than borrowing "watched" and reading as a duplicate.
+- **A rewatch is distinguished from a retry.** This is the hard half and the reason it is
+  not a small feature. The write path is idempotent by operation id precisely so that a
+  lost response does not become a second log; a real rewatch is a second log that *must*
+  count. The two are indistinguishable at the row level and are told apart only by intent,
+  so a rewatch needs its own explicit act and its own operation id issued at the moment the
+  user asks for one — never by a client retrying anything.
+- **The ranking RPCs need that operation id too, and do not have one.** `rank_start`,
+  `rank_answer` and `rank_rebucket` take no operation id, so nothing on the server can
+  recognise a replay: a `rank_answer` that finalises and loses its reply is reported to the
+  reader as a failure over a ranking that exists. Two accidental refusals were covering
+  for that — `rank_start`'s 23505 and `rank_rebucket`'s 22023 — and neither stands in
+  front of a re-rank inside the same bucket, which is why independent review 30 raised it
+  when that path was built. The beta answer is honest copy: the sheet says the outcome is
+  unknown and names checking the collection, rather than claiming nothing happened. The
+  real answer is a `_claim_operation` on the ranking functions, which is a migration and is
+  the same mechanism this entry needs.
+
+**No beta implementation.** Nothing about this ships for the friend beta. It needs schema
+(a view-event table, or a durable log the collection reads through), a decision about what
+re-ranking a rewatch means, and Feed vocabulary — none of which is a change to make to a
+build already installed on beta devices.
+
+**Revisit when.** After the beta reports what people actually did: the signal is somebody
+re-logging a title they have already logged, which the current write path quietly absorbs
+and which is worth counting before the feature is designed against a guess.
+
+**Depends on.** A view-event schema · the Feed's verb set (`features/feed/activity.ts`)
+· the idempotency contract in `lib/write-outcome.ts`, which this must extend rather than
+weaken.
 
 ---
 

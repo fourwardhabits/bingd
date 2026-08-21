@@ -26,7 +26,15 @@ export const layout = {
   minTapTarget: 44,
   buttonMinHeight: 48,
   aspect: { poster: 2 / 3, backdrop: 16 / 9 },
-  avatar: { xs: 24, sm: 32, md: 44, lg: 72 },
+  /**
+   * `xxs` is the feed row's actor chip, overlaid on the corner of a 40pt poster
+   * (`ActivityRow`). It is deliberately below the 24pt floor the standalone sizes
+   * observe: a circle here is read against artwork it sits on rather than on its
+   * own, and at 24 it covered three fifths of the poster's width and stopped
+   * reading as a stamp. `Avatar` drops to one initial below `xs` for the same
+   * reason — two will not fit.
+   */
+  avatar: { xxs: 18, xs: 24, sm: 32, md: 44, lg: 72 },
   icon: { sm: 20, md: 24, lg: 28 },
   control: { searchFieldHeight: 40, chipHeight: 32, headerHeight: 44 },
   row: { dense: 56, media: 76, ordinalColumn: 28 },
@@ -123,5 +131,4 @@ export const posterRadius = (size: PosterSize) => {
 };
 
 /** Shadows on small posters produce visual noise in a list. */
-export const posterHasShadow = (size: PosterSize) =>
-  poster[size].width >= poster.md.width;
+export const posterHasShadow = (size: PosterSize) => poster[size].width >= poster.md.width;

@@ -136,6 +136,17 @@ describe('the profile controls', () => {
     expect(view.queryByText('Edit Profile')).toBeNull();
   });
 
+  it('offers Invite friends beneath the pair', async () => {
+    // The own profile is the one page about the person doing the inviting, so it is
+    // the entry point for the invite link — `/u/[username]` deliberately has no such
+    // control (see PublicProfileScreen.test.tsx).
+    const view = await open();
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Invite friends' })).toBeTruthy(),
+    );
+  });
+
   it('keeps the bell in its corner and puts settings beside it as a gear', async () => {
     const view = await open();
 
@@ -304,6 +315,43 @@ describe('the shape of the page', () => {
 
     const order = found.map((piece) => piece.at);
     expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('puts the Watchlist immediately after Top ranked', async () => {
+    /**
+     * **The founder's ordering decision, asserted as an ordering.** Top ranked says what
+     * this person loves; Watchlist says what they want to watch next, and the second is
+     * the one somebody else can act on — "I want to watch that too" is a reason to message
+     * them. Anything between the two would break that reading, so the adjacency is the
+     * test rather than mere presence.
+     */
+    mockTables.watchlist = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'w1',
+        created_at: '2026-08-19T10:00:00Z',
+        media_items: { ...movie('w1', 'Sicario'), season_number: null, parent: null },
+      },
+    ];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('WATCHLIST')).toBeTruthy());
+
+    // `SectionHeader` upper-cases, so these are the headings as they appear in the tree.
+    const found = positions(view, ['TOP RANKED', 'WATCHLIST', 'RECENT ACTIVITY']);
+    for (const piece of found) expect([piece.want, piece.at >= 0]).toEqual([piece.want, true]);
+    const [top, watchlist, activity] = found.map((piece) => piece.at);
+    expect(top).toBeLessThan(watchlist!);
+    expect(watchlist!).toBeLessThan(activity!);
+  });
+
+  it('shows no Watchlist section for an account that has saved nothing', async () => {
+    // Same rule as everywhere else on this screen: a section with nothing in it is not a
+    // section. On somebody else's profile this is also the privacy behaviour — see
+    // `ProfileWatchlist.test.tsx`.
+    const view = await open();
+    await waitFor(() => expect(view.getByText('TOP RANKED')).toBeTruthy());
+    expect(view.queryByText('WATCHLIST')).toBeNull();
   });
 
   it('keeps the bio out of the name column, where it used to wrap early', async () => {

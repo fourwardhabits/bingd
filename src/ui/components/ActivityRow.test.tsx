@@ -1,6 +1,8 @@
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, within } from '@testing-library/react-native';
 
-import { Text } from 'react-native';
+import { StyleSheet, Text, type StyleProp, type ViewStyle } from 'react-native';
+
+import { theme } from '../tokens';
 
 import { ActivityRow } from './ActivityRow';
 
@@ -62,6 +64,271 @@ describe('the sentence', () => {
 
     await fireEvent.press(view.getByLabelText('Suraj’s profile'.replace('’', "'")));
     expect(onPressActor).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Founder Feed finalization, 2026-08-20, item 1.
+ *
+ * The physical Android review found the row setting the actor on one line and the
+ * title on the next, unconditionally — which made the film read as a field of the row
+ * rather than as the object of the verb. These pin the sentence back together, and
+ * they pin the *mechanism*: one text node, no explicit break, the layout free to wrap.
+ */
+describe('the integrated sentence', () => {
+  /**
+   * The character between a title and its year.
+   *
+   * Written out rather than typed inline because it is invisible in a diff and it is
+   * the thing under test: a plain space here is a legal wrap point, and the founder's
+   * rule is that the year stays with what it dates.
+   */
+  const NBSP = ' ';
+  const withYear = (title: string, year: number) => `${title}${NBSP}(${year})`;
+
+  /**
+   * The exact characters a node renders, with no normalisation.
+   *
+   * The text queries run their matcher over *normalised* text, which folds a
+   * non-breaking space into an ordinary one. So a query cannot tell the two apart and
+   * cannot be the test for the thing under test here. Walking the tree gives the
+   * characters that actually rendered.
+   */
+  const rawText = (node: unknown): string =>
+    typeof node === 'string'
+      ? node
+      : (((node as { children?: unknown[] })?.children ?? []) as unknown[])
+          .map(rawText)
+          .join('');
+
+  it('is one sentence — actor, verb and title in a single text node', async () => {
+    const view = await render(<ActivityRow {...props} />);
+
+    // Composed across the nested runs. If the title were a sibling block again this
+    // query finds nothing, which is exactly the regression.
+    expect(view.getByText(`Suraj ranked ${withYear('Inception', 2010)}`)).toBeTruthy();
+  });
+
+  it('joins the year to the title with a space that cannot be broken', async () => {
+    // Independent review's finding, and the reason this is its own test. Nesting the
+    // year inside the title's `Text` shares the styling and the press target but not
+    // the line breaking: with an ordinary space, a title ending near the line width
+    // leaves "(1982)" stranded on a line by itself.
+    const view = await render(<ActivityRow {...props} title="Blade Runner" year={1982} />);
+
+    // The query normalises, so it is only used to find the node. The assertion is on
+    // the characters themselves.
+    const sentence = view.getByText('Suraj ranked Blade Runner (1982)');
+    expect(rawText(sentence)).toBe(`Suraj ranked ${withYear('Blade Runner', 1982)}`);
+    expect(rawText(sentence)).toContain(NBSP);
+    expect(rawText(sentence)).not.toContain('Blade Runner (1982)');
+  });
+
+  it('never breaks the line itself, however long the title is', async () => {
+    // The founder's long case. The row must let the text engine wrap it and must not
+    // insert a break of its own — an explicit "\n" is what makes a title look like a
+    // second field on a short one.
+    const view = await render(
+      <ActivityRow {...props} title="Keep Your Hands Off Eizouken!, S1" year={2020} />,
+    );
+
+    const sentence = view.getByText(
+      'Suraj ranked Keep Your Hands Off Eizouken!, S1 (2020)',
+    );
+    // The whole sentence, in one node, with no break of our own anywhere in it.
+    expect(rawText(sentence)).toBe(
+      `Suraj ranked ${withYear('Keep Your Hands Off Eizouken!, S1', 2020)}`,
+    );
+    expect(rawText(sentence)).not.toContain('\n');
+    // Wrapping is the layout's job, and it needs room to do it.
+    expect(sentence.props.numberOfLines).toBeGreaterThan(1);
+  });
+
+  it('puts a watchlist add’s clause after the title, still in one sentence', async () => {
+    const view = await render(
+      <ActivityRow
+        {...props}
+        verb="added"
+        tail="to their watchlist"
+        title="Dune"
+        year={2021}
+      />,
+    );
+
+    expect(
+      view.getByText(`Suraj added ${withYear('Dune', 2021)} to their watchlist`),
+    ).toBeTruthy();
+  });
+
+  it('names watch companions after the title, where they are grammatical', async () => {
+    // "Suraj watched with Anna Inception" is what the old ordering became once the
+    // title joined the line.
+    const view = await render(
+      <ActivityRow {...props} verb="watched" companions={['Anna']} />,
+    );
+
+    expect(
+      view.getByText(`Suraj watched ${withYear('Inception', 2010)} with Anna`),
+    ).toBeTruthy();
+  });
+
+  it('opens the title page from inside the sentence', async () => {
+    const view = await render(<ActivityRow {...props} />);
+    await fireEvent.press(view.getByText(withYear('Inception', 2010)));
+
+    expect(props.onPressTitle).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Founder Feed refinement, 2026-08-20.
+ *
+ * Two reports — "the row looks busy with a poster *and* a face" and "the subheading is
+ * shifted relative to the sentence" — that were one defect. The sentence lived in a row
+ * behind the avatar; the metadata lived in the column that row sat in. No amount of
+ * styling makes two lines share a left edge while an avatar stands in front of one.
+ *
+ * These test the *structure* rather than pixels, because the structure is what the fix
+ * is. A padding-based alignment would pass a screenshot and fail these, which is the
+ * right way round: the pad is the version that drifts the moment the avatar resizes.
+ */
+describe('the row composition', () => {
+  /** The sentence's own column, found via the sentence rather than by a test ID. */
+  const copyColumn = (view: Awaited<ReturnType<typeof render>>) =>
+    view.getByText(/Suraj ranked/).parent!;
+
+  it('sets the sentence and the metadata as siblings, on one left edge', async () => {
+    const view = await render(<ActivityRow {...props} onPressActor={jest.fn()} />);
+
+    // The same parent *node*, not merely an ancestor in common: siblings in one column
+    // share a left edge by construction, and there is then no offset to keep in step
+    // with the leading cluster by hand. Nesting either line one level deeper — which
+    // is exactly what the avatar's row did — breaks this and only this.
+    const sentence = view.getByText(/Suraj ranked/);
+    const metadata = view.getByText('148m · Sci-fi');
+    expect(metadata.parent).toBe(sentence.parent);
+  });
+
+  it('keeps the avatar out of the sentence column entirely', async () => {
+    // The regression this guards: putting the face back in front of the sentence
+    // re-indents that line and only that line, which is what the founder saw.
+    const view = await render(<ActivityRow {...props} onPressActor={jest.fn()} />);
+
+    expect(within(copyColumn(view)).queryByLabelText("Suraj's profile")).toBeNull();
+  });
+
+  it('composes the actor onto the poster as one leading object', async () => {
+    const view = await render(<ActivityRow {...props} onPressActor={jest.fn()} />);
+
+    // The poster's press target and the actor chip share a container: that container
+    // is the artwork's own box, which is what lets the chip sit in its corner — and
+    // what keeps the chip's touches inside a parent Android will deliver them from.
+    const lead = view.getByLabelText('Inception, 2010, 148m · Sci-fi').parent!;
+    expect(within(lead).getByLabelText("Suraj's profile")).toBeTruthy();
+  });
+
+  it('still opens the profile from the chip, not only from the name', async () => {
+    const onPressActor = jest.fn();
+    const view = await render(<ActivityRow {...props} onPressActor={onPressActor} />);
+
+    const lead = view.getByLabelText('Inception, 2010, 148m · Sci-fi').parent!;
+    await fireEvent.press(within(lead).getByLabelText("Suraj's profile"));
+    expect(onPressActor).toHaveBeenCalled();
+  });
+
+  it('holds the alignment when the sentence wraps and the metadata does not', async () => {
+    // The founder's long case. A wrapped sentence must not move the line under it.
+    const view = await render(
+      <ActivityRow
+        {...props}
+        title="Keep Your Hands Off Eizouken!, S1"
+        year={2020}
+        verb="added"
+        tail="to their watchlist"
+        companions={['Anna']}
+        metadata="TV-14 · 12 episodes · Animation · Comedy"
+      />,
+    );
+
+    const sentence = view.getByText(/Suraj added/);
+    const metadata = view.getByText('TV-14 · 12 episodes · Animation · Comedy');
+    expect(metadata.parent).toBe(sentence.parent);
+  });
+
+  /**
+   * Read off the render rather than restated from the stylesheet, so the numbers here
+   * cannot agree with a copy of themselves while the component has moved on.
+   */
+  const styleOf = (node: unknown) =>
+    (StyleSheet.flatten((node as { props: { style?: StyleProp<ViewStyle> } }).props.style) ??
+      {}) as ViewStyle;
+
+  it('keeps the chip and its whole touch box inside the poster', async () => {
+    // The Android rule this exists for: touches outside a parent's bounds are not
+    // delivered. A chip that overhangs the corner — or one grown past the artwork by
+    // a later bump to `avatar.xxs` — is a profile link that works in review on iOS and
+    // silently does not on the device. Containment is the fix and this is its guard.
+    const view = await render(<ActivityRow {...props} onPressActor={jest.fn()} />);
+
+    const chip = view.getByLabelText("Suraj's profile");
+    const chipStyle = styleOf(chip);
+    const ringStyle = styleOf(chip.children[0]);
+    const poster = styleOf(
+      view.getByLabelText('Inception, 2010, 148m · Sci-fi').children[0],
+    );
+
+    // Anchored to the corner rather than floated somewhere near it.
+    expect(chipStyle.position).toBe('absolute');
+    expect(chipStyle.right).toBe(0);
+    expect(chipStyle.bottom).toBe(0);
+
+    // The face, the Paper ring around it, and the padding that makes the corner
+    // tappable — all of it has to fit the artwork in both axes.
+    const ring = theme.layout.avatar.xxs + 2 * Number(ringStyle.padding);
+    const width = ring + Number(chipStyle.paddingLeft) + Number(chipStyle.paddingRight);
+    const height = ring + Number(chipStyle.paddingTop) + Number(chipStyle.paddingBottom);
+
+    expect(width).toBeLessThanOrEqual(Number(poster.width));
+    expect(height).toBeLessThanOrEqual(Number(poster.height));
+
+    // And it is not smaller than the target this control had before the overlay: a
+    // 24pt avatar with 4pt of hitSlop all round. 44 cannot be reached inside a 40pt
+    // poster, but going backwards from what shipped is a regression rather than a
+    // constraint — which is what independent review caught at 28.
+    const wasBefore = theme.layout.avatar.xs + 2 * theme.space[1];
+    expect(width).toBeGreaterThanOrEqual(wasBefore);
+    expect(height).toBeGreaterThanOrEqual(wasBefore);
+  });
+
+  it('lets the poster take its own touches when the actor has no profile to open', async () => {
+    /**
+     * The defect independent review found, and it was not a corner case: neither
+     * profile screen passes `onPressActor` at all, and the feed omits it on the
+     * viewer's own rows.
+     *
+     * A `Pressable` with `disabled` is not inert. It declines the responder, and
+     * React Native then negotiates *up* the ancestor chain — never sideways to the
+     * sibling painted underneath, which is what the poster is. So a disabled chip
+     * swallows the touches over its corner instead of passing them down, and a third
+     * of the artwork quietly stops opening the title.
+     */
+    const onPressTitle = jest.fn();
+    const view = await render(
+      <ActivityRow {...props} onPressTitle={onPressTitle} onPressActor={undefined} />,
+    );
+
+    const lead = view.getByLabelText('Inception, 2010, 148m · Sci-fi').parent!;
+    // One child is the poster's own Pressable; the chip is the other, and with no
+    // profile to open it must be decoration that touches pass straight through.
+    const chip = (lead.children as unknown[]).find(
+      (child) => styleOf(child).position === 'absolute',
+    );
+
+    expect(chip).toBeTruthy();
+    expect((chip as { props: { pointerEvents?: string } }).props.pointerEvents).toBe('none');
+    // And it is not a control at all, so there is nothing for a screen reader to
+    // announce twice — the actor is named in the sentence beside it.
+    expect(within(lead).queryByLabelText(/profile/)).toBeNull();
   });
 });
 

@@ -54,6 +54,18 @@ jobs:
       # and required to go red.
       - run: npm run test:web:mutants
 
+      # The release lanes. Cheap, static, and in the *pull request* gate deliberately:
+      # what it protects is every change to eas.json and config/backends.cjs, and those
+      # arrive on ordinary pull requests rather than on release branches. Independent
+      # review 28 made this point — a lane assertion that only runs at release time is a
+      # lane assertion that runs after the mistake has been merged.
+      #
+      # It asserts the lane-to-backend mapping directly (URL parsing, cross-lane swaps,
+      # the empty production lane, the local escape hatch) and that eas.json's four
+      # profiles each declare their own lane, a real EAS environment and a distinct
+      # channel.
+      - run: npm run test:config
+
       # Edge Functions are Deno and are excluded from tsconfig and eslint, so the
       # steps above cannot see them at all. Without this, tmdb-adapter is checked by
       # nothing until a deploy fails. Deno is a devDependency rather than a setup

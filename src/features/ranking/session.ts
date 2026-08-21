@@ -24,6 +24,22 @@ const CODES = {
   /** The title already has a position, so `rank_start` refuses (api.md §8, BG409). */
   alreadyRanked: '23505',
   suspended: '42501',
+  /**
+   * The transaction was rolled back to break a conflict with a concurrent one.
+   *
+   * Listed here because `classifyWrite` reads every SQLSTATE it does not know as
+   * `unknown`, which is the right default — an unrecognised code could have committed.
+   * This one could not: Postgres aborts the transaction that raises it, so nothing it
+   * did survives. Left in the default it would set `changed`, and the sheet would tell
+   * a reader their ranking may have landed when it certainly did not — the exact
+   * mis-statement the “Not sure that landed” branch exists to avoid making.
+   *
+   * Handled here rather than in `classifyWrite`, which every write in the app shares.
+   * Independent review 30b raised it against this path; widening the shared refusal set
+   * days before a beta would change reconciliation for the collection writers too, and
+   * that is not this run's fence.
+   */
+  serializationFailure: '40001',
   unauthenticated: '28000',
 } as const;
 
@@ -152,6 +168,15 @@ const fail = (error: { code?: string; message: string }): SessionFailed => {
       };
     case CODES.unauthenticated:
       return { state: 'failed', message: 'Your session expired. Sign in again.', restart: false };
+    case CODES.serializationFailure:
+      // Definitely nothing written, and the session row is untouched — so the answer is
+      // to ask again, not to start over. The database's own wording names a transaction
+      // isolation level, which is not a sentence for a person.
+      return {
+        state: 'failed',
+        message: 'Something else was changing your rankings at that moment. Try again.',
+        restart: false,
+      };
     default:
       return { state: 'failed', message: error.message, restart: false, ...ambiguous };
   }
@@ -223,6 +248,43 @@ export const rankRebucket = (mediaItemId: string, bucket: BucketId) =>
     { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket] },
     mediaItemId,
   );
+
+/**
+ * Ranks an already-ranked title **again, inside the band it is already in**.
+ *
+ * The founder reproduced this on the device: a Loved title, Change your rating, Loved
+ * — and nothing happened. `LogSheet` read “same bucket” as “no change” and returned
+ * before anything ran. It is not no change: a reader who re-opens a rating they have
+ * already given is saying the *position* is wrong, which is the one thing re-selecting
+ * the bucket ought to fix.
+ *
+ * `rank_rebucket` cannot do it. It raises 22023 on a bucket that is not moving, by
+ * design — it exists to change a band. So this composes the two calls it would have
+ * made anyway, both granted to `authenticated` since the first migration and both
+ * already called from this client: drop the position, then open a fresh session in the
+ * same band. The server recomputes the band bounds inside `rank_start`, so the title
+ * re-enters comparison against its own bucket exactly as a rebucket does against the
+ * new one. The bucket never moves; the ordinal and the score may.
+ *
+ * **Two calls rather than one transaction, and that is the honest cost.** A rebucket is
+ * atomic and this is not: an unrank that lands and a `rank_start` that does not leaves
+ * the title logged, in the same bucket, without a position — which is a state the app
+ * already has a name and a queue for (`unranked_queue`), reachable from the collection.
+ * The alternative was a migration to relax that 22023, and a beta already installed on
+ * two devices is not the moment to move a ranking function.
+ *
+ * `P0002` from the unrank is not an error here. It means the title lost its position
+ * between the screen reading it and this call — which is the state this call was
+ * trying to reach, so it goes on and starts the session.
+ */
+export const rankAgain = async (
+  mediaItemId: string,
+  bucket: BucketId,
+): Promise<SessionStep> => {
+  const { error } = await supabase.rpc('rank_unrank', { p_media_item_id: mediaItemId });
+  if (error && error.code !== CODES.notFound) return fail(error);
+  return rankStart(mediaItemId, bucket);
+};
 
 export const rankAnswer = (sessionId: string, winnerId: string, subjectId: string) =>
   call('rank_answer', { p_session_id: sessionId, p_winner: winnerId }, subjectId);

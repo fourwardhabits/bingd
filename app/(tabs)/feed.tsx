@@ -8,6 +8,7 @@ import { unreadCount, useNotifications } from '@/features/notifications/use-noti
 import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
+import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
@@ -149,8 +150,11 @@ export default function FeedScreen() {
    * sheet sends to a named friend *and* ends in "Share off Bingd", so the off-platform
    * path survives one tap further in.
    *
-   * A series is not offered, for the same reason it cannot be ranked (PRD §10) — though
-   * nothing in the feed is a series today, because feed events are rankings and logs.
+   * A series is not offered, for the same reason it cannot be ranked (PRD §10). That
+   * guard used to be theoretical — every feed event was a ranking or a log, and neither
+   * can name a series. `watchlist_added` can: `set_watchlist` is the one collection
+   * write that accepts a whole show, so "Suraj added Severance to their watchlist" is a
+   * real row and the guard is now load-bearing rather than defensive.
    */
   const openRecommend = (event: FeedItem) => {
     if (!event.mediaItemId || event.kind === 'series') return;
@@ -265,7 +269,8 @@ export default function FeedScreen() {
                   ? undefined
                   : () => router.push(`/u/${event.actorUsername}`)
               }
-              verb={VERB[event.type]}
+              verb={verbFor(event.type)}
+              tail={tailFor(event.type)}
               companions={event.companions}
               title={event.title}
               year={event.year}
@@ -374,12 +379,6 @@ export default function FeedScreen() {
   }
 }
 
-const VERB: Record<FeedItem['type'], string> = {
-  title_ranked: 'ranked',
-  title_logged: 'watched',
-  season_completed: 'finished',
-};
-
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   pad: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
@@ -401,13 +400,21 @@ const styles = StyleSheet.create({
   },
 });
 
-/** `148m · Sci-fi`, the same line the compact row uses everywhere else. */
+/**
+ * `PG-13 · 148m · Science Fiction · Adventure`.
+ *
+ * The rules live in `features/feed/activity.ts` so that the three surfaces rendering
+ * an activity cannot drift apart on them. This is the adapter from a `FeedItem`,
+ * which has already resolved a season's inherited genres and rating.
+ */
 function metadataFor(event: FeedItem) {
-  const parts = [
-    event.runtimeMinutes ? `${event.runtimeMinutes}m` : null,
-    event.genres[0] ?? null,
-  ].filter(Boolean);
-  return parts.length ? parts.join(' · ') : null;
+  return activityMetadata({
+    kind: event.kind,
+    genres: event.genres,
+    certification: event.certification,
+    runtimeMinutes: event.runtimeMinutes,
+    episodeCount: event.episodeCount,
+  });
 }
 
 function relativeTime(value: string) {

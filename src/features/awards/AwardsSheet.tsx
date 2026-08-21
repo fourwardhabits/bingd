@@ -166,12 +166,38 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space[3],
     gap: theme.space[1],
   },
-  list: { flexGrow: 0 },
-  listContent: { paddingBottom: theme.space[2] },
+  /**
+   * Bounded by the space the sheet actually has, not by what twenty rows measure.
+   *
+   * `flexGrow: 0` alone was the bug the founder saw as Awards content running into the
+   * Done footer. Flex children in React Native do not shrink unless told to, so a list
+   * taller than the sheet’s `maxHeight: '90%'` kept its full measured height and pushed
+   * the foot below the sheet’s bottom edge — and every award track ships, so the list
+   * is always taller than the sheet on a phone.
+   *
+   * `flexShrink: 1` rather than the `maxHeight: 380` its sibling sheets use: the other
+   * lists are drill-downs that should stay small next to their heading, while this one
+   * is the sheet's whole content and should take the room that is left. Grow stays off
+   * so a short list — the loading skeleton, the error state — does not stretch.
+   */
+  list: { flexGrow: 0, flexShrink: 1 },
+  // A full gutter, so the last award clears the sticky Done rather than touching it.
+  listContent: { paddingBottom: theme.space[4] },
   state: {
     paddingHorizontal: theme.layout.gutter,
     gap: theme.space[3],
     paddingVertical: theme.space[2],
   },
-  foot: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3] },
+  /**
+   * Sticky, and now visibly its own band: the hairline is what tells the reader the
+   * list above it is scrolled rather than ended. The sheet itself owns the space below
+   * this — see `Sheet`, which guarantees a gutter under every footer whatever the
+   * device reports as its bottom inset.
+   */
+  foot: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.border.hairline,
+  },
 });

@@ -209,11 +209,26 @@ alter table media_items
 
 create index media_items_search   on media_items using gin (search_vec);
 create index media_items_sort_key on media_items (sort_key text_pattern_ops);
+
+-- The two scalars the metadata line is made of. Columns rather than facets for the
+-- reason 20260817000900 gives: each is a short value rendered beside the year and the
+-- runtime, which are columns, so a facet would make the line wait on a second query.
+alter table media_items
+  -- 20260817000900. The **US** certification: PG-13 from a movie's release_dates,
+  -- TV-MA from a series' content_ratings. Null where TMDB publishes none, which is
+  -- common. Never a fabricated NR.
+  add column certification text,
+  -- 20260820000400. Seasons only. From the per-season episode_count TMDB returns on
+  -- the series detail, or from counting the episodes on a direct season enrichment.
+  -- Null, never zero: an unaired season has no count rather than a count of none.
+  add column episode_count integer;
 ```
 
 One table for movies, series, and seasons (AD-1). Seasons carry a `parent_id` to their series. **Only `movie` and `season` rows are ever rankable** — series exist for browsing and grouping, and PRD §10 forbids ranking a whole series.
 
 The rankable category is derived, not stored: `movie` → `movies`, `season` → `tv_seasons`.
+
+**A season row is descriptively thin, and that is TMDB's shape rather than an oversight.** `tmdb_upsert_seasons` writes no `genres`, no `original_language` and no `certification`, because TMDB publishes all three on the *series*. They are resolved at read time by `src/lib/media-metadata.ts` — own value first, parent series second, absent stays absent — rather than copied onto every season row, which would need a backfill and a re-run on every re-enrichment. `episode_count` is the deliberate exception: it is the one descriptive field that is genuinely the season's own, and there is nothing to inherit it from, since a series' `runtime_minutes` is the length of a single episode.
 
 ### Provenance — added 2026-08-13
 
@@ -537,6 +552,33 @@ The primary key on `reactions` enforces PRD §14's one-reaction-per-user rule at
 `payload` on `feed_events` holds a denormalized snapshot — the position at the time of ranking, the bucket, the tagged users. Denormalizing here is deliberate: a feed item should show what was true when it happened, and re-deriving a historical position from current data would be both expensive and wrong.
 
 Feed reads use `can_view_profile` against `actor_id` (AD-6).
+
+### `watchlist_added`, and the two lifetimes a feed event can have — `20260820000300`
+
+Adding a title to the watchlist writes an event (PRD §14). Three things about it are worth stating here because they are the contract a future event type will be read against.
+
+**It is written inside `set_watchlist`, in the same transaction as the `watchlist` row.** `feed_events` has no insert policy and never has; every event in this schema comes from a `security definer` function that authorised the caller first. Two writes would be two failure modes — a committed row with no event is an add nobody saw, an event with no row is a claim about a watchlist that does not hold it — and the operation ledger's idempotency only covers a writer it is inside of.
+
+**Uniqueness is per type, by partial index:**
+
+```sql
+create unique index feed_events_watchlist_once
+  on feed_events (actor_id, media_item_id)
+  where type = 'watchlist_added';
+```
+
+Partial is the whole point. `title_ranked` must stay free to repeat — `_rank_finalize` writes a new one on every rerank and rebucket, and `20260817001100` reads the latest of many — while `watchlist_added` is one per pair. The insert repeats the predicate on its conflict target so Postgres can infer the index; without that it raises rather than choosing the wrong one, the same hazard `20260817000900` records.
+
+**Two lifetimes.** A feed event is either a claim about *current state* or a record of a *past act*, and which one it is decides whether a state change should delete it:
+
+| | Deleted when the state moves | Why |
+|---|---|---|
+| `title_ranked`, `title_logged`, `season_completed` | **Yes** — `unlog` removes them (`20260818000100`) | Each asserts the title is in the collection. Removal makes that a false claim about a person, and it is the one the app makes loudest. |
+| `watchlist_added`, `list_added` | **No** | Neither asserts collection state. "Added it to their watchlist" is past tense and stays true after a remove, a watch or an unlog — and deleting it would cascade away other people's reactions and comments, ending a conversation because its subject changed their mind. |
+
+So `_leave_watchlist` deleting the row when a title is watched leaves the activity standing, which is the intended outcome and required no code — only that nothing was added to remove it. A re-add after a remove restores the row and inherits the original event.
+
+**Nothing was added to the read path**, which is what makes the privacy argument short: `feed_events_read` is type-independent, so the event is visible to exactly the accounts that may see the actor's rankings — and `20260820000200` set `watchlist`'s own select policy to the same visibility. `reactions_read`, `add_comment` and `set_reaction` all key on the event id and never on `type`, so a new type inherits the social controls by construction.
 
 ---
 

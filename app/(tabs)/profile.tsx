@@ -6,13 +6,16 @@ import { Alert, RefreshControl, ScrollView, Share, StyleSheet, View } from 'reac
 import { useCurrentProfile } from '@/features/auth';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
+import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { useReactions, useSetReaction, REACTION_GLYPH } from '@/features/feed/use-reactions';
 import { useFeed } from '@/features/feed/use-feed';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { GoalsSection } from '@/features/goals/GoalsSection';
+import { InviteFriendsButton } from '@/features/profile/InviteFriendsButton';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
+import { ProfileWatchlist } from '@/features/profile/ProfileWatchlist';
 import { TopRanked } from '@/features/profile/TopRanked';
 import { useProfileStats } from '@/features/profile/use-public-profile';
 import { posterUri } from '@/lib/images';
@@ -131,7 +134,7 @@ export default function ProfileScreen() {
           }}
           controls={
             /**
-             * Share Profile and Bingd Awards, in that order and nothing else.
+             * Share Profile and Bingd Awards in that order, then Invite friends.
              *
              * Share Profile is what a profile is *for*: it is the thing you hand to
              * somebody so they can follow you, and the one action that does that
@@ -147,13 +150,24 @@ export default function ProfileScreen() {
              * that is meant to be tempting rather than on the one people already know
              * how to find.
              */
-            <View style={styles.controls}>
-              <View style={styles.control}>
-                <Button label="Share Profile" kind="secondary" onPress={() => void shareProfile()} />
+            <View style={styles.controlStack}>
+              <View style={styles.controls}>
+                <View style={styles.control}>
+                  <Button
+                    label="Share Profile"
+                    kind="secondary"
+                    onPress={() => void shareProfile()}
+                  />
+                </View>
+                <View style={styles.control}>
+                  <Button label="Bingd Awards" onPress={() => setAwardsOpen(true)} />
+                </View>
               </View>
-              <View style={styles.control}>
-                <Button label="Bingd Awards" onPress={() => setAwardsOpen(true)} />
-              </View>
+              {/* Under the pair, full width, outlined like Share: inviting somebody is
+                  sharing pointed at a person who is not on Bingd yet. Own profile only —
+                  `/u/[username]` deliberately does not render this, because an invite is
+                  from the signed-in person and that page is about somebody else. */}
+              <InviteFriendsButton />
             </View>
           }
         />
@@ -167,6 +181,10 @@ export default function ProfileScreen() {
         />
 
         <TopRanked userId={profile.id} onPressTitle={(id) => router.push(`/title/${id}`)} />
+
+        {/* Immediately after Top Ranked, and that order is the product decision rather
+            than a layout one: what somebody loves, then what they want to watch next. */}
+        <ProfileWatchlist userId={profile.id} onPressTitle={(id) => router.push(`/title/${id}`)} />
 
         <View style={styles.section}>
           <SectionHeader title="Recent activity" />
@@ -187,10 +205,23 @@ export default function ProfileScreen() {
                 key={event.id}
                 actorName={event.actorName}
                 actorAvatarUri={event.actorAvatarUri}
-                verb={event.type === 'title_logged' ? 'watched' : 'ranked'}
+                // The shared vocabulary, not a local guess. This line used to read
+                // `type === 'title_logged' ? 'watched' : 'ranked'`, which called a
+                // finished season "ranked" here and "finished" in the feed — one
+                // event saying two things on two screens.
+                verb={verbFor(event.type)}
+                tail={tailFor(event.type)}
+                companions={event.companions}
                 title={event.title}
                 year={event.year}
                 posterUri={posterUri(event.posterPath)}
+                metadata={activityMetadata({
+                  kind: event.kind,
+                  genres: event.genres,
+                  certification: event.certification,
+                  runtimeMinutes: event.runtimeMinutes,
+                  episodeCount: event.episodeCount,
+                })}
                 score={event.score}
                 bucket={event.bucket}
                 note={event.note?.text ?? null}
@@ -262,4 +293,6 @@ const styles = StyleSheet.create({
   // thing and equal weight is what stops the fill reading as the only real control.
   controls: { flexDirection: 'row', gap: theme.space[2] },
   control: { flex: 1 },
+  // The pair, then Invite friends beneath it, at the same rhythm the pair keeps.
+  controlStack: { gap: theme.space[2] },
 });

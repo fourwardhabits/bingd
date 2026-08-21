@@ -6,43 +6,59 @@ import { SectionHeader } from './SectionHeader';
 import { Text } from './Text';
 
 export type ScoresSectionProps = {
-  /** The mean over the accounts this viewer follows. One eligible rating is enough. */
-  following: { score: number | null; ratingCount: number } | null;
   /** The app-wide mean, withheld below the sample size the server sets. */
   bingd: { score: number | null; ratingCount: number } | null;
+  /** The mean over the accounts this viewer follows. One eligible rating is enough. */
+  following: { score: number | null; ratingCount: number } | null;
 };
 
-/** Said the same way in both columns, and it is the whole of the empty state. */
+/** Said the same way in both units, and it is the whole of the empty state. */
 const NOT_ENOUGH = 'Not enough ratings';
 
 /**
- * Below this, or under enough font scaling, the two columns become two rows.
+ * Below this, or under enough font scaling, the two units become two rows.
  *
- * `Not enough ratings` is the widest thing either column has to hold. In half of a
- * 360pt screen, less the gutters, it wraps to two lines and still reads; below that it
- * starts breaking mid-word, and a reader who has turned type size up is exactly the
- * reader a cramped two-column row fails. Falling back to the old stacked rows costs a
- * little height on a narrow device and costs legibility nowhere.
+ * **Raised from 340 with the horizontal composition.** Each unit now spends about 56pt
+ * on the circle and the gap beside it before its words start, which the stacked version
+ * did not: the circle sat *above* the label and the full column width was the text's.
+ * At 340 that left roughly 90pt for a line whose widest content is `Not enough
+ * ratings`, and it broke mid-word.
+ *
+ * 360 is the narrowest screen in ordinary use — a small Android, an iPhone 12 mini —
+ * and at 360 each unit has about 100pt of text, where `Not enough` sets on one line and
+ * `ratings` on the next. Below that is the 320-class device the brief calls "very
+ * narrow", and it gets the full-width rows, which cost a little height and cost
+ * legibility nothing.
  */
-const TWO_COLUMN_MIN_WIDTH = 340;
+const TWO_COLUMN_MIN_WIDTH = 360;
 const TWO_COLUMN_MAX_FONT_SCALE = 1.3;
 
 /**
- * What other people thought, in the order a reader cares about them.
+ * What other people thought, in the order the founder set.
  *
- *   **Following** — what the people you chose to follow thought.
  *   **Bingd** — what everybody on the app thought.
+ *   **Following** — what the people you chose to follow thought.
  *
- * The population widens left to right and the reader's stake in it narrows, which is
- * why that is the order rather than the reverse.
+ * Bingd leads because it is the app's own number and the one that is there to be
+ * compared against; Following is the narrower, more personal reading of the same
+ * question. It ran the other way until the founder's Preview pass.
  *
- * **Two columns, since the founder's final pass.** They were two full-width rows, and
- * two rows of a circle beside two short lines is a tall block saying very little —
- * especially in the state most titles are actually in, where both say "Not enough
- * ratings". Side by side they read as one comparison, which is what they are, and the
- * section costs about half the vertical space. Below {@link TWO_COLUMN_MIN_WIDTH}, or
- * with type scaled past {@link TWO_COLUMN_MAX_FONT_SCALE}, it falls back to the rows
- * rather than forcing a column to overflow.
+ * **A circle on the left with its words beside it**, twice, side by side — the
+ * composition the founder asked for after reviewing the Preview. It was a circle
+ * *above* its words, which made each unit a tall centred stack and the pair read as two
+ * unrelated things rather than as one comparison. Horizontal, the number is where the
+ * eye lands first and the label explains it, which is the order somebody reads them in
+ * anyway.
+ *
+ * Below {@link TWO_COLUMN_MIN_WIDTH}, or with type scaled past
+ * {@link TWO_COLUMN_MAX_FONT_SCALE}, the two units become two full-width rows. Same
+ * composition, more room: the fallback is a wider line, not a different design.
+ *
+ * **The inset rule above the header** separates the scores from the actions over them.
+ * Inset to the gutter and at the hairline the rest of the app uses — a full-bleed rule
+ * would cut the page in half and announce a new screen, which this is not. It is the
+ * only structural line on the title page and it is there because scores were reading as
+ * a continuation of the action row rather than as their own block.
  *
  * **Your own score is not here, and that is the founder's correction of 2026-08-18.**
  * It leads the hero, opposite the poster, with the rank context and the Ranked control
@@ -57,46 +73,50 @@ const TWO_COLUMN_MAX_FONT_SCALE = 1.3;
  * strangers is a different thing entirely: it looks like data and is not, so the number
  * waits for the sample the server sets — ten ratings.
  *
- * **The circle is always drawn.** Founder instruction, and it does two jobs. A column
- * that grows a circle when the data arrives is a column that moves; and the empty
- * circle is itself the honest statement that there is a score-shaped hole here rather
- * than a score. What it must never do is put a faded or greyed *number* in that hole,
- * which would be a fact the page does not believe.
+ * **The circle is always drawn.** Founder instruction, and it does two jobs. A unit
+ * that grows a circle when the data arrives is a unit that moves; and the empty circle
+ * is itself the honest statement that there is a score-shaped hole here rather than a
+ * score. What it must never do is put a faded or greyed *number* in that hole, which
+ * would be a fact the page does not believe.
  *
- * **Both columns say the same four words when empty, and neither counts down.** `2 more
+ * **Both units say the same four words when empty, and neither counts down.** `2 more
  * needed` turns a reader into a spectator of a number they cannot move, and the exact
  * shortfall is a property of a config value rather than of the film.
  */
-export function ScoresSection({ following, bingd }: ScoresSectionProps) {
+export function ScoresSection({ bingd, following }: ScoresSectionProps) {
   const { width, fontScale } = useWindowDimensions();
 
   if (!following && !bingd) return null;
 
-  const sideBySide =
-    width >= TWO_COLUMN_MIN_WIDTH && fontScale <= TWO_COLUMN_MAX_FONT_SCALE;
+  const sideBySide = width >= TWO_COLUMN_MIN_WIDTH && fontScale <= TWO_COLUMN_MAX_FONT_SCALE;
 
   return (
     <View style={styles.section}>
+      {/* Decorative and inset. No accessibility role: a screen reader announcing a
+          separator here would put a word between the actions and the scores where the
+          design puts a pause. */}
+      <View testID="scores-divider" style={styles.divider} />
+
       <SectionHeader title="Scores" />
 
       {/* One container either way. The testID is how the layout test tells them apart:
           there is no role for "two columns", and reading it off the tree by shape made
           the test agree with any stack that happened to have a row in it. */}
       <View testID="scores-layout" style={sideBySide ? styles.columns : styles.rows}>
-        {following ? (
-          <Score
-            score={following.score}
-            label="Following"
-            detail={followingDetail(following.ratingCount)}
-            stacked={sideBySide}
-          />
-        ) : null}
         {bingd ? (
           <Score
             score={bingd.score}
             label="Bingd"
             detail={ratingsDetail(bingd.ratingCount)}
-            stacked={sideBySide}
+            sideBySide={sideBySide}
+          />
+        ) : null}
+        {following ? (
+          <Score
+            score={following.score}
+            label="Following"
+            detail={followingDetail(following.ratingCount)}
+            sideBySide={sideBySide}
           />
         ) : null}
       </View>
@@ -105,20 +125,23 @@ export function ScoresSection({ following, bingd }: ScoresSectionProps) {
 }
 
 /**
- * One score. The circle above its words in the two-column layout, beside them in the
- * fallback — one component either way, so the copy rules cannot differ between them.
+ * One score: the circle, then the label and the sample beside it.
+ *
+ * The composition is the same in both layouts and only the width changes, so the copy
+ * rules cannot differ between them — which they could when one layout stacked and the
+ * other did not.
  */
 function Score({
   score,
   label,
   detail,
-  stacked,
+  sideBySide,
 }: {
   score: number | null;
   label: string;
   /** How big the sample behind the number is. Only ever drawn when there is a number. */
   detail: string;
-  stacked: boolean;
+  sideBySide: boolean;
 }) {
   const badge =
     score != null ? (
@@ -128,16 +151,16 @@ function Score({
     );
 
   return (
-    <View style={stacked ? styles.column : styles.row}>
-      <View style={stacked ? styles.columnBadge : styles.rowBadge}>{badge}</View>
-      <View style={stacked ? styles.columnCopy : styles.rowCopy}>
+    <View testID="scores-unit" style={sideBySide ? styles.unit : styles.row}>
+      {badge}
+      <View style={styles.copy}>
         <Text variant="callout">{label}</Text>
         <Text
           variant="footnote"
           tone="secondary"
-          // Two lines in a half-width column, where "Not enough ratings" does not fit
-          // on one. Truncating it would leave "Not enough" on the page, which reads as
-          // the app trailing off mid-sentence.
+          // Two lines in a half-width unit, where "Not enough ratings" does not fit on
+          // one. Truncating it would leave "Not enough" on the page, which reads as the
+          // app trailing off mid-sentence.
           numberOfLines={2}
         >
           {score == null ? NOT_ENOUGH : detail}
@@ -155,7 +178,7 @@ function followingDetail(ratingCount: number): string {
 /**
  * "128 ratings".
  *
- * Only reached with a number beside it. Below the threshold the column says
+ * Only reached with a number beside it. Below the threshold the unit says
  * {@link NOT_ENOUGH} and stops: no countdown, because "2 more needed" invites the
  * reader to watch a figure they cannot move and the exact shortfall is a property of a
  * config value rather than of the film.
@@ -165,7 +188,17 @@ function ratingsDetail(ratingCount: number): string {
 }
 
 const styles = StyleSheet.create({
-  section: { paddingTop: theme.space[6], gap: theme.space[2] },
+  section: { paddingTop: theme.space[5], gap: theme.space[2] },
+
+  /** Inset to the gutter, at the app's hairline. Doubled because a single
+   *  `hairlineWidth` rounds away to nothing on some Android densities, which is the
+   *  same reason every other rule in the app is drawn this way. */
+  divider: {
+    marginHorizontal: theme.layout.gutter,
+    marginBottom: theme.space[2],
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderTopColor: theme.border.hairline,
+  },
 
   // Two equal halves. Equal rather than content-sized, so the two circles sit at
   // predictable places and the pair reads as a comparison rather than as a sentence.
@@ -174,20 +207,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     gap: theme.space[4],
   },
-  column: { flex: 1, alignItems: 'center', gap: theme.space[1] },
-  columnBadge: { alignItems: 'center' },
-  columnCopy: { alignItems: 'center', gap: 2 },
+  unit: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
 
-  // The fallback: what this section was before, unchanged.
+  // The fallback: the same unit, one per line, with the whole width to set in.
   rows: { gap: theme.space[2] },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.space[4],
+    gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
     minHeight: theme.layout.rowMinHeight,
   },
-  // Fixed, so an empty circle and a 7.4 put their labels in the same place.
-  rowBadge: { width: theme.layout.scoreBadge.md + theme.space[3], alignItems: 'center' },
-  rowCopy: { flex: 1, gap: 2 },
+
+  // `flexShrink` rather than `flex: 1`, so the text yields to the circle instead of the
+  // circle being squeezed out of round. A score badge that is 40 wide and 44 tall is
+  // the one thing on this section that must not happen.
+  copy: { flexShrink: 1, gap: 2 },
 });

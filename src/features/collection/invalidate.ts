@@ -49,6 +49,12 @@ export function invalidateAfterCollectionChange(
   // still reading "In watchlist".
   invalidate(queryKeys.collection(userId));
 
+  // The profile's Watchlist shelf, which is *not* under that prefix — it is a bounded,
+  // date-ordered read with a key of its own. Same reason as the line above: the trigger
+  // in `20260815040000` takes a title off the watchlist the moment it is logged or
+  // ranked, so a shelf still showing it is showing something the server has deleted.
+  invalidate(['profile-watchlist', userId]);
+
   // The title page: the catalogue half and, by prefix, the personal half at
   // `[...title(id), 'personal', userId]`.
   invalidate(queryKeys.title(mediaItemId));
@@ -119,5 +125,21 @@ export function invalidateAfterWatchlistChange(queryClient: QueryClient, userId:
   void queryClient.invalidateQueries({
     queryKey: [...queryKeys.collection(userId), 'watchlist'],
   });
+
+  /**
+   * The profile shelf, which is a *second read of the same table* rather than a second
+   * copy of the state (`profile/use-public-profile.ts`).
+   *
+   * It has its own key because it is bounded and ordered by `created_at` — twelve rows
+   * rather than the whole backlog — so it is not a prefix of the collection key above and
+   * would not have been invalidated by it. Keyed by prefix here because the full key
+   * carries the limit.
+   *
+   * Only the viewer's own shelf. Saving a title cannot change what is on somebody else's,
+   * and invalidating every profile visited this session would refetch a stranger's shelf
+   * on every bookmark press.
+   */
+  void queryClient.invalidateQueries({ queryKey: ['profile-watchlist', userId] });
+
   invalidateAwards(queryClient, userId);
 }

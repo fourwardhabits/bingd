@@ -521,8 +521,9 @@ describe('notification preferences', () => {
 
   it('answers for every category, defaulted by the category rather than by absence', async () => {
     // 20260819000300 replaced the two categories with eight, and made absence mean
-    // *the category's default* rather than a flat true. Six are still on; reactions
-    // and awards are off, which is why the old flat assertion could not survive.
+    // *the category's default* rather than a flat true. 20260820000100 then moved
+    // reactions on, leaving awards as the only category that is off -- and off because
+    // nothing writes an award notification, rather than because nobody wants one.
     const rows = await t.asUser(heidi, async () => {
       const { rows } = await t.sql(`select * from my_notification_preferences() order by category`);
       return rows;
@@ -535,7 +536,7 @@ describe('notification preferences', () => {
       { category: 'follow_accepted', enabled: true },
       { category: 'follows', enabled: true },
       { category: 'invites', enabled: true },
-      { category: 'reactions', enabled: false },
+      { category: 'reactions', enabled: true },
       { category: 'recommendations', enabled: true },
       { category: 'watch_tags', enabled: true },
     ]);

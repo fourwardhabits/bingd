@@ -169,7 +169,7 @@ describe('the thresholds', () => {
     'truth-worm': [15, 50, 150],
     'passport-mode': [15, 75, 250],
     'time-hopper': [25, 100, 300],
-    'genre-gremlin': [8, 14, 16],
+    'genre-gremlin': [14, 16, 17],
     'two-screen-life': [30, 100, 300],
     'heart-magnet': [50, 250, 1000],
     'mutual-mania': [5, 25, 100],
@@ -186,13 +186,60 @@ describe('the thresholds', () => {
     expect(Object.keys(EXPECTED).sort()).toEqual(AWARD_TRACKS.map((t) => t.key).sort());
   });
 
-  it('sets the distinct-genre top tier inside the vocabulary it counts', () => {
-    // Sixteen of eighteen: the audit is in the config's own comment. Documentary is two
-    // titles in the seeded catalogue and Animation is eight, so a reader must be free to
-    // miss any two rather than hunt one documentary.
+  it('sets the distinct-genre top tier one short of the vocabulary it counts', () => {
+    /**
+     * Seventeen of eighteen, and the *one* is the whole argument.
+     *
+     * The measurement is in `scripts/awards/genre-ladder-report.mjs` and quoted in the
+     * config's own comment. Over the 1,814 loggable rows Documentary is carried by six and
+     * Animation by ten; a reader who may miss one genre can finish on Western, Music or War
+     * about half the time, and one who may miss none is sent after the rarest row there is —
+     * a median of 126 further logged units against 45, and a 90th percentile of 448.
+     *
+     * So the assertion is exactly "one short", in both directions: eighteen would be the
+     * scavenger hunt the brief rules out, and sixteen was the Gold that took a median of 62
+     * units while every other Gold in the file takes 250.
+     */
     const top = track('genre-gremlin').tiers[2].threshold;
-    expect(top).toBeLessThanOrEqual(CANONICAL_GENRES.length);
-    expect(CANONICAL_GENRES.length - top).toBe(2);
+    expect(CANONICAL_GENRES.length - top).toBe(1);
+  });
+
+  /**
+   * The founder's Preview note: Dabbler was being earned for watching a handful of
+   * ordinary films, because one title carries 2.68 canonical genres on average.
+   *
+   * The audit is in `tracks.ts`. What is asserted here is the *shape* the audit
+   * concluded, so that moving one threshold without the others fails: an entry tier
+   * that a handful of titles cannot reach, and a ceiling that does not require the two
+   * genres the catalogue barely has.
+   */
+  it('sets the distinct-genre entry tier above what a handful of titles yields', () => {
+    const [bronze, silver, gold] = track('genre-gremlin').tiers.map((tier) => tier.threshold);
+
+    /**
+     * The founder's complaint was that the *whole ladder* was compressed, not that one
+     * number was off by two — so what is asserted here is the shape the measurement
+     * concluded, and moving one threshold without the others fails it.
+     *
+     * Thirteen is the line: at 2.68 canonical genres per title, twelve distinct genres is
+     * a median of fifteen logged units and a tenth of readers get there in nine. That is
+     * the "handful of ordinary multi-genre titles" the entry tier must sit past.
+     */
+    expect(bronze!).toBeGreaterThan(13);
+    // Still an entry tier rather than a second Silver: short of five-sixths of the
+    // vocabulary, where the thin tail starts deciding the outcome.
+    expect(bronze!).toBeLessThan(CANONICAL_GENRES.length * (5 / 6));
+    // Monotonic and distinct, so no two tiers can be earned by the same collection.
+    expect(bronze!).toBeLessThan(silver!);
+    expect(silver).toBeLessThan(gold!);
+    /**
+     * **The compression test.** Bronze and Silver two genres apart is roughly a doubling
+     * of logged units (27 → 62 at the median); one genre apart is 1.5×, which is the
+     * "Bronze→Silver only one or two ordinary viewing sessions apart" the brief names.
+     * Gold is deliberately allowed to be one step, because genre 17 alone costs more than
+     * genres 15 and 16 together.
+     */
+    expect(silver! - bronze!).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -515,28 +562,28 @@ describe('what a row is called', () => {
   it('shows the family name before the first tier', () => {
     const locked = gremlin(6);
     expect(locked.title).toBe('Genre Gremlin');
-    expect(locked.detailLine).toBe('Next: Watch 8 different genres');
-    expect(locked.countLabel).toBe('6 / 8');
+    expect(locked.detailLine).toBe('Next: Watch 14 different genres');
+    expect(locked.countLabel).toBe('6 / 14');
   });
 
   it('becomes the first tier name once it is earned', () => {
-    const tier1 = gremlin(10);
+    const tier1 = gremlin(14);
     expect(tier1.title).toBe('Dabbler');
-    expect(tier1.detailLine).toBe('Next: Watch 14 different genres');
-    expect(tier1.countLabel).toBe('10 / 14');
+    expect(tier1.detailLine).toBe('Next: Watch 16 different genres');
+    expect(tier1.countLabel).toBe('14 / 16');
   });
 
   it('becomes the second tier name at the second threshold', () => {
-    const tier2 = gremlin(14);
+    const tier2 = gremlin(16);
     expect(tier2.title).toBe('Mixer');
-    expect(tier2.detailLine).toBe('Next: Watch 16 different genres');
+    expect(tier2.detailLine).toBe('Next: Watch 17 different genres');
   });
 
   it('becomes the third tier name at the top, and states what earned it', () => {
-    const tier3 = gremlin(16);
+    const tier3 = gremlin(17);
     expect(tier3.title).toBe('Chaos Collector');
-    expect(tier3.detailLine).toBe('Watched 16 different genres');
-    expect(tier3.countLabel).toBe('16');
+    expect(tier3.detailLine).toBe('Watched 17 different genres');
+    expect(tier3.countLabel).toBe('17');
   });
 
   it('never reveals the next tier name before it is earned', () => {
@@ -544,8 +591,8 @@ describe('what a row is called', () => {
     // the reward, and a tier-1 row that said "Mixer" would give away the next one.
     for (const [reached, forbidden] of [
       [6, ['Dabbler', 'Mixer', 'Chaos Collector']],
-      [10, ['Mixer', 'Chaos Collector']],
-      [14, ['Chaos Collector']],
+      [14, ['Mixer', 'Chaos Collector']],
+      [16, ['Chaos Collector']],
     ] as const) {
       const progress = gremlin(reached);
       const shown = [progress.title, progress.detailLine].join(' ');
@@ -595,9 +642,52 @@ describe('what a row is called', () => {
   it('fills one dot per tier earned', () => {
     // `earnedTierIndex` is what `TierDots` draws: -1 is three empty, 0 is bronze only.
     expect(gremlin(6).earnedTierIndex).toBe(-1);
-    expect(gremlin(10).earnedTierIndex).toBe(0);
-    expect(gremlin(14).earnedTierIndex).toBe(1);
-    expect(gremlin(16).earnedTierIndex).toBe(2);
+    expect(gremlin(14).earnedTierIndex).toBe(0);
+    expect(gremlin(16).earnedTierIndex).toBe(1);
+    expect(gremlin(17).earnedTierIndex).toBe(2);
+  });
+
+  /**
+   * **Every boundary of the rebalanced ladder, one row each.**
+   *
+   * The founder's brief asks for exactly this table — threshold−1, the threshold itself,
+   * the next threshold−1, and the top — because a ladder change that only moves the
+   * numbers in the config is a ladder change nothing has checked. Written as data rather
+   * than as four `it`s so the next rebalance edits one table and sees every consequence.
+   *
+   * Genre Gremlin is the one track where these boundaries are cheap to reach in a fixture
+   * (one title per genre) and where the whole tier is one integer apart from the next, so
+   * an off-by-one is invisible in every other kind of test.
+   */
+  it('reads correctly on both sides of each of the three thresholds', () => {
+    const boundaries: [number, string | null, string, string][] = [
+      // genres,  tier earned,        heading,          detail line
+      [13, null, 'Genre Gremlin', 'Next: Watch 14 different genres'],
+      [14, 'Dabbler', 'Dabbler', 'Next: Watch 16 different genres'],
+      [15, 'Dabbler', 'Dabbler', 'Next: Watch 16 different genres'],
+      [16, 'Mixer', 'Mixer', 'Next: Watch 17 different genres'],
+      [17, 'Chaos Collector', 'Chaos Collector', 'Watched 17 different genres'],
+      // Eighteen is outside the ladder on purpose: the reader who does collect every
+      // genre is still Chaos Collector, and the row must not read "18 / 17".
+      [18, 'Chaos Collector', 'Chaos Collector', 'Watched 17 different genres'],
+    ];
+
+    for (const [genres, tier, heading, detail] of boundaries) {
+      const progress = gremlin(genres);
+      expect([genres, progress.title]).toEqual([genres, heading]);
+      expect([genres, progress.detailLine]).toEqual([genres, detail]);
+      expect([genres, progress.earnedTier?.label ?? null]).toEqual([genres, tier]);
+    }
+  });
+
+  it('states the count against the next threshold, never against the last one', () => {
+    // `13 / 14` and not `13 / 12`: the pair a reader reads is where they are against where
+    // they are going. At the top there is nowhere to go, so it is the bare number.
+    expect(gremlin(13).countLabel).toBe('13 / 14');
+    expect(gremlin(15).countLabel).toBe('15 / 16');
+    expect(gremlin(16).countLabel).toBe('16 / 17');
+    expect(gremlin(17).countLabel).toBe('17');
+    expect(gremlin(18).countLabel).toBe('18');
   });
 });
 

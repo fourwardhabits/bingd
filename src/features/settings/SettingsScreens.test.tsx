@@ -75,12 +75,21 @@ jest.mock('@/features/auth', () => ({
 // are about, and it would otherwise reach expo-image-picker.
 jest.mock('@/features/profile/AvatarPicker', () => ({ AvatarPicker: () => null }));
 
-// A release build, because that is the reader the diagnostics question is about: the
-// detailed block is gated on `variant !== 'production'`, so asserting its absence in a
-// development test would assert nothing at all.
+// A public release build, because that is the reader the diagnostics question is about:
+// the detailed block is gated on `isRelease`, so asserting its absence on any other lane
+// would assert nothing at all.
+//
+// `lane` rather than `variant` since review 28. A **Beta** build is `variant: 'production'`
+// and is not a release — it carries the store bundle identifier against the nonproduction
+// backend — so the old gate hid the diagnostics from the friend beta, which is the one
+// audience that needed them. Mocking `variant: 'production'` alone would now leave
+// `isRelease` undefined and quietly re-enable the block, so the lane is stated too.
+// `src/lib/env.test.ts` covers the derivation itself.
 jest.mock('@/lib/env', () => ({
-  env: { variant: 'production' },
+  env: { variant: 'production', lane: 'production' },
+  lane: 'production',
   isProduction: true,
+  isRelease: true,
   showEnvironmentBadge: false,
 }));
 
@@ -132,16 +141,40 @@ afterEach(() => {
  * real.
  */
 describe('the Settings hub', () => {
-  it('offers the five destinations rather than an apology', async () => {
+  it('offers the four destinations rather than an apology', async () => {
     const view = await renderWithProviders(<SettingsScreen />);
 
     expect(view.getByLabelText('Edit Profile, @sai')).toBeTruthy();
     expect(view.getByLabelText('Privacy')).toBeTruthy();
-    expect(view.getByLabelText('Notifications')).toBeTruthy();
+    expect(view.getByLabelText('Notification Settings')).toBeTruthy();
     expect(view.getByLabelText('Account & Data')).toBeTruthy();
     // About is a section on this screen rather than a destination — it is two
     // sentences and a link, and a row leading to that would be a row leading to less.
     expect(view.getByText('ABOUT')).toBeTruthy();
+  });
+
+  /**
+   * The founder's Preview correction: Settings had a Notifications row leading to the
+   * inbox, and the bell in the Feed and Profile headers already leads there.
+   *
+   * The removal is the easy half. The half worth a test is that nothing else went with
+   * it — the inbox screen, the bell and the preferences screen are all untouched, and
+   * an over-eager cleanup that took the preferences row instead would leave the reader
+   * with no way to reach their switches at all.
+   */
+  it('does not lead to the notification inbox, which the bell already opens', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    expect(view.queryByLabelText('Notifications')).toBeNull();
+    expect(view.queryByText(/waiting/)).toBeNull();
+  });
+
+  it('still leads to the notification preferences', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    await fireEvent.press(view.getByLabelText('Notification Settings'));
+    expect(mockPush).toHaveBeenCalledWith('/settings/notification-preferences');
+    expect(mockPush).not.toHaveBeenCalledWith('/settings/notifications');
   });
 
   it('says nothing is unbuilt, because nothing on it is', async () => {
@@ -173,20 +206,21 @@ describe('the Settings hub', () => {
     ).toBeTruthy();
   });
 
-  it('surfaces the number of people waiting on the reader', async () => {
-    // The only number on the screen, and the only thing in the app that is genuinely
-    // a task: a reaction is news, a request is somebody waiting.
+  it('carries no pending-request count, because it no longer leads to the inbox', async () => {
+    /**
+     * This screen used to show "1 waiting" beside a Notifications row, and it was the
+     * only number on it. The count went with the row in the founder's Preview pass —
+     * not because it was wrong, but because it was a badge on a door that is gone.
+     *
+     * **The reader does not lose it.** `AppHeader`'s bell carries the unread count on
+     * Feed and Profile, and a follow request is a notification, so it is counted there.
+     * That is asserted where the bell lives rather than here.
+     */
     mockRpcResults.my_notifications = [request, comment];
     const view = await renderWithProviders(<SettingsScreen />);
 
-    await waitFor(() => expect(view.getByText('1 waiting')).toBeTruthy());
-  });
-
-  it('shows no count when nobody is waiting', async () => {
-    mockRpcResults.my_notifications = [comment];
-    const view = await renderWithProviders(<SettingsScreen />);
-
-    await waitFor(() => expect(view.getByLabelText('Notifications')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Privacy')).toBeTruthy());
+    expect(view.queryByText('1 waiting')).toBeNull();
     expect(view.queryByText(/waiting/)).toBeNull();
   });
 

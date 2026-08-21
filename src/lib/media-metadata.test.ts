@@ -114,12 +114,47 @@ describe('resolving a PostgREST row', () => {
       original_language: null,
       parent: { title: 'The Last of Us', genres: ['Drama'], original_language: 'en' },
     });
-    expect(resolved).toEqual({ genres: ['Drama'], language: 'en', seriesTitle: 'The Last of Us' });
+    expect(resolved).toEqual({
+      genres: ['Drama'],
+      language: 'en',
+      // Selected by nobody in this fixture, which is the ordinary case: a caller that
+      // does not ask for the column gets the same answer as one whose title has no
+      // rating. Absent and unrated are not distinguished, and nothing needs them to be.
+      certification: null,
+      seriesTitle: 'The Last of Us',
+    });
   });
 
   it('gives a movie no series title and its own metadata', () => {
     expect(
       resolveMetadata({ kind: 'movie', genres: ['Comedy'], original_language: 'en', parent: null }),
-    ).toEqual({ genres: ['Comedy'], language: 'en', seriesTitle: null });
+    ).toEqual({ genres: ['Comedy'], language: 'en', certification: null, seriesTitle: null });
+  });
+
+  it('resolves a certification the same own-then-parent way the genres go', () => {
+    // The reason the field exists. TMDB publishes a rating on the series and never on
+    // a season, so a feed row about `Severance, S2` had nothing to print until the
+    // parent was consulted — and the parent was already being embedded for its title.
+    expect(
+      resolveMetadata({
+        kind: 'season',
+        certification: null,
+        parent: { title: 'Severance', certification: 'TV-MA' },
+      }).certification,
+    ).toBe('TV-MA');
+
+    // Own-first, so an anthology season rated on its own beats the show's.
+    expect(
+      resolveMetadata({
+        kind: 'season',
+        certification: 'TV-14',
+        parent: { title: 'Severance', certification: 'TV-MA' },
+      }).certification,
+    ).toBe('TV-14');
+
+    // A movie never falls through: it has no parent to fall through to.
+    expect(
+      resolveMetadata({ kind: 'movie', certification: null, parent: null }).certification,
+    ).toBeNull();
   });
 });

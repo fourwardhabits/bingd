@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -141,6 +142,23 @@ beforeEach(() => {
  */
 const count = (text: string) => screen.getByText(text, { includeHiddenElements: true });
 
+/**
+ * The scrolling container the award rows sit in, found by walking up from a row.
+ *
+ * By its `contentContainerStyle`, which only a scroll view has — rather than by a
+ * `testID` added to the source for this test’s benefit, and rather than by type, which
+ * this library stopped offering a query for at v14.
+ */
+const awardList = () => {
+  let node = screen.getByText('Movie Muncher').parent;
+  while (node && node.props?.contentContainerStyle === undefined) node = node.parent;
+  if (!node) throw new Error('no scroll container above the award rows');
+  return {
+    style: StyleSheet.flatten(node.props.style),
+    content: StyleSheet.flatten(node.props.contentContainerStyle),
+  };
+};
+
 const open = async (props: Partial<React.ComponentProps<typeof AwardsSheet>> = {}) => {
   const view = await renderWithProviders(
     <AwardsSheet userId="me" onClose={() => {}} {...props} />,
@@ -161,6 +179,35 @@ describe('the sheet', () => {
     for (const name of ['Movie Muncher', 'Passport Mode', 'Mutual Mania', 'Two-Screen Life']) {
       expect(screen.getByText(name)).toBeTruthy();
     }
+  });
+
+  /**
+   * The founder’s second safe-area finding, which was really two.
+   *
+   * Done sits under a list of twenty rows that is always taller than the sheet on a
+   * phone. The list was `flexGrow: 0` and nothing else — and a flex child in React
+   * Native does not shrink unless it is told to, so it kept its full measured height
+   * and pushed the footer past the bottom of a sheet capped at 90%.
+   */
+  it('keeps Done reachable under a list of twenty', async () => {
+    await open();
+
+    const done = screen.getByRole('button', { name: 'Done' });
+    expect(done).toBeTruthy();
+
+    // The list yields the space, rather than the footer being pushed out of the sheet.
+    expect(awardList().style.flexShrink).toBe(1);
+    // And it does not stretch when there is little to show — the loading and error
+    // states are three rows, not a sheetful.
+    expect(awardList().style.flexGrow).toBe(0);
+  });
+
+  it('leaves room under the last award for the sticky footer', async () => {
+    // Without it the twentieth row finishes hard against Done, which is what the
+    // founder saw as the content running into the footer.
+    await open();
+
+    expect(awardList().content.paddingBottom).toBeGreaterThanOrEqual(16);
   });
 
   it('opens with its own name and no scoreline above the rows', async () => {
@@ -262,44 +309,67 @@ describe('what a row is called', () => {
   const genres = (names: string[]) =>
     names.map((genre, i) => watched(`g${i}`, { title: `Film ${i}`, genres: [genre] }));
 
-  const EIGHT = [
+  /**
+   * Fourteen genres: Dabbler, after the 2026-08-20 rebalance moved the ladder to
+   * 14 / 16 / 17. The whole vocabulary is eighteen, so these are named out in full rather
+   * than sliced from `CANONICAL_GENRES` — a fixture that tracked the constant would keep
+   * passing if the constant and the threshold moved together, which is the one thing
+   * these tests exist to catch.
+   */
+  const FOURTEEN = [
     'Action',
     'Adventure',
     'Animation',
     'Comedy',
     'Crime',
+    'Documentary',
     'Drama',
     'Family',
     'Fantasy',
+    'History',
+    'Horror',
+    'Music',
+    'Mystery',
+    'Romance',
   ];
-  const FOURTEEN = [...EIGHT, 'History', 'Horror', 'Music', 'Mystery', 'Romance', 'Thriller'];
+  const SIXTEEN = [...FOURTEEN, 'Science Fiction', 'Thriller'];
 
   it('shows the family name and the requirement while locked', async () => {
-    seed('user_media', genres(EIGHT.slice(0, 6)));
+    seed('user_media', genres(FOURTEEN.slice(0, 6)));
     await open();
     expect(screen.getByText('Genre Gremlin')).toBeTruthy();
-    expect(screen.getByText('Next: Watch 8 different genres')).toBeTruthy();
-    expect(count('6 / 8')).toBeTruthy();
+    expect(screen.getByText('Next: Watch 14 different genres')).toBeTruthy();
+    expect(count('6 / 14')).toBeTruthy();
     // The reward is not spent early: the tier's name is nowhere on the sheet.
     expect(screen.queryByText('Dabbler')).toBeNull();
   });
 
   it('becomes the tier name once it is earned, with no separate earned line', async () => {
-    seed('user_media', genres(EIGHT));
+    seed('user_media', genres(FOURTEEN));
     await open();
     expect(screen.getByText('Dabbler')).toBeTruthy();
-    expect(screen.getByText('Next: Watch 14 different genres')).toBeTruthy();
+    expect(screen.getByText('Next: Watch 16 different genres')).toBeTruthy();
     // Both the old line and the next tier's name are absent.
     expect(screen.queryByText('Dabbler earned')).toBeNull();
     expect(screen.queryByText('Mixer')).toBeNull();
   });
 
   it('advances to the second tier name', async () => {
-    seed('user_media', genres(FOURTEEN));
+    seed('user_media', genres(SIXTEEN));
     await open();
     expect(screen.getByText('Mixer')).toBeTruthy();
+    expect(screen.getByText('Next: Watch 17 different genres')).toBeTruthy();
     expect(screen.queryByText('Genre Gremlin')).toBeNull();
     expect(screen.queryByText('Chaos Collector')).toBeNull();
+  });
+
+  it('reaches the top tier one genre short of the whole vocabulary', async () => {
+    // Seventeen, not eighteen, and this is the fixture that says so on the sheet itself:
+    // the reader who has never logged a Western is still Chaos Collector.
+    seed('user_media', genres([...SIXTEEN, 'War']));
+    await open();
+    expect(screen.getByText('Chaos Collector')).toBeTruthy();
+    expect(screen.getByText('Watched 17 different genres')).toBeTruthy();
   });
 
   it('keeps the family name on a generic Bronze/Silver/Gold track', async () => {
@@ -772,8 +842,9 @@ describe('the breakdowns', () => {
     expect(screen.getByText('Action')).toBeTruthy();
     expect(screen.getByText('2 titles')).toBeTruthy();
     expect(screen.getByText('Comedy')).toBeTruthy();
-    // Two genre rows against a numerator of two.
-    expect(screen.getByText(/2 \/ 8/)).toBeTruthy();
+    // Two genre rows against a numerator of two, and the denominator is Dabbler's
+    // threshold — the tier being worked toward, not the size of the vocabulary.
+    expect(screen.getByText(/2 \/ 14/)).toBeTruthy();
   });
 
   it('Two-Screen Life shows both sides with their own caps', async () => {

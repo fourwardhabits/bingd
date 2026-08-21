@@ -151,14 +151,24 @@ export default function suite() {
 
         await t1.actAs(actor);
         await t1.begin();
-        const pending = write({ t1, actor, victim });
+        // The refusal is the *expected* outcome of this direction, and it can arrive
+        // the moment t2 commits — while this function is still awaiting `blocked` or
+        // `t2.commit()` below. The handler therefore has to exist from the instant the
+        // promise does, or node:test reports the run as an unhandledRejection and the
+        // late `.catch` earns a PromiseRejectionHandledWarning. Captured errors still
+        // reach the caller's `result.code` assertion, so an unexpected error remains a
+        // failure — it just fails the assertion instead of the process.
+        const pending = write({ t1, actor, victim }).then(
+          (r) => r.rows[0].r,
+          (e) => e,
+        );
         await t1.awaitBlocked({ on: 'advisory', advisoryKey: key });
 
         await ctl.releasePair(actor, victim);
         await blocked;
         await t2.commit();
 
-        result = await pending.then((r) => r.rows[0].r).catch((e) => e);
+        result = await pending;
         await t1.commit().catch(() => t1.rollback());
       } finally {
         await t1.rollback().catch(() => {});

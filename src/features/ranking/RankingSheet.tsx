@@ -16,6 +16,7 @@ import { theme } from '@/ui/tokens';
 import { Button, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
 import {
+  rankAgain,
   rankAnswer,
   rankBack,
   rankCancel,
@@ -31,11 +32,18 @@ export type RankingSubject = {
   bucket: BucketId;
   posterUri?: string | null;
   /**
-   * `rebucket` when the title already had a position and the user changed its band.
-   * It selects `rank_rebucket`, which unranks and re-opens in one call. Defaults to a
-   * first ranking.
+   * How this session begins, which is three different calls.
+   *
+   * `start` — the default — is a first ranking. `rebucket` is a title that had a
+   * position and is changing band: `rank_rebucket` unranks, moves the bucket and
+   * re-opens in one call. `rerank` is a title that had a position and is keeping its
+   * band: `rankAgain` drops the position and re-opens in the same one, because
+   * `rank_rebucket` refuses a bucket that is not moving.
+   *
+   * The last two both destroy the position before a single comparison is answered,
+   * which is why they share everything below that `start` does not get.
    */
-  mode?: 'start' | 'rebucket';
+  mode?: 'start' | 'rebucket' | 'rerank';
 };
 
 export type RankingSheetProps = {
@@ -177,9 +185,20 @@ function Session({
     [profile.id, queryClient, subject.id, subject.mode, surface],
   );
 
+  /**
+   * Whether opening this session has already changed the collection.
+   *
+   * True of both re-ranking modes and of neither first ranking. It used to be spelled
+   * `mode === 'rebucket'` in the two places below, and adding a third mode that also
+   * unranks before it opens is exactly how that spelling goes wrong — so it is one
+   * name asked once.
+   */
+  const opensDestructively = subject.mode === 'rebucket' || subject.mode === 'rerank';
+
   useEffect(() => {
     let live = true;
-    const open = subject.mode === 'rebucket' ? rankRebucket : rankStart;
+    const open =
+      subject.mode === 'rebucket' ? rankRebucket : subject.mode === 'rerank' ? rankAgain : rankStart;
     void open(subject.id, subject.bucket).then((next) => {
       /**
        * **A rebucket has already happened by the time this resolves**, and that is the
@@ -204,7 +223,7 @@ function Session({
        * redundant refetch; the other way costs a screen describing a ranking that is
        * gone. Independent review 21d.
        */
-      if (subject.mode === 'rebucket') {
+      if (opensDestructively) {
         invalidateAfterCollectionChange(queryClient, profile.id, subject.id);
       }
 
@@ -224,7 +243,7 @@ function Session({
     return () => {
       live = false;
     };
-  }, [subject, apply, profile.id, queryClient]);
+  }, [subject, apply, profile.id, queryClient, opensDestructively]);
 
   const act = async (run: () => Promise<SessionStep>, progress = 0) => {
     if (busy) return;
@@ -280,12 +299,40 @@ function Session({
             onClose={() => void close()}
           />
         ) : step?.state === 'failed' ? (
+          /**
+           * Three failures, and the third one is not a failure.
+           *
+           * `changed` is `session.ts` saying it cannot prove this was a refusal — the
+           * request may have committed and lost its reply, in which case the title is
+           * ranked, the score is written and the feed event exists. Saying “Could not
+           * rank” over that is not a small inaccuracy: it is the app telling somebody
+           * nothing happened and inviting them to do it again, and doing it again is
+           * what turns one intent into two `title_ranked` events on the same title.
+           *
+           * Independent review 30 found the route that made this matter. Re-ranking
+           * inside the same bucket has no server-side refusal standing in front of it
+           * — a first ranking is stopped by 23505 and a rebucket by 22023, and both of
+           * those were doing retry protection by accident. This path has neither, so
+           * the protection has to be the sentence: a reader who is told the outcome is
+           * unknown checks before they repeat it.
+           *
+           * **It is not idempotency and does not claim to be.** The ranking RPCs carry
+           * no operation id, so nothing on the server can recognise a replay. That is a
+           * migration and it is recorded in the deferred roadmap under rewatch history,
+           * which is the same problem asked from the other end.
+           */
           <Centred>
             <Text variant="title2" style={styles.centre}>
-              {step.restart ? 'That session ended' : 'Could not rank'}
+              {step.changed
+                ? 'Not sure that landed'
+                : step.restart
+                  ? 'That session ended'
+                  : 'Could not rank'}
             </Text>
             <Text variant="body" tone="secondary" style={styles.centre}>
-              {step.message}
+              {step.changed
+                ? `We lost the connection before hearing back, so ${subject.title} may already be ranked. Check your collection before you rank it again.`
+                : step.message}
             </Text>
             <Button label="Close" kind="secondary" onPress={() => void close()} />
           </Centred>

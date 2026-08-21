@@ -312,7 +312,7 @@ tuned to the seeded account** — expect to lose most of the badges you had.
 | Truth Worm | 15 | 50 | 150 |
 | Passport Mode | 15 | 75 | 250 |
 | Time Hopper | 25 | 100 | 300 |
-| Genre Gremlin | 8 | 14 | 16 |
+| Genre Gremlin | 14 | 16 | 17 |
 | Two-Screen Life | 30 | 100 | 300 |
 | Heart Magnet | 50 | 250 | 1,000 |
 | Mutual Mania | 5 | 25 | 100 |
@@ -320,11 +320,23 @@ tuned to the seeded account** — expect to lose most of the badges you had.
 Every one of them is written out in `awards.test.ts` as well as in `tracks.ts`, so a
 number cannot move without somebody moving it in two places on purpose.
 
-**Genre Gremlin's top tier was audited rather than picked.** `genres.ts` knows eighteen
-genres and all eighteen do appear in the seeded catalogue — but Documentary is carried by
-two titles, Animation by eight and Western by fourteen out of 1,814 countable rows.
-Sixteen is the largest tier that lets a reader miss any two, so the award never becomes a
-hunt for one specific documentary.
+**Genre Gremlin was rebalanced on 2026-08-20, and its whole ladder moved.** It was
+8 / 14 / 16, then briefly 12 / 14 / 16, and is now **14 / 16 / 17**. The founder's Preview
+verdict was that the ladder was too easy *and too compressed* rather than that one number
+was wrong, and the measurement agreed: 12 / 14 / 16 cost a median of 15 / 27 / 62 logged
+titles, against 250–300 for every other Gold in the set.
+
+The evidence is reproducible — `node scripts/awards/genre-ladder-report.mjs` reads the
+seeded catalogue and simulates acquisition, and its own suite holds it honest. Two earlier
+statements on this page were wrong and are corrected here: the rarity figures quoted
+(*"Documentary two titles, Animation eight, Western fourteen"*) were counts among the 382
+**movies**, not the whole loggable catalogue. Over all **1,814 loggable rows** — of which
+1,551 carry a canonical genre at all — they are **6, 10 and 23**.
+
+**Gold is 17 of 18 and deliberately not 18.** Seventeen lets a reader miss any one genre;
+eighteen names the rarest row in the catalogue and demands it. The last genre costs a
+median of 126 further titles against 45 for the seventeenth, so 18 would turn breadth into
+a scavenger hunt. Nothing about the Awards UI changed — same rows, same dots, same art.
 
 **Two-Screen Life is capped contribution, not the weaker side.** Each side counts up to
 half the threshold and the two are added: Bronze is fifteen films and fifteen seasons, and

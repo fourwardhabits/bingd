@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 
 import { invalidateAfterCollectionChange } from './invalidate';
 import { diagnose } from '@/lib/diagnose';
+import { queryKeys } from '@/lib/query';
 import { track, type Surface } from '@/lib/analytics';
 import { compactName } from '@/lib/titles';
 import { useCurrentProfile } from '@/features/auth';
@@ -28,7 +29,7 @@ import {
   useSetCompanions,
   useTaggablePeople,
 } from './use-companions';
-import { emptyLogState, useLogState } from './use-log-state';
+import { emptyLogState, useLogState, type LogState } from './use-log-state';
 import { WatchDatePicker } from './WatchDatePicker';
 import {
   logWatched,
@@ -66,10 +67,14 @@ export type LogSheetProps = {
    * `mode` decides which RPC opens the session. `start` is a first ranking and the
    * bucket has already been saved by then. `rebucket` is a *ranked* title changing
    * bands: `rank_rebucket` does the unrank, the bucket change and the fresh session
-   * in one server call, so the bucket must **not** be written here first — doing so
-   * would hit `set_bucket`'s 55000 refusal.
+   * in one server call. `rerank` is a ranked title keeping its band, which
+   * `rank_rebucket` refuses — `rankAgain` unranks and re-opens instead.
+   *
+   * For both ranked modes the bucket must **not** be written here first: on a rebucket
+   * the server owns the change, and on a rerank there is no change to write — either
+   * way `set_bucket` answers with its 55000 refusal.
    */
-  onRank?: (bucket: BucketId, mode: 'start' | 'rebucket') => void;
+  onRank?: (bucket: BucketId, mode: 'start' | 'rebucket' | 'rerank') => void;
   /**
    * Which screen opened this, for `title_logged` alone. Two screens mount this sheet
    * and the route underneath it is not the same question as where somebody decided to
@@ -206,6 +211,12 @@ function Body({
   // `exists: false` and both try to log the watch. Only ever written from inside an
   // async callback, never during render.
   const createdRow = useRef(false);
+  // Single-flight for the default-date stamp. Two quick bucket taps launch two
+  // detached decisions, and if both read "no date" before either write lands, both
+  // write — same date almost always, but not across a midnight rollover
+  // (independent review 33d). One decision in flight answers for both taps: if it
+  // stamps, the second was redundant; if it finds a date, the second would too.
+  const stampPending = useRef(false);
   const stored = companions.data?.map((c) => c.id) ?? [];
   const chosen = companionEdit ?? stored;
   // Mutual follows plus whoever is already on this watch. See `taggableWith`.
@@ -221,6 +232,42 @@ function Body({
   // watchlist, and changes what this reader has watched. The same set as ranking.
   const refresh = () =>
     invalidateAfterCollectionChange(queryClient, profile.id, title.id);
+
+  /**
+   * What is stored about this title, answered only once the read is at rest.
+   *
+   * `choose` needs "is there a date already" as a fact, and the render closure
+   * cannot supply one: the buckets are live before `useLogState` resolves, and a
+   * reopened sheet shows cached data while `staleTime: 0` refetches behind it — a
+   * date recorded on another device is exactly what that refetch carries
+   * (independent reviews 33, 33b). A fetch still in flight is therefore *waited
+   * out* rather than guessed at, so the decision is made against the truth in both
+   * directions: a stored date is never overwritten, and a genuinely dateless title
+   * still gets its stamp even when the tap raced an invalidation's refetch. The
+   * wait is bounded by the fetch itself, which always settles; a read left
+   * `paused` (offline) or `error` resolves to no answer, and no answer stamps
+   * nothing.
+   */
+  const settledLogState = (): Promise<LogState | undefined> => {
+    const key = queryKeys.logState(profile.id, title.id);
+    const atRest = (): LogState | undefined | null => {
+      const read = queryClient.getQueryState<LogState>(key);
+      if (read?.fetchStatus === 'fetching') return null;
+      return read?.status === 'success' ? read.data : undefined;
+    };
+
+    const now = atRest();
+    if (now !== null) return Promise.resolve(now);
+    return new Promise((resolve) => {
+      const unsubscribe = queryClient.getQueryCache().subscribe(() => {
+        const later = atRest();
+        if (later !== null) {
+          unsubscribe();
+          resolve(later);
+        }
+      });
+    });
+  };
 
   const report = (result: WriteResult) => {
     if (result.outcome === 'ranked') {
@@ -241,17 +288,23 @@ function Body({
    * 2026-08-15, reversing PRD §11). Three cases have to stay distinct:
    *
    *   - not ranked yet: save, then hand off to the ranking sheet;
-   *   - ranked, same bucket: do nothing at all. Re-selecting what is already chosen
-   *     is not a change, and `set_bucket` would refuse it with 55000 anyway;
-   *   - ranked, different bucket: ask first. `rank_rebucket` discards the position
-   *     and starts fresh comparisons, so it is destructive and must not happen on a
-   *     stray tap.
+   *   - ranked, same bucket: **ask, then re-rank inside that same bucket.** This used
+   *     to return without doing anything, on the reading that re-selecting what is
+   *     already chosen is not a change. The founder found what that reading costs on
+   *     the device: a Loved title, Change your rating, Loved — and the app does
+   *     nothing at all, with no message saying why. The bucket is indeed not the
+   *     change being asked for. The *position* is, and re-opening a rating already
+   *     given is the only way anybody has to say so. No `set_bucket` call is made,
+   *     which is what the old 55000 note was really about;
+   *   - ranked, different bucket: ask first, then move the band.
+   *
+   * Both ranked branches discard the position before a comparison is answered, so both
+   * confirm — what differs is the call behind the confirmation and the sentence on it.
    */
   const choose = async (chosen: BucketId) => {
     if (saving) return;
 
     if (state.ranked) {
-      if (chosen === state.bucket) return;
       setConfirmRebucket(chosen);
       return;
     }
@@ -302,15 +355,35 @@ function Body({
     // The row says "Today", so today is what must be stored. `set_bucket` writes no
     // date, and leaving it at that meant the sheet displayed a default it had never
     // saved — reopen it a week later and it would still claim "Today". Only when
-    // there is no date already: a re-log must not overwrite the real one.
-    if (!state.watchedOn) {
-      // Failure here is not worth blocking on. The bucket is saved, the title is in
-      // the collection, and the date is recoverable from this same row.
-      await logWatched({
-        operationId: newOperationId(),
-        mediaItemId: title.id,
-        watchedOn: effectiveDate,
-      });
+    // there is no date already — a re-log must not overwrite the real one — and
+    // "no date already" is `settledLogState`'s question, not this render's closure.
+    //
+    // Deliberately not awaited before the ranking handoff. The stamp is a courtesy
+    // default, already "not worth blocking on", and a read stalled on a bad network
+    // must not hold the ranking sheet hostage (independent review 33c); it waits
+    // for the settled answer on its own and reconciles the cache when it lands.
+    // What remains unclosable from this side is the instant between that answer
+    // and the write — a date recorded on another device in that gap needs a
+    // server-side conditional write, which the beta accepts as a residual risk.
+    if (!stampPending.current) {
+      stampPending.current = true;
+      void (async () => {
+        try {
+          const settled = await settledLogState();
+          if (settled && !settled.watchedOn) {
+            // Failure here is not worth blocking on. The bucket is saved, the title
+            // is in the collection, and the date is recoverable from this same row.
+            await logWatched({
+              operationId: newOperationId(),
+              mediaItemId: title.id,
+              watchedOn: effectiveDate,
+            });
+            refresh();
+          }
+        } finally {
+          stampPending.current = false;
+        }
+      })();
     }
 
     setSaving(false);
@@ -319,17 +392,20 @@ function Body({
   };
 
   /**
-   * Confirmed re-rank. Nothing is written here — `rank_rebucket` is one server call
-   * that unranks, changes the bucket and opens the new session, and the ranking sheet
-   * is what drives a session. Writing the bucket first would only earn a 55000.
+   * Confirmed re-rank, in either direction.
+   *
+   * Nothing is written here. Each mode is one server call the ranking sheet makes when
+   * it opens — `rank_rebucket` for a band change, unrank-then-`rank_start` for a
+   * re-rank inside the same band — and the sheet is what drives a session. Writing the
+   * bucket first would only earn a 55000.
    */
   const rebucket = () => {
-    const chosen = confirmRebucket;
-    if (!chosen || saving) return;
+    const next = confirmRebucket;
+    if (!next || saving) return;
 
     setConfirmRebucket(null);
-    setBucketEdit(chosen);
-    onRank?.(chosen, 'rebucket');
+    setBucketEdit(next);
+    onRank?.(next, next === state.bucket ? 'rerank' : 'rebucket');
   };
 
   /**
@@ -577,7 +653,15 @@ function Body({
 
         {confirmRebucket ? (
           <View style={styles.confirm}>
-            <Text variant="callout">Changing this will re-rank {title.title}.</Text>
+            {/* Two sentences for two different acts. “Changing this” is untrue of a
+                re-rank in the same bucket — nothing about the rating changes — and a
+                confirmation that misdescribes what it is confirming is worse than none.
+                The second line is the same either way, because the consequence is. */}
+            <Text variant="callout">
+              {confirmRebucket === state.bucket
+                ? `Rank ${title.title} again?`
+                : `Changing this will re-rank ${title.title}.`}
+            </Text>
             <Text variant="footnote" tone="secondary">
               Its current position is discarded and you will compare it again.
             </Text>

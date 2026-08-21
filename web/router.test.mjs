@@ -400,6 +400,67 @@ describe('the built site', () => {
     }
   });
 
+  it('serves the three documents the stores demand a URL for', () => {
+    /**
+     * Until 2026-08-20 all three of these returned Cloudflare Pages' fallback
+     * `index.html` with a **200**. That is the worst possible shape for this failure:
+     * a reviewer following the privacy URL out of App Store Connect got the generic
+     * "Bingd is in closed testing" page and a success status, and no check anywhere —
+     * curl, a link checker, this suite — could tell it apart from a policy.
+     *
+     * So the test is not "does the path answer". It is "does the path answer with the
+     * document it claims to be".
+     */
+    const expected = [
+      ['privacy', /Privacy/, /never leaves your device as\s+analytics|allowlist/],
+      ['support', /Support/, new RegExp('hello@bingd\\.app')],
+      ['account-deletion', /Deleting your account/, /Settings &rsaquo; Account &amp; Data/],
+    ];
+
+    for (const [dir, heading, marker] of expected) {
+      const html = read(dir, 'index.html');
+      assert.match(html, /<html/, `/${dir} is not a page`);
+      assert.match(html, new RegExp(`<h1>${heading.source}</h1>`), `/${dir} has the wrong heading`);
+      assert.match(html, marker, `/${dir} does not carry its own content`);
+
+      // A document, not the router. `page.mjs` decides where somebody who tapped an
+      // invitation is sent; a store's crawler runs no JavaScript, and a policy that
+      // needs a script to render is a policy that cannot be read.
+      assert.doesNotMatch(html, /page\.mjs/, `/${dir} loads the router`);
+      assert.doesNotMatch(html, /<script/, `/${dir} contains script`);
+    }
+  });
+
+  it('lets no store document be claimed by the app', () => {
+    /**
+     * The other half. These pages have no screen behind them, so a claim on any of them
+     * means Android or iOS opens Bingd onto `+not-found` when a reviewer taps the very
+     * link the store listing published. The Android manifest claimed the entire host
+     * until the same day these pages were written, which is exactly how that would have
+     * happened.
+     */
+    const documents = ['privacy', 'support', 'account-deletion'];
+    const aasa = JSON.parse(read('.well-known', 'apple-app-site-association'));
+    const claimed = aasa.applinks.details[0].components.map((c) => c['/']);
+    const appConfig = readFileSync(join(here, '..', 'app.config.ts'), 'utf8');
+    const filters = /intentFilters: \[([\s\S]*?)\n {4}\],/.exec(appConfig)?.[1] ?? '';
+    const prefixes = [...filters.matchAll(/pathPrefix: '([^']+)'/g)].map(([, value]) => value);
+
+    for (const dir of documents) {
+      for (const path of claimed) {
+        assert.ok(
+          !`/${dir}`.startsWith(path.replace(/\*$/, '')),
+          `Apple claims ${path}, which covers /${dir}`,
+        );
+      }
+      for (const prefix of prefixes) {
+        assert.ok(!`/${dir}/`.startsWith(prefix), `Android claims ${prefix}, which covers /${dir}`);
+      }
+      // And the rewrite table must not swallow them either.
+      assert.doesNotMatch(read('_redirects'), new RegExp(`^/${dir}\\b`, 'm'));
+    }
+  });
+
   it('puts no token anywhere but the path it came from', () => {
     // The page reports an open and nothing else. No token in a query string, no token
     // in an analytics call, no third-party origin on the page at all beyond the font
@@ -498,6 +559,55 @@ describe('the app the site claims to open', () => {
     assert.match(filters, /autoVerify: true/);
     assert.match(filters, /scheme: 'https'/);
     assert.match(filters, new RegExp(`host: '${literal(links.domain)}'`));
+  });
+
+  it('claims the same four paths on Android as it does on iOS', () => {
+    /**
+     * The two halves of one claim, which nothing else compares.
+     *
+     * Apple's file lists paths; Android's manifest lists path prefixes; and until this
+     * test existed the manifest listed *no* path at all, which claims the entire domain.
+     * Both directions of drift are silent and both are damaging:
+     *
+     *   - **Android claiming more than iOS** hands the app URLs it has no screen for. The
+     *     moment bingd.app serves /privacy — which the stores require — an over-broad
+     *     filter turns a store's own compliance link into `+not-found` on Android and a
+     *     working page on iOS.
+     *   - **Android claiming less** is the `/list/*` failure again, on one platform only:
+     *     the link opens Chrome, the same link opens the app on an iPhone, and nothing
+     *     anywhere reports a mismatch.
+     *
+     * `pathPrefix` is the exact Android spelling of Apple's `/x/*`: both match every URL
+     * beginning with `/x/`. So the comparison is a rewrite of one into the other, and any
+     * claim in `deep-links.config.json` that is not of the `/<segment>/*` shape fails
+     * rather than being silently skipped.
+     */
+    const filters = /intentFilters: \[([\s\S]*?)\n {4}\],/.exec(appConfig)?.[1] ?? '';
+    const prefixes = [...filters.matchAll(/pathPrefix: '([^']+)'/g)].map(([, value]) => value);
+
+    const expected = links.appPaths.map((claimed) => {
+      const segment = /^\/([^/]+)\/\*$/.exec(claimed)?.[1];
+      assert.ok(segment, `${claimed} is not a /<segment>/* claim`);
+      return `/${segment}/`;
+    });
+
+    assert.deepEqual(
+      [...prefixes].sort(),
+      [...expected].sort(),
+      'app.config.ts intent filters and deep-links.config.json appPaths claim different paths',
+    );
+
+    // Every path entry carries its own scheme and host, because Android unions <data>
+    // attributes across the filter rather than pairing them up. A bare pathPrefix would
+    // widen the claim instead of narrowing it.
+    const entries = [...filters.matchAll(/\{[^{}]*pathPrefix: '[^']+'[^{}]*\}/g)].map(
+      ([entry]) => entry,
+    );
+    assert.equal(entries.length, prefixes.length);
+    for (const entry of entries) {
+      assert.match(entry, /scheme: 'https'/, entry);
+      assert.match(entry, new RegExp(`host: '${literal(links.domain)}'`), entry);
+    }
   });
 
   it('claims no path the app has no screen for', () => {

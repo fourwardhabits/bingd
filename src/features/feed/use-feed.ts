@@ -2,9 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 
 import type { Bucket } from '@/features/collection/score';
 import { avatarUri } from '@/lib/images';
+import { effectiveCertification, effectiveGenres } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { compactName, type MediaKind } from '@/lib/titles';
+
+import { ACTIVITY_TYPES, isWatchActivity, type ActivityType } from './activity';
 
 export type FeedNote = {
   text: string;
@@ -13,7 +16,7 @@ export type FeedNote = {
 
 export type FeedItem = {
   id: string;
-  type: 'title_ranked' | 'title_logged' | 'season_completed';
+  type: ActivityType;
   actorId: string;
   actorUsername: string;
   actorName: string;
@@ -29,8 +32,20 @@ export type FeedItem = {
   title: string | null;
   year: number | null;
   posterPath: string | null;
+  /**
+   * The genres to print — the row's own, or the parent series' where a season has
+   * none, which is every season the catalogue holds (`lib/media-metadata.ts`).
+   *
+   * Resolved here rather than at the row, so the three surfaces that render an
+   * activity cannot disagree about what a season's genres are.
+   */
   genres: string[];
+  /** The US rating, resolved the same own-then-parent way. `PG-13`, `TV-MA`, null. */
+  certification: string | null;
+  /** A movie's length. Null for a season and a series — see `activityMetadata`. */
   runtimeMinutes: number | null;
+  /** A season's episode count (`20260820000400`). Null everywhere else. */
+  episodeCount: number | null;
   createdAt: string;
   position: number | null;
   /**
@@ -67,7 +82,20 @@ export type FeedItem = {
 
 type Embedded<T> = T | T[] | null;
 
-type ParentShape = { title: string | null };
+/**
+ * The parent series of a season, which this read has always embedded for its title.
+ *
+ * It now carries two more columns, and they are the cheap half of the founder's
+ * standardised subheading: TMDB publishes genres and a content rating on the *series*
+ * and never on a season, so before this a feed row about `Severance, S2` had no genres
+ * and no rating to print — not because they were unknown, but because they were one
+ * join away on a join that was already being made.
+ */
+type ParentShape = {
+  title: string | null;
+  genres: string[] | null;
+  certification: string | null;
+};
 
 type MediaShape = {
   kind: MediaKind;
@@ -76,7 +104,9 @@ type MediaShape = {
   release_date: string | null;
   poster_path: string | null;
   genres: string[] | null;
+  certification: string | null;
   runtime_minutes: number | null;
+  episode_count: number | null;
   parent: Embedded<ParentShape>;
 };
 
@@ -173,15 +203,17 @@ async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
     .from('feed_events')
     .select(
       'id, type, actor_id, media_item_id, created_at, payload, ' +
-        // The parent series, so a season can be named. A self-join through
-        // parent_id, which PostgREST resolves as an embed like any other.
+        // The parent series, so a season can be named — and, since the founder
+        // standardised the subheading, so it can be described and rated too. A
+        // self-join through parent_id, which PostgREST resolves as an embed like any
+        // other, and a left one: a movie comes back with `parent: null`.
         'media_items(kind, title, season_number, release_date, poster_path, genres, ' +
-        'runtime_minutes, ' +
-        'parent:parent_id(title)), ' +
+        'certification, runtime_minutes, episode_count, ' +
+        'parent:parent_id(title, genres, certification)), ' +
         'profiles:actor_id(username, display_name, avatar_path)',
     )
     .in('actor_id', actorIds)
-    .in('type', ['title_ranked', 'title_logged', 'season_completed'])
+    .in('type', [...ACTIVITY_TYPES])
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
@@ -202,6 +234,21 @@ async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
     const actorName = profile?.display_name || profile?.username;
     if (!actorName) continue;
 
+    // Resolved once, here, against the parent embed above. `effectiveGenres` is the
+    // same helper the awards and the collection filter use, so a season's genres mean
+    // one thing across the app rather than "whatever this query happened to select".
+    const parent = media ? one(media.parent) : null;
+    const subject = media
+      ? {
+          kind: media.kind,
+          genres: media.genres,
+          certification: media.certification,
+          parent: parent
+            ? { genres: parent.genres, certification: parent.certification }
+            : null,
+        }
+      : null;
+
     items.push({
       id: row.id,
       type: row.type as FeedItem['type'],
@@ -215,14 +262,16 @@ async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
         ? compactName({
             kind: media.kind,
             title: media.title,
-            seriesTitle: one(media.parent)?.title ?? null,
+            seriesTitle: parent?.title ?? null,
             seasonNumber: media.season_number,
           })
         : null,
       year: media?.release_date ? Number(media.release_date.slice(0, 4)) : null,
       posterPath: media?.poster_path ?? null,
-      genres: media?.genres ?? [],
+      genres: subject ? effectiveGenres(subject) : [],
+      certification: subject ? effectiveCertification(subject) : null,
       runtimeMinutes: media?.runtime_minutes ?? null,
+      episodeCount: media?.episode_count ?? null,
       createdAt: row.created_at,
       position: row.payload?.position ?? null,
       score: row.payload?.score ?? null,
@@ -233,7 +282,22 @@ async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
     });
   }
 
-  await Promise.all([attachNotes(items), attachCompanions(items)]);
+  /**
+   * Notes and companions attach to activities about having *watched* the thing, and
+   * to no others.
+   *
+   * Both are matched on (actor, media item) rather than on event id, deliberately and
+   * for good reasons documented below — a note is read live so its author can retract
+   * it, a tag is read live so the tagged person can withdraw it. The cost of that key
+   * is that it cannot tell one of an actor's events about a title from another, so a
+   * `watchlist_added` row for a film its actor later watched would inherit the review
+   * and the companions of the watching. "Suraj added Dune to their watchlist with
+   * Anna", under a note calling it the best thing he saw all year.
+   *
+   * Filtering the input is the whole fix, and it also narrows the two queries.
+   */
+  const watched = items.filter((item) => isWatchActivity(item.type));
+  await Promise.all([attachNotes(watched), attachCompanions(watched)]);
   return items;
 }
 

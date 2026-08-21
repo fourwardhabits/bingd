@@ -1,0 +1,173 @@
+name: Release gate
+
+# Everything ci.yml runs, plus the suites that are too slow or too heavy to put in
+# front of every ordinary commit — and the checks that only matter when something is
+# about to be handed to somebody else.
+#
+# Separate from ci.yml deliberately. The real multi-connection PostgreSQL concurrency
+# suite starts an actual PostgreSQL 17 server and runs 74 tests across many connections;
+# putting it on every pull request would make a one-line copy change cost several minutes
+# and would teach people to stop watching CI. Putting it nowhere would mean the ranking
+# and notification race invariants are only ever verified by the person who remembers to
+# run them.
+#
+# So it runs here: before a Beta build, before an `eas update --branch beta`, and before
+# anything is merged that a friend tester will end up running. See
+# docs/release/safe-update-runbook.md §6.
+#
+# Started by hand rather than on a schedule, because "a release candidate" is a decision
+# somebody makes rather than a state a branch drifts into. It also runs on any branch
+# named release/*, which is where candidates are prepared.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['release/**']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Full suite, real Postgres, export
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx expo customize tsconfig.json --non-interactive || true
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: https://ci.invalid
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ci
+
+      # ---- Everything ci.yml runs -------------------------------------------------
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test -- --ci
+      - run: npm run test:db
+      - run: npm run test:web
+      - run: npm run test:web:mutants
+      - run: npm run test:config
+      - run: npm run functions:check
+      - run: npm run functions:lint
+
+      # ---- And the part that only runs here ---------------------------------------
+      #
+      # Real PostgreSQL, many connections. `embedded-postgres` downloads and starts a
+      # genuine server, so these tests can interleave two transactions the way two
+      # phones do — which is the only way the ranking, redemption and block-barrier
+      # races can be observed at all. PGlite cannot express them: it is one connection.
+      - name: Concurrency suite (real PostgreSQL)
+        run: npm run test:race
+
+      # And the check on that check: each race invariant is deliberately broken and the
+      # suite is required to go red. A concurrency test that passes against a broken
+      # implementation is worse than no concurrency test.
+      - name: Concurrency mutation check
+        run: npm run test:race:mutants
+
+      # A bundle that cannot be produced is a build that cannot be made, and the failure
+      # arrives ten minutes into an EAS build otherwise.
+      - name: Android export
+        run: npx expo export --platform android
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: https://ci.invalid
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ci
+          APP_VARIANT: preview
+
+      # The site build refuses on a missing or malformed identifier rather than
+      # producing a file that makes every link open the browser. Cheap, and it is the
+      # last thing between deep-links.config.json and Apple's CDN.
+      - name: Site build
+        run: npm run build:web
+
+      # Each lane's config resolved with that lane's real variant, lane and backend, the
+      # way an EAS build resolves it — and asserting that `extra.lane` and `extra.variant`
+      # come back as the lane declared, which is the pair an `eas update` gets wrong when
+      # it is run without `scripts/release.mjs`.
+      #
+      # Two earlier versions of this step were wrong and both were found by review rather
+      # than by the step. The first set only APP_VARIANT and passed https://ci.invalid,
+      # which is not a Supabase URL at all, so it asserted nothing about backends. The
+      # second called itself "every lane" and skipped production in a `continue`.
+      #
+      # Named for what it does. It resolves the **three lanes that have a backend** —
+      # development, preview, beta — and asserts that `production` has none, which is why
+      # it is not among them. Review 28b caught the earlier version calling itself "every
+      # lane" while skipping production in a `continue`; the negative step below is what
+      # actually covers production, and saying so is the difference between a skip and a
+      # silent gap.
+      - name: The three lanes with a backend resolve against it
+        run: |
+          set -e
+          node -e "
+            const { execFileSync } = require('node:child_process');
+            const { LANE_BACKENDS } = require('./config/backends.cjs');
+            const eas = require('./eas.json');
+
+            const withBackend = Object.entries(LANE_BACKENDS).filter(([, refs]) => refs.length);
+            const without = Object.entries(LANE_BACKENDS).filter(([, refs]) => !refs.length);
+
+            if (without.length !== 1 || without[0][0] !== 'production') {
+              throw new Error(
+                'Exactly one lane may have no backend and it must be production. Lanes without one: ' +
+                  (without.map(([l]) => l).join(', ') || 'none') +
+                  '. If a production Supabase project now exists, this step and its name need updating ' +
+                  'in the same change that adds it.'
+              );
+            }
+            console.log('production: no backend declared, covered by the negative step below');
+
+            for (const [lane, refs] of withBackend) {
+              const variant = eas.build[lane].env.APP_VARIANT;
+              for (const ref of refs) {
+                const env = {
+                  ...process.env,
+                  EAS_BUILD: 'true',
+                  BINGD_LANE: lane,
+                  APP_VARIANT: variant,
+                  EXPO_PUBLIC_SUPABASE_URL: \`https://\${ref}.supabase.co\`,
+                  EXPO_PUBLIC_SUPABASE_ANON_KEY: 'ci',
+                };
+                const out = execFileSync('npx', ['expo', 'config', '--type', 'public', '--json'], {
+                  env, encoding: 'utf8', shell: process.platform === 'win32',
+                });
+                const config = JSON.parse(out);
+                if (config.extra.lane !== lane) throw new Error(lane + ': extra.lane is ' + config.extra.lane);
+                if (config.extra.variant !== variant) throw new Error(lane + ': extra.variant is ' + config.extra.variant);
+                console.log(\`--- \${lane}: \${config.android.package} on \${ref} — resolved\`);
+              }
+            }
+          "
+
+      # And the mirror image: a lane pointed at a project it may not use has to FAIL.
+      # A check that only ever proves the good case proves that nothing throws.
+      - name: A lane pointed at the wrong backend fails the build
+        run: |
+          set -e
+          if EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
+             EXPO_PUBLIC_SUPABASE_URL=https://someotherproject.supabase.co \
+             EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
+             npx expo config --type public --json > /dev/null 2>&1; then
+            echo "The beta lane resolved against an unlisted Supabase project. The guard is inert."
+            exit 1
+          fi
+          echo "beta + unlisted project: refused, as it must be"
+
+          if EAS_BUILD=true BINGD_LANE=production APP_VARIANT=production \
+             EXPO_PUBLIC_SUPABASE_URL=https://abheeqyjzekiowkztfxv.supabase.co \
+             EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
+             npx expo config --type public --json > /dev/null 2>&1; then
+            echo "The production lane resolved against bingd-nonprod. The lane mapping is inert."
+            exit 1
+          fi
+          echo "production + nonprod: refused, as it must be"

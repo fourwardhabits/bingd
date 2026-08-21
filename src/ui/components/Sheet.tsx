@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { inkAlpha, theme } from '../tokens';
 import { Text } from './Text';
@@ -41,6 +41,24 @@ export type SheetProps = {
  */
 export function Sheet({ visible, onClose, label, children }: SheetProps) {
   const keyboard = useKeyboardHeight();
+  const insets = useSafeAreaInsets();
+
+  /**
+   * The foot of every sheet in the app, decided in one place.
+   *
+   * A bottom-edge safe area is right about the device and wrong about the design: it
+   * pads by the inset and by *nothing else*, so on a display that reports no bottom
+   * inset — an Android device with three-button navigation, a simulator, every test —
+   * a sticky footer’s buttons finish flush against the edge of the sheet. The founder
+   * found that twice on one device, on Collection Filters and on Bingd Awards, which
+   * are simply the two sheets whose last element is a button rather than a list.
+   *
+   * `Math.max` rather than a sum: the home indicator’s inset is already breathing
+   * room, and adding a gutter on top of it would lift the buttons off a modern iPhone
+   * for no reason. Whichever is larger, never less than a gutter — the same rule
+   * `Screen` applies to the bottom of a page.
+   */
+  const bottomPadding = Math.max(insets.bottom, theme.space[4]);
 
   return (
     <Modal
@@ -66,14 +84,14 @@ export function Sheet({ visible, onClose, label, children }: SheetProps) {
           accessibilityElementsHidden
           importantForAccessibility="no"
         />
-        <SafeAreaView edges={['bottom']} style={styles.sheet} accessibilityLabel={label}>
+        <View style={[styles.sheet, { paddingBottom: bottomPadding }]} accessibilityLabel={label}>
           <View
             style={styles.handle}
             accessibilityElementsHidden
             importantForAccessibility="no"
           />
           {children}
-        </SafeAreaView>
+        </View>
       </View>
     </Modal>
   );

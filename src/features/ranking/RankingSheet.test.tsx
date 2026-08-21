@@ -440,6 +440,80 @@ describe('moving a title to another band', () => {
     expect(invalidated(['collection', 'user-1'])).toBe(true);
   });
 
+  /**
+   * The founder's device finding, at the layer that answers it.
+   *
+   * A ranked title re-ranked *inside* its own band cannot go through `rank_rebucket`,
+   * which raises 22023 on a bucket that is not moving. `rerank` unranks and re-opens in
+   * the same band instead, and everything downstream — the comparisons, the reveal, the
+   * refresh — is the same session.
+   */
+  it('re-ranks inside the same band by unranking and starting again', async () => {
+    answering(comparison());
+    const { invalidated } = await mount({ subject: { ...subject, mode: 'rerank' as const } });
+
+    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
+    // The position is dropped first, because `rank_start` refuses a title that has one.
+    expect(callsTo('rank_unrank')).toHaveLength(1);
+    // Never the rebucket RPC: the bucket is not moving and that call would be refused.
+    expect(callsTo('rank_rebucket')).toHaveLength(0);
+    // The bucket the session opens in is the bucket it already had.
+    expect(callsTo('rank_start')[0][1]).toMatchObject({ p_bucket: 'loved' });
+    // The unrank is committed before a single comparison, exactly as a rebucket is.
+    await waitFor(() => expect(invalidated(['awards', 'user-1'])).toBe(true));
+    expect(invalidated(['collection', 'user-1'])).toBe(true);
+  });
+
+  it('does not open a session when the unrank was refused', async () => {
+    // A suspension is a refusal, not a lost reply: the position is still there, and
+    // starting a session over it would earn a 23505 and read as a different fault.
+    mockRpc.mockImplementation((name: string) =>
+      Promise.resolve(
+        name === 'rank_unrank'
+          ? { data: null, error: { code: '42501', message: 'suspended' } }
+          : { data: { done: false, session_id: 's', pivot: 'p' }, error: null },
+      ),
+    );
+    await mount({ subject: { ...subject, mode: 'rerank' as const } });
+
+    await waitFor(() => expect(callsTo('rank_unrank')).toHaveLength(1));
+    expect(callsTo('rank_start')).toHaveLength(0);
+  });
+
+  /**
+   * Independent review 30, the one Major it found.
+   *
+   * A same-bucket re-rank has no server refusal in front of it. A first ranking is
+   * stopped by 23505 and a rebucket by 22023, and both were doing retry protection by
+   * accident — so on this path a reader told “Could not rank” over a finalize that
+   * actually committed would tap again and write a second `title_ranked` event for one
+   * intent. The sentence is the protection.
+   */
+  it('says the outcome is unknown rather than that it failed', async () => {
+    // A bare code is not a refusal this app raises — `write-outcome.ts` reads it as an
+    // outcome nobody can prove either way, and marks the step `changed`.
+    answering({ data: null, error: { code: '', message: 'TypeError: Network request failed' } });
+    const view = await mount({ subject: { ...subject, mode: 'rerank' as const } });
+
+    await waitFor(() => expect(view.getByText('Not sure that landed')).toBeTruthy());
+    // Never “Could not rank” over a write that may have committed.
+    expect(view.queryByText('Could not rank')).toBeNull();
+    // And it says what to do about it, rather than leaving a retry as the obvious move.
+    expect(view.getByText(/may already be ranked/)).toBeTruthy();
+    // The raw transport error is not a sentence to show anybody.
+    expect(view.queryByText(/TypeError/)).toBeNull();
+  });
+
+  it('still says plainly when the server actually refused', async () => {
+    // A SQLSTATE this app raises on purpose is a definite refusal: nothing committed,
+    // and hedging about it would be its own kind of dishonest.
+    answering({ data: null, error: { code: '42501', message: 'suspended' } });
+    const view = await mount({ subject: { ...subject, mode: 'rerank' as const } });
+
+    await waitFor(() => expect(view.getByText('Could not rank')).toBeTruthy());
+    expect(view.queryByText('Not sure that landed')).toBeNull();
+  });
+
   it('leaves a first ranking alone, which writes nothing until it is placed', async () => {
     answering(comparison());
     const { invalidated } = await mount();

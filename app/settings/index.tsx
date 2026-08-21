@@ -1,12 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Application from 'expo-application';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { Stack, useRouter } from 'expo-router';
 import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { signOut, useCurrentProfile } from '@/features/auth';
-import { pendingRequestCount, useNotifications } from '@/features/notifications/use-notifications';
-import { env } from '@/lib/env';
+import { env, isRelease, lane } from '@/lib/env';
 import { Button, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -18,23 +18,21 @@ import { theme } from '@/ui/tokens';
  * which is why it survived: nothing in the database could be reached from here.
  *
  * The destinations are the questions somebody opens Settings to answer: *who am I
- * here* (Edit Profile), *who can see me* (Privacy), *who is waiting on me*
- * (Notifications), *what should reach me at all* (Notification Settings), *how do I
- * leave* (Account & Data), and *what is this built on* (About). There is none added
- * for the sake of symmetry and there are no placeholders: every row leads to controls
- * with real backend semantics behind them.
+ * here* (Edit Profile), *who can see me* (Privacy), *what should reach me at all*
+ * (Notification settings), *how do I leave* (Account & Data), and *what is this built
+ * on* (About). There is none added for the sake of symmetry and there are no
+ * placeholders: every row leads to controls with real backend semantics behind them.
  *
- * The pending-request count is the one number on this screen. It is the only thing in
- * the app that is genuinely waiting on the reader — a reaction is news, a request is a
- * task — and before Phase F a private account could receive them with nowhere to see
- * them, which made the private setting a way to become unreachable rather than a
- * choice.
+ * **The inbox is not one of the destinations, since the founder's Preview pass.** It
+ * was, and it was redundant: the bell in the Feed and Profile headers opens the same
+ * inbox from the screens somebody is on when they wonder who reacted, and it carries
+ * the unread count — follow requests included. A second door three taps deep inside
+ * Settings made one inbox read as two features. The bell, the inbox and the
+ * preferences screen are all unchanged; only the duplicate route is gone.
  */
 export default function SettingsScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
-  const notifications = useNotifications(profile.id);
-  const pending = pendingRequestCount(notifications.data);
 
   const leave = async () => {
     await signOut();
@@ -65,18 +63,22 @@ export default function SettingsScreen() {
             label="Privacy"
             onPress={() => router.push('/settings/privacy')}
           />
+          {/* **The inbox is not reachable from here, and that is the founder's
+              Preview correction.** There was a Notifications row above this one going
+              to `/settings/notifications`, and it was a second door to a room with a
+              door already: the bell in the Feed and Profile headers opens the same
+              inbox, from the screens somebody is actually on when they wonder who
+              reacted. Two entry points to one inbox, one of them three taps deep inside
+              Settings, made the pair read as two different features.
+
+              The inbox itself, the bell, and this screen are all untouched. What is
+              gone is the redundant route to it.
+
+              This row stays, because it answers a different question. "Who is waiting
+              on me" is the inbox; "what should reach me at all" is this, and the second
+              is the one somebody opens Settings for. */}
           <Row
             icon="notifications-outline"
-            label="Notifications"
-            detail={pending ? `${pending} waiting` : undefined}
-            emphasis={pending > 0}
-            onPress={() => router.push('/settings/notifications')}
-          />
-          {/* Its own row rather than a control inside the inbox alone. The two are
-              different questions — "who is waiting on me" and "what should reach me
-              at all" — and the second is the one somebody comes to Settings for. */}
-          <Row
-            icon="options-outline"
             label="Notification Settings"
             onPress={() => router.push('/settings/notification-preferences')}
           />
@@ -116,14 +118,12 @@ function Row({
   icon,
   label,
   detail,
-  emphasis = false,
   last = false,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
   detail?: string;
-  emphasis?: boolean;
   last?: boolean;
   onPress: () => void;
 }) {
@@ -139,7 +139,7 @@ function Row({
         {label}
       </Text>
       {detail ? (
-        <Text variant="footnote" tone={emphasis ? 'action' : 'secondary'}>
+        <Text variant="footnote" tone="secondary">
           {detail}
         </Text>
       ) : null}
@@ -215,15 +215,36 @@ function About() {
  * version and a build number, which is what a support conversation actually starts
  * with.
  *
- * The rest is not deleted, it is moved: `env.variant !== 'production'` still gates the
- * detailed block, so a preview build carries the diagnostics for Beta Hardening and a
- * release build shows one line. That is the same rule as before with the *default*
- * inverted — it used to show everything outside production, and now it shows the line
- * everywhere and the detail only where somebody is testing.
+ * The rest is not deleted, it is moved: `isRelease` gates the detailed block, so every
+ * build somebody is testing carries the diagnostics for Beta Hardening and a release
+ * build shows one line. That is the same rule as before with the *default* inverted — it
+ * used to show everything outside production, and now it shows the line everywhere and
+ * the detail only where somebody is testing.
+ *
+ * The gate was `env.variant !== 'production'` until review 28, and that was wrong for the
+ * one lane it mattered most in. Beta builds the production variant, so a friend beta —
+ * production identity, nonproduction database — showed nothing but the version line.
  */
 function BuildDetails() {
   const version = Constants.expoConfig?.version ?? '?';
-  const build = Constants.expoConfig?.android?.versionCode ?? '—';
+
+  /**
+   * **The build number is read from the installed binary, not from the config.**
+   *
+   * This line used to say `Constants.expoConfig?.android?.versionCode`, and it was
+   * wrong twice over. `app.config.ts` sets no `versionCode` at all — `appVersionSource`
+   * is `remote`, so the number is assigned by EAS at build time and lives on EAS's
+   * servers — and even where a value did appear, the key is the *Android* one, so every
+   * iPhone in the beta showed `Bingd 0.1.0 (—)`. The one screen whose job is to let a
+   * tester tell a support conversation which build they are on could not name it on
+   * half the fleet.
+   *
+   * `Application.nativeBuildVersion` is `versionCode` on Android and `CFBundleVersion`
+   * on iOS, read out of the package that is actually installed. It is the same source
+   * `lib/release.ts` uses for the `build_number` on every analytics event and every
+   * Sentry report, so what a tester reads aloud matches what the dashboards say.
+   */
+  const build = Application.nativeBuildVersion ?? '—';
 
   return (
     <View style={styles.block}>
@@ -233,21 +254,49 @@ function BuildDetails() {
         </Text>
 
         {/* Only where somebody is testing. PRD §23 keeps identifiers out of anything
-            user-facing, and a fingerprint is an identifier. */}
-        {env.variant !== 'production' ? (
+            user-facing, and a fingerprint is an identifier.
+
+            Gated on the **lane**, not the variant. A Beta build carries the production
+            variant — the bundle identifier cannot change between TestFlight and the App
+            Store release that replaces it — while talking to the nonproduction backend,
+            so `variant !== 'production'` hid these four lines from precisely the people
+            running a production-looking binary against a test database. Independent
+            review 28 called that the wrong trade and it was. */}
+        {!isRelease ? (
           <>
             <Text variant="caption" tone="tertiary">
-              {env.variant} · {Updates.channel ?? 'no channel'}
+              {lane} · {Updates.channel ?? 'no channel'}
             </Text>
             <Text variant="caption" tone="tertiary">
               runtime {short(Updates.runtimeVersion)} ·{' '}
               {Updates.isEmbeddedLaunch ? 'embedded' : `update ${short(Updates.updateId)}`}
+            </Text>
+            {/* Which backend this build is talking to.
+
+                Not a secret — the project ref is the hostname the app connects to and is
+                in the bundle already — and it is the one fact that cannot be inferred
+                from anything else on this screen. A Preview build pointed at the wrong
+                Supabase project looks identical to a right one: it signs in, and the
+                collection is simply empty. `app.config.ts` refuses to build against a
+                project that is not on its allowlist, and this is how the founder
+                confirms which one it chose without opening a dashboard. */}
+            <Text variant="caption" tone="tertiary">
+              backend {backendRef(env.supabaseUrl)}
             </Text>
           </>
         ) : null}
       </View>
     </View>
   );
+}
+
+/** `https://abheeqyjzekiowkztfxv.supabase.co` reads as `abheeqyjzekiowkztfxv`. */
+function backendRef(url: string) {
+  try {
+    return new URL(url).hostname.split('.')[0];
+  } catch {
+    return '—';
+  }
 }
 
 /** A full fingerprint is 40 characters and unreadable aloud; the first eight identify it. */

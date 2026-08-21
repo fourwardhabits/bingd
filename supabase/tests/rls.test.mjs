@@ -368,3 +368,109 @@ describe('the invite attribution behind the award', () => {
     );
   });
 });
+
+/**
+ * The watchlist, after it stopped being a private domain.
+ *
+ * `20260820000200` replaced `watchlist_own` (`user_id = auth.uid()`) with
+ * `watchlist_read` (`can_i_view(user_id)`), so the shelf on a profile is authorised by
+ * the same oracle as the rankings above it. That is a *widening*, which is the kind of
+ * change that has to be tested from the outside rather than reasoned about: the whole
+ * point of this file is that the owner role cannot see a policy at all.
+ *
+ * Four cases, and the two that matter most are the negative ones. A private account's
+ * watchlist must leak neither its titles nor its *count* — a `count(*)` of 3 on a
+ * profile that shows nothing is still the disclosure, and it is the one a client-side
+ * privacy check would have left open.
+ */
+describe('watchlist visibility follows the profile', () => {
+  let film;
+  let second;
+
+  before(async () => {
+    film = await t.createMovie('A Watchlisted Film', 90201);
+    second = await t.createMovie('Another Watchlisted Film', 90202);
+    // Alice is public, Priya is private. Both save both films.
+    for (const owner of [alice, priya]) {
+      await t.sql(
+        `insert into watchlist (user_id, media_item_id) values ($1, $2), ($1, $3)
+         on conflict do nothing`,
+        [owner, film, second],
+      );
+    }
+  });
+
+  it('lets a stranger read a public account watchlist', async () => {
+    const { rows } = await t.asUser(mallory, () =>
+      t.sql(`select media_item_id from watchlist where user_id = $1`, [alice]),
+    );
+    assert.equal(rows.length, 2, 'a public profile shelf would be empty for every visitor');
+  });
+
+  it('shows a private account watchlist to nobody who does not follow it', async () => {
+    const { rows } = await t.asUser(mallory, () =>
+      t.sql(`select media_item_id from watchlist where user_id = $1`, [priya]),
+    );
+    assert.deepEqual(rows, [], 'a private watchlist leaked its titles');
+  });
+
+  it('does not leak the count of a private account watchlist either', async () => {
+    // The section hides on an empty read, so a visible-but-empty shelf is the same
+    // thing as no shelf. A count that came back non-zero would be the leak on its own.
+    const { rows } = await t.asUser(mallory, () =>
+      t.sql(`select count(*)::int as n from watchlist where user_id = $1`, [priya]),
+    );
+    assert.equal(rows[0].n, 0, 'a private watchlist leaked how many titles are on it');
+  });
+
+  it('shows a private account watchlist to an approved follower', async () => {
+    await t.sql(
+      `insert into follows (follower_id, followee_id, state) values ($1, $2, 'approved')
+       on conflict (follower_id, followee_id) do update set state = 'approved'`,
+      [bob, priya],
+    );
+
+    const { rows } = await t.asUser(bob, () =>
+      t.sql(`select media_item_id from watchlist where user_id = $1`, [priya]),
+    );
+    assert.equal(rows.length, 2, 'an approved follower sees the rest of the profile but not this');
+  });
+
+  it('hides it across a block in either direction', async () => {
+    await t.sql(
+      `insert into blocks (blocker_id, blocked_id) values ($1, $2) on conflict do nothing`,
+      [alice, mallory],
+    );
+
+    const blockedReader = await t.asUser(mallory, () =>
+      t.sql(`select media_item_id from watchlist where user_id = $1`, [alice]),
+    );
+    assert.deepEqual(blockedReader.rows, [], 'a blocked account still read the blocker watchlist');
+
+    const blocker = await t.asUser(alice, () =>
+      t.sql(`select media_item_id from watchlist where user_id = $1`, [mallory]),
+    );
+    assert.deepEqual(blocker.rows, [], 'a blocker still read the blocked account watchlist');
+
+    await t.sql(`delete from blocks where blocker_id = $1 and blocked_id = $2`, [alice, mallory]);
+  });
+
+  it('still refuses every direct write, which widening a select must not have changed', async () => {
+    for (const statement of [
+      [`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [alice, film]],
+      [`delete from watchlist where user_id = $1`, [alice]],
+      [`update watchlist set media_item_id = $2 where user_id = $1`, [alice, second]],
+    ]) {
+      const before = await t.sql(`select count(*)::int as n from watchlist where user_id = $1`, [
+        alice,
+      ]);
+      // RLS denies by default: with no insert/update/delete policy these either raise
+      // or silently affect nothing. Either is a refusal; a changed row count is not.
+      await t.asUser(mallory, () => t.sql(statement[0], statement[1])).catch(() => {});
+      const now = await t.sql(`select count(*)::int as n from watchlist where user_id = $1`, [
+        alice,
+      ]);
+      assert.equal(now.rows[0].n, before.rows[0].n, `a client role wrote through: ${statement[0]}`);
+    }
+  });
+});

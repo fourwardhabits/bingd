@@ -253,3 +253,244 @@ Later-positive-rank is the metric that would catch an engine that optimizes for 
 | TMDB unavailable | Serve from `media_items`; suppress enrichment, never the slate |
 
 Under every failure the surface degrades to something honest. It never shows an empty state to a user who has a valid older slate, and it never presents a fallback as personalization.
+
+---
+
+## 7. Freshness — the audit, and what was changed, 2026-08-20
+
+The founder's report after the Android Preview: *"essentially the same recommendations
+every visit."*
+
+### The audit
+
+Nothing was broken, and that is the finding. Every stage below was read against the code
+rather than assumed:
+
+| | What it did | Verdict |
+|---|---|---|
+| Candidate generation | `similar` per anchor + `trending.*.week` fallback | Fixed for the life of the provider cache — weeks for `similar`, six hours for trending |
+| Scoring | `scoreCandidate`, pure over candidate × anchors × taste | Deterministic |
+| Re-ranking | `diversify`, greedy top-k in strict score order | **Deterministic. One input, one answer.** |
+| Cache | `staleTime` 30 minutes; key = rankings + watched + filters | Correct, and irrelevant to this |
+| Remount | Same key, so the cache is re-read | Changes nothing |
+| Filters | Applied to candidates before scoring | Stable candidate set, by design |
+| Low-data fallback | Popularity-only | Also deterministic |
+
+So the wall was **not stale — it was correct, and correctness had exactly one answer.**
+With the rankings unchanged and the provider cache unchanged, every visit recomputed the
+same twenty titles in the same order, and would have done for weeks. No amount of cache
+tuning could have moved it, which is why the audit came before the fix.
+
+### What changed
+
+The pipeline was split at the boundary between *which titles are good* and *which
+arrangement of them is on screen*.
+
+- **Stage 3 (scoring) is unchanged, and is what the query caches.** `scoreSlate` returns
+  every eligible scored candidate. Relevance weighting is untouched — no term was added,
+  removed or reweighted.
+- **Stage 4 (re-ranking) gained an optional seed.** With no seed, `diversify` is exactly
+  what it was: strict score order under the three hard ceilings. With one, the order it
+  walks is sampled instead of sorted.
+- **The sampling is perturbed top-k over a bounded pool**, also called Gumbel top-k:
+  `key = score + T × spread × Gumbel(u)`, over the top `3 × limit` candidates by score,
+  with `u` a stable hash of (seed, media item id). Adding a Gumbel draw to a score and
+  taking the best is equivalent to sampling in proportion to the exponential of that
+  score, so a better title is genuinely more likely to lead — this is not a shuffle.
+- **The three ceilings run over the sampled order unchanged.** Anchor, franchise and
+  genre caps hold for every seed; only the order they are applied to varies.
+
+`T = 0.12`, measured rather than chosen. Over 3,000 seeds on a sixty-candidate pool, a
+reader with one anchor sees their top-scoring title lead about half of all visits and a
+title from outside the top ten lead about one visit in a hundred, with roughly six hundred
+distinct top-sixes available. The measurement table is in `rank.ts`.
+
+**Those figures are a one-off calibration run, not something the suite maintains** —
+review 29e asked for the distinction. The suite holds exactly two weaker bounds over 300
+seeds: the best title leads **more than a third** of visits (`> 100/300`), and a title from
+outside the top ten leads **less than a tenth** (`< 30/300`). 29f caught this paragraph
+saying "well over" and "well under" of assertions that permit 101 and 29. Nothing
+reproduces the distinct-top-six count. Re-run the calibration before moving `T`.
+
+**The pool bound is where the relevance guarantee lives — and independent review 29
+found this paragraph claiming more than the code delivers.** It said sampling "can never
+reach the two-hundredth". The accurate statement is narrower:
+
+> **No draw can promote a title from outside the pool.** Sampling reorders the top sixty
+> and nothing else; every candidate below them keeps its strict score order and stays
+> behind all sixty.
+
+The greedy ceiling pass then walks that whole sequence, so a wall whose top sixty are
+mostly rejected by the genre, franchise and anchor caps *can* be filled from position 61
+and beyond. **That is not something the seed introduced.** `diversify` has always been one
+greedy pass over every scored candidate with hard ceilings; reaching the tail is a property
+of the candidates and the caps rather than of the arrangement.
+
+**Seeding changes which titles are chosen and how many**, and it took two further rounds
+to say that. The ceilings intersect and are spent in the order they are met, so a different
+arrangement of the pool leaves different quota for what follows.
+
+**There is exactly one guarantee:**
+
+| Holds, every seed | Does not hold — and each was claimed here once |
+|---|---|
+| No draw promotes a title from outside the pool | The same titles are chosen *(found 29b)* |
+| | The wall never gets shorter *(found 29c)* |
+| | The tail is reached under identical conditions *(found 29c)* |
+
+The counterexample to the second row is small and real: six candidates over two genres and
+two franchises at `limit: 5` give a wall of four in strict order and **three** under seed
+76. It is in `rank.test.ts`.
+
+**That cost is accepted.** The excuse offered for it in one round — that it needs a pool
+which could not fill the wall anyway — was **disproved by 29d** and is also in the suite: add
+a seventh candidate with its own genre and franchise and strict order fills all five slots
+while seed 76 still returns four, in about one seed in fifty. What the shortening actually
+requires is that the intersecting ceilings be near-binding.
+
+What holds, and now runs as a test rather than sitting in prose: **on the five pool shapes
+the suite tests, the length does not move.** Those five are 60 and 200 candidates across
+the eighteen-genre vocabulary, a five-genre wall, a franchise-heavy wall, and 25 candidates
+for a wall of 20 — over 200 seeds each, twenty every time. Five fixtures are evidence about
+five fixtures and not a proof about every pool with slack in its caps; 29f was right that
+the previous sentence here read as the second. It is a test at all because 29d could not
+reproduce the claim from the paragraph that made it.
+
+Topping the wall back up would mean relaxing a ceiling, which §4 already refused: a cap that
+yields when it is inconvenient is not a cap.
+
+Truncating the input to the pool would make the top-60 bound literal, and was rejected for
+the same reason twice over: it shortens the wall *more*, and unconditionally.
+
+`rank.test.ts`, `what the exploration pool bounds`, asserts every row of that table —
+**including the false ones**, so no later round can restore them.
+
+On a popularity-only wall the same setting behaves close to uniform sampling inside the
+pool, which is the right answer rather than a defect: those scores differ by thousandths,
+so there is no distinctly best title to protect. Where the spread is exactly zero,
+`explore` returns strict order for every seed and Refresh is honestly a no-op — there is
+no near-tie to break when everything is one tie.
+
+### Where the seed lives
+
+`src/features/recommendations/session-seed.ts`, a module rather than component state, so
+that:
+
+- **A visit is stable.** Nothing reshuffles on a bookmark, a reaction, a re-render, a
+  navigation, or a cache invalidation. The only writer is the Refresh control.
+- **Leaving the tab and coming back does not reshuffle**, which component state could not
+  have given us.
+- **A new launch is a new seed**, because the module is evaluated again — and a new seed
+  is *almost always* a new arrangement rather than necessarily one, for the two reasons
+  Refresh carries: a zero-spread pool returns strict order for every seed, and two seeds
+  can survive the ceilings to the same wall.
+
+It enters the query through `select`, never through the key. A seed in the key would make
+Refresh a different cache entry with no data in it — the screen would fall to `isPending`,
+swap the wall for a skeleton and mount a fresh `ScrollView`, which is the same
+flash-and-jump defect fixed in the same pass for bookmarks. Through `select`, a refresh is
+one sort over data already in the cache: no network, no pending state, no remount.
+
+Filters are unaffected: sampling runs over the already-filtered scored pool, so a
+refreshed wall is still Comedy if Comedy was chosen.
+
+## 8. Rotation — the second audit, and why the seed was not enough, 2026-08-20
+
+The founder tested two consecutive Refresh states on the Preview build after §7 shipped.
+The visible wall kept **eight of the nine posters** and rearranged them. Their verdict:
+this is *shuffle the same recommendations*, not *show me different recommendations*, and
+it is a product failure whatever the mechanism.
+
+### The audit
+
+§7's mechanism was doing exactly what it was designed to do, which is the finding again.
+
+| | What it was | Verdict |
+|---|---|---|
+| Candidate pool | Every eligible scored candidate, typically 100–160 | Not the constraint |
+| Rotation pool | Top `3 × limit` = **60** by score | Deep enough; not the constraint |
+| Score distribution | A real gradient — an anchored head well above the body | **Part of the cause** |
+| Perturbation | `T = 0.12 × spread`, Gumbel | **Calibrated to preserve the leader.** §7 tuned it so the best title leads >⅓ of visits and an outsider leads <1/10. Head retention is that guarantee seen from the other side |
+| Top-k selection | Top 20 of the perturbed 60 | Not the constraint |
+| Seed behaviour | Advances; no fixed point, no two-cycle | Working. A promise about the *seed*, never about the wall |
+| Diversification | Three hard ceilings over the sampled order | Unchanged, not the cause |
+| **Current-slate exclusion** | **None** | **Primary cause** |
+| **Session exposure memory** | **None** | **Primary cause** |
+
+Measured against the real scorer across pool shapes, retention in the first nine ran
+**52–72%**, and the founder's screenshot is the tail of that distribution. So the verdict
+is a *combination*, and the two rows in bold are the ones worth fixing: **nothing in the
+pipeline knew which titles were on screen**, so turnover was a by-product of how far a
+random draw happened to move a title rather than something the algorithm was trying to
+achieve.
+
+Raising the temperature was the other available lever and was rejected. It buys turnover
+by spending the relevance guarantee §7 measured, and what it buys is still turnover by
+luck — the same mechanism, louder.
+
+### What changed
+
+Deliberately the smallest coherent change, and none of it touches scoring.
+
+- **The session arrangement is no longer a number.** `session-seed.ts` holds a seed plus
+  `current` (what is on the wall) and `seen` (how many arrangements have contained each
+  title, capped at three).
+- **`explore` orders by staleness tier first, then by the same perturbed score.** The
+  current wall is the worst tier; never-shown is the best. A comparison rather than an
+  arithmetic penalty, because a penalty is a magnitude that must be tuned against a score
+  spread nobody controls — which is how `T` came to need three review rounds. A tier
+  cannot be too small to matter.
+- **Up to two anchors are exempt**, and only titles that are the two strongest candidates
+  in the whole pool by true score. Relevance stays primary: a Refresh that discarded the
+  single best recommendation would be a reset rather than a refresh. A wall whose head is
+  weak keeps nothing and rotates completely.
+- **The pool bound is unchanged at `3 × limit`.** Rotation happens *inside* the bounded
+  pool, so §7's one guarantee — sampling cannot promote a title from outside it — holds
+  exactly as before. Widening the pool to buy a fourth novel refresh would put the
+  hundredth-best candidate on the visible wall, which is the trade the quality bound rules
+  out.
+
+### The loop that had to be avoided
+
+Exposure is recorded by the thing that renders, which makes a feedback cycle the obvious
+failure mode: render → record → exposure changes → new wall → record. So
+`noteSlateOnScreen` is **silent** — it parks what is on screen without notifying
+subscribers — and only `refreshRecommendations` promotes the parked value into the
+arrangement and notifies.
+
+Two things follow. The exposure the ranker reads is **frozen between presses**, so a
+navigation, a re-render or a bookmark re-derives the identical wall. And parking is keyed
+per wall, so switching medium does not erase what the other one showed and then hand it
+straight back on the next press.
+
+### Measured behaviour
+
+Over a pool of 60 or more, per press, with a wall of 20 and nine posters visible:
+
+| | retained of 9 | session-new of 9 |
+|---|---|---|
+| Refresh #1 | 2 | 7 |
+| Refresh #2 | 2 | 7 |
+| Refresh #3 | 2 | 4–6 |
+| Refresh #4+ | 2 | 0 |
+
+**Turnover holds at 78% even after novelty is exhausted**, which is the property that
+matters most. The rotation pool is three walls deep, so by the third press there is
+little unseen left; from there the tiers rotate titles by relative staleness instead, and
+the wall neither settles into two alternating arrangements nor gets shorter.
+
+On a constrained pool — 22 candidates for a wall of 20 — retention rises to 3–5 of 9 and
+the wall stays full. That is the graceful degradation the brief asks for, rather than a
+turnover target forcing weak titles onto the screen.
+
+`src/features/recommendations/rotation.test.ts` asserts every row above, and carries the
+founder's failure as a named mutant: *permutes the same titles instead of replacing them,
+if rotation is removed* runs the old path over the identical fixture and asserts that it
+retains more than a third of the visible nine.
+
+### What this does not do
+
+No memory of what was shown **in a previous session** — exposure dies with the process —
+no novelty or recency term in the score, no learning from what an explored title did, and
+no widening of the candidate pool itself. Those are
+`docs/product/deferred-roadmap.md` §17, with the reasoning for each.

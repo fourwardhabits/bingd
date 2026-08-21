@@ -100,8 +100,8 @@ export default function NotificationPreferencesScreen() {
                     label={section.masterLabel}
                     description={
                       on
-                        ? 'Everything in this section is on, or some of it.'
-                        : 'Everything in this section is off.'
+                        ? 'At least one of these is on.'
+                        : 'All of these are off.'
                     }
                     value={on}
                     disabled={busy || unavailable}
@@ -137,16 +137,16 @@ export default function NotificationPreferencesScreen() {
             );
           })}
 
-          {/* Said once, at the bottom, rather than under each of the two rows it
-              applies to. Both are real settings over real categories — the gate
-              honours them the moment anything writes one — and neither has a writer
-              today: the invite resolver is not built, and award notifications are
-              deferred until a tier crossing is something the server records rather
-              than something a device believes. */}
+          {/* One row, not two. This said "Invite and Award notifications" until
+              2026-08-20, and by then it was wrong: `20260819000500` gave
+              `invite_activated` a writer, so that switch has been governing real
+              traffic while the screen told readers it was not. Awards are the last one
+              without a writer, and stay deferred until a tier crossing is something the
+              server records rather than something a device believes. */}
           <View style={styles.explain}>
             <Text variant="caption" tone="tertiary">
-              Invite and Award notifications are not being sent yet. Your choice here is
-              saved and will be honoured when they start.
+              Award notifications are not being sent yet. Your choice here is saved and
+              will be honoured when they start.
             </Text>
           </View>
         </ScrollView>
