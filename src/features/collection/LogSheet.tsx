@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 
 import { invalidateAfterCollectionChange } from './invalidate';
 import { diagnose } from '@/lib/diagnose';
+import { queryKeys } from '@/lib/query';
 import { track, type Surface } from '@/lib/analytics';
 import { compactName } from '@/lib/titles';
 import { useCurrentProfile } from '@/features/auth';
@@ -28,7 +29,7 @@ import {
   useSetCompanions,
   useTaggablePeople,
 } from './use-companions';
-import { emptyLogState, useLogState } from './use-log-state';
+import { emptyLogState, useLogState, type LogState } from './use-log-state';
 import { WatchDatePicker } from './WatchDatePicker';
 import {
   logWatched,
@@ -210,6 +211,12 @@ function Body({
   // `exists: false` and both try to log the watch. Only ever written from inside an
   // async callback, never during render.
   const createdRow = useRef(false);
+  // Single-flight for the default-date stamp. Two quick bucket taps launch two
+  // detached decisions, and if both read "no date" before either write lands, both
+  // write — same date almost always, but not across a midnight rollover
+  // (independent review 33d). One decision in flight answers for both taps: if it
+  // stamps, the second was redundant; if it finds a date, the second would too.
+  const stampPending = useRef(false);
   const stored = companions.data?.map((c) => c.id) ?? [];
   const chosen = companionEdit ?? stored;
   // Mutual follows plus whoever is already on this watch. See `taggableWith`.
@@ -225,6 +232,42 @@ function Body({
   // watchlist, and changes what this reader has watched. The same set as ranking.
   const refresh = () =>
     invalidateAfterCollectionChange(queryClient, profile.id, title.id);
+
+  /**
+   * What is stored about this title, answered only once the read is at rest.
+   *
+   * `choose` needs "is there a date already" as a fact, and the render closure
+   * cannot supply one: the buckets are live before `useLogState` resolves, and a
+   * reopened sheet shows cached data while `staleTime: 0` refetches behind it — a
+   * date recorded on another device is exactly what that refetch carries
+   * (independent reviews 33, 33b). A fetch still in flight is therefore *waited
+   * out* rather than guessed at, so the decision is made against the truth in both
+   * directions: a stored date is never overwritten, and a genuinely dateless title
+   * still gets its stamp even when the tap raced an invalidation's refetch. The
+   * wait is bounded by the fetch itself, which always settles; a read left
+   * `paused` (offline) or `error` resolves to no answer, and no answer stamps
+   * nothing.
+   */
+  const settledLogState = (): Promise<LogState | undefined> => {
+    const key = queryKeys.logState(profile.id, title.id);
+    const atRest = (): LogState | undefined | null => {
+      const read = queryClient.getQueryState<LogState>(key);
+      if (read?.fetchStatus === 'fetching') return null;
+      return read?.status === 'success' ? read.data : undefined;
+    };
+
+    const now = atRest();
+    if (now !== null) return Promise.resolve(now);
+    return new Promise((resolve) => {
+      const unsubscribe = queryClient.getQueryCache().subscribe(() => {
+        const later = atRest();
+        if (later !== null) {
+          unsubscribe();
+          resolve(later);
+        }
+      });
+    });
+  };
 
   const report = (result: WriteResult) => {
     if (result.outcome === 'ranked') {
@@ -312,15 +355,35 @@ function Body({
     // The row says "Today", so today is what must be stored. `set_bucket` writes no
     // date, and leaving it at that meant the sheet displayed a default it had never
     // saved — reopen it a week later and it would still claim "Today". Only when
-    // there is no date already: a re-log must not overwrite the real one.
-    if (!state.watchedOn) {
-      // Failure here is not worth blocking on. The bucket is saved, the title is in
-      // the collection, and the date is recoverable from this same row.
-      await logWatched({
-        operationId: newOperationId(),
-        mediaItemId: title.id,
-        watchedOn: effectiveDate,
-      });
+    // there is no date already — a re-log must not overwrite the real one — and
+    // "no date already" is `settledLogState`'s question, not this render's closure.
+    //
+    // Deliberately not awaited before the ranking handoff. The stamp is a courtesy
+    // default, already "not worth blocking on", and a read stalled on a bad network
+    // must not hold the ranking sheet hostage (independent review 33c); it waits
+    // for the settled answer on its own and reconciles the cache when it lands.
+    // What remains unclosable from this side is the instant between that answer
+    // and the write — a date recorded on another device in that gap needs a
+    // server-side conditional write, which the beta accepts as a residual risk.
+    if (!stampPending.current) {
+      stampPending.current = true;
+      void (async () => {
+        try {
+          const settled = await settledLogState();
+          if (settled && !settled.watchedOn) {
+            // Failure here is not worth blocking on. The bucket is saved, the title
+            // is in the collection, and the date is recoverable from this same row.
+            await logWatched({
+              operationId: newOperationId(),
+              mediaItemId: title.id,
+              watchedOn: effectiveDate,
+            });
+            refresh();
+          }
+        } finally {
+          stampPending.current = false;
+        }
+      })();
     }
 
     setSaving(false);

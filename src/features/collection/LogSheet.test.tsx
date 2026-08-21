@@ -1,8 +1,10 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
+import { queryKeys } from '@/lib/query';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { LogSheet, type LoggableTitle, type LogSheetProps } from './LogSheet';
+import { emptyLogState } from './use-log-state';
 
 const mockRpc = jest.fn();
 const mockFrom = jest.fn();
@@ -744,6 +746,12 @@ describe('the watch date', () => {
   it('stamps today when a bucket is chosen and no date exists', async () => {
     const sheet = await open(filmA);
 
+    // "No date exists" is this test's premise, and only the landed read states it.
+    // Pressed before that, the stamp is rightly withheld (the slow-read test below),
+    // which is a different case than the one pinned here.
+    await waitFor(() =>
+      expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
+    );
     await fireEvent.press(sheet.bucket('Loved it'));
 
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
@@ -754,22 +762,120 @@ describe('the watch date', () => {
     stubReads({ bucket: null, watched_on: '2020-03-04', note: null }, null);
     const sheet = await open(filmA);
 
+    // Hydration is what the disabled state reports, so it is what to wait on. The
+    // first version waited on `accessibilityValue.text` not being 'Today' — but
+    // before the read lands the row has no value, `undefined` is not 'Today', and
+    // the press could go through against `emptyLogState`. That vacuous pass is how
+    // this test found the real overwrite (fixed in `choose`) while claiming to test
+    // only the loaded case; the loaded case is what it pins again now, and the
+    // unloaded one has its own test below.
     await waitFor(() =>
-      expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today'),
+      expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
     );
+    expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today');
     await fireEvent.press(sheet.bucket('Loved it'));
 
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(0);
   });
 
-  it('shows a stored date rather than today', async () => {
-    stubReads({ bucket: null, watched_on: '2020-03-04', note: null }, null);
+  /**
+   * The race the loaded case cannot see, and what CI actually caught on 2026-08-21.
+   *
+   * The buckets are deliberately live before `useLogState` resolves, so a real user
+   * on a slow connection can choose one while their stored date is still in flight.
+   * `choose` used to decide "no date already" from the render closure — which at that
+   * moment is `emptyLogState` — and stamped today over a date recorded years ago. The
+   * decision now reads the query cache after `set_bucket` returns: a baseline that
+   * has not landed stamps nothing.
+   */
+  it('does not stamp today when a bucket is chosen before the stored date has loaded', async () => {
+    const { release } = stubSlowReads({ bucket: null, watched_on: '2020-03-04', note: null }, null);
     const sheet = await open(filmA);
+
+    // Pressed while the read is still held open — the window a slow network keeps.
+    await fireEvent.press(sheet.bucket('Loved it'));
+    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    expect(callsTo('log_watched')).toHaveLength(0);
+
+    release();
+
+    // The date survives, and its arrival does not trigger a late stamp either.
+    await waitFor(() =>
+      expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
+    );
+    expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today');
+    expect(callsTo('log_watched')).toHaveLength(0);
+  });
+
+  /**
+   * Review 33's finding, pinned: cached data is not a settled read.
+   *
+   * A sheet reopened on this device still holds last visit's "no date" while
+   * `staleTime: 0` refetches behind it — and a watch date recorded on another
+   * device since then is exactly what that refetch is carrying. The sheet is fully
+   * interactive on the cached answer, so the guard has to require the fetch to be
+   * at rest, not merely that some read once landed.
+   */
+  it('does not stamp today from a cached "no date" while its refetch is still in flight', async () => {
+    const { release } = stubSlowReads({ bucket: null, watched_on: '2020-03-04', note: null }, null);
+    const sheet = await open(filmA);
+    await act(async () => {
+      sheet.client.setQueryData(queryKeys.logState('user-1', 'film-a'), emptyLogState);
+    });
+
+    // The cached answer makes the row live and claim "Today" while the refetch is
+    // still held open — which is exactly the window being tested.
+    await waitFor(() =>
+      expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
+    );
+    expect(sheet.dateRow().props.accessibilityValue.text).toBe('Today');
+
+    await fireEvent.press(sheet.bucket('Loved it'));
+    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    expect(callsTo('log_watched')).toHaveLength(0);
+
+    release();
 
     await waitFor(() =>
       expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today'),
     );
+    expect(callsTo('log_watched')).toHaveLength(0);
+  });
+
+  /**
+   * The other direction of the same wait (review 33b): a tap that races the read on
+   * a title with genuinely no date must still get its stamp — after the read lands,
+   * not never. Skipping it permanently would re-open the original defect: a row
+   * that says "Today" and reopens a week later still saying it.
+   */
+  it('stamps today after the read settles when the tap raced it and no date exists', async () => {
+    const { release } = stubSlowReads(null, null);
+    const sheet = await open(filmA);
+
+    await fireEvent.press(sheet.bucket('Loved it'));
+    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    // Withheld while the answer is unknown…
+    expect(callsTo('log_watched')).toHaveLength(0);
+
+    release();
+
+    // …and delivered once it is known to be "no date".
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_watched_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('shows a stored date rather than today', async () => {
+    stubReads({ bucket: null, watched_on: '2020-03-04', note: null }, null);
+    const sheet = await open(filmA);
+
+    // Waiting on the row being enabled rather than on its text not being 'Today':
+    // before the read lands the row has no text at all, which is also not 'Today',
+    // and this test would have passed without ever seeing the date it is about.
+    await waitFor(() =>
+      expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
+    );
+    expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today');
   });
 });
 
