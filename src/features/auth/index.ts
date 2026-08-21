@@ -13,6 +13,7 @@ export {
   oauthRedirectUrl,
   sendEmailCode,
   signInWithApple,
+  signInWithEmailPassword,
   signInWithGoogle,
   signOut,
   takePendingDisplayName,

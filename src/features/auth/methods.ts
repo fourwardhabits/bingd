@@ -74,6 +74,36 @@ export async function verifyEmailCode(email: string, code: string): Promise<Sign
 }
 
 // ---------------------------------------------------------------------------
+// Email + password
+// ---------------------------------------------------------------------------
+
+/**
+ * Sign-in only, never sign-up: `signInWithPassword` cannot create an account, so
+ * this adds no second registration flow. It exists because store review requires
+ * reusable credentials that work without a one-time code — the email method above
+ * delivers its code to an inbox a reviewer at Google or Apple does not have.
+ * Ordinary accounts are created by code or OAuth and have no password set, so
+ * this path simply fails for them; nothing about their flow changes.
+ */
+export async function signInWithEmailPassword(
+  email: string,
+  password: string,
+): Promise<SignInOutcome> {
+  const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+  if (error) {
+    // Supabase's "Invalid login credentials" reads like a system fault; say what
+    // it means. Every other error keeps its own message.
+    const message =
+      error.code === 'invalid_credentials'
+        ? 'That email and password do not match.'
+        : error.message;
+    return { ok: false, cancelled: false, message };
+  }
+  track({ name: 'sign_in_completed', props: { method: 'password' } });
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
 // Apple
 // ---------------------------------------------------------------------------
 

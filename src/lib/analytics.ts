@@ -78,7 +78,7 @@ export type Surface =
    */
   | 'notifications';
 
-export type SignInMethod = 'email_code' | 'apple' | 'google';
+export type SignInMethod = 'email_code' | 'password' | 'apple' | 'google';
 
 /** The three bands. `not_for_me` is the database's spelling and the one used here. */
 export type Bucket = 'loved' | 'fine' | 'not_for_me';
