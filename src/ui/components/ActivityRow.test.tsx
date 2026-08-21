@@ -1,6 +1,8 @@
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, within } from '@testing-library/react-native';
 
-import { Text } from 'react-native';
+import { StyleSheet, Text, type StyleProp, type ViewStyle } from 'react-native';
+
+import { theme } from '../tokens';
 
 import { ActivityRow } from './ActivityRow';
 
@@ -175,6 +177,117 @@ describe('the integrated sentence', () => {
     await fireEvent.press(view.getByText(withYear('Inception', 2010)));
 
     expect(props.onPressTitle).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Founder Feed refinement, 2026-08-20.
+ *
+ * Two reports — "the row looks busy with a poster *and* a face" and "the subheading is
+ * shifted relative to the sentence" — that were one defect. The sentence lived in a row
+ * behind the avatar; the metadata lived in the column that row sat in. No amount of
+ * styling makes two lines share a left edge while an avatar stands in front of one.
+ *
+ * These test the *structure* rather than pixels, because the structure is what the fix
+ * is. A padding-based alignment would pass a screenshot and fail these, which is the
+ * right way round: the pad is the version that drifts the moment the avatar resizes.
+ */
+describe('the row composition', () => {
+  /** The sentence's own column, found via the sentence rather than by a test ID. */
+  const copyColumn = (view: Awaited<ReturnType<typeof render>>) =>
+    view.getByText(/Suraj ranked/).parent!;
+
+  it('sets the sentence and the metadata as siblings, on one left edge', async () => {
+    const view = await render(<ActivityRow {...props} onPressActor={jest.fn()} />);
+
+    // The same parent *node*, not merely an ancestor in common: siblings in one column
+    // share a left edge by construction, and there is then no offset to keep in step
+    // with the leading cluster by hand. Nesting either line one level deeper — which
+    // is exactly what the avatar's row did — breaks this and only this.
+    const sentence = view.getByText(/Suraj ranked/);
+    const metadata = view.getByText('148m · Sci-fi');
+    expect(metadata.parent).toBe(sentence.parent);
+  });
+
+  it('keeps the avatar out of the sentence column entirely', async () => {
+    // The regression this guards: putting the face back in front of the sentence
+    // re-indents that line and only that line, which is what the founder saw.
+    const view = await render(<ActivityRow {...props} onPressActor={jest.fn()} />);
+
+    expect(within(copyColumn(view)).queryByLabelText("Suraj's profile")).toBeNull();
+  });
+
+  it('composes the actor onto the poster as one leading object', async () => {
+    const view = await render(<ActivityRow {...props} onPressActor={jest.fn()} />);
+
+    // The poster's press target and the actor chip share a container: that container
+    // is the artwork's own box, which is what lets the chip sit in its corner — and
+    // what keeps the chip's touches inside a parent Android will deliver them from.
+    const lead = view.getByLabelText('Inception, 2010, 148m · Sci-fi').parent!;
+    expect(within(lead).getByLabelText("Suraj's profile")).toBeTruthy();
+  });
+
+  it('still opens the profile from the chip, not only from the name', async () => {
+    const onPressActor = jest.fn();
+    const view = await render(<ActivityRow {...props} onPressActor={onPressActor} />);
+
+    const lead = view.getByLabelText('Inception, 2010, 148m · Sci-fi').parent!;
+    await fireEvent.press(within(lead).getByLabelText("Suraj's profile"));
+    expect(onPressActor).toHaveBeenCalled();
+  });
+
+  it('holds the alignment when the sentence wraps and the metadata does not', async () => {
+    // The founder's long case. A wrapped sentence must not move the line under it.
+    const view = await render(
+      <ActivityRow
+        {...props}
+        title="Keep Your Hands Off Eizouken!, S1"
+        year={2020}
+        verb="added"
+        tail="to their watchlist"
+        companions={['Anna']}
+        metadata="TV-14 · 12 episodes · Animation · Comedy"
+      />,
+    );
+
+    const sentence = view.getByText(/Suraj added/);
+    const metadata = view.getByText('TV-14 · 12 episodes · Animation · Comedy');
+    expect(metadata.parent).toBe(sentence.parent);
+  });
+
+  /**
+   * Read off the render rather than restated from the stylesheet, so the numbers here
+   * cannot agree with a copy of themselves while the component has moved on.
+   */
+  const styleOf = (node: unknown) =>
+    (StyleSheet.flatten((node as { props: { style?: StyleProp<ViewStyle> } }).props.style) ??
+      {}) as ViewStyle;
+
+  it('keeps the chip and its whole touch box inside the poster', async () => {
+    // The Android rule this exists for: touches outside a parent's bounds are not
+    // delivered. A chip that overhangs the corner — or one grown past the artwork by
+    // a later bump to `avatar.xxs` — is a profile link that works in review on iOS and
+    // silently does not on the device. Containment is the fix and this is its guard.
+    const view = await render(<ActivityRow {...props} onPressActor={jest.fn()} />);
+
+    const chip = view.getByLabelText("Suraj's profile");
+    const chipStyle = styleOf(chip);
+    const ringStyle = styleOf(chip.children[0]);
+    const poster = styleOf(
+      view.getByLabelText('Inception, 2010, 148m · Sci-fi').children[0],
+    );
+
+    // Anchored to the corner rather than floated somewhere near it.
+    expect(chipStyle.position).toBe('absolute');
+    expect(chipStyle.right).toBe(0);
+    expect(chipStyle.bottom).toBe(0);
+
+    // The face, the Paper ring around it, and the padding that makes the corner
+    // square tappable — all of it has to fit the artwork in both axes.
+    const box =
+      theme.layout.avatar.xxs + 2 * Number(ringStyle.padding) + 2 * Number(chipStyle.padding);
+    expect(box).toBeLessThanOrEqual(Number(poster.width));
+    expect(box).toBeLessThanOrEqual(Number(poster.height));
   });
 });
 

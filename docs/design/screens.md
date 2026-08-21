@@ -286,6 +286,27 @@ Where an actor genuinely cannot be resolved, the item is **omitted**. A feed wit
 
 Empty feed for a user following nobody: an invitation to find friends, not a spinner and not a blank page.
 
+### The row as it stands — 2026-08-20
+
+The anatomy above is the 2026-08-15 decision and is kept for its reasoning. Three device passes have moved the composition since, and this is where it landed:
+
+```
+┌─────────────────────────────────────────────────┐
+  ┌──┐
+  │▓▓│  Suraj ranked Inception (2010) with Anna   ⬤ 8.7
+  │ (S)  148m · Sci-fi
+  └──┘
+        "Third time and it still holds up."
+        ♡ 3   💬 2   🔖   ✈                  13h ago
+─────────────────────────────────────────────────
+```
+
+- **One band, not three.** The avatar header line and the separate title card are gone; the sentence, the artwork and the score share a row, with the note and the actions hanging off it. That is what closed the density gap against Beli — three items filled a phone, and the difference was never type size.
+- **One sentence.** Actor, verb, title, year, companions and any tail are a single wrapping text node. Actor and title are semibold and both are pressable; the year is muted and joined to the title by a non-breaking space, so a wrap cannot strand it.
+- **One leading object.** The poster is the anchor and the actor's face is a small ringed chip in its bottom-right corner, contained inside the artwork rather than overhanging it. Two separate leading visuals is Bingd's problem and not Beli's — Beli has one photograph per item where Bingd has a poster *and* a face — and setting them side by side made the row read as busy.
+- **One left text edge.** The sentence, the metadata, the note, the reaction cluster and the action icons all start at the poster's right edge. The metadata used to start 32pt left of the sentence it describes, because the avatar was standing in front of that sentence; nothing is offset by hand now.
+- **Actions are icons**, labelled for screen readers and named after the title they act on. Comments shipped since — the icon appears only where a surface has wired the sheet up, and it carries a count and never a preview, since a preview is the mask that gets forgotten.
+
 ---
 
 ## 8. Recommendations — reworked 2026-08-15
