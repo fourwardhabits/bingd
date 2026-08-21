@@ -222,7 +222,7 @@ the founder's own builds, which is exactly where they get tested.
 2. **Founder Preview acceptance** — [Android](./android-preview-acceptance.md),
    [iOS](./ios-preview-acceptance.md). Nothing below starts until this passes on **both**
    platforms.
-3. TMDB logo added (`store-privacy-inventory.md` §5). Pre-beta blocker.
+3. ~~TMDB logo added (`store-privacy-inventory.md` §5).~~ Done 2026-08-21.
 4. `hello@bingd.app` confirmed. Demo account created for App Review.
 5. Release gate green (`safe-update-runbook.md` §6).
 6. `beta` builds made — both platforms, first iOS one interactive.

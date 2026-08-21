@@ -261,7 +261,7 @@ JavaScript.
 
 ---
 
-## 5. TMDB attribution — a beta blocker, and one part is still open
+## 5. TMDB attribution — every part now met
 
 The founder holds written TMDB confirmation permitting zero-revenue testing; a commercial
 agreement is required before monetisation. What their terms ask for during testing:
@@ -274,19 +274,20 @@ agreement is required before monetisation. What their terms ask for during testi
 | Per-screen metadata attribution | **met** | "Metadata from TMDB" on the title screen and the person screen |
 | Images served from TMDB, never rehosted | **met** | `src/lib/images.ts` |
 | The same notice on the website | **met** | `https://bingd.app/privacy`, final section |
-| **The official TMDB logo** | **NOT MET — FOUNDER** | see below |
+| **The official TMDB logo** | **met** (2026-08-21) | `assets/brand/tmdb-logo.svg` in Settings › About, above the notice |
 
-**The logo must be downloaded from TMDB and used unmodified** — their colours, their aspect
-ratio, and less prominent than Bingd's own mark. It has not been added, and **it must not
-be drawn, redrawn, approximated, traced, or generated**: producing a lookalike breaches the
-same terms the attribution section exists to satisfy.
+**The logo is TMDB's own file, used unmodified.** It is the primary short (blue) SVG from
+<https://www.themoviedb.org/about/logos-attribution>, committed byte-for-byte, and rendered
+contain-fit at a size smaller than Bingd's own mark. It was **not drawn, redrawn,
+approximated, traced, or generated**: producing a lookalike breaches the same terms the
+attribution section exists to satisfy, which is why the file's provenance is recorded here:
 
-Get it from <https://www.themoviedb.org/about/logos-attribution> and drop it into
-`assets/brand/`, then render it in Settings › About above the notice.
-
-**This is a pre-Beta action, not a pre-Preview one.** It does not block founder acceptance
-testing and it should not hold up any other work; it must be done before a friend installs
-the app.
+- Downloaded 2026-08-21 from
+  `https://themoviedb.org/assets/v4/logos/v2/blue_square_1-5bdc75aaebeb75dc7ae79426ddd9be3b2be1e342510f8202baf6bffa71d7f5c4.svg`
+- sha256 of the committed file:
+  `5bdc75aaebeb75dc7ae79426ddd9be3b2be1e342510f8202baf6bffa71d7f5c4` — identical to the
+  hash TMDB embeds in the filename above, so `sha256sum assets/brand/tmdb-logo.svg` is the
+  ongoing proof the asset is theirs and untouched.
 
 ---
 
@@ -294,7 +295,7 @@ the app.
 
 1. **Confirm `hello@bingd.app` is a mailbox somebody reads.** Both stores publish it and
    Apple emails it during review.
-2. **Add the official TMDB logo** (§5). Downloaded, unmodified.
+2. ~~**Add the official TMDB logo** (§5).~~ Done 2026-08-21 — downloaded, unmodified.
 3. **Decide the legal entity named on the privacy page.** It currently says "one
    independent developer" and names no person or company. A public launch — particularly
    for UK/EU users — wants a named data controller and an address. A friend beta on nonprod

@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Application from 'expo-application';
+import { Image } from 'expo-image';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { Stack, useRouter } from 'expo-router';
@@ -167,30 +168,39 @@ function Row({
  * app entirely. It now says which half of a title page is theirs, which is the thing a
  * reader would actually wonder.
  *
- * Two obligations are met elsewhere and one is still owed. The per-title source line
- * is on the title screen and now on the person screen too; artwork is served from
- * TMDB's CDN and never rehosted (`src/lib/images.ts`). Still owed is the approved TMDB
- * logo, which has to be unmodified in colour and aspect and less prominent than
- * Bingd's own mark — it arrives with the brand asset pass rather than being
- * approximated here, because a redrawn logo would breach the same terms this section
- * exists to satisfy.
+ * Two obligations are met elsewhere. The per-title source line is on the title screen
+ * and the person screen; artwork is served from TMDB's CDN and never rehosted
+ * (`src/lib/images.ts`). The logo below is TMDB's own file — the primary short (blue)
+ * SVG from themoviedb.org/about/logos-attribution, committed byte-for-byte — because
+ * their terms permit only approved, unmodified marks. Its rendered size keeps the
+ * source aspect (190.24:81.52) and stays smaller than Bingd's own mark, which the same
+ * terms require.
  */
+const TMDB_LOGO = require('../../assets/brand/tmdb-logo.svg');
+
 function About() {
   const openAttribution = () => {
-    void Linking.openURL('https://www.themoviedb.org/about/logos-attribution');
+    void Linking.openURL('https://www.themoviedb.org');
   };
 
   return (
     <View style={styles.block}>
       <SectionHeader title="About" />
       <View style={styles.blockBody}>
+        <Image
+          source={TMDB_LOGO}
+          style={styles.tmdbLogo}
+          contentFit="contain"
+          accessible
+          accessibilityLabel="TMDB"
+        />
         <Text tone="secondary">
           This product uses the TMDB API but is not endorsed or certified by TMDB.
         </Text>
         <Pressable
           onPress={openAttribution}
           accessibilityRole="link"
-          accessibilityLabel="TMDB attribution and logo guidelines"
+          accessibilityLabel="TMDB website"
           hitSlop={theme.space[2]}
         >
           <Text tone="action">themoviedb.org</Text>
@@ -336,4 +346,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface.raised,
   },
   pressed: { opacity: 0.7 },
+  // TMDB's source aspect is 190.24:81.52, which contain-fit preserves inside this box.
+  // Smaller than BrandMark's lg rendition, so the mark reads as a credit, not a co-brand.
+  tmdbLogo: { width: 63, height: 27 },
 });

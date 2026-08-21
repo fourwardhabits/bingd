@@ -369,10 +369,11 @@ None of these blocks the checklist, and all of them block the store:
 - The `apple-app-site-association` file and the associated-domains entitlement.
 - The external account-deletion page Apple requires for an app with account creation.
 - A privacy manifest and the App Store privacy questionnaire answers.
-- The approved TMDB logo, unmodified and less prominent than Bingd's own mark. The
-  wording obligation is met; the logo is not.
+- ~~The approved TMDB logo, unmodified and less prominent than Bingd's own mark.~~ Added
+  2026-08-21 (`assets/brand/tmdb-logo.svg`, Settings › About); the wording obligation was
+  already met.
 
-All four are Beta Hardening.
+The remaining three are Beta Hardening.
 
 ---
 
