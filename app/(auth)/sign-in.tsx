@@ -1,8 +1,14 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { StyleSheet, View, type TextInput } from 'react-native';
 
-import { isAppleSignInAvailable, sendEmailCode, signInWithApple, signInWithGoogle } from '@/features/auth';
+import {
+  isAppleSignInAvailable,
+  sendEmailCode,
+  signInWithApple,
+  signInWithEmailPassword,
+  signInWithGoogle,
+} from '@/features/auth';
 import { BrandLockup, Button, Field, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -12,9 +18,15 @@ import { theme } from '@/ui/tokens';
 export default function SignInScreen() {
   const router = useRouter();
   const [email, setEmail] = useState('');
-  const [busy, setBusy] = useState<'email' | 'apple' | 'google' | null>(null);
+  const [password, setPassword] = useState('');
+  // The code flow is the door for everyone; the password flow is sign-in only,
+  // for accounts that already have one (store reviewers — see methods.ts). It is
+  // a mode of the same form rather than a second screen, so nothing forks.
+  const [withPassword, setWithPassword] = useState(false);
+  const [busy, setBusy] = useState<'email' | 'password' | 'apple' | 'google' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [appleAvailable, setAppleAvailable] = useState(false);
+  const passwordField = useRef<TextInput>(null);
 
   // Asked rather than assumed from the platform: the entitlement can be missing
   // from a build, and a button that always fails is worse than no button.
@@ -34,6 +46,15 @@ export default function SignInScreen() {
     } else {
       setError(result.message ?? 'That did not work. Try again.');
     }
+  };
+
+  const submitPassword = async () => {
+    setBusy('password');
+    setError(null);
+    const result = await signInWithEmailPassword(email, password);
+    setBusy(null);
+    if (!result.ok) setError(result.message ?? 'That did not work. Try again.');
+    // No navigation on success: useAuthRouting moves the user, same as OAuth.
   };
 
   const submitProvider = async (
@@ -74,19 +95,66 @@ export default function SignInScreen() {
           keyboardType="email-address"
           inputMode="email"
           textContentType="emailAddress"
-          returnKeyType="go"
+          returnKeyType={withPassword ? 'next' : 'go'}
           editable={busy === null}
-          onSubmitEditing={looksLikeEmail ? submitEmail : undefined}
-          error={error ?? undefined}
-          hint="We will send a six-digit code. No password to remember."
-        />
-        <Button
-          label={busy === 'email' ? 'Sending…' : 'Continue with email'}
-          onPress={submitEmail}
-          disabled={!looksLikeEmail || busy !== null}
-          disabledReason={
-            looksLikeEmail ? 'Signing in, one moment.' : 'Enter your email address first.'
+          onSubmitEditing={
+            withPassword
+              ? () => passwordField.current?.focus()
+              : looksLikeEmail
+                ? submitEmail
+                : undefined
           }
+          error={!withPassword ? (error ?? undefined) : undefined}
+          hint={
+            withPassword ? undefined : 'We will send a six-digit code. No password to remember.'
+          }
+        />
+        {withPassword ? (
+          <Field
+            ref={passwordField}
+            label="Password"
+            value={password}
+            onChangeText={setPassword}
+            autoCapitalize="none"
+            autoComplete="current-password"
+            autoCorrect={false}
+            secureTextEntry
+            textContentType="password"
+            returnKeyType="go"
+            editable={busy === null}
+            onSubmitEditing={looksLikeEmail && password ? submitPassword : undefined}
+            error={error ?? undefined}
+          />
+        ) : null}
+        {withPassword ? (
+          <Button
+            label={busy === 'password' ? 'Signing in…' : 'Sign in'}
+            onPress={submitPassword}
+            disabled={!looksLikeEmail || !password || busy !== null}
+            disabledReason={
+              busy !== null ? 'Signing in, one moment.' : 'Enter your email and password first.'
+            }
+          />
+        ) : (
+          <Button
+            label={busy === 'email' ? 'Sending…' : 'Continue with email'}
+            onPress={submitEmail}
+            disabled={!looksLikeEmail || busy !== null}
+            disabledReason={
+              looksLikeEmail ? 'Signing in, one moment.' : 'Enter your email address first.'
+            }
+          />
+        )}
+        <Button
+          label={withPassword ? 'Email me a code instead' : 'Sign in with a password'}
+          kind="tertiary"
+          onPress={() => {
+            setWithPassword(!withPassword);
+            setError(null);
+            setPassword('');
+          }}
+          disabled={busy !== null}
+          disabledReason="Signing in, one moment."
         />
       </View>
 
