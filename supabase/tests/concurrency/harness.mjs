@@ -666,6 +666,12 @@ export { sleep };
  * machine, and never share a database.
  */
 export function fixtures(db) {
+  // Monotonic, not random: a random default draws ~hundreds of ids from a small
+  // space per run, and a birthday collision on media_items_tmdb fails a test in
+  // setup before its race ever fires. Each suite has its own database, so a
+  // per-instance counter cannot collide with anything.
+  let movieSeq = 0;
+
   return {
     async createUser({ username, visibility = 'public', dob = '1990-01-01' } = {}) {
       const id = (await db.rows(`select gen_random_uuid() as id`))[0].id;
@@ -683,7 +689,7 @@ export function fixtures(db) {
       return id;
     },
 
-    async createMovie(title = 'Fixture', tmdbId = Math.floor(Math.random() * 1e6) + 1) {
+    async createMovie(title = 'Fixture', tmdbId = (movieSeq += 1)) {
       const { rows } = await db.sql(
         `insert into media_items (kind, tmdb_id, title, provenance)
          values ('movie', $1, $2, 'manual') returning id`,
