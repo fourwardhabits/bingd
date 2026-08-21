@@ -330,15 +330,23 @@ describe('the built site', () => {
     assert.equal(read('router.mjs'), readFileSync(join(here, 'src', 'router.mjs'), 'utf8'));
   });
 
-  it('carries no distribution destination today, and says so', () => {
+  it('carries the friend-beta install destinations for both platforms', () => {
+    // These are the two links behind every button on the invitation page. Pinned as
+    // exact values: a typo here is a store button that 404s on a page a friend was
+    // sent, and nothing else in the build would catch it.
     const invite = read('i', 'index.html');
     const config = JSON.parse(
       /<script type="application\/json" id="bingd-config">(.*?)<\/script>/s.exec(invite)[1],
     );
     assert.equal(config.page, 'invite');
-    assert.equal(config.distribution.ios.betaUrl, null);
-    assert.equal(config.distribution.android.optInUrl, null);
+    assert.equal(config.distribution.ios.betaUrl, 'https://testflight.apple.com/join/kkgaYsqx');
+    assert.equal(
+      config.distribution.android.optInUrl,
+      'https://play.google.com/apps/testing/app.bingd',
+    );
     assert.equal(config.distribution.app.scheme, 'bingd');
+    // The empty state must still exist for the 'other' platform and for any future
+    // un-configured window — it is painted by page.mjs, not removed by configuration.
     assert.match(invite, /not open for this device yet/);
   });
 
@@ -644,11 +652,10 @@ describe('the app the site claims to open', () => {
      * Android development build cannot verify App Links.** Physical Android testing has
      * to use the Preview build, whose fingerprint is present.
      *
-     * The production entry is also not finished, and cannot be yet. It carries the EAS
-     * upload key only; Play re-signs with its own, so a build installed from Play
-     * presents a certificate that is not listed here and App Links silently fail. The
-     * Play app-signing fingerprint has to be *added alongside* it — never in place of
-     * it — once Play Console exists.
+     * The production entry carries two fingerprints: the EAS upload key, and the Play
+     * app-signing key that Play substitutes when it re-signs. Both stay — a device that
+     * installed from Play checks the Play key, and one that installed a production
+     * build straight from EAS checks the upload key.
      */
     const statements = JSON.parse(read('.well-known', 'assetlinks.json'));
     const declared = new Set(declaredVariants.map((v) => v.bundleId));

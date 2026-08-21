@@ -28,7 +28,7 @@
       "invitation stops working. Set this once the build is approved for external",
       "testing; the App Store URL replaces it at public release."
     ],
-    "betaUrl": null,
+    "betaUrl": "https://testflight.apple.com/join/kkgaYsqx",
     "storeUrl": null
   },
 
@@ -43,11 +43,16 @@
       "to anybody who has not opted in, from the store page and from a direct link",
       "alike. `betaUrl` is the ordinary store listing, which only works after that.",
       "",
+      "The opt-in URL is Google's documented format, https://play.google.com/apps/",
+      "testing/<package>, set here the day the closed test was published. Play's",
+      "own Copy Link button can lag a first release while the tester page",
+      "propagates; that is a Play-side delay, not a wrong URL.",
+      "",
       "So the page leads with `optInUrl` while it is set. Tester eligibility and any",
       "Google Group membership are administered in Play Console and deliberately",
       "not modelled here: Bingd does not run a tester list."
     ],
-    "optInUrl": null,
+    "optInUrl": "https://play.google.com/apps/testing/app.bingd",
     "betaUrl": null,
     "storeUrl": null
   },
