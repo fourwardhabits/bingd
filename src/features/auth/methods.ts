@@ -146,6 +146,9 @@ export const oauthRedirectUrl = () => Linking.createURL('auth/callback');
 export async function signInWithGoogle(): Promise<SignInOutcome> {
   const redirectTo = oauthRedirectUrl();
 
+  // TEMPORARY: remove once the redirect URL is confirmed registered in Supabase.
+  console.log('[oauth] redirectTo =', redirectTo);
+
   // skipBrowserRedirect because there is no browser to redirect: the URL is opened
   // in an in-app session so the result comes back to us rather than to the OS.
   const { data, error } = await supabase.auth.signInWithOAuth({
