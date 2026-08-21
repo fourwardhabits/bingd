@@ -1,4 +1,11 @@
-import { rankAnswer, rankBack, rankCancel, rankSkip, rankStart } from './session';
+import {
+  rankAgain,
+  rankAnswer,
+  rankBack,
+  rankCancel,
+  rankSkip,
+  rankStart,
+} from './session';
 
 const mockRpc = jest.fn();
 
@@ -238,5 +245,136 @@ describe('an already ranked title', () => {
       restart: false,
     });
     expect(JSON.stringify(result)).not.toMatch(/rank_rebucket/);
+  });
+});
+
+/**
+ * Ranking a title again inside the band it is already in.
+ *
+ * The founder reproduced the absence of this on the device: Loved, Change your rating,
+ * Loved, and nothing happened at all. `rank_rebucket` cannot serve it — it raises 22023
+ * on a bucket that is not moving, by design — so this composes the two calls it would
+ * have made anyway. The interesting cases are all about the seam between them, which a
+ * transaction would not have.
+ */
+/**
+ * A rollback is not an ambiguity, and independent review 30b caught the app calling it
+ * one. `classifyWrite` reads an unrecognised SQLSTATE as `unknown` — correct by default,
+ * wrong for this code, because Postgres aborts the transaction that raises it.
+ */
+describe('a transaction rolled back against a concurrent one', () => {
+  it('is a definite refusal, not a write that may have landed', async () => {
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { code: '40001', message: 'could not serialize access due to concurrent update' },
+    });
+
+    const result = await rankStart(subject, 'loved');
+
+    // No `changed`: nothing survived, so nothing needs refetching and nobody should be
+    // told their ranking might be there.
+    expect(result).toEqual({
+      state: 'failed',
+      message: 'Something else was changing your rankings at that moment. Try again.',
+      restart: false,
+    });
+    // The database's own wording names a transaction isolation level.
+    expect(JSON.stringify(result)).not.toMatch(/serialize/);
+  });
+});
+
+describe('ranking a title again in the same bucket', () => {
+  const answering = (byName: Record<string, unknown>) =>
+    mockRpc.mockImplementation((name: string) =>
+      Promise.resolve(byName[name] ?? { data: null, error: null }),
+    );
+
+  it('drops the position, then opens a session in the bucket it already had', async () => {
+    answering({
+      rank_unrank: { data: { done: true, unranked: true }, error: null },
+      rank_start: { data: { done: false, session_id: session, pivot }, error: null },
+    });
+
+    expect(await rankAgain(subject, 'loved')).toEqual({
+      state: 'comparing',
+      sessionId: session,
+      subjectId: subject,
+      pivotId: pivot,
+      skipped: false,
+    });
+    // In this order. `rank_start` refuses a title that still holds a position.
+    expect(mockRpc.mock.calls.map(([name]) => name)).toEqual(['rank_unrank', 'rank_start']);
+    // The bucket does not move. That is the entire difference from a rebucket.
+    expect(mockRpc.mock.calls[1][1]).toEqual({
+      p_media_item_id: subject,
+      p_bucket: 'loved',
+    });
+  });
+
+  it('places outright when the band empties to nothing', async () => {
+    // The only Loved title, re-ranked: after the unrank there is nothing left to compare
+    // it against, so the server places it and there are no comparisons at all.
+    answering({
+      rank_unrank: { data: { done: true, unranked: true }, error: null },
+      rank_start: {
+        data: { done: true, position: 1, category: 'movies', bucket: 'loved', score: 10 },
+        error: null,
+      },
+    });
+
+    const result = await rankAgain(subject, 'loved');
+
+    expect(result).toMatchObject({ state: 'placed', position: 1, bucket: 'loved' });
+  });
+
+  it('carries a not-for-me bucket through unchanged', async () => {
+    answering({
+      rank_unrank: { data: { done: true }, error: null },
+      rank_start: { data: { done: false, session_id: session, pivot }, error: null },
+    });
+
+    await rankAgain(subject, 'notForMe');
+
+    // The client's own vocabulary is camelCase and the database's is snake_case, and the
+    // one place that mapping can go wrong is a bucket that is two words.
+    expect(mockRpc.mock.calls[1][1]).toEqual({
+      p_media_item_id: subject,
+      p_bucket: 'not_for_me',
+    });
+  });
+
+  it('does not open a session when the unrank was refused', async () => {
+    // A refusal means the position is still there, and starting over it would earn a
+    // 23505 that reads to the user as a different fault entirely.
+    answering({
+      rank_unrank: { data: null, error: { code: '42501', message: 'suspended' } },
+    });
+
+    const result = await rankAgain(subject, 'loved');
+
+    expect(result).toMatchObject({ state: 'failed', restart: false });
+    expect(mockRpc.mock.calls.map(([name]) => name)).toEqual(['rank_unrank']);
+  });
+
+  it('reports an unanswered unrank as a change that may have landed', async () => {
+    // A dropped reply is not a refusal. The position may be gone, so the caller has to
+    // refresh — `changed` is what tells the sheet to (`lib/write-outcome.ts`).
+    answering({ rank_unrank: { data: null, error: { code: '', message: 'TypeError: fail' } } });
+
+    expect(await rankAgain(subject, 'loved')).toMatchObject({ state: 'failed', changed: true });
+    expect(mockRpc.mock.calls.map(([name]) => name)).toEqual(['rank_unrank']);
+  });
+
+  it('goes on when the title had already lost its position', async () => {
+    // P0002 from the unrank is "title is not ranked", which is the state this call was
+    // trying to reach. Treating it as an error would strand a title the user asked to
+    // rank in a queue instead of ranking it.
+    answering({
+      rank_unrank: { data: null, error: { code: 'P0002', message: 'title is not ranked' } },
+      rank_start: { data: { done: false, session_id: session, pivot }, error: null },
+    });
+
+    expect(await rankAgain(subject, 'loved')).toMatchObject({ state: 'comparing' });
+    expect(mockRpc.mock.calls.map(([name]) => name)).toEqual(['rank_unrank', 'rank_start']);
   });
 });

@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -141,6 +142,23 @@ beforeEach(() => {
  */
 const count = (text: string) => screen.getByText(text, { includeHiddenElements: true });
 
+/**
+ * The scrolling container the award rows sit in, found by walking up from a row.
+ *
+ * By its `contentContainerStyle`, which only a scroll view has — rather than by a
+ * `testID` added to the source for this test’s benefit, and rather than by type, which
+ * this library stopped offering a query for at v14.
+ */
+const awardList = () => {
+  let node = screen.getByText('Movie Muncher').parent;
+  while (node && node.props?.contentContainerStyle === undefined) node = node.parent;
+  if (!node) throw new Error('no scroll container above the award rows');
+  return {
+    style: StyleSheet.flatten(node.props.style),
+    content: StyleSheet.flatten(node.props.contentContainerStyle),
+  };
+};
+
 const open = async (props: Partial<React.ComponentProps<typeof AwardsSheet>> = {}) => {
   const view = await renderWithProviders(
     <AwardsSheet userId="me" onClose={() => {}} {...props} />,
@@ -161,6 +179,35 @@ describe('the sheet', () => {
     for (const name of ['Movie Muncher', 'Passport Mode', 'Mutual Mania', 'Two-Screen Life']) {
       expect(screen.getByText(name)).toBeTruthy();
     }
+  });
+
+  /**
+   * The founder’s second safe-area finding, which was really two.
+   *
+   * Done sits under a list of twenty rows that is always taller than the sheet on a
+   * phone. The list was `flexGrow: 0` and nothing else — and a flex child in React
+   * Native does not shrink unless it is told to, so it kept its full measured height
+   * and pushed the footer past the bottom of a sheet capped at 90%.
+   */
+  it('keeps Done reachable under a list of twenty', async () => {
+    await open();
+
+    const done = screen.getByRole('button', { name: 'Done' });
+    expect(done).toBeTruthy();
+
+    // The list yields the space, rather than the footer being pushed out of the sheet.
+    expect(awardList().style.flexShrink).toBe(1);
+    // And it does not stretch when there is little to show — the loading and error
+    // states are three rows, not a sheetful.
+    expect(awardList().style.flexGrow).toBe(0);
+  });
+
+  it('leaves room under the last award for the sticky footer', async () => {
+    // Without it the twentieth row finishes hard against Done, which is what the
+    // founder saw as the content running into the footer.
+    await open();
+
+    expect(awardList().content.paddingBottom).toBeGreaterThanOrEqual(16);
   });
 
   it('opens with its own name and no scoreline above the rows', async () => {

@@ -1,6 +1,6 @@
 # Deferred roadmap — product capability that is specified, wanted, and not being built yet
 
-**Status:** current as of 2026-08-19, at the product re-freeze.
+**Status:** current as of 2026-08-21, at the Founder Preview known-issues closeout.
 
 **Companion documents:** [`PRD.md`](./PRD.md) · [`analytics.md`](./analytics.md) ·
 [`growth-instrumentation.md`](./growth-instrumentation.md) · [`backlog.md`](./backlog.md) ·
@@ -554,6 +554,116 @@ of what somebody was *shown* is a new category of stored data and PRD §22 has n
 · a candidate-source or cache-lifetime change, since a deeper pool is what a cross-session
 ledger would need to draw from · PRD §13's explainability rule, which any novelty term has
 to stay inside.
+
+---
+
+## 18. Recommendation Engine V2
+
+**What it is.** The recommender rebuilt on evidence rather than on the one signal it has
+today. What ships for the friend beta scores candidates from a single reader's ranking
+history and arranges them freshly (§17); V2 is the version that also knows what a reader
+has *watched*, what people with the same taste liked, and what this reader has already been
+shown.
+
+**Founder decision, 2026-08-20: current quality is accepted for the initial friend beta and
+tuning stops here.** That is not a claim the recommendations are good. It is a claim that
+the next honest improvement cannot be made from the desk — every lever below needs
+behaviour from more than one account, and tuning weights against a single founder's
+collection produces a model fitted to one person that has to be thrown away the first week
+real accounts arrive.
+
+**The three families of signal, none of them built:**
+
+*Content.* Ranking history beyond the anchors currently used · watch history, including
+what was logged and never ranked · the Watchlist as a statement of intent rather than as a
+list to exclude · genre affinity learnt rather than assumed · cast and crew, which is the
+signal a film person would name first and the app already stores · original language ·
+era. Today's ranker reaches for `similar` off a handful of anchors and stops.
+
+*Collaborative.* Taste Match already exists and is already computed between two accounts —
+it is a **display** value with no path into the ranker. V2 turns it into a weight: the
+rankings of highly matched users, what similar users watched, what they liked and
+explicitly what they **disliked** — a Not-for-me from three close matches is the strongest
+negative signal the product will ever have, and nothing consumes it. Following is a signal
+here too, but a weaker and more careful one: people follow friends they do not share taste
+with, so it informs and must not dominate.
+
+*Novelty.* A durable exposure ledger, so freshness survives a process restart ·
+cross-session turnover · a deliberate exploration term, so the wall is not only the safest
+nine titles. §17 is the presentational half of this and shipped; the persistent half is
+here because it is the half that needs schema.
+
+**Why not now.** Every family above is a *ratio* problem — how much a co-viewer's dislike
+should outweigh a genre match — and a ratio cannot be chosen against one account's data.
+Collaborative filtering with one user is not a cold start, it is an empty one. The beta
+exists to produce exactly this: 30–60 people ranking heavily against overlapping
+catalogues, which is the smallest dataset any of it can be fitted to.
+
+**Revisit when.** The friend beta has run long enough that Taste Match between real pairs
+is stable rather than swinging on every new ranking, and there is enough overlap for a
+"people who ranked this Loved also ranked" query to return more than noise.
+
+**Depends on.** The impression ledger and its privacy row in PRD §22 (§17) · PRD §13's
+explainability rule, which every added term still has to stay inside — a recommendation
+the app cannot say a sentence about does not ship, however well it scores · analytics that
+can tell an improvement from a change, which today's event set cannot.
+
+---
+
+## 19. Rewatch and repeated viewing history
+
+**What it is.** A title watched more than once, recorded as more than once. Today the
+collection holds one `user_media` row per title and one canonical ranking, and a second
+viewing has nowhere to go: re-logging a film overwrites the date it carries rather than
+adding to it, and the interface has no way to say "again".
+
+**Why it matters more than it sounds.** Rewatching is not an edge case in film culture, it
+is most of what affection looks like — and Bingd is a product about what somebody loves.
+An app that cannot tell a film seen once from one seen every year is missing the strongest
+statement its own data could make.
+
+**The shape it should take:**
+
+- **Many view events, one canonical rank.** Multiple legitimate watch/log events per title,
+  while `rankings` keeps exactly one row and one position. The invariant that a title holds
+  at most one place in a list is load-bearing across the whole ranking system and does not
+  move.
+- **A summary in the interface** — "Watched 3 times", on the title page and in the
+  collection — which is the whole feature as far as most readers are concerned.
+- **Optional movement over rewatches.** A film that climbs on second viewing is a real and
+  interesting thing to show; whether it is worth a chart or a sentence is a design question
+  that is not answered yet.
+- **Legitimate rewatch Feed events.** A rewatch is genuine activity and should be able to
+  appear, with its own verb rather than borrowing "watched" and reading as a duplicate.
+- **A rewatch is distinguished from a retry.** This is the hard half and the reason it is
+  not a small feature. The write path is idempotent by operation id precisely so that a
+  lost response does not become a second log; a real rewatch is a second log that *must*
+  count. The two are indistinguishable at the row level and are told apart only by intent,
+  so a rewatch needs its own explicit act and its own operation id issued at the moment the
+  user asks for one — never by a client retrying anything.
+- **The ranking RPCs need that operation id too, and do not have one.** `rank_start`,
+  `rank_answer` and `rank_rebucket` take no operation id, so nothing on the server can
+  recognise a replay: a `rank_answer` that finalises and loses its reply is reported to the
+  reader as a failure over a ranking that exists. Two accidental refusals were covering
+  for that — `rank_start`'s 23505 and `rank_rebucket`'s 22023 — and neither stands in
+  front of a re-rank inside the same bucket, which is why independent review 30 raised it
+  when that path was built. The beta answer is honest copy: the sheet says the outcome is
+  unknown and names checking the collection, rather than claiming nothing happened. The
+  real answer is a `_claim_operation` on the ranking functions, which is a migration and is
+  the same mechanism this entry needs.
+
+**No beta implementation.** Nothing about this ships for the friend beta. It needs schema
+(a view-event table, or a durable log the collection reads through), a decision about what
+re-ranking a rewatch means, and Feed vocabulary — none of which is a change to make to a
+build already installed on beta devices.
+
+**Revisit when.** After the beta reports what people actually did: the signal is somebody
+re-logging a title they have already logged, which the current write path quietly absorbs
+and which is worth counting before the feature is designed against a guess.
+
+**Depends on.** A view-event schema · the Feed's verb set (`features/feed/activity.ts`)
+· the idempotency contract in `lib/write-outcome.ts`, which this must extend rather than
+weaken.
 
 ---
 

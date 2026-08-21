@@ -66,10 +66,14 @@ export type LogSheetProps = {
    * `mode` decides which RPC opens the session. `start` is a first ranking and the
    * bucket has already been saved by then. `rebucket` is a *ranked* title changing
    * bands: `rank_rebucket` does the unrank, the bucket change and the fresh session
-   * in one server call, so the bucket must **not** be written here first — doing so
-   * would hit `set_bucket`'s 55000 refusal.
+   * in one server call. `rerank` is a ranked title keeping its band, which
+   * `rank_rebucket` refuses — `rankAgain` unranks and re-opens instead.
+   *
+   * For both ranked modes the bucket must **not** be written here first: on a rebucket
+   * the server owns the change, and on a rerank there is no change to write — either
+   * way `set_bucket` answers with its 55000 refusal.
    */
-  onRank?: (bucket: BucketId, mode: 'start' | 'rebucket') => void;
+  onRank?: (bucket: BucketId, mode: 'start' | 'rebucket' | 'rerank') => void;
   /**
    * Which screen opened this, for `title_logged` alone. Two screens mount this sheet
    * and the route underneath it is not the same question as where somebody decided to
@@ -241,17 +245,23 @@ function Body({
    * 2026-08-15, reversing PRD §11). Three cases have to stay distinct:
    *
    *   - not ranked yet: save, then hand off to the ranking sheet;
-   *   - ranked, same bucket: do nothing at all. Re-selecting what is already chosen
-   *     is not a change, and `set_bucket` would refuse it with 55000 anyway;
-   *   - ranked, different bucket: ask first. `rank_rebucket` discards the position
-   *     and starts fresh comparisons, so it is destructive and must not happen on a
-   *     stray tap.
+   *   - ranked, same bucket: **ask, then re-rank inside that same bucket.** This used
+   *     to return without doing anything, on the reading that re-selecting what is
+   *     already chosen is not a change. The founder found what that reading costs on
+   *     the device: a Loved title, Change your rating, Loved — and the app does
+   *     nothing at all, with no message saying why. The bucket is indeed not the
+   *     change being asked for. The *position* is, and re-opening a rating already
+   *     given is the only way anybody has to say so. No `set_bucket` call is made,
+   *     which is what the old 55000 note was really about;
+   *   - ranked, different bucket: ask first, then move the band.
+   *
+   * Both ranked branches discard the position before a comparison is answered, so both
+   * confirm — what differs is the call behind the confirmation and the sentence on it.
    */
   const choose = async (chosen: BucketId) => {
     if (saving) return;
 
     if (state.ranked) {
-      if (chosen === state.bucket) return;
       setConfirmRebucket(chosen);
       return;
     }
@@ -319,17 +329,20 @@ function Body({
   };
 
   /**
-   * Confirmed re-rank. Nothing is written here — `rank_rebucket` is one server call
-   * that unranks, changes the bucket and opens the new session, and the ranking sheet
-   * is what drives a session. Writing the bucket first would only earn a 55000.
+   * Confirmed re-rank, in either direction.
+   *
+   * Nothing is written here. Each mode is one server call the ranking sheet makes when
+   * it opens — `rank_rebucket` for a band change, unrank-then-`rank_start` for a
+   * re-rank inside the same band — and the sheet is what drives a session. Writing the
+   * bucket first would only earn a 55000.
    */
   const rebucket = () => {
-    const chosen = confirmRebucket;
-    if (!chosen || saving) return;
+    const next = confirmRebucket;
+    if (!next || saving) return;
 
     setConfirmRebucket(null);
-    setBucketEdit(chosen);
-    onRank?.(chosen, 'rebucket');
+    setBucketEdit(next);
+    onRank?.(next, next === state.bucket ? 'rerank' : 'rebucket');
   };
 
   /**
@@ -577,7 +590,15 @@ function Body({
 
         {confirmRebucket ? (
           <View style={styles.confirm}>
-            <Text variant="callout">Changing this will re-rank {title.title}.</Text>
+            {/* Two sentences for two different acts. “Changing this” is untrue of a
+                re-rank in the same bucket — nothing about the rating changes — and a
+                confirmation that misdescribes what it is confirming is worse than none.
+                The second line is the same either way, because the consequence is. */}
+            <Text variant="callout">
+              {confirmRebucket === state.bucket
+                ? `Rank ${title.title} again?`
+                : `Changing this will re-rank ${title.title}.`}
+            </Text>
             <Text variant="footnote" tone="secondary">
               Its current position is discarded and you will compare it again.
             </Text>

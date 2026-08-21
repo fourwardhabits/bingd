@@ -1,8 +1,9 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
@@ -23,6 +24,7 @@ import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
   ActivityRow,
+  Button,
   EmptyState,
   LoadingScreen,
   Screen,
@@ -57,6 +59,9 @@ export default function PublicProfileScreen() {
   const viewer = useCurrentProfile();
   const router = useRouter();
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  // Mounted only while open, as on the own profile: it reads nine things when it
+  // mounts, and one that stayed mounted would read them on every visit to anybody.
+  const [awardsOpen, setAwardsOpen] = useState(false);
 
   const profile = usePublicProfile(username ?? null);
   /**
@@ -114,6 +119,26 @@ export default function PublicProfileScreen() {
   );
   const openComments = commentsFor ? (recent.find((e) => e.id === commentsFor) ?? null) : null;
   const tasteBadge = tasteMatchBadge(taste.data);
+
+  /**
+   * This profile as a link, and **this** profile means the one being looked at.
+   *
+   * The handle comes from `profile.data.username` — the row this screen resolved —
+   * rather than from `viewer`, which is the signed-in reader and is the wrong person
+   * in every case this screen exists for. It falls back to the route parameter, which
+   * is the same handle by a less certain route: the control is only rendered once the
+   * row is in hand, so the fallback exists to satisfy the type rather than to run.
+   */
+  const viewedHandle = profile.data?.username ?? username;
+
+  const shareProfile = async () => {
+    const url = `https://bingd.app/u/${viewedHandle}`;
+    try {
+      await Share.share({ message: url, url });
+    } catch (error) {
+      Alert.alert('Could not share', error instanceof Error ? error.message : 'Sharing failed.');
+    }
+  };
 
   return (
     <Screen includeBottomInset edges={[]}>
@@ -237,14 +262,47 @@ export default function PublicProfileScreen() {
               ) : null
             }
             controls={
-              <FollowControl
-                userId={subjectId}
-                name={profile.data.name}
-                viewerId={viewer.id}
-                relationship={relationships.data?.get(subjectId)}
-                isSelf={isSelf}
-                surface="profile"
-              />
+              /**
+               * Follow, then Share Profile and Bingd Awards — the same pair, in the
+               * same order and the same row shape as the own profile.
+               *
+               * The founder found them missing here. They are not own-profile controls:
+               * a profile is a thing you hand to somebody, and the person most likely to
+               * hand somebody else’s profile on is the one reading it. Awards is the
+               * same reading of the same public collection, taken about whoever is being
+               * looked at.
+               *
+               * **Both outlined here, where the own profile fills Awards.** The fill is
+               * spent on the one control that depends on who is looking, and on this
+               * screen that is Follow. Three filled buttons in a stack is three primary
+               * actions, which is none.
+               */
+              <View style={styles.controls}>
+                <FollowControl
+                  userId={subjectId}
+                  name={profile.data.name}
+                  viewerId={viewer.id}
+                  relationship={relationships.data?.get(subjectId)}
+                  isSelf={isSelf}
+                  surface="profile"
+                />
+                <View style={styles.actions}>
+                  <View style={styles.action}>
+                    <Button
+                      label="Share Profile"
+                      kind="secondary"
+                      onPress={() => void shareProfile()}
+                    />
+                  </View>
+                  <View style={styles.action}>
+                    <Button
+                      label="Bingd Awards"
+                      kind="secondary"
+                      onPress={() => setAwardsOpen(true)}
+                    />
+                  </View>
+                </View>
+              </View>
             }
           />
 
@@ -343,6 +401,28 @@ export default function PublicProfileScreen() {
         </ScrollView>
       )}
 
+      {/* The viewed user’s awards, not the reader’s. `subjectId` is the row this
+          screen resolved; `viewer.id` is the person holding the phone, and using it
+          here would open the reader’s own awards under somebody else’s name.
+
+          Only reachable from this branch, which renders only once `profile.data` came
+          back — so an account the viewer may not read never offers the control. The
+          sheet’s own reads are RLS-governed on top of that. */}
+      {awardsOpen ? (
+        <AwardsSheet
+          userId={subjectId}
+          onPressTitle={(id) => {
+            setAwardsOpen(false);
+            router.push(`/title/${id}`);
+          }}
+          onPressProfile={(handle) => {
+            setAwardsOpen(false);
+            router.push(`/u/${handle}`);
+          }}
+          onClose={() => setAwardsOpen(false)}
+        />
+      ) : null}
+
       <CommentSheet
         eventId={commentsFor}
         mediaItemId={openComments?.mediaItemId ?? null}
@@ -363,13 +443,13 @@ const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   // Centred under the photo, tight: two short lines about the person in it.
   taste: { alignItems: 'center', gap: 0 },
-  identity: {
-    alignItems: 'center',
-    gap: theme.space[2],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[4],
-    paddingBottom: theme.space[4],
-  },
+  // Follow on its own line, the two actions under it. The gap is the one between two
+  // rows of controls; `ProfileIdentity` owns the space above and the gutter beside.
+  controls: { gap: theme.space[3] },
+  // Two equal halves, as on the own profile — equal weight is what stops either
+  // reading as the only real control.
+  actions: { flexDirection: 'row', gap: theme.space[2] },
+  action: { flex: 1 },
   section: { paddingTop: theme.space[5], gap: theme.space[2] },
   note: { paddingBottom: theme.space[2] },
   noteBody: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[1] },

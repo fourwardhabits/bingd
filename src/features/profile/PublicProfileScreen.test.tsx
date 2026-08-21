@@ -1,4 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { Share } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -67,6 +68,21 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
+/**
+ * The awards sheet, stubbed to record what it was handed.
+ *
+ * The question this screen has to answer about it is one question — *whose* awards —
+ * and rendering the real sheet would answer it through nine reads and a scroll view.
+ * The prop is the contract.
+ */
+let awardsProps: { userId: string } | null = null;
+jest.mock('@/features/awards/AwardsSheet', () => ({
+  AwardsSheet: (props: { userId: string }) => {
+    awardsProps = props;
+    return null;
+  },
+}));
+
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
   useLocalSearchParams: () => ({ username: 'anna' }),
@@ -109,6 +125,7 @@ beforeEach(() => {
   mockRpcErrors = {};
   issued = 0;
   mockRpcCalls.length = 0;
+  awardsProps = null;
   for (const key of Object.keys(tableRows)) delete tableRows[key];
   tableRows.public_profiles = [anna];
   tableRows.rankings = [];
@@ -656,5 +673,73 @@ describe('Taste Match', () => {
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
 
     expect(view.queryByText('Match')).toBeNull();
+  });
+});
+
+/**
+ * The two actions the founder found missing here.
+ *
+ * They were on the own profile and not on anybody else's, which is the drift
+ * `ProfileIdentity` exists to stop: a reader could not tell that what they see on
+ * somebody else is what other people see on them. Both are about the person being
+ * looked at, and the tests that matter are the two where "the person" could silently
+ * become the reader instead.
+ */
+describe('sharing and awards on somebody else’s profile', () => {
+  it('offers both, under the follow control', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
+    expect(view.getByRole('button', { name: 'Share Profile' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'Bingd Awards' })).toBeTruthy();
+  });
+
+  it('shares the viewed handle, not the reader’s own', async () => {
+    // The reader is `sai`. A share that reached for the signed-in profile would hand
+    // somebody a link to the sharer, from a page about a different person — and it
+    // would look right, because it is a valid Bingd profile URL.
+    const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' });
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: 'Share Profile' }));
+
+    await waitFor(() => expect(share).toHaveBeenCalled());
+    expect(share).toHaveBeenCalledWith({
+      message: 'https://bingd.app/u/anna',
+      url: 'https://bingd.app/u/anna',
+    });
+    share.mockRestore();
+  });
+
+  it('opens the awards of the person being looked at', async () => {
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
+    // Closed until asked for: it reads nine things when it mounts.
+    expect(awardsProps).toBeNull();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Bingd Awards' }));
+
+    // `anna-id`, never `viewer`. The whole sheet is a reading of one user's collection,
+    // so the wrong id here is somebody else's awards under Anna's name.
+    await waitFor(() => expect(awardsProps).not.toBeNull());
+    expect(awardsProps?.userId).toBe('anna-id');
+  });
+
+  it('offers neither on an account the viewer may not read', async () => {
+    // The controls live in the branch that renders only once `public_profiles` came
+    // back. A private account the viewer does not follow never reaches it, so there is
+    // no Awards button to open a collection they are not entitled to.
+    tableRows.public_profiles = [];
+    mockRpcResults.profile_identity = [
+      { ...anna, avatar_path: null, visibility: 'private' },
+    ];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('This account is private')).toBeTruthy());
+    expect(view.queryByRole('button', { name: 'Bingd Awards' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Share Profile' })).toBeNull();
   });
 });

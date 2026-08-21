@@ -489,6 +489,8 @@ Every rating begins with a bucket.
 
 **Buckets partition the ranking.** All *Loved it* titles rank above all *It was fine* titles, which rank above all *Not for me* titles. A title cannot cross a band boundary without changing its bucket. Changing a bucket moves the title into the new band and re-runs comparisons there.
 
+**Re-selecting the bucket a title already has re-ranks it inside that band.** It is not a no-op, and the founder's device test on 2026-08-21 is the record of why: a reader who re-opens a rating they have already given is saying the *position* is wrong, and the bucket is the only control they have to say it with. The bucket does not move; the position is discarded and comparisons run again within the same band, so the ordinal and the derived score may both change. Like a bucket change, it is destructive and is confirmed first.
+
 This is the mechanism that keeps ranking cheap: comparisons only ever search within one band.
 
 ### Insertion — Recommended
@@ -1653,7 +1655,7 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 5. On completion, the app reveals a 0–10 score with one decimal, derived from the title's position within its bucket band per §10.
 6. No 0–100 score or percentile is rendered on any screen or share artifact. No score is ever aggregated across users.
 7. Every *Loved it* title ranks above every *It was fine* title, which ranks above every *Not for me* title, at all times.
-8. Changing a title's bucket moves it into the new band and re-runs comparisons there.
+8. Changing a title's bucket moves it into the new band and re-runs comparisons there. Re-selecting the bucket it already has keeps the band and re-runs comparisons within it — the ordinal and the score may change, the bucket may not.
 9. Skip re-anchors to a different title in the same bucket; Back returns to the previous comparison and permits a changed answer.
 10. After 3 skips in one insertion, the title is placed at the midpoint of the remaining range and the user is told the position is adjustable.
 11. No two titles in the same category ever hold the same position.

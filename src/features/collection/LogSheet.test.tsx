@@ -271,24 +271,61 @@ describe('choosing a bucket', () => {
 
 /**
  * A ranked title's bucket belongs to the ranking. `set_bucket` refuses it with 55000,
- * and the only legitimate route is `rank_rebucket`, which discards the position — so
- * it must never happen on a stray tap, and must not happen at all when nothing changed.
+ * so a ranked title re-enters comparison instead — by `rank_rebucket` when the band is
+ * moving, and by unrank-then-`rank_start` when it is not. Either way the position is
+ * discarded, so neither may happen on a stray tap.
+ *
+ * **The same-bucket case used to do nothing at all**, which is the founder’s device
+ * finding: a Loved title, Change your rating, Loved, and no response of any kind. The
+ * first test below is the one that changed, and it is the regression guard.
  */
 describe('a title that is already ranked', () => {
   beforeEach(() => {
     stubReads({ bucket: 'loved', watched_on: '2026-08-01', note: '' }, { bucket: 'loved' });
   });
 
-  it('does nothing when the bucket it already has is tapped again', async () => {
+  it('asks before re-ranking when the bucket it already has is tapped again', async () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
     await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
     await fireEvent.press(sheet.bucket('Loved it'));
 
+    // Its own sentence: nothing about the rating is changing, so “Changing this”
+    // would be describing an act that is not happening.
+    expect(sheet.getByText('Rank Film A again?')).toBeTruthy();
+    expect(sheet.queryByText(/Changing this/)).toBeNull();
+    // Still nothing written, and still nothing handed off, until it is confirmed.
     expect(onRank).not.toHaveBeenCalled();
     expect(callsTo('set_bucket')).toHaveLength(0);
-    expect(sheet.queryByText(/will re-rank/)).toBeNull();
+  });
+
+  it('confirming a same-bucket tap hands off in rerank mode, bucket unchanged', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
+    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Re-rank' }));
+
+    // The bucket it went in with is the bucket it comes out with. Only the mode differs
+    // from a band change, because only the opening RPC does.
+    expect(onRank).toHaveBeenCalledWith('loved', 'rerank');
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('rank_rebucket')).toHaveLength(0);
+  });
+
+  it('cancelling a same-bucket tap leaves the ranking alone', async () => {
+    const onRank = jest.fn();
+    const sheet = await open(filmA, { onRank });
+
+    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
+    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Cancel' }));
+
+    expect(onRank).not.toHaveBeenCalled();
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true);
   });
 
   it('asks before re-ranking when a different bucket is tapped', async () => {
