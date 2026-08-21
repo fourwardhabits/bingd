@@ -36,7 +36,7 @@
  * anybody can type** — they make it a deliberate act rather than a Tuesday afternoon.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -270,11 +270,85 @@ const env = {
 
 console.log(`eas ${args.join(' ')}   (BINGD_LANE=${lane}, APP_VARIANT=${env.APP_VARIANT})\n`);
 
-const result = spawnSync('eas', args, {
-  cwd: root,
-  env,
-  stdio: 'inherit',
-  shell: process.platform === 'win32',
-});
+/**
+ * **No shell, on any platform.**
+ *
+ * This used `shell: true` on Windows, because `eas` there is `eas.cmd` and a `.cmd`
+ * cannot be spawned directly. But `shell: true` joins the argument array with spaces and
+ * no quoting — so `--message "Founder preview two"` reached EAS as three arguments and
+ * the invocation failed, while single-word messages worked. Quoting for `cmd.exe` is a
+ * two-parser problem (cmd, then the C runtime) with known escape-sequence pitfalls, so
+ * the fix is to not involve a shell at all: find what the shim actually runs and invoke
+ * it with argv passed through byte-for-byte.
+ *
+ *   - a real executable (`eas.exe`, e.g. a Volta shim) is spawnable as-is;
+ *   - an npm `eas.cmd` shim sits next to `node_modules/eas-cli/bin/run`, which this
+ *     same Node can run directly.
+ *
+ * If neither shape is found, the old shell path is still safe for arguments that
+ * contain nothing a shell would reinterpret — and anything else is refused with the
+ * reason, rather than split silently.
+ */
+function resolveEasInvocation() {
+  if (process.platform !== 'win32') return { command: 'eas', prefix: [] };
+  let candidates = [];
+  try {
+    candidates = execFileSync('where.exe', ['eas'], { encoding: 'utf8' }).split(/\r?\n/);
+  } catch {
+    return null; // `eas` not on PATH; the spawn below will say so
+  }
+  for (const line of candidates) {
+    const shim = line.trim();
+    if (/\.exe$/i.test(shim)) return { command: shim, prefix: [] };
+    if (/\.cmd$/i.test(shim)) {
+      const entry = join(dirname(shim), 'node_modules', 'eas-cli', 'bin', 'run');
+      if (existsSync(entry)) return { command: process.execPath, prefix: [entry] };
+    }
+  }
+  return null;
+}
+
+const invocation = resolveEasInvocation();
+
+if (!invocation) {
+  // Last resort: the shell path that shipped before, permitted only when no argument
+  // could be mangled by it. A space, quote or cmd metacharacter would be re-split.
+  const unsafe = args.filter((arg) => /[\s"'^&|<>%()]/.test(arg));
+  if (unsafe.length) {
+    console.error(
+      '\nCould not resolve the eas CLI to a directly-spawnable command, and these\n' +
+        `arguments cannot survive a Windows shell unquoted: ${JSON.stringify(unsafe)}\n\n` +
+        '  Reinstall the CLI so it can be found: npm install -g eas-cli\n',
+    );
+    process.exit(1);
+  }
+}
+
+// Set BINGD_RELEASE_DRY_RUN=1 to print the exact argv instead of running it. This is the
+// testable seam for the argument-passing above; it changes nothing about the guards,
+// which have all run by this point.
+if (process.env.BINGD_RELEASE_DRY_RUN) {
+  console.log(
+    JSON.stringify(
+      {
+        command: invocation ? invocation.command : 'eas (via shell)',
+        argv: [...(invocation ? invocation.prefix : []), ...args],
+        BINGD_LANE: env.BINGD_LANE,
+        APP_VARIANT: env.APP_VARIANT,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(0);
+}
+
+const result = invocation
+  ? spawnSync(invocation.command, [...invocation.prefix, ...args], {
+      cwd: root,
+      env,
+      stdio: 'inherit',
+    })
+  : spawnSync('eas', args, { cwd: root, env, stdio: 'inherit', shell: true });
 
 process.exit(result.status ?? 1);
