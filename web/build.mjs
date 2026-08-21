@@ -763,9 +763,17 @@ const ROUTES = [
   },
 ];
 
+/**
+ * Each route page is one flat file — `i.html`, not `i/index.html` — and the reason is
+ * a Cloudflare Pages rule discovered in production on 2026-08-21. A `_redirects` proxy
+ * whose destination matches its own source pattern (`/i/*  /i/index.html  200`) is
+ * treated by Pages as an infinite loop and silently ignored; with no 404.html in the
+ * project, every `/i/<token>` then fell through to SPA fallback and served the root
+ * holding page with a 200. The flat file lets the rewrite target be `/i`, which
+ * `/i/*` does not match, so the rule survives validation.
+ */
 for (const route of ROUTES) {
-  await mkdir(join(dist, route.dir), { recursive: true });
-  await writeFile(join(dist, route.dir, 'index.html'), page(route));
+  await writeFile(join(dist, `${route.dir}.html`), page(route));
 }
 
 // ---------------------------------------------------------------------------
@@ -881,10 +889,17 @@ for (const doc of DOCUMENTS) {
  * `.well-known` is deliberately not listed and must never be: a rewrite over it would
  * serve HTML where iOS expects JSON, which is the exact failure `_headers` was written
  * to prevent, arriving from the other direction.
+ *
+ * The destination is `/<dir>`, extensionless, and both halves of that are load-bearing.
+ * It must not match the rule's own `/<dir>/*` pattern, or Pages drops the rule as an
+ * infinite loop (see the route-page comment above). And it must not be `/<dir>.html`,
+ * because Pages 308-normalizes direct `.html` requests to the pretty URL — surfaced
+ * through the proxy, that redirect would rewrite the address bar and lose the token,
+ * which is the one thing this site exists to preserve.
  */
 await writeFile(
   join(dist, '_redirects'),
-  ROUTES.map((route) => `/${route.dir}/*  /${route.dir}/index.html  200`).join('\n') + '\n',
+  ROUTES.map((route) => `/${route.dir}/*  /${route.dir}  200`).join('\n') + '\n',
 );
 
 console.log(`Built ${dist}`);

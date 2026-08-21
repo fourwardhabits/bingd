@@ -307,8 +307,16 @@ describe('the built site', () => {
     const rewrites = read('_redirects');
 
     for (const path of claimed) {
-      assert.ok(read(path, 'index.html').includes('<html'), `no page is served for /${path}/*`);
-      assert.match(rewrites, new RegExp(`^/${path}/\\*\\s`, 'm'), `no rewrite for /${path}/*`);
+      assert.ok(read(`${path}.html`).includes('<html'), `no page is served for /${path}/*`);
+      // The exact rule shape is pinned, because Cloudflare Pages silently drops a proxy
+      // whose destination matches its own source pattern as an "infinite loop" — which
+      // is how /i/<token> served the root holding page in production on 2026-08-21.
+      // The destination must stay extensionless and outside the pattern it serves.
+      assert.match(
+        rewrites,
+        new RegExp(`^/${path}/\\*\\s+/${path}\\s+200$`, 'm'),
+        `no valid rewrite for /${path}/*`,
+      );
     }
   });
 
@@ -334,7 +342,7 @@ describe('the built site', () => {
     // These are the two links behind every button on the invitation page. Pinned as
     // exact values: a typo here is a store button that 404s on a page a friend was
     // sent, and nothing else in the build would catch it.
-    const invite = read('i', 'index.html');
+    const invite = read('i.html');
     const config = JSON.parse(
       /<script type="application\/json" id="bingd-config">(.*?)<\/script>/s.exec(invite)[1],
     );
@@ -351,7 +359,7 @@ describe('the built site', () => {
   });
 
   it('drops the $comment prose rather than shipping it to every visitor', () => {
-    const invite = read('i', 'index.html');
+    const invite = read('i.html');
     assert.doesNotMatch(invite, /\$comment/);
     assert.doesNotMatch(invite, /TestFlight link, of the form/);
   });
@@ -360,7 +368,7 @@ describe('the built site', () => {
     // The deferred-install limitation, said to the person it affects rather than only
     // in a document. Without it somebody installs from TestFlight, launches from the
     // home screen, and silently loses the invitation.
-    const invite = read('i', 'index.html');
+    const invite = read('i.html');
     assert.match(invite, /Come back to this page/);
     assert.match(invite, /the invitation will not follow you there/);
   });
@@ -400,7 +408,7 @@ describe('the built site', () => {
      * destination is baked in at build time; nothing here reads `location.search`,
      * `document.referrer` or a hash.
      */
-    for (const file of ['i/index.html', 'u/index.html', 'title/index.html', 'page.mjs', 'router.mjs']) {
+    for (const file of ['i.html', 'u.html', 'title.html', 'page.mjs', 'router.mjs']) {
       const source = read(...file.split('/'));
       assert.doesNotMatch(source, /location\.search|URLSearchParams|document\.referrer/);
       assert.doesNotMatch(source, /location\.href\s*=/);
