@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { StyleSheet, View, type TextInput } from 'react-native';
 
 import {
   isAppleSignInAvailable,
@@ -26,6 +26,7 @@ export default function SignInScreen() {
   const [busy, setBusy] = useState<'email' | 'password' | 'apple' | 'google' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [appleAvailable, setAppleAvailable] = useState(false);
+  const passwordField = useRef<TextInput>(null);
 
   // Asked rather than assumed from the platform: the entitlement can be missing
   // from a build, and a button that always fails is worse than no button.
@@ -96,7 +97,13 @@ export default function SignInScreen() {
           textContentType="emailAddress"
           returnKeyType={withPassword ? 'next' : 'go'}
           editable={busy === null}
-          onSubmitEditing={!withPassword && looksLikeEmail ? submitEmail : undefined}
+          onSubmitEditing={
+            withPassword
+              ? () => passwordField.current?.focus()
+              : looksLikeEmail
+                ? submitEmail
+                : undefined
+          }
           error={!withPassword ? (error ?? undefined) : undefined}
           hint={
             withPassword ? undefined : 'We will send a six-digit code. No password to remember.'
@@ -104,6 +111,7 @@ export default function SignInScreen() {
         />
         {withPassword ? (
           <Field
+            ref={passwordField}
             label="Password"
             value={password}
             onChangeText={setPassword}
