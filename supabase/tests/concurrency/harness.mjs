@@ -100,6 +100,37 @@ const connect = async (database) => {
 };
 
 /**
+ * Polls until a real connection to the postmaster succeeds — the readiness signal
+ * `boot()` trusts, since the library's own is fragile (see there). Rejection of an
+ * individual attempt is expected while the postmaster is still coming up; only the
+ * deadline turns it into a failure.
+ */
+async function untilConnectable(port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const probe = new Client({
+      host: '127.0.0.1',
+      port,
+      user: CLUSTER_USER,
+      password: CLUSTER_PASSWORD,
+      database: 'postgres',
+      connectionTimeoutMillis: 2_000,
+    });
+    try {
+      await probe.connect();
+      await probe.end();
+      return;
+    } catch {
+      await probe.end().catch(() => {});
+      if (Date.now() >= deadline) {
+        throw new Error(`postgres on port ${port} did not accept connections within ${timeoutMs}ms`);
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+}
+
+/**
  * Boots the cluster and builds the template database. Idempotent, and awaited by
  * every caller through the same promise, so `node --test` running several files in
  * one process does not start several PostgreSQLs.
@@ -112,14 +143,19 @@ export function startCluster() {
 }
 
 async function boot() {
-  const port = await freePort();
   const dataDir = mkdtempSync(join(tmpdir(), `bingd-race-${process.pid}-`));
 
   const pg = new EmbeddedPostgres({
     databaseDir: dataDir,
     user: CLUSTER_USER,
     password: CLUSTER_PASSWORD,
-    port,
+    // Placeholder. The real port is claimed after `initialise()`, immediately
+    // before `start()` binds it — initdb takes ~20 seconds and never uses the
+    // port, and in that window the sibling test file's client connections draw
+    // ephemeral ports from the same OS range. A port claimed before initdb was
+    // occasionally gone by the time postgres bound it, and the library reports
+    // that as a bare `undefined` rejection with the file's suites never run.
+    port: 1,
     // Cleanup is ours: `persistent: false` removes the directory on stop, and on
     // Windows that races the postmaster's own file handles and throws EBUSY out of
     // an exit handler, which fails a suite that has already passed.
@@ -143,7 +179,28 @@ async function boot() {
   });
 
   await pg.initialise();
-  await pg.start();
+
+  const port = await freePort();
+  pg.options.port = port;
+
+  /**
+   * `pg.start()` resolves only when a single stderr chunk contains the whole
+   * "database system is ready to accept connections" sentinel, and rejects with
+   * `undefined` if the process exits early. A chunk boundary through the sentinel
+   * therefore left a healthy cluster running while this promise stayed pending
+   * forever — a hung run with zero CPU and no error, observed 2026-08-21. The
+   * cluster's actual readiness is decided here by connecting to it; the library's
+   * own settlement is raced against that probe, and its rejection is translated
+   * into an error that names the port. `Promise.race` attaches handlers to both,
+   * so a late library rejection after the probe wins is still a handled one.
+   */
+  const started = pg.start().then(
+    () => undefined,
+    () => {
+      throw new Error(`postgres exited during startup on port ${port} — likely a port collision`);
+    },
+  );
+  await Promise.race([started, untilConnectable(port, 30_000)]);
 
   cluster = { pg, port, dataDir };
 
