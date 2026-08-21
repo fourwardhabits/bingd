@@ -74,12 +74,17 @@ export default function suite() {
         await t1.actAs(first.as);
         await t1.begin();
         await t1.pauseAt(key);
-        const p1 = t1.start(first.sql, first.params);
+        // Handlers attached at start, not where the results are read: a refusal is an
+        // expected outcome here, and it can settle while this test is still awaiting a
+        // release or the other session's commit. A rejection that crosses an I/O turn
+        // without a handler is an unhandledRejection to node:test, and the suite fails
+        // on the exact refusal it set out to assert.
+        const p1 = t1.start(first.sql, first.params).then((r) => r.rows[0].r, (e) => e);
         await t1.awaitBlocked();
 
         await t2.actAs(second.as);
         await t2.begin();
-        const p2 = t2.start(second.sql, second.params);
+        const p2 = t2.start(second.sql, second.params).then((r) => r.rows[0].r, (e) => e);
 
         /**
          * Unconditional, and it has no opt-out — review 25d's point, after 25c's.
@@ -103,9 +108,9 @@ export default function suite() {
         });
 
         await ctl.release(key);
-        const r1 = await p1.then((r) => r.rows[0].r).catch((e) => e);
+        const r1 = await p1;
         await t1.commit();
-        const r2 = await p2.then((r) => r.rows[0].r).catch((e) => e);
+        const r2 = await p2;
         await t2.commit().catch(() => t2.rollback());
         return { r1, r2 };
       } finally {

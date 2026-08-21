@@ -164,10 +164,18 @@ export default function suite() {
       // other proceeds without the test having to guess which went first — which is
       // the only way to await both and still be sure neither is waiting on the test.
       const pairKey = await db.pairKey(a, b);
-      const follow = t1.start(`select follow($1, $2) as r`, [await newOp(db), b]);
+      // Handlers attached at start: either call may settle — including with the 40P01
+      // this test exists to rule out — while the test is still awaiting the release,
+      // and a rejection crossing an I/O turn unhandled fails the suite as an
+      // unhandledRejection rather than through the assertion below.
+      const follow = t1
+        .start(`select follow($1, $2) as r`, [await newOp(db), b])
+        .then((r) => r.rows[0].r, (e) => e);
       await t1.awaitBlocked({ on: 'advisory', advisoryKey: pairKey });
 
-      const block = t2.start(`select block($1, $2) as r`, [await newOp(db), a]);
+      const block = t2
+        .start(`select block($1, $2) as r`, [await newOp(db), a])
+        .then((r) => r.rows[0].r, (e) => e);
       await t2.awaitBlocked({ on: 'advisory', advisoryKey: pairKey });
 
       // Both are queued on one key. Releasing it lets them through one at a time in
@@ -175,10 +183,7 @@ export default function suite() {
       // so neither can be told 40P01.
       await ctl.releasePair(a, b);
 
-      const [rf, rb] = await Promise.all([
-        follow.then((r) => r.rows[0].r).catch((e) => e),
-        block.then((r) => r.rows[0].r).catch((e) => e),
-      ]);
+      const [rf, rb] = await Promise.all([follow, block]);
 
       for (const r of [rf, rb]) {
         assert.notEqual(r?.code, '40P01', `deadlock detected: ${r?.message}`);

@@ -108,7 +108,14 @@ export default function suite() {
       await t1.awaitBlocked();
 
       await t2.begin();
-      const p2 = t2.start(`select follow($1, $2) as r`, [await newOp(db), c]);
+      // The refusal is the expected outcome, and it can land while this test is still
+      // awaiting t1's commit — the commit is what releases the advisory lock t2 is
+      // queued on. The handler is attached here, at start, because a rejection that
+      // waits for a handler across an I/O turn is an unhandledRejection to node:test,
+      // and the suite fails on the exact 53400 it is asserting.
+      const p2 = t2
+        .start(`select follow($1, $2) as r`, [await newOp(db), c])
+        .then((r) => r.rows[0].r, (e) => e);
       // The whole of Q1. Remove the advisory lock from `_assert_operation_rate` and
       // this throws instead of the assertion below failing — which is the right way
       // round, because a count that races is not visible in the final row count when
@@ -124,7 +131,7 @@ export default function suite() {
       await ctl.release('quota');
       const r1 = (await p1).rows[0].r;
       await t1.commit();
-      const r2 = await p2.then((r) => r.rows[0].r).catch((e) => e);
+      const r2 = await p2;
       await t2.commit().catch(() => t2.rollback());
 
       assert.equal(r1.status, 'ok');
