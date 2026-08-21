@@ -193,17 +193,26 @@ describe('the Settings hub', () => {
   });
 
   it('names themoviedb.org as the source, and says what TMDB supplies', async () => {
-    // TMDB's terms ask for three things in an About section: the notice above,
-    // unparaphrased; a visible link to themoviedb.org; and a clear indication of which
-    // data is theirs. The approved logo is the fourth and is not in the repository —
-    // recorded for Beta Hardening rather than approximated, because a redrawn logo
-    // would breach the same terms this section exists to satisfy.
+    // TMDB's terms ask for four things in an About section: the notice above,
+    // unparaphrased; a visible link to themoviedb.org; a clear indication of which
+    // data is theirs; and their approved logo, unmodified. The logo is asserted in
+    // its own test below.
     const view = await renderWithProviders(<SettingsScreen />);
 
     expect(view.getByText('themoviedb.org')).toBeTruthy();
     expect(
       view.getByText(/Artwork, cast and title details come from TMDB/),
     ).toBeTruthy();
+  });
+
+  it('carries the approved TMDB logo in the About section', async () => {
+    // The asset is TMDB's own primary short (blue) SVG, committed byte-for-byte from
+    // themoviedb.org/about/logos-attribution. This asserts it is on the screen and
+    // labelled for a screen reader; that the file itself is the approved one is the
+    // committed asset's checksum against the hash TMDB embeds in its download URL.
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    expect(view.getByLabelText('TMDB')).toBeTruthy();
   });
 
   it('carries no pending-request count, because it no longer leads to the inbox', async () => {

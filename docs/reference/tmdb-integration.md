@@ -18,10 +18,12 @@
 >   client-side file with TMDB in its name posts to Bingd's own project.
 > - **Attribution is in both slots** the section below asks for: the notice, quoted exactly, in
 >   Settings › About, and a source line on title detail.
-> - **Still owed: the logo.** The terms require an approved TMDB logo, unmodified in colour and
->   aspect and less prominent than Bingd's mark. Nothing ships a redrawn approximation, because
->   that would breach the same terms the notice satisfies. It arrives with the brand asset pass
->   (PRD §5), and until then the attribution is text-only.
+> - **The logo ships too** (added 2026-08-21). `assets/brand/tmdb-logo.svg` is TMDB's own
+>   primary short (blue) SVG from their logos-attribution page, committed byte-for-byte —
+>   its sha256 matches the hash TMDB embeds in the download URL — and rendered in
+>   Settings › About above the notice, contain-fit and smaller than Bingd's own mark.
+>   Nothing ships a redrawn approximation, because that would breach the same terms the
+>   notice satisfies.
 
 ---
 
