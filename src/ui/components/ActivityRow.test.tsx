@@ -283,11 +283,52 @@ describe('the row composition', () => {
     expect(chipStyle.bottom).toBe(0);
 
     // The face, the Paper ring around it, and the padding that makes the corner
-    // square tappable — all of it has to fit the artwork in both axes.
-    const box =
-      theme.layout.avatar.xxs + 2 * Number(ringStyle.padding) + 2 * Number(chipStyle.padding);
-    expect(box).toBeLessThanOrEqual(Number(poster.width));
-    expect(box).toBeLessThanOrEqual(Number(poster.height));
+    // tappable — all of it has to fit the artwork in both axes.
+    const ring = theme.layout.avatar.xxs + 2 * Number(ringStyle.padding);
+    const width = ring + Number(chipStyle.paddingLeft) + Number(chipStyle.paddingRight);
+    const height = ring + Number(chipStyle.paddingTop) + Number(chipStyle.paddingBottom);
+
+    expect(width).toBeLessThanOrEqual(Number(poster.width));
+    expect(height).toBeLessThanOrEqual(Number(poster.height));
+
+    // And it is not smaller than the target this control had before the overlay: a
+    // 24pt avatar with 4pt of hitSlop all round. 44 cannot be reached inside a 40pt
+    // poster, but going backwards from what shipped is a regression rather than a
+    // constraint — which is what independent review caught at 28.
+    const wasBefore = theme.layout.avatar.xs + 2 * theme.space[1];
+    expect(width).toBeGreaterThanOrEqual(wasBefore);
+    expect(height).toBeGreaterThanOrEqual(wasBefore);
+  });
+
+  it('lets the poster take its own touches when the actor has no profile to open', async () => {
+    /**
+     * The defect independent review found, and it was not a corner case: neither
+     * profile screen passes `onPressActor` at all, and the feed omits it on the
+     * viewer's own rows.
+     *
+     * A `Pressable` with `disabled` is not inert. It declines the responder, and
+     * React Native then negotiates *up* the ancestor chain — never sideways to the
+     * sibling painted underneath, which is what the poster is. So a disabled chip
+     * swallows the touches over its corner instead of passing them down, and a third
+     * of the artwork quietly stops opening the title.
+     */
+    const onPressTitle = jest.fn();
+    const view = await render(
+      <ActivityRow {...props} onPressTitle={onPressTitle} onPressActor={undefined} />,
+    );
+
+    const lead = view.getByLabelText('Inception, 2010, 148m · Sci-fi').parent!;
+    // One child is the poster's own Pressable; the chip is the other, and with no
+    // profile to open it must be decoration that touches pass straight through.
+    const chip = (lead.children as unknown[]).find(
+      (child) => styleOf(child).position === 'absolute',
+    );
+
+    expect(chip).toBeTruthy();
+    expect((chip as { props: { pointerEvents?: string } }).props.pointerEvents).toBe('none');
+    // And it is not a control at all, so there is nothing for a screen reader to
+    // announce twice — the actor is named in the sentence beside it.
+    expect(within(lead).queryByLabelText(/profile/)).toBeNull();
   });
 });
 

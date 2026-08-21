@@ -254,22 +254,40 @@ export function ActivityRow({
             <Poster uri={posterUri} title={filmName} size="xs" />
           </Pressable>
 
-          {/* The ring is Paper, the page's own ground, and it is what makes the chip
-              read as sitting on the poster rather than punched out of it. A dark
-              poster and a dark avatar would otherwise merge into one shape. It is a
-              padded background rather than a `borderWidth`, because a border around
-              a clipped circle leaves a hairline seam on Android at these sizes. */}
-          <Pressable
-            accessibilityRole={onPressActor ? 'button' : undefined}
-            accessibilityLabel={onPressActor ? `${actorName}'s profile` : actorName}
-            onPress={onPressActor}
-            disabled={!onPressActor}
-            style={({ pressed }) => [styles.chip, pressed && styles.pressed]}
-          >
-            <View style={styles.chipRing}>
-              <Avatar size="xxs" uri={actorAvatarUri} name={actorName} />
+          {/**
+           * Two shapes, and the difference is not cosmetic.
+           *
+           * A `Pressable` with `disabled` is not an inert view. It declines the
+           * responder, and React Native's responder negotiation then walks *up* the
+           * ancestor chain — never sideways to a sibling painted underneath. The
+           * poster's `Pressable` is that sibling. So a disabled chip laid over the
+           * artwork does not pass its touches down to the poster; it swallows them,
+           * and the bottom-right corner of the poster silently stops opening the
+           * title. Independent review caught this and it is not a corner case:
+           * `onPressActor` is absent on the viewer's own activity, and neither
+           * `profile.tsx` nor `u/[username].tsx` passes it at all — every row on both
+           * of those screens would have had a dead patch of artwork.
+           *
+           * With no profile to open, the face is therefore decoration and says so:
+           * `pointerEvents="none"`, so the whole poster is one target again. It drops
+           * out of the accessibility tree with it, which costs nothing — the actor's
+           * name is in the sentence directly beside it, and announcing it twice was
+           * noise the old `accessibilityLabel` was already making.
+           */}
+          {onPressActor ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${actorName}'s profile`}
+              onPress={onPressActor}
+              style={({ pressed }) => [styles.chip, pressed && styles.pressed]}
+            >
+              <ActorFace uri={actorAvatarUri} name={actorName} />
+            </Pressable>
+          ) : (
+            <View style={styles.chip} pointerEvents="none">
+              <ActorFace uri={actorAvatarUri} name={actorName} />
             </View>
-          </Pressable>
+          )}
         </View>
 
         <View style={styles.copy}>
@@ -494,6 +512,25 @@ export function ActivityRow({
 }
 
 /**
+ * The actor's face, ringed in Paper, for the corner of the poster.
+ *
+ * The ring is what makes the chip read as sitting *on* the artwork rather than being
+ * punched out of it — a dark poster and a dark avatar would otherwise merge into one
+ * shape. It is a padded background rather than a `borderWidth` because a border around
+ * a clipped circle leaves a hairline seam on Android at this size.
+ *
+ * Extracted only so the pressable and the decorative form of the chip cannot drift
+ * apart; it holds no behaviour of its own.
+ */
+function ActorFace({ uri, name }: { uri?: string | null; name: string }) {
+  return (
+    <View style={styles.chipRing}>
+      <Avatar size="xxs" uri={uri} name={name} />
+    </View>
+  );
+}
+
+/**
  * "Anna", "Anna and Raj", or "Anna and 3 others".
  *
  * Two names is the ceiling here as it is for reactions, and for the same reason: the
@@ -585,17 +622,34 @@ const styles = StyleSheet.create({
    */
   lead: { position: 'relative' },
   /**
-   * The chip's *touch* box, and it is the whole bottom-right corner square of the
-   * poster: 22pt of ring plus 3pt of inset on the two inner sides. 28pt is short of
-   * the 44pt floor, and deliberately — the actor's name in the sentence carries the
-   * same `onPressActor` and is the large, obvious target. This is the second way in,
-   * not the only one, which is what it was as a 24pt avatar with 4pt of `hitSlop`.
+   * The chip's touch box, and the padding is asymmetric on purpose.
    *
-   * `hitSlop` is what it does *not* use. Slop here would spill outside `lead`, and
-   * Android does not deliver touches outside a parent's bounds — the target would
-   * measure 36pt in review on iOS and 28 on the device.
+   * 3pt on the right and bottom is the visible inset from the poster's corner. 7pt on
+   * the left and top is invisible and is touch target: it grows the box inwards, over
+   * artwork, to 32×32 — which is exactly what this control measured before the
+   * overlay, as a 24pt avatar with 4pt of `hitSlop` all round. Independent review
+   * flagged the 28pt version as a regression against that, and it was.
+   *
+   * It grows inwards and no further. 44 is the floor `layout.minTapTarget` states
+   * without exception and it cannot be met here by geometry — the poster is 40pt wide,
+   * so no box inside it reaches 44. The two ways out are both worse: `hitSlop` spills
+   * outside `lead`, and Android does not deliver touches outside a parent's bounds, so
+   * the target would measure 44 in review on iOS and 28 on the device; and padding the
+   * box out to the full 40 would hand two thirds of the artwork to the profile link,
+   * so tapping a poster near its middle would stop opening the title. The face is the
+   * *second* way to a profile — the actor's name in the sentence carries the same
+   * `onPressActor` and is a wide, obvious, screen-reader-labelled target.
    */
-  chip: { position: 'absolute', right: 0, bottom: 0, padding: 3, zIndex: 1 },
+  chip: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    paddingRight: 3,
+    paddingBottom: 3,
+    paddingLeft: 7,
+    paddingTop: 7,
+    zIndex: 1,
+  },
   chipRing: {
     padding: 2,
     borderRadius: theme.radius.full,
