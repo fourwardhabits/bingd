@@ -13,6 +13,7 @@ import { useReactions, useSetReaction, REACTION_GLYPH } from '@/features/feed/us
 import { useFeed } from '@/features/feed/use-feed';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { GoalsSection } from '@/features/goals/GoalsSection';
+import { InviteFriendsButton } from '@/features/profile/InviteFriendsButton';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
 import { ProfileWatchlist } from '@/features/profile/ProfileWatchlist';
 import { TopRanked } from '@/features/profile/TopRanked';
@@ -133,7 +134,7 @@ export default function ProfileScreen() {
           }}
           controls={
             /**
-             * Share Profile and Bingd Awards, in that order and nothing else.
+             * Share Profile and Bingd Awards in that order, then Invite friends.
              *
              * Share Profile is what a profile is *for*: it is the thing you hand to
              * somebody so they can follow you, and the one action that does that
@@ -149,13 +150,24 @@ export default function ProfileScreen() {
              * that is meant to be tempting rather than on the one people already know
              * how to find.
              */
-            <View style={styles.controls}>
-              <View style={styles.control}>
-                <Button label="Share Profile" kind="secondary" onPress={() => void shareProfile()} />
+            <View style={styles.controlStack}>
+              <View style={styles.controls}>
+                <View style={styles.control}>
+                  <Button
+                    label="Share Profile"
+                    kind="secondary"
+                    onPress={() => void shareProfile()}
+                  />
+                </View>
+                <View style={styles.control}>
+                  <Button label="Bingd Awards" onPress={() => setAwardsOpen(true)} />
+                </View>
               </View>
-              <View style={styles.control}>
-                <Button label="Bingd Awards" onPress={() => setAwardsOpen(true)} />
-              </View>
+              {/* Under the pair, full width, outlined like Share: inviting somebody is
+                  sharing pointed at a person who is not on Bingd yet. Own profile only —
+                  `/u/[username]` deliberately does not render this, because an invite is
+                  from the signed-in person and that page is about somebody else. */}
+              <InviteFriendsButton />
             </View>
           }
         />
@@ -281,4 +293,6 @@ const styles = StyleSheet.create({
   // thing and equal weight is what stops the fill reading as the only real control.
   controls: { flexDirection: 'row', gap: theme.space[2] },
   control: { flex: 1 },
+  // The pair, then Invite friends beneath it, at the same rhythm the pair keeps.
+  controlStack: { gap: theme.space[2] },
 });

@@ -692,6 +692,9 @@ describe('sharing and awards on somebody else’s profile', () => {
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
     expect(view.getByRole('button', { name: 'Share Profile' })).toBeTruthy();
     expect(view.getByRole('button', { name: 'Bingd Awards' })).toBeTruthy();
+    // But not Invite friends: an invitation is from the signed-in person, and this
+    // page is about somebody else. The control lives on the own profile alone.
+    expect(view.queryByRole('button', { name: 'Invite friends' })).toBeNull();
   });
 
   it('shares the viewed handle, not the reader’s own', async () => {

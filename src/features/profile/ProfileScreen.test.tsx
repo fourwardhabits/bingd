@@ -136,6 +136,17 @@ describe('the profile controls', () => {
     expect(view.queryByText('Edit Profile')).toBeNull();
   });
 
+  it('offers Invite friends beneath the pair', async () => {
+    // The own profile is the one page about the person doing the inviting, so it is
+    // the entry point for the invite link — `/u/[username]` deliberately has no such
+    // control (see PublicProfileScreen.test.tsx).
+    const view = await open();
+
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Invite friends' })).toBeTruthy(),
+    );
+  });
+
   it('keeps the bell in its corner and puts settings beside it as a gear', async () => {
     const view = await open();
 
