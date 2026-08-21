@@ -234,8 +234,9 @@ export function ActivityRow({
          * Android clips touches that fall outside a parent's box, so a chip hanging
          * off the corner — or one relying on `hitSlop` to reach a usable size — is a
          * profile link that works on iOS and silently does not on Android. Its
-         * `Pressable` is the whole 28pt corner square; the visible circle is the
-         * 22pt ring inside it.
+         * `Pressable` is a 32pt corner square; the visible circle is the 22pt ring
+         * inset 3pt from the corner inside it. See `styles.chip` for why the padding
+         * that separates those two numbers is asymmetric.
          *
          * Sibling order after the poster is what puts it on top. Neither view carries
          * elevation — `posterHasShadow` is false at `xs` — so paint order is not in
