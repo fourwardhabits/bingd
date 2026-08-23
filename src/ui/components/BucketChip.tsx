@@ -1,14 +1,22 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { BUCKET_LABEL } from '@/features/collection/score';
+
 import { theme } from '../tokens';
 import { Text } from './Text';
 
-/** Always in this order. The scale expresses "for me" and "not for me", not
- *  good and bad — see design-system.md §3. */
+/**
+ * Always in this order, best first — the bands are ordered, so the control that
+ * chooses one has to be too (design-system.md §3).
+ *
+ * The `id`s are the chip's own camelCase space and are mapped to the stored
+ * `loved` / `fine` / `not_for_me` at the write. The words come from
+ * `BUCKET_LABEL` so that rewording the scale is one edit rather than three.
+ */
 export const BUCKETS = [
-  { id: 'loved', label: 'Loved it', color: theme.bucket.loved },
-  { id: 'fine', label: 'It was fine', color: theme.bucket.fine },
-  { id: 'notForMe', label: 'Not for me', color: theme.bucket.notForMe },
+  { id: 'loved', label: BUCKET_LABEL.loved, color: theme.bucket.loved },
+  { id: 'fine', label: BUCKET_LABEL.fine, color: theme.bucket.fine },
+  { id: 'notForMe', label: BUCKET_LABEL.not_for_me, color: theme.bucket.notForMe },
 ] as const;
 
 export type BucketId = (typeof BUCKETS)[number]['id'];

@@ -144,7 +144,7 @@ describe('the first five', () => {
 
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
-    await fireEvent.press(view.getByLabelText('Loved it'));
+    await fireEvent.press(view.getByLabelText('I liked it'));
 
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(0);
@@ -156,7 +156,7 @@ describe('the first five', () => {
 
     await fireEvent.press(view.getByLabelText(/Inception, 2010/));
     await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
-    await fireEvent.press(view.getByLabelText('Loved it'));
+    await fireEvent.press(view.getByLabelText('I liked it'));
 
     // `rank_start` is the same session opener the Log tab drives. Nothing about the
     // ranking algorithm is reimplemented here.

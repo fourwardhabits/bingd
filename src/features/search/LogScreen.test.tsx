@@ -197,7 +197,7 @@ describe('a series in the results', () => {
     // decision D5, 2026-08-15): an em dash, not a colon, and never a bare "Season 2".
     await waitFor(() => expect(view.getByText('Breaking Bad, S2')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Loved it'));
+    await fireEvent.press(view.getByLabelText('I liked it'));
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
 
     expect(callsTo('set_bucket')[0][1]).toMatchObject({ p_media_item_id: 'season-2' });

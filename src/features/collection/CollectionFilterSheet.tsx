@@ -12,8 +12,7 @@ import {
   type CollectionItem,
   type Decade,
 } from './filters';
-import { BAND_LABEL } from './use-collection';
-import type { Bucket } from './score';
+import { BUCKET_LABEL, type Bucket } from './score';
 
 export type CollectionFilterSheetProps = {
   /** Every item *before* filtering, so the options describe the whole collection. */
@@ -85,7 +84,7 @@ export function CollectionFilterSheet({
             {BUCKETS.map((bucket) => (
               <Option
                 key={bucket}
-                label={BAND_LABEL[bucket]}
+                label={BUCKET_LABEL[bucket]}
                 selected={draft.buckets.includes(bucket)}
                 onPress={() => setDraft({ ...draft, buckets: toggle(draft.buckets, bucket) })}
               />

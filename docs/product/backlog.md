@@ -96,10 +96,14 @@ watched forty films in April.
 
 This carries a known consequence, already recorded as debt: **`watched_on` is nullable,
 and there is one per title.** A watch with no date cannot be placed in a quarter, and a
-rewatch overwrites the first date. Cross-year rewatch is debt item 1 in
-`feature-completion-status.md`, and the standing rule there is that **no year-in-review
-or past-period selector ships before it is resolved** — a recap is exactly that feature,
-so resolving it is a prerequisite and not a follow-up.
+rewatch overwrites the first date. Cross-year rewatch is tracked locally on the hardening
+list in `.agent-workflow/feature-completion-status.md` (founder-local, gitignored) and is
+specified in
+[`deferred-roadmap.md`](./deferred-roadmap.md) §19 — designed 2026-08-23, not built — and
+the standing rule is that **no year-in-review or past-period selector ships before it is
+resolved** — a recap is exactly that feature, so resolving it is a prerequisite and not a
+follow-up. Specifically, this depends on §19.5's repoint of Goals and Awards onto
+`watch_events`, not merely on the table existing.
 
 ### A developer period override is mandatory, not nice
 

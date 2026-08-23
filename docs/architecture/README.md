@@ -90,7 +90,7 @@ The uniqueness constraint on `(user_id, category, position)` must be `DEFERRABLE
 
 ### AD-3 — Bucket bands are contiguous position ranges
 
-PRD §10 requires that every *Loved it* title rank above every *It was fine* title, which ranks above every *Not for me* title.
+PRD §10 requires that every *I liked it* title rank above every *It was fine* title, which ranks above every *I didn’t like it* title.
 
 Rather than storing band boundaries, they are derived: sort by position, and the bands appear in order. A ranking row carries its `bucket`, and the insertion routine restricts its binary search to rows sharing that bucket. Changing a bucket removes the row from its current position and re-inserts it into the target band.
 

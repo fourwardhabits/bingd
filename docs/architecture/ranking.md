@@ -151,7 +151,7 @@ Each answer is also written to `comparisons` for analytics and future recalibrat
 | 255 | 8 |
 | 1,023 | 10 |
 
-This is why bands matter beyond correctness. A user with 400 ranked movies split across three buckets searches one band of perhaps 150, not the full 400 — and the *Loved it* band, where users actually care about precision, is the smallest of the three.
+This is why bands matter beyond correctness. A user with 400 ranked movies split across three buckets searches one band of perhaps 150, not the full 400 — and the *I liked it* band, where users actually care about precision, is the smallest of the three.
 
 ---
 
@@ -346,9 +346,9 @@ score  = high - offset × (high - low) / max(band.size - 1, 1)
 
 Rounded to one decimal. Three properties worth stating because each one is a plausible bug:
 
-**A band of one scores the high.** The `max(size - 1, 1)` denominator is what prevents a division by zero, and returning the high rather than the midpoint is deliberate: the first title you ever call *Loved it* is, at that moment, genuinely the best thing in your list.
+**A band of one scores the high.** The `max(size - 1, 1)` denominator is what prevents a division by zero, and returning the high rather than the midpoint is deliberate: the first title you ever call *I liked it* is, at that moment, genuinely the best thing in your list.
 
-**The ranges are closed and non-overlapping**, so a bucket is always recoverable from a score. `7.0` is *Loved it* and `6.9` is *It was fine*, with nothing in between. This is what lets the feed show a friend's score without also shipping their bucket.
+**The ranges are closed and non-overlapping**, so a bucket is always recoverable from a score. `7.0` is *I liked it* and `6.9` is *It was fine*, with nothing in between. This is what lets the feed show a friend's score without also shipping their bucket.
 
 **Scores reflow.** Because `band.size` is in the denominator, ranking one new title changes the score of every title in that band. That is correct — the score always was a statement about relative position — but it means a score must never be cached anywhere it could be read after the band changed. The one exception is §6's `feed_events.payload`, which is a snapshot on purpose.
 

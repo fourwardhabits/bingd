@@ -1,5 +1,6 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -45,6 +46,23 @@ const NUDGE_PREF_KEY = 'collection.unranked-nudge';
 const NUDGE_COOLDOWN_DAYS = 14;
 
 /**
+ * Which side of the Movies/TV selector this reader was last on, per account.
+ *
+ * Local only, and deliberately not an account preference: it describes a device
+ * habit rather than something about the user, so it does not belong in a table
+ * that would then have to sync, migrate and be reasoned about server-side. It
+ * rides the same `readPref`/`writePref` pair the nudge already uses.
+ *
+ * A TV-heavy reader was reopening Collection on Movies every single time and
+ * switching back by hand. Movies stays the first-ever default — a new account
+ * has no habit to remember — but after that the app follows the reader.
+ */
+const MEDIUM_PREF_KEY = 'collection.medium';
+
+const isMedium = (value: unknown): value is Medium =>
+  value === 'movies' || value === 'tv_seasons';
+
+/**
  * The user's own working surface (screens.md §5).
  *
  * Ranked and Watched used to be separate tabs and were largely the same list:
@@ -67,7 +85,19 @@ export default function CollectionScreen() {
   const profile = useCurrentProfile();
   const { data: loggedSummary } = useLoggedCollection(profile.id);
   const [segment, setSegment] = useState<Segment>('watched');
-  const [medium, setMedium] = useState<Medium>('movies');
+  /**
+   * The remembered side, tagged with the account it was read for.
+   *
+   * Carrying the id rather than resetting the value on sign-in is what makes a switch of
+   * account correct *during the render that switches*, with no effect to fire and nothing
+   * to clean up: a preference belongs to whoever it was read for, so one that does not
+   * name the current reader is simply not theirs and the default stands.
+   */
+  const [mediumPref, setMediumPref] = useState<{ profileId: string; medium: Medium }>({
+    profileId: profile.id,
+    medium: 'movies',
+  });
+  const medium: Medium = mediumPref.profileId === profile.id ? mediumPref.medium : 'movies';
   const [nudgePref, setNudgePref] = useState<UnrankedNudgePref | null>(null);
   /**
    * Filters, sort, view mode and shuffle seed, owned here rather than by either
@@ -76,12 +106,43 @@ export default function CollectionScreen() {
    */
   const [viewState, setViewState] = useState<CollectionViewState>(initialViewState);
   const [nudgePrefLoaded, setNudgePrefLoaded] = useState(false);
+  /** Whether this reader has touched the selector since their preference was read. */
+  const chosenMedium = useRef(false);
 
   useEffect(() => {
     readPref<UnrankedNudgePref>(`${profile.id}.${NUDGE_PREF_KEY}`)
       .then(setNudgePref)
       .catch(() => setNudgePref(null))
       .finally(() => setNudgePrefLoaded(true));
+  }, [profile.id]);
+
+  /**
+   * The remembered side, applied when it arrives.
+   *
+   * Not gated on: the store is local and the collection is a network read, so the
+   * stored side lands while the list is still a skeleton and there is nothing to
+   * see flicker. `chosenMedium` is what stops a slow read from overruling a reader
+   * who tapped TV in the meantime — the tap is the newer intent of the two, and a
+   * preference that fights the control it came from is worse than none.
+   *
+   * The value is validated rather than trusted: a key left by an older build, or
+   * one that failed to parse, must not put the selector in a state it cannot draw.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    // The reader who touched the selector was the *previous* account. Left true, it would
+    // make the incoming account's own stored side be discarded as though they had just
+    // tapped the control themselves. A ref rather than state, so this costs no render.
+    chosenMedium.current = false;
+    readPref<unknown>(`${profile.id}.${MEDIUM_PREF_KEY}`)
+      .then((stored) => {
+        if (cancelled || chosenMedium.current) return;
+        if (isMedium(stored)) setMediumPref({ profileId: profile.id, medium: stored });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [profile.id]);
 
   /**
@@ -121,16 +182,23 @@ export default function CollectionScreen() {
   const active: Segment = segment === 'unranked' && unrankedCount === 0 ? 'watched' : segment;
 
   /**
-   * Switching Movies and TV, and forgetting Unranked when the new side has none.
+   * Switching Movies and TV, forgetting Unranked when the new side has none, and
+   * remembering the choice for next time.
    *
-   * The derivation above already draws the right tab, so this is about the state rather
-   * than the pixels: without it a reader who moved to Movies (no unranked, so Watched)
-   * and back to TV would silently land on Unranked again, having chosen Watched in
-   * between. Falling back deterministically means falling back for good.
+   * The derivation above already draws the right tab, so the middle line is about the
+   * state rather than the pixels: without it a reader who moved to Movies (no unranked,
+   * so Watched) and back to TV would silently land on Unranked again, having chosen
+   * Watched in between. Falling back deterministically means falling back for good.
+   *
+   * The write is not awaited and its failure is swallowed. Remembering the side is a
+   * convenience, and a store that refuses should cost the reader nothing more than
+   * opening on Movies next time.
    */
   const changeMedium = (next: Medium) => {
-    setMedium(next);
+    chosenMedium.current = true;
+    setMediumPref({ profileId: profile.id, medium: next });
     if (segment === 'unranked' && unrankedFor(next) === 0) setSegment('watched');
+    void writePref(`${profile.id}.${MEDIUM_PREF_KEY}`, next).catch(() => {});
   };
 
   const showNudge = shouldShowUnrankedNudge({
@@ -162,28 +230,43 @@ export default function CollectionScreen() {
 
       {active === 'watched' && showNudge ? (
         <View style={styles.nudge}>
+          {/* The card now names its own reason. "Rank a few more and your
+              recommendations get sharper" was true of the app in general and so
+              said nothing about this reader: it read as an advert rather than as
+              a state of their collection. It is only ever drawn when this side of
+              the selector genuinely holds unranked titles, so it can say so. */}
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel="You have unranked titles. Rank now."
             onPress={() => setSegment('unranked')}
             style={styles.nudgeMain}
           >
+            <Text variant="callout">You have unranked titles</Text>
             <Text variant="footnote" tone="secondary">
-              Rank a few more and your recommendations get sharper.
+              Rank them to complete your Collection and improve your recommendations.
             </Text>
             <Text variant="callout" tone="action">
-              Rank some
+              Rank now
             </Text>
           </Pressable>
+          {/* An X rather than "Not now": the control dismisses this card, and a
+              worded button that size reads as the second of two answers to the
+              question above it. Dismissing hides the card only — the Unranked tab
+              stands as long as there is anything on it. */}
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel="Dismiss"
             onPress={() => {
               void dismissNudge().catch(() => {});
             }}
-            hitSlop={theme.space[2]}
+            hitSlop={theme.space[3]}
+            style={styles.nudgeDismiss}
           >
-            <Text variant="callout" tone="tertiary">
-              Not now
-            </Text>
+            <Ionicons
+              name="close"
+              size={theme.layout.icon.sm}
+              color={theme.text.tertiary}
+            />
           </Pressable>
         </View>
       ) : null}
@@ -369,6 +452,13 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.minTapTarget,
     justifyContent: 'center',
   },
+  // The icon is small; the target around it is not.
+  nudgeDismiss: {
+    minWidth: theme.layout.minTapTarget,
+    minHeight: theme.layout.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   body: { flex: 1 },
   count: {
     paddingHorizontal: theme.layout.gutter,
@@ -379,6 +469,32 @@ const styles = StyleSheet.create({
   padded: { padding: theme.layout.gutter },
 });
 
+/**
+ * Whether to draw the unranked card.
+ *
+ * **The one re-eligibility rule: once dismissed, the card comes back only when
+ * fourteen days have passed *and* the reader has ranked something since.** Both
+ * halves are needed and neither is enough. Time alone would make the card a
+ * fortnightly tax on somebody who has decided they are not interested; progress
+ * alone would put it back the moment they ranked a single title, which is the
+ * one moment they have just demonstrated they do not need telling.
+ *
+ * Ahead of that sit three conditions that are about the collection rather than
+ * about the dismissal: there is nothing to nudge about unless this side of the
+ * Movies/TV selector actually holds an unranked title, a reader with fifty
+ * ranked titles has the habit and does not need the prompt, and nothing is drawn
+ * before the stored preference has been read — a card that appears and then
+ * vanishes is worse than one that arrives a frame late.
+ *
+ * `dismissCount` is recorded but is deliberately not part of the rule. It used
+ * to gate a third branch that could never change the answer, because "twice
+ * dismissed and no progress since" is already false under the progress test
+ * below. It stays in the stored shape as a signal for whoever tunes this next.
+ *
+ * Dismissal hides *this card only*. The Unranked tab is drawn from
+ * `unrankedCount` and is unaffected, so the state stays reachable and clearing
+ * the last unranked title removes the underlying condition on its own.
+ */
 function shouldShowUnrankedNudge({
   unrankedCount,
   rankedCount,
@@ -394,8 +510,6 @@ function shouldShowUnrankedNudge({
   if (unrankedCount <= 0) return false;
   if (rankedCount >= 50) return false;
   if (!pref) return true;
-
-  if (pref.dismissCount >= 2 && rankedCount <= pref.rankedCountAtDismissal) return false;
 
   const lastDismissedAt = new Date(pref.dismissedAt).getTime();
   const elapsedDays = (Date.now() - lastDismissedAt) / (1000 * 60 * 60 * 24);

@@ -52,9 +52,9 @@ describe('the certified fills', () => {
   // design-system.md §3. These are the only pairs in the system where a brand
   // colour carries text, and they are what lets the score badge be chromatic.
   it.each([
-    { name: 'Loved it', fill: bucket.loved, ink: bucketInk.loved, documented: 7.4 },
+    { name: 'I liked it', fill: bucket.loved, ink: bucketInk.loved, documented: 7.4 },
     { name: 'It was fine', fill: bucket.fine, ink: bucketInk.fine, documented: 6.1 },
-    { name: 'Not for me', fill: bucket.notForMe, ink: bucketInk.notForMe, documented: 4.9 },
+    { name: 'I didn’t like it', fill: bucket.notForMe, ink: bucketInk.notForMe, documented: 4.9 },
   ])('$name reaches $documented:1', ({ fill, ink, documented }) => {
     const ratio = contrastRatio(ink, fill);
     expect(ratio).toBeGreaterThanOrEqual(WCAG.AA_BODY);
@@ -67,7 +67,7 @@ describe('the certified fills', () => {
    * not one pair until 2026-08-16 — the reveal was Amber — and this asserts they
    * cannot drift apart again while still both clearing AA.
    */
-  it('the score pair reaches 7.4:1, the same as Loved it', () => {
+  it('the score pair reaches 7.4:1, the same as I liked it', () => {
     const ratio = contrastRatio(semantic.scoreInk, semantic.score);
     expect(ratio).toBeGreaterThanOrEqual(WCAG.AA_BODY);
     expect(round(ratio)).toBe(7.4);

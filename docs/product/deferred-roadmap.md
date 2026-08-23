@@ -1,6 +1,6 @@
 # Deferred roadmap — product capability that is specified, wanted, and not being built yet
 
-**Status:** current as of 2026-08-21, at the Founder Preview known-issues closeout.
+**Status:** current as of 2026-08-23, at the friend-beta follow-up pass.
 
 **Companion documents:** [`PRD.md`](./PRD.md) · [`analytics.md`](./analytics.md) ·
 [`growth-instrumentation.md`](./growth-instrumentation.md) · [`backlog.md`](./backlog.md) ·
@@ -17,8 +17,14 @@ built before the friend beta.
 **It is not the bug list.** A security defect, a privacy defect or an unresolved
 release-hardening blocker does not belong here, because a roadmap is a document people
 read as *"nice things, later"* — and filing a blocker among them is how a blocker stops
-being one. Those live in `.agent-workflow/continuation.md` and
-`.agent-workflow/feature-completion-status.md`, and they stay there.
+being one.
+
+Those live in [`../release/public-launch-risk-register.md`](../release/public-launch-risk-register.md),
+which since 2026-08-23 is the **tracked** home for pre-public majors, beta-safe minors and
+accepted risks, with the release classification for both lanes. The working run logs
+`.agent-workflow/continuation.md` and `.agent-workflow/feature-completion-status.md` still
+hold the blow-by-blow, but they are **gitignored and founder-local** — nothing that has to
+survive a fresh clone may live only there.
 
 **§7 used to break that rule and no longer does.** The invite and referral resolver was
 carried here *and* on the hardening list, because it was genuinely both. It was built on
@@ -612,6 +618,11 @@ can tell an improvement from a change, which today's event set cannot.
 
 ## 19. Rewatch and repeated viewing history
 
+**Status: designed, not built.** The design below is canonical as of 2026-08-23 and
+replaces the sketch that stood here before. It is deliberately *not* implemented in the
+friend-beta tranche — see **19.13** for why, and **19.14** for what the founder still has
+to decide before it can be.
+
 **What it is.** A title watched more than once, recorded as more than once. Today the
 collection holds one `user_media` row per title and one canonical ranking, and a second
 viewing has nowhere to go: re-logging a film overwrites the date it carries rather than
@@ -622,48 +633,319 @@ is most of what affection looks like — and Bingd is a product about what someb
 An app that cannot tell a film seen once from one seen every year is missing the strongest
 statement its own data could make.
 
-**The shape it should take:**
+---
 
-- **Many view events, one canonical rank.** Multiple legitimate watch/log events per title,
-  while `rankings` keeps exactly one row and one position. The invariant that a title holds
-  at most one place in a list is load-bearing across the whole ranking system and does not
-  move.
-- **A summary in the interface** — "Watched 3 times", on the title page and in the
-  collection — which is the whole feature as far as most readers are concerned.
-- **Optional movement over rewatches.** A film that climbs on second viewing is a real and
-  interesting thing to show; whether it is worth a chart or a sentence is a design question
-  that is not answered yet.
-- **Legitimate rewatch Feed events.** A rewatch is genuine activity and should be able to
-  appear, with its own verb rather than borrowing "watched" and reading as a duplicate.
-- **A rewatch is distinguished from a retry.** This is the hard half and the reason it is
-  not a small feature. The write path is idempotent by operation id precisely so that a
-  lost response does not become a second log; a real rewatch is a second log that *must*
-  count. The two are indistinguishable at the row level and are told apart only by intent,
-  so a rewatch needs its own explicit act and its own operation id issued at the moment the
-  user asks for one — never by a client retrying anything.
-- **The ranking RPCs need that operation id too, and do not have one.** `rank_start`,
-  `rank_answer` and `rank_rebucket` take no operation id, so nothing on the server can
-  recognise a replay: a `rank_answer` that finalises and loses its reply is reported to the
-  reader as a failure over a ranking that exists. Two accidental refusals were covering
-  for that — `rank_start`'s 23505 and `rank_rebucket`'s 22023 — and neither stands in
-  front of a re-rank inside the same bucket, which is why independent review 30 raised it
-  when that path was built. The beta answer is honest copy: the sheet says the outcome is
-  unknown and names checking the collection, rather than claiming nothing happened. The
-  real answer is a `_claim_operation` on the ranking functions, which is a migration and is
-  the same mechanism this entry needs.
+### 19.1 What happens today, traced
 
-**No beta implementation.** Nothing about this ships for the friend beta. It needs schema
-(a view-event table, or a durable log the collection reads through), a decision about what
-re-ranking a rewatch means, and Feed vocabulary — none of which is a change to make to a
-build already installed on beta devices.
+Every claim here was checked against HEAD rather than inherited from an earlier document.
 
-**Revisit when.** After the beta reports what people actually did: the signal is somebody
-re-logging a title they have already logged, which the current write path quietly absorbs
-and which is worth counting before the feature is designed against a guess.
+| Act | What actually runs | What it writes |
+|---|---|---|
+| First log / bucket chosen | `LogSheet.tsx` → `set_bucket`, then a conditional `log_watched` | `user_media.bucket`; then `user_media.watched_on` **only if it was null** |
+| Watch date saved | `log_watched(p_watched_on)` | `user_media.watched_on`, **in place** |
+| Bucketed | `set_bucket` | `user_media.bucket`. No feed event |
+| Ranked | `rank_start` → `rank_answer`… → `_rank_finalize` | a `rankings` row; **a new `title_ranked` feed event** |
+| Rank again, same bucket | `session.ts` `rankAgain` = `rank_unrank` **then** `rank_start` | deletes and re-inserts the `rankings` row; another `title_ranked` |
+| Rank again, different bucket | `rank_rebucket` (atomic, server-side) | same, plus `user_media.bucket` |
+| Watch date edited | `log_watched` again, new operation id | **overwrites** `user_media.watched_on` |
+| Same title encountered again | nothing distinguishes it from the first time | — |
+| Unlogged | `unlog` | deletes the `user_media` row **and** its `title_ranked` / `title_logged` / `season_completed` feed events |
 
-**Depends on.** A view-event schema · the Feed's verb set (`features/feed/activity.ts`)
-· the idempotency contract in `lib/write-outcome.ts`, which this must extend rather than
-weaken.
+**The blocking facts.**
+
+- **`user_media` is keyed `(user_id, media_item_id)`** and carries a single nullable
+  `watched_on date`. One row, one date, per title, forever. `rankings` is keyed the same
+  way and carries one `position`.
+- **`log_watched` coalesces on insert but overwrites on update**, so a second date replaces
+  the first and the first is gone. `docs/architecture/data-model.md` already records this
+  as known debt.
+- **The collection RPCs are idempotent by operation id** through `_claim_operation` and the
+  `processed_operations` ledger. **The ranking RPCs are not** — `rank_start`, `rank_answer`
+  and `rank_rebucket` take no operation id at all.
+- **`title_logged` already exists and has no producer.** It is in the `feed_events` type
+  CHECK, it is rendered by the client with the verb *watched* (`features/feed/activity.ts`),
+  and `unlog` already cleans it up — but **no SQL anywhere inserts one**. The "watched"
+  activity type is fully plumbed and entirely unused. `season_completed` is in exactly the
+  same state.
+- **`title_ranked` is deliberately unconstrained** and a new one is written on every
+  finalize, rerank and rebucket. Repetition there is by design.
+- **`_leave_watchlist` fires on any genuine `watched_on` transition** and deletes the
+  watchlist row for that exact `(user, media item)`.
+- **`watch_tags` is keyed `(tagger, tagged, media_item)`**, so who you watched with cannot
+  vary between two viewings without a change to that table too.
+- **Goals and Awards read `user_media.watched_on` directly** and filter it by date range.
+  This is where the missing history actually costs the user something today: a film watched
+  in 2025 and rewatched in 2026 counts once, in 2026, and silently leaves the 2025 total.
+
+### 19.2 The product model, and why it fits this codebase
+
+The proposed separation is **adopted**:
+
+| Act | Watch history | Ranking |
+|---|---|---|
+| First watch | creates the first watch event | bucket and rank established as now |
+| **Rewatch** | appends another watch event | **untouched** |
+| **Rank again** | **untouched** | repositions the title |
+| Rewatch *and* rank again | appends an event | repositions — but only because the user asked twice |
+
+This is not merely compatible with the ranking architecture, it is the only model that
+architecture can express. The personalized score is **not stored anywhere**: `score.ts`
+derives it from the title's ordinal position inside its band and the band's size, and the
+one persisted copy is a snapshot in `feed_events.payload` written at finalize. There is no
+per-watch rating in the schema, so "average the ratings of separate viewings" is not a
+thing the system could do without inventing a second, competing notion of a rating and
+breaking invariant **I2** — that every title in a higher band outranks every title in a
+lower one — which `band_bounds`, `rankInBand` and `rankings_position_unique` all depend on.
+
+So the score keeps answering exactly one question: **where does this title rank for me
+now.** A rewatch that changed the user's mind is expressed by them re-ranking it, which is
+an act they take, not an inference the app makes.
+
+### 19.3 Source of truth, after the change
+
+| Fact | Where it lives | Stored or derived |
+|---|---|---|
+| That a viewing happened, and when | `watch_events` (new) | **stored**, append-only |
+| `watch_count` | `count(*)` over `watch_events` | **derived** |
+| `first_watched_at` | `min(watched_on)` | **derived** |
+| `last_watched_at` | `max(watched_on)` | **derived**, cached (19.5) |
+| Current bucket | `user_media.bucket` | stored, unchanged |
+| Current rank | `rankings.position` | stored, unchanged |
+| Current score | `score.ts` from position + band size | derived, unchanged |
+
+**Ranking truth is never copied into watch history.** A watch event records that somebody
+watched something on a date. It carries no bucket, no position and no score, because each
+of those is a fact about the title's place in the whole list rather than about one evening.
+
+### 19.4 The new table
+
+```sql
+create table watch_events (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references profiles(id) on delete cascade,
+  media_item_id uuid not null references media_items(id) on delete cascade,
+  watched_on    date,
+  created_at    timestamptz not null default now()
+);
+
+create index watch_events_owner
+  on watch_events (user_id, media_item_id, watched_on desc);
+```
+
+`watched_on` is **nullable**, matching `user_media` today: "I have seen this, I do not
+recall when" is a real and currently representable state, and a history table that refused
+it would be unable to hold the rows being migrated into it.
+
+**No other columns.** No bucket, no score, no note, no companions, no `source`, no
+`rewatch boolean`. Each was considered and each fails the same test — it has no current
+product requirement, and adding it now would fix a guess in place. In particular there is
+deliberately no per-event note or per-event companion list: `watch_tags` would have to be
+re-keyed for the latter and that is its own decision (19.14).
+
+### 19.5 What happens to `user_media.watched_on`
+
+**It stays, as a denormalized cache of the last watch.** It is not deprecated and not
+dropped.
+
+The reason is blast radius. Four read paths consume it directly — `use-log-state.ts`, the
+title screen, `use-goals.ts` and `use-awards.ts` — and making it a view or dropping it
+turns a contained migration into a rewrite of Goals, Awards, the title page and the log
+sheet in one commit. Keeping it maintained also makes the change **reversible**: drop
+`watch_events` and the app is exactly what it is today, because the column every screen
+reads was never allowed to go stale.
+
+The write rule is one line: **a watch event whose `watched_on` is later than the cached
+value advances it; nothing else touches it.** An out-of-order backfill of an older viewing
+therefore adds history without rewriting "last watched", which is the correct behaviour and
+is not what the current in-place overwrite does.
+
+**Goals and Awards should move to `watch_events` — but not in the same migration.** That is
+where the user-visible win is (a film rewatched in a new year finally counts in both), and
+it is also a change to numbers people have already seen. It wants its own pass and its own
+before/after check against real beta data.
+
+### 19.6 RPC changes
+
+| RPC | Change |
+|---|---|
+| `log_watched` | also inserts the **first** `watch_events` row when it is establishing a date on a row that had none. Signature unchanged |
+| `log_rewatch` **(new)** | `(p_operation_id uuid, p_media_item_id uuid, p_watched_on date)` — requires an existing `user_media` row, appends a `watch_events` row, advances the cache per 19.5. Returns `{status}` like its siblings |
+| `edit_watch_event` **(new, optional for v1)** | `(p_operation_id uuid, p_watch_event_id uuid, p_watched_on date)` — corrects a date **without** claiming another viewing. This is the act the current UI silently performs, and the reason "edit" and "again" must be separate calls rather than one call with different arguments |
+| `unlog` | must delete that user's `watch_events` for the title, alongside the `user_media` row it already removes |
+| every ranking RPC | **unchanged.** Ranking does not learn about watches |
+
+All of them go through `assert_can_write()` and `_claim_operation`, exactly as the existing
+collection writers do.
+
+### 19.7 Ranking interaction
+
+None, by design. `rank_start`, `rank_answer`, `rank_rebucket`, `rank_unrank` and
+`_rank_finalize` are untouched, read nothing from `watch_events`, and write nothing to it.
+"Rank again" continues to mean only what it means today.
+
+The one ranking defect this design **does not** fix, and must not be confused with, is that
+`rankAgain` is still `rank_unrank` followed by `rank_start` with no transaction and no
+operation id, so a failure between the two leaves a title logged-but-unranked. That is a
+separate pre-public hardening item and is tracked as such — but it shares a mechanism with
+this entry, because both want `_claim_operation` on the ranking functions.
+
+### 19.8 Watchlist interaction — and the screenshot
+
+A Watchlist control **is** still offered on a title that is already ranked and watched, and
+**this is intentional, not stale state.** It means *I want to watch this again*. The
+invariant migration says so in as many words — re-adding something you have already seen is
+a rewatch, and it is a deliberate act — and the trigger that clears a watchlist entry is
+one-directional and fires only on a genuine transition, precisely so that a re-added entry
+survives an unrelated edit to the same row.
+
+Under this design that reading gets sharper rather than changing: the watchlist is the
+*intention* to watch, `watch_events` is the *record* of having watched, and a rewatch
+logged through `log_rewatch` advances `watched_on`, fires `_leave_watchlist`, and correctly
+clears the intention it has just satisfied.
+
+The only thing worth changing is the word. **"Watchlist" on a title you have already seen
+could read as "Watch again"**, which says the same thing and cannot be mistaken for a stale
+control. That is a copy decision for the founder (19.14) and not a semantic one.
+
+### 19.9 Feed implications — evaluated, not built
+
+Three acts, three different truths, and today only one of them speaks:
+
+| Act | Today | Should it be an activity? |
+|---|---|---|
+| First watch | silent — `title_logged` has no producer | Probably yes, and the type already exists and already renders |
+| Rewatch | impossible to express | Yes, and it needs **its own verb** rather than borrowing *watched*, or the feed reads as a duplicate |
+| Rerank | **already emits another `title_ranked`** every time | Arguably already too loud |
+
+A rewatch can be given a feed event **without** creating a second ranking identity, because
+the two are unrelated tables — `title_ranked` carries the position and score, a watch event
+carries neither. The dedup idiom for "one of these per title" already exists as a partial
+unique index (`feed_events_watchlist_once`), and the equivalent for rewatches is the
+opposite: no constraint, because repetition is the point.
+
+**None of this ships in the same pass as the schema.** Turning on a producer for
+`title_logged` changes how much every friend's feed contains, on a cohort small enough that
+the change would be the dominant thing they notice. Schema first, feed vocabulary second,
+with the beta's own numbers in hand.
+
+### 19.10 Title UI — the smallest coherent version
+
+One line, which is the whole feature for most readers:
+
+- watched once → `Watched 23 Aug 2026` — **exactly what it says today**
+- watched more than once → `Watched 3 times · Last watched 23 Aug 2026`
+
+No history screen in v1. The count is the interesting fact; the list of dates behind it is a
+detail almost nobody opens, and it can become a tap-through on the count later without any
+of the above changing.
+
+**Two actions, never one.** *Watched again* appends an event and leaves the ranking alone.
+*Rank again* reopens comparisons and claims nothing about a viewing. They sit apart, they
+are worded apart, and neither silently performs the other — which is precisely the failure
+the current single date field forces.
+
+### 19.11 Collection implications
+
+Almost none, which is a good sign. The Watched list stays one row per title, because a
+collection of titles is what it is; Unranked keeps working off `rankings` and is unaffected;
+filters and bands are untouched. The only opportunity is a **sort by last watched**, which
+becomes meaningful for the first time and is cheap given the cache in 19.5.
+
+### 19.12 Migration and rollback
+
+**Forward.** Create the table, then seed one event per logged row:
+
+```sql
+insert into watch_events (user_id, media_item_id, watched_on, created_at)
+select user_id, media_item_id, watched_on, created_at
+from user_media;
+```
+
+Every logged row gets an event, **including rows whose `watched_on` is null**, because in
+Bingd logging a title *is* the claim that you watched it — the date is what is missing, not
+the viewing. Seeding only the dated rows would leave undated titles reporting a watch count
+of zero while sitting in the Watched list, which is a worse lie than an undated event.
+`created_at` is carried across because it is the only honest evidence of when the claim was
+made; it is not a watch date and must never be read as one.
+
+**Rollback** is dropping the table. Nothing else has to be undone, because
+`user_media.watched_on` was kept authoritative for every existing reader throughout — that
+is what 19.5 buys. The only loss is rewatch history accumulated since the migration, which
+is why the Goals and Awards repoint is deliberately a later, separately reversible step.
+
+**Beta data is disposable** and is not intended to migrate into production, so the seed
+above is exercised against real rows in beta at no risk — which is the argument for doing it
+in beta rather than first attempting it on production data.
+
+### 19.13 Is it friend-beta-safe to add now? **No.**
+
+Not because it is dangerous, but because it is not free and it is not finished:
+
+- It is a **schema migration**, and the friend beta is a fixed native build. Shipping a
+  migration means the server changes under installed clients, so the client and the schema
+  have to be compatible in both directions for the whole rollout. Doable, but it is a
+  release-shaped task rather than an OTA-shaped one.
+- **Material ambiguity remains** — four decisions in 19.14 that change the schema or the
+  RPC surface, not just the copy.
+- The behaviour it fixes is one the beta is **supposed to be observing**. The signal worth
+  having is how often testers re-log something they have already logged, which the current
+  write path quietly absorbs. Counting that first is cheap and makes the feature answer a
+  measurement rather than a guess.
+
+### 19.14 Unresolved founder decisions
+
+1. **Same-day duplicates.** Two "watched again" taps on the same date: two events, or one?
+   A unique index on `(user_id, media_item_id, watched_on)` collapses accidental
+   double-taps and simultaneously forbids genuinely watching something twice in a day.
+   Recommendation: **no constraint**, and a confirming step in the UI instead — but this is
+   a product call and it decides the schema.
+2. **Does a first watch produce a Feed activity?** `title_logged` is built, rendered and
+   silent. Turning it on is a visible change in feed volume for a small cohort.
+3. **Does a rewatch get its own verb**, or is it *watched* again? A duplicate-looking row is
+   worse than no row.
+4. **Do companions become per-watch?** That re-keys `watch_tags`, which is a second
+   migration with its own notification and privacy surface. Recommendation: **not now.**
+5. **Does the Watchlist control on a watched title get relabelled "Watch again"?** Copy
+   only, no semantics (19.8).
+
+**Depends on.** `watch_events` · the Feed's verb set (`features/feed/activity.ts`) · the
+idempotency contract in `lib/write-outcome.ts`, which this must extend rather than weaken ·
+and, for the part users will actually feel, the Goals and Awards repoint in 19.5.
+
+---
+
+## 20. Letterboxd import
+
+**Deprioritized 2026-08-23.** It is **not** a requirement for the friend beta, for the
+initial App Store release, or for the initial Google Play production release.
+
+**Nothing here is retracted.** The design stands and stays where it was written: the full
+specification is PRD §12, the screen flow is `design/screens.md` §12, the star-to-bucket
+mapping is a settled founder decision in `decision-log.md` §4 (4.0+ → *I liked it*,
+2.5–3.5 → *It was fine*, ≤2.0 → *I didn't like it*, one summary line, no cut-line UI), and
+the argument for why an importer gets useful recommendations on day one is
+`architecture/recommendations.md`. This entry moves the *stage*, not the thinking.
+
+**Why it moved.** It was carried as a v1 must-have on the strength of cold-start: an
+importer arrives with 400 films and a usable taste profile instead of an empty collection.
+That argument is sound and unchanged — it is simply not an argument about *this* cohort. The
+friend beta builds collections by hand, which is the behaviour the beta exists to observe,
+and an importer would remove exactly the signal being collected. Meanwhile the work is not
+small: a CSV parser, a title-matching pipeline with thresholds nobody has tuned against real
+exports, a bucket mapping, a review step and an anchor session, none of which exists in the
+app today.
+
+**Policy that survives the deprioritization.** User-uploaded export files only. **No
+scraping and no live account connection** — Letterboxd's terms prohibit automated
+extraction and its API is not granted for this use case. That constraint is not a staging
+decision and does not relax because the feature moved.
+
+**Revisit when.** Public traction rather than a date: the first cohort large enough that
+hand-building a collection is the thing stopping people, and real exports in hand to tune
+matching against.
+
+**Depends on.** A file picker and CSV parser · a title-matching pipeline · the bucket
+mapping in `decision-log.md` §4 · the post-import anchor session.
 
 ---
 
@@ -685,6 +967,7 @@ Still deferred, still agreed, recorded so that nothing is lost between documents
 - **Offline outbox and durable sync** — PRD §18's capability matrix is decided; the outbox
   is not built, and `signOut` carries a note where its teardown will go.
 - **Letterboxd import** — specified in full in PRD §12 and **not built**. No import screen,
-  no CSV parser and no matching pipeline exists in the app today. It is a v1 "must have"
-  in the PRD's own staging and is not a friend-beta blocker: the cohort's collections are
-  being built by hand, which is also the behaviour the beta is trying to observe.
+  no CSV parser and no matching pipeline exists in the app today. It was a v1 "must have"
+  in the PRD's own staging; as of 2026-08-23 it is **no longer a gate for the friend beta
+  or for either initial store release**, and it has its own entry at **§20** above, which
+  is where the reasoning and the surviving policy now live.
