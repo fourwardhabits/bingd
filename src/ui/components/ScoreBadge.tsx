@@ -1,6 +1,6 @@
 import { PixelRatio, Pressable, StyleSheet, View } from 'react-native';
 
-import { formatScore, type Bucket } from '@/features/collection/score';
+import { BUCKET_LABEL, formatScore, type Bucket } from '@/features/collection/score';
 
 import { theme } from '../tokens';
 import { Text } from './Text';
@@ -12,19 +12,13 @@ export type ScoreBadgeProps = {
   score?: number | null;
   /**
    * Carried for the spoken label only. It no longer decides the colour — see the
-   * note below — but "8.7, Loved it" is still the useful thing to hear, and the
+   * note below — but "8.7, I liked it" is still the useful thing to hear, and the
    * bands are closed so the caller usually has it anyway.
    */
   bucket?: Bucket | null;
   size?: ScoreBadgeSize;
   /** Makes the unranked state a button into the ranking sheet. */
   onPress?: () => void;
-};
-
-const BAND_LABEL: Record<Bucket, string> = {
-  loved: 'Loved it',
-  fine: 'It was fine',
-  not_for_me: 'Not for me',
 };
 
 /**
@@ -64,7 +58,7 @@ export function ScoreBadge({ score, bucket, size = 'md', onPress }: ScoreBadgePr
       // "8.7" alone is a bare number in a list of film titles. The unit is what
       // makes it mean anything read aloud.
       accessibilityLabel={
-        bucket ? `${value} out of 10, ${BAND_LABEL[bucket]}` : `${value} out of 10`
+        bucket ? `${value} out of 10, ${BUCKET_LABEL[bucket]}` : `${value} out of 10`
       }
       style={[styles.circle, styles.filled, { width: diameter, height: diameter }]}
     >

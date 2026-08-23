@@ -19,7 +19,25 @@
 export type Bucket = 'loved' | 'fine' | 'not_for_me';
 
 /**
- * Closed, non-overlapping. The gaps matter: 7.0 is the worst *Loved it* and 6.9
+ * How each bucket is written for the reader.
+ *
+ * **Display copy only.** The stored value stays `loved` / `fine` / `not_for_me`
+ * — `taste_bucket` holds a meaning rather than a caption, so rewording the scale
+ * is a copy change and never a data migration (data-model.md §14). Nothing in
+ * the app branches on these strings; every decision reads the bucket itself.
+ *
+ * One map rather than one per surface: the chip, the filter sheet and the score
+ * badge’s spoken label each carried their own copy of the three words, which is
+ * how they drift.
+ */
+export const BUCKET_LABEL: Record<Bucket, string> = {
+  loved: 'I liked it',
+  fine: 'It was fine',
+  not_for_me: 'I didn’t like it',
+};
+
+/**
+ * Closed, non-overlapping. The gaps matter: 7.0 is the worst *I liked it* and 6.9
  * the best *It was fine*, so a bucket is always recoverable from a score. That
  * is what lets the feed show a friend's number without also shipping their
  * bucket, and what lets the badge tint by bucket without the tint being the
@@ -72,7 +90,7 @@ export const rankInBand = (bucket: Bucket, position: number, sizes: BandSizes): 
  * meeting cleanly.
  *
  * A band of one scores the high, not the midpoint. The first title you ever
- * call *Loved it* is, at that moment, genuinely the best thing in your list.
+ * call *I liked it* is, at that moment, genuinely the best thing in your list.
  */
 export const scoreFor = (bucket: Bucket, position: number, sizes: BandSizes): number => {
   const { high, low } = BAND_RANGE[bucket];
@@ -109,7 +127,7 @@ export const bucketForScore = (score: number): Bucket => {
 /**
  * Where the reveal's count-up starts (design-system.md §9).
  *
- * The low end of the title's own band, not zero. Counting a *Not for me* title
+ * The low end of the title's own band, not zero. Counting a *I didn’t like it* title
  * up from 0.0 sprints through the whole scale to land at 1.2, which reads as
  * the app deciding the film was better than it was and then correcting itself.
  * Starting inside the band makes the animation say what actually happened: the

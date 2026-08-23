@@ -36,7 +36,7 @@ All six product decisions that blocked architecture as of v0.5 have been resolve
 | Invitation token model | One reusable personal link plus short code | Decision log §5 |
 | Notification mechanism | Full system in v1; inbox live; push built but delivery flagged off | Decision log §6 |
 | Lists in public alpha | Ship in v1 with the three-list limit enforced | Decision log §8 |
-| Letterboxd import stage | Ships in v1 | Decision log §4 |
+| Letterboxd import stage | **Deprioritized 2026-08-23** — gates neither the friend beta nor either initial store release | Decision log §4, deferred-roadmap §20 |
 
 **READY FOR ARCHITECTURE: YES.** See PRD §31 for the full assessment and the conditions attached.
 
@@ -48,7 +48,7 @@ These are recorded as decisions so work can proceed, but they were **made by the
 
 ### ~~INF-1 — Letterboxd rating translation~~ — **RESOLVED 2026-08-12**
 
-Confirmed by the founder. Star ratings auto-map to buckets (4.0+ → *Loved it*, 2.5–3.5 → *It was fine*, ≤2.0 → *Not for me*), shown as a single summary line, with no cut-line UI and every bucket editable per title afterward. This is now a founder decision, recorded in `decision-log.md` §4. The threshold values themselves remain Provisional and tunable after real imports.
+Confirmed by the founder. Star ratings auto-map to buckets (4.0+ → *I liked it*, 2.5–3.5 → *It was fine*, ≤2.0 → *I didn’t like it*), shown as a single summary line, with no cut-line UI and every bucket editable per title afterward. This is now a founder decision, recorded in `decision-log.md` §4. The threshold values themselves remain Provisional and tunable after real imports.
 
 ### INF-2 — Username change policy
 
@@ -84,7 +84,7 @@ Two things carried forward from the inference because they proved useful. Values
 
 ### ~~INF-3 — Bucket bands partition the ranking~~ — **RESOLVED 2026-08-12**
 
-Confirmed by the founder. All *Loved it* titles rank above all *It was fine* titles, which rank above all *Not for me* titles. Comparisons run only within a band, which is the mechanism that keeps them short and avoids asking a user to compare titles they placed at different reaction levels. This is now a founder decision, recorded in `decision-log.md` §2 and implemented as invariant **I2** in `../architecture/ranking.md`.
+Confirmed by the founder. All *I liked it* titles rank above all *It was fine* titles, which rank above all *I didn’t like it* titles. Comparisons run only within a band, which is the mechanism that keeps them short and avoids asking a user to compare titles they placed at different reaction levels. This is now a founder decision, recorded in `decision-log.md` §2 and implemented as invariant **I2** in `../architecture/ranking.md`.
 
 ### ~~INF-4 — Navigation structure~~ — **RESOLVED 2026-08-13**
 
@@ -108,7 +108,7 @@ Real answers require real users. Each has a working default so nothing is blocke
 
 | Question | Working default | What would settle it |
 |---|---|---|
-| Do the three bucket labels read correctly? | *Loved it / It was fine / Not for me* | Confusion or hesitation in the first cohort |
+| Do the three bucket labels read correctly? | *I liked it / It was fine / I didn’t like it* | Confusion or hesitation in the first cohort |
 | Does the starter set produce better activation than import? | Both offered; no preference expressed in UI | Completion rate by onboarding path |
 | Which of the 40 starter titles are actually recognized? | Founder-curated list | Tap rates per title |
 | Is the Top 20 anchor session the right length? | ~20 titles | Completion and abandonment rates |
@@ -165,6 +165,9 @@ Not questions so much as work deliberately not done yet, recorded so it is not r
 ## 5. External Hard Gates
 
 Each requires a **manual founder action**. None can be resolved by an agent.
+
+Their current status, alongside every other pre-public major, is tracked in
+[`../release/public-launch-risk-register.md`](../release/public-launch-risk-register.md) §M9.
 
 ### ~~HG-1 — TMDB commercial clarification~~ — **NOT A HARD GATE. Closed 2026-08-13, approved by the founder**
 
@@ -271,4 +274,72 @@ Recorded here because they have been mistaken for open questions before, or beca
 - **Whether reporting can ship without a way to act on a report.** It cannot. A report flow with no operator surface is a checkbox, and PRD §27 gates the release on the whole loop.
 - **Whether a deleted account's username becomes available.** It does not, ever.
 - **Whether a view may be created without `security_invoker`.** It may not. A default-owner view bypasses RLS on the tables beneath it while the table policies still read correctly.
-- **Whether the Logged collection is private on a public profile.** It is not. It inherits profile visibility, like the rest of the profile. The **watchlist**, separately, is private at every visibility level.
+- **Whether the Logged collection is private on a public profile.** It is not. It inherits profile visibility, like the rest of the profile. **The watchlist does too**, since the founder decision of 2026-08-20 and migration `20260820000200` — this bullet used to say the watchlist was private at every visibility level, which PRD §22 superseded and this document had not caught up with. What stays always-private is **notes and watch dates**, which live in `user_media` and are owner-only.
+---
+
+## 8. Semantic contradictions found in the build, 2026-08-23
+
+Opened by the friend-beta follow-up pass. These are not new features and not new risks —
+they are places where a **Decided** rule and the shipped app disagree, which is worth
+naming precisely so the next semantic pass fixes the right side of the disagreement.
+
+### TV-1 — A season is documented as rankable only when Completed, and nothing enforces it
+
+**Status: OPEN. Verified against HEAD, not inherited from an earlier audit.**
+
+**What the documents say.**
+
+- `decision-log.md` §2, *TV progress*, marked **Decided** by the founder: "A season may be
+  marked *Watching*, but becomes rankable only when marked completed."
+- PRD §9: "Mark a season *Watching* or *Completed*. Only completed seasons are rankable."
+- PRD §26, acceptance criterion 3: "Only completed seasons can be bucketed and ranked."
+
+**What the build does.**
+
+- `set_season_progress(p_operation_id, p_media_item_id, p_progress)` exists, is
+  `security definer`, and is granted to `authenticated`. It has **zero call sites** in
+  `src/` or `app/`. The client never invokes it and never even selects the column.
+- `user_media.progress` is therefore **unreachable by any user**. The enum has only
+  `('watching', 'completed')`; absence of a value is the implicit third state, and absence
+  is what every row has.
+- `set_bucket` gates on `_assert_loggable` (rejects `series`) and `_assert_unranked`.
+  It never reads `progress`.
+- `rank_start` gates on `rankable_category` (rejects `series`). It never reads `progress`,
+  and it *creates* the `user_media` row rather than requiring one to exist.
+- The series page lists seasons as **Ranked / Not ranked yet**, which is a deliberate
+  design choice recorded in the screen — and is not the *Watching / Completed* control
+  PRD §9 specifies.
+
+**So the contradiction is total rather than partial:** the gate is unenforced at every
+layer, and the state the gate depends on cannot be entered by any user through any surface.
+
+**A second symptom of the same gap.** `feed_events.type` permits `'season_completed'`, the
+client renders it with the verb *finished*, and both deletion paths maintain it — but **no
+SQL anywhere inserts one**, because the only writer that could set `progress = 'completed'`
+is never called. PRD §14 lists "a season was completed" as an eligible feed event. It can
+never fire.
+
+**Not fixed in this pass, deliberately.** Closing it means either building the
+Watching/Completed control and adding a guard to two RPCs, or retiring the rule — and which
+of those is right is a product decision, not a defect to patch. It is also entangled with
+repeat-watch semantics (`deferred-roadmap.md` §19), because "completed" and "watched" are
+the same claim about a season and should not end up as two independent records of it.
+
+**The founder decision needed:** is the Completed gate real? If yes, the season UI and the
+two guards are the work. If no, the three documents above should stop saying it.
+
+### RW-1 — Repeat-watch semantics: the model is settled, five details are not
+
+**Status: designed, not built.** The canonical design is `deferred-roadmap.md` §19, which
+carries the full trace of current behaviour, the data model, the migration and the
+rollback. The product model is **Decided** (`decision-log.md` §4, *Rewatches*): watching
+again and re-ranking are different acts and neither implies the other.
+
+What remains open is listed in full at §19.14 and is repeated here only as a pointer:
+same-day duplicate rule (which decides whether the table gets a unique index), whether a
+first watch produces a Feed activity, whether a rewatch gets its own verb, whether
+companions become per-watch, and whether the Watchlist control on an already-watched title
+is relabelled *Watch again*.
+
+**Not open:** whether a title can hold more than one ranking or more than one score. It
+cannot, and §19.2 gives the architectural reason rather than a preference.

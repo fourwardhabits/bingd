@@ -76,7 +76,7 @@ Four steps. Each is skippable except account creation, and each states why it is
 - **Import from Letterboxd** — the fastest path, and the reason import is in v1 (§12).
 - **"Which of these have you seen?"** — a grid of widely-seen titles. Tapping one logs it. This is Beli's "How many of these spots have you tried?" ([`references/beli-30-collection-progress.jpg`](./references/beli-30-collection-progress.jpg)) and it works because recognition is far easier than recall.
 
-Beli also asks what you dislike during onboarding ([`references/beli-20-onboarding-dislikes.jpg`](./references/beli-20-onboarding-dislikes.jpg)). Bingd should not. Genre exclusions collected before a user has logged anything are guesses about themselves, they conflict with the guardrails in [`recommendations.md`](../architecture/recommendations.md), and the same signal arrives more honestly from the *Not for me* bucket.
+Beli also asks what you dislike during onboarding ([`references/beli-20-onboarding-dislikes.jpg`](./references/beli-20-onboarding-dislikes.jpg)). Bingd should not. Genre exclusions collected before a user has logged anything are guesses about themselves, they conflict with the guardrails in [`recommendations.md`](../architecture/recommendations.md), and the same signal arrives more honestly from the *I didn’t like it* bucket.
 
 **Find and invite friends.** Contact matching is opt-in with an explicit explanation of what leaves the device. Below it, the personal invite link with a native share action. Skippable.
 
@@ -162,7 +162,7 @@ The compact row from [`design-system.md`](./design-system.md) §8, which is Lett
 
 **The band headers are gone.** *LOVED IT* / *IT WAS FINE* / *NOT FOR ME* section headers made the bucket partition legible when the only number on the row was an ordinal that said nothing about how much the user liked something. The score says it — the ranges do not overlap, and the badge is tinted by bucket — so the headers now caption information already present twice on every row.
 
-**The bucket label is gone from the subtitle** for the same reason. `Loved it · 148m · Action` next to a badge reading `8.7` spends the most valuable line on the row restating the badge.
+**The bucket label is gone from the subtitle** for the same reason. `I liked it · 148m · Action` next to a badge reading `8.7` spends the most valuable line on the row restating the badge.
 
 No progress bar toward 100% and no "380 remaining" (PRD §5). Someone importing 800 films must not open this tab and feel behind.
 

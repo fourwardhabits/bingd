@@ -645,7 +645,7 @@ function Reveal({
 /**
  * Counts from the low end of the title's own band up to its score.
  *
- * Not from zero: a *Not for me* title would sprint through the whole scale to land at
+ * Not from zero: a *I didn’t like it* title would sprint through the whole scale to land at
  * 1.2, which reads as the app deciding the film was better than it was and then
  * correcting itself. Starting inside the band makes the animation say what actually
  * happened — the user chose a bucket, and this is where the title landed inside it

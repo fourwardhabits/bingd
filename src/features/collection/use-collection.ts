@@ -361,11 +361,4 @@ export function useWatchlist(userId: string) {
   });
 }
 
-/** The band headers, in the order the scale is always shown in. */
-export const BAND_LABEL: Record<'loved' | 'fine' | 'not_for_me', string> = {
-  loved: 'Loved it',
-  fine: 'It was fine',
-  not_for_me: 'Not for me',
-};
-
 export const BAND_ORDER = ['loved', 'fine', 'not_for_me'] as const;

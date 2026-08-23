@@ -70,7 +70,7 @@
 | Status | Statement |
 |---|---|
 | **Decided** | The rankable units are movies and TV seasons. Episodes are never ranked. Whole-series ranking is not the primary TV unit. |
-| **Decided** | Rating happens in two steps: a three-bucket reaction (**Loved it / It was fine / Not for me**), then pairwise comparison within that bucket. |
+| **Decided** | Rating happens in two steps: a three-bucket reaction (**I liked it / It was fine / I didn’t like it**), then pairwise comparison within that bucket. |
 | **Decided 2026-08-15 (supersedes the ordinal-only rule)** | The ranking output shown to users is a **0–10 score with one decimal**, derived from the title's position inside its bucket band. The exact ordinal remains the stored ground truth and is shown as secondary detail on a title page. There is still no 0–100 score and no percentile. |
 | **Decided** | A title is either **Logged** (watched, optionally bucketed) or **Ranked** (has an exact position from comparisons). Positions are never derived from an imported rating. |
 | **Decided** | The product is social: profiles, one-way follows, a chronological feed, people discovery, match scores, recommendations, reactions, watch tagging, outward sharing, and direct invitations. |
@@ -254,7 +254,7 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 1. User searches for a movie or TV series.
 2. For TV, the user selects a season. The season is the rankable unit.
 3. User marks it watched or completed.
-4. User chooses a bucket: **Loved it**, **It was fine**, or **Not for me**.
+4. User chooses a bucket: **I liked it**, **It was fine**, or **I didn’t like it**.
 5. The app asks a small number of pairwise comparisons **against already-ranked titles in that same bucket**.
 6. The title is inserted at an exact position and the placement is revealed.
 7. The activity becomes eligible for the feed and updates match and recommendation inputs.
@@ -398,7 +398,7 @@ Comments, DMs, discussion boards, and long-form reviews. Destination-specific so
 >
 > - **Comments shipped.** They are on feed activity, rate-limited, with their own notification type and category. The Deferred line is stale on that one word; DMs, discussion boards and long-form reviews remain deferred.
 > - **Achievements shipped as Bingd Awards** (2026-08-18) and are no longer a backlog item. See §14's As-built block.
-> - **Letterboxd import is listed as a v1 must-have and has not been built.** No import screen, no CSV parser, no matching pipeline. It is not a friend-beta blocker — the cohort is building collections by hand, which is the behaviour the beta exists to observe — but it is the largest single gap between this list and the app.
+> - **Letterboxd import was listed as a v1 must-have, has not been built, and is no longer a release gate.** No import screen, no CSV parser, no matching pipeline. **Deprioritized 2026-08-23**: it gates neither the friend beta nor either initial store release. The cohort is building collections by hand, which is the behaviour the beta exists to observe and which an importer would erase. §12 keeps the full specification; `deferred-roadmap.md` §20 holds the staging decision.
 >
 > Everything else this document calls Deferred is still deferred. The canonical register, with the reasoning and the revisit trigger for each, is [`deferred-roadmap.md`](./deferred-roadmap.md).
 
@@ -424,7 +424,7 @@ Comments, DMs, discussion boards, and long-form reviews. Destination-specific so
 
 1. Search and select. Global search requires connectivity; the cached own collection remains searchable offline.
 2. Tap Watched.
-3. Choose a bucket: Loved it / It was fine / Not for me.
+3. Choose a bucket: I liked it / It was fine / I didn’t like it.
 4. Optionally capture the watch date, a lightweight note, and **who you watched with**.
 5. Either compare now, or stop here and leave the title **Logged**.
 6. If comparing: a short sequence of comparisons within the bucket, then the placement reveal.
@@ -483,11 +483,11 @@ Every rating begins with a bucket.
 
 | Bucket | Band |
 |---|---|
-| **Loved it** | Top band |
+| **I liked it** | Top band |
 | **It was fine** | Middle band |
-| **Not for me** | Bottom band |
+| **I didn’t like it** | Bottom band |
 
-**Buckets partition the ranking.** All *Loved it* titles rank above all *It was fine* titles, which rank above all *Not for me* titles. A title cannot cross a band boundary without changing its bucket. Changing a bucket moves the title into the new band and re-runs comparisons there.
+**Buckets partition the ranking.** All *I liked it* titles rank above all *It was fine* titles, which rank above all *I didn’t like it* titles. A title cannot cross a band boundary without changing its bucket. Changing a bucket moves the title into the new band and re-runs comparisons there.
 
 **Re-selecting the bucket a title already has re-ranks it inside that band.** It is not a no-op, and the founder's device test on 2026-08-21 is the record of why: a reader who re-opens a rating they have already given is saying the *position* is wrong, and the bucket is the only control they have to say it with. The bucket does not move; the position is discarded and comparisons run again within the same band, so the ordinal and the derived score may both change. Like a bucket change, it is destructive and is confirmed first.
 
@@ -515,9 +515,9 @@ The score is **derived, not stored**. Each bucket owns a fixed range, and a titl
 
 | Bucket | Range |
 |---|---|
-| Loved it | 10.0 → 7.0 |
+| I liked it | 10.0 → 7.0 |
 | It was fine | 6.9 → 3.5 |
-| Not for me | 3.4 → 0.0 |
+| I didn’t like it | 3.4 → 0.0 |
 
 ```
 score = high - (rankInBand - 1) × (high - low) / max(bandSize - 1, 1)
@@ -571,7 +571,7 @@ This is Principle 3 and it is not negotiable.
 
 ### What a bucket gives you without a position
 
-A bucket is real partial ordering, not a placeholder. A *Loved it* title is known to rank above everything in *It was fine*. That is directly usable:
+A bucket is real partial ordering, not a placeholder. A *I liked it* title is known to rank above everything in *It was fine*. That is directly usable:
 
 - **Recommendations use buckets as preference signal.** A user who imports 400 titles and ranks zero still receives meaningfully personalized recommendations on day one. This is the main reason imported ratings are mapped rather than discarded.
 - **Exclusion works regardless of state.** Every Logged title is ineligible for recommendation, ranked or not.
@@ -608,7 +608,11 @@ Once a user has a ranked spine, a single bonus comparison offered after each new
 
 ## 12. Letterboxd import
 
-**Decided for public alpha.** Ships in v1. Free, permanently.
+> **Stage changed 2026-08-23 — deprioritized.** Import is **not** a requirement for the
+> friend beta, for the initial App Store release, or for the initial Google Play production
+> release. **The specification below is unchanged and still canonical**; only the stage
+> moved. The reasoning, the surviving policy and the revisit trigger are in
+> [`deferred-roadmap.md`](./deferred-roadmap.md) §20. Free, permanently, whenever it ships.
 
 ### Method — Required by policy
 
@@ -624,13 +628,13 @@ Separate CSV files for watched titles, ratings, diary entries with watch dates, 
 
 1. **Upload.** The user uploads the ZIP. Limits: 5,000 titles, 25 MB. Processing runs as a background job with visible progress.
 2. **Preview — Required.** Before any write, show: cleanly matched count, ambiguous rows needing a tap to resolve, unmatched rows, and duplicates of titles already in Bingd.
-3. **Bucket mapping.** Star ratings map to buckets automatically. **No cut-line UI.** One summary line: *"We sorted your 320 rated films into Loved it (118), It was fine (140), Not for me (62). Change any of these anytime."*
+3. **Bucket mapping.** Star ratings map to buckets automatically. **No cut-line UI.** One summary line: *"We sorted your 320 rated films into I liked it (118), It was fine (140), I didn’t like it (62). Change any of these anytime."*
 
    | Letterboxd rating | Bucket |
    |---|---|
-   | 4.0 – 5.0 | Loved it |
+   | 4.0 – 5.0 | I liked it |
    | 2.5 – 3.5 | It was fine |
-   | 0.5 – 2.0 | Not for me |
+   | 0.5 – 2.0 | I didn’t like it |
 
    Thresholds are **Provisional** and tunable after observing real imports. Every bucket is editable per title afterward.
 
@@ -639,7 +643,7 @@ Separate CSV files for watched titles, ratings, diary entries with watch dates, 
 6. **Watch dates** come from the diary. **Rewatch flags are ignored in v1** — the most recent watch date is used.
 7. **Lists import in full.** All lists are created regardless of the three-list limit. See the over-limit rule below.
 8. **Confirm and write.** Idempotent — the same file can be re-uploaded safely without duplicating records.
-9. **Anchor session.** Immediately after the write, run a guided comparison session over roughly 20 titles from the top of the *Loved it* bucket, so the user finishes onboarding with a genuine Top 20. Skippable at any point and resumable later.
+9. **Anchor session.** Immediately after the write, run a guided comparison session over roughly 20 titles from the top of the *I liked it* bucket, so the user finishes onboarding with a genuine Top 20. Skippable at any point and resumable later.
 10. **Cleanup.** Source files are deleted after processing completes.
 
 ### Import and the list limit — Decided
@@ -843,7 +847,7 @@ A fixed reaction set of six on feed activity items. One reaction per user per it
 | `wow` | Impressive or surprising | Astonished face |
 | `moved` | This moved me | Single tear |
 
-**Values are stored as meanings, not as glyph names.** `agree` rather than `thumbs_up`, for the same reason `taste_bucket` stores `loved` rather than "Loved it". Which symbol renders is a design decision, so swapping a thumb for a flame, or replacing the hands with faces entirely, is a copy change and never a data migration.
+**Values are stored as meanings, not as glyph names.** `agree` rather than `thumbs_up`, for the same reason `taste_bucket` stores `loved` rather than "I liked it". Which symbol renders is a design decision, so swapping a thumb for a flame, or replacing the hands with faces entirely, is a copy change and never a data migration.
 
 **A disagree reaction is included, against the earlier inference.** The reasoning that ruled it out — that a downvote is a pile-on mechanic — holds for a public network of strangers. It does not hold here: arguing about a friend's ranking is the point of the product, and the launch cohort is people who know each other. The pile-on risk lives in the *display*, not in the reaction existing, which is what the rule below addresses.
 
@@ -1648,13 +1652,13 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 
 ### 26.3 Three-bucket rating and ranking
 
-1. Marking a title watched offers exactly three buckets: Loved it, It was fine, Not for me.
+1. Marking a title watched offers exactly three buckets: I liked it, It was fine, I didn’t like it.
 2. Choosing a bucket with no prior ranked titles in that bucket places the title without comparisons.
 3. Choosing a bucket with existing ranked titles runs pairwise comparisons **only against titles in the same bucket**.
 4. A bucket of 64 ranked titles resolves in at most 7 comparisons.
 5. On completion, the app reveals a 0–10 score with one decimal, derived from the title's position within its bucket band per §10.
 6. No 0–100 score or percentile is rendered on any screen or share artifact. No score is ever aggregated across users.
-7. Every *Loved it* title ranks above every *It was fine* title, which ranks above every *Not for me* title, at all times.
+7. Every *I liked it* title ranks above every *It was fine* title, which ranks above every *I didn’t like it* title, at all times.
 8. Changing a title's bucket moves it into the new band and re-runs comparisons there. Re-selecting the bucket it already has keeps the band and re-runs comparisons within it — the ordinal and the score may change, the bucket may not.
 9. Skip re-anchors to a different title in the same bucket; Back returns to the previous comparison and permits a changed answer.
 10. After 3 skips in one insertion, the title is placed at the midpoint of the remaining range and the user is told the position is adjustable.
@@ -1688,7 +1692,7 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 12. Imported lists are recorded with `source: imported`.
 13. No imported title receives a ranking position.
 14. Re-uploading the same export creates no duplicate records.
-15. After the write, an anchor session offers ~20 comparisons from the top of the Loved it bucket; it can be skipped at any point and resumed later.
+15. After the write, an anchor session offers ~20 comparisons from the top of the I liked it bucket; it can be skipped at any point and resumed later.
 16. Uploaded source files are deleted after processing completes.
 17. No Letterboxd credential is requested, and no network call is made to Letterboxd.
 
@@ -2025,7 +2029,7 @@ Plain-language definitions of the terms used in this document.
 
 **Binary insertion** — Placing an item by repeatedly comparing against the midpoint of the remaining range. Doubling the list adds only one comparison.
 
-**Bucket** — One of three broad reactions (Loved it / It was fine / Not for me) captured before comparison. Buckets partition the ranking into ordered bands.
+**Bucket** — One of three broad reactions (I liked it / It was fine / I didn’t like it) captured before comparison. Buckets partition the ranking into ordered bands.
 
 **Bundle identifier** — The permanent unique name of an app on the stores, such as `app.bingd`.
 

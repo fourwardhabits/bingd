@@ -200,7 +200,7 @@ describe('a second title', () => {
   it('does not inherit the first title’s bucket or note', async () => {
     const sheet = await open(filmA);
 
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.bucket('I liked it'));
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
     await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'a private note about Film A');
@@ -208,7 +208,7 @@ describe('a second title', () => {
     await sheet.show(filmB);
 
     expect(sheet.getByText('Film B')).toBeTruthy();
-    expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(false);
+    expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(false);
   });
 
   it('does not file the first title’s note against the second', async () => {
@@ -226,7 +226,7 @@ describe('choosing a bucket', () => {
   it('saves the bucket for the title on screen', async () => {
     const sheet = await open(filmA);
 
-    await fireEvent.press(sheet.bucket('Not for me'));
+    await fireEvent.press(sheet.bucket('I didn’t like it'));
 
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith('set_bucket', {
@@ -242,7 +242,7 @@ describe('choosing a bucket', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.bucket('I liked it'));
 
     await waitFor(() => expect(onRank).toHaveBeenCalledWith('loved', 'start'));
   });
@@ -252,7 +252,7 @@ describe('choosing a bucket', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.bucket('I liked it'));
 
     await waitFor(() => expect(sheet.getByText('nope')).toBeTruthy());
     expect(onRank).not.toHaveBeenCalled();
@@ -261,7 +261,7 @@ describe('choosing a bucket', () => {
   it('carries a new operation id each time, so a change of mind is not read as a retry', async () => {
     const sheet = await open(filmA);
 
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.bucket('I liked it'));
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
     await fireEvent.press(sheet.bucket('It was fine'));
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(2));
@@ -290,8 +290,8 @@ describe('a title that is already ranked', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
+    await fireEvent.press(sheet.bucket('I liked it'));
 
     // Its own sentence: nothing about the rating is changing, so “Changing this”
     // would be describing an act that is not happening.
@@ -306,8 +306,8 @@ describe('a title that is already ranked', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
+    await fireEvent.press(sheet.bucket('I liked it'));
     await fireEvent.press(sheet.getByRole('button', { name: 'Re-rank' }));
 
     // The bucket it went in with is the bucket it comes out with. Only the mode differs
@@ -321,20 +321,20 @@ describe('a title that is already ranked', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
+    await fireEvent.press(sheet.bucket('I liked it'));
     await fireEvent.press(sheet.getByRole('button', { name: 'Cancel' }));
 
     expect(onRank).not.toHaveBeenCalled();
     expect(mockRpc).not.toHaveBeenCalled();
-    expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true);
+    expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true);
   });
 
   it('asks before re-ranking when a different bucket is tapped', async () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
+    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
     await fireEvent.press(sheet.bucket('It was fine'));
 
     expect(sheet.getByText('Changing this will re-rank Film A.')).toBeTruthy();
@@ -347,20 +347,20 @@ describe('a title that is already ranked', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
+    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
     await fireEvent.press(sheet.bucket('It was fine'));
     await fireEvent.press(sheet.getByRole('button', { name: 'Cancel' }));
 
     expect(onRank).not.toHaveBeenCalled();
     expect(mockRpc).not.toHaveBeenCalled();
-    expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true);
+    expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true);
   });
 
   it('confirming hands off in rebucket mode without writing the bucket first', async () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('Loved it').props.accessibilityState.selected).toBe(true));
+    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
     await fireEvent.press(sheet.bucket('It was fine'));
     await fireEvent.press(sheet.getByRole('button', { name: 'Re-rank' }));
 
@@ -752,7 +752,7 @@ describe('the watch date', () => {
     await waitFor(() =>
       expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
     );
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.bucket('I liked it'));
 
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
     expect(callsTo('log_watched')[0][1].p_watched_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
@@ -773,7 +773,7 @@ describe('the watch date', () => {
       expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
     );
     expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today');
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.bucket('I liked it'));
 
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(0);
@@ -794,7 +794,7 @@ describe('the watch date', () => {
     const sheet = await open(filmA);
 
     // Pressed while the read is still held open — the window a slow network keeps.
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.bucket('I liked it'));
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(0);
 
@@ -831,7 +831,7 @@ describe('the watch date', () => {
     );
     expect(sheet.dateRow().props.accessibilityValue.text).toBe('Today');
 
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.bucket('I liked it'));
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
     expect(callsTo('log_watched')).toHaveLength(0);
 
@@ -853,7 +853,7 @@ describe('the watch date', () => {
     const { release } = stubSlowReads(null, null);
     const sheet = await open(filmA);
 
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.bucket('I liked it'));
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
     // Withheld while the answer is unknown…
     expect(callsTo('log_watched')).toHaveLength(0);
@@ -921,7 +921,7 @@ describe('when the log state cannot be read', () => {
       expect(sheet.getByLabelText('Notes').props.accessibilityHint).toBe('Unavailable'),
     );
 
-    await fireEvent.press(sheet.bucket('Loved it'));
+    await fireEvent.press(sheet.bucket('I liked it'));
     await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
   });
 

@@ -62,7 +62,7 @@ The reference that matters most, and the one whose visual language must be ignor
 
 **Red, yellow, green buckets.** Reasoning in [`design-system.md`](./design-system.md) §3.
 
-**Asking what you dislike during onboarding** ([`beli-20`](./references/beli-20-onboarding-dislikes.jpg)). Pre-experience exclusions are guesses, and the same signal arrives honestly from the *Not for me* bucket.
+**Asking what you dislike during onboarding** ([`beli-20`](./references/beli-20-onboarding-dislikes.jpg)). Pre-experience exclusions are guesses, and the same signal arrives honestly from the *I didn’t like it* bucket.
 
 **Invite rewards** ([`beli-110`](./references/beli-110-invite-perks.jpg)) — credits, locked recs, "you used up all your invites." Already a founder decision: track attribution, ship no rewards.
 

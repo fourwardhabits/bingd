@@ -42,9 +42,12 @@ jest.mock('@/lib/supabase', () => ({
 
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: jest.fn() }) }));
 
+/** Mutable so a test can sign one reader out and another in without unmounting. */
+const mockProfile = { id: 'user-1' };
+
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({
-    id: 'user-1',
+    id: mockProfile.id,
     username: 'sai',
     display_name: 'Sai',
     avatar_path: null,
@@ -52,11 +55,29 @@ jest.mock('@/features/auth', () => ({
   }),
 }));
 
-/** The nudge reads a preference on mount; it is not what these tests are about. */
+/**
+ * A real store rather than a stub that always answers null.
+ *
+ * Two things on this screen persist locally — the remembered Movies/TV side and the
+ * unranked card's dismissal — and both are only worth anything across a restart, which
+ * is what a store you can seed and then read back lets a test express. Named `mock…`
+ * because `jest.mock` is hoisted above every other binding in the file and that prefix
+ * is what makes a reference out of the factory legal.
+ */
+const mockPrefStore: Record<string, unknown> = {};
+const mockPrefWrites: { name: string; value: unknown }[] = [];
+
 jest.mock('@/lib/prefs', () => ({
-  readPref: () => Promise.resolve(null),
-  writePref: () => Promise.resolve(),
+  readPref: (name: string) => Promise.resolve(mockPrefStore[name] ?? null),
+  writePref: (name: string, value: unknown) => {
+    mockPrefWrites.push({ name, value });
+    mockPrefStore[name] = value;
+    return Promise.resolve();
+  },
 }));
+
+const MEDIUM_KEY = 'user-1.collection.medium';
+const NUDGE_KEY = 'user-1.collection.unranked-nudge';
 
 const watched = (id: string, kind: 'movie' | 'season') => ({
   media_item_id: id,
@@ -84,6 +105,9 @@ const ranked = (id: string, category: 'movies' | 'tv_seasons') => ({
 });
 
 beforeEach(() => {
+  mockProfile.id = 'user-1';
+  for (const key of Object.keys(mockPrefStore)) delete mockPrefStore[key];
+  mockPrefWrites.length = 0;
   for (const key of Object.keys(mockTables)) delete mockTables[key];
   mockTables.user_media = [];
   // Nothing is ranked in any of these: `rankings` is what turns a logged title into a
@@ -217,5 +241,178 @@ describe('switching category while standing on Unranked', () => {
     await switchTo(view, 'TV seasons');
 
     await waitFor(() => expect(selected(view, 'Unranked')).toBe(true));
+  });
+});
+
+/**
+ * **Collection reopens where the reader left it.**
+ *
+ * A TV-heavy reader was landing on Movies every single time and switching across by
+ * hand, which is a tax that grows with how much someone uses the app. Movies stays the
+ * first-ever default — a new account has no habit to remember — and after that the side
+ * is remembered locally, per account.
+ */
+describe('the remembered category', () => {
+  const showing = (view: Awaited<ReturnType<typeof open>>) =>
+    view.getByLabelText(/^Showing /).props.accessibilityLabel;
+
+  it('opens on Movies when this account has never chosen', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    expect(showing(view)).toBe('Showing Movies');
+  });
+
+  it('reopens on TV seasons when that is where the reader last was', async () => {
+    mockPrefStore[MEDIUM_KEY] = 'tv_seasons';
+    mockTables.user_media = [watched('s1', 'season')];
+    const view = await open();
+
+    await waitFor(() => expect(showing(view)).toBe('Showing TV seasons'));
+  });
+
+  it('records the switch, so the next launch starts there', async () => {
+    mockTables.user_media = [watched('s1', 'season')];
+    const view = await open();
+
+    await switchTo(view, 'TV seasons');
+
+    await waitFor(() =>
+      expect(mockPrefWrites).toContainEqual({ name: MEDIUM_KEY, value: 'tv_seasons' }),
+    );
+  });
+
+  it('goes back to Movies when the reader does, rather than remembering only TV', async () => {
+    mockPrefStore[MEDIUM_KEY] = 'tv_seasons';
+    mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+    const view = await open();
+
+    await waitFor(() => expect(showing(view)).toBe('Showing TV seasons'));
+    await switchTo(view, 'Movies');
+
+    await waitFor(() =>
+      expect(mockPrefWrites).toContainEqual({ name: MEDIUM_KEY, value: 'movies' }),
+    );
+    expect(showing(view)).toBe('Showing Movies');
+  });
+
+
+  /** A key left by an older build must not put the selector in a state it cannot draw. */
+  it('ignores a stored value that is not a category', async () => {
+    mockPrefStore[MEDIUM_KEY] = 'tv';
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    expect(showing(view)).toBe('Showing Movies');
+  });
+
+  /**
+   * Found by independent review of this change, 2026-08-23.
+   *
+   * The preference is per account, and the screen is not guaranteed to unmount between
+   * two of them. Without the reset in the effect, a reader who had touched the selector
+   * left `chosenMedium` true, and the next account's stored side was then discarded as
+   * though *they* had just tapped the control — so one person's habit silently became
+   * another person's default.
+   */
+  it('reads the incoming account\u2019s own side, even after the outgoing one touched the control', async () => {
+    // The two accounts must want *different* sides, or this passes on the default alone.
+    mockPrefStore['user-1.collection.medium'] = 'movies';
+    mockPrefStore['user-2.collection.medium'] = 'tv_seasons';
+    mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+
+    const view = await open();
+    // Touching the control is what used to poison the switch: it latched "the reader has
+    // chosen", and the next account's stored side was then thrown away as their choice.
+    await switchTo(view, 'TV seasons');
+    await switchTo(view, 'Movies');
+
+    mockProfile.id = 'user-2';
+    await view.rerender(<CollectionScreen />);
+
+    await waitFor(() => expect(showing(view)).toBe('Showing TV seasons'));
+  });
+
+  it('falls back to Movies for a next account that has no stored side', async () => {
+    mockPrefStore['user-1.collection.medium'] = 'tv_seasons';
+    mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+
+    const view = await open();
+    await waitFor(() => expect(showing(view)).toBe('Showing TV seasons'));
+
+    mockProfile.id = 'user-3';
+    await view.rerender(<CollectionScreen />);
+
+    await waitFor(() => expect(showing(view)).toBe('Showing Movies'));
+  });
+});
+
+/**
+ * **The unranked card says what it is about.**
+ *
+ * "Rank a few more and your recommendations get sharper" was true of the app in general
+ * and so said nothing about this reader — it read as an advert rather than as a state of
+ * their collection. It is only ever drawn when this side of the selector genuinely holds
+ * unranked titles, so it can say so.
+ */
+describe('the unranked card', () => {
+  it('names the unranked titles it is about', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
+    expect(
+      view.getByText('Rank them to complete your Collection and improve your recommendations.'),
+    ).toBeTruthy();
+    expect(view.getByText('Rank now')).toBeTruthy();
+  });
+
+  it('stays away when this side of the selector has nothing unranked', async () => {
+    // The season is unranked; Movies is not what the card is about.
+    mockTables.user_media = [watched('s1', 'season')];
+    const view = await open();
+
+    await waitFor(() => expect(tab(view, 'Unranked')).toBeNull());
+    expect(view.queryByText('You have unranked titles')).toBeNull();
+  });
+
+  it('is dismissed by the X, and records the dismissal', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Dismiss'));
+
+    await waitFor(() => expect(view.queryByText('You have unranked titles')).toBeNull());
+    expect(mockPrefWrites.map((write) => write.name)).toContain(NUDGE_KEY);
+  });
+
+  /**
+   * Dismissing the card is not dismissing the work. The tab is drawn from the collection
+   * rather than from the preference, so the state stays reachable either way — which is
+   * what makes hiding the card a safe thing to offer.
+   */
+  it('leaves the Unranked tab standing after the card is dismissed', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Dismiss'));
+
+    await waitFor(() => expect(view.queryByText('You have unranked titles')).toBeNull());
+    expect(tab(view, 'Unranked')).toBeTruthy();
+  });
+
+  it('stays dismissed on the next launch, rather than returning immediately', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const first = await open();
+    await waitFor(() => expect(first.getByText('You have unranked titles')).toBeTruthy());
+    await fireEvent.press(first.getByLabelText('Dismiss'));
+    await waitFor(() => expect(first.queryByText('You have unranked titles')).toBeNull());
+
+    // Same store, fresh mount: the dismissal was written, so it survives.
+    const second = await open();
+    await waitFor(() => expect(tab(second, 'Unranked')).toBeTruthy());
+    expect(second.queryByText('You have unranked titles')).toBeNull();
   });
 });

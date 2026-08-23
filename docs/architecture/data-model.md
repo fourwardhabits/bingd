@@ -465,7 +465,9 @@ Own-read only, matching `user_media` rather than `rankings`. No specification ha
 >
 > This is not fixable without a watch-history table, and the founder decision that specified goals ruled that out in as many words — "do not create a complicated historical-backfill system; yearly goals are intentionally simple". It is accepted rather than overlooked.
 >
-> Its practical reach today is nil, because the only year any screen displays is the current one and a rewatch inside the current year cannot lose a count it is also adding. It becomes visible the day a year-in-review or a past-year selector ships, and that surface must not ship before this is resolved. Carried on the Beta Hardening list.
+> Its practical reach today is nil, because the only year any screen displays is the current one and a rewatch inside the current year cannot lose a count it is also adding. It becomes visible the day a year-in-review or a past-year selector ships, and that surface must not ship before this is resolved.
+>
+> **Design landed 2026-08-23, still not built.** [`../product/deferred-roadmap.md`](../product/deferred-roadmap.md) §19 is now the canonical answer: an append-only `watch_events` table, with `user_media.watched_on` kept as a denormalized *last watched* cache so every reader here keeps working and the migration stays reversible. §19.5 is explicit that repointing Goals and Awards at the new table is the step that actually fixes this paragraph, and that it is a **separate, later pass** rather than part of the schema migration. Until then the limitation stands exactly as written above.
 
 There is no `watch_goal_progress` RPC, and that is a choice. Both halves are the caller's own rows under policies that already say so (`watch_goals_own`, `user_media_own`), so a function would be either a query with a grant attached or a screen's arithmetic promoted to `security definer` code taking a year from the client. The read is one person's own rows for one year, bounded by a range filter on `watched_on`.
 
@@ -543,7 +545,7 @@ The primary key on `reactions` enforces PRD §14's one-reaction-per-user rule at
 
 > **Corrected 2026-08-13.** `kind` shipped as unconstrained `text`, which quietly undid that last guarantee: a column that accepts any string *is* a free-text field, whatever the client puts in it. The constraint closes it.
 >
-> Values are semantic rather than glyphs, for the same reason `taste_bucket` stores `loved` instead of `Loved it` — which emoji renders is a copy decision and should not be a data migration.
+> Values are semantic rather than glyphs, for the same reason `taste_bucket` stores `loved` instead of `I liked it` — which emoji renders is a copy decision and should not be a data migration.
 >
 > **The set is a founder decision as of 2026-08-13** (PRD §14), and it includes `disagree`. An earlier inference left the negative reaction out, reasoning that a downvote counter is a pile-on mechanic. That reasoning applies to a public network; among a cohort of friends, disagreeing with someone's ranking is the mechanic the product is for. The safeguard is in the read path rather than the schema: **no query aggregates reactions onto a profile.** `disagree` is countable on the activity item it belongs to and nowhere else.
 

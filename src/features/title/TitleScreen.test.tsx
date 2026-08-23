@@ -299,7 +299,7 @@ describe('a title this user has ranked', () => {
     // section as well until the founder's correction of 2026-08-18; two copies of one
     // number, and the second had neither the rank line nor the control that changes it.
     await waitFor(() =>
-      expect(view.getAllByLabelText('10.0 out of 10, Loved it')).toHaveLength(1),
+      expect(view.getAllByLabelText('10.0 out of 10, I liked it')).toHaveLength(1),
     );
   });
 

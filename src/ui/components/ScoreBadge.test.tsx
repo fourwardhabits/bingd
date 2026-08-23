@@ -133,9 +133,9 @@ describe('the number fits the circle', () => {
 describe('the badge', () => {
   it('is Maroon whatever the bucket', async () => {
     const bands = {
-      loved: 'Loved it',
+      loved: 'I liked it',
       fine: 'It was fine',
-      not_for_me: 'Not for me',
+      not_for_me: 'I didn’t like it',
     } as const;
 
     // All three in one tree. Three renders in one test is the thing this library
@@ -161,7 +161,7 @@ describe('the badge', () => {
 
   it('reads the score with its unit and its band', async () => {
     const view = await render(<ScoreBadge score={10} bucket="loved" />);
-    expect(view.getByLabelText('10.0 out of 10, Loved it')).toBeTruthy();
+    expect(view.getByLabelText('10.0 out of 10, I liked it')).toBeTruthy();
   });
 
   it('offers ranking rather than a zero when nothing has been compared', async () => {

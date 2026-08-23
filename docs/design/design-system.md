@@ -135,9 +135,9 @@ Three buckets, always in this order, always with a label.
 
 | Bucket | Color | Token | Score range | Ink on fill |
 |---|---|---|---|---|
-| Loved it | Bingd Maroon `#773744` | `bucket.loved` | 10.0 – 7.0 | — uses `text.inverse` at 7.4:1 |
+| I liked it | Bingd Maroon `#773744` | `bucket.loved` | 10.0 – 7.0 | — uses `text.inverse` at 7.4:1 |
 | It was fine | Muted Sage `#92A895` | `bucket.fine` | 6.9 – 3.5 | 6.1:1 |
-| Not for me | Stone `#9A8F86` | `bucket.notForMe` | 3.4 – 0.0 | 4.9:1 |
+| I didn’t like it | Stone `#9A8F86` | `bucket.notForMe` | 3.4 – 0.0 | 4.9:1 |
 
 These three pairs are the **certified fills**: the only combinations in the system where a brand color carries text, and the reason the score badge in §8 can be chromatic at all. Nothing else may be used as a fill behind a label without being measured and added here.
 
@@ -149,7 +149,7 @@ Three deliberate choices here.
 
 **Amber is excluded**, even though it is the obvious middle color. Amber's job in this system is milestones and awards. Using it for "it was fine" would spend the product's celebration color on its most neutral state, and after a few weeks of use amber would read as *unremarkable* everywhere it appears.
 
-**Color is never the only signal.** Every bucket indicator carries its label, or a number that states the same thing. The score badge in §8 satisfies this without a label because the score itself encodes the bucket — the ranges do not overlap, so `8.7` *is* "Loved it" whether or not the fill is visible. A bare colored dot with nothing in it is never acceptable.
+**Color is never the only signal.** Every bucket indicator carries its label, or a number that states the same thing. The score badge in §8 satisfies this without a label because the score itself encodes the bucket — the ranges do not overlap, so `8.7` *is* "I liked it" whether or not the fill is visible. A bare colored dot with nothing in it is never acceptable.
 
 Unselected chips render as an outlined ring in the bucket color on `surface.raised`; the selected chip fills and adds a checkmark. This is the interaction from Beli 224 and it works because selection is signalled by fill, checkmark, and border simultaneously.
 
@@ -287,7 +287,7 @@ Never a percentage, a ring gauge, a progress bar, or a 0–100 value. Never an a
 
 The compact form, ~60pt: `poster.row` (38 × 57), then title and year on one line, then a metadata line, then a trailing score badge. The text block sets the height and the poster fits within it — never the reverse (§7).
 
-The metadata line carries **runtime and genres**: `148m · Action · Adventure`. It does *not* carry the bucket label or the score, because the badge already says both. A row that reads `Loved it · #4 in Movies` next to a badge reading `8.7` is saying one thing three times.
+The metadata line carries **runtime and genres**: `148m · Action · Adventure`. It does *not* carry the bucket label or the score, because the badge already says both. A row that reads `I liked it · #4 in Movies` next to a badge reading `8.7` is saying one thing three times.
 
 ### Comparison card
 
@@ -353,7 +353,7 @@ The sequence: the comparison screen clears, the panel scales up from 92% while f
 
 The score is what counts up, not the ordinal — amended 2026-08-15. This is a better moment than the one it replaces: `#4` counting up from zero passes through three numbers that would each have been a lie about a different film, whereas `8.7` climbing to its value is the same claim getting more precise. It also survives a long list, where an ordinal reveal degrades — `#118` is an anticlimax in a way `9.1` is not, and the reveal fires most often for users who have ranked the most.
 
-The count-up is over the score's own range, not from zero, so a *Not for me* title does not sprint through the entire scale to land at 1.2. Start at the low end of the title's band and count to the value: the animation then reads as placing the title within a bucket the user already chose, which is exactly what just happened.
+The count-up is over the score's own range, not from zero, so a *I didn’t like it* title does not sprint through the entire scale to land at 1.2. Start at the low end of the title's band and count to the value: the animation then reads as placing the title within a bucket the user already chose, which is exactly what just happened.
 
 Under `prefers-reduced-motion`, the final composition cross-fades in with no counting and no scale.
 
@@ -369,7 +369,7 @@ Beyond the contrast work in §1 and §2.
 
 **Color is never the sole carrier of meaning** — buckets pair with labels, sync state pairs with a glyph, selection pairs with a checkmark and border. The score badge carries a number, and because the bucket ranges do not overlap that number states the bucket on its own.
 
-**A score badge announces itself in words.** `8.7 out of 10, Loved it` — not "8.7", which a screen reader will read as a bare number in a list of titles with no indication of what it measures. The unranked badge announces `Not ranked. Rank this title.` and is a button.
+**A score badge announces itself in words.** `8.7 out of 10, I liked it` — not "8.7", which a screen reader will read as a bare number in a list of titles with no indication of what it measures. The unranked badge announces `Not ranked. Rank this title.` and is a button.
 
 **A poster grid tile carries the label the grid does not show.** §8's grid has no titles by design, which is a visual decision and must not become an accessibility one: every tile exposes the film's name and year.
 
