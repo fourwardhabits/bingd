@@ -58,6 +58,18 @@ export type LogSheetProps = {
   title: LoggableTitle | null;
   onClose: () => void;
   /**
+   * What the reader came here to write, which decides only the *starting* state of
+   * the visibility control on a note that does not exist yet.
+   *
+   * `note` — the default, and what every logging entry point means. Opens private.
+   * `review` — the Reviews tab's "Write a review", which is a request to publish and
+   * would be a broken promise if it quietly saved something only the author can read.
+   *
+   * It never overrides a stored value: a note that already exists always opens on the
+   * visibility it was saved with, whichever door the reader came through.
+   */
+  noteIntent?: 'note' | 'review';
+  /**
    * Called once a bucket is settled and the title can be ranked.
    *
    * Fired automatically — there is no longer a "Find where it lands" button. The
@@ -91,7 +103,7 @@ export type LogSheetProps = {
  * space only when opened. What is borrowed is density and hierarchy; the palette,
  * the serif and the poster treatment stay Bingd's (PRD §5).
  */
-export function LogSheet({ title, onClose, onRank, surface }: LogSheetProps) {
+export function LogSheet({ title, onClose, onRank, surface, noteIntent }: LogSheetProps) {
   if (!title) return null;
 
   // Keyed by the title, and unmounted entirely when there is none. Both matter: a sheet
@@ -99,7 +111,14 @@ export function LogSheet({ title, onClose, onRank, surface }: LogSheetProps) {
   // worst of all — its unsaved note, which then gets filed against whatever is on screen
   // now.
   return (
-    <Body key={title.id} title={title} onClose={onClose} onRank={onRank} surface={surface} />
+    <Body
+      key={title.id}
+      title={title}
+      onClose={onClose}
+      onRank={onRank}
+      surface={surface}
+      noteIntent={noteIntent}
+    />
   );
 }
 
@@ -126,6 +145,7 @@ function Body({
   onClose,
   onRank,
   surface,
+  noteIntent = 'note',
 }: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
@@ -224,7 +244,18 @@ function Body({
 
   const bucket = bucketEdit ?? state.bucket;
   const note = noteEdit ?? state.note;
-  const visibility = visibilityEdit ?? state.noteVisibility;
+  /**
+   * Three sources, in priority order: what the reader just chose, then what the note
+   * was saved as, then what they came here to write.
+   *
+   * The middle term is the promise — a note that exists opens on its stored value and
+   * nothing else, so arriving through "Write a review" can never republish something
+   * the author kept private. The last term only ever decides a note that has no stored
+   * value to contradict.
+   */
+  const visibility =
+    visibilityEdit ??
+    (state.note ? state.noteVisibility : noteIntent === 'review' ? 'public' : 'private');
   const spoilers = spoilersEdit ?? state.noteSpoilers;
   const effectiveDate = dateEdit ?? state.watchedOn ?? today();
 
@@ -766,13 +797,19 @@ function Body({
                     void saveDetails({ spoilers: !spoilers });
                   }}
                 />
+                {/* Publishing is the positive state of this control, not the absence
+                    of a negative one. It read "Only me" and was off by default, so
+                    the way to keep a note to yourself was to notice a chip and tick
+                    it — and the way to publish was to do nothing at all. Naming the
+                    act that has consequences is what makes the default safe to
+                    leave alone. */}
                 <ToggleChip
-                  icon={visibility === 'private' ? 'lock-closed' : 'lock-open-outline'}
-                  label="Only me"
-                  on={visibility === 'private'}
-                  accessibilityLabel="Keep this note private"
+                  icon={visibility === 'public' ? 'people' : 'people-outline'}
+                  label="Share as a review"
+                  on={visibility === 'public'}
+                  accessibilityLabel="Share this note as a public review"
                   onToggle={() => {
-                    const next: NoteVisibility = visibility === 'private' ? 'public' : 'private';
+                    const next: NoteVisibility = visibility === 'public' ? 'private' : 'public';
                     setVisibilityEdit(next);
                     void saveDetails({ visibility: next });
                   }}

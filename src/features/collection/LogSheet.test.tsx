@@ -558,16 +558,69 @@ describe('notes', () => {
 describe('what a note says about itself', () => {
   const spoilerToggle = (sheet: Awaited<ReturnType<typeof open>>) =>
     sheet.getByLabelText('This note contains spoilers');
-  const privateToggle = (sheet: Awaited<ReturnType<typeof open>>) =>
-    sheet.getByLabelText('Keep this note private');
+  /**
+   * The control is now the *publish* act rather than its absence: checked means the
+   * note is shared as a review. It used to be "Only me", off by default, which made
+   * keeping a note to yourself the thing you had to notice.
+   */
+  const reviewToggle = (sheet: Awaited<ReturnType<typeof open>>) =>
+    sheet.getByLabelText('Share this note as a public review');
 
-  it('opens a new note on the social default', async () => {
+  it('opens a new note private, so nothing is published by inattention', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
 
-    expect(privateToggle(sheet).props.accessibilityState.checked).toBe(false);
+    expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false);
     expect(spoilerToggle(sheet).props.accessibilityState.checked).toBe(false);
+    expect(sheet.getByText('Only you can read this.')).toBeTruthy();
+  });
+
+  it('writes a first note private when the reader was only logging', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'just for me');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_note_visibility).toBe('private');
+  });
+
+  /**
+   * The other half of the same decision. "Write a review" on the title page is a
+   * request to publish, and a sheet that quietly saved it privately would be its own
+   * broken promise — so the intent, and only the intent, moves the starting state.
+   */
+  it('opens public when the reader came through Write a review', async () => {
+    const sheet = await open(filmA, { noteIntent: 'review' });
+    await sheet.openNotes();
+
+    expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(true);
     expect(sheet.getByText(/Shown with your rating/)).toBeTruthy();
+  });
+
+  /**
+   * **Intent never outranks a stored value.** Somebody who wrote a private note and
+   * later taps "Write a review" on the same title must not have the note they already
+   * have republished under them.
+   */
+  it('leaves a stored private note private even when opened to write a review', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'kept back',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA, { noteIntent: 'review' });
+    await sheet.openNotes();
+
+    await waitFor(() => expect(sheet.note().props.value).toBe('kept back'));
+    expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false);
+    expect(sheet.getByText('Only you can read this.')).toBeTruthy();
   });
 
   it('opens a note written before notes were social on private, and leaves it there', async () => {
@@ -585,7 +638,7 @@ describe('what a note says about itself', () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
 
-    await waitFor(() => expect(privateToggle(sheet).props.accessibilityState.checked).toBe(true));
+    await waitFor(() => expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false));
     expect(sheet.getByText('Only you can read this.')).toBeTruthy();
 
     // Editing the text must carry the stored visibility rather than the default.
@@ -597,7 +650,9 @@ describe('what a note says about itself', () => {
   });
 
   it('writes the spoiler claim with a first note', async () => {
-    const sheet = await open(filmA);
+    // Through the review door, so the spoiler claim is being made about something
+    // that will actually be shown to somebody.
+    const sheet = await open(filmA, { noteIntent: 'review' });
     await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'he was dead the whole time');
     await fireEvent.press(spoilerToggle(sheet));
@@ -626,7 +681,9 @@ describe('what a note says about itself', () => {
     await sheet.openNotes();
     await waitFor(() => expect(sheet.note().props.value).toBe('out in the open'));
 
-    await fireEvent.press(privateToggle(sheet));
+    // Unticking "Share as a review" is how a published note is taken back.
+    await waitFor(() => expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(true));
+    await fireEvent.press(reviewToggle(sheet));
 
     await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
     expect(callsTo('save_note')[0][1]).toMatchObject({
@@ -681,7 +738,8 @@ describe('what a note says about itself', () => {
       expect(sheet.note().props.value).toBe('written when this was private'),
     );
     // The stored visibility, not the default the sheet was showing a moment ago.
-    expect(privateToggle(sheet).props.accessibilityState.checked).toBe(true);
+    expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false);
+    expect(sheet.getByText('Only you can read this.')).toBeTruthy();
     expect(callsTo('log_watched')).toHaveLength(0);
     expect(callsTo('save_note')).toHaveLength(0);
   });

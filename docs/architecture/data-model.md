@@ -419,7 +419,7 @@ create policy rankings_read on rankings for select
   using (can_view_profile(auth.uid(), user_id));
 ```
 
-`user_media` is more restrictive, because it carries `note` and `watched_on`, which PRD §22 classifies as always-private:
+`user_media` is more restrictive, because it carries `watched_on`, which is always-private under PRD §22, and `note`, which is private unless its author publishes it as a review:
 
 ```sql
 alter table user_media enable row level security;
@@ -428,11 +428,20 @@ create policy user_media_own on user_media for select
   using (user_id = auth.uid());
 ```
 
-Other users never read `user_media` directly. The bucket, where it should be visible, is exposed through `rankings` or through the `visible_collection` view, which projects only non-private columns. **`watchlist` is always private** and has an owner-only policy.
+Other users never read `user_media` directly, and that policy has never been widened.
+
+> **As built — 2026-08-23. Two claims in this section describe a design rather than the database.**
+>
+> - **`visible_collection` does not exist.** No migration creates it. The bucket reaches another reader through `rankings` and through nothing else, so a *logged but unranked* title is not visible to anybody but its owner — which is stricter than the founder decision quoted below, not looser. The decision stands as intent; the view that would implement it was never built. Recorded rather than fixed, because building it is a schema change and a product question about whether the unranked half of a collection should be visible at all.
+> - **`watchlist` is no longer always private.** `watchlist_own` became `watchlist_read using (can_i_view(user_id))` on 2026-08-20 (`20260820000200`), so it inherits profile visibility exactly as `rankings` does. The sentence that used to sit here said the opposite.
+>
+> What is unchanged, and was verified exhaustively on 2026-08-23: **`watched_on` is owner-only on every path there is.** The two review projections (`public_notes`, `title_reviews`) omit the column deliberately, no `feed_events.payload` carries a date, and no view or `returns table` in the whole migration tree names it.
 
 > **Founder decision, 2026-08-13.** The **Logged collection inherits profile visibility** — on a public profile it is public, on a private profile it is visible only to approved followers. The collection is part of the profile and follows the same rules; it is not a separate privacy domain. PRD §22's always-public table never listed it either way, so the behaviour was arriving as a side effect of a view definition rather than as a decision.
 >
-> This is what the schema already did, and it is why the column split matters. `visible_collection` exposes `media_item_id`, `bucket`, and `progress`. It does **not** expose `note` or `watched_on`, which stay always-private regardless of profile visibility, and it is not a path to `watchlist`, which stays owner-only at every visibility level. A watchlist is forward-looking intent about things you have not watched, which is a different kind of disclosure from a reaction to something you have; PRD §22 keeps it private and this decision does not change that.
+> ~~This is what the schema already did, and it is why the column split matters. `visible_collection` exposes `media_item_id`, `bucket`, and `progress`. It does **not** expose `note` or `watched_on`, which stay always-private regardless of profile visibility, and it is not a path to `watchlist`, which stays owner-only at every visibility level. A watchlist is forward-looking intent about things you have not watched, which is a different kind of disclosure from a reaction to something you have; PRD §22 keeps it private and this decision does not change that.~~
+>
+> **Corrected 2026-08-23.** The paragraph above described a view that was never created and a watchlist rule that has since been reversed — see the As-built block above it. What survives intact is the column split it was arguing for: `note` and `watched_on` are not exposed by anything, and `watched_on` never becomes visible at any visibility level.
 
 ### Yearly goals — added 2026-08-16
 

@@ -343,3 +343,43 @@ is relabelled *Watch again*.
 
 **Not open:** whether a title can hold more than one ranking or more than one score. It
 cannot, and §19.2 gives the architectural reason rather than a preference.
+### NR-1 — The client and the server disagree about an unspecified new note
+
+**Status: OPEN, and deliberately not closed in the privacy-contract pass.**
+
+**What each side does.** The column default is safe: `user_media.note_visibility` is
+`not null default 'private'`, so anything created outside the two writers is private by
+omission. But both writers override it *forward* when the caller passes no visibility:
+
+- `log_watched`, insert branch — `coalesce(p_note_visibility, 'public')` for a non-empty
+  note.
+- `save_note` — `when v_new then 'public'`, where `v_new` is a note that has never been
+  written before.
+
+So a caller that omits the argument publishes. The client, since 2026-08-23, always sends
+an explicit value and now sends `private` for a new note unless the reader asked to write
+a review — **so nothing in the app reaches this path**, and no stored row is affected
+either way.
+
+**Why it is still worth closing.** Two defaults that disagree are a trap for the next
+writer of a client, an importer, or a backfill: the safe-looking thing (omit the
+argument) is the publishing thing. The asymmetry is also now the opposite of the stated
+product contract, which is that a note is private until its author publishes it.
+
+**Why it was not closed here.** Changing it means editing two SECURITY DEFINER functions,
+which is a migration. The privacy pass deliberately changed no SQL — every other defect
+it found was a document or a piece of copy describing correct behaviour wrongly — and
+turning it into a schema tranche on the way past is how a narrow change stops being one.
+
+**The founder decision needed:** should `log_watched` and `save_note` treat a null
+`p_note_visibility` on a brand-new note as `private` rather than `public`?
+
+- **Recommended: yes.** It makes the server agree with the product contract and with its
+  own column default, and it is a one-line change in each function.
+- **Blast radius: none observable today.** The app never omits the argument, and existing
+  rows are untouched — the branch only fires for a note that does not yet exist.
+- **Not urgent, and not a privacy exposure.** It can only be reached by a caller that is
+  not this app.
+
+Related: PRD §22's Notes and Reviews block, `decision-log.md` §3 *Note and Review
+visibility*, and **M5** in `../release/public-launch-risk-register.md`.

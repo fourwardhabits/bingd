@@ -1437,19 +1437,36 @@ Rationale: a social discovery product whose core loops are leaderboards, match s
 
 | Always public (public accounts) | Always private (all accounts) |
 |---|---|
-| Display name, username, avatar | Watch dates |
-| Top titles and rankings | Notes |
+| Display name, username, avatar | **Watch dates** |
+| Top titles and rankings | **Notes, unless the author shares one as a review** — moved 2026-08-23, see below |
 | **The Logged collection and its buckets** | Import history |
 | **The watchlist** — moved 2026-08-20, see below | Email and account identifiers |
 | Public lists | Capability and Early Access state |
 | Feed activity | |
 | Reactions given | |
+| **Reviews** — notes the author chose to publish | |
+
+**Identity is discoverable at every visibility level, and content is not.** Handle,
+display name and avatar are findable by anyone signed in, including for a private
+account, so that somebody can be found and sent a follow request — see §8's As-built
+note. Being unfindable was never what private was meant to mean. What private gates is
+everything in the left column above.
+
+> **As built — 2026-08-23: the Logged collection is stricter than this table says.** The
+> left column promises "The Logged collection and its buckets", and the founder decision
+> below is what that promise came from — but the view that would implement it,
+> `visible_collection`, was never created. `user_media` has one owner-only policy and no
+> second path, so what another reader can actually see is **ranked titles, through
+> `rankings`**. A title that is logged but not yet ranked is visible to nobody but its
+> owner. That is *less* exposure than promised, not more, so it is a gap in the feature
+> rather than in the privacy contract — and the copy in Settings says "ranked titles"
+> for exactly this reason. Recorded in `architecture/data-model.md`.
 
 > **Founder decision, 2026-08-13.** The **Logged collection inherits profile visibility**, exactly as rankings do. The collection is part of the profile and follows the same rules; it is not a separate privacy domain. This table previously listed neither state for it, so the behaviour was going to be decided by whoever wrote the view.
 >
 > Three boundaries this does **not** move, all of which stay as they are:
 >
-> - **Notes and watch dates remain always-private**, even on a public profile and even on a title whose bucket is public. A visible Logged entry is the title and the bucket, nothing else.
+> - ~~**Notes and watch dates remain always-private**, even on a public profile and even on a title whose bucket is public. A visible Logged entry is the title and the bucket, nothing else.~~ **Half superseded 2026-08-23 — see the Notes and Reviews block below.** **Watch dates remain always-private and that has not moved**, on any profile, at any visibility, to anybody. **Notes did move**: a note can be published by its author as a Bingd Review. An unpublished note is still exactly as private as this line says.
 > - ~~**The watchlist remains always-private at every visibility level.**~~ **Superseded by the founder decision of 2026-08-20 — see the block immediately below.** The original reasoning stands as written: it is intent about things you have not watched, which is a different disclosure from a reaction to something you have, and it was left private pending an explicit decision.
 > - **A private profile's Logged collection is visible to approved followers only**, on the same terms as its rankings.
 
@@ -1462,11 +1479,54 @@ Rationale: a social discovery product whose core loops are leaderboards, match s
 > - a block in either direction hides it;
 > - an account the viewer may not see returns **zero rows**, and the section renders nothing — no titles, no count, and no "nothing saved yet", because a placeholder is itself a statement about an account the reader is not entitled to.
 >
-> **Writes were not widened and could not have been.** `watchlist` has never had an insert, update or delete policy; `set_watchlist` is `security definer` and checks the caller. **Notes and watch dates are unaffected** and remain always-private on every profile. This moves one row of the table above and nothing adjacent to it.
+> **Writes were not widened and could not have been.** `watchlist` has never had an insert, update or delete policy; `set_watchlist` is `security definer` and checks the caller. **Watch dates are unaffected** and remain always-private on every profile. This moves one row of the table above and nothing adjacent to it. *(Notes were named here too, and moved separately on 2026-08-23 — see below.)*
 >
 > `created_at` becomes visible to a viewer who can see the row, which is intended: the shelf is ordered most-recently-added first. It is a *save* time, not a watch date.
 
 Rationale, and the reason this needed deciding rather than defaulting: a public Logged collection is what makes a profile worth visiting before someone has ranked much. A new user with 200 imported titles and 12 ranked ones has a profile that is mostly empty if only rankings show, which is the same cold-start problem private-by-default would have caused, applied to the individual profile instead of the network.
+
+> **Founder decision, 2026-08-23 — Notes and Reviews.** **A note is private until its
+> author publishes it as a review.** This supersedes "Notes are always private", which
+> the v0.6 table above asserted and which stopped being true when public notes shipped
+> as Bingd Reviews (`20260816000000`, and the Reviews tab decision recorded in
+> `reference/tmdb-integration.md`). Both statements were in this document at once and
+> could not both hold.
+>
+> The contract, in full:
+>
+> - **A note has its own visibility**, `private` or `public`, stored per title on the
+>   author's own row. It is the author's choice and nothing else sets it.
+> - **A public note is a Review.** It appears on the title's Reviews tab and on the
+>   author's profile, attributed, beside their score. That is the whole of what
+>   publishing means — there is no separate review object and no second piece of text.
+> - **A private note is visible to its author and to nobody else**, on either account
+>   setting, with no exception for followers.
+> - **Account visibility gates a published note as well.** Publishing does not escape
+>   the profile: a review by a private account is readable by approved followers only,
+>   and a block hides it in both directions. Publishing widens a note as far as the
+>   account allows and never further.
+> - **Watch dates are not part of this and never become visible.** The read paths that
+>   serve reviews (`public_notes`, `title_reviews`) project the note columns alone,
+>   deliberately, because the row they come from also carries `watched_on`.
+>
+> **New notes are private by default** *(client, 2026-08-23)*. They used to open public
+> on the reasoning that a new note is the forward-facing social case. The field a reader
+> types into is called *Notes*, it saves on blur with no Done button, and free text
+> should not be published because somebody did not notice a chip. Writing a review is
+> still one tap — the control now names that act, *Share as a review*, rather than
+> naming its absence — and the Reviews tab's own "Write a review" opens ready to
+> publish, because arriving through that door is the request.
+>
+> **A note that already exists always opens on the visibility it was saved with**,
+> whichever door the reader came through. Nothing about this decision changes a stored
+> row: notes written under the private-only promise were force-set private by
+> `20260816000000` and stay that way, and published reviews stay published.
+>
+> **One thing is deliberately left open.** The server's own forward default is still
+> `public` when a caller passes no visibility — the app never does, so nothing today
+> relies on it, but the client and the server now disagree about what an unspecified
+> new note means. Closing that is a migration and a founder decision, recorded in
+> `open-questions.md` §8.
 
 ### Follow model
 
@@ -1487,7 +1547,18 @@ A block is symmetric in effect and takes effect immediately:
 
 A report flow with a defined reason taxonomy, covering profiles, lists, list titles, usernames, tags, and reactions. Reports are triaged through a documented process with a stated response commitment, both written before public release.
 
-Bingd carries user-generated content — usernames, display names, list titles, tags — which triggers platform obligations for content filtering, reporting, blocking, and published contact information regardless of the absence of comments.
+Bingd carries user-generated content — usernames, display names, list titles, tags — which triggers platform obligations for content filtering, reporting, blocking, and published contact information.
+
+> **As built — 2026-08-23: the UGC surface is larger than this section describes, and the report path does not yet cover it.** Two free-text surfaces shipped after the taxonomy above was written:
+>
+> - **Feed comments**, which are readable by anyone who can see the activity they sit on.
+> - **Public notes, surfaced as Bingd Reviews** on a title page and on a profile.
+>
+> `report_subject` covers `profile`, `display_name`, `username`, `list`, `list_title` and `watch_tag`. It does **not** include `comment` or `note`, and the report RPC has **no client call site at all**, so nothing in the app can file a report about anything. A Terms of Use and community policy, and acceptance of them before a user creates UGC, do not exist either.
+>
+> **This is a pre-public gate, not a friend-beta blocker** — the cohort is a few dozen people who know each other and the founder, and blocking already works in both directions. It is tracked as **M1** in [`../release/public-launch-risk-register.md`](../release/public-launch-risk-register.md) and gated by §27 and HG-4, which already require the whole loop rather than a report button.
+>
+> **Nothing here implies these surfaces are private.** They are public by the author's own choice and are described as such above; the gap is that there is no way to *report* them, which is a different thing from their being hidden.
 
 ### Minimum age — Required
 
