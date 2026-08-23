@@ -63,6 +63,16 @@ debate. HG-4 in `open-questions.md` §5 carries the legal half.
 **Why it is not a beta blocker:** the cohort is 30–60 people who know each other, and the
 moderation answer at that size is the founder talking to them.
 
+**Documented 2026-08-23, still open.** PRD §22's Reporting section named only the v0.6
+taxonomy and said the obligations applied "regardless of the absence of comments" — which
+had stopped being true twice over. It now carries an As-built block naming both free-text
+surfaces (feed comments, and public notes surfaced as Bingd Reviews), stating that
+`report_subject` covers neither and that the report RPC has no client call site at all,
+and stating that no Terms of Use exists. **The risk is unchanged and its classification is
+unchanged**; what changed is that the document no longer understates the surface it has to
+cover. Nothing in the privacy pass implies these surfaces are private — they are public by
+their author's own choice, and the gap is the absence of a way to *report* them.
+
 ### M2 — TV seasons: documented as rankable only when Completed, unenforced — **OPEN**
 
 Verified in full this pass. The gate is unenforced at every layer *and* the state it
@@ -99,26 +109,55 @@ The real fix is `_claim_operation` on the ranking functions, which is a migratio
 the same mechanism [`../product/deferred-roadmap.md`](../product/deferred-roadmap.md) §19
 needs.
 
-### M5 — Privacy: UI copy, PRD and schema alignment — **PARTIAL**
+### M5 — Privacy: UI copy, PRD and schema alignment — **RESOLVED 2026-08-23**
 
-Two of three parts are now aligned; one is not, and it is **shipping copy**.
+Closed by the privacy-contract pass. There is now one contract, and the app, the PRD,
+the decision log and the schema all state it the same way. The backend was found
+**correct throughout and was not changed** — every defect was a document or a piece of
+copy describing it wrongly.
 
-- **Aligned.** Watchlist visibility. It inherits profile visibility (founder decision
-  2026-08-20, migration `20260820000200`), PRD §22 says so, and `open-questions.md` §7 was
-  corrected in this pass to stop claiming otherwise.
-- **Aligned at the server, contradicted in the app.** Private accounts **are**
-  discoverable by name — `search_users` filters through `can_discover_profile`, which is
-  deliberate and documented. But `app/settings/privacy.tsx` still tells the user *"While
-  your account is private, your profile does not appear in search…"*. **That sentence is
-  now false.** It is a copy fix or a product reversal, and which one is a founder call —
-  which is why this pass documented it rather than silently rewording a privacy promise.
-- **Not aligned.** PRD §22 still asserts in several places that **"Notes and watch dates
-  remain always-private"**, while `note_visibility` has had a `'public'` value since
-  `20260816000000_social_notes.sql` and public Notes ship as Bingd Reviews. Watch dates
-  *are* still always-private; notes are not.
+What was wrong and what closed it:
 
-**This is the highest-value item in this section**, because unlike the rest it is visible
-to friend-beta testers today and concerns a promise about their privacy.
+- **Private-account discovery.** `app/settings/privacy.tsx` told the reader *"While your
+  account is private, your profile does not appear in search"*. That has been false
+  since `20260819000100` moved `search_users` to `can_discover_profile`, which reads
+  status and blocks and ignores `visibility` entirely. The copy now says the true thing
+  — people can find you by name or @handle and ask to follow; what private gates is your
+  rankings, collection, watchlist, reviews and activity. The screen's own header comment
+  claimed the same falsehood and was corrected with it. **No RLS was loosened or
+  tightened to make this true; the copy was wrong, not the behaviour.**
+- **Notes.** PRD §22 listed Notes under "Always private (all accounts)" and asserted
+  twice that "Notes and watch dates remain always-private", while public notes have
+  shipped as Bingd Reviews since `20260816000000`. The PRD now carries the real
+  contract: a note is private until its author publishes it as a review, and a published
+  note is still gated by account visibility and by blocks. `decision-log.md` carried the
+  same stale claim in two rows and now carries the superseding decisions.
+- **Watchlist.** Was already aligned; `open-questions.md` §7 was corrected in the
+  previous pass.
+- **The default a new note gets.** The client opened new notes **public**. The field is
+  labelled *Notes*, it saves on blur with no Done button, and the only thing standing
+  between a candid sentence and a public review was noticing an unticked chip called
+  "Only me". New notes now default to **private**, the control names the publishing act
+  (*Share as a review*), and the Reviews tab's "Write a review" opens ready to publish so
+  that door still means what it says. **Client-only: no migration, and no stored row
+  changed visibility in either direction.**
+- **Signup said nothing.** Every account is public because that is the column default,
+  and the first time anybody learned this was by finding the switch that turns it off.
+  One sentence under Create my account now says so. The default itself did not move.
+
+**Verified, not assumed:** `watched_on` is owner-only on every path. `user_media` carries
+the only SELECT policy it has ever had (`user_id = auth.uid()`), the two review
+projections (`public_notes`, `title_reviews`) deliberately omit the column, no
+`feed_events.payload` contains a date, and no view, RPC or `returns table` anywhere in
+the migration tree names it. Watch-date privacy is the one promise in this section that
+never needed correcting.
+
+**Residual, and deliberately not fixed here.** The server's forward default is still
+`public` when a caller passes no visibility (`log_watched` / `save_note`). The app always
+sends an explicit value, so nothing today depends on it — but the client and the server
+now disagree about what an unspecified new note means, and aligning them is a migration.
+Recorded as a founder decision in `../product/open-questions.md` §8 **NR-1**. It is not a
+privacy exposure: the disagreement can only be reached by a caller that is not this app.
 
 ### M6 — Production environment identity is seeded as `nonprod` — **OPEN**
 
@@ -240,3 +279,19 @@ For traceability, so a later reader can tell what moved and what merely got re-v
 
 **Nothing was removed from this register as resolved in this pass.** M5 and M8 moved to
 PARTIAL on evidence; every other major stands where it did.
+
+## 5. Changes made in the privacy-contract pass, 2026-08-23
+
+| Change | Effect on this register |
+|---|---|
+| Settings privacy copy corrected | Closes the live false statement in **M5** |
+| Signup discloses that accounts start public | Closes the "no disclosure" half of **M5**. The default itself did not move |
+| PRD §22 and decision-log reconciled on Notes, watchlist, discovery | Closes the documentation half of **M5** |
+| New notes default to private; control renamed *Share as a review* | Closes the "published by inattention" half of **M5**. Client-only, no migration, no stored row changed |
+| Watch-date privacy verified exhaustively | Confirms the one promise that was already true. No change required |
+| PRD §22 Reporting now names comments and public Reviews | **M1** documented more honestly, **still OPEN**, classification unchanged |
+| `open-questions.md` §8 **NR-1** opened | The one residual: client and server disagree on the default for an unspecified new note |
+
+**No RLS policy, RPC or migration was changed.** Every defect this pass closed was a
+document or a piece of copy describing the backend wrongly. **M5 is the only major that
+moves to RESOLVED**; M1 through M4 and M6 through M9 stand exactly where they did.

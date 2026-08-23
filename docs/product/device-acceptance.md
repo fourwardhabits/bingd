@@ -259,8 +259,13 @@ device**, and no test renderer can answer whether it draws.
       refused with a date.
 - [ ] Avatar picker: choose, crop, upload, and remove.
 - [ ] **Privacy**: the switch shows the real current state and never a guess. Turn it
-      on; from the other device, confirm the profile becomes unfindable and a follow
-      becomes a request.
+      on; from the other device, confirm a follow becomes a request, and that the
+      profile is **still findable by handle** — name, @handle and avatar, with no
+      rankings, collection, watchlist, reviews, activity or counts. Private gates
+      content, not existence (`20260819000100`). *This step used to say "confirm the
+      profile becomes unfindable", which has been wrong since 2026-08-19.*
+- [ ] The copy under the switch matches what you just saw: it must not claim the
+      profile is hidden from search.
 - [ ] Turn it off. Confirm the pending request is approved and **no "approved your
       request" notification is sent**.
 - [ ] Blocked accounts list shows somebody you blocked, and Unblock works from there —

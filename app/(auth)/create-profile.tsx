@@ -323,6 +323,19 @@ export default function CreateProfileScreen() {
                 : 'Choose an available username and enter your date of birth.'
             }
           />
+
+          {/* **The one thing a new account is never told.**
+              Visibility is set by the column default and by nothing the user does,
+              so until this line the first time anybody learned their profile was
+              public was by finding the switch that turns it off. One sentence, under
+              the button that creates the account, naming the setting and where to
+              change it — deliberately not a screen, not a choice, and not a step:
+              PRD §22 keeps public as the default, and this only stops it being a
+              silent one. */}
+          <Text variant="caption" tone="tertiary">
+            Your account starts public, so people can find you and see what you rank.
+            You can make it private whenever you like, in Settings.
+          </Text>
         </View>
       </KeyboardScreen>
     </Screen>

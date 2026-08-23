@@ -123,6 +123,12 @@ export default function TitleScreen() {
   // opens on the wrong tab.
   const [tab, setTab] = useState<Tab | null>(null);
   const [loggingTitle, setLoggingTitle] = useState<LoggableTitle | null>(null);
+  /**
+   * Which door the log sheet was opened through, which decides how a *new* note
+   * starts out. "Write a review" means publish; everything else means a private note
+   * until the reader says otherwise. A note that already exists ignores this entirely.
+   */
+  const [logIntent, setLogIntent] = useState<'note' | 'review'>('note');
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
@@ -440,9 +446,10 @@ export default function TitleScreen() {
   // so it falls back rather than rendering nothing under a live tab row.
   const activeTab = tabs.some((option) => option.id === tab) ? tab : tabs[0]?.id;
 
-  const openLog = () => {
+  const openLog = (intent: 'note' | 'review' = 'note') => {
     if (!rankable) return;
     setActionError(null);
+    setLogIntent(intent);
     setLoggingTitle({
       id: title.id,
       title: title.title,
@@ -639,7 +646,7 @@ export default function TitleScreen() {
               score={score}
               bucket={data.ranked?.bucket ?? null}
               ordinal={heroRank?.label ?? null}
-              onPress={openLog}
+              onPress={() => openLog()}
               // Ranked is a fact with more than one thing to do to it, so it opens a menu
               // rather than jumping straight back into the comparison. Long press was
               // considered and rejected: an interaction nobody can see is not a way out of
@@ -928,7 +935,7 @@ export default function TitleScreen() {
             // One composer. A note has always been written in the log sheet, where the
             // spoiler flag and the visibility are chosen beside it; a second one here
             // would be a second content model wearing a different button.
-            onWrite={openLog}
+            onWrite={() => openLog('review')}
             noun={title.kind === 'season' ? 'season' : 'movie'}
           />
         ) : null}
@@ -1007,6 +1014,7 @@ export default function TitleScreen() {
       <LogSheet
         title={loggingTitle}
         surface="title"
+        noteIntent={logIntent}
         onClose={() => {
           setLoggingTitle(null);
           setActionError(null);

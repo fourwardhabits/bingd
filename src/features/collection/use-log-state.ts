@@ -23,8 +23,19 @@ export type LogState = {
    * Read rather than assumed, and this is the mechanism that keeps the 2026-08-16
    * amendment from breaking its own promise: a note written when notes were
    * private-only comes back `private`, the editor shows that, and the user has to
-   * choose to publish it. The forward default lives in the server, applies to a
-   * note that has never existed, and is never inferred here.
+   * choose to publish it.
+   *
+   * **A note that has never existed now reports `private` too** (2026-08-23). It
+   * used to report `public`, on the reasoning that a new note is the forward-facing
+   * social case — but the field a reader types into is called *Notes*, it saves on
+   * blur with no Done button, and publishing free text because somebody did not
+   * notice a chip is not a thing this app should do. Writing a review is still one
+   * tap; it is now a tap the reader takes rather than one they have to undo.
+   *
+   * The server's own forward default is still `public` when a caller passes null
+   * (`log_watched` / `save_note`, 20260816000000). Nothing in the app relies on it —
+   * the sheet always sends an explicit value — but the two disagree, and closing
+   * that is a migration and a founder decision rather than part of this change.
    */
   noteVisibility: NoteVisibility;
   /** The author's own claim that the note spoils this exact title. */
@@ -53,9 +64,9 @@ export const emptyLogState: LogState = {
   bucket: null,
   watchedOn: null,
   note: '',
-  // A note nobody has written yet is the forward-facing case, so the editor opens
-  // on the social default rather than on the historical one.
-  noteVisibility: 'public',
+  // A note nobody has written yet opens private, and is published only by an
+  // explicit act. See the type's own comment above for why.
+  noteVisibility: 'private',
   noteSpoilers: false,
   exists: false,
   noteVersion: null,
@@ -121,10 +132,10 @@ export function useLogState(userId: string, mediaItemId: string | null) {
         watchedOn: row?.watched_on ?? null,
         note: row?.note ?? '',
         // The stored value only speaks for a note that exists. A row with no note
-        // carries the column default, which is `private` so that anything created
-        // outside the writers is private by omission — showing that as the editor's
-        // starting state would contradict the forward-facing default.
-        noteVisibility: row?.note ? (row.note_visibility ?? 'private') : 'public',
+        // reports `private`, which is both the column default and the state a new
+        // note now opens in; where the reader arrived meaning to write a *review*,
+        // the sheet overrides this from its own intent rather than the row's.
+        noteVisibility: row?.note ? (row.note_visibility ?? 'private') : 'private',
         noteSpoilers: Boolean(row?.note && row.note_has_spoilers),
         exists: Boolean(row),
         noteVersion: row?.note_updated_at ?? null,

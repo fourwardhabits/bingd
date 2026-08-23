@@ -129,7 +129,7 @@ Notes are the only free text a user writes, so losing one to a silent overwrite 
 **What the client must do — Required.** Two consequences, both on the client side:
 
 - **Coalesce note edits per title in the outbox.** Two queued edits to the same note share the base captured before either was written, so the second collides with the user's own first edit. A note is a draft and only the latest text matters, so the queue should keep one entry per title with the newest text and the original base. `save_note` also returns `note_version`, which a client that prefers to drain them separately can carry forward as the next base.
-- **Read the note back on `BG409`.** The payload deliberately carries the server's version and not the server's text: Postgres logs an exception's `DETAIL`, and PRD §22 classifies a note as always-private, so putting it there would deposit private text into operator-visible logs on every conflict. The client owns the row and reads its own note to present the choice.
+- **Read the note back on `BG409`.** The payload deliberately carries the server's version and not the server's text: Postgres logs an exception's `DETAIL`, and a note is the reader's own free text — private under PRD §22 unless they publish it as a review — so putting it there would deposit private text into operator-visible logs on every conflict, whatever the note's visibility happens to be. The client owns the row and reads its own note to present the choice.
 
 An operation targeting an object that has been deleted or has become inaccessible fails with `BG404`, is removed from the queue, and produces a plain-language explanation rather than an indefinite retry.
 

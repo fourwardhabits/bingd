@@ -8,10 +8,15 @@ import { supabase } from '@/lib/supabase';
 /**
  * The user's own collection.
  *
- * Read straight from `user_media`, `rankings` and `watchlist` rather than through a view.
- * `visible_collection` exists for looking at *someone else's* collection and deliberately
- * omits notes and watch dates; the owner is entitled to all of it, and RLS already scopes
- * every one of these tables to `auth.uid()`.
+ * Read straight from `user_media`, `rankings` and `watchlist`. The owner is entitled to
+ * all of it, and RLS already scopes every one of these tables to `auth.uid()`.
+ *
+ * This used to say that `visible_collection` "exists" for reading somebody else's
+ * collection. **It does not** — no migration ever created it (checked 2026-08-23), so
+ * `user_media` has one owner-only policy and no second path. Somebody else's *ranked*
+ * titles come from `rankings`; their logged-but-unranked ones are readable by nobody but
+ * them. See `architecture/data-model.md` for why that is a gap in the feature rather
+ * than in the privacy contract.
  *
  * **Every read here goes to exhaustion, by keyset** (`lib/read-all.ts`), and the reason is
  * worth stating because deferring it was a mistake made deliberately and in writing.

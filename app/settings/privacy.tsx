@@ -18,10 +18,17 @@ import { theme } from '@/ui/tokens';
  * Three controls, each of which already had complete backend semantics and no way to
  * reach them. Nothing on this screen is a switch that does nothing, which was the
  * founder's explicit bar: `profiles.visibility` decides whether a follow is approved
- * or pending, whether the account appears in `search_users`, and whether
- * `can_view_profile` admits a stranger to the feed, the notes, the rankings and the
- * scores — and every account in the database is public today because that is the
- * column default rather than because anybody chose it.
+ * or pending, and whether `can_view_profile` admits a stranger to the feed, the notes,
+ * the rankings and the scores.
+ *
+ * **It no longer decides whether the account can be found.** `search_users` and
+ * `profile_identity` moved to `can_discover_profile` on 2026-08-19, which reads
+ * `status` and blocks and ignores `visibility` entirely — so a private account is
+ * findable by handle or display name and discloses five identity columns, and nothing
+ * else. This comment used to say the opposite, and so did the copy under the switch.
+ *
+ * Every account is public today because that is the column default rather than because
+ * anybody chose it, which is why signup now says so out loud.
  *
  * The blocked list is here because blocking closes the door behind itself. Independent
  * review 12 found it: `can_view_profile` goes false in both directions, so a blocked
@@ -201,12 +208,38 @@ export default function PrivacyScreen() {
               </View>
             ) : null}
 
+            {/* **Private hides what you have, not who you are.**
+                This block used to say a private profile "does not appear in search",
+                and that stopped being true on 2026-08-19, when `search_users` moved
+                to `can_discover_profile` so that somebody can be found and asked to
+                follow without any of their content being readable. A privacy screen
+                that overstates the protection is worse than one that says nothing:
+                it is the sentence somebody decides what to write against.
+
+                Branching on `known` rather than on `isPrivate`, because `isPrivate`
+                is false while the read is still in flight, and describing the wrong
+                setting to somebody reading a privacy screen is the whole defect the
+                switch above already guards against. */}
             <View style={styles.explain}>
+              {known === 'private' ? (
+                <Text variant="caption" tone="tertiary">
+                  People can still find you by name or @handle and ask to follow — being
+                  private hides what you have, not who you are. Until you approve
+                  somebody, your ranked titles, watchlist, reviews and activity stay
+                  hidden. People you already approved stay approved; remove them from
+                  your followers if you want them gone.
+                </Text>
+              ) : null}
+              {known === 'public' ? (
+                <Text variant="caption" tone="tertiary">
+                  Anyone on Bingd can see your ranked titles and their scores, your
+                  watchlist and your activity, along with any note you have shared as a
+                  review.
+                </Text>
+              ) : null}
               <Text variant="caption" tone="tertiary">
-                While your account is private, your profile does not appear in search
-                and your rankings, notes and activity are visible only to followers you
-                have approved. People you already approved stay approved. Remove them from your
-                followers if you want them gone.
+                Your watch dates are never shown to anybody, and a note stays yours
+                alone unless you share it as a review. That is true on both settings.
               </Text>
             </View>
           </View>
@@ -338,5 +371,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.space[4],
   },
   switchCopy: { flex: 1, gap: 2 },
-  explain: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
+  explain: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[2],
+    gap: theme.space[2],
+  },
 });
