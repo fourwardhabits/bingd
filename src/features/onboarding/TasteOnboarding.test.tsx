@@ -323,15 +323,36 @@ describe('the rating sheet', () => {
     }
   });
 
+  /**
+   * The sheet's own content block, found by walking up from the row rather than
+   * through a testID added for this test's benefit. Everything asserted about the
+   * sheet's shape lives on it: the gutter, the clearance under the drag handle, and
+   * the fact that it scrolls at all.
+   */
+  const contentBlock = (view: Awaited<ReturnType<typeof openSheet>>) => {
+    let node = view.getByTestId('bucket-choices').parent;
+    while (node && node.props.contentContainerStyle === undefined) node = node.parent;
+    if (!node) throw new Error('the choices are not inside a scrolling content block');
+    return node;
+  };
+
   it('keeps the sheet content off the edge and clear of the drag handle', async () => {
     const view = await openSheet();
 
-    // The heading sat flush against the left edge because the body carried no gutter.
-    // Read through the row rather than a testID added for this: it is a child of the
-    // body, so the body is its parent.
-    const body = flatten(view.getByTestId('bucket-choices').parent?.props.style);
+    // The heading sat flush against the left edge of the sheet, because the body
+    // carried no horizontal padding at all.
+    const body = flatten(contentBlock(view).props.contentContainerStyle);
     expect(body.paddingHorizontal).toBe(16);
     expect(body.paddingTop).toBeGreaterThan(0);
+  });
+
+  it('scrolls, so the largest text sizes cannot put a choice out of reach', async () => {
+    const view = await openSheet();
+
+    // `Sheet` caps itself at 90% of the window. The Log tab's sheet scrolls for exactly
+    // this reason; this one did not, and at the largest accessibility text sizes the
+    // third choice and the helper text went somewhere nobody could get to.
+    expect(contentBlock(view).type).toBe('RCTScrollView');
   });
 
   it('stores the middle bucket the middle words mean', async () => {

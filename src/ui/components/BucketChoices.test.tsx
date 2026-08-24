@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react-native';
 
+import { theme } from '../tokens';
 import { BucketChoices } from './BucketChip';
 
 /**
@@ -66,12 +67,24 @@ describe('the three choices', () => {
     }
   });
 
-  it('lets a long label wrap instead of clipping it on a narrow phone', async () => {
+  it('leaves a usable column at the narrowest width the app supports', async () => {
+    // Arithmetic, not geometry: this library has no layout engine, so what is pinned
+    // here is the input to the layout rather than its output. 320pt less the two
+    // gutters the host sheet adds, less two gaps, over three columns.
+    const column = (320 - theme.layout.gutter * 2 - theme.space[3] * 2) / 3;
+
+    // Wide enough for the 44pt circle with room either side. If a future token change
+    // takes it below that, the circles start touching before anybody opens a simulator.
+    expect(column).toBeGreaterThanOrEqual(theme.layout.minTapTarget + theme.space[3]);
+  });
+
+  it('lets a long label wrap rather than clipping or breaking the row', async () => {
     await draw();
 
-    // 320pt less two 16pt gutters and two 12pt gaps leaves 88pt to a column, which is
-    // not enough for the longest label on one line. Wrapping is the intended answer,
-    // so the row must not wrap its columns and the label must not clamp its lines.
+    // 88pt is not enough for "I didn't like it" on one line at any text size, so
+    // wrapping is the intended answer rather than a failure. Two things have to hold
+    // for it: the row must not wrap its own columns onto a second line, and the label
+    // must not clamp itself to one.
     expect(row().flexWrap).toBeUndefined();
     for (const chip of chips()) {
       expect(chip.props.children[1].props.numberOfLines).toBeUndefined();

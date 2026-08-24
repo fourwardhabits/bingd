@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
@@ -105,7 +105,16 @@ export function TasteBucketSheet({
 
   return (
     <Sheet visible onClose={onClose} label="How was it?">
-      <View style={styles.body}>
+      {/* Scrolls, for the same reason `LogSheet` does. `Sheet` caps itself at 90% of
+          the window, and at the largest accessibility text sizes a question, a poster
+          block, three wrapped labels and a note are taller than that — which without
+          this would put the third choice somewhere nobody can reach. At ordinary sizes
+          it never scrolls, because the content is shorter than the cap. */}
+      <ScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        bounces={false}
+      >
         <Text variant="title2">How was it?</Text>
 
         <View style={styles.subject}>
@@ -142,7 +151,7 @@ export function TasteBucketSheet({
         <Text variant="footnote" tone="tertiary">
           Anything you have ever seen. It does not have to be recent.
         </Text>
-      </View>
+      </ScrollView>
     </Sheet>
   );
 }
