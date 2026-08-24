@@ -4,7 +4,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import { createTestDb } from './harness.mjs';
 
 /**
- * Push delivery, 20260824000300.
+ * Push delivery, 20260825000300.
  *
  * Two things are under test and they are different in kind.
  *

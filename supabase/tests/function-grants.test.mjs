@@ -338,7 +338,7 @@ const ALLOWED = {
   'redeem_invite(uuid,text)': ['authenticated'],
   'revoke_invite_link(uuid)': ['authenticated'],
 
-  // Added 2026-08-24 with push delivery (20260824000300). Two writers for a table that
+  // Added 2026-08-24 with push delivery (20260825000300). Two writers for a table that
   // has had no writer and no read policy since 20260813000900.
   //
   // Neither names an account. `register_device_token` writes `auth.uid()` and takes only

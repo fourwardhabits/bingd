@@ -507,7 +507,7 @@ let lastNudgeAt = 0;
  * moment, which makes their client the cheapest scheduler available.
  *
  * **What this does not guarantee.** Nothing else drains the queue: there is no cron and
- * no database networking extension (`20260824000300` says why). A notification created
+ * no database networking extension (`20260825000300` says why). A notification created
  * while nobody has the app open therefore waits until somebody does. That is the one
  * piece of this system deliberately left for a scheduler, and the runbook in
  * `supabase/functions/push-sender/README.md` says what it would take.

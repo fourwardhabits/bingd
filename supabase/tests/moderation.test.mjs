@@ -534,7 +534,7 @@ describe('the guard is wired in, not merely present', () => {
     // no target, acts only on auth.uid(), and its effect is to remove the account
     // rather than to reach anybody else.
     'delete_account',
-    // 20260824000300, and the second writer to skip the guard deliberately — for
+    // 20260825000300, and the second writer to skip the guard deliberately — for
     // `delete_account`'s reason applied to a smaller act.
     //
     // This is what sign-out calls. Refusing it for a suspended account would mean the
