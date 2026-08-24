@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { nudgePushDelivery } from '@/features/notifications/push';
 import { readAllByKey } from '@/lib/read-all';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
@@ -254,7 +255,13 @@ export function useSetCompanions(userId: string) {
       ]);
     }
 
-    if (!error) return { ok: true as const, message: null };
+    if (!error) {
+      // Everybody newly tagged has a `watch_tag` notification as of the statement above,
+      // and this reader is the only person holding a phone on their behalf. Debounced and
+      // awaited by nothing (`nudgePushDelivery`).
+      nudgePushDelivery();
+      return { ok: true as const, message: null };
+    }
 
     // 42501 is the server refusing somebody in the list. The picker only offers
     // connected people, so reaching it means a follow lapsed or a block landed

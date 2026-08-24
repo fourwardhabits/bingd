@@ -14,6 +14,11 @@ jest.mock('expo-crypto', () => ({ randomUUID: () => `id-${(issued += 1)}` }));
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
+    // Writes that create a notification nudge push-sender afterwards
+    // (notifications/push.ts). It chooses nothing and this suite asserts nothing about
+    // it; the stub is here so the nudge is exercised rather than swallowed by its own
+    // guard.
+    functions: { invoke: () => Promise.resolve({ data: null, error: null }) },
     rpc: (...args: unknown[]) => mockRpc(...args),
     from: () => {
       const chain: Record<string, unknown> = {};

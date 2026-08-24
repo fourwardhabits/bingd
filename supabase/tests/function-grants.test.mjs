@@ -337,6 +337,29 @@ const ALLOWED = {
   'record_invite_open(text,text)': ['anon', 'authenticated'],
   'redeem_invite(uuid,text)': ['authenticated'],
   'revoke_invite_link(uuid)': ['authenticated'],
+
+  // Added 2026-08-24 with push delivery (20260824000300). Two writers for a table that
+  // has had no writer and no read policy since 20260813000900.
+  //
+  // Neither names an account. `register_device_token` writes `auth.uid()` and takes only
+  // a token and a platform; `revoke_device_token` acts on `user_id = auth.uid()` and
+  // answers `ok` either way, so it cannot report whether a token exists or who holds it.
+  // The device-to-account move that makes a shared phone safe happens inside the first
+  // one, through the table's own unique key, rather than through anything a caller says.
+  //
+  // **`claim_push_batch` and `settle_push_batch` are deliberately absent, and they are
+  // the two functions in this schema it would be worst to grant.** They resolve
+  // recipients server-side and hand back device tokens; a client holding either could
+  // read other people's tokens and settle other people's deliveries. Both are granted to
+  // `service_role` alone, which this sweep does not cover — so `push.test.mjs` asserts
+  // the refusal for `anon` and `authenticated` directly. An allow-list can only say what
+  // is not on it.
+  //
+  // `_push_eligible` and `_enqueue_push` join the internal side for the reason
+  // `_apply_notification_preference` does: the second writes the delivery queue, and a
+  // client holding it could enqueue a push for anybody.
+  'register_device_token(uuid,text,text)': ['authenticated'],
+  'revoke_device_token(uuid,text)': ['authenticated'],
 };
 
 async function functionPrivileges(t) {

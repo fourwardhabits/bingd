@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { invalidateAwards } from '@/features/awards/invalidate';
 import { newOperationId } from '@/features/collection/writes';
+import { nudgePushDelivery } from '@/features/notifications/push';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
@@ -196,6 +197,10 @@ export function useCommentWrites(viewerId: string) {
         (error instanceof Error ? error.message : 'Something went wrong. Try again.');
       return { ok: false, message };
     }
+    // Only `add` writes a notification, and this helper is shared by all three writers —
+    // which is right rather than sloppy: a drain is global and debounced, so an edit that
+    // happens to send somebody else's queued push is the mechanism working as intended.
+    nudgePushDelivery();
     return { ok: true };
   };
 
