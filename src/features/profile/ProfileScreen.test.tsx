@@ -46,6 +46,9 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 jest.mock('expo-router', () => ({
+  // The inbox query refetches when the screen it is on regains focus, so anything
+  // rendering a bell reaches for this. A no-op here: focus is not what these test.
+  useFocusEffect: () => {},
   useRouter: () => ({ push: mockPush }),
   // No params, which is how this tab is reached everywhere except from an award
   // notification — that one arrives as `?awards=1` and opens the sheet on mount

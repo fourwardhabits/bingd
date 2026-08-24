@@ -6,12 +6,14 @@ import { useCurrentProfile } from '@/features/auth';
 import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
   canFollowBack,
+  unreadCount,
   useMarkNotificationsRead,
   useNotifications,
   verbFor,
   type Notification,
 } from '@/features/notifications/use-notifications';
 import { useRelationships, useSocialWrites } from '@/features/profile/use-social';
+import { relativeTime } from '@/features/recommendations/use-sent-to-you';
 import { compactName } from '@/lib/titles';
 import {
   Avatar,
@@ -86,7 +88,14 @@ export default function NotificationsScreen() {
   const rows = notifications.data ?? [];
   const requests = rows.filter((row) => row.kind === 'follow_request');
   const rest = rows.filter((row) => row.kind !== 'follow_request');
-  const unreadCount = rows.filter((row) => !row.readAt).length;
+  /**
+   * The same selector the bell counts with, rather than a second copy of the rule.
+   *
+   * This screen used to re-implement it inline. The two agreed, and would have gone on
+   * agreeing right up until somebody changed what "unread" means in one place — which
+   * is the only way a badge and the sentence explaining it ever drift apart.
+   */
+  const unread = unreadCount(rows);
 
   /**
    * Whether the reader already follows the people who followed them.
@@ -205,18 +214,31 @@ export default function NotificationsScreen() {
           {/* In the list rather than in the navigation bar, and only while it would do
               something. A control that clears a state has to sit where that state is
               visible, or the reader cannot tell what they just changed. */}
-          {unreadCount > 0 ? (
+          {unread > 0 ? (
             <View style={styles.markAll}>
               <Text variant="footnote" tone="secondary" style={styles.markAllCount}>
-                {unreadCount === 1 ? '1 unread' : `${unreadCount} unread`}
+                {unread === 1 ? '1 unread' : `${unread} unread`}
               </Text>
-              <Button
-                label={markRead.isPending ? 'Marking…' : 'Mark all read'}
-                kind="tertiary"
-                onPress={() => markRead.mutate()}
+              {/* A text action rather than a `Button`. The button's 48pt minimum was
+                  setting the height of a strip that holds one line of footnote type,
+                  which is what made the top of this screen a band of empty Paper
+                  before the first notification. `hitSlop` buys the target back
+                  without the box — the same trade the bell itself makes. */}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Mark all notifications read"
+                accessibilityState={{ disabled: markRead.isPending }}
+                accessibilityHint={
+                  markRead.isPending ? 'Marking your notifications read.' : undefined
+                }
                 disabled={markRead.isPending}
-                disabledReason="Marking your notifications read."
-              />
+                onPress={() => markRead.mutate()}
+                hitSlop={theme.space[3]}
+              >
+                <Text variant="footnote" tone="action">
+                  {markRead.isPending ? 'Marking…' : 'Mark all read'}
+                </Text>
+              </Pressable>
             </View>
           ) : null}
 
@@ -316,8 +338,13 @@ export default function NotificationsScreen() {
                             {subject}
                           </Text>
                         ) : null}
+                        {/* "2d ago" rather than "23/08/2026". Recency is half of what
+                            an inbox row is telling you, and a bare date makes the
+                            reader do the subtraction — the same argument the
+                            recommendations list already settled, through the same
+                            helper so the two cannot drift. */}
                         <Text variant="caption" tone="tertiary">
-                          {new Date(row.createdAt).toLocaleDateString()}
+                          {relativeTime(row.createdAt)}
                         </Text>
                       </View>
                       <UnreadDot show={!row.readAt} />
@@ -327,10 +354,12 @@ export default function NotificationsScreen() {
                         for a relationship that already exists is a control that can
                         only mislead. */}
                     {offerFollowBack ? (
-                      <View style={styles.answers}>
+                      <View style={styles.rowAction}>
                         <Button
                           label="Follow back"
                           kind="secondary"
+                          size="sm"
+                          hitSlop={theme.space[2]}
                           onPress={() => void followBack(row)}
                           disabled={busy}
                           disabledReason="One at a time"
@@ -378,11 +407,15 @@ const styles = StyleSheet.create({
   },
   gearPressed: { opacity: 0.6 },
   unread: { backgroundColor: theme.surface.raised },
+  // Padded on both sides now. It had a top and no bottom, so the only thing keeping
+  // the summary off the first notification was the 48pt button inside it — and taking
+  // that button out is what this pair replaces it with.
   markAll: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
+    paddingBottom: theme.space[2],
   },
   markAllCount: { flex: 1 },
   dot: {
@@ -403,6 +436,22 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.border.hairline,
   },
   person: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
+  /**
+   * A row's own action, aligned under the sentence it belongs to.
+   *
+   * `answers` is shared with the follow-request block, which sits inside `request` and
+   * inherits that block's gutter — so the same style read as inset there and flush
+   * against the screen edge here, under an avatar indented by 16. This one states its
+   * own inset: gutter, plus the avatar, plus the row's gap, which is exactly where the
+   * text above it starts. `flexDirection: 'row'` keeps the button its label's width
+   * rather than the screen's.
+   */
+  rowAction: {
+    flexDirection: 'row',
+    paddingLeft: theme.layout.gutter + theme.layout.avatar.sm + theme.space[3],
+    paddingRight: theme.layout.gutter,
+    paddingBottom: theme.space[2],
+  },
   personCopy: { flex: 1, gap: 2 },
   answers: { flexDirection: 'row', gap: theme.space[3] },
   row: {

@@ -189,6 +189,11 @@ export default function FeedScreen() {
               void feed.refetch();
               void reactions.refetch();
               void commentCounts.refetch();
+              // The bell is on this screen, so a reader pulling to see what is new is
+              // asking about it too. Leaving it out meant the one deliberate "refresh
+              // this page" gesture in the app refreshed everything on it except the
+              // control most likely to be wrong.
+              void notifications.refetch();
             }}
             tintColor={theme.semantic.action}
             colors={[theme.semantic.action]}

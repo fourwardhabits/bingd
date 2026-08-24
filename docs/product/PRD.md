@@ -913,6 +913,8 @@ Build the **entire** system in v1: event generation, in-app inbox, per-category 
 
 **Push is installed but off.** `expo-notifications` and the Apple and Google push credentials are configured in the **first** development build. Push **delivery** is flagged off at launch.
 
+> **As built:** the module is in every build and the credentials are not. See the As-built block at the end of this section — the distinction decides whether enabling push needs a new binary, and it does not.
+
 > **Why this specific arrangement.** Push requires native configuration. If the module is absent when the app reaches the stores, enabling push later requires a new native build *and* a new store submission. With it present from v1, enabling push is a server-side flag plus an over-the-air JavaScript update. This is the difference between "add push next month" being an afternoon and being a release cycle.
 
 ### v1 event set
@@ -1003,6 +1005,7 @@ Each type has an ordered chain whose last link always resolves. Staleness is rea
 #### What is **not** built
 
 - **Push is dark.** `expo-notifications` and its config plugin are in every build, as §15 intends — and nothing on any client writes `device_tokens`, no client imports the module, and no delivery path exists. **Push delivery is not "flagged off"; it has never been built** (AD-10). [`deferred-roadmap.md`](./deferred-roadmap.md) §4.
+- **Re-verified 2026-08-23**, after a real follow produced an inbox row and no phone notification. Every stage after the native module is absent: zero calls to `requestPermissionsAsync`, `getExpoPushTokenAsync` or any notification listener; no import of `expo-notifications` anywhere in `src/` or `app/`; `device_tokens` present with no writer and no `register_device_token` RPC; `tmdb-adapter` the only Edge Function; nothing anywhere calls Expo Push, FCM or APNs. **The founder received no push because nothing in this repository has ever been able to send one.** That is an unbuilt feature behaving as expected rather than a defect — but §15's build posture above and the §27 checklist both read as though push credentials were configured, and both now carry corrections.
 - **The scheduled nudge** ships with push, so it does not exist either.
 - **`invite_activated` gained its writer on 2026-08-19** (`20260819000500`) and is no longer in this list. It is filed by `_maybe_activate_invite` at the activation transition — server-side, once, and not from a client observing a column. It respects the `invites` category, is not written across a block, and is not written when the inviter has gone. §17 As built.
 - **`award_earned` has no writer**, and this is a disposition rather than an omission. Award tiers are computed entirely on the device from raw table reads; **no durable state records which tier an account has reached**, so a *crossing* cannot be distinguished from a *state*, and exactly-once delivery is impossible without an unlock ledger. An award notification that fires twice is worse than one that never fires. [`deferred-roadmap.md`](./deferred-roadmap.md) §5.
@@ -1796,7 +1799,7 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 2. An inbox is reachable from the app with read and unread states.
 3. A Notifications page under Settings offers a toggle per category plus a master Turn all off.
 4. Disabling a category stops new items in that category.
-5. `expo-notifications` is present in the production build and Apple and Google push credentials are configured.
+5. ~~`expo-notifications` is present in the production build and Apple and Google push credentials are configured.~~ **Half true as of 2026-08-23, and the half that is false matters.** `expo-notifications` and its config plugin *are* in every build (`app.config.ts`), so the native side is covered and enabling push will not force a new binary. **The credentials are not configured**: `app.config.ts` declares no `googleServicesFile` on either platform and no `aps-environment` entitlement, and both credential files are gitignored. Treat this line as two items — the module, done; the credentials, open — and see §15's As-built block, which was already right about the rest.
 6. Push **delivery** is disabled by a server-side flag, and no push is delivered in v1.
 7. Enabling the flag requires no new native build and no store submission.
 8. Push permission is never requested at first launch; it is requested after the first invite or follow.

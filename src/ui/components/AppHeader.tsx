@@ -84,7 +84,7 @@ export function AppHeader({ right, notifications, settings }: AppHeaderProps) {
                 that is a different statement: news is unread, a request is a task. */}
             {notifications.count > 0 ? (
               <View style={styles.badge}>
-                <Text variant="caption" tone="inverse" allowFontScaling={false}>
+                <Text variant="caption" tone="action" allowFontScaling={false}>
                   {notifications.count > 9 ? '9+' : notifications.count}
                 </Text>
               </View>
@@ -113,6 +113,17 @@ const styles = StyleSheet.create({
     gap: theme.space[2],
   },
   bell: { padding: theme.space[1] },
+  /**
+   * Parchment carrying Maroon, outlined in it — the founder's correction, and the
+   * inverse of the pair it replaced.
+   *
+   * It was a solid Maroon disc with Parchment on it, which is the score badge's
+   * treatment: the app's loudest mark, spent on a count that is subordinate to the
+   * bell it sits on. Turning the pair around keeps the same certified 7.4:1 contrast
+   * (design-system.md §3 — the same two colours, swapped) while letting the glyph stay
+   * the thing the eye lands on. The ring is what keeps it legible where the badge
+   * overlaps the bell's own dark strokes, which a bare Parchment disc would not.
+   */
   badge: {
     position: 'absolute',
     top: 0,
@@ -121,7 +132,9 @@ const styles = StyleSheet.create({
     height: 18,
     paddingHorizontal: 4,
     borderRadius: theme.radius.full,
-    backgroundColor: theme.semantic.action,
+    backgroundColor: theme.surface.sunken,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: theme.semantic.action,
     alignItems: 'center',
     justifyContent: 'center',
   },

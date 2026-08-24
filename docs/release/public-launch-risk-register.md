@@ -224,6 +224,97 @@ and as unchecked gates in PRD §27. Current split:
 
 ---
 
+### M10 — Public release opens signup; an invite becomes referral, not admission — **OPEN (product requirement, recorded 2026-08-23)**
+
+**Founder decision, recorded here rather than implemented.** For the public App Store and
+Play releases the hard invite gate is removed:
+
+- **No invite** → the visitor may create an account normally.
+- **Invite present** → the visitor may create an account normally, *and* the inviter
+  relationship, the referral attribution and the follow edge are preserved.
+
+An invitation becomes **optional referral and social context**, never a required
+admission credential.
+
+**Most of this is already true, which is the useful finding.** Verified at HEAD:
+`create_profile(text, text, date)` contains no reference to `invite_tokens`,
+`invite_attributions` or any token — the checks are auth, a username pattern, a display
+name, and the 13+ date-of-birth gate. There is **no account-level invite gate to remove.**
+`redeem_invite` is a separate, optional act that files the attribution and the follow.
+
+**So the friend beta's invite-only quality is a *distribution* gate, not an app gate:** the
+only thing stopping a stranger is that the build lives in TestFlight and a Play closed
+test. Publishing to the public store is what opens signup, and it needs no change to the
+signup path.
+
+What *does* need doing before public release:
+
+- **Deferred attribution.** The token does not survive a trip through TestFlight or Play —
+  there is no install referrer and no attribution vendor — so a recipient who installs and
+  launches from the home screen arrives with no inviter, permanently and undetectably.
+  Acceptable for the beta, tracked as **M7**, and it becomes the difference between
+  measurable and unmeasurable referral once acquisition matters.
+- **Confirm nothing in the public build teaches invite-only behaviour.** Today the web
+  invite page says Bingd "is in closed testing, and this invitation is how you get in",
+  which is true now and will be wrong the day the store listing is public.
+
+**Not friend-beta work, and not to be implemented ahead of the store decision.**
+
+---
+
+### Friend-beta invite instruction — verified 2026-08-23, no code change
+
+Recorded because it was in question and the answer is "it already works":
+
+> **Invite friends from Bingd. Send the Bingd invite link, not the raw TestFlight link.**
+
+- **Any ordinary tester can generate one.** `create_invite_link` is granted to
+  `authenticated` with no allowlist, admin role or founder check; the only gates are
+  signed-in and not-suspended. Profile → **Invite friends** is two taps, and the same link
+  is reachable from the Recommend sheet and from Settings → Privacy.
+- **One link is enough.** `https://bingd.app/i/<token>` is the canonical URL. The web page
+  it resolves to offers a real, public TestFlight join URL and a real Play closed-test
+  opt-in URL, both committed in `web/distribution.config.json`. Nothing in the app tells a
+  user to ask the founder for anything.
+- **The token preserves the inviter** through `redeem_invite` into
+  `invite_attributions` and `profiles.invited_by`, plus the follow edge.
+- **Two caveats that are platform, not product.** Android closed testing only admits
+  Google accounts on the Play Console tester list, so the founder still adds Android
+  testers there — no link fixes that. And the recipient must return to the same
+  `bingd.app/i/<token>` page after installing and tap *I already have Bingd*, or the
+  account is created with no inviter (**M7**).
+
+
+---
+
+---
+
+### M11 — Push notifications are not built, and the credentials are not configured — **OPEN**
+
+**Verified 2026-08-23** after a real follow produced an inbox row and no phone
+notification. That was expected behaviour, not a bug: nothing in the repository has ever
+been able to send a push.
+
+| Stage | State |
+|---|---|
+| `expo-notifications` + config plugin in every build | **done** — so enabling push needs no new binary |
+| Apple / Google credentials in `app.config.ts` | **absent** — no `googleServicesFile`, no `aps-environment`; both files gitignored |
+| OS permission request | absent — zero call sites |
+| Token acquisition and persistence | absent — `device_tokens` exists, no writer, no `register_device_token` RPC |
+| Delivery path | absent — `tmdb-adapter` is the only Edge Function |
+| Foreground handler / listeners | absent |
+
+**The in-app inbox is the channel the friend beta was built to test, and it works** — the
+follow row was created, categorised, routed and rendered correctly. Push is additive.
+
+**Not a friend-beta blocker.** It is a public-launch item, and the credentials are a
+founder task with Apple and Google rather than an engineering one. The smallest
+implementation slice, in order, is in
+[`../product/deferred-roadmap.md`](../product/deferred-roadmap.md) §4.
+
+**Corrected alongside it:** PRD §15's build posture and the §27 launch checklist both
+asserted the push credentials were configured. Only the module is.
+
 ## 2. Beta-safe minors
 
 Real, known, and **not** worth stopping the beta for. Recorded so they are not rediscovered
@@ -295,3 +386,18 @@ PARTIAL on evidence; every other major stands where it did.
 **No RLS policy, RPC or migration was changed.** Every defect this pass closed was a
 document or a piece of copy describing the backend wrongly. **M5 is the only major that
 moves to RESOLVED**; M1 through M4 and M6 through M9 stand exactly where they did.
+
+## 6. Changes made in the notification-repair pass, 2026-08-23
+
+| Change | Effect on this register |
+|---|---|
+| Query focus tracking wired to `AppState` | Fixes the stale unread badge. `refetchOnWindowFocus` was inert on a phone, so the inbox query could only refetch when a new observer mounted |
+| Inbox opts into focus refetch; refetches on screen focus when stale; Feed's pull-to-refresh includes it | The bell is now correct at launch, on foreground, on tab focus, on pull-to-refresh and after Mark all read |
+| Unread badge restyled Parchment-on-Maroon | Cosmetic. Same certified 7.4:1 pair, inverted |
+| Inbox layout: compact summary action, Follow back inset and sized to its label, relative timestamps | Cosmetic. No change to what a notification means |
+| Inbox uses the shared `unreadCount` selector | Removes a duplicated definition of "unread" that could have drifted from the bell |
+| Push pipeline verified end to end | **M11 opened.** Not a new risk — a precise statement of an already-deferred one |
+| Invite flow verified | **M10 opened** for the public open-signup requirement. No code changed; ordinary testers can already generate links |
+
+**No SQL, no native config, and no notification semantics changed.** Read/unread still
+means what it meant: opening the inbox marks nothing, and only Mark all read clears it.

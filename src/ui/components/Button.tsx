@@ -5,9 +5,21 @@ import { Text } from './Text';
 
 type Kind = 'primary' | 'secondary' | 'tertiary';
 
+/**
+ * `md` is the screen's own action. `sm` is one that belongs to a row.
+ *
+ * A notification offering Follow back was using `md`, which is the same physical
+ * control a screen uses for its primary act — 48pt tall with 20pt of padding either
+ * side, sitting under a 56pt row and very nearly doubling its height. `sm` is 36pt
+ * and still clears the 44pt target with the `hitSlop` its caller passes, because slop
+ * is the right tool for a control inside a list and a taller box is not.
+ */
+type Size = 'md' | 'sm';
+
 export type ButtonProps = Omit<PressableProps, 'children' | 'style'> & {
   label: string;
   kind?: Kind;
+  size?: Size;
   /**
    * Required when disabled. An unexplained dead button is the most common
    * accessibility failure in this pattern (design-system.md §8), so the reason
@@ -19,6 +31,7 @@ export type ButtonProps = Omit<PressableProps, 'children' | 'style'> & {
 export function Button({
   label,
   kind = 'primary',
+  size = 'md',
   disabled,
   disabledReason,
   ...rest
@@ -35,6 +48,7 @@ export function Button({
       disabled={disabled}
       style={({ pressed }) => [
         styles.base,
+        styles[size],
         styles[kind],
         pressed && !disabled && styles.pressed,
         disabled && styles.disabled,
@@ -42,7 +56,10 @@ export function Button({
       {...rest}
     >
       <View pointerEvents="none">
-        <Text variant="headline" tone={kind === 'primary' ? 'inverse' : 'primary'}>
+        <Text
+          variant={size === 'sm' ? 'callout' : 'headline'}
+          tone={kind === 'primary' ? 'inverse' : 'primary'}
+        >
           {label}
         </Text>
       </View>
@@ -52,12 +69,12 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: theme.layout.buttonMinHeight,
     borderRadius: theme.radius.control,
-    paddingHorizontal: theme.space[5],
     alignItems: 'center',
     justifyContent: 'center',
   },
+  md: { minHeight: theme.layout.buttonMinHeight, paddingHorizontal: theme.space[5] },
+  sm: { minHeight: 36, paddingHorizontal: theme.space[4] },
   primary: { backgroundColor: theme.semantic.action },
   secondary: {
     backgroundColor: theme.surface.raised,
