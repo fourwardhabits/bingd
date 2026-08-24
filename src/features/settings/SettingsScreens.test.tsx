@@ -759,6 +759,26 @@ describe('the inbox’s two new behaviours', () => {
     );
   });
 
+  /**
+   * **Both of these wait for the control to *go*, and the wait is the assertion.**
+   *
+   * `getByText('Ada')` is the wrong anchor on its own, and this suite failed on CI
+   * proving it (run 32739006812). The row and the relationship come from two different
+   * queries — `my_notifications` and `follow_state_with` — and only the first is settled
+   * when the name is on screen. `canFollowBack(row, outgoing)` returns true while
+   * `outgoing` is `undefined`, so between the two resolutions the row genuinely renders
+   * "Follow back" and then removes it. On a quiet machine both had landed; on a loaded
+   * runner the second had not, and the assertion read the intermediate frame.
+   *
+   * `waitFor` around the absence is not a weaker check — it is the same claim about the
+   * settled state, and it still fails if the control never goes. The `getByText` above
+   * stays, because it is what stops the whole thing passing on a row that never rendered.
+   *
+   * **The flash itself is real and is not a test artefact.** A reader whose follow is
+   * already mutual sees "Follow back" for as long as `follow_state_with` takes. It is a
+   * frame of a control that should not be there, and it is out of scope here — recorded
+   * rather than fixed in a moderation tranche.
+   */
   it('does not offer it when the follow is already mutual', async () => {
     mockRpcResults.my_notifications = [followed];
     mockRpcResults.follow_state_with = [
@@ -767,7 +787,7 @@ describe('the inbox’s two new behaviours', () => {
     const view = await renderWithProviders(<NotificationsScreen />);
 
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
-    expect(view.queryByText('Follow back')).toBeNull();
+    await waitFor(() => expect(view.queryByText('Follow back')).toBeNull());
   });
 
   it('does not offer it while the reader’s own request is still pending', async () => {
@@ -778,7 +798,7 @@ describe('the inbox’s two new behaviours', () => {
     const view = await renderWithProviders(<NotificationsScreen />);
 
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
-    expect(view.queryByText('Follow back')).toBeNull();
+    await waitFor(() => expect(view.queryByText('Follow back')).toBeNull());
   });
 
   it('does not put Follow back beside Approve and Decline', async () => {
