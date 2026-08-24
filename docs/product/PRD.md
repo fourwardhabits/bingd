@@ -1538,6 +1538,45 @@ Rationale, and the reason this needed deciding rather than defaulting: a public 
 > relies on it, but the client and the server now disagree about what an unspecified
 > new note means. Closing that is a migration and a founder decision, recorded in
 > `open-questions.md` §8.
+> **Founder decision, 2026-08-23 — Ranking, Review and Private note.**
+>
+> Three things a person can produce about a title, and the app now names them the way
+> this section does. **No schema changed to make this true**: the storage was already
+> correct and the words were not.
+>
+> **1. A ranking is the opinion.** It is Bingd's core signal and it needs no writing at
+> all. A ranking with nothing written is complete: it sets the bucket, the position, the
+> personalized score and the Collection place, and it contributes on the existing terms
+> to the aggregate `bingd.` score, the Following score, Taste Match, recommendations and
+> Feed activity. **A ranking with no writing is never shown as an empty review** — the
+> Reviews tab requires `note is not null` and always has.
+>
+> **2. A Review is optional social writing.** Published deliberately, by the author, and
+> visible to whoever may already see that account. It is called a *Review* everywhere a
+> reader meets it: the title page tab, the profile section, the compose control.
+>
+> **3. A Private note is optional personal writing.** Owner-only, with no exception for
+> approved followers, and it appears in no social surface at all — not the Reviews tab,
+> not a profile, not the Feed, not a notification, not search, not the aggregate score's
+> explanation. A private note **does not affect scoring**; the ranking underneath it
+> still counts, because the ranking and the writing are separate things.
+>
+> **One field stores both**, and `note_visibility` is the whole difference. That was
+> already true — `20260817001100` says in as many words that *"a review is a public Note,
+> which is the same text the Feed shows"*. What changed on 2026-08-23 is that the
+> interface stopped using three names for it. The composer row is now headed **Private
+> note** or **Review** according to what it currently is, the profile section is headed
+> **Reviews** rather than Notes, and the spoiler control names what it is revealing.
+>
+> **Publishing never escapes the account.** A Review by a private account is readable by
+> approved followers only; a block hides it both ways; a suspended author's writing
+> disappears. `title_reviews` and `public_notes` share one predicate —
+> `note_visibility = 'public' and can_view_profile(...)` — so "public" means *social
+> within the audience the account already permits* and never more than that.
+>
+> **Existing content was not touched.** Nothing was migrated, nothing changed visibility
+> in either direction, and no second content model was introduced. A note written under
+> the private-only promise is still private; a published review is still published.
 
 ### Follow model
 

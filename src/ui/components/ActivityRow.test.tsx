@@ -455,7 +455,7 @@ describe('the note', () => {
     const view = await render(<ActivityRow {...props} note={note} />);
 
     expect(view.getByText(note).props.numberOfLines).toBe(2);
-    await fireEvent.press(view.getByLabelText('Show the whole note'));
+    await fireEvent.press(view.getByLabelText('Show the whole review'));
     expect(view.getByText(note).props.numberOfLines).toBeUndefined();
   });
 
@@ -480,7 +480,7 @@ describe('the note', () => {
       <ActivityRow {...props} note={note} noteHasSpoilers noteMasked />,
     );
 
-    await fireEvent.press(view.getByLabelText('Contains spoilers for Inception. Show the note.'));
+    await fireEvent.press(view.getByLabelText('Contains spoilers for Inception. Show the review.'));
     expect(view.getByText(note)).toBeTruthy();
     // The claim survives the reveal — it is part of what the note says about
     // itself, not just the lock.

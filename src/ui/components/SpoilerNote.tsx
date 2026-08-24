@@ -15,6 +15,15 @@ export type SpoilerNoteProps = {
   numberOfLines?: number;
   /** Names the title in the reveal control, so the button is not a bare "Show". */
   titleForLabel?: string | null;
+  /**
+   * What this piece of writing is called, for the spoken labels.
+   *
+   * A review by default, because every social surface this renders on — the feed, a
+   * profile, the Reviews tab — is showing writing its author published. The comment
+   * sheet passes `'comment'`. It used to say "note" everywhere, which meant a reader
+   * inside a tab called Reviews tapped a control announced as "Show the note."
+   */
+  noun?: string;
 };
 
 /**
@@ -41,6 +50,7 @@ export function SpoilerNote({
   masked,
   numberOfLines,
   titleForLabel,
+  noun = 'review',
 }: SpoilerNoteProps) {
   const [revealed, setRevealed] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -51,8 +61,8 @@ export function SpoilerNote({
         accessibilityRole="button"
         accessibilityLabel={
           titleForLabel
-            ? `Contains spoilers for ${titleForLabel}. Show the note.`
-            : 'Contains spoilers. Show the note.'
+            ? `Contains spoilers for ${titleForLabel}. Show the ${noun}.`
+            : `Contains spoilers. Show the ${noun}.`
         }
         onPress={() => setRevealed(true)}
         style={({ pressed }) => [styles.mask, pressed && styles.pressed]}
@@ -93,7 +103,7 @@ export function SpoilerNote({
       ) : null}
       <Pressable
         accessibilityRole={clamp ? 'button' : undefined}
-        accessibilityLabel={clamp ? 'Show the whole note' : undefined}
+        accessibilityLabel={clamp ? `Show the whole ${noun}` : undefined}
         onPress={() => setExpanded(true)}
         disabled={!clamp}
       >

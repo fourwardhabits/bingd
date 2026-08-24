@@ -229,7 +229,7 @@ describe('the screen', () => {
     const view = await renderLoaded();
 
     expect(view.getByLabelText('Reactions').props.value).toBe(false);
-    expect(view.getByLabelText('Bingd Awards').props.value).toBe(false);
+    expect(view.getByLabelText('bingd. Awards').props.value).toBe(false);
     expect(view.getByLabelText('Comments').props.value).toBe(true);
     expect(view.getByLabelText('Follows').props.value).toBe(true);
     expect(view.getByLabelText('Recommendations').props.value).toBe(true);
@@ -406,14 +406,14 @@ describe('the screen', () => {
     expect(view.getByText(/^Award notifications are not being sent yet\./)).toBeTruthy();
   });
 
-  it('marks Bingd Awards as unwritten and no longer marks invites', async () => {
+  it('marks bingd. Awards as unwritten and no longer marks invites', async () => {
     // The badge has to be on the right row. Asserting the count alone would pass if the
     // flag had merely moved from Awards to Invites.
     const view = await renderLoaded();
 
-    expect(view.getByText('Bingd Awards')).toBeTruthy();
+    expect(view.getByText('bingd. Awards')).toBeTruthy();
     expect(
-      view.getByText('Somebody you invited joins Bingd and ranks their first ten titles.'),
+      view.getByText('Somebody you invited joins bingd. and ranks their first ten titles.'),
     ).toBeTruthy();
     expect(view.queryByText(/Invite and Award/)).toBeNull();
   });

@@ -379,6 +379,51 @@ Beyond the contrast work in §1 and §2.
 
 ---
 
+## How the product name is written — canonical, 2026-08-23
+
+**`bingd.` — lowercase, with the period.** In the wordmark and in running copy alike.
+
+The wordmark rule already existed (PRD §5: *"The wordmark is lowercase with a period"*)
+and was followed in exactly one place: `Wordmark.tsx`. Every other user-facing string
+said **Bingd**, because the rule had only ever been written as a rule about the mark. It
+is a rule about the name.
+
+### In the interface
+
+Write it as it is spoken about: `bingd. score`, `About bingd.`, `Welcome to bingd.`,
+`bingd. Awards`, `Join me on bingd.`
+
+**The brand's period doubles as the sentence's.** *"Welcome to bingd."* is one period,
+not two. **Never write `bingd..`** — if a sentence would end in one, the brand's period
+is the one that stays.
+
+Where the name is followed by other punctuation that reads badly against a period — a
+colon, most often — reword rather than stack them. *"Join me on bingd. <link>"*, not
+*"Join me on bingd.: <link>"*.
+
+### Where it is not written this way
+
+Three categories, and they are exceptions to the *typography*, not to the name:
+
+- **Identifiers.** Package names, bundle ids, storage keys, query keys, analytics event
+  names, table and column names. `app.bingd`, `bingd.pending_display_name`.
+- **Domains and URLs.** `bingd.app`, `bingd.app/u/<username>`. The period there belongs
+  to the hostname.
+- **Platform-imposed fields.** Store listing titles, legal entity names and anything a
+  platform validates against its own format. If one of these forces another spelling,
+  note it here rather than letting it spread back into the app.
+
+Code comments, JSDoc and test names are prose about the product rather than product
+copy; either spelling is fine there and neither is worth a diff.
+
+### Colour
+
+The maroon token belongs to the **wordmark**, and to a label that is naming the product
+as a source — the `bingd.` score beside `Following` is one, because there the name is
+distinguishing two populations. It does not belong to every sentence that happens to
+contain the word. A screen where three unrelated phrases are maroon has no hierarchy
+left to spend.
+
 ## 11. Keeping the system honest
 
 Two mechanisms, both cheap, both preventing the failures this document exists to catch.

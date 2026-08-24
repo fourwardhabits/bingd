@@ -132,7 +132,7 @@ export default function TasteOnboardingScreen() {
           <View style={styles.intro}>
             <Text variant="title1">Build your taste</Text>
             <Text variant="body" tone="secondary">
-              Rank five films you have seen. Bingd learns from how they compare to each
+              Rank five films you have seen. bingd. learns from how they compare to each
               other, not from stars.
             </Text>
 

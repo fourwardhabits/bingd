@@ -119,7 +119,7 @@ export const SECTIONS: readonly NotificationSection[] = [
         // this switch governs real traffic — the flag was left behind by the migration
         // that made it work, and the screen was telling readers a working feature was
         // not built yet.
-        description: 'Somebody you invited joins Bingd and ranks their first ten titles.',
+        description: 'Somebody you invited joins bingd. and ranks their first ten titles.',
       },
     ],
   },
@@ -130,7 +130,7 @@ export const SECTIONS: readonly NotificationSection[] = [
     settings: [
       {
         key: 'awards',
-        label: 'Bingd Awards',
+        label: 'bingd. Awards',
         description: 'You reach a new tier on an Award.',
         pending: true,
       },

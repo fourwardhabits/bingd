@@ -185,7 +185,7 @@ export default function CreateProfileScreen() {
   if (refused) {
     return (
       <Screen airy includeBottomInset>
-        <Text variant="title1">Bingd is for ages 13 and over</Text>
+        <Text variant="title1">bingd. is for ages 13 and over</Text>
         <Text variant="body" tone="secondary">
           We could not create this account with that date of birth. We have not kept your
           details.

@@ -424,8 +424,8 @@ export const AWARD_TRACKS: AwardTrack[] = [
       ],
       emptyLabel: 'No activated invites yet.',
     }),
-    next: (n) => `Bring ${count(n)} ${plural(n, 'person', 'people')} to Bingd`,
-    earned: (n) => `Brought ${count(n)} ${plural(n, 'person', 'people')} to Bingd`,
+    next: (n) => `Bring ${count(n)} ${plural(n, 'person', 'people')} to bingd.`,
+    earned: (n) => `Brought ${count(n)} ${plural(n, 'person', 'people')} to bingd.`,
     tiers: tiers(['bronze', 'Bronze', 3], ['silver', 'Silver', 15], ['gold', 'Gold', 50]),
   },
   {
@@ -486,8 +486,8 @@ export const AWARD_TRACKS: AwardTrack[] = [
         {
           rows: facts.written.map((entry) => ({
             key: entry.key,
-            label: entry.title ? compactLabel(entry.title) : 'A Bingd activity',
-            detail: [entry.kind === 'note' ? 'Public note' : 'Comment', on(entry.writtenAt)]
+            label: entry.title ? compactLabel(entry.title) : 'A bingd. activity',
+            detail: [entry.kind === 'note' ? 'Review' : 'Comment', on(entry.writtenAt)]
               .filter(Boolean)
               .join(' · '),
             posterPath: entry.title?.posterPath ?? null,
@@ -501,9 +501,9 @@ export const AWARD_TRACKS: AwardTrack[] = [
       emptyLabel: 'Nothing written yet.',
     }),
     next: (n) =>
-      `Write ${count(n)} ${plural(n, 'comment or public note', 'comments or public notes')}`,
+      `Write ${count(n)} ${plural(n, 'comment or review', 'comments or reviews')}`,
     earned: (n) =>
-      `Wrote ${count(n)} ${plural(n, 'comment or public note', 'comments or public notes')}`,
+      `Wrote ${count(n)} ${plural(n, 'comment or review', 'comments or reviews')}`,
     tiers: tiers(
       ['whisper', 'Whisper', 20],
       ['chatterbox', 'Chatterbox', 100],
@@ -895,7 +895,7 @@ export const AWARD_TRACKS: AwardTrack[] = [
         {
           rows: facts.reactionsReceived.map((item) => ({
             key: item.key,
-            label: item.title ? compactLabel(item.title) : 'A Bingd activity',
+            label: item.title ? compactLabel(item.title) : 'A bingd. activity',
             posterPath: item.title?.posterPath ?? null,
             year: item.title?.year ?? null,
             value: `${count(item.reactions)} ${plural(item.reactions, 'reaction', 'reactions')}`,

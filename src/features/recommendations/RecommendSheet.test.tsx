@@ -153,7 +153,7 @@ describe('who the sheet offers', () => {
 
     await waitFor(() => expect(view.getByText('Nobody to recommend to yet')).toBeTruthy());
     // The off-Bingd path is still offered, because it is the answer to an empty list.
-    expect(view.getByText('Share off Bingd')).toBeTruthy();
+    expect(view.getByText('Share off bingd.')).toBeTruthy();
   });
 
   it('names the show a season belongs to in its heading', async () => {
@@ -335,12 +335,12 @@ describe('sending', () => {
   });
 });
 
-describe('sharing with somebody who is not on Bingd', () => {
+describe('sharing with somebody who is not on bingd.', () => {
   it('carries the reader’s invite link and records that it was created', async () => {
     mockRpcResults.create_invite_link = { status: 'ok', token: 'abc123' };
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await fireEvent.press(view.getByText('Share off Bingd'));
+    await fireEvent.press(view.getByText('Share off bingd.'));
 
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith(
@@ -360,7 +360,7 @@ describe('sharing with somebody who is not on Bingd', () => {
     mockRpcErrors.create_invite_link = { code: '53400', message: 'too many' };
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await fireEvent.press(view.getByText('Share off Bingd'));
+    await fireEvent.press(view.getByText('Share off bingd.'));
 
     await waitFor(() => expect(Share.share as jest.Mock).toHaveBeenCalled());
     const shared = (Share.share as jest.Mock).mock.calls[0][0] as { message: string };
@@ -385,10 +385,10 @@ describe('sharing with somebody who is not on Bingd', () => {
     mockRpcErrors.create_invite_link = { code: '', message: 'TypeError: Network request failed' };
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await fireEvent.press(view.getByText('Share off Bingd'));
+    await fireEvent.press(view.getByText('Share off bingd.'));
     await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(1));
 
-    await fireEvent.press(view.getByText('Share off Bingd'));
+    await fireEvent.press(view.getByText('Share off bingd.'));
     await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(2));
 
     const [first, second] = idsSentTo('create_invite_link');
@@ -403,10 +403,10 @@ describe('sharing with somebody who is not on Bingd', () => {
     mockRpcResults.create_invite_link = { status: 'ok', token: 'abc123' };
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await fireEvent.press(view.getByText('Share off Bingd'));
+    await fireEvent.press(view.getByText('Share off bingd.'));
     await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(1));
 
-    await fireEvent.press(view.getByText('Share off Bingd'));
+    await fireEvent.press(view.getByText('Share off bingd.'));
     await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(2));
 
     const [first, second] = idsSentTo('create_invite_link');
@@ -421,10 +421,10 @@ describe('sharing with somebody who is not on Bingd', () => {
     (Share.share as jest.Mock).mockResolvedValue({ action: 'dismissedAction' } as never);
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    await fireEvent.press(view.getByText('Share off Bingd'));
+    await fireEvent.press(view.getByText('Share off bingd.'));
     await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(1));
 
-    await fireEvent.press(view.getByText('Share off Bingd'));
+    await fireEvent.press(view.getByText('Share off bingd.'));
     await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(2));
 
     const [first, second] = idsSentTo('create_invite_link');

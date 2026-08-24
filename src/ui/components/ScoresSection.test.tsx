@@ -39,12 +39,12 @@ const both = {
 describe('the scores row', () => {
   it('puts Bingd and Following side by side on an ordinary phone', async () => {
     await render(<ScoresSection {...both} />);
-    expect(screen.getByText('Bingd')).toBeTruthy();
+    expect(screen.getByText('bingd.')).toBeTruthy();
     expect(screen.getByText('Following')).toBeTruthy();
     expect(isSideBySide()).toBe(true);
   });
 
-  it('leads with Bingd, then Following', async () => {
+  it('leads with bingd., then Following', async () => {
     // The founder's ordering, and the one a screen reader walks in. Asserted on the
     // rendered order rather than on the props, because the props are named and could be
     // passed either way round without changing what anybody sees.
@@ -55,9 +55,9 @@ describe('the scores row', () => {
       />,
     );
     const labels = screen
-      .getAllByText(/^(Bingd|Following)$/)
+      .getAllByText(/^(bingd.|Following)$/)
       .map((node) => node.props.children);
-    expect(labels).toEqual(['Bingd', 'Following']);
+    expect(labels).toEqual(['bingd.', 'Following']);
   });
 
   it('draws each circle beside its words rather than above them', async () => {
@@ -118,8 +118,8 @@ describe('the scores row', () => {
         following={{ score: 8.2, ratingCount: 4 }}
       />,
     );
-    const labels = screen.getAllByText(/^(Bingd|Following)$/).map((n) => n.props.children);
-    expect(labels).toEqual(['Bingd', 'Following']);
+    const labels = screen.getAllByText(/^(bingd.|Following)$/).map((n) => n.props.children);
+    expect(labels).toEqual(['bingd.', 'Following']);
   });
 
   it('says the same four words in both units when there is nothing to average', async () => {
@@ -164,7 +164,7 @@ describe('the scores row', () => {
     await render(<ScoresSection {...both} />);
     // The empty badge announces itself; a greyed figure would be a fact the page does
     // not believe.
-    expect(screen.getByLabelText('Bingd: Not enough ratings')).toBeTruthy();
+    expect(screen.getByLabelText('bingd.: Not enough ratings')).toBeTruthy();
     expect(screen.getByLabelText('Following: Not enough ratings')).toBeTruthy();
   });
 

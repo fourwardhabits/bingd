@@ -729,11 +729,12 @@ function Body({
           {fieldState === 'unavailable' ? (
             <View style={styles.unavailable}>
               <Text variant="footnote" tone="secondary" style={styles.unavailableText}>
-                {diagnose(logState.error) ?? 'Notes, companions and the watch date are unavailable.'}
+                {diagnose(logState.error) ??
+                  'Your writing, companions and the watch date are unavailable.'}
               </Text>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Retry loading your notes and watch date"
+                accessibilityLabel="Retry loading what you wrote and your watch date"
                 onPress={() => void logState.refetch()}
                 hitSlop={theme.space[2]}
               >
@@ -768,9 +769,16 @@ function Body({
               sheet's shape, and having them appear a beat after the buckets would
               make the sheet resize under the thumb that just tapped one. What is
               withheld is the ability to act on a baseline that is not there yet. */}
+          {/* **The row says which of the two things this is.**
+
+              One field stores both, and the row used to be called "Notes" whichever
+              state it was in — so the composer for a review was headed with the word
+              for the private one, two lines above a caption saying it would appear in
+              your friends' feeds. Naming the state is the smallest honest fix: the
+              label follows the visibility, and the chip inside still switches it. */}
           <SheetRow
             icon="create-outline"
-            label="Notes"
+            label={visibility === 'public' ? 'Review' : 'Private note'}
             value={loaded ? noteValue : undefined}
             expanded={expanded === 'notes'}
             onPress={loaded ? () => setExpanded(expanded === 'notes' ? null : 'notes') : undefined}
@@ -780,6 +788,7 @@ function Body({
             <View style={[styles.expanded, styles.noteBox]}>
               <NoteInput
                 value={note}
+                label={visibility === 'public' ? 'Review' : 'Private note'}
                 onChangeText={setNoteEdit}
                 onBlur={() => void saveDetails({})}
               />
@@ -866,16 +875,19 @@ function Body({
  */
 function NoteInput({
   value,
+  label,
   onChangeText,
   onBlur,
 }: {
   value: string;
+  /** What this is right now — "Review" or "Private note". The field is one field. */
+  label: string;
   onChangeText: (next: string) => void;
   onBlur: () => void;
 }) {
   return (
     <TextInput
-      accessibilityLabel="Notes"
+      accessibilityLabel={label}
       value={value}
       onChangeText={onChangeText}
       onBlur={onBlur}

@@ -1,12 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
+import { useEffect, useMemo, useRef } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
   canFollowBack,
-  unreadCount,
   useMarkNotificationsRead,
   useNotifications,
   verbFor,
@@ -85,17 +85,74 @@ export default function NotificationsScreen() {
   const markRead = useMarkNotificationsRead(profile.id);
   const { follow, respondToRequest, busy } = useSocialWrites(profile.id, 'notifications');
 
-  const rows = notifications.data ?? [];
+  // Memoised because the mark-on-sight effect below depends on it, and a fresh array
+  // identity every render would re-run that effect on every render.
+  const rows = useMemo(() => notifications.data ?? [], [notifications.data]);
   const requests = rows.filter((row) => row.kind === 'follow_request');
   const rest = rows.filter((row) => row.kind !== 'follow_request');
   /**
-   * The same selector the bell counts with, rather than a second copy of the rule.
+   * **Seeing them is what reads them.**
    *
-   * This screen used to re-implement it inline. The two agreed, and would have gone on
-   * agreeing right up until somebody changed what "unread" means in one place — which
-   * is the only way a badge and the sentence explaining it ever drift apart.
+   * Read used to be something the reader did: no mark-on-open, and a `Mark all read`
+   * control that was the only way to clear the bell. Beta feedback is that this is
+   * friction with nothing on the other side of it — somebody who has just looked at
+   * six rows should not have to tell the app they looked.
+   *
+   * The objection the old design was answering was real, and this keeps its answer:
+   * `read_at` must not become a column with one observable value. It does not, because
+   * the marking happens *after* the rows are on screen. The first paint of this list is
+   * always the unread one — tinted rows, dots, the state the reader came to see — and
+   * the refetch that follows settles it to read. What is gone is the requirement to
+   * press something.
+   *
+   * `my_notifications` returns the whole inbox (limit 100, no pagination and no
+   * cursor), so "displayed" and "fetched" are the same set and there is no later page
+   * this could mark read unseen. If that ever gains pagination, this has to become
+   * per-row visibility — hence the comment rather than a bare call.
    */
-  const unread = unreadCount(rows);
+  /** Stable across renders, unlike `markRead` itself — see the effect below. */
+  const { mutate: markAllRead } = markRead;
+  const markedOnSight = useRef(false);
+  useEffect(() => {
+    if (notifications.isPending || notifications.isError) return;
+    if (markedOnSight.current) return;
+    if (!rows.some((row) => !row.readAt)) return;
+
+    // Latched before the call, so a re-render while it is in flight does not send a
+    // second one — and released again if it fails. There is no `Mark all read` any
+    // more, so a failure that latched permanently would leave the reader with unread
+    // rows and nothing to press: the bell would stay lit until the screen was
+    // remounted.
+    //
+    // **The dependency is `mutate` and not the mutation.** Both halves of that were
+    // found by independent review, the second only after the first was fixed: a
+    // `useMutation` *result* takes a new identity every time its state changes, so
+    // depending on it would re-run this effect the instant `onError` released the
+    // latch — straight back into the call that just failed, for ever. `mutate` itself
+    // is `useCallback`-stable, so the effect now re-runs only when the query's own
+    // state or its rows change, and the retry lands on the next genuine refetch
+    // (foreground, screen focus) rather than on the next render.
+    markedOnSight.current = true;
+    markAllRead(undefined, {
+      onError: () => {
+        markedOnSight.current = false;
+      },
+    });
+    // `dataUpdatedAt` rather than `rows` alone, which was the third finding on this
+    // effect. React Query shares structure between fetches, so a refetch returning the
+    // same rows hands back the *same array* — and after a failed mark released the
+    // latch, nothing in the dependency list would have changed on the next foreground
+    // or focus, so the retry would never fire and the bell would stay lit until the
+    // screen was remounted. The timestamp advances on every successful fetch whether
+    // the rows moved or not, which is exactly the signal "there has been a fresh look
+    // at this" needs. It cannot spin: it advances on fetches, not on renders.
+  }, [
+    notifications.isPending,
+    notifications.isError,
+    notifications.dataUpdatedAt,
+    rows,
+    markAllRead,
+  ]);
 
   /**
    * Whether the reader already follows the people these rows are about.
@@ -222,36 +279,6 @@ export default function NotificationsScreen() {
         />
       ) : (
         <ScrollView contentContainerStyle={styles.page}>
-          {/* In the list rather than in the navigation bar, and only while it would do
-              something. A control that clears a state has to sit where that state is
-              visible, or the reader cannot tell what they just changed. */}
-          {unread > 0 ? (
-            <View style={styles.markAll}>
-              <Text variant="footnote" tone="secondary" style={styles.markAllCount}>
-                {unread === 1 ? '1 unread' : `${unread} unread`}
-              </Text>
-              {/* A text action rather than a `Button`. The button's 48pt minimum was
-                  setting the height of a strip that holds one line of footnote type,
-                  which is what made the top of this screen a band of empty Paper
-                  before the first notification. `hitSlop` buys the target back
-                  without the box — the same trade the bell itself makes. */}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Mark all notifications read"
-                accessibilityState={{ disabled: markRead.isPending }}
-                accessibilityHint={
-                  markRead.isPending ? 'Marking your notifications read.' : undefined
-                }
-                disabled={markRead.isPending}
-                onPress={() => markRead.mutate()}
-                hitSlop={theme.space[3]}
-              >
-                <Text variant="footnote" tone="action">
-                  {markRead.isPending ? 'Marking…' : 'Mark all read'}
-                </Text>
-              </Pressable>
-            </View>
-          ) : null}
 
           {requests.length ? (
             <View style={styles.section}>
@@ -322,7 +349,7 @@ export default function NotificationsScreen() {
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`${row.readAt ? '' : 'Unread. '}${
-                        row.kind === 'invite_welcome' ? 'Welcome to Bingd. ' : ''
+                        row.kind === 'invite_welcome' ? 'Welcome to bingd. ' : ''
                       }${row.actorName} ${verbFor(row.kind, row.mediaKind)}${
                         subject ? `, ${subject}` : ''
                       }`}
@@ -346,7 +373,7 @@ export default function NotificationsScreen() {
                             that survives being dropped. */}
                         {row.kind === 'invite_welcome' ? (
                           <Text variant="callout" numberOfLines={2}>
-                            <Text variant="callout" tone="secondary">Welcome to Bingd. </Text>
+                            <Text variant="callout" tone="secondary">Welcome to bingd. </Text>
                             <Text variant="callout">{row.actorName}</Text>
                             <Text variant="callout" tone="secondary"> invited you 🎉</Text>
                           </Text>
@@ -449,17 +476,7 @@ const styles = StyleSheet.create({
   },
   gearPressed: { opacity: 0.6 },
   unread: { backgroundColor: theme.surface.raised },
-  // Padded on both sides now. It had a top and no bottom, so the only thing keeping
-  // the summary off the first notification was the 48pt button inside it — and taking
-  // that button out is what this pair replaces it with.
-  markAll: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-    paddingBottom: theme.space[2],
-  },
-  markAllCount: { flex: 1 },
+
   dot: {
     width: 8,
     height: 8,

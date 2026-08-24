@@ -46,8 +46,17 @@ Status legend: **OPEN** (unchanged) · **PARTIAL** (some layers closed) · **RES
 
 ### M1 — UGC reporting, moderation, and Terms — **OPEN**
 
-Feed comments are user-generated content. Public Notes surfaced as Bingd Reviews are user-
-generated content. Both are readable by people other than their author.
+Feed comments are user-generated content. **Reviews** are user-generated content. Both are
+readable by people other than their author.
+
+> **Naming, settled 2026-08-23, and it changes nothing here.** What this register used to
+> call "public Notes surfaced as Bingd Reviews" the app now simply calls a **Review**
+> everywhere a reader meets it. That was a vocabulary fix — one field, one visibility
+> flag, no schema change — and it **does not reduce this finding by any amount**. If
+> anything it sharpens it: the product now says plainly that people are publishing
+> writing, which is exactly the content that has no report path, no moderation handling
+> and no Terms to accept. A **Private note** is not UGC in this sense and never appears
+> on a social surface.
 
 - `report_subject` covers `profile`, `display_name`, `username`, `list`, `list_title`,
   `watch_tag`. It does **not** include `comment` or `note` / `review`. No later migration
@@ -414,3 +423,19 @@ means what it meant: opening the inbox marks nothing, and only Mark all read cle
 
 **M10 is unchanged and was not acted on** — the public open-signup requirement stays a
 recorded decision, not work. No existing major changed classification in this pass.
+
+## 8. Changes made in the Reviews-contract pass, 2026-08-23
+
+| Change | Effect on this register |
+|---|---|
+| Ranking / Review / Private note named consistently | **None on risk.** One field and one visibility flag as before; no schema change, no migration, no row's visibility moved. **M1 stands exactly as it did** — see the note under it |
+| Profile section renamed Notes → Reviews; composer row names the state | Cosmetic. It is the same `public_notes` rows under a truthful heading |
+| Unranked reminder: Rank and Not now as a pair | Cosmetic |
+| Notifications read on sight; `Mark all read` removed | Behavioural, client-only. Recorded as **NR-2** |
+| `bingd.` written canonically across the app | Cosmetic. Rule now documented in `design-system.md` |
+| Feed historical visibility checked | **No change.** Already works — no cutoff exists. Recorded as **FEED-1** |
+| Following-score drilldown | Deferred, recorded as **FS-1** |
+
+**No SQL, no migration, no native change.** The one thing this pass proved about the
+data model is that it did not need changing: a review has always been a note with
+`note_visibility = 'public'`, and every privacy gate around it was already correct.

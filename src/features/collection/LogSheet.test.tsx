@@ -156,6 +156,9 @@ const failing = (fn: string, error: { code?: string; message: string }) => {
   );
 };
 
+/** Whichever of the two names the one writing field is wearing right now. */
+const WRITING = /^(Private note|Review)$/;
+
 const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> = {}) => {
   const view = await renderWithProviders(<LogSheet title={title} onClose={() => {}} surface="search" {...props} />);
 
@@ -164,18 +167,22 @@ const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> =
     show: (next: LoggableTitle | null) =>
       view.rerender(<LogSheet title={next} onClose={() => {}} surface="search" {...props} />),
     bucket: (label: string) => view.getByLabelText(label),
-    // The row and the field it discloses share the name "Notes" — which is right for
+    // The row and the field it discloses share a name — which is right for
     // a screen reader, since one is a button and the other a text field — so the
     // queries here separate them by role rather than by label.
-    notesRow: () => view.getByRole('button', { name: 'Notes' }),
+    // One field, two names: the row is called "Private note" or "Review" depending on
+    // which of the two this piece of writing currently is. The helper matches either,
+    // because almost every test here is about the field rather than about its state —
+    // the ones that *are* about the state assert the exact word themselves.
+    notesRow: () => view.getByRole('button', { name: WRITING }),
     // Both rows are inert until `useLogState` resolves, so that nothing can be
     // decided about a note the sheet has not been told about yet. A user waits for
     // that without noticing; a test has to say so.
     openNotes: async () => {
       await waitFor(() =>
-        expect(view.getByLabelText('Notes').props.accessibilityState.disabled).toBe(false),
+        expect(view.getByLabelText(WRITING).props.accessibilityState.disabled).toBe(false),
       );
-      return fireEvent.press(view.getByRole('button', { name: 'Notes' }));
+      return fireEvent.press(view.getByRole('button', { name: WRITING }));
     },
     note: () => view.getByPlaceholderText('What did you think?'),
     dateRow: () => view.getByRole('button', { name: 'Watch date' }),
@@ -725,7 +732,7 @@ describe('what a note says about itself', () => {
 
     // The row is present so the sheet keeps its shape, but it cannot be opened
     // and therefore cannot be acted on.
-    const notes = sheet.getByLabelText('Notes');
+    const notes = sheet.getByLabelText(WRITING);
     expect(notes.props.accessibilityState.disabled).toBe(true);
     await fireEvent.press(notes);
     expect(sheet.queryByPlaceholderText('What did you think?')).toBeNull();
@@ -955,9 +962,9 @@ describe('when the log state cannot be read', () => {
     const sheet = await open(filmA);
 
     await waitFor(() =>
-      expect(sheet.getByLabelText('Notes').props.accessibilityHint).toBe('Unavailable'),
+      expect(sheet.getByLabelText(WRITING).props.accessibilityHint).toBe('Unavailable'),
     );
-    for (const label of ['Notes', 'Who I watched with', 'Watch date']) {
+    for (const label of [WRITING, 'Who I watched with', 'Watch date']) {
       expect(sheet.getByLabelText(label).props.accessibilityHint).not.toBe('Loading');
     }
   });
@@ -968,7 +975,7 @@ describe('when the log state cannot be read', () => {
     await waitFor(() =>
       expect(sheet.getByText(/note_visibility does not exist/)).toBeTruthy(),
     );
-    expect(sheet.getByLabelText('Retry loading your notes and watch date')).toBeTruthy();
+    expect(sheet.getByLabelText('Retry loading what you wrote and your watch date')).toBeTruthy();
   });
 
   it('still lets a bucket be chosen and ranking start', async () => {
@@ -976,7 +983,7 @@ describe('when the log state cannot be read', () => {
     // user for a fault in a different query.
     const sheet = await open(filmA);
     await waitFor(() =>
-      expect(sheet.getByLabelText('Notes').props.accessibilityHint).toBe('Unavailable'),
+      expect(sheet.getByLabelText(WRITING).props.accessibilityHint).toBe('Unavailable'),
     );
 
     await fireEvent.press(sheet.bucket('I liked it'));
@@ -994,10 +1001,10 @@ describe('when the log state cannot be read', () => {
   it('does not open the note editor, so nothing is decided about a note it cannot see', async () => {
     const sheet = await open(filmA);
     await waitFor(() =>
-      expect(sheet.getByLabelText('Notes').props.accessibilityHint).toBe('Unavailable'),
+      expect(sheet.getByLabelText(WRITING).props.accessibilityHint).toBe('Unavailable'),
     );
 
-    await fireEvent.press(sheet.getByLabelText('Notes'));
+    await fireEvent.press(sheet.getByLabelText(WRITING));
 
     expect(sheet.queryByPlaceholderText('What did you think?')).toBeNull();
     expect(callsTo('save_note')).toHaveLength(0);
@@ -1042,7 +1049,7 @@ describe('two accounts on one device', () => {
     });
 
     await waitFor(() =>
-      expect(view.getByLabelText('Notes').props.accessibilityHint).toBe('Unavailable'),
+      expect(view.getByLabelText(WRITING).props.accessibilityHint).toBe('Unavailable'),
     );
     expect(view.queryByText('A private note belonging to somebody else')).toBeNull();
     expect(view.queryByPlaceholderText('What did you think?')).toBeNull();
@@ -1331,5 +1338,65 @@ describe('who I watched with', () => {
     const sheet = await openWho();
 
     await waitFor(() => expect(sheet.getByText('Nobody to tag yet')).toBeTruthy());
+  });
+});
+/**
+ * **One field, two names, and which one it wears is the contract.**
+ *
+ * `user_media.note` stores both a private note and a review; `note_visibility` is the
+ * only thing that tells them apart. The UI used to call it "Notes" in both states —
+ * over a caption promising it would appear in friends' feeds — so the word for the
+ * private thing was heading the composer for the public one.
+ */
+describe('what the writing is called', () => {
+  it('is a private note until it is shared', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    expect(sheet.getByRole('button', { name: 'Private note' })).toBeTruthy();
+    expect(sheet.queryByRole('button', { name: 'Review' })).toBeNull();
+    expect(sheet.getByText('Only you can read this.')).toBeTruthy();
+  });
+
+  it('is a review once it is', async () => {
+    const sheet = await open(filmA, { noteIntent: 'review' });
+    await sheet.openNotes();
+
+    expect(sheet.getByRole('button', { name: 'Review' })).toBeTruthy();
+    expect(sheet.queryByRole('button', { name: 'Private note' })).toBeNull();
+  });
+
+  it('renames itself the moment the reader shares it', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    expect(sheet.getByRole('button', { name: 'Private note' })).toBeTruthy();
+
+    await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
+
+    await waitFor(() => expect(sheet.getByRole('button', { name: 'Review' })).toBeTruthy());
+  });
+
+  /**
+   * The stored value still wins over the door the reader came through — the guarantee
+   * `20260823000100`'s tranche established, restated here because the label is now
+   * derived from the same expression and would be the first thing to drift.
+   */
+  it('calls a stored private note a private note, even under Write a review', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'kept back',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA, { noteIntent: 'review' });
+    await sheet.openNotes();
+
+    await waitFor(() => expect(sheet.note().props.value).toBe('kept back'));
+    expect(sheet.getByRole('button', { name: 'Private note' })).toBeTruthy();
   });
 });

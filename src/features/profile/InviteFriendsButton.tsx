@@ -50,7 +50,7 @@ export function InviteFriendsButton() {
 
       // Reuse the sentence the title share already sends, minus the title. Cancelling
       // the sheet resolves normally and is nobody's error.
-      await Share.share({ message: `Join me on Bingd: ${url}`, url });
+      await Share.share({ message: `Join me on bingd. ${url}`, url });
     } catch (error) {
       Alert.alert('Could not share', error instanceof Error ? error.message : 'Sharing failed.');
     } finally {

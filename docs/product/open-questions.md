@@ -441,3 +441,92 @@ founder decision about declared data collection, and it should be taken delibera
 alongside the store forms rather than folded into an unrelated tranche.
 
 **Do not delete `profile_private` or its data without that decision.**
+### UN-1 — What "Unranked" means, recorded because it was asked
+
+**Not open. Written down because a founder observation needed checking and the answer
+should not have to be re-derived.**
+
+**Unranked = logged AND not ranked.** `useLoggedCollection` reads `user_media` and
+`rankings`, and returns as unranked every logged row whose `media_item_id` has no
+`rankings` row. **The watchlist is not consulted** — it is a different query against a
+different table, and nothing in the derivation touches it.
+
+So a title appearing under Collection → Unranked while absent from the Watchlist is the
+**expected state**, not a defect. It is in fact the *designed* one: `_leave_watchlist`
+(`20260815040000`) deletes the watchlist row the moment a title is logged, because a
+watchlist entry is an intention to watch and watching it ends the intention. A logged,
+unranked, un-watchlisted title with a watch date and a Rank control on its title page is
+exactly what the three tables say it is.
+
+The card that surfaces this is scoped to the side of the Movies/TV selector being looked
+at, which is a separate fix from 2026-08-21 and is unchanged.
+
+---
+
+### NR-2 — Reading a notification is seeing it
+
+**Settled 2026-08-23.** This screen has now had three behaviours and it is worth
+recording why it landed here.
+
+1. It began by marking the whole inbox read on first render. That made `read_at` a
+   column with exactly one observable value: by the time anybody could look, nothing
+   was unread.
+2. That was replaced by nothing-marks-it-but-you, plus a `Mark all read` control.
+3. Beta feedback: pressing a button to say "yes, I looked" is friction with nothing on
+   the other side of it.
+
+**Final semantics: a notification is read once it has been shown.** The marking happens
+*after* the rows are on screen, so the first paint of the inbox is always the unread one
+— tinted rows and dots, the state the reader came to see — and the refetch that follows
+settles it. What is gone is the requirement to press anything.
+
+That answers (1)'s objection rather than reintroducing it: the value is observable,
+because it is observed before it changes.
+
+**`Mark all read` is gone**, along with the "N unread" strip it sat in. It could not be
+reached once opening the screen cleared the state, and a control that can never appear
+is the dead control this repo keeps out.
+
+**If the inbox ever gains pagination this has to change.** `my_notifications` returns
+the whole inbox — 100 rows, no cursor — so "displayed" and "fetched" are the same set
+today and there is no later page being marked read unseen. A paginated inbox would have
+to mark per-row visibility instead.
+
+---
+
+### FEED-1 — Historical activity from a new follow already works
+
+**Checked 2026-08-23 for the next social-density tranche. No implementation performed,
+and none is needed for the stated goal.**
+
+The Feed is a **query-time** read over `feed_events`, not a fan-out inbox: the client
+reads the current approved-follow set, then reads events by those actors, and RLS
+authorises each row with `can_i_view(actor_id)`. **There is no `follows.created_at` or
+`approved_at` cutoff anywhere** — `approved_at` is written and never read by any query.
+
+So following somebody surfaces their whole eligible back catalogue in normal
+chronological position immediately, and unfollowing retracts it. That symmetry is
+deliberate and documented at the policy: *"the feed is a live query, not a historical
+record."*
+
+**Verdict: SIMPLE NEXT TRANCHE — in fact already true.**
+
+**The real constraint is the window, not the cutoff.** The feed reads a flat 30 rows
+with no cursor and no pagination. Following somebody with a large back catalogue will
+push other people's recent activity off the bottom with no way to page past it. That is
+pre-existing and affects every follow today; it is the thing that will actually be
+noticed as follow counts grow, and it is what a social-density tranche should budget for.
+
+---
+
+### FS-1 — The Following-score drilldown
+
+**Deferred, recorded so it is not lost.** Tapping the Following score on a title page
+should show the eligible people the reader follows who rated it, and their scores.
+
+Not built and deliberately out of scope for the Reviews tranche. It is a read over
+`rankings` filtered by the follow set — the same shape the Following score already
+computes — so it is a surface rather than an architecture. The privacy question it has
+to answer first: the aggregate deliberately does not name anybody, and a drilldown does,
+so it needs the same `can_view_profile` gate every other identity surface uses and it
+must not become a way to learn that a private account rated something.

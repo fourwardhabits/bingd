@@ -106,7 +106,10 @@ export function ScoresSection({ bingd, following }: ScoresSectionProps) {
         {bingd ? (
           <Score
             score={bingd.score}
-            label="Bingd"
+            // The product's own name, written the way the wordmark writes it. It sits
+            // beside "Following", so the two labels name two populations — and this one
+            // is the whole of bingd. rather than a generic "community".
+            label="bingd."
             detail={ratingsDetail(bingd.ratingCount)}
             sideBySide={sideBySide}
           />

@@ -372,6 +372,26 @@ describe('their notes', () => {
     );
   });
 
+  /**
+   * **Reviews, because that is what they are.** This section is fed by `public_notes` —
+   * writing its author chose to publish, the same rows the title page lists under a tab
+   * called Reviews, through the same predicate. It was headed "Notes", which put the
+   * private word over the public thing and was the sharpest of the three names one
+   * object had.
+   */
+  it('heads the section Reviews, not Notes', async () => {
+    mockRpcResults.public_notes = [note];
+    const view = await open();
+
+    // `SectionHeader` uppercases what it draws and keeps the real title as its
+    // accessible name, so both are asserted — the word somebody sees and the word
+    // somebody hears.
+    await waitFor(() => expect(view.getByLabelText('Reviews')).toBeTruthy());
+    expect(view.getByText('REVIEWS')).toBeTruthy();
+    expect(view.queryByLabelText('Notes')).toBeNull();
+    expect(view.queryByText('NOTES')).toBeNull();
+  });
+
   it('shows nothing at all when every note is private', async () => {
     // `public_notes` returns only public ones, so a private note is absent rather
     // than filtered here — there is no client-side rule to get wrong.
@@ -691,7 +711,7 @@ describe('sharing and awards on somebody else’s profile', () => {
 
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
     expect(view.getByRole('button', { name: 'Share Profile' })).toBeTruthy();
-    expect(view.getByRole('button', { name: 'Bingd Awards' })).toBeTruthy();
+    expect(view.getByRole('button', { name: 'bingd. Awards' })).toBeTruthy();
     // But not Invite friends: an invitation is from the signed-in person, and this
     // page is about somebody else. The control lives on the own profile alone.
     expect(view.queryByRole('button', { name: 'Invite friends' })).toBeNull();
@@ -722,7 +742,7 @@ describe('sharing and awards on somebody else’s profile', () => {
     // Closed until asked for: it reads nine things when it mounts.
     expect(awardsProps).toBeNull();
 
-    await fireEvent.press(view.getByRole('button', { name: 'Bingd Awards' }));
+    await fireEvent.press(view.getByRole('button', { name: 'bingd. Awards' }));
 
     // `anna-id`, never `viewer`. The whole sheet is a reading of one user's collection,
     // so the wrong id here is somebody else's awards under Anna's name.
@@ -742,7 +762,7 @@ describe('sharing and awards on somebody else’s profile', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('This account is private')).toBeTruthy());
-    expect(view.queryByRole('button', { name: 'Bingd Awards' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'bingd. Awards' })).toBeNull();
     expect(view.queryByRole('button', { name: 'Share Profile' })).toBeNull();
   });
 });

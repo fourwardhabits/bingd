@@ -232,7 +232,7 @@ export default function PrivacyScreen() {
               ) : null}
               {known === 'public' ? (
                 <Text variant="caption" tone="tertiary">
-                  Anyone on Bingd can see your ranked titles and their scores, your
+                  Anyone on bingd. can see your ranked titles and their scores, your
                   watchlist and your activity, along with any note you have shared as a
                   review.
                 </Text>

@@ -276,7 +276,7 @@ export function verbFor(kind: NotificationKind, mediaKind?: Notification['mediaK
       if (mediaKind === 'movie') return 'recommended a movie';
       return 'recommended something';
     case 'invite_activated':
-      return 'joined Bingd from your invite';
+      return 'joined bingd. from your invite';
     /**
      * No emoji here, on purpose. The row draws one; a screen reader would say "party
      * popper" in the middle of the only sentence that tells a new reader who brought

@@ -34,7 +34,7 @@ const bottomPaddingOf = async () => {
  * The foot of every sheet in the app.
  *
  * This is one primitive and eleven consumers, and the founder found the same defect on
- * two of them — Collection Filters and Bingd Awards, which are the two whose last
+ * two of them — Collection Filters and bingd. Awards, which are the two whose last
  * element is a button rather than a list. A bottom safe area alone pads by the inset and
  * by nothing else, so on any display reporting no bottom inset the buttons finish flush
  * against the edge of the sheet.

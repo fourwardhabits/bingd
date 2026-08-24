@@ -418,6 +418,8 @@ function CommentRow({
           hasSpoilers={comment.hasSpoilers}
           masked={masked}
           titleForLabel={title}
+          // The one surface where this text is not a review.
+          noun="comment"
         />
 
         {mine ? (

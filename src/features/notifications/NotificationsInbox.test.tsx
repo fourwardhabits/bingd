@@ -112,31 +112,30 @@ const open = async () => {
   return view;
 };
 
-describe('the unread summary', () => {
-  it('offers Mark all read as a text action, not a screen-sized button', async () => {
+/**
+ * **Seeing them is what reads them**, as of 2026-08-23.
+ *
+ * The screen has had both behaviours: mark-on-open, then a reader-driven `Mark all
+ * read`, and now this. Beta feedback was that pressing a button to say "yes, I looked"
+ * is friction with nothing on the other side of it.
+ *
+ * The objection the middle version answered still holds and is still answered — the
+ * marking happens *after* the rows are on screen, so the first paint is always the
+ * unread one. What is gone is the requirement to press anything, and with it the
+ * summary strip, which could never be reached once opening the screen cleared it.
+ */
+describe('reading is seeing', () => {
+  it('paints the rows unread before it marks them', async () => {
     const view = await open();
 
-    const action = view.getByLabelText('Mark all notifications read');
-    const style = StyleSheet.flatten(action.props.style);
-    // The old control carried the Button's 48pt floor. This one carries none at all —
-    // its target comes from hitSlop, which is what keeps the strip one line tall.
-    expect(style?.minHeight).toBeUndefined();
-    expect(action.props.hitSlop).toBe(theme.space[3]);
+    expect(view.getByLabelText(/^Unread\./)).toBeTruthy();
   });
 
-  it('says how many are unread, from the same selector the bell counts with', async () => {
+  it('offers no control for something that needs no asking', async () => {
     const view = await open();
 
-    expect(view.getByText('1 unread')).toBeTruthy();
-  });
-
-  it('says nothing when everything has been read', async () => {
-    mockNotifications.length = 0;
-    mockNotifications.push(follow({ read_at: new Date().toISOString() }));
-    const view = await open();
-
-    expect(view.queryByText(/unread/)).toBeNull();
     expect(view.queryByLabelText('Mark all notifications read')).toBeNull();
+    expect(view.queryByText(/unread$/)).toBeNull();
   });
 });
 
@@ -188,11 +187,11 @@ describe('a follow notification', () => {
 });
 
 describe('read is something the reader does', () => {
-  it('does not mark anything read merely by being opened', async () => {
+  it('is still drawn unread on the visit that reads it', async () => {
     const view = await open();
 
     // Still unread after the screen has rendered: only the control changes this.
-    expect(view.getByText('1 unread')).toBeTruthy();
+    expect(view.getByLabelText(/^Unread./)).toBeTruthy();
   });
 });
 /**
@@ -219,7 +218,7 @@ describe('the welcome an invitation writes back', () => {
     mockNotifications.push(welcome());
     const view = await renderWithProviders(<NotificationsScreen />);
 
-    await waitFor(() => expect(view.getByText('Welcome to Bingd. ')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Welcome to bingd. ')).toBeTruthy());
     expect(view.getByText('Ada')).toBeTruthy();
     expect(view.getByText(' invited you 🎉')).toBeTruthy();
   });
@@ -235,17 +234,17 @@ describe('the welcome an invitation writes back', () => {
     const view = await renderWithProviders(<NotificationsScreen />);
 
     await waitFor(() =>
-      expect(view.getByLabelText(/Welcome to Bingd\. Ada invited you/)).toBeTruthy(),
+      expect(view.getByLabelText(/Welcome to bingd\. Ada invited you/)).toBeTruthy(),
     );
     expect(view.queryByLabelText(/🎉/)).toBeNull();
   });
 
-  it('counts toward unread like any other row', async () => {
+  it('paints as unread like any other row', async () => {
     mockNotifications.length = 0;
     mockNotifications.push(welcome());
     const view = await renderWithProviders(<NotificationsScreen />);
 
-    await waitFor(() => expect(view.getByText('1 unread')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText(/^Unread./)).toBeTruthy());
   });
 
   /**

@@ -165,7 +165,7 @@ export default function PublicProfileScreen() {
         <EmptyState
           kind="nothingYet"
           title={`You blocked @${blockedMatch.username}`}
-          body="You will not see each other on Bingd. Any follow between you is removed, and unblocking does not bring it back."
+          body="You will not see each other on bingd. Any follow between you is removed, and unblocking does not bring it back."
           action={{
             label: unblocking ? 'Unblocking…' : 'Unblock',
             onPress: () =>
@@ -296,7 +296,7 @@ export default function PublicProfileScreen() {
                   </View>
                   <View style={styles.action}>
                     <Button
-                      label="Bingd Awards"
+                      label="bingd. Awards"
                       kind="secondary"
                       onPress={() => setAwardsOpen(true)}
                     />
@@ -322,7 +322,12 @@ export default function PublicProfileScreen() {
 
           {notes.data?.length ? (
             <View style={styles.section}>
-              <SectionHeader title="Notes" />
+              {/* **Reviews, because that is what these are.** This section is fed by
+                  `public_notes`, so every row under it is writing its author chose to
+                  publish — the same rows the title page lists under a tab called
+                  Reviews, through the same predicate. Calling them Notes here was the
+                  sharpest of the three names one object had. */}
+              <SectionHeader title="Reviews" />
               {notes.data.map((entry) => (
                 <View key={`${entry.mediaItemId}-${entry.updatedAt}`} style={styles.note}>
                   <TitleRow

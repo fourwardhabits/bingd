@@ -107,7 +107,7 @@ describe('what the privacy screen promises', () => {
     const view = await open();
 
     await waitFor(() =>
-      expect(view.getByText(/Anyone on Bingd can see your ranked titles/)).toBeTruthy(),
+      expect(view.getByText(/Anyone on bingd. can see your ranked titles/)).toBeTruthy(),
     );
     expect(view.queryByText(/can still find you by name or @handle/)).toBeNull();
   });
@@ -133,7 +133,7 @@ describe('what the privacy screen promises', () => {
   it('describes neither setting until it knows which one is on', async () => {
     const view = await renderWithProviders(<PrivacyScreen />);
 
-    expect(view.queryByText(/Anyone on Bingd can see your ranked titles/)).toBeNull();
+    expect(view.queryByText(/Anyone on bingd. can see your ranked titles/)).toBeNull();
     expect(view.queryByText(/can still find you by name or @handle/)).toBeNull();
   });
 });

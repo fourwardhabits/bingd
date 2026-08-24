@@ -160,7 +160,7 @@ export default function ProfileScreen() {
                   />
                 </View>
                 <View style={styles.control}>
-                  <Button label="Bingd Awards" onPress={() => setAwardsOpen(true)} />
+                  <Button label="bingd. Awards" onPress={() => setAwardsOpen(true)} />
                 </View>
               </View>
               {/* Under the pair, full width, outlined like Share: inviting somebody is
