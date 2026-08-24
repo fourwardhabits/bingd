@@ -346,6 +346,20 @@ describe('the rating sheet', () => {
     expect(body.paddingTop).toBeGreaterThan(0);
   });
 
+  it('offers a way out that is not the scrim, and writes nothing on the way', async () => {
+    const view = await openSheet();
+
+    // `Sheet` hides its backdrop from the accessibility tree, so tapping outside is
+    // not a route a screen reader can take. Leaving must not cost a rating, and it
+    // must not leave a title behind either.
+    await fireEvent.press(view.getByRole('button', { name: 'Close' }));
+
+    await waitFor(() => expect(view.queryByText('How was it?')).toBeNull());
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('rank_start')).toHaveLength(0);
+    expect(view.getByLabelText('0 of 5 films ranked')).toBeTruthy();
+  });
+
   it('scrolls, so the largest text sizes cannot put a choice out of reach', async () => {
     const view = await openSheet();
 

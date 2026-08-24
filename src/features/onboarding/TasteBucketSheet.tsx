@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
@@ -115,7 +115,27 @@ export function TasteBucketSheet({
         keyboardShouldPersistTaps="handled"
         bounces={false}
       >
-        <Text variant="title2">How was it?</Text>
+        <View style={styles.head}>
+          <Text variant="title2" style={styles.heading}>
+            How was it?
+          </Text>
+          {/* The way out, in words, because the way out cannot be the scrim alone.
+              `Sheet` hides its backdrop from the accessibility tree on purpose, and
+              Android's back button is not a gesture VoiceOver offers — so without
+              this, a screen-reader user who opened the wrong film could leave only
+              by rating it. Every other sheet in the app carries one; this was the
+              omission. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            onPress={onClose}
+            hitSlop={theme.space[3]}
+          >
+            <Text variant="callout" tone="secondary">
+              Close
+            </Text>
+          </Pressable>
+        </View>
 
         <View style={styles.subject}>
           <Poster uri={subject.posterUri} title={subject.title} size="sm" />
@@ -173,6 +193,8 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space[2],
     gap: theme.space[4],
   },
+  head: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
+  heading: { flex: 1 },
   subject: { flexDirection: 'row', gap: theme.space[3], alignItems: 'center' },
   subjectText: { flex: 1, gap: theme.space[1] },
 });
