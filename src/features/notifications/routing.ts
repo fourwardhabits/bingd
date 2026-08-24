@@ -138,6 +138,19 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
     case 'invite_activated':
       return [...profile, unavailable('That account is no longer available.')];
 
+    /**
+     * The inviter, which is the whole point of the row.
+     *
+     * A new reader's inbox holds this and nothing else, and the one useful thing to do
+     * with it is look at the person who brought them. The identity-only profile at the
+     * end of the chain is a real destination even when the inviter is private — see the
+     * note at the top of this file — which matters here more than anywhere, because a
+     * private inviter is precisely the case where the invitee's follow is still pending
+     * and they may want to see who they are waiting on.
+     */
+    case 'invite_welcome':
+      return [...profile, unavailable('That account is no longer available.')];
+
     /** Nothing writes this one yet, and the sheet is real regardless. */
     case 'award_earned':
       return [{ kind: 'awards' }];
@@ -210,5 +223,6 @@ export const ROUTED_KINDS: readonly NotificationKind[] = [
   'watch_tag',
   'recommendation',
   'invite_activated',
+  'invite_welcome',
   'award_earned',
 ];

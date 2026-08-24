@@ -259,6 +259,20 @@ export default function CreateProfileScreen() {
             <Text variant="caption" tone="secondary">
               Date of birth
             </Text>
+            {/* **The question a beta tester actually asked.**
+                The screen collected a birthday with no explanation at all — the two
+                fields above it both carry a hint and this block carried none, so the
+                only place the reason appeared was the refusal screen, which you see
+                only if you are turned away.
+
+                Both halves are literally true and neither overstates. It is used for
+                the 13+ comparison in `create_profile` and for nothing else: the value
+                lands in `profile_private`, which has RLS enabled and no policy, so no
+                API returns it to anybody — including the person who typed it. It is on
+                the analytics denylist. Nothing personalises anything from it. */}
+            <Text variant="caption" tone="tertiary">
+              We use this to check you are 13 or over. It is never shown to anyone.
+            </Text>
             <View style={styles.birthRow}>
               <View style={styles.birthDay}>
                 <Field

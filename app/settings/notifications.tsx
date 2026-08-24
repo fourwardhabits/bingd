@@ -98,16 +98,27 @@ export default function NotificationsScreen() {
   const unread = unreadCount(rows);
 
   /**
-   * Whether the reader already follows the people who followed them.
+   * Whether the reader already follows the people these rows are about.
    *
-   * Asked once for the whole screen rather than per row, and only about the actors on
-   * `follow` rows — `follow_state_with` is security invoker, so it reports the
-   * caller's own edges and nothing else, but a list of ids is still a list of ids and
-   * there is no reason to send the ones no control depends on.
+   * Asked once for the whole screen rather than per row, and only about the actors
+   * whose rows can carry a follow control — `follow_state_with` is security invoker,
+   * so it reports the caller's own edges and nothing else, but a list of ids is still
+   * a list of ids and there is no reason to send the ones no control depends on.
+   *
+   * **This list and `canFollowBack` have to agree.** Found by independent review of
+   * `20260823000100`: `invite_welcome` was added to `canFollowBack` and not here, so
+   * the inviter's state was never asked for, `relationships` had nothing under their
+   * id, and "nobody has looked" was read as "there is no edge" — which offered Follow
+   * on every welcome row, including the overwhelmingly common one where the redemption
+   * had already created the follow a second earlier.
    */
+  const CAN_OFFER_FOLLOW: readonly Notification['kind'][] = ['follow', 'invite_welcome'];
   const followActors = [
     ...new Set(
-      rows.filter((row) => row.kind === 'follow').map((row) => row.actorId).filter(Boolean),
+      rows
+        .filter((row) => CAN_OFFER_FOLLOW.includes(row.kind))
+        .map((row) => row.actorId)
+        .filter(Boolean),
     ),
   ] as string[];
   const relationships = useRelationships(followActors, profile.id);
@@ -310,10 +321,11 @@ export default function NotificationsScreen() {
                   <View key={row.id} style={[styles.entry, !row.readAt && styles.unread]}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel={`${row.readAt ? '' : 'Unread. '}${row.actorName} ${verbFor(
-                        row.kind,
-                        row.mediaKind,
-                      )}${subject ? `, ${subject}` : ''}`}
+                      accessibilityLabel={`${row.readAt ? '' : 'Unread. '}${
+                        row.kind === 'invite_welcome' ? 'Welcome to Bingd. ' : ''
+                      }${row.actorName} ${verbFor(row.kind, row.mediaKind)}${
+                        subject ? `, ${subject}` : ''
+                      }`}
                       // From the same chain the tap uses, so the hint cannot promise a
                       // title and then open a profile.
                       accessibilityHint={hintFor(row)}
@@ -322,13 +334,31 @@ export default function NotificationsScreen() {
                     >
                       <Avatar size="sm" uri={row.actorAvatarUri} name={row.actorName ?? ''} />
                       <View style={styles.rowCopy}>
-                        <Text variant="callout" numberOfLines={2}>
-                          <Text variant="callout">{row.actorName}</Text>
-                          <Text variant="callout" tone="secondary">{` ${verbFor(
-                            row.kind,
-                            row.mediaKind,
-                          )}`}</Text>
-                        </Text>
+                        {/* The welcome is the one row whose sentence does not begin
+                            with the actor. It is the first thing a new account ever
+                            sees, so it greets before it reports, and the inviter's
+                            name still carries the emphasis every other row gives the
+                            person who did something.
+
+                            The emoji lives here and not in `verbFor`, which supplies
+                            the spoken label — "party popper" in the middle of that
+                            sentence helps nobody, and the celebration is the part
+                            that survives being dropped. */}
+                        {row.kind === 'invite_welcome' ? (
+                          <Text variant="callout" numberOfLines={2}>
+                            <Text variant="callout" tone="secondary">Welcome to Bingd. </Text>
+                            <Text variant="callout">{row.actorName}</Text>
+                            <Text variant="callout" tone="secondary"> invited you 🎉</Text>
+                          </Text>
+                        ) : (
+                          <Text variant="callout" numberOfLines={2}>
+                            <Text variant="callout">{row.actorName}</Text>
+                            <Text variant="callout" tone="secondary">{` ${verbFor(
+                              row.kind,
+                              row.mediaKind,
+                            )}`}</Text>
+                          </Text>
+                        )}
                         {/* The title on its own line rather than after a separator.
                             "Suraj recommended a movie" and then "Inception" is the
                             founder's shape, and it is also what stops a long name
@@ -349,14 +379,26 @@ export default function NotificationsScreen() {
                       </View>
                       <UnreadDot show={!row.readAt} />
                     </Pressable>
-                    {/* Follow back, on the row that announced the follow and nowhere
-                        else. Absent once the reader follows them, because a control
-                        for a relationship that already exists is a control that can
-                        only mislead. */}
+                    {/* Follow, on the two rows that name somebody worth following and
+                        nowhere else. Absent once the reader follows them, because a
+                        control for a relationship that already exists is a control
+                        that can only mislead.
+                        
+                        **"Follow back" is wrong on a welcome**: the inviter never
+                        followed them, so there is nothing to return. It is also the
+                        rarer of the two rows in practice — `redeem_invite` already
+                        creates the invitee's follow, so this appears only if they
+                        later unfollow and come back to the row. That it appears at
+                        all then is the point.
+
+                        A *pending* request shows no control either, by the same rule:
+                        the state is not "not following". Tapping through to the
+                        profile is where `FollowControl` says "Requested", which is the
+                        one place in the app that draws that state. */}
                     {offerFollowBack ? (
                       <View style={styles.rowAction}>
                         <Button
-                          label="Follow back"
+                          label={row.kind === 'invite_welcome' ? 'Follow' : 'Follow back'}
                           kind="secondary"
                           size="sm"
                           hitSlop={theme.space[2]}

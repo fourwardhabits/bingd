@@ -38,6 +38,20 @@ export type NotificationKind =
    */
   | 'invite_activated'
   /**
+   * The invitee's own welcome, filed by `redeem_invite` at the moment an invitation
+   * is accepted (`20260823000100`).
+   *
+   * The only kind in this list whose recipient is the *new* account. Everything else
+   * is news about somebody acting on an established reader; this is the first thing
+   * a person ever sees in Bingd, and it exists because the invitee was the one party
+   * to the exchange being told nothing — the inviter already gets a `follow`, and the
+   * follow itself already happens without either of them watching it.
+   *
+   * Written server-side inside the redemption, so a lost reply or a remount cannot
+   * produce a second one, and cannot lose the first.
+   */
+  | 'invite_welcome'
+  /**
    * An award tier was crossed. **Nothing writes this yet, and this run did not
    * build it.**
    *
@@ -90,6 +104,7 @@ const KINDS = new Set<string>([
   'watch_tag',
   'recommendation',
   'invite_activated',
+  'invite_welcome',
   'award_earned',
 ]);
 
@@ -263,6 +278,13 @@ export function verbFor(kind: NotificationKind, mediaKind?: Notification['mediaK
     case 'invite_activated':
       return 'joined Bingd from your invite';
     /**
+     * No emoji here, on purpose. The row draws one; a screen reader would say "party
+     * popper" in the middle of the only sentence that tells a new reader who brought
+     * them, and the celebration is the part that survives being dropped.
+     */
+    case 'invite_welcome':
+      return 'invited you';
+    /**
      * Second person, and no actor. Every other verb completes a sentence that began
      * with somebody's name; this one is the whole sentence, which is why the row
      * that draws it must not expect a face.
@@ -286,7 +308,11 @@ export function canFollowBack(
   row: Notification,
   outgoing: 'approved' | 'pending' | null | undefined,
 ): boolean {
-  return row.kind === 'follow' && Boolean(row.actorId) && !outgoing;
+  return (
+    (row.kind === 'follow' || row.kind === 'invite_welcome') &&
+    Boolean(row.actorId) &&
+    !outgoing
+  );
 }
 
 /**

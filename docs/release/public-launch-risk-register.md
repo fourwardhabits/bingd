@@ -401,3 +401,16 @@ moves to RESOLVED**; M1 through M4 and M6 through M9 stand exactly where they di
 
 **No SQL, no native config, and no notification semantics changed.** Read/unread still
 means what it meant: opening the inbox marks nothing, and only Mark all read clears it.
+
+## 7. Changes made in the invite-welcome and birthday pass, 2026-08-23
+
+| Change | Effect on this register |
+|---|---|
+| `invite_welcome` notification added (`20260823000100`) | None. An invitee is now told who invited them; **this is the first migration in four passes**, so this tranche needs a backend deploy where the last three did not |
+| Birthday helper copy on signup | None. Copy only — the reason was true and unstated |
+| DOB retention audited | **DOB-1 opened** in `../product/open-questions.md` §8. Collection is justified; the *retention* is not, because nothing reads the value after signup |
+| Push | Untouched. **M11 stands exactly as written** — this welcome is an inbox row and nothing here makes it a push |
+| Invite routing, tokens, attribution | Untouched. `redeem_invite` was recreated verbatim with one insert added; the follow, the inviter's notification, the refusal branches and the return shape are byte-identical |
+
+**M10 is unchanged and was not acted on** — the public open-signup requirement stays a
+recorded decision, not work. No existing major changed classification in this pass.

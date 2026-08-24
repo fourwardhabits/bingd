@@ -922,6 +922,7 @@ Build the **entire** system in v1: event generation, in-app inbox, per-category 
 | Event | Inbox | Push (when enabled) |
 |---|---|---|
 | Someone joined from your invite | Yes | Yes |
+| You joined from someone's invite | Yes *(added 2026-08-23)* | Yes |
 | New follower | Yes | Yes |
 | Follow request received | Yes | Yes |
 | Follow request approved | Yes | No |
@@ -959,7 +960,13 @@ Never request push permission at first launch. Request after the user's first su
 
 Reviewed at 23f PASS. Where this block and the v1 event set above disagree, this block is what ships.
 
-**Nine notification types.** The canonical names are `follow`, `follow_request`, `follow_approved`, `comment`, `reaction`, `watch_tag`, `recommendation`, `invite_activated`, `award_earned`.
+**Ten notification types.** The canonical names are `follow`, `follow_request`, `follow_approved`, `comment`, `reaction`, `watch_tag`, `recommendation`, `invite_activated`, `invite_welcome`, `award_earned`.
+
+> **`invite_welcome` added 2026-08-23** (`20260823000100`). The only type whose recipient is a *brand-new* account: it is filed for the **invitee** by `redeem_invite`, names the inviter, and is the first thing anybody sees in Bingd. It exists because the invitee was the one party to an invitation being told nothing — §17 already creates their follow and already notifies the inviter, so a person who joined through a friend's link arrived to a follow they never watched happen and an empty inbox. A beta tester reported it as a Feed that starts empty.
+>
+> **Exempt from the category gate, like `follow_request`**, and for a related reason: it fires once, at account creation, for somebody who has never opened the settings screen and has nothing there to have chosen. A preference that could silence it could only ever be silenced by accident.
+>
+> **Exactly one per account, for ever.** The mechanism is the insert's position inside `redeem_invite` — it is reachable only when the `invite_attributions` row was genuinely new, and `invitee_id` is that table's primary key. A partial unique index backs it up. **It is an inbox row, not a push**; push is still unbuilt.
 
 **Eight categories, one per kind, each with its own default.** `recommendation` had been in no category at all, so the trigger's `case` returned null, the unmapped-type rule delivered the row unconditionally, and **a recommendation could not be switched off** — by accident rather than by decision. That is the defect the settings screen would otherwise have shipped on top of.
 
@@ -998,6 +1005,7 @@ Each type has an ordered chain whose last link always resolves. Staleness is rea
 | `watch_tag` | the Movie or Season | unavailable notice |
 | `recommendation` | the Movie or Season | recommender's profile, then unavailable |
 | `invite_activated` | the joined user's profile | unavailable notice |
+| `invite_welcome` | the inviter's profile | unavailable notice |
 | `award_earned` | the Awards sheet | — |
 
 **Comment and reaction route to the title rather than to the exact feed event, deliberately.** There is no per-event route, and the feed tab is a paginated list of *followees'* activity — a reader's own event does not appear in it at all. Routing to a screen that cannot contain the subject is worse than routing to its parent. Deferred as [`deferred-roadmap.md`](./deferred-roadmap.md) §6.
