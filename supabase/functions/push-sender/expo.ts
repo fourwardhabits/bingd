@@ -33,6 +33,26 @@
 const ENDPOINT = 'https://exp.host/--/api/v2/push/send';
 
 /**
+ * Everything below returns a `failure` string that `index.ts` writes to the function log,
+ * and two of those strings are built from **the provider's own words**: the body of a
+ * non-2xx response, and `errors[0].message`. Expo names the token it is complaining about
+ * — `"ExponentPushToken[...]" is not a registered push notification recipient` is one of
+ * its ordinary replies — so those two paths copy an operational secret into a log that
+ * outlives the request.
+ *
+ * This is the same two-pass redaction `src/features/notifications/push.ts` applies on the
+ * client, and it is here for the same reason it is there: a token is a device address, a
+ * log is not the place for one, and nothing on screen or in a diff would have shown it.
+ * The first pass takes an Expo token by its literal shape; the second takes any long
+ * opaque run, which is what a raw APNs token, an FCM token and a JWT all look like.
+ */
+export function redactTokens(message: string): string {
+  return message
+    .replace(/Expo(nent)?PushToken\[[^\]]*\]/g, '[token]')
+    .replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]');
+}
+
+/**
  * Expo's documented ceiling for one request. Exceeding it is rejected outright rather
  * than truncated, so this is a hard chunk size rather than a tuning knob.
  */
@@ -121,7 +141,7 @@ export async function sendChunk(
       body: JSON.stringify(messages),
     });
   } catch (e) {
-    return { tickets: [], failure: `push transport: ${(e as Error).message}` };
+    return { tickets: [], failure: redactTokens(`push transport: ${(e as Error).message}`) };
   }
 
   if (!response.ok) {
@@ -129,18 +149,27 @@ export async function sendChunk(
     // from something in front of Expo. Bounded, so neither ends up in a log entry
     // measured in kilobytes.
     const text = await response.text().catch(() => '');
-    return { tickets: [], failure: `push ${response.status}: ${text.slice(0, 200)}` };
+    return {
+      tickets: [],
+      failure: redactTokens(`push ${response.status}: ${text.slice(0, 200)}`),
+    };
   }
 
   let payload: { data?: ExpoTicket[]; errors?: { message?: string }[] };
   try {
     payload = await response.json();
   } catch (e) {
-    return { tickets: [], failure: `push response was not json: ${(e as Error).message}` };
+    return {
+      tickets: [],
+      failure: redactTokens(`push response was not json: ${(e as Error).message}`),
+    };
   }
 
   if (Array.isArray(payload?.errors) && payload.errors.length) {
-    return { tickets: [], failure: `push rejected: ${payload.errors[0]?.message ?? 'unknown'}` };
+    return {
+      tickets: [],
+      failure: redactTokens(`push rejected: ${payload.errors[0]?.message ?? 'unknown'}`),
+    };
   }
 
   const tickets = payload?.data;

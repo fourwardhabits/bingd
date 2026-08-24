@@ -58,7 +58,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import { messagesFor, summarise } from './batch.ts';
 import type { PushJob } from './copy.ts';
-import { chunk, isDeadToken, isRetryable, sendChunk } from './expo.ts';
+import { chunk, isDeadToken, isRetryable, redactTokens, sendChunk } from './expo.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -110,18 +110,48 @@ function claimsServiceRole(token: string): boolean {
   }
 }
 
-/** Somebody real, or nobody. The identity is never used for anything but this gate. */
-async function isKnownCaller(db: SupabaseClient, req: Request): Promise<boolean> {
-  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
-  if (!token) return false;
+/**
+ * What an invocation answers with.
+ *
+ * **A signed-in caller is told only that the drain ran.** The counts are global — this
+ * function drains one queue for everybody — so returning them to any authenticated caller
+ * makes the endpoint an oracle over other people's activity: poll it, and the numbers move
+ * when somebody else is followed, commented on or recommended a title. Nobody is *named*
+ * by that, which is why it is a side channel rather than a disclosure — but the header of
+ * this file claims an invocation buys "no output about anybody", and this is what makes
+ * that true rather than nearly true.
+ *
+ * `service_role` still gets the numbers. It operates the queue, it can already read the
+ * table directly, and a scheduled drain with no way to say what it did is not operable.
+ */
+function counts(
+  caller: Caller,
+  body: { claimed: number; sent: number; failed: number; revoked: number },
+) {
+  return caller === 'service_role' ? body : { ok: true };
+}
 
-  if (token === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')) return true;
-  if (claimsServiceRole(token)) return true;
+/**
+ * Which kind of caller this is, or null for nobody.
+ *
+ * This used to answer only "is this somebody real", because the identity was never used
+ * for anything but the gate. It is used for one more thing now — see `counts` above — and
+ * the distinction it draws is between a caller that *operates* this system and one that
+ * merely nudged it.
+ */
+type Caller = 'service_role' | 'user';
+
+async function resolveCaller(db: SupabaseClient, req: Request): Promise<Caller | null> {
+  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+  if (!token) return null;
+
+  if (token === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')) return 'service_role';
+  if (claimsServiceRole(token)) return 'service_role';
 
   // The anon key is itself a valid JWT and resolves to no user, which is what this
   // rejects. `verify_jwt` alone would have let it through.
   const { data, error } = await db.auth.getUser(token);
-  return !error && Boolean(data.user);
+  return !error && data.user ? 'user' : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +171,8 @@ Deno.serve(async (req) => {
     return json({ error: 'not configured' }, 500);
   }
 
-  if (!(await isKnownCaller(db, req))) return json({ error: 'unauthorized' }, 401);
+  const caller = await resolveCaller(db, req);
+  if (!caller) return json({ error: 'unauthorized' }, 401);
 
   const { data: claimed, error: claimError } = await db.rpc('claim_push_batch', { p_limit: BATCH });
   if (claimError) {
@@ -150,7 +181,9 @@ Deno.serve(async (req) => {
   }
 
   const jobs = (claimed ?? []) as PushJob[];
-  if (jobs.length === 0) return json({ claimed: 0, sent: 0, failed: 0, revoked: 0 });
+  if (jobs.length === 0) {
+    return json(counts(caller, { claimed: 0, sent: 0, failed: 0, revoked: 0 }));
+  }
 
   const addressed = messagesFor(jobs);
   if (addressed.length === 0) {
@@ -160,7 +193,7 @@ Deno.serve(async (req) => {
       p_results: jobs.map((job) => ({ notification_id: job.notification_id, delivered: true })),
       p_invalid_tokens: null,
     });
-    return json({ claimed: jobs.length, sent: 0, failed: 0, revoked: 0 });
+    return json(counts(caller, { claimed: jobs.length, sent: 0, failed: 0, revoked: 0 }));
   }
 
   /**
@@ -189,7 +222,11 @@ Deno.serve(async (req) => {
       outcomes.push({
         retryable: isRetryable(ticket),
         dead: isDeadToken(ticket),
-        message: ticket.status === 'error' ? ticket.message : null,
+        // Redacted for the same reason the chunk failure is, and by the same function.
+        // This one does not reach a log — `summarise` carries it into `last_error` — but
+        // Expo names the token it is rejecting, and `push_outbox` is a queue rather than
+        // somewhere to keep a device address.
+        message: ticket.status === 'error' ? redactTokens(ticket.message ?? '') : null,
       });
     }
   }
@@ -209,10 +246,12 @@ Deno.serve(async (req) => {
   }
 
   const failed = results.filter((r) => !r.delivered).length;
-  return json({
-    claimed: jobs.length,
-    sent: results.length - failed,
-    failed,
-    revoked: (settled as { revoked?: number } | null)?.revoked ?? 0,
-  });
+  return json(
+    counts(caller, {
+      claimed: jobs.length,
+      sent: results.length - failed,
+      failed,
+      revoked: (settled as { revoked?: number } | null)?.revoked ?? 0,
+    }),
+  );
 });

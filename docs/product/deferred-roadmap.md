@@ -237,6 +237,26 @@ is an `AFTER INSERT` trigger. No per-channel settings were added.
    no control in Settings to change that answer afterwards.
 4. **The scheduled nudge** (PRD §15), which ships with push in the PRD's plan and is not in
    this tranche. It stays deferred as §15 below.
+5. **A sign-out that cannot be outrun.** `releaseDeviceOnSignOut` moves a session epoch,
+   then waits up to three seconds for registrations already in flight so their compensating
+   revoke happens while the session still exists. Past that ceiling it proceeds. A
+   registration that lands *after* it — with a JWT still valid server-side — leaves the
+   token owned by the account that just signed out, and the compensating revoke fails
+   because the local session is gone. The backstop is the server's move-on-conflict: the
+   **next** account to sign in on that phone takes the device in one statement. So the
+   exposure is a phone signed out and left signed out, and it ends the moment anybody signs
+   in. Closing it properly needs server-side ownership epochs — an `operation_id` the
+   server can recognise as belonging to an ended session — which is a schema change and new
+   push behaviour rather than a fix. **Raised by independent review 40 and accepted as a
+   bounded residual risk**, not a defect introduced by the integration.
+6. **An outbox row can outlive its attempt ceiling.** `claim_push_batch` increments
+   `attempts` as it claims, and the due predicate is `attempts < 3`. A sender that dies
+   between its **third** claim and its settlement therefore leaves a row that no lease
+   expiry can make claimable again — it is deleted only by the cascade when its notification
+   goes. One stranded row per crashed final attempt, invisible to every client, and the
+   in-app notification it was for has already arrived. Left alone deliberately: every fix
+   changes claim or lease semantics, and this tranche is the last one before the native
+   surface freezes. **Raised by independent review 40.**
 
 ---
 

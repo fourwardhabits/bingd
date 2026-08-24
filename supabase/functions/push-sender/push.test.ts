@@ -14,7 +14,14 @@
 import { assert, assertEquals } from '@std/assert';
 
 import { contentFor, subjectName, type PushJob } from './copy.ts';
-import { chunk, isDeadToken, isRetryable, sendChunk, type ExpoTicket } from './expo.ts';
+import {
+  chunk,
+  isDeadToken,
+  isRetryable,
+  redactTokens,
+  sendChunk,
+  type ExpoTicket,
+} from './expo.ts';
 import { summarise, type Addressed } from './batch.ts';
 
 const job = (overrides: Partial<PushJob> = {}): PushJob => ({
@@ -198,6 +205,61 @@ Deno.test('bounds what it repeats from an error body', async () => {
 
   assert(outcome.failure);
   assert(outcome.failure.length < 300, `failure was ${outcome.failure.length} characters`);
+});
+
+/**
+ * Review 40 found these: every `failure` string is built from the provider's own words and
+ * is then written to a function log, and Expo names the token it is rejecting. A log
+ * outlives the request, so an unredacted failure puts a device address somewhere nobody
+ * would look for one. The client has had a redactor since a test caught the same leak
+ * there; these are the sender's half.
+ */
+Deno.test('redaction takes an Expo token out of a message, whichever spelling', () => {
+  assertEquals(
+    redactTokens('"ExponentPushToken[abc-123]" is not a registered recipient'),
+    '"[token]" is not a registered recipient',
+  );
+  assertEquals(redactTokens('bad ExpoPushToken[xyz]'), 'bad [token]');
+});
+
+Deno.test('redaction also takes a long opaque run, which is what a raw APNs token is', () => {
+  const apns = 'a'.repeat(64);
+  assert(!redactTokens(`rejected ${apns}`).includes(apns));
+});
+
+Deno.test('an error body that names a token does not reach the failure string', async () => {
+  const outcome = await sendChunk(
+    [{ to: 'a', title: 't', body: 'b', data: {} }],
+    stub(
+      () =>
+        new Response('unregistered: "ExponentPushToken[secret-device-address]"', {
+          status: 400,
+        }),
+    ),
+  );
+
+  assert(outcome.failure);
+  assert(
+    !outcome.failure.includes('ExponentPushToken['),
+    `failure carried a token: ${outcome.failure}`,
+  );
+  assert(!outcome.failure.includes('secret-device-address'));
+});
+
+Deno.test("a provider's own error message is redacted too", async () => {
+  const outcome = await sendChunk(
+    [{ to: 'a', title: 't', body: 'b', data: {} }],
+    stub(
+      () =>
+        new Response(
+          JSON.stringify({ errors: [{ message: 'ExponentPushToken[nope] is invalid' }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    ),
+  );
+
+  assert(outcome.failure);
+  assert(!outcome.failure.includes('ExponentPushToken['), outcome.failure);
 });
 
 Deno.test('sends nothing for an empty chunk', async () => {

@@ -1893,8 +1893,8 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
    - **The module** — done, and in every build since the first.
    - **The native configuration** — done in `public/push-v1`, production-only: `aps-environment: production` on iOS and `googleServicesFile` on Android. The 2026-08-23 version of this line said the native side was covered and that enabling push "will not force a new binary". Both halves were wrong: the configuration was absent, and it is native, so it **does** force a new production binary and a store submission.
    - **The credentials** — open, and a founder task. APNs `.p8` / Key ID / Team ID on Apple; a Firebase project, `google-services.json` and an FCM V1 service account on Google. The checklist is in [`push-sender/README.md`](../../supabase/functions/push-sender/README.md).
-6. Push **delivery** is disabled by a server-side flag, and no push is delivered in v1.
-7. Enabling the flag requires no new native build and no store submission.
+6. ~~Push **delivery** is disabled by a server-side flag, and no push is delivered in v1.~~ **Restated 2026-08-24.** There is no server-side delivery flag and there never was one. What gates delivery is the absence of a production binary carrying the native push configuration, and — until the founder supplies them — the absence of APNs and FCM credentials. The friend beta is on a binary that predates that configuration, deliberately, so no push is delivered there either.
+7. ~~Enabling the flag requires no new native build and no store submission.~~ **False, corrected 2026-08-24.** It requires both. The native configuration — `aps-environment: production` and `googleServicesFile` — cannot be changed over the air. See item 5 above and [`deferred-roadmap.md`](./deferred-roadmap.md) §4.
 8. Push permission is never requested at first launch; it is requested after the first invite or follow.
 9. If OS permission is denied, the preferences screen states this and links to system settings.
 10. Sync-failure notices appear in the inbox and never as push.
