@@ -547,3 +547,36 @@ describe('two registrations in flight at once', () => {
     expect(released).toBe(true);
   });
 });
+
+/**
+ * A wedged write's own removal runs in a callback that will never fire, so without the
+ * clear it would sit in the set for the life of the process and charge every later
+ * sign-out the full grace period. Found on the fourth review round.
+ */
+describe('a write that never settles', () => {
+  it('is waited on once and never again', async () => {
+    jest.useFakeTimers();
+    try {
+      trackDispatchedWrite(new Promise<void>(() => {}));
+
+      let first = false;
+      const one = releaseDeviceOnSignOut().then(() => {
+        first = true;
+      });
+      await Promise.resolve();
+      expect(first).toBe(false);
+      jest.advanceTimersByTime(3000);
+      await one;
+
+      // The second sign-out must not wait at all: nothing is left to wait for.
+      let second = false;
+      const two = releaseDeviceOnSignOut().then(() => {
+        second = true;
+      });
+      await two;
+      expect(second).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
