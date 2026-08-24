@@ -398,6 +398,7 @@ Comments, DMs, discussion boards, and long-form reviews. Destination-specific so
 >
 > - **Comments shipped.** They are on feed activity, rate-limited, with their own notification type and category. The Deferred line is stale on that one word; DMs, discussion boards and long-form reviews remain deferred.
 > - **Achievements shipped as Bingd Awards** (2026-08-18) and are no longer a backlog item. See §14's As-built block.
+> - **An invite is referral and attribution, never permission to create an account.** Recorded here 2026-08-25 because the opposite is a natural thing to assume from a beta whose whole shape is invitations, and assuming it produces engineering work that should not exist. There is **no app-level invite-admission gate today** — `create_profile` requires no token, and nothing in the schema conditions account creation on an invitation. What limits who can sign up during the beta is entirely **distribution**: TestFlight and a Play closed test. Public store availability therefore opens ordinary account creation on its own, with no "remove the invite gate" task to do, because there is no gate to remove. What an invite carries is the connection: who brought you, and the follow that follows from it.
 > - **Letterboxd import was listed as a v1 must-have, has not been built, and is no longer a release gate.** No import screen, no CSV parser, no matching pipeline. **Deprioritized 2026-08-23**: it gates neither the friend beta nor either initial store release. The cohort is building collections by hand, which is the behaviour the beta exists to observe and which an importer would erase. §12 keeps the full specification; `deferred-roadmap.md` §20 holds the staging decision.
 >
 > Everything else this document calls Deferred is still deferred. The canonical register, with the reasoning and the revisit trigger for each, is [`deferred-roadmap.md`](./deferred-roadmap.md).
@@ -1599,16 +1600,52 @@ A report flow with a defined reason taxonomy, covering profiles, lists, list tit
 
 Bingd carries user-generated content — usernames, display names, list titles, tags — which triggers platform obligations for content filtering, reporting, blocking, and published contact information.
 
-> **As built — 2026-08-23: the UGC surface is larger than this section describes, and the report path does not yet cover it.** Two free-text surfaces shipped after the taxonomy above was written:
+> **As built — 2026-08-25: the report path now covers the whole UGC surface.** The two
+> free-text surfaces that shipped after the taxonomy above was written are both
+> reportable:
 >
-> - **Feed comments**, which are readable by anyone who can see the activity they sit on.
-> - **Public notes, surfaced as Bingd Reviews** on a title page and on a profile.
+> - **Feed comments**, readable by anyone who can see the activity they sit on. Subject
+>   `comment`; the owner resolves from `comments.author_id`, which is the author rather
+>   than the actor whose activity it was written under.
+> - **Reviews** — a public note — on a title page and on a profile. Subject `review`; the
+>   owner resolves from the `user_media` row named by `user_media.id`, a surrogate added
+>   by `20260825000100` because `reports.subject_id` is one uuid and the row's key is a
+>   pair. Reporting by title instead would have made two people's reviews of one film
+>   collide on `reports_one_open_per_reporter` and silently dropped the second complaint.
 >
-> `report_subject` covers `profile`, `display_name`, `username`, `list`, `list_title` and `watch_tag`. It does **not** include `comment` or `note`, and the report RPC has **no client call site at all**, so nothing in the app can file a report about anything. A Terms of Use and community policy, and acceptance of them before a user creates UGC, do not exist either.
+> **A Private note has no subject and must not get one.** It has exactly one reader, so
+> there is nobody it could harm and nobody who could report it; a subject for it would
+> exist only to be probed — a way to ask the server whether a row carries private
+> writing. `report()` resolves a `review` only while the note is public, which keeps that
+> true rather than merely intended.
 >
-> **This is a pre-public gate, not a friend-beta blocker** — the cohort is a few dozen people who know each other and the founder, and blocking already works in both directions. It is tracked as **M1** in [`../release/public-launch-risk-register.md`](../release/public-launch-risk-register.md) and gated by §27 and HG-4, which already require the whole loop rather than a report button.
+> The client offers Report on a **comment**, a **review** and a **profile**, through one
+> compact reason sheet using the existing eight-value taxonomy. Reporting does **not**
+> block: they are separate acts and the app keeps them separate, which also means the
+> control stays present on a profile the viewer has already blocked — the database
+> deliberately checks that a subject *exists* and not that the caller can still see it,
+> so that blocking somebody cannot suppress the complaint about them.
 >
-> **Nothing here implies these surfaces are private.** They are public by the author's own choice and are described as such above; the gap is that there is no way to *report* them, which is a different thing from their being hidden.
+> The operator half is [`../release/moderation-runbook.md`](../release/moderation-runbook.md):
+> queue, inspect, act, record, close, run from the Supabase SQL editor. **No admin
+> console, no automated detection, no appeals, no notification on a new report** — all
+> four are stated as absent there and none is claimed in the Terms.
+>
+> **What remains open is legal, not engineering.** A Terms of Use now exists at
+> [`/terms`](https://bingd.app/terms) and is acknowledged at account creation, but it is
+> a **draft**: it names `[LEGAL ENTITY / DEVELOPER NAME — FOUNDER TO CONFIRM]`, states no
+> governing law, venue or arbitration clause, and no lawyer has read it. **M1** in
+> [`../release/public-launch-risk-register.md`](../release/public-launch-risk-register.md)
+> tracks the remainder.
+>
+> **No acceptance state is stored, deliberately.** A persisted accepted-version stamp is
+> what a product needs in order to *re-prompt* on a change, and nothing re-prompts: there
+> is no versioned Terms table, no launch gate and no blocking Agree screen, so the column
+> would be a legal data model with no reader. The account's creation timestamp already
+> records when somebody agreed to the Terms as they stood that day.
+>
+> **Nothing here implies these surfaces are private.** They are public by the author's own
+> choice and are described as such above.
 
 ### Minimum age — Required
 
@@ -1972,7 +2009,7 @@ Public alpha may not ship until every item is true.
 
 - [ ] Reliable account creation and sign-in on both platforms, including Sign in with Apple on iOS.
 - [ ] Search, detail, watched state, buckets, and comparison ranking work end to end for movies and TV seasons.
-- [ ] Letterboxd import completes end to end, including preview, bucket mapping, full list import, and the anchor session.
+- ~~Letterboxd import completes end to end, including preview, bucket mapping, full list import, and the anchor session.~~ **Struck 2026-08-25. Not a gate on either initial store release.** §11's As-built block deprioritized it on 2026-08-23 and this line was left behind, so §11 and §27 disagreed about whether the same unbuilt feature blocked launch. It does not: the cohort is building collections by hand, which is the behaviour the beta exists to observe. §12 keeps the full specification and `deferred-roadmap.md` §20 holds the staging decision.
 - [ ] Profiles, follows, feed, people discovery, match scores, reactions, and tagging are functional.
 - [ ] The notification system delivers inbox items for all seven v1 events, with working preferences.
 - [ ] Recommendations return useful results for new, imported-only, and established accounts, with every guardrail enforced.
@@ -1980,13 +2017,13 @@ Public alpha may not ship until every item is true.
 - [ ] Capability enforcement is server-side and cannot be bypassed.
 - [ ] Sharing and invitations work end to end, installed and uninstalled, with the Top 10 card polished.
 - [ ] Offline behavior matches the §18 matrix exactly, with honest state labels.
-- [ ] Privacy defaults, blocking, reporting, and account deletion all function.
-- [ ] **The operator can see a filed report, suspend an account, and reverse it**, and every action is recorded. Reporting without a way to act on a report is a checkbox, not a safety feature.
+- [x] Privacy defaults, blocking, reporting, and account deletion all function. **Reporting closed 2026-08-25**: `report_subject` gained `comment` and `review`, `report()` resolves both owners server-side, and the app has Report on a comment, a review and a profile. A **Private note** deliberately has no subject and no path — it has one reader, so there is nobody to report it and nothing a subject would be for but probing.
+- [x] **The operator can see a filed report, suspend an account, and reverse it**, and every action is recorded. Reporting without a way to act on a report is a checkbox, not a safety feature. The procedure is [`../release/moderation-runbook.md`](../release/moderation-runbook.md), run from the Supabase SQL editor. **No admin console, no automated detection, no appeals, and no notification when a report arrives** — the runbook says so in those words, and the Terms of Use claims none of them.
 - [ ] Crash monitoring, analytics, and alerting are live in production.
 - [ ] A published contact address reaches the founder, and the data-request path in HG-4 has been exercised once end to end rather than only written down.
 - [ ] **HG-2** Android developer verification complete.
 - [ ] **HG-3** App Store and Play name availability confirmed; knockout trademark search complete.
-- [ ] **HG-4** Privacy policy, terms of use, support contact, 13+ statement, age ratings, and data-request path published.
+- [ ] **HG-4** Privacy policy, terms of use, support contact, 13+ statement, age ratings, and data-request path published. **Terms of Use drafted and routed 2026-08-25** at `/terms`, generated by the same `web/build.mjs` as the privacy, support and deletion pages, linked from Settings and acknowledged at account creation. **It is a draft and this item stays open**: it names `[LEGAL ENTITY / DEVELOPER NAME — FOUNDER TO CONFIRM]`, states no governing law, venue or arbitration clause, and no lawyer has read it. Age ratings and the data-request path are untouched by that tranche.
 - [ ] **HG-5** Google Play production access granted.
 - [ ] **HG-6** Brand assets outlined, font import removed, square icon mark produced.
 - [ ] Store metadata, screenshots, and review notes prepared for both platforms.

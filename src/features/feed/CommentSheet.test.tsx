@@ -106,7 +106,18 @@ const open = async (over: Partial<React.ComponentProps<typeof CommentSheet>> = {
  * *not* taken — a spy on the RPC alone cannot tell 'refused' from 'never confirmed'.
  */
 const alertButtons: { text?: string; onPress?: () => void }[] = [];
-jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+/**
+ * The title and message of every alert raised, in order.
+ *
+ * Recorded as well as the buttons because reporting's whole outcome *is* an alert: it
+ * has no confirmation step and no visible state change, so "did the report succeed"
+ * and "was the failure explained" can only be read here.
+ */
+const alertTitles: string[] = [];
+const alertMessages: string[] = [];
+jest.spyOn(Alert, 'alert').mockImplementation((title, message, buttons) => {
+  alertTitles.push(title);
+  alertMessages.push(message ?? '');
   alertButtons.length = 0;
   for (const button of buttons ?? []) alertButtons.push(button);
 });
@@ -123,6 +134,8 @@ beforeEach(() => {
   mockRpcError = null;
   mockRpcGate = null;
   alertButtons.length = 0;
+  alertTitles.length = 0;
+  alertMessages.length = 0;
 });
 
 // ---------------------------------------------------------------------------
@@ -582,5 +595,125 @@ describe('an opening, not an activity id', () => {
     await waitFor(() => expect(mockRpcCalls).toHaveLength(1));
 
     expect(view.getByDisplayValue('second attempt')).toBeTruthy();
+  });
+});
+
+
+/**
+ * Reporting a comment.
+ *
+ * The control sits in the branch Edit and Delete do not, so a good deal of what is worth
+ * asserting here is about *absence*: on your own comment there must be no Report at all,
+ * because `report()` refuses a self-report with a 22023 and a control whose only possible
+ * outcome is an error message is worse than no control.
+ */
+describe('reporting a comment', () => {
+  it("offers Report on somebody else's comment and not on your own", async () => {
+    mockCommentRows = [
+      comment({ id: 'theirs', author_id: AUTHOR }),
+      comment({
+        id: 'mine',
+        author_id: VIEWER,
+        body: 'my own remark',
+        profiles: { username: 'me', display_name: 'Me', avatar_path: null },
+      }),
+    ];
+
+    const view = await open();
+
+    // One Report, for the one comment that is not the viewer's.
+    expect(view.getAllByText('Report')).toHaveLength(1);
+    expect(view.getByLabelText("Report Anna's comment")).toBeTruthy();
+
+    // And the viewer's own comment keeps its own two controls.
+    expect(view.getByLabelText('Edit your comment')).toBeTruthy();
+    expect(view.getByLabelText('Delete your comment')).toBeTruthy();
+  });
+
+  it('files the chosen reason against the comment id, and sends no owner', async () => {
+    mockCommentRows = [comment({ id: 'c-abusive', author_id: AUTHOR })];
+    const view = await open();
+
+    await fireEvent.press(view.getByLabelText("Report Anna's comment"));
+    await fireEvent.press(view.getByText('Harassment or bullying'));
+
+    await waitFor(() => expect(mockRpcCalls.filter((c) => c.name === 'report')).toHaveLength(1));
+    const call = mockRpcCalls.find((c) => c.name === 'report');
+
+    /**
+     * **Exactly these three arguments.** The whole reason `report()` resolves the author
+     * from `comments.author_id` is that a client-supplied owner would let anybody
+     * attribute a report to an account of their choosing — and a call that passed one
+     * would still succeed, because the server ignores what it did not ask for. So the
+     * absence has to be asserted on this side.
+     */
+    expect(call?.args).toEqual({
+      p_subject_type: 'comment',
+      p_subject_id: 'c-abusive',
+      p_reason: 'harassment',
+    });
+  });
+
+  it('uses the backend taxonomy rather than a second set of reasons', async () => {
+    mockCommentRows = [comment({ author_id: AUTHOR })];
+    const view = await open();
+    await fireEvent.press(view.getByLabelText("Report Anna's comment"));
+
+    // Eight, matching `reports_known_reason`. A ninth invented here would produce
+    // reports the triage process has no column for.
+    for (const label of [
+      'Harassment or bullying',
+      'Hate speech',
+      'Self-harm or suicide',
+      'Sexual content',
+      'Pretending to be someone',
+      'Illegal content',
+      'Spam or a scam',
+      'Something else',
+    ]) {
+      expect(view.getByText(label)).toBeTruthy();
+    }
+  });
+
+  it('thanks the reporter without claiming the report was new', async () => {
+    mockCommentRows = [comment({ author_id: AUTHOR })];
+    const view = await open();
+
+    await fireEvent.press(view.getByLabelText("Report Anna's comment"));
+    await fireEvent.press(view.getByText('Spam or a scam'));
+
+    await waitFor(() => expect(alertTitles).toContain('Thanks for telling us'));
+    // The server's receipt cannot distinguish "filed" from "you already reported this",
+    // deliberately — so the confirmation must not assert either.
+    expect(alertTitles.concat(alertMessages).join(' ')).not.toMatch(/already|first|new report/i);
+  });
+
+  /**
+   * A stale row: the comment was deleted between the list loading and a reason being
+   * chosen. The server answers P0002, and the sheet has to say so rather than throw.
+   */
+  it('fails gracefully when the comment has already been removed', async () => {
+    mockCommentRows = [comment({ author_id: AUTHOR })];
+    const view = await open();
+
+    mockRpcError = { code: 'P0002', message: 'no such subject' };
+    await fireEvent.press(view.getByLabelText("Report Anna's comment"));
+    await fireEvent.press(view.getByText('Hate speech'));
+
+    await waitFor(() => expect(alertTitles).toContain('Could not report'));
+    expect(alertMessages).toContain('That has already been removed.');
+  });
+
+  it('does not block anybody as a side effect of reporting them', async () => {
+    mockCommentRows = [comment({ author_id: AUTHOR })];
+    const view = await open();
+
+    await fireEvent.press(view.getByLabelText("Report Anna's comment"));
+    await fireEvent.press(view.getByText('Hate speech'));
+
+    await waitFor(() => expect(mockRpcCalls.some((c) => c.name === 'report')).toBe(true));
+    // Report and Block are separate acts with separate consequences. Bundling them would
+    // silently block somebody who only meant to flag one remark.
+    expect(mockRpcCalls.map((c) => c.name)).not.toContain('block');
   });
 });

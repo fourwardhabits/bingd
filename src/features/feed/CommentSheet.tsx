@@ -4,6 +4,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react
 
 import { shouldMask } from '@/features/collection/use-watched';
 import { newOperationId } from '@/features/collection/writes';
+import { ReportSheet } from '@/features/moderation/ReportSheet';
 import { Avatar, Button, EmptyState, Sheet, SpoilerNote, Text } from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
@@ -76,6 +77,9 @@ export function CommentSheet({
   // than growing a second one inside the row: two text inputs that can both be
   // focused is how a draft ends up submitted against the wrong comment.
   const [editing, setEditing] = useState<Comment | null>(null);
+  // Which comment's reason sheet is open, by id. An id rather than the row, because a
+  // refetch replaces the objects and the sheet should stay open across one.
+  const [reporting, setReporting] = useState<string | null>(null);
 
   /**
    * The composer belongs to one event, and this is what makes that true.
@@ -277,6 +281,7 @@ export function CommentSheet({
               onPressAuthor={() => onPressPerson(comment.authorUsername)}
               onEdit={() => beginEdit(comment)}
               onDelete={() => confirmDelete(comment)}
+              onReport={() => setReporting(comment.id)}
             />
           ))
         )}
@@ -366,6 +371,16 @@ export function CommentSheet({
           />
         </View>
       </View>
+
+      {/* Stacked over the comment sheet rather than replacing it, so closing the reason
+          list returns to the conversation the reader was in. */}
+      <ReportSheet
+        visible={reporting !== null}
+        onClose={() => setReporting(null)}
+        subject="comment"
+        subjectId={reporting ?? ''}
+        noun="comment"
+      />
     </Sheet>
   );
 }
@@ -378,6 +393,7 @@ function CommentRow({
   onPressAuthor,
   onEdit,
   onDelete,
+  onReport,
 }: {
   comment: Comment;
   masked: boolean;
@@ -386,6 +402,7 @@ function CommentRow({
   onPressAuthor: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onReport: () => void;
 }) {
   return (
     <View style={styles.row}>
@@ -422,6 +439,15 @@ function CommentRow({
           noun="comment"
         />
 
+        {/* One row of actions, and which ones depends on whose comment it is.
+
+            Report sits in the branch Edit and Delete do not, which is how it stays
+            honest rather than merely tidy: `report()` refuses your own content with a
+            22023, so offering the control on your own comment would be a button whose
+            only outcome is an error message. The affordance is the same weight as Edit
+            and Delete — a caption-sized text action, not a red button — because a
+            comment is one remark and a permanent alarm beside every one of them
+            changes what the whole surface feels like. */}
         {mine ? (
           <View style={styles.ownActions}>
             <Pressable accessibilityRole="button" accessibilityLabel="Edit your comment" onPress={onEdit}>
@@ -439,7 +465,25 @@ function CommentRow({
               </Text>
             </Pressable>
           </View>
-        ) : null}
+        ) : (
+          <View style={styles.ownActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Report ${comment.authorName}'s comment`}
+              accessibilityHint="Tells whoever runs bingd. about this comment"
+              onPress={onReport}
+              // The slop is what carries the 44pt floor (`layout.minTapTarget`): the
+              // control is one caption line, and a taller box beside every comment
+              // would change what the surface reads as. Slop rather than size is the
+              // Button `sm` reasoning, applied to a control smaller still.
+              hitSlop={(theme.layout.minTapTarget - theme.typography.caption.lineHeight) / 2}
+            >
+              <Text variant="caption" tone="tertiary">
+                Report
+              </Text>
+            </Pressable>
+          </View>
+        )}
       </View>
     </View>
   );

@@ -1,4 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -13,6 +14,13 @@ let mockRpcResults: Record<string, unknown> = {};
 // Recorded rather than discarded: the collection writers this screen now calls are
 // only observable as the RPC they send.
 const mockRpc = jest.fn();
+
+/**
+ * Alert is a native module. Reporting has no confirmation step and no visible state
+ * change, so an alert is the entire observable outcome of one — both the thank-you and
+ * the failure sentence can only be read here.
+ */
+const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
 /** What each RPC fails with, when a test asks it to. Keyed by name. */
 let mockRpcErrors: Record<string, unknown> = {};
@@ -171,6 +179,7 @@ beforeEach(() => {
   mockParams = {};
   mockPush.mockReset();
   mockRpc.mockReset();
+  alertSpy.mockClear();
   mockOpenURL.mockReset();
   mockEnrichmentArgs.length = 0;
   mockRpcResults = {};
@@ -553,6 +562,10 @@ describe('tabs that have nothing behind them', () => {
  */
 describe('reviews', () => {
   const review = {
+    // The `user_media` row the review is written on — its report subject, added by
+    // 20260825000100. Not the media item: two people reviewing one film must be two
+    // subjects, or the second complaint collides with the first and is dropped.
+    id: 'um-ada-film1',
     user_id: 'user-2',
     username: 'ada',
     display_name: 'Ada',
@@ -585,6 +598,68 @@ describe('reviews', () => {
     expect(view.queryByText(/themoviedb/i)).toBeNull();
     expect(view.queryByText(/critic/i)).toBeNull();
     expect(view.queryByText(/on TMDB/i)).toBeNull();
+  });
+
+  /**
+   * Reporting a review.
+   *
+   * The subject is the `user_media` row rather than the title or the author, which is
+   * the part worth pinning: reporting by `media_item_id` would have made two authors'
+   * reviews of one film collide on `reports_one_open_per_reporter`, so the second
+   * report a reader filed about that title would have been silently swallowed.
+   */
+  it('reports a review by its own id, not by the title or the author', async () => {
+    mockRpcResults.title_reviews = [review];
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText("Report Ada's review"));
+    await fireEvent.press(view.getByText('Hate speech'));
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('report', {
+        p_subject_type: 'review',
+        p_subject_id: 'um-ada-film1',
+        p_reason: 'hate_speech',
+      }),
+    );
+  });
+
+  /**
+   * The viewer's own review has no Report control.
+   *
+   * `report()` refuses a self-report with a 22023, so the control could only ever
+   * produce an error message here. Absent rather than disabled: a disabled control asks
+   * the reader to work out why, and the answer — "you wrote this" — is already obvious
+   * from the row.
+   */
+  it('offers no Report on the viewer’s own review', async () => {
+    mockRpcResults.title_reviews = [
+      { ...review, id: 'um-mine', user_id: 'user-1', username: 'sai', display_name: 'Sai' },
+    ];
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
+    await waitFor(() => expect(view.getByText('Sai')).toBeTruthy());
+
+    expect(view.queryByLabelText("Report Sai's review")).toBeNull();
+  });
+
+  it('says a review has gone rather than failing, when its author deleted it', async () => {
+    mockRpcResults.title_reviews = [review];
+    const view = await open();
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    // P0002 is also what a note made private answers with, which is the same story to
+    // the reader: it is not there to report any more.
+    mockRpcErrors.report = { code: 'P0002', message: 'no such subject' };
+    await fireEvent.press(view.getByLabelText("Report Ada's review"));
+    await fireEvent.press(view.getByText('Spam or a scam'));
+
+    await waitFor(() =>
+      expect(alertSpy).toHaveBeenCalledWith('Could not report', 'That has already been removed.'),
+    );
   });
 
   it('opens the reviewer’s profile', async () => {

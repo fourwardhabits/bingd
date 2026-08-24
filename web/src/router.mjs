@@ -105,6 +105,39 @@ export function allDestinations(distribution) {
 }
 
 /**
+ * What the one dominant install button says, for a destination `destinationFor` chose.
+ *
+ * Here rather than in `page.mjs`, because it is a decision and this file's rule is
+ * that decisions live where the tests run. It used to be a map keyed on `kind` alone
+ * in the paint layer, and that had a defect no beta build could surface: both
+ * platforms' public listings share `kind: 'store'`, so the day the Play listing went
+ * live, every Android visitor's button would have read "Get Bingd for iPhone". The
+ * beta never renders that kind for Android — the closed test takes the `play-opt-in`
+ * branch — which is exactly why the wrong label sat unnoticed.
+ *
+ * So the store label reads the platform. The three beta kinds keep the labels the
+ * beta has always shown, verbatim.
+ */
+export function installLabel(destination) {
+  if (!destination) return null;
+
+  switch (destination.kind) {
+    case 'testflight':
+      return 'Get the Bingd beta for iPhone';
+    case 'play-opt-in':
+      return 'Join the Bingd beta on Android';
+    case 'play':
+      return 'Get Bingd for Android';
+    case 'store':
+      return destination.platform === 'android'
+        ? 'Get Bingd for Android'
+        : 'Get Bingd for iPhone';
+    default:
+      return null;
+  }
+}
+
+/**
  * The token in `/i/<token>`, or null.
  *
  * The shape is `create_invite_link`'s: `gen_random_uuid()` with the dashes removed, so

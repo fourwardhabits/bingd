@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
@@ -9,6 +9,7 @@ import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { useActorActivity } from '@/features/feed/use-feed';
+import { ReportSheet } from '@/features/moderation/ReportSheet';
 import { FollowControl } from '@/features/profile/FollowControl';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
 import { ProfileWatchlist } from '@/features/profile/ProfileWatchlist';
@@ -62,6 +63,8 @@ export default function PublicProfileScreen() {
   // Mounted only while open, as on the own profile: it reads nine things when it
   // mounts, and one that stayed mounted would read them on every visit to anybody.
   const [awardsOpen, setAwardsOpen] = useState(false);
+  // Which review's reason sheet is open, by `user_media.id`.
+  const [reportingReview, setReportingReview] = useState<string | null>(null);
 
   const profile = usePublicProfile(username ?? null);
   /**
@@ -357,6 +360,35 @@ export default function PublicProfileScreen() {
                       numberOfLines={4}
                       titleForLabel={entry.title}
                     />
+
+                    {/* The same reporting path the title page's Reviews tab offers, on
+                        the same object. A review is one row of `user_media` wherever it
+                        is read, so a reader who finds it here rather than on the title
+                        has the same recourse.
+
+                        Absent on the viewer's own profile — which this screen can be:
+                        Settings › Privacy links here as "see your public profile". The
+                        server refuses a self-report with a 22023, so the control would
+                        only ever produce an error.
+
+                        The slop is what carries the 44pt floor (`layout.minTapTarget`):
+                        the control is one caption line, and a taller box would make
+                        one word read as a button under every review. */}
+                    {!isSelf ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Report this review of ${entry.title}`}
+                        accessibilityHint="Tells whoever runs bingd. about this review"
+                        onPress={() => setReportingReview(entry.id)}
+                        hitSlop={
+                          (theme.layout.minTapTarget - theme.typography.caption.lineHeight) / 2
+                        }
+                      >
+                        <Text variant="caption" tone="tertiary">
+                          Report
+                        </Text>
+                      </Pressable>
+                    ) : null}
                   </View>
                 </View>
               ))}
@@ -427,6 +459,14 @@ export default function PublicProfileScreen() {
           onClose={() => setAwardsOpen(false)}
         />
       ) : null}
+
+      <ReportSheet
+        visible={reportingReview !== null}
+        onClose={() => setReportingReview(null)}
+        subject="review"
+        subjectId={reportingReview ?? ''}
+        noun="review"
+      />
 
       <CommentSheet
         eventId={commentsFor}

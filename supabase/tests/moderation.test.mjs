@@ -121,6 +121,199 @@ describe('filing a report', () => {
   });
 });
 
+/**
+ * The two subjects 20260825000100 added, and the one it deliberately did not.
+ *
+ * These are the surfaces that carry most of the writing in the product, and until that
+ * migration neither had a value in `report_subject` — so the whole spine above existed
+ * for usernames and list titles and for nothing anybody writes a paragraph in.
+ *
+ * What is worth testing here is not that the enum grew. It is that the owner is
+ * resolved from the *canonical authorship column* in both cases, that a private note
+ * stays outside the system entirely, and that the duplicate guarantee survives the one
+ * case that would have broken it — two authors reviewing the same film.
+ */
+describe('reporting a comment', () => {
+  let eventId;
+  let commentId;
+
+  before(async () => {
+    const movie = await t.createMovie('a film with a comment under it', 60101);
+    const { rows: ev } = await t.sql(
+      `insert into feed_events (actor_id, type, media_item_id, payload)
+       values ($1, 'title_ranked', $2, '{"position":1,"bucket":"loved","category":"movies","score":10}')
+       returning id`,
+      [bystander, movie],
+    );
+    eventId = ev[0].id;
+
+    await t.actAs(offender);
+    const { rows } = await t.sql(
+      `select add_comment(gen_random_uuid(), $1, 'something abusive', false) as r`,
+      [eventId],
+    );
+    commentId = rows[0].r.id ?? rows[0].r.comment_id;
+  });
+
+  it('resolves the author from comments.author_id, not from the event actor', async () => {
+    await t.actAs(reporter);
+    const r = await rpc(`select report('comment', $1, 'harassment') as r`, [commentId]);
+    assert.equal(r.received, true);
+
+    const { rows } = await t.sql(
+      `select subject_owner, subject_type from reports where subject_id = $1`,
+      [commentId],
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].subject_type, 'comment');
+    assert.equal(
+      rows[0].subject_owner,
+      offender,
+      'a comment belongs to whoever wrote it, not to whoever it was written under',
+    );
+  });
+
+  it('refuses a comment that no longer exists, the way every stale row is refused', async () => {
+    await t.actAs(reporter);
+    await assert.rejects(
+      () => t.sql(`select report('comment', gen_random_uuid(), 'spam') as r`),
+      /no such subject/i,
+    );
+  });
+
+  it('refuses your own comment', async () => {
+    await t.actAs(offender);
+    await assert.rejects(
+      () => t.sql(`select report('comment', $1, 'spam') as r`, [commentId]),
+      /your own content/i,
+    );
+  });
+});
+
+describe('reporting a review', () => {
+  let film;
+  let reviewId;
+
+  const publicNote = async (user, mediaItemId, text) => {
+    await t.actAs(user);
+    await t.sql(`select log_watched(gen_random_uuid(), $1, null, $2) as r`, [mediaItemId, text]);
+    await t.sql(
+      `select save_note(gen_random_uuid(), $1, $2, null, 'public'::note_visibility) as r`,
+      [mediaItemId, text],
+    );
+    const { rows } = await t.sql(`select id from user_media where user_id = $1 and media_item_id = $2`, [
+      user,
+      mediaItemId,
+    ]);
+    return rows[0].id;
+  };
+
+  before(async () => {
+    film = await t.createMovie('a film two people reviewed', 60102);
+    reviewId = await publicNote(offender, film, 'an abusive review');
+  });
+
+  it('resolves the author from the user_media row the review lives on', async () => {
+    await t.actAs(reporter);
+    const r = await rpc(`select report('review', $1, 'hate_speech') as r`, [reviewId]);
+    assert.equal(r.received, true);
+
+    const { rows } = await t.sql(
+      `select subject_owner, subject_type from reports where subject_id = $1`,
+      [reviewId],
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].subject_type, 'review');
+    assert.equal(rows[0].subject_owner, offender, 'the owner must be resolved, not supplied');
+  });
+
+  /**
+   * The defect the surrogate id exists to prevent.
+   *
+   * Reporting a review by its `media_item_id` would have made these two reports collide
+   * on `reports_one_open_per_reporter`, so the second would hit `on conflict do nothing`
+   * and vanish — while the reporter was told it had been received. Two distinct rows is
+   * the whole justification for `user_media.id`.
+   */
+  it('keeps two authors reviewing one film as two reportable subjects', async () => {
+    const second = await publicNote(bystander, film, 'a different abusive review');
+    assert.notEqual(second, reviewId);
+
+    await t.actAs(reporter);
+    await rpc(`select report('review', $1, 'spam') as r`, [second]);
+
+    const { rows } = await t.sql(
+      `select count(*)::integer as n from reports
+        where reporter_id = $1 and subject_type = 'review'`,
+      [reporter],
+    );
+    assert.equal(rows[0].n, 2, 'one complaint per review, not one per title');
+  });
+
+  it('is still idempotent for one reporter against one review', async () => {
+    const third = await t.createMovie('a film reported twice', 60103);
+    const id = await publicNote(offender, third, 'more of the same');
+
+    await t.actAs(reporter);
+    await rpc(`select report('review', $1, 'spam') as r`, [id]);
+    await rpc(`select report('review', $1, 'spam') as r`, [id]);
+
+    const { rows } = await t.sql(
+      `select count(*)::integer as n from reports where reporter_id = $1 and subject_id = $2`,
+      [reporter, id],
+    );
+    assert.equal(rows[0].n, 1);
+  });
+
+  /**
+   * A private note has exactly one reader — its author — so there is nobody it could
+   * harm and nobody who could report it. The subject must not become the probe that
+   * asks the server whether a row carries private writing.
+   */
+  it('refuses a note that is private, so a private note stays unreportable', async () => {
+    const secret = await t.createMovie('a film with a private note', 60104);
+    await t.actAs(offender);
+    await t.sql(`select log_watched(gen_random_uuid(), $1, null, 'a private thought') as r`, [
+      secret,
+    ]);
+    await t.sql(
+      `select save_note(gen_random_uuid(), $1, 'a private thought', null, 'private'::note_visibility) as r`,
+      [secret],
+    );
+    const { rows } = await t.sql(
+      `select id from user_media where user_id = $1 and media_item_id = $2`,
+      [offender, secret],
+    );
+
+    await t.actAs(reporter);
+    await assert.rejects(
+      () => t.sql(`select report('review', $1, 'spam') as r`, [rows[0].id]),
+      /no such subject/i,
+    );
+  });
+
+  it('has no subject for a private note at all', async () => {
+    const { rows } = await t.sql(
+      `select enumlabel from pg_enum e
+         join pg_type ty on ty.oid = e.enumtypid
+        where ty.typname = 'report_subject'`,
+    );
+    const labels = rows.map((r) => r.enumlabel);
+    assert.ok(labels.includes('comment'), 'comment must be reportable');
+    assert.ok(labels.includes('review'), 'review must be reportable');
+    assert.ok(!labels.includes('note'), 'a private note must have no reporting path');
+    assert.ok(!labels.includes('private_note'), 'a private note must have no reporting path');
+  });
+
+  it('rejects a subject outside the taxonomy entirely', async () => {
+    await t.actAs(reporter);
+    await assert.rejects(
+      () => t.sql(`select report('reaction', $1, 'spam') as r`, [reviewId]),
+      /invalid input value for enum/i,
+    );
+  });
+});
+
 describe('who can see a report', () => {
   it('shows a reporter only their own', async () => {
     const { rows } = await t.asUser(reporter, () => t.sql(`select subject_id from reports`));

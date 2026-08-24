@@ -1,5 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
-import { Share } from 'react-native';
+import { Alert, Share } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -27,6 +27,12 @@ const mockRpcCalls: { name: string; args: Record<string, unknown> }[] = [];
  * mutation a privacy test exists to catch. `rpc` records its arguments and `in`
  * filters on the ids it was given.
  */
+/**
+ * Reporting has no confirmation step and no visible state change, so the alert it
+ * raises is the whole of what a test can observe about it.
+ */
+const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: Record<string, unknown>) => {
@@ -122,6 +128,7 @@ const ranking = (id: string, title: string, position: number, over: Record<strin
 beforeEach(() => {
   mockPush.mockReset();
   mockRpcResults = {};
+  alertSpy.mockClear();
   mockRpcErrors = {};
   issued = 0;
   mockRpcCalls.length = 0;
@@ -348,8 +355,87 @@ describe('what this person likes', () => {
   });
 });
 
+/**
+ * Reporting, from the profile.
+ *
+ * Two subjects reachable from this one screen: the account itself, and each review it
+ * publishes. They are separate rows in `reports` with separate subject types, because
+ * "this person is impersonating someone" and "this particular review is abusive" are
+ * different complaints and a queue that conflated them would be triaged wrongly.
+ */
+describe('reporting from a profile', () => {
+  const reportCalls = () => mockRpcCalls.filter((call) => call.name === 'report');
+
+  it('reports the profile itself, resolving nothing on the client', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Report'));
+    await fireEvent.press(view.getByText('Pretending to be someone'));
+
+    await waitFor(() => expect(reportCalls()).toHaveLength(1));
+    expect(reportCalls()[0]?.args).toEqual({
+      p_subject_type: 'profile',
+      p_subject_id: 'anna-id',
+      p_reason: 'impersonation',
+    });
+  });
+
+  /**
+   * **Reporting is not blocking, and one must not perform the other.**
+   *
+   * They are different acts with different consequences: a block is between two people
+   * and takes effect at once, a report is a message to whoever runs Bingd. Bundling
+   * them would silently block somebody who only wanted to flag a profile — and the
+   * reverse, hiding Report once a block exists, is the inversion the database
+   * deliberately refuses (20260813002000 §4).
+   */
+  it('does not block the account as a side effect', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Report'));
+    await fireEvent.press(view.getByText('Harassment or bullying'));
+
+    await waitFor(() => expect(reportCalls()).toHaveLength(1));
+    expect(mockRpcCalls.map((call) => call.name)).not.toContain('block');
+  });
+
+  it('tells the reporter it was received, without promising a timeline', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Report'));
+    await fireEvent.press(view.getByText('Something else'));
+
+    await waitFor(() =>
+      expect(alertSpy).toHaveBeenCalledWith('Thanks for telling us', 'We will take a look at this.'),
+    );
+  });
+
+  it('explains a refusal rather than failing silently', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
+
+    mockRpcErrors.report = { code: '53400', message: 'report limit reached for today' };
+    await fireEvent.press(view.getByText('Report'));
+    await fireEvent.press(view.getByText('Spam or a scam'));
+
+    await waitFor(() =>
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Could not report',
+        'You have reported a lot today. Please try again tomorrow.',
+      ),
+    );
+  });
+});
+
 describe('their notes', () => {
   const note = {
+    // The `user_media` row this review lives on — its report subject, from
+    // 20260825000100. Keyed per row rather than per title so that two people's reviews
+    // of one film are two subjects rather than one.
+    id: 'um-anna-film1',
     user_id: 'anna-id',
     media_item_id: 'film-1',
     note: 'The last twenty minutes are the whole film.',
@@ -363,6 +449,27 @@ describe('their notes', () => {
     ];
   });
 
+  it('reports one of their reviews by its own id', async () => {
+    mockRpcResults.public_notes = [note];
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByText('The last twenty minutes are the whole film.')).toBeTruthy(),
+    );
+
+    await fireEvent.press(view.getByLabelText('Report this review of Inception'));
+    await fireEvent.press(view.getByText('Sexual content'));
+
+    await waitFor(() =>
+      expect(mockRpcCalls.filter((call) => call.name === 'report')).toHaveLength(1),
+    );
+    expect(mockRpcCalls.find((call) => call.name === 'report')?.args).toEqual({
+      // The review, not the profile it is displayed on and not the title it is about.
+      p_subject_type: 'review',
+      p_subject_id: 'um-anna-film1',
+      p_reason: 'sexual_content',
+    });
+  });
+
   it('shows the ones they made public', async () => {
     mockRpcResults.public_notes = [note];
     const view = await open();
@@ -370,6 +477,24 @@ describe('their notes', () => {
     await waitFor(() =>
       expect(view.getByText('The last twenty minutes are the whole film.')).toBeTruthy(),
     );
+  });
+
+  /**
+   * This screen *can* be the viewer's own: Settings › Privacy links here as "see your
+   * public profile". An earlier comment in the screen claimed otherwise, and the
+   * control it justified was a Report on your own review — a button whose only
+   * possible outcome is the server's 22023 refusal. The review stays visible; only
+   * the recourse against its own author goes.
+   */
+  it('offers no Report on the viewer’s own reviews, on their own profile', async () => {
+    tableRows.public_profiles = [{ ...anna, id: 'viewer' }];
+    mockRpcResults.public_notes = [{ ...note, id: 'um-viewer-film1', user_id: 'viewer' }];
+    const view = await open();
+
+    await waitFor(() =>
+      expect(view.getByText('The last twenty minutes are the whole film.')).toBeTruthy(),
+    );
+    expect(view.queryByLabelText('Report this review of Inception')).toBeNull();
   });
 
   /**

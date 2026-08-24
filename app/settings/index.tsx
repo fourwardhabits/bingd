@@ -8,6 +8,7 @@ import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { signOut, useCurrentProfile } from '@/features/auth';
 import { env, isRelease, lane } from '@/lib/env';
+import { openLegal } from '@/lib/legal';
 import { Button, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -97,6 +98,41 @@ export default function SettingsScreen() {
             is how you finish for the day and the other cannot be undone. Separating
             them visually says that without dressing sign-out up as destructive, which
             it also is not. */}
+        {/* Privacy, Terms and Support, in that order.
+
+            **Links out rather than screens**, which is `lib/legal.ts`'s reasoning: a
+            policy rendered in the binary can only be corrected by shipping a build,
+            and until that build reaches everybody two versions of the same document
+            are live at once. The web copies are canonical, both stores already require
+            a URL for the privacy policy, and one template generates all three.
+
+            Here rather than inside About, because About is an attribution block —
+            TMDB's notice, quoted in their words — and a legal document is not a
+            credit. And above Sign out's group rather than below it, because a person
+            looking for the Terms is reading the list, while somebody signing out is
+            aiming at a row they already know the position of. */}
+        <View style={styles.group}>
+          <Row
+            icon="lock-closed-outline"
+            label="Privacy Policy"
+            onPress={() => openLegal('privacy')}
+            external
+          />
+          <Row
+            icon="document-text-outline"
+            label="Terms of Use"
+            onPress={() => openLegal('terms')}
+            external
+          />
+          <Row
+            icon="help-circle-outline"
+            label="Support"
+            onPress={() => openLegal('support')}
+            external
+            last
+          />
+        </View>
+
         <View style={styles.group}>
           <Row icon="log-out-outline" label="Sign out" onPress={() => void leave()} last />
         </View>
@@ -120,18 +156,27 @@ function Row({
   label,
   detail,
   last = false,
+  external = false,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
   detail?: string;
   last?: boolean;
+  /**
+   * The row leaves the app for the browser. Changes the role to `link` and the
+   * trailing glyph from a chevron to an open-outward mark, because "this navigates
+   * within Settings" and "this closes Settings and opens Safari" are different
+   * promises and the chevron only makes the first one.
+   */
+  external?: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable
-      accessibilityRole="button"
+      accessibilityRole={external ? 'link' : 'button'}
       accessibilityLabel={detail ? `${label}, ${detail}` : label}
+      accessibilityHint={external ? 'Opens in your browser' : undefined}
       onPress={onPress}
       style={({ pressed }) => [styles.row, !last && styles.rowDivided, pressed && styles.pressed]}
     >
@@ -145,7 +190,7 @@ function Row({
         </Text>
       ) : null}
       <Ionicons
-        name="chevron-forward"
+        name={external ? 'open-outline' : 'chevron-forward'}
         size={theme.layout.icon.sm}
         color={theme.text.tertiary}
       />

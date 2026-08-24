@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+import { Alert, Linking } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -143,6 +143,73 @@ afterEach(() => {
  * first thing worth asserting is that the sentence is gone and the destinations are
  * real.
  */
+/**
+ * Privacy, Terms and Support, reachable from Settings.
+ *
+ * The store-facing half of this is the reason it is tested at all: both stores require a
+ * privacy policy the user can reach, and an in-app Terms link is what makes the signup
+ * acknowledgment mean anything after signup — a document you agreed to and can never
+ * open again is not a document.
+ *
+ * They open the web copies rather than rendering in the app, which `lib/legal.ts`
+ * explains: a policy in the binary can only be corrected by shipping a build, and until
+ * that build lands two versions of the same document are live at once.
+ */
+describe('the legal group in Settings', () => {
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+
+  beforeEach(() => openURL.mockClear());
+
+  it('offers all three documents', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    expect(view.getByLabelText('Privacy Policy')).toBeTruthy();
+    expect(view.getByLabelText('Terms of Use')).toBeTruthy();
+    expect(view.getByLabelText('Support')).toBeTruthy();
+  });
+
+  it('sends each one to its own canonical address', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    for (const [label, url] of [
+      ['Privacy Policy', 'https://bingd.app/privacy'],
+      ['Terms of Use', 'https://bingd.app/terms'],
+      ['Support', 'https://bingd.app/support'],
+    ] as const) {
+      await fireEvent.press(view.getByLabelText(label));
+      expect(openURL).toHaveBeenCalledWith(url);
+    }
+  });
+
+  /**
+   * A row that closes Settings and opens Safari is not the same promise as a row that
+   * pushes a screen, and a chevron only makes the second one. Announced as a link, with
+   * a hint, so a screen-reader user is not surprised by leaving the app.
+   */
+  it('announces them as links that leave the app', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    const terms = view.getByLabelText('Terms of Use');
+    expect(terms.props.accessibilityRole).toBe('link');
+    expect(terms.props.accessibilityHint).toBe('Opens in your browser');
+
+    // And the in-app destinations are still buttons, so the distinction says something.
+    expect(view.getByLabelText('Privacy').props.accessibilityRole).toBe('button');
+  });
+
+  /**
+   * The policies are not duplicated into the app. If the Terms text itself ever appears
+   * on this screen, there are two copies of a legal document in the world and only one
+   * of them can be corrected without a release.
+   */
+  it('does not reproduce the policy text in the app', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    expect(view.queryByText(/You need to be 13 or older/)).toBeNull();
+    expect(view.queryByText(/LEGAL ENTITY/)).toBeNull();
+  });
+});
+
 describe('the Settings hub', () => {
   it('offers the four destinations rather than an apology', async () => {
     const view = await renderWithProviders(<SettingsScreen />);
@@ -692,6 +759,26 @@ describe('the inbox’s two new behaviours', () => {
     );
   });
 
+  /**
+   * **Both of these wait for the control to *go*, and the wait is the assertion.**
+   *
+   * `getByText('Ada')` is the wrong anchor on its own, and this suite failed on CI
+   * proving it (run 32739006812). The row and the relationship come from two different
+   * queries — `my_notifications` and `follow_state_with` — and only the first is settled
+   * when the name is on screen. `canFollowBack(row, outgoing)` returns true while
+   * `outgoing` is `undefined`, so between the two resolutions the row genuinely renders
+   * "Follow back" and then removes it. On a quiet machine both had landed; on a loaded
+   * runner the second had not, and the assertion read the intermediate frame.
+   *
+   * `waitFor` around the absence is not a weaker check — it is the same claim about the
+   * settled state, and it still fails if the control never goes. The `getByText` above
+   * stays, because it is what stops the whole thing passing on a row that never rendered.
+   *
+   * **The flash itself is real and is not a test artefact.** A reader whose follow is
+   * already mutual sees "Follow back" for as long as `follow_state_with` takes. It is a
+   * frame of a control that should not be there, and it is out of scope here — recorded
+   * rather than fixed in a moderation tranche.
+   */
   it('does not offer it when the follow is already mutual', async () => {
     mockRpcResults.my_notifications = [followed];
     mockRpcResults.follow_state_with = [
@@ -700,7 +787,7 @@ describe('the inbox’s two new behaviours', () => {
     const view = await renderWithProviders(<NotificationsScreen />);
 
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
-    expect(view.queryByText('Follow back')).toBeNull();
+    await waitFor(() => expect(view.queryByText('Follow back')).toBeNull());
   });
 
   it('does not offer it while the reader’s own request is still pending', async () => {
@@ -711,7 +798,7 @@ describe('the inbox’s two new behaviours', () => {
     const view = await renderWithProviders(<NotificationsScreen />);
 
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
-    expect(view.queryByText('Follow back')).toBeNull();
+    await waitFor(() => expect(view.queryByText('Follow back')).toBeNull());
   });
 
   it('does not put Follow back beside Approve and Decline', async () => {

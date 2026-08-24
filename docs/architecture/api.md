@@ -294,7 +294,7 @@ Added 2026-08-13. `report` appeared in the rate-limit table below but was define
 
 | Function | Purpose | Queueable |
 |---|---|---|
-| `report(subject_type, subject_id, reason, note?)` | File a report. One open report per reporter per subject | **no** |
+| `report(subject_type, subject_id, reason, note?)` | File a report. One open report per reporter per subject. `subject_type` is `profile`, `display_name`, `username`, `list`, `list_title`, `watch_tag`, `comment` or `review`; `subject_id` is a `comments.id` for a comment and a `user_media.id` for a review. Owner always resolved server-side | **no** |
 
 Not queueable, for the same reason `block` is not: PRD §22 makes safety actions online-only, and a queued report is a complaint the operator has not received while the user believes it was sent. The client hides the reported content locally on tap and submits when connected, so the *response* is immediate even though the *submission* is not.
 

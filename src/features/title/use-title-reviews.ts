@@ -6,6 +6,15 @@ import { supabase } from '@/lib/supabase';
 export type ReviewSort = 'top' | 'recent';
 
 export type TitleReview = {
+  /**
+   * The `user_media` row this review is written on, which is also its report subject.
+   *
+   * A review is a public note on a row keyed by `(user_id, media_item_id)`, and
+   * `reports.subject_id` is one uuid — so 20260825000100 gave the row a surrogate name
+   * rather than let two people's reviews of the same film collide on the
+   * one-open-report index and silently drop the second complaint.
+   */
+  id: string;
   userId: string;
   username: string;
   name: string;
@@ -55,6 +64,7 @@ export function useTitleReviews(mediaItemId: string | null, sort: ReviewSort) {
       if (error) throw error;
 
       return ((data ?? []) as {
+        id: string;
         user_id: string;
         username: string;
         display_name: string | null;
@@ -65,6 +75,7 @@ export function useTitleReviews(mediaItemId: string | null, sort: ReviewSort) {
         score: string | number | null;
         reaction_count: number | null;
       }[]).map((row) => ({
+        id: row.id,
         userId: row.user_id,
         username: row.username,
         name: row.display_name || row.username,

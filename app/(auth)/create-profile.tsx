@@ -12,6 +12,7 @@ import {
   useAuth,
 } from '@/features/auth';
 import { track } from '@/lib/analytics';
+import { openLegal } from '@/lib/legal';
 import { queryKeys } from '@/lib/query';
 import { Button, Field, KeyboardScreen, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -349,6 +350,48 @@ export default function CreateProfileScreen() {
           <Text variant="caption" tone="tertiary">
             Your account starts public, so people can find you and see what you rank.
             You can make it private whenever you like, in Settings.
+          </Text>
+
+          {/* **The acknowledgment, and deliberately not a checkbox.**
+
+              A sentence under the button that creates the account is the standard
+              form, and it is the honest one here: the act of creating the account is
+              the agreement, so a tick box beside it asks the user to confirm the thing
+              they are already doing. The two links are the substance — an
+              acknowledgment referring to documents nobody can reach is worse than
+              none, because it claims consent to something unread and unreachable.
+
+              **Nothing is persisted, and that is a decision rather than an omission.**
+              Storing an accepted-version stamp is what a product needs when it intends
+              to *re-prompt* on a change — a versioned Terms table, a gate on the next
+              launch, a screen that blocks the app until somebody taps Agree. None of
+              that exists, none of it is planned for public v1, and adding the column
+              now would be a legal data model with no reader, which is the kind of
+              thing that later gets treated as evidence of a process that was never
+              run. The account's creation timestamp already records when somebody
+              agreed to the Terms as they stood that day. */}
+          <Text variant="caption" tone="tertiary">
+            By creating an account, you agree to the{' '}
+            <Text
+              variant="caption"
+              tone="action"
+              accessibilityRole="link"
+              accessibilityHint="Opens in your browser"
+              onPress={() => openLegal('terms')}
+            >
+              Terms of Use
+            </Text>{' '}
+            and{' '}
+            <Text
+              variant="caption"
+              tone="action"
+              accessibilityRole="link"
+              accessibilityHint="Opens in your browser"
+              onPress={() => openLegal('privacy')}
+            >
+              Privacy Policy
+            </Text>
+            .
           </Text>
         </View>
       </KeyboardScreen>

@@ -97,6 +97,15 @@ export function usePublicProfile(username: string | null) {
 }
 
 export type ProfileNote = {
+  /**
+   * The `user_media` row this review is written on, and its report subject.
+   *
+   * 20260825000100 gave the row a name so a review could be reported at all: the row
+   * is keyed by `(user_id, media_item_id)` and `reports.subject_id` is one uuid, so
+   * reporting by title would have made two authors' reviews of one film collide on the
+   * one-open-report index and silently drop the second complaint.
+   */
+  id: string;
   mediaItemId: string;
   title: string;
   seriesTitle: string | null;
@@ -129,6 +138,7 @@ export function useProfileNotes(userId: string | null) {
       if (error) throw error;
 
       const notes = (data ?? []) as {
+        id: string;
         media_item_id: string;
         note: string;
         has_spoilers: boolean;
@@ -158,6 +168,7 @@ export function useProfileNotes(userId: string | null) {
           if (!item) return null;
           const parent = Array.isArray(item.parent) ? item.parent[0] : item.parent;
           return {
+            id: note.id,
             mediaItemId: note.media_item_id,
             title: item.title,
             seriesTitle: parent?.title ?? null,

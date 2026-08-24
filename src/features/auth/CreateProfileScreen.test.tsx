@@ -1,4 +1,5 @@
-import { waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
+import { Linking } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -79,5 +80,60 @@ describe('why the signup screen asks for a birthday', () => {
     expect(view.getByLabelText('Month')).toBeTruthy();
     expect(view.getByLabelText('Day')).toBeTruthy();
     expect(view.getByLabelText('Year')).toBeTruthy();
+  });
+});
+
+
+/**
+ * The legal acknowledgment under the create-account button.
+ *
+ * **Not a checkbox, and not a stored acceptance.** The act of creating the account is
+ * the agreement, so a tick box beside the button asks somebody to confirm the thing they
+ * are already doing. Persisting a version stamp is what a product needs when it intends
+ * to *re-prompt* on a change — a versioned Terms table, a gate on next launch, a screen
+ * that blocks the app until somebody taps Agree — and none of that exists or is planned
+ * for public v1. The account's own creation timestamp already records when somebody
+ * agreed to the Terms as they stood that day.
+ *
+ * What is worth testing is that the two documents are actually reachable. An
+ * acknowledgment pointing at documents nobody can open is worse than none: it claims
+ * consent to something unread and unreachable.
+ */
+describe('the terms acknowledgment at signup', () => {
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+
+  beforeEach(() => openURL.mockClear());
+
+  it('says what creating an account agrees to', async () => {
+    const view = await renderWithProviders(<CreateProfileScreen />);
+
+    await waitFor(() => expect(view.getByText(/By creating an account/)).toBeTruthy());
+    expect(view.getByText('Terms of Use')).toBeTruthy();
+    expect(view.getByText('Privacy Policy')).toBeTruthy();
+  });
+
+  it('makes both documents openable', async () => {
+    const view = await renderWithProviders(<CreateProfileScreen />);
+
+    await waitFor(() => expect(view.getByText('Terms of Use')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Terms of Use'));
+    expect(openURL).toHaveBeenCalledWith('https://bingd.app/terms');
+
+    await fireEvent.press(view.getByText('Privacy Policy'));
+    expect(openURL).toHaveBeenCalledWith('https://bingd.app/privacy');
+  });
+
+  /**
+   * No blocking gate. The acknowledgment is a sentence, not a step: a screen that
+   * refuses to proceed until a box is ticked is a different product decision, and one
+   * this tranche deliberately did not make.
+   */
+  it('adds no acceptance control between the reader and the account', async () => {
+    const view = await renderWithProviders(<CreateProfileScreen />);
+
+    await waitFor(() => expect(view.getByText(/By creating an account/)).toBeTruthy());
+    expect(view.queryByLabelText(/agree to the terms/i)).toBeNull();
+    expect(view.queryByText(/^I agree$/)).toBeNull();
   });
 });

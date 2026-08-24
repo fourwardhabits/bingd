@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,7 @@ import {
   destinationFor,
   detectPlatform,
   handleFromPath,
+  installLabel,
   titleIdFromPath,
   tokenFromPath,
 } from './src/router.mjs';
@@ -149,6 +151,54 @@ describe('destinationFor', () => {
   it('survives a missing config rather than throwing on a page nobody can then read', () => {
     assert.equal(destinationFor('ios', undefined), null);
     assert.deepEqual(allDestinations(undefined), []);
+  });
+});
+
+describe('installLabel', () => {
+  it('keeps the three beta labels exactly as the beta has always shown them', () => {
+    assert.equal(
+      installLabel({ platform: 'ios', kind: 'testflight', url: 'x' }),
+      'Get the Bingd beta for iPhone',
+    );
+    assert.equal(
+      installLabel({ platform: 'android', kind: 'play-opt-in', url: 'x' }),
+      'Join the Bingd beta on Android',
+    );
+    assert.equal(
+      installLabel({ platform: 'android', kind: 'play', url: 'x' }),
+      'Get Bingd for Android',
+    );
+  });
+
+  it('labels the iOS store button for an iPhone', () => {
+    assert.equal(
+      installLabel(destinationFor('ios', { ios: { storeUrl: 'https://apps.apple.com/x' } })),
+      'Get Bingd for iPhone',
+    );
+  });
+
+  /**
+   * The public-mode defect an independent review found before it could ship.
+   *
+   * Both platforms' public listings share `kind: 'store'`, and the label used to be a
+   * map keyed on kind alone — so the day the Play listing went live, every Android
+   * visitor's one dominant button would have read "Get Bingd for iPhone". Invisible in
+   * beta because Android's closed test takes the `play-opt-in` branch, which is
+   * exactly why it needs a test rather than an eye.
+   */
+  it('never labels the Android store button as an iPhone one', () => {
+    const label = installLabel(
+      destinationFor('android', {
+        android: { storeUrl: 'https://play.google.com/store/apps/details?id=app.bingd' },
+      }),
+    );
+    assert.equal(label, 'Get Bingd for Android');
+    assert.ok(!/iphone/i.test(label), 'the Android button must not name an iPhone');
+  });
+
+  it('answers null for nothing, matching destinationFor', () => {
+    assert.equal(installLabel(null), null);
+    assert.equal(installLabel({ platform: 'ios', kind: 'nonsense', url: 'x' }), null);
   });
 });
 
@@ -416,7 +466,7 @@ describe('the built site', () => {
     }
   });
 
-  it('serves the three documents the stores demand a URL for', () => {
+  it('serves the four documents the stores and the Terms demand a URL for', () => {
     /**
      * Until 2026-08-20 all three of these returned Cloudflare Pages' fallback
      * `index.html` with a **200**. That is the worst possible shape for this failure:
@@ -431,6 +481,10 @@ describe('the built site', () => {
       ['privacy', /Privacy/, /never leaves your device as\s+analytics|allowlist/],
       ['support', /Support/, new RegExp('hello@bingd\\.app')],
       ['account-deletion', /Deleting your account/, /Settings &rsaquo; Account &amp; Data/],
+      // The Terms, whose own marker is the moderation list: it is the section that has
+      // to stay checkable against `moderation_actions`' six allowed actions, and a
+      // Terms rendered from the wrong constant would still have the right heading.
+      ['terms', /Terms of Use/, /suspend the account, which hides it and stops it posting/],
     ];
 
     for (const [dir, heading, marker] of expected) {
@@ -455,7 +509,7 @@ describe('the built site', () => {
      * until the same day these pages were written, which is exactly how that would have
      * happened.
      */
-    const documents = ['privacy', 'support', 'account-deletion'];
+    const documents = ['privacy', 'terms', 'support', 'account-deletion'];
     const aasa = JSON.parse(read('.well-known', 'apple-app-site-association'));
     const claimed = aasa.applinks.details[0].components.map((c) => c['/']);
     const appConfig = readFileSync(join(here, '..', 'app.config.ts'), 'utf8');
@@ -707,6 +761,281 @@ describe('the app the site claims to open', () => {
 // ---------------------------------------------------------------------------
 // What the host is told to send
 // ---------------------------------------------------------------------------
+
+/**
+ * The Terms of Use, and the two things about it that are worth a test.
+ *
+ * Not the prose — a test that asserts paragraphs is a test that fails on every edit and
+ * teaches people to update it without reading. These are the two claims that would be
+ * *wrong* rather than merely different if they changed by accident.
+ */
+describe('the Terms of Use', () => {
+  // Defined here and called inside the tests: the site is built by the first suite's
+  // `before`, so a read at this level would run during collection and fail on a clean
+  // tree.
+  const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
+
+  /**
+   * The placeholder is the whole reason this document is safe to publish unfinished.
+   *
+   * It names no company because there is no confirmed company to name, and the failure
+   * this guards against is somebody filling in a plausible-looking entity to make the
+   * page look finished — which produces a contract with a party that does not exist.
+   * When the founder supplies the real one, this test fails and is deleted in the same
+   * commit, which is the point: the reminder lives where it cannot be lost.
+   */
+  it('still says out loud that the legal entity is unconfirmed', () => {
+    const html = read('terms', 'index.html');
+    assert.match(
+      html,
+      /LEGAL ENTITY \/ DEVELOPER NAME &mdash; FOUNDER TO CONFIRM/,
+      'the Terms names an operating entity that nothing in this repository establishes',
+    );
+    // `\s+` rather than a space: the source wraps at 90 columns, so a literal match
+    // here would break on a reflow that changed nothing about the meaning.
+    assert.match(
+      html,
+      /not yet been reviewed by a\s+lawyer/,
+      'the draft status must be stated',
+    );
+  });
+
+  /**
+   * The date is a source literal, and it is the Terms' own.
+   *
+   * `TERMS_DATE` rather than the shared `DOCUMENT_DATE`, because the Terms was drafted
+   * five days after the other three documents and a "last updated" predating a page's
+   * own existence is the small wrongness that makes its large claims doubtable. A
+   * build stamp would be worse — a redeploy with no text change would claim a
+   * revision — so both dates are literals, and the finalisation commit is what moves
+   * this one.
+   */
+  it('dates itself from its own deterministic revision date', () => {
+    assert.match(read('terms', 'index.html'), /Last updated 25 August 2026\./);
+    // The other three keep the shared date; the Terms did not drag them forward.
+    assert.match(read('privacy', 'index.html'), /Last updated 20 August 2026\./);
+  });
+
+  /**
+   * Every power the moderation section claims has to exist in `moderation_actions`.
+   *
+   * A Terms is the one document where an unbacked promise is worse than silence: it is
+   * what somebody points at when they say Bingd said it would act. The six actions
+   * below are the check constraint in 20260813001700, and the document may describe
+   * those and nothing more.
+   */
+  it('claims only powers the moderation schema actually has', () => {
+    const html = read('terms', 'index.html');
+    for (const claim of [
+      /remove the review, comment, or other content/,
+      /require a handle to be changed/,
+      /issue a warning/,
+      /suspend the account/,
+    ]) {
+      assert.match(html, claim, 'a stated moderation power is missing from the Terms');
+    }
+
+    /**
+     * **And the enumerated list stops there**, because `moderation_actions` does.
+     *
+     * Its check constraint allows six values — suspend_account, restore_account,
+     * remove_content, force_username_change, dismiss_report, warn — and none of them is
+     * "delete this account". A Terms that listed account removal beside the four above
+     * would claim a routine enforcement power the operator system cannot record, which
+     * is the class of over-claim this whole document is written to avoid. Permanent
+     * closure is covered separately under "Ending it", where it is tied to a legal or
+     * safety obligation rather than offered as a response to a report.
+     */
+    assert.doesNotMatch(
+      html.split('<h2>Our content')[0],
+      /<li>remove the account/,
+      'the Terms lists an enforcement action moderation_actions has no value for',
+    );
+
+    // And the ones it must not claim, because nothing implements them. An appeals
+    // process and automated detection are both things a templated Terms supplies by
+    // default and this product does not have.
+    assert.doesNotMatch(html, /automated (?:detection|moderation|systems? (?:detect|scan))/i);
+    assert.match(
+      html,
+      /no formal appeals process/,
+      'the absence of an appeals process must be stated rather than implied',
+    );
+  });
+
+  it('is reachable from every other document and from the router pages', () => {
+    for (const dir of ['privacy', 'support', 'account-deletion']) {
+      assert.match(read(dir, 'index.html'), /href="\/terms"/, `/${dir} does not link the Terms`);
+    }
+    assert.match(read('i.html'), /href="\/terms"/, 'the invitation page does not link the Terms');
+    assert.match(read('index.html'), /href="\/terms"/, 'the root page does not link the Terms');
+  });
+});
+
+/**
+ * The release mode, which is the switch the whole public launch turns on.
+ *
+ * These run against the *built* site, so they assert the state that would actually be
+ * deployed if this commit were pushed — which is the only version of this question
+ * worth answering. `web/mutation-check.mjs` covers the other direction.
+ */
+describe('the release mode', () => {
+  const distribution = JSON.parse(
+    readFileSync(join(here, 'distribution.config.json'), 'utf8'),
+  );
+  const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
+
+  /**
+   * **The lock, stated as a test.**
+   *
+   * Bingd is not public today. A commit that flips this to "public" while the store
+   * URLs are still null cannot build at all — but a commit that flips it *and* invents
+   * URLs would build, and this is the line that says the decision is deliberate. It
+   * fails on launch day and is updated then, by somebody who meant to.
+   */
+  it('is still beta, because the apps are not on the stores', () => {
+    assert.equal(
+      distribution.mode ?? 'beta',
+      'beta',
+      'mode is no longer beta — if the apps really have launched, update this test with the commit that launched them',
+    );
+  });
+
+  it('keeps the closed test honestly described while it is a closed test', () => {
+    assert.match(read('index.html'), /closed testing/, 'the front page must say so');
+    assert.match(read('i.html'), /closed testing/, 'the invitation page must say so');
+  });
+
+  /**
+   * The two halves of noindex, which must agree.
+   *
+   * The header covers the JSON files and anything not HTML; the meta tag survives a
+   * host that drops custom headers. Both come from one `isPublic`, and this asserts
+   * they landed together rather than one of them being edited alone.
+   */
+  it('asks not to be indexed, in the header and in the pages', () => {
+    assert.match(read('_headers'), /X-Robots-Tag: noindex, nofollow/);
+    for (const file of ['index.html', 'i.html', 'u.html']) {
+      assert.match(
+        read(file),
+        /<meta name="robots" content="noindex, nofollow" \/>/,
+        `${file} is missing the robots meta`,
+      );
+    }
+    assert.match(read('terms', 'index.html'), /<meta name="robots"/);
+  });
+
+  /**
+   * Store URLs are null, and the copy must not have got ahead of them.
+   *
+   * The failure this prevents is subtle and would ship silently: a page that says
+   * "download it from the App Store" over a button whose destination is null renders a
+   * dead control and reads as a broken product rather than an unlaunched one.
+   */
+  it('promises no store while no store URL exists', () => {
+    assert.equal(distribution.ios?.storeUrl ?? null, null);
+    assert.equal(distribution.android?.storeUrl ?? null, null);
+    for (const file of ['index.html', 'i.html', 'u.html', 'title.html', 'lists.html']) {
+      assert.doesNotMatch(
+        read(file),
+        /apps\.apple\.com|play\.google\.com\/store/,
+        `${file} names a store that has no URL configured`,
+      );
+    }
+  });
+});
+
+/**
+ * The public build, exercised for real — in a sandbox, one launch input at a time.
+ *
+ * Everything above asserts the beta; nothing there can answer the adversarial
+ * question, which is what a `mode: "public"` build would actually publish. An
+ * independent review answered it by hand and found a hole: fill in the entity, set
+ * both store URLs, flip the mode, and the site would have shipped a Terms whose first
+ * paragraph still called itself an unreviewed draft.
+ *
+ * So this copies the site's sources into a scratch directory, applies the launch
+ * commit's edits step by step, and runs the real `build.mjs` there. The working tree
+ * is never touched, which is what lets these run beside the beta assertions.
+ */
+describe('the public build, in a sandbox', () => {
+  const sandbox = mkdtempSync(join(tmpdir(), 'bingd-public-build-'));
+  const sandboxDist = join(sandbox, 'dist');
+
+  const patch = (file, edits) => {
+    let source = readFileSync(join(sandbox, file), 'utf8');
+    for (const [from, to] of edits) source = source.replace(from, to);
+    writeFileSync(join(sandbox, file), source);
+  };
+
+  /** Runs the sandbox build; returns what it refused with, or null on success. */
+  const build = () => {
+    try {
+      execFileSync(process.execPath, [join(sandbox, 'build.mjs')], { stdio: 'pipe' });
+      return null;
+    } catch (error) {
+      return String(error.stderr);
+    }
+  };
+
+  before(() => {
+    for (const file of ['build.mjs', 'deep-links.config.json', 'distribution.config.json']) {
+      cpSync(join(here, file), join(sandbox, file));
+    }
+    cpSync(join(here, 'src'), join(sandbox, 'src'), { recursive: true });
+
+    // The launch commit's first edit: the mode, with both store URLs real.
+    patch('distribution.config.json', [
+      ['"mode": "beta"', '"mode": "public"'],
+      ['"storeUrl": null', '"storeUrl": "https://apps.apple.com/app/id0000000000"'],
+      ['"storeUrl": null', '"storeUrl": "https://play.google.com/store/apps/details?id=app.bingd"'],
+    ]);
+  });
+
+  after(() => {
+    rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  it('refuses while the entity placeholder and the draft status both stand', () => {
+    const refusal = build();
+    assert.ok(refusal, 'the build must refuse public with the legal inputs unresolved');
+    assert.match(refusal, /TERMS_STATUS is still "draft"/);
+    // And refused before writing anything: a partial dist/ holding public-mode
+    // _headers — no noindex — from a failed build is the half-deploy the gate's
+    // ordering exists to prevent.
+    assert.ok(!existsSync(sandboxDist), 'a refused build must write no output');
+  });
+
+  it('still refuses with the entity filled in, because filling it in is not a legal read', () => {
+    patch('build.mjs', [
+      ["'[LEGAL ENTITY / DEVELOPER NAME &mdash; FOUNDER TO CONFIRM]'", "'Example Operator'"],
+    ]);
+
+    const refusal = build();
+    assert.ok(refusal, 'the entity alone must not open the gate');
+    assert.match(refusal, /TERMS_STATUS is still "draft"/);
+    assert.ok(!existsSync(sandboxDist), 'a refused build must write no output');
+  });
+
+  it('builds once the Terms is final, and ships no draft language anywhere', () => {
+    patch('build.mjs', [["const TERMS_STATUS = 'draft';", "const TERMS_STATUS = 'final';"]]);
+
+    assert.equal(build(), null, 'the full launch commit must build');
+
+    const terms = readFileSync(join(sandboxDist, 'terms', 'index.html'), 'utf8');
+    assert.doesNotMatch(terms, /Draft for review/);
+    assert.doesNotMatch(terms, /not yet (?:been )?reviewed by a\s+lawyer/);
+    assert.doesNotMatch(terms, /FOUNDER TO CONFIRM/);
+    assert.match(terms, /Example Operator/, 'the filled-in entity must be the one named');
+
+    // And the launch state around it is the one the flag promises.
+    const headers = readFileSync(join(sandboxDist, '_headers'), 'utf8');
+    assert.doesNotMatch(headers, /X-Robots-Tag: noindex/);
+    const front = readFileSync(join(sandboxDist, 'index.html'), 'utf8');
+    assert.doesNotMatch(front, /closed testing/);
+    assert.doesNotMatch(front, /<meta name="robots"/);
+  });
+});
 
 /**
  * `_headers` is the only part of this site that is not code and cannot be run, and it

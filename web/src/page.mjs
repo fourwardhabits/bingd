@@ -17,6 +17,7 @@ import {
   detectPlatform,
   destinationFor,
   handleFromPath,
+  installLabel,
   titleIdFromPath,
   tokenFromPath,
 } from './router.mjs';
@@ -59,13 +60,8 @@ const link = (id, href, label) => {
   return true;
 };
 
-const STORE_LABEL = {
-  testflight: 'Get the Bingd beta for iPhone',
-  store: 'Get Bingd for iPhone',
-  'play-opt-in': 'Join the Bingd beta on Android',
-  play: 'Get Bingd for Android',
-};
-
+// The button's wording is `installLabel` in router.mjs — a decision, so it lives with
+// the tests. What stays here is the desktop pair, which is platform-keyed already.
 const PLATFORM_LABEL = { ios: 'Get Bingd for iPhone', android: 'Get Bingd for Android' };
 
 /**
@@ -116,7 +112,7 @@ function paintInstall(cfg, platform) {
 
   if (platform === 'ios' || platform === 'android') {
     const destination = destinationFor(platform, dist);
-    if (destination && link('primary-install', destination.url, STORE_LABEL[destination.kind])) {
+    if (destination && link('primary-install', destination.url, installLabel(destination))) {
       return;
     }
     show('no-destination');

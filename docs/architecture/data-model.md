@@ -938,6 +938,22 @@ There is no insert policy on `reports` and no client write grant anywhere in the
 
 **The subject's owner is resolved server-side** rather than accepted from the caller. Trusting a client-supplied owner would let anyone attribute a report to an account of their choosing, which is precisely the reporting-as-harassment vector PRD §22 names.
 
+> **The subjects, and what `subject_id` means in each — extended 2026-08-25 (`20260825000100`).** `subject_id` is a single `uuid` column whose *meaning* depends on `subject_type`, and reading it as one kind of thing is the mistake that wastes an operator's time:
+>
+> | `subject_type` | `subject_id` | Owner resolved from |
+> |---|---|---|
+> | `profile`, `display_name`, `username` | `profiles.id` | itself |
+> | `list`, `list_title` | `lists.id` | `lists.owner_id` |
+> | `watch_tag` | `watch_tags.id` | `watch_tags.tagger_id` |
+> | `comment` | `comments.id` | `comments.author_id` — the author, **not** the event's actor |
+> | `review` | `user_media.id` | `user_media.user_id`, and only while the note is public |
+>
+> **A review needed a name before it could be a subject, and that is why `user_media` gained a surrogate `id`.** The column is unique and is *not* the primary key — `(user_id, media_item_id)` still is, and every writer still addresses rows by the pair. The alternative was to report a review by its `media_item_id`, which fails in a way no test would have caught by accident: two people's reviews of the same film collide on `reports_one_open_per_reporter`, so the second complaint a reporter filed about that title hits `on conflict do nothing` and is discarded **while the reporter is told it was received**. A moderation system that quietly drops the second report about a popular title is worse than one with no button, because the first one lies.
+>
+> **There is no subject for a private note and there must not be.** A private note has exactly one reader, so nobody else can be harmed by it and nobody else can report it; a subject would exist only to be probed — a way of asking the server whether a given row carries private writing, which is the question `public_notes` was written to refuse. The `review` branch resolves only while `note_visibility = 'public'`, which keeps that structural rather than merely intended.
+>
+> **The subject is stored as `review` rather than `note`** because that is the word the reporter saw on the button. An operator reading `moderation_queue` should not have to translate.
+
 **Reporting is not gated on visibility**, only on the subject existing. An earlier draft of this section and the comment beside the function both claimed the opposite, and a review found the code had never done it. The behaviour is correct and the claim was wrong: the obvious gate would make an abuser unreportable the moment they blocked the person they abused, so being blocked after the fact would withdraw the ability to report it. The cost is that a caller can confirm a UUID names a real row, which is a fair trade.
 
 **The per-day cap is advisory.** It is counted before the insert without a lock, so simultaneous calls from one reporter can exceed it slightly. Idempotency is not advisory — one open report per reporter per subject is held by a partial unique index, which concurrency cannot defeat.
