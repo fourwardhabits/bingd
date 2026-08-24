@@ -454,6 +454,21 @@ export async function releaseDeviceOnSignOut(): Promise<void> {
     // Or the timer holds the event loop open for three seconds after a sign-out that
     // did not need it — which on a device is a background task nobody asked for.
     if (timer) clearTimeout(timer);
+
+    /**
+     * Everything waited on above has had its grace, settled or not.
+     *
+     * Without this a write that **never** settles stays in the set for the life of the
+     * process — its own removal runs in a callback that will not fire — and every later
+     * sign-out pays the full three seconds again, on a promise no second wait can help.
+     * A wedged fetch is exactly the shape that produces one. Found on the fourth review
+     * round.
+     *
+     * Safe to clear rather than to prune: a write dispatched *after* this line adds
+     * itself, and one dispatched before has already been given the only wait it is going
+     * to get.
+     */
+    dispatchedWrites.clear();
   }
 
   const held = heldToken();
