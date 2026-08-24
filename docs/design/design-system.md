@@ -266,6 +266,8 @@ Minimum height 48, minimum tap target 44 × 44, radius 8, `headline` label. One 
 
 The triad from §3. Three chips in a row, equal width, each an outlined circle above its label. Tapping fills the circle, adds a checkmark, and leaves the other two outlined. Selecting a bucket never starts comparisons on its own — that is a separate deliberate action (PRD §11, [`api.md`](../architecture/api.md) §1).
 
+**The row is the component, not the caller’s job.** A single chip is written to take an equal column of a row, so a surface that lays three of them out itself can get the row wrong — and one did: the onboarding sheet stacked them into a column of automatic height, where equal-column sizing resolves to nothing and the circles collapse onto one another. `BucketChoices` is the whole triad, and it is what every surface asking "How was it?" renders. Horizontal gutters stay with the sheet that hosts it, so the row is never padded twice.
+
 ### Score badge
 
 > **Replaces the rank badge.** v1 specified the ordinal `#18` and said "never rendered as a score, percentage, ring, or bar." Reversed by the founder on 2026-08-15; the reasoning is in PRD §4 and the derivation in §10.

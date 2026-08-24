@@ -1,13 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import { mustReconcile, newOperationId, setBucket } from '@/features/collection/writes';
 import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
-import { BUCKETS, BucketChip, Poster, Sheet, Text, type BucketId } from '@/ui/components';
+import { BucketChoices, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
 export type TasteSubject = {
   id: string;
@@ -105,8 +105,38 @@ export function TasteBucketSheet({
 
   return (
     <Sheet visible onClose={onClose} label="How was it?">
-      <View style={styles.body}>
-        <Text variant="title2">How was it?</Text>
+      {/* Scrolls, for the same reason `LogSheet` does. `Sheet` caps itself at 90% of
+          the window, and at the largest accessibility text sizes a question, a poster
+          block, three wrapped labels and a note are taller than that — which without
+          this would put the third choice somewhere nobody can reach. At ordinary sizes
+          it never scrolls, because the content is shorter than the cap. */}
+      <ScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        bounces={false}
+      >
+        <View style={styles.head}>
+          <Text variant="title2" style={styles.heading}>
+            How was it?
+          </Text>
+          {/* The way out, in words, because the way out cannot be the scrim alone.
+              `Sheet` hides its backdrop from the accessibility tree on purpose, and
+              Android's back button is not a gesture VoiceOver offers — so without
+              this, a screen-reader user who opened the wrong film could leave only
+              by rating it. Every other sheet in the app carries one; this was the
+              omission. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            onPress={onClose}
+            style={styles.close}
+            hitSlop={theme.space[3]}
+          >
+            <Text variant="callout" tone="secondary">
+              Close
+            </Text>
+          </Pressable>
+        </View>
 
         <View style={styles.subject}>
           <Poster uri={subject.posterUri} title={subject.title} size="sm" />
@@ -122,16 +152,14 @@ export function TasteBucketSheet({
           </View>
         </View>
 
-        <View style={styles.buckets}>
-          {BUCKETS.map((bucket) => (
-            <BucketChip
-              key={bucket.id}
-              bucket={bucket}
-              selected={false}
-              onPress={() => void choose(bucket.id)}
-            />
-          ))}
-        </View>
+        {/* The same control the Log tab shows, not a second one that resembles it.
+            Nothing is pre-selected: this sheet asks the question once and closes on
+            the answer, so a filled circle would be describing a choice nobody made. */}
+        <BucketChoices
+          selected={null}
+          onSelect={(bucket) => void choose(bucket)}
+          testID="bucket-choices"
+        />
 
         {problem ? (
           <Text variant="footnote" tone="secondary">
@@ -144,14 +172,38 @@ export function TasteBucketSheet({
         <Text variant="footnote" tone="tertiary">
           Anything you have ever seen. It does not have to be recent.
         </Text>
-      </View>
+      </ScrollView>
     </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  body: { gap: theme.space[5], paddingBottom: theme.space[4] },
+  /**
+   * The gutter every other sheet body observes. Its absence is why the heading sat
+   * flush against the left edge of the sheet — `Sheet` pads its foot for the home
+   * indicator and nothing else, on purpose, because its children pad themselves.
+   *
+   * `paddingTop` clears the drag handle. Handle, question, title, choices, note:
+   * the order is the order it is read in, and the gap between them is one token
+   * rather than five, so nothing here needs a fixed offset to land correctly on a
+   * particular phone.
+   */
+  body: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[2],
+    gap: theme.space[4],
+  },
+  head: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
+  heading: { flex: 1 },
+  /**
+   * The height is the target, not the `hitSlop`. A word of `callout` type is about
+   * twenty points tall, and slop that reaches past its parent's bounds is not
+   * delivered on Android — so a control relying on it alone is 28pt however wide the
+   * slop is written. The slop stays for horizontal reach; the minimum height is what
+   * makes the 44 real.
+   */
+  close: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
   subject: { flexDirection: 'row', gap: theme.space[3], alignItems: 'center' },
   subjectText: { flex: 1, gap: theme.space[1] },
-  buckets: { gap: theme.space[2] },
 });

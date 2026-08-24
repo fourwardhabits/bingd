@@ -254,3 +254,161 @@ describe('the first five', () => {
     expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('skipped');
   });
 });
+
+/**
+ * "How was it?", as the founder saw it on a device — three circles piled on top of one
+ * another with the labels floating over them.
+ *
+ * The cause was not in the chip. `BucketChip` is written with `flex: 1` so that three
+ * of them take equal columns of a row; this sheet mapped them into a container that had
+ * a gap and no direction, and `flex: 1` in a column of automatic height resolves each
+ * chip to nothing. The row is now a component — `BucketChoices` — that both this sheet
+ * and `LogSheet` render, so there is no parent left for either of them to get wrong.
+ *
+ * These read the layout, not a screenshot: what has to hold is the direction, the equal
+ * columns and the words, none of which is a colour.
+ */
+describe('the rating sheet', () => {
+  const flatten = (style: unknown) =>
+    (Array.isArray(style) ? Object.assign({}, ...style) : (style ?? {})) as Record<
+      string,
+      unknown
+    >;
+
+  const openSheet = async () => {
+    const view = await open();
+    await search(view, 'inception');
+    await fireEvent.press(view.getByLabelText(/Inception, 2010/));
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    return view;
+  };
+
+  it('offers the three choices, in the words the product uses', async () => {
+    const view = await openSheet();
+
+    expect(view.getAllByRole('radio').map((chip) => chip.props.accessibilityLabel)).toEqual([
+      'I liked it',
+      'It was fine',
+      'I didn’t like it',
+    ]);
+  });
+
+  it('draws them as one horizontal row rather than a stack', async () => {
+    const view = await openSheet();
+
+    // The regression guard. A column here, or an absolutely positioned chip, is the
+    // broken build.
+    const row = view.getByTestId('bucket-choices');
+    expect(flatten(row.props.style).flexDirection).toBe('row');
+    for (const chip of view.getAllByRole('radio')) {
+      expect(flatten(chip.props.style).flex).toBe(1);
+      expect(flatten(chip.props.style).position).toBeUndefined();
+    }
+  });
+
+  it('shows the same control the Log tab shows, rather than its own copy', async () => {
+    const view = await openSheet();
+
+    // Same testID, same role, same three radios as `LogSheet.test.tsx` asserts. If one
+    // surface stops using `BucketChoices`, one of the two tests goes red.
+    expect(view.getByTestId('bucket-choices').props.accessibilityRole).toBe('radiogroup');
+    expect(view.getAllByRole('radio')).toHaveLength(3);
+  });
+
+  it('starts with nothing chosen, because nobody has chosen yet', async () => {
+    const view = await openSheet();
+
+    for (const chip of view.getAllByRole('radio')) {
+      expect(chip.props.accessibilityState.selected).toBe(false);
+    }
+  });
+
+  /**
+   * The sheet's own content block, found by walking up from the row rather than
+   * through a testID added for this test's benefit. Everything asserted about the
+   * sheet's shape lives on it: the gutter, the clearance under the drag handle, and
+   * the fact that it scrolls at all.
+   */
+  const contentBlock = (view: Awaited<ReturnType<typeof openSheet>>) => {
+    let node = view.getByTestId('bucket-choices').parent;
+    while (node && node.props.contentContainerStyle === undefined) node = node.parent;
+    if (!node) throw new Error('the choices are not inside a scrolling content block');
+    return node;
+  };
+
+  it('keeps the sheet content off the edge and clear of the drag handle', async () => {
+    const view = await openSheet();
+
+    // The heading sat flush against the left edge of the sheet, because the body
+    // carried no horizontal padding at all.
+    const body = flatten(contentBlock(view).props.contentContainerStyle);
+    expect(body.paddingHorizontal).toBe(16);
+    expect(body.paddingTop).toBeGreaterThan(0);
+  });
+
+  it('offers a way out that is not the scrim, and writes nothing on the way', async () => {
+    const view = await openSheet();
+
+    // `Sheet` hides its backdrop from the accessibility tree, so tapping outside is
+    // not a route a screen reader can take. Leaving must not cost a rating, and it
+    // must not leave a title behind either.
+    // A real 44pt target rather than a word with `hitSlop` around it: slop that
+    // reaches past its parent's bounds is not delivered on Android.
+    const close = view.getByRole('button', { name: 'Close' });
+    expect(flatten(close.props.style).minHeight).toBe(44);
+
+    await fireEvent.press(close);
+
+    await waitFor(() => expect(view.queryByText('How was it?')).toBeNull());
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('rank_start')).toHaveLength(0);
+    expect(view.getByLabelText('0 of 5 films ranked')).toBeTruthy();
+  });
+
+  it('scrolls, so the largest text sizes cannot put a choice out of reach', async () => {
+    const view = await openSheet();
+
+    // `Sheet` caps itself at 90% of the window. The Log tab's sheet scrolls for exactly
+    // this reason; this one did not, and at the largest accessibility text sizes the
+    // third choice and the helper text went somewhere nobody could get to.
+    expect(contentBlock(view).type).toBe('RCTScrollView');
+  });
+
+  it('stores the middle bucket the middle words mean', async () => {
+    const view = await openSheet();
+    await fireEvent.press(view.getByLabelText('It was fine'));
+
+    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    expect(callsTo('set_bucket')[0][1]).toEqual({
+      p_media_item_id: 'film-1',
+      p_bucket: 'fine',
+      p_operation_id: expect.any(String),
+    });
+    // And the comparison flow still opens on the same bucket, unchanged by the layout.
+    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
+    expect(callsTo('rank_start')[0][1]).toEqual({
+      p_media_item_id: 'film-1',
+      p_bucket: 'fine',
+    });
+  });
+
+  it('stores not_for_me for the last of the three, not the camelCase id', async () => {
+    const view = await openSheet();
+    await fireEvent.press(view.getByLabelText('I didn’t like it'));
+
+    // The chip's id is `notForMe`; what is written — and what the comparison session
+    // is opened on — is `not_for_me`. This is the one place that mapping is visible
+    // from the surface, so it is asserted here.
+    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    expect(callsTo('set_bucket')[0][1]).toEqual({
+      p_media_item_id: 'film-1',
+      p_bucket: 'not_for_me',
+      p_operation_id: expect.any(String),
+    });
+    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
+    expect(callsTo('rank_start')[0][1]).toEqual({
+      p_media_item_id: 'film-1',
+      p_bucket: 'not_for_me',
+    });
+  });
+});

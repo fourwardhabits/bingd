@@ -289,6 +289,28 @@ describe('choosing a bucket', () => {
  * first test below is the one that changed, and it is the regression guard.
  */
 /**
+ * The shared control, asserted from the surface that owns its design.
+ *
+ * The onboarding sheet asks the same question and used to draw its own row, which is
+ * how it ended up stacked. Both suites now assert the same testID and the same
+ * direction, so the two cannot part company again without one of them going red.
+ */
+describe('the rating control', () => {
+  it('is the shared three-choice row, laid out horizontally', async () => {
+    stubReads(null, null);
+    const sheet = await open(filmA);
+
+    const row = sheet.getByTestId('bucket-choices');
+    const style = Array.isArray(row.props.style)
+      ? Object.assign({}, ...row.props.style)
+      : row.props.style;
+    expect(style.flexDirection).toBe('row');
+    expect(row.props.accessibilityRole).toBe('radiogroup');
+    expect(sheet.getAllByRole('radio')).toHaveLength(3);
+  });
+});
+
+/**
  * The bounded logging sanity check (2026-08-24).
  *
  * The question behind it: can a passive act — opening something, looking at it, backing
