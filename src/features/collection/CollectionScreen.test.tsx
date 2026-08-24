@@ -362,9 +362,47 @@ describe('the unranked card', () => {
 
     await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
     expect(
-      view.getByText('Rank them to complete your Collection and improve your recommendations.'),
+      view.getByText(
+        'Rank what you have watched to complete your Collection and improve your recommendations.',
+      ),
     ).toBeTruthy();
-    expect(view.getByText('Rank now')).toBeTruthy();
+  });
+
+  /**
+   * **Both answers in one place.** The card used to put its copy down the left and an
+   * X at the far right edge, so the two things a reader could do about it sat as far
+   * apart as the card allowed and only one of them looked like a control.
+   */
+  it('offers Rank and Not now together, as a pair', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByRole('button', { name: 'Rank' })).toBeTruthy());
+    const rank = view.getByRole('button', { name: 'Rank' });
+    const notNow = view.getByRole('button', { name: 'Not now' });
+    // Same parent, so they are one action area rather than two opposite corners.
+    expect(rank.parent).toBe(notNow.parent);
+  });
+
+  it('offers one dismissal, not two', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
+    expect(view.queryByLabelText('Dismiss')).toBeNull();
+    expect(view.getByRole('button', { name: 'Not now' })).toBeTruthy();
+  });
+
+  it('opens the Unranked tab from Rank', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByRole('button', { name: 'Rank' })).toBeTruthy());
+    await fireEvent.press(view.getByRole('button', { name: 'Rank' }));
+
+    await waitFor(() =>
+      expect(tab(view, 'Unranked')?.props.accessibilityState.selected).toBe(true),
+    );
   });
 
   it('stays away when this side of the selector has nothing unranked', async () => {
@@ -381,7 +419,7 @@ describe('the unranked card', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
-    await fireEvent.press(view.getByLabelText('Dismiss'));
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
     await waitFor(() => expect(view.queryByText('You have unranked titles')).toBeNull());
     expect(mockPrefWrites.map((write) => write.name)).toContain(NUDGE_KEY);
@@ -397,7 +435,7 @@ describe('the unranked card', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('You have unranked titles')).toBeTruthy());
-    await fireEvent.press(view.getByLabelText('Dismiss'));
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
 
     await waitFor(() => expect(view.queryByText('You have unranked titles')).toBeNull());
     expect(tab(view, 'Unranked')).toBeTruthy();
@@ -407,7 +445,7 @@ describe('the unranked card', () => {
     mockTables.user_media = [watched('m1', 'movie')];
     const first = await open();
     await waitFor(() => expect(first.getByText('You have unranked titles')).toBeTruthy());
-    await fireEvent.press(first.getByLabelText('Dismiss'));
+    await fireEvent.press(first.getByRole('button', { name: 'Not now' }));
     await waitFor(() => expect(first.queryByText('You have unranked titles')).toBeNull());
 
     // Same store, fresh mount: the dismissal was written, so it survives.

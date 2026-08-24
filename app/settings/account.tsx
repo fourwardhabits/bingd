@@ -45,7 +45,7 @@ export default function AccountScreen() {
     setError(null);
     Alert.alert(
       'Delete your account?',
-      'This removes your account, your rankings, your watchlist, your notes and your activity. It cannot be undone and there is no way to recover any of it.',
+      'This removes your account, your rankings, your watchlist, anything you wrote and your activity. It cannot be undone and there is no way to recover any of it.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -231,7 +231,7 @@ export default function AccountScreen() {
               </Text>
               {[
                 'Your account, sign-in method and profile',
-                'Every ranking, watch, watchlist entry and note',
+                'Every ranking, watch, watchlist entry and anything you wrote',
                 'Your follows, followers and blocks, in both directions',
                 'Your activity, reactions and comments — including comments on other people’s activity',
                 'Recommendations you sent and were sent, and your invite link',

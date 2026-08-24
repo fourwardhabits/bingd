@@ -257,7 +257,7 @@ describe('the Settings hub', () => {
     // conversation starts with a version and a build number.
     const view = await renderWithProviders(<SettingsScreen />);
 
-    expect(view.getByText(/^Bingd .+ \(.+\)$/)).toBeTruthy();
+    expect(view.getByText(/^bingd\. .+ \(.+\)$/)).toBeTruthy();
     expect(view.queryByText(/^runtime /)).toBeNull();
   });
 });
@@ -331,36 +331,92 @@ describe('follow requests', () => {
     expect(view.getByText('Inception')).toBeTruthy();
   });
 
-  it('leaves unread rows unread until the reader says otherwise', async () => {
-    // What this replaced marked the whole inbox read on its first render, which made
-    // `read_at` a column with one observable value — by the time anybody could look,
-    // nothing was ever unread. The founder asked for read/unread *and* a Mark all read
-    // control, and neither means anything without the other.
+  /**
+   * **Seeing them is what reads them**, as of 2026-08-23.
+   *
+   * This screen has had both behaviours. It began by marking the inbox read on first
+   * render, which made `read_at` a column with one observable value; that was replaced
+   * by a reader-driven `Mark all read`; and beta feedback is that pressing a button to
+   * say "yes, I looked" is friction with nothing on the other side of it.
+   *
+   * The objection the middle version answered still holds and is still answered: the
+   * marking happens *after* the rows are on screen, so the first paint is the unread
+   * one. What is gone is the requirement to press anything.
+   */
+  it('shows the rows unread first, then marks them read without being asked', async () => {
     mockRpcResults.my_notifications = [comment];
     const view = await renderWithProviders(<NotificationsScreen />);
 
-    await waitFor(() => expect(view.getByText('1 unread')).toBeTruthy());
-    expect(mockRpc).not.toHaveBeenCalledWith('mark_notifications_read', expect.anything());
-    expect(view.getByLabelText(/^Unread\. Bo/)).toBeTruthy();
+    // Drawn unread — the reader sees what was new on this visit.
+    await waitFor(() => expect(view.getByLabelText(/^Unread\. Bo/)).toBeTruthy());
+    // And read without a tap.
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('mark_notifications_read', undefined),
+    );
   });
 
-  it('marks everything read when the reader asks', async () => {
+  it('asks the server once, not once per render', async () => {
     mockRpcResults.my_notifications = [comment];
     const view = await renderWithProviders(<NotificationsScreen />);
 
-    await waitFor(() => expect(view.getByText('Mark all read')).toBeTruthy());
-    await fireEvent.press(view.getByText('Mark all read'));
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('mark_notifications_read', undefined),
+    );
+    await waitFor(() => expect(view.getByText('Bo')).toBeTruthy());
 
-    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('mark_notifications_read', undefined));
+    const calls = mockRpc.mock.calls.filter(([name]) => name === 'mark_notifications_read');
+    expect(calls).toHaveLength(1);
   });
 
-  it('offers nothing to mark when nothing is unread', async () => {
-    // A control that cannot change anything is the dead control this run keeps out.
+  it('asks nothing when everything was already read', async () => {
     mockRpcResults.my_notifications = [{ ...comment, read_at: '2026-08-17T11:00:00.000Z' }];
     const view = await renderWithProviders(<NotificationsScreen />);
 
     await waitFor(() => expect(view.getByText('Bo')).toBeTruthy());
+    expect(mockRpc).not.toHaveBeenCalledWith('mark_notifications_read', undefined);
+  });
+
+  /**
+   * Found by independent review of this change. With `Mark all read` gone there is no
+   * manual way back, so a failed mark that latched would leave the reader looking at
+   * unread rows and a lit bell with nothing to press until the screen was remounted.
+   */
+  it('tries again after a failed mark, rather than latching', async () => {
+    mockRpcErrors.mark_notifications_read = [{ code: '53400', message: 'nope' }];
+    mockRpcResults.my_notifications = [comment];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('mark_notifications_read', undefined),
+    );
+    await waitFor(() => expect(view.getByText('Bo')).toBeTruthy());
+
+    // The refusal released the latch, so the rows are still unread and still markable.
+    expect(view.getByLabelText(/^Unread\. Bo/)).toBeTruthy();
+
+    /**
+     * **And released is not the same as spinning**, which is the second half of the
+     * same finding. Depending on the `useMutation` result rather than on its `mutate`
+     * would re-run the effect the moment `onError` cleared the latch — a new object
+     * identity every time the mutation's state changed — and the retry would go
+     * straight back into the call that had just failed. One attempt, and then it waits
+     * for a real refetch.
+     */
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const attempts = mockRpc.mock.calls.filter(
+      ([name]) => name === 'mark_notifications_read',
+    );
+    expect(attempts).toHaveLength(1);
+  });
+  it('no longer offers a control for something that needs no asking', async () => {
+    mockRpcResults.my_notifications = [comment];
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Bo')).toBeTruthy());
     expect(view.queryByText('Mark all read')).toBeNull();
+    expect(view.queryByText(/unread$/)).toBeNull();
     expect(view.queryByText(/unread/)).toBeNull();
   });
 

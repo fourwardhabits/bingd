@@ -1,7 +1,6 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import {
@@ -24,6 +23,7 @@ import { readPref, writePref } from '@/lib/prefs';
 import { theme } from '@/ui/tokens';
 import {
   AppHeader,
+  Button,
   HeaderBoundary,
   EmptyState,
   MediumSelector,
@@ -228,46 +228,36 @@ export default function CollectionScreen() {
           information architecture is untouched. */}
       <HeaderBoundary />
 
+      {/* **Two answers to one question, side by side.**
+
+          The card said its piece down the left and put an X at the far right edge,
+          so the two things a reader could do about it sat as far apart as the card
+          allowed and only one of them looked like a control. Rank and Not now are
+          now a pair, in the order the question asks them, using the same
+          primary/secondary pairing the notifications screen uses for Approve and
+          Decline — at the compact size that screen introduced.
+
+          One dismissal, not two: an X *and* a Not now would be the same act offered
+          twice. Dismissing hides this card only; the Unranked tab stands as long as
+          anything is unranked. */}
       {active === 'watched' && showNudge ? (
         <View style={styles.nudge}>
-          {/* The card now names its own reason. "Rank a few more and your
-              recommendations get sharper" was true of the app in general and so
-              said nothing about this reader: it read as an advert rather than as
-              a state of their collection. It is only ever drawn when this side of
-              the selector genuinely holds unranked titles, so it can say so. */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="You have unranked titles. Rank now."
-            onPress={() => setSegment('unranked')}
-            style={styles.nudgeMain}
-          >
-            <Text variant="callout">You have unranked titles</Text>
-            <Text variant="footnote" tone="secondary">
-              Rank them to complete your Collection and improve your recommendations.
-            </Text>
-            <Text variant="callout" tone="action">
-              Rank now
-            </Text>
-          </Pressable>
-          {/* An X rather than "Not now": the control dismisses this card, and a
-              worded button that size reads as the second of two answers to the
-              question above it. Dismissing hides the card only — the Unranked tab
-              stands as long as there is anything on it. */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss"
-            onPress={() => {
-              void dismissNudge().catch(() => {});
-            }}
-            hitSlop={theme.space[3]}
-            style={styles.nudgeDismiss}
-          >
-            <Ionicons
-              name="close"
-              size={theme.layout.icon.sm}
-              color={theme.text.tertiary}
+          <Text variant="callout">You have unranked titles</Text>
+          <Text variant="footnote" tone="secondary">
+            Rank what you have watched to complete your Collection and improve your
+            recommendations.
+          </Text>
+          <View style={styles.nudgeActions}>
+            <Button label="Rank" size="sm" onPress={() => setSegment('unranked')} />
+            <Button
+              label="Not now"
+              kind="secondary"
+              size="sm"
+              onPress={() => {
+                void dismissNudge().catch(() => {});
+              }}
             />
-          </Pressable>
+          </View>
         </View>
       ) : null}
 
@@ -431,34 +421,22 @@ function Loading() {
 }
 
 const styles = StyleSheet.create({
+  // A column now. As a row it put the copy and the dismissal at opposite edges,
+  // which is what made them read as unrelated to each other.
   nudge: {
     marginHorizontal: theme.layout.gutter,
     marginTop: theme.space[3],
     marginBottom: theme.space[2],
     paddingHorizontal: theme.space[3],
-    paddingVertical: theme.space[2],
+    paddingVertical: theme.space[3],
     borderRadius: theme.radius.control,
     backgroundColor: theme.surface.raised,
     borderColor: theme.border.hairline,
     borderWidth: StyleSheet.hairlineWidth * 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: theme.space[3],
+    gap: theme.space[2],
   },
-  nudgeMain: {
-    gap: theme.space[1],
-    flex: 1,
-    minHeight: theme.layout.minTapTarget,
-    justifyContent: 'center',
-  },
-  // The icon is small; the target around it is not.
-  nudgeDismiss: {
-    minWidth: theme.layout.minTapTarget,
-    minHeight: theme.layout.minTapTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  nudgeActions: { flexDirection: 'row', gap: theme.space[2], paddingTop: theme.space[1] },
+
   body: { flex: 1 },
   count: {
     paddingHorizontal: theme.layout.gutter,

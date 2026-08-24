@@ -203,7 +203,7 @@ const personFrom = (id: string, profile: ProfileRow | null): PersonRef =>
         username: profile.username,
         avatarPath: profile.avatar_path,
       }
-    : { id, name: 'Someone on Bingd', username: null, avatarPath: null };
+    : { id, name: 'Someone on bingd.', username: null, avatarPath: null };
 
 /**
  * The row shapes, at module scope because the reads are now generic over them.

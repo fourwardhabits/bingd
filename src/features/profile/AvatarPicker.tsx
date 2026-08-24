@@ -36,7 +36,7 @@ export function AvatarPicker() {
       // Not an error and not retryable in-app: once the system dialog has been
       // answered it does not reappear, so the only useful next step is Settings.
       Alert.alert(
-        'Bingd cannot see your photos',
+        'bingd. cannot see your photos',
         'Allow photo access in your device settings to choose a picture.',
         [
           { text: 'Not now', style: 'cancel' },

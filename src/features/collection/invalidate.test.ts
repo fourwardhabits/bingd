@@ -116,7 +116,7 @@ describe('after a ranking completes', () => {
     expect(has(touched(), KEYS.community)).toBe(true);
   });
 
-  it('refreshes Bingd Awards, which thirteen tracks read the collection for', async () => {
+  it('refreshes bingd. Awards, which thirteen tracks read the collection for', async () => {
     // The failure this module exists to prevent, repeated: Awards was built after the
     // list and never added to it, so a badge earned by the film just logged did not move
     // until the one-minute staleTime expired — and `use-awards.ts` carried a comment
@@ -195,7 +195,7 @@ describe('after a watchlist change', () => {
     expect(has(touched(), KEYS.watchlist)).toBe(true);
   });
 
-  it('refreshes Bingd Awards, which is what Queue Dragon counts', async () => {
+  it('refreshes bingd. Awards, which is what Queue Dragon counts', async () => {
     expect(has(touched(), KEYS.awards)).toBe(true);
   });
 

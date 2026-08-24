@@ -182,7 +182,7 @@ export default function InvitationScreen() {
       <Screen airy includeBottomInset>
         <EmptyState
           kind="nothingYet"
-          title="You have been invited to Bingd"
+          title="You have been invited to bingd."
           body="Sign in or create your account, and this invitation will be waiting when you get there."
         />
       </Screen>
@@ -195,7 +195,7 @@ export default function InvitationScreen() {
     <Screen airy includeBottomInset>
       <EmptyState
         kind="nothingYet"
-        title="You have been invited to Bingd"
+        title="You have been invited to bingd."
         // The account that will be attributed, named before the tap rather than after
         // it. PRD §17: a person signed into a second account must be able to see which
         // one is about to accept.
@@ -326,7 +326,7 @@ function Outcome({
           <EmptyState
             kind="nothingYet"
             title="That is your own link"
-            body="Send it to somebody who is not on Bingd yet, and they will land here."
+            body="Send it to somebody who is not on bingd. yet, and they will land here."
             action={toCollection}
           />
         </Screen>
@@ -353,7 +353,7 @@ function Outcome({
           <EmptyState
             kind="couldNotLoad"
             title="This invitation cannot be accepted"
-            body="The account it came from is not available. You can still use Bingd — nothing else is affected."
+            body="The account it came from is not available. You can still use bingd. — nothing else is affected."
             action={toCollection}
           />
         </Screen>

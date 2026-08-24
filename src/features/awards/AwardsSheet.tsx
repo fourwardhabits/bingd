@@ -72,9 +72,9 @@ export function AwardsSheet({
     open && openTrack && awards.data ? breakdownFor(openTrack, awards.data.facts, open) : null;
 
   return (
-    <Sheet visible onClose={onClose} label="Bingd Awards">
+    <Sheet visible onClose={onClose} label="bingd. Awards">
       <View style={styles.head}>
-        <Text variant="title2">Bingd Awards</Text>
+        <Text variant="title2">bingd. Awards</Text>
       </View>
 
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>

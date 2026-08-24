@@ -520,7 +520,7 @@ export default function TitleScreen() {
     setManaging(false);
     Alert.alert(
       `Remove ${displayTitle ?? title.title} from your collection?`,
-      'Your rating, your watch date and your note go with it. The activity about it goes too, along with any reactions and comments on it. You can log it again later.',
+      'Your rating, your watch date and anything you wrote go with it. The activity about it goes too, along with any reactions and comments on it. You can log it again later.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -1082,7 +1082,7 @@ export default function TitleScreen() {
             <SheetRow
               icon="trash-outline"
               label="Remove from collection"
-              value="Rating, date and note"
+              value="Rating, date and anything you wrote"
               onPress={confirmRemoval}
             />
           </View>

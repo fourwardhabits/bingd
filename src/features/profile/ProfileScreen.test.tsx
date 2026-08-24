@@ -254,7 +254,7 @@ describe('top ranked', () => {
  * the goals and the collection below them.
  *
  * Two things moved. The bio left the identity column, where it had two thirds of the
- * screen and competed with the name for it; and Share Profile and Bingd Awards moved
+ * screen and competed with the name for it; and Share Profile and bingd. Awards moved
  * *below* the stat row, so identity flows into the numbers that describe it without a
  * row of buttons interrupting, and the two controls sit next to the goals and the
  * poster wall they actually lead to.
@@ -306,7 +306,7 @@ describe('the shape of the page', () => {
       'Films, mostly.',
       'Followers',
       'Share Profile',
-      'Bingd Awards',
+      'bingd. Awards',
       // Top ranked's empty state. A section heading would have been the natural marker,
       // and `SectionHeader` upper-cases its title, so none of them is on the page as it
       // is written.

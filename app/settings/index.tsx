@@ -206,7 +206,7 @@ function About() {
           <Text tone="action">themoviedb.org</Text>
         </Pressable>
         <Text variant="caption" tone="tertiary">
-          Artwork, cast and title details come from TMDB. Reviews and scores are Bingd
+          Artwork, cast and title details come from TMDB. Reviews and scores are bingd.
           users&apos; own.
         </Text>
       </View>
@@ -260,7 +260,7 @@ function BuildDetails() {
     <View style={styles.block}>
       <View style={styles.blockBody}>
         <Text variant="caption" tone="tertiary">
-          Bingd {version} ({build})
+          bingd. {version} ({build})
         </Text>
 
         {/* Only where somebody is testing. PRD §23 keeps identifiers out of anything

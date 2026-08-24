@@ -192,8 +192,8 @@ export function RecommendSheet({
      */
     const titleUrl = `https://bingd.app/title/${mediaItemId}`;
     const message = invite
-      ? `${name} on Bingd\n${titleUrl}\n\nJoin me on Bingd: ${invite}`
-      : `${name} on Bingd\n${titleUrl}`;
+      ? `${name} on bingd.\n${titleUrl}\n\nJoin me on bingd. ${invite}`
+      : `${name} on bingd.\n${titleUrl}`;
 
     try {
       await Share.share({ message, url: titleUrl });
@@ -314,7 +314,7 @@ export function RecommendSheet({
           for width. */}
       <View style={styles.actions}>
         <Button
-          label={sharing ? 'Opening…' : 'Share off Bingd'}
+          label={sharing ? 'Opening…' : 'Share off bingd.'}
           kind="secondary"
           onPress={() => void shareOffPlatform()}
           disabled={sharing}

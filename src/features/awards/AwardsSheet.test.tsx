@@ -213,7 +213,7 @@ describe('the sheet', () => {
   it('opens with its own name and no scoreline above the rows', async () => {
     seed('user_media', movies(60));
     await open();
-    expect(screen.getByText('Bingd Awards')).toBeTruthy();
+    expect(screen.getByText('bingd. Awards')).toBeTruthy();
     expect(screen.queryByText(/awards earned/)).toBeNull();
   });
 
@@ -914,7 +914,7 @@ describe('the breakdowns', () => {
     await open({ onPressTitle: () => {} });
     await drillInto('Comment Gremlin');
 
-    expect(screen.getByText('Public note')).toBeTruthy();
+    expect(screen.getByText('Review')).toBeTruthy();
     expect(screen.getByText(/^Comment · /)).toBeTruthy();
     // Never the writing itself.
     expect(screen.queryByText(/Loved the structure/)).toBeNull();
@@ -1051,7 +1051,7 @@ describe('privacy', () => {
     expect(count('1 / 5')).toBeTruthy();
     await drillInto('Mutual Mania');
 
-    expect(screen.getByText('Someone on Bingd')).toBeTruthy();
+    expect(screen.getByText('Someone on bingd.')).toBeTruthy();
     expect(screen.getByText('This account is not available to you')).toBeTruthy();
   });
 

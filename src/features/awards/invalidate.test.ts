@@ -7,7 +7,7 @@ import { AWARD_SOURCES, invalidateAwards } from './invalidate';
 /**
  * **Three reviews found this same defect, and this file is the answer to the third.**
  *
- * Bingd Awards is derived and cached for a minute, so a badge only moves when something
+ * bingd. Awards is derived and cached for a minute, so a badge only moves when something
  * says the answer has changed. Review 21 found that logging a film did not. `23a237f`
  * fixed the logging path. Review 21b then found that four other writers — comments,
  * direct watchlist writes, recommendations and the follow graph — moved an award and said

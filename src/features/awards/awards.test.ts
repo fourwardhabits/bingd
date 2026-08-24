@@ -133,7 +133,7 @@ describe('the shape of the set', () => {
   it('agrees with the noun when a threshold is one', () => {
     expect(track('movie-muncher').next(1)).toBe('Watch 1 movie');
     expect(track('mutual-mania').next(1)).toBe('Follow 1 person who follows you back');
-    expect(track('invite-instigator').next(1)).toBe('Bring 1 person to Bingd');
+    expect(track('invite-instigator').next(1)).toBe('Bring 1 person to bingd.');
   });
 
   it('separates thousands, so a top tier is a number and not a serial', () => {
@@ -700,7 +700,7 @@ describe('Invite Instigator', () => {
 
   it('never describes the number as links, sharing or sending', () => {
     const copy = [track('invite-instigator').next(3), track('invite-instigator').earned(50)].join(' ');
-    expect(copy).toBe('Bring 3 people to Bingd Brought 50 people to Bingd');
+    expect(copy).toBe('Bring 3 people to bingd. Brought 50 people to bingd.');
     for (const word of ['link', 'share', 'sent', 'invited']) {
       expect(copy.toLowerCase()).not.toContain(word);
     }
@@ -734,7 +734,7 @@ describe('Invite Instigator', () => {
  * still a follow — so it becomes a row that discloses nothing and leads nowhere.
  */
 describe('a person the reader may not see', () => {
-  const hidden = person({ name: 'Someone on Bingd', username: null });
+  const hidden = person({ name: 'Someone on bingd.', username: null });
 
   it('still counts, so the number stays honest', () => {
     const input = facts({ mutualFollows: [person(), hidden] });
@@ -744,7 +744,7 @@ describe('a person the reader may not see', () => {
 
   it('discloses no handle and offers no route to a profile', () => {
     const { rows } = rowsFor('mutual-mania', facts({ mutualFollows: [hidden] }));
-    expect(rows[0]?.label).toBe('Someone on Bingd');
+    expect(rows[0]?.label).toBe('Someone on bingd.');
     expect(rows[0]?.detail).toBe('This account is not available to you');
     expect(rows[0]?.link).toBeNull();
   });
@@ -845,7 +845,7 @@ describe('Comment Gremlin', () => {
       facts({ written: [{ key: 'note:m1', kind: 'note', title: title({ title: 'Arrival' }), writtenAt: null }] }),
     );
     expect(rows[0]?.label).toBe('Arrival');
-    expect(rows[0]?.detail).toBe('Public note');
+    expect(rows[0]?.detail).toBe('Review');
   });
 
   it('never reprints what was written', () => {
@@ -854,7 +854,7 @@ describe('Comment Gremlin', () => {
     const contribution = { key: 'k', kind: 'note' as const, title: null, writtenAt: null };
     expect(Object.keys(contribution)).not.toContain('body');
     const { rows } = rowsFor('comment-gremlin', facts({ written: [contribution] }));
-    expect(rows[0]?.label).toBe('A Bingd activity');
+    expect(rows[0]?.label).toBe('A bingd. activity');
   });
 });
 

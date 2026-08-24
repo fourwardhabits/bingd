@@ -312,7 +312,7 @@ describe('a title this user has ranked', () => {
     expect(view.getAllByText('Your score')).toHaveLength(1);
     // The section is what everybody *else* thought, and those are its only two rows.
     expect(view.getByText('Following')).toBeTruthy();
-    expect(view.getByText('Bingd')).toBeTruthy();
+    expect(view.getByText('bingd.')).toBeTruthy();
   });
 
   it('says where it sits in their own list, as an ordinal', async () => {
@@ -393,9 +393,9 @@ describe('the community score', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
-    // "Bingd", not "Community". The old label described a population where the new one
+    // "bingd.", not "Community". The old label described a population where the new one
     // names it, and the app has a name.
-    expect(view.getByText('Bingd')).toBeTruthy();
+    expect(view.getByText('bingd.')).toBeTruthy();
     expect(view.getByText('12 ratings')).toBeTruthy();
   });
 
@@ -412,7 +412,7 @@ describe('the community score', () => {
     mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Bingd')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
     // It is a mean. An ordinal is what "#1 in Movies" is, and that is a different
     // line about a different thing.
     expect(view.queryByText(/community rank/i)).toBeNull();
@@ -837,7 +837,7 @@ describe('the following score', () => {
     // "3 people you follow" rather than "3 ratings": the population is the whole point
     // of the number, and it is a different population from the row underneath.
     expect(view.getByText('3 people you follow')).toBeTruthy();
-    expect(view.getByText('Bingd')).toBeTruthy();
+    expect(view.getByText('bingd.')).toBeTruthy();
   });
 
   it('shows a single followee, which community would withhold', async () => {
@@ -856,7 +856,7 @@ describe('the following score', () => {
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Bingd')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
     // Founder correction, 2026-08-18: the row is always drawn, with the grey circle
     // and the same four words. A row that appears when the data does is a page that
     // moves under somebody reading it.
@@ -882,7 +882,7 @@ describe('the following score', () => {
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
     expect(view.queryByText('Following')).toBeNull();
-    expect(view.queryByText('Bingd')).toBeNull();
+    expect(view.queryByText('bingd.')).toBeNull();
   });
 });
 
@@ -1002,7 +1002,7 @@ describe('the following score with nothing to say', () => {
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Bingd')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
     expect(view.getAllByText('Not enough ratings')).toHaveLength(2);
     // Never a zero, and never a real number greyed out to say "do not trust this".
     expect(view.queryByText('0.0')).toBeNull();
@@ -1033,7 +1033,7 @@ describe('the action row', () => {
     await fireEvent.press(view.getByLabelText('Recommend Inception to a friend'));
 
     await waitFor(() => expect(view.getByText('Recommend Inception')).toBeTruthy());
-    expect(view.getByText('Share off Bingd')).toBeTruthy();
+    expect(view.getByText('Share off bingd.')).toBeTruthy();
   });
 
   /**

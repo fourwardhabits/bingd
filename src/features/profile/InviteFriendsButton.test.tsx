@@ -36,7 +36,7 @@ describe('Invite friends', () => {
     await waitFor(() => expect(mockCreateInviteLink).toHaveBeenCalledWith(null, 'op-1', 'profile'));
     await waitFor(() => expect(share).toHaveBeenCalled());
     expect(share).toHaveBeenCalledWith({
-      message: 'Join me on Bingd: https://bingd.app/i/tok123',
+      message: 'Join me on bingd. https://bingd.app/i/tok123',
       url: 'https://bingd.app/i/tok123',
     });
     share.mockRestore();
