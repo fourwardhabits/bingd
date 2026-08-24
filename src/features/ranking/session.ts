@@ -222,12 +222,45 @@ const call = async (fn: string, args: Record<string, unknown>, subjectId: string
 };
 
 /**
+ * **The outcome the server never established**, which is what `useOperationIntent`
+ * needs in order to decide whether to keep an id for the retry.
+ *
+ * `changed` is set for exactly the answers `write-outcome.ts` cannot prove were a
+ * refusal — a dropped connection, an unrecognised SQLSTATE — which is the same
+ * question in this file's vocabulary. A refusal releases the id, because the next
+ * press is a new intent; an unknown holds it, because the next press is the *same*
+ * intent and, since `20260825000200`, the server can recognise it as one and answer
+ * with what the lost reply said.
+ */
+export const outcomeUnknown = (result: SessionStep) =>
+  result.state === 'failed' && result.changed === true;
+
+/**
+ * **The operation id is a required argument on every wrapper below, and that is
+ * deliberate.**
+ *
+ * All seven RPCs default `p_operation_id` to null, because the friend-beta build
+ * installed on real devices calls them without one and must keep working during the
+ * window between the backend deploy and the OTA (`20260825000200` §9). The cost of
+ * that compatibility is that *omitting the id is a legal call which silently gets no
+ * replay protection* — there is no error to notice.
+ *
+ * So this file refuses to make it optional. A caller that has not thought about what
+ * its intent is cannot compile, and `RankingSheet` is the single place that decides
+ * where one intent ends and the next begins.
+ */
+
+/**
  * Opens a session, or places the title outright when its band is empty — there being
  * nothing to compare it against. Resuming an existing session is the server's decision,
  * not the client's.
  */
-export const rankStart = (mediaItemId: string, bucket: BucketId) =>
-  call('rank_start', { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket] }, mediaItemId);
+export const rankStart = (mediaItemId: string, bucket: BucketId, operationId: string) =>
+  call(
+    'rank_start',
+    { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket], p_operation_id: operationId },
+    mediaItemId,
+  );
 
 /**
  * Moves an already-ranked title into a different band, and opens the session that
@@ -242,10 +275,10 @@ export const rankStart = (mediaItemId: string, bucket: BucketId) =>
  * comparisons rather than estimating a new position, so this cannot be made cheaper.
  * That is why the caller confirms with the user before reaching it.
  */
-export const rankRebucket = (mediaItemId: string, bucket: BucketId) =>
+export const rankRebucket = (mediaItemId: string, bucket: BucketId, operationId: string) =>
   call(
     'rank_rebucket',
-    { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket] },
+    { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket], p_operation_id: operationId },
     mediaItemId,
   );
 
@@ -259,45 +292,70 @@ export const rankRebucket = (mediaItemId: string, bucket: BucketId) =>
  * the bucket ought to fix.
  *
  * `rank_rebucket` cannot do it. It raises 22023 on a bucket that is not moving, by
- * design — it exists to change a band. So this composes the two calls it would have
- * made anyway, both granted to `authenticated` since the first migration and both
- * already called from this client: drop the position, then open a fresh session in the
- * same band. The server recomputes the band bounds inside `rank_start`, so the title
- * re-enters comparison against its own bucket exactly as a rebucket does against the
- * new one. The bucket never moves; the ordinal and the score may.
+ * design — it exists to change a band. So there is now a `rank_again` RPC that drops
+ * the position and opens a fresh session in the same band, in one transaction. The
+ * server recomputes the band bounds inside its start, so the title re-enters
+ * comparison against its own bucket exactly as a rebucket does against the new one.
+ * The bucket never moves; the ordinal and the score may.
  *
- * **Two calls rather than one transaction, and that is the honest cost.** A rebucket is
- * atomic and this is not: an unrank that lands and a `rank_start` that does not leaves
- * the title logged, in the same bucket, without a position — which is a state the app
- * already has a name and a queue for (`unranked_queue`), reachable from the collection.
- * The alternative was a migration to relax that 22023, and a beta already installed on
- * two devices is not the moment to move a ranking function.
+ * **It used to be two calls from here, and that was the honest cost at the time.**
+ * `rank_unrank` then `rank_start`, with no transaction around them: an unrank that
+ * landed and a start that did not left the title logged, in the same bucket, without a
+ * position. Nobody's data was ever wrong — the app has a name and a queue for that
+ * state (`unranked_queue`) — but a reader who pressed one button and lost their
+ * network in the middle got half of what they asked for, and the only repair was to
+ * notice and press it again. The alternative was a migration to a ranking function,
+ * and a beta already installed on two devices was not the moment to attempt one.
  *
- * `P0002` from the unrank is not an error here. It means the title lost its position
- * between the screen reading it and this call — which is the state this call was
- * trying to reach, so it goes on and starts the session.
+ * `20260825000200` is that migration, and this is now a single call. If the session
+ * cannot be opened, the position it was replacing is still there.
+ *
+ * A title that is not ranked is still not an error: it means the title lost its
+ * position between the screen reading it and this call, which is the state this call
+ * was trying to reach. The server takes the same reading, so there is no `P0002` to
+ * absorb here any more.
  */
-export const rankAgain = async (
-  mediaItemId: string,
-  bucket: BucketId,
-): Promise<SessionStep> => {
-  const { error } = await supabase.rpc('rank_unrank', { p_media_item_id: mediaItemId });
-  if (error && error.code !== CODES.notFound) return fail(error);
-  return rankStart(mediaItemId, bucket);
-};
+export const rankAgain = (mediaItemId: string, bucket: BucketId, operationId: string) =>
+  call(
+    'rank_again',
+    { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket], p_operation_id: operationId },
+    mediaItemId,
+  );
 
-export const rankAnswer = (sessionId: string, winnerId: string, subjectId: string) =>
-  call('rank_answer', { p_session_id: sessionId, p_winner: winnerId }, subjectId);
+export const rankAnswer = (
+  sessionId: string,
+  winnerId: string,
+  subjectId: string,
+  operationId: string,
+) =>
+  call(
+    'rank_answer',
+    { p_session_id: sessionId, p_winner: winnerId, p_operation_id: operationId },
+    subjectId,
+  );
 
 /** Re-anchors to a different opponent. The third skip places at the midpoint. */
-export const rankSkip = (sessionId: string, subjectId: string) =>
-  call('rank_skip', { p_session_id: sessionId }, subjectId);
+export const rankSkip = (sessionId: string, subjectId: string, operationId: string) =>
+  call('rank_skip', { p_session_id: sessionId, p_operation_id: operationId }, subjectId);
 
 /** One comparison back. At the first, the session ends and the title stays Logged. */
-export const rankBack = (sessionId: string, subjectId: string) =>
-  call('rank_back', { p_session_id: sessionId }, subjectId);
+export const rankBack = (sessionId: string, subjectId: string, operationId: string) =>
+  call('rank_back', { p_session_id: sessionId, p_operation_id: operationId }, subjectId);
 
-/** Leaves the session. The bucket survives and the answers already given are kept. */
+/**
+ * Leaves the session. The bucket survives and the answers already given are kept.
+ *
+ * **The one mutating call in this file with no operation id**, and it is deliberate
+ * rather than an oversight. `rank_cancel` deletes a session by id: a replay names an id
+ * that is already gone — deleted by the first attempt, or by the finalise that beat it —
+ * and raises `P0002`, which the line below has always read as the outcome the caller
+ * wanted. A later session for the same title carries a different id and cannot be hit.
+ * There is no observable a second attempt changes, which is the test
+ * `lib/operation-intent.ts` sets for whether an id is worth having.
+ *
+ * It does take the media lock server-side (`20260825000200`), because deleting a session
+ * out from under an answer that is mid-flight is a different problem from replaying one.
+ */
 export async function rankCancel(sessionId: string): Promise<SessionStep> {
   const { error } = await supabase.rpc('rank_cancel', { p_session_id: sessionId });
   // Already gone is the outcome the caller wanted.

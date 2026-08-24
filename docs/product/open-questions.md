@@ -283,9 +283,40 @@ Opened by the friend-beta follow-up pass. These are not new features and not new
 they are places where a **Decided** rule and the shipped app disagree, which is worth
 naming precisely so the next semantic pass fixes the right side of the disagreement.
 
-### TV-1 — A season is documented as rankable only when Completed, and nothing enforces it
+### ~~TV-1 — A season is documented as rankable only when Completed~~ — **DECIDED 2026-08-24, closed 2026-08-25**
 
-**Status: OPEN. Verified against HEAD, not inherited from an earlier audit.**
+**The founder's decision: ranking a TV season *is* the completion claim. There is no
+prerequisite and there will not be one.**
+
+The "How was it? — I liked it / It was fine / I didn't like it" that opens the flow
+already says the reader watched the season. A separate Completed step would ask the same
+question twice, and it would give movies and seasons two different logging models for no
+gain the reader can see.
+
+So the contradiction is resolved on the **documents' side**, not the build's:
+
+- No completion gate is added to `rank_start` or `set_bucket`. Neither ever had one; the
+  rule below was unenforced at every layer.
+- No Watching/Completed control is built. The season list stays *Ranked / Not ranked yet*.
+- **`progress` is not written as a side effect of ranking.** Evaluated narrowly, as the
+  decision asks: `progress = 'completed'` has exactly two consumers, `clear_watch_date`'s
+  watch-signal check — which a ranked title already satisfies through its bucket — and
+  the `season_completed` feed event, which has no writer. Neither needs it, so the column
+  stays dormant rather than becoming a second, partial record of the same claim. That
+  also keeps it clear of `deferred-roadmap.md` §19's repeat-watch model, where "completed"
+  and "watched" being two independent records is the failure to avoid.
+- No episode tracking, then or now.
+
+**Closed by `20260825000200` with no SQL.** The change is entirely documentary plus a
+fence of tests. `supabase/tests/ranking-contract.test.mjs` §TV-1 pins the *absences*: a
+season with no `set_season_progress` call ranks; a season explicitly marked `watching`
+ranks, and keeps that value; ranking writes no `progress`; and a whole series is still
+refused, because PRD §10's one real TV rule — the season is the unit — stands.
+
+The statement of the contradiction is kept below as it was written, because the record of
+what the documents claimed is the reason the decision was needed.
+
+**Status: was OPEN. Verified against HEAD, not inherited from an earlier audit.**
 
 **What the documents say.**
 
@@ -343,9 +374,41 @@ is relabelled *Watch again*.
 
 **Not open:** whether a title can hold more than one ranking or more than one score. It
 cannot, and §19.2 gives the architectural reason rather than a preference.
-### NR-1 — The client and the server disagree about an unspecified new note
+### ~~NR-1 — The client and the server disagree about an unspecified new note~~ — **DECIDED 2026-08-24, closed 2026-08-25**
 
-**Status: OPEN, and deliberately not closed in the privacy-contract pass.**
+**The founder's answer to the question below was yes.** A brand-new note reaching the
+server with visibility absent or null is **private**, in both writers, as of
+`20260825000200`.
+
+The five cases, all of them tested in `supabase/tests/social-notes.test.mjs`:
+
+| Call | Result |
+|---|---|
+| new text, visibility explicitly `public` | Review — public |
+| new text, visibility explicitly `private` | Private Note |
+| new text, **visibility null or omitted** | **private** ← the branch that changed |
+| existing public Review, ordinary edit naming no visibility | stays public |
+| existing private note, ordinary edit | stays private |
+
+Rows four and five are why this is not a one-character change to a column default.
+"A note that has never existed" is `note_updated_at is null`, which `touch_note_version`
+has maintained since `20260813002300` — it advances only when the text changes. That is
+the test for *new content*, and it is what keeps a published Review public through an
+edit that omits the field. Reinterpreting somebody's review as private because a caller
+left out a redundant argument would be the same defect pointed the other way, and it
+would take their review off the Reviews tab without them touching a control.
+
+**No stored row was changed.** Both branches fire only for a note that does not yet
+exist; the migration contains no `update user_media set note_visibility`.
+
+**This is a safety invariant, not a change of direction.** The product hierarchy is
+unchanged and unchallenged: the app still offers *Write a review* first and *Add a
+private note* second. What the server now guarantees is only that **silence is not
+consent** — which matters for the next importer, backfill or second client rather than
+for anything the app does today, since the app has sent an explicit value since
+2026-08-23.
+
+**Status: was OPEN, and deliberately not closed in the privacy-contract pass.**
 
 **What each side does.** The column default is safe: `user_media.note_visibility` is
 `not null default 'private'`, so anything created outside the two writers is private by
@@ -383,10 +446,65 @@ turning it into a schema tranche on the way past is how a narrow change stops be
 
 Related: PRD §22's Notes and Reviews block, `decision-log.md` §3 *Note and Review
 visibility*, and **M5** in `../release/public-launch-risk-register.md`.
-### DOB-1 — The birthday is collected for one comparison and then never read again
+### ~~DOB-1 — The birthday is collected for one comparison and then never read again~~ — **DECIDED 2026-08-24**
 
-**Status: OPEN as a data-minimisation question. No change made, and none should be made
-without a founder decision.**
+**The founder's decision: keep the exact date of birth, privately, in the data model it
+already has.** None of the three minimisation options below is taken. `profile_private`
+stays, `date_of_birth` stays, and the audit that follows describes the state that is now
+deliberate rather than incidental.
+
+**The three purposes it is retained for:**
+
+1. Bingd's 13+ account eligibility, enforced exactly-calendar and server-side.
+2. Future personalisation of recommendations by age.
+3. Future aggregate or de-identified analysis of movie and TV taste by age cohort.
+
+Purposes 2 and 3 are why the minimisation options were declined: birth *year* loses the
+boundary case that makes purpose 1 honest, and discarding the date after the comparison
+forecloses both of the others. Retention was the cheaper thing to keep and the harder
+thing to get back.
+
+**What that decision does not license, stated as the fence it is:**
+
+- **No widening of read access.** RLS, grants and views are exactly as audited below.
+  Nothing may read another account's date of birth; nor may its owner.
+- **Raw DOB does not leave the database.** Not to PostHog, not to Sentry, not into feed
+  events, not into ordinary recommendation or event payloads. It is on the analytics
+  denylist and stays there.
+- **Future consumers take derived features**, not the date: current age, or an age band.
+  A recommender needs "how old is this person" and never "which day were they born",
+  and copying the date through analytics systems to answer the first question is how a
+  retained field becomes a distributed one.
+- **No demographic analytics tables in this tranche**, and none built on the strength of
+  this decision alone.
+- **No new demographics at all.** Not gender, race, ethnicity, religion, politics, sexual
+  orientation, income or precise location. If optional recommendation inputs are ever
+  added, the low-risk candidates named are country/region and the languages somebody
+  enjoys watching — recorded as a direction, not a plan.
+
+**The signup copy widened with the decision** (`app/(auth)/create-profile.tsx`): *"We use
+your birthday to confirm you are 13 or older. It may also help us personalise
+recommendations as bingd. improves. It is never shown to anyone."* The hedge is load-
+bearing — nothing personalises anything from it today, and claiming otherwise would be
+the opposite error. What the line deliberately does **not** say is "we don't save it",
+which would be false.
+
+**The store declarations are unaffected**, which is the practical benefit of deciding
+this way: Apple's App Privacy answer, Google Play's Data safety answer and the public
+privacy page all already assert that Bingd stores a date of birth, and all three stay
+true. The paragraph below about revisiting them applies to the options that were *not*
+taken.
+
+**Verified again 2026-08-25** and pinned by tests rather than by this paragraph:
+`supabase/tests/rls.test.mjs` now asserts that `profile_private` is unreadable by another
+user, by the owner and by `anon` — with the refusal coming from the missing grant, so
+that a policy added by mistake would still not open it — that no view in `public`
+projects a `date_of_birth` column, and that the row does not outlive the account.
+`supabase/tests/signup.test.mjs` pins the boundary from both sides: the day before a
+thirteenth birthday is refused, the day itself is accepted, the day after is accepted.
+
+**Status: was OPEN as a data-minimisation question.** The audit below is retained
+unchanged, because it is the evidence the decision was taken on.
 
 Opened 2026-08-23 after a beta tester asked, reasonably, why Bingd wants their birthday.
 The screen answered it nowhere, which is now fixed in copy — this entry is about the

@@ -17,7 +17,7 @@ grounds for removal from Play, and an inaccurate App Privacy label is a review r
 |---|---|---|---|
 | Email address | `auth.users` | yes | sign-in |
 | Apple / Google account identifier | `auth.identities` | yes | sign-in |
-| Date of birth | **`profile_private.date_of_birth`** | yes | the 13+ gate, and nothing else. Never returned by any API, including to its owner. It was moved out of `profiles` by `20260813001400_security_fixes.sql` precisely so that no profile read could reach it. **Audited 2026-08-23: the stored value is never read again after signup** — `is_over_13` is its only reader and has no production callers — so the retention, not the collection, is the open question. See `../product/open-questions.md` §8 **DOB-1** |
+| Date of birth | **`profile_private.date_of_birth`** | yes | the 13+ gate today; retained also for future age-based personalisation and aggregate taste analysis (DOB-1). Never returned by any API, including to its owner. It was moved out of `profiles` by `20260813001400_security_fixes.sql` precisely so that no profile read could reach it. **Retention DECIDED 2026-08-24 (DOB-1): the exact date is kept.** The three minimisation options were declined — year precision loses the boundary case that makes the gate honest, and discarding after the comparison forecloses the other two purposes. Retained for **three** purposes: 13+ eligibility; future personalisation of recommendations by age; future aggregate or de-identified analysis of taste by age cohort. Nothing reads it today but the age gate. **The fence:** raw DOB never leaves the database — not to PostHog, Sentry, feed events or ordinary recommendation payloads — and future consumers take derived features (current age, age band) rather than the date. Re-audited 2026-08-25 and pinned by `rls.test.mjs`: unreadable by another user, by its owner and by `anon`, refused by the missing grant rather than by a policy alone; no view in `public` projects the column; the row does not outlive the account. See `../product/open-questions.md` §8 **DOB-1** |
 | Handle, display name, bio | `profiles` | yes | the profile |
 | Profile picture | Supabase Storage, `avatars/{uuid}/` | yes | the profile |
 | Public/private setting | `profiles.visibility` | yes | who can read the account |
@@ -178,7 +178,7 @@ transferred to any third party for their own purposes, sold, or used for adverti
 | Personal info → **Name** | Yes | No | Optional | App functionality |
 | Personal info → **Email address** | Yes | No | Required | App functionality, Account management |
 | Personal info → **User IDs** | Yes | No | Required | App functionality, Analytics |
-| Personal info → **Other info** *(date of birth)* | Yes | No | Required | App functionality — age eligibility |
+| Personal info → **Other info** *(date of birth)* | Yes | No | Required | App functionality — age eligibility. **Not** declared under Personalisation: DOB-1 retains the date for possible future age-based recommendations, but nothing reads it for that today, and a declared purpose has to describe what ships. Revisit this row, not the collection answer, if a recommender ever consumes it |
 | Photos and videos → **Photos** | Yes | No | Optional | App functionality — profile picture |
 | App activity → **Other user-generated content** | Yes | No | Optional | App functionality |
 | App activity → **App interactions** | Yes | No | **Required**² | Analytics |

@@ -1,6 +1,6 @@
 # Public-launch risk register
 
-**Last verified against HEAD: 2026-08-23**, during the friend-beta follow-up pass.
+**Last verified against HEAD: 2026-08-25**, during the T2 data-contract pass (§10).
 
 ## What this document is
 
@@ -143,41 +143,82 @@ unchanged**; what changed is that the document no longer understates the surface
 cover. Nothing in the privacy pass implies these surfaces are private — they are public by
 their author's own choice, and the gap is the absence of a way to *report* them.
 
-### M2 — TV seasons: documented as rankable only when Completed, unenforced — **OPEN**
+### M2 — TV seasons: documented as rankable only when Completed, unenforced — **RESOLVED 2026-08-24 by founder decision, closed 2026-08-25**
 
-Verified in full this pass. The gate is unenforced at every layer *and* the state it
-depends on is unreachable by any user, because `set_season_progress` has zero client call
-sites. `season_completed` feed events can never fire for the same reason.
+Resolved on the documents' side, which is where the error was. **Ranking a season is the
+completion claim**: the "How was it?" that opens the flow already says the reader watched
+it, so there is no prerequisite, no Watching/Completed control, and no episode tracking.
 
-The exact contradiction, with both sides cited, is
-[`../product/open-questions.md`](../product/open-questions.md) §8 **TV-1**. It is entangled
-with repeat-watch semantics and should be resolved with them.
+**No SQL was required.** The gate was unenforced at every layer, so retiring the rule
+meant deleting the claim rather than deleting code. `progress` stays dormant — it is not
+written when a season is ranked, because its only two consumers are a `clear_watch_date`
+check that a ranked title already satisfies through its bucket, and a `season_completed`
+feed event that has no writer.
 
-### M3 — Same-title concurrency between logging and ranking — **OPEN**
+Fenced by `supabase/tests/ranking-contract.test.mjs`, which pins the absences a future
+guard would break: a season with no `set_season_progress` call ranks, a season marked
+`watching` ranks and keeps that value, ranking writes no `progress`, and a whole series is
+still refused. Full statement at
+[`../product/open-questions.md`](../product/open-questions.md) §8 **TV-1**.
 
-`set_bucket` takes no lock and runs `_assert_unranked` followed by an upsert with nothing
-serializing the two. `rank_start` takes no `(user, media_item)` lock either — the only
-advisory locks in the ranking family are keyed on `(user, category)`, which is a different
-grain. So `set_bucket` and `rank_start` on the same title can interleave.
+### M3 — Same-title concurrency between logging and ranking — **RESOLVED 2026-08-25**
 
-This is **known and recorded at the site**: the migration that defines `set_bucket` says so
-in its own header. `unlog` versus ranking is the related case.
+Closed by `20260825000200`. `_lock_media(user, media_item)` is a second advisory lock at
+the grain that was missing, taken by every writer that can change whether a title is
+logged, bucketed or ranked: `set_bucket`, `log_watched`, `unlog`, `clear_watch_date`,
+`rank_start`, `rank_answer`, `rank_skip`, `rank_back`, `rank_unrank`, `rank_reorder`,
+`rank_rebucket` and `rank_again`. The `(user, category)` lock is retained where the band
+arithmetic needs it, and the order is fixed — ledger claim, media lock, category lock —
+so the pair cannot deadlock.
 
-### M4 — Rank Again is two operations with no atomicity and no idempotency — **OPEN**
+Two more writers were added to that list by independent review 39, which checked the
+contract against the schema rather than against the list of functions in the brief, and
+both are worth naming because both look exempt. **`set_season_progress`** writes a column
+TV-1 leaves dormant, so it reads like a function with nothing at stake — but its upsert
+creates the `user_media` row, and a row is a Logged title however it got there, so it
+could put back the row an `unlog` had just deleted. **`rank_cancel`** touches neither
+`rankings` nor `user_media`, but it deletes a session that `rank_answer` may be halfway
+through reading, acting on and writing back.
 
-`rankAgain` is still `rank_unrank` followed by `rank_start`, in sequence, with no
-transaction. A failure between them leaves the title **logged but unranked** — a real state
-the app can display, which is what keeps this a major rather than a corruption.
+Two further holes found while closing it, both fixed here:
 
-Compounding it: **no ranking RPC takes an operation id**, so nothing server-side can
-recognise a replay. A `rank_answer` that finalises and loses its reply is reported to the
-reader as a failure over a ranking that exists. The beta answer is honest copy — the sheet
-says the outcome is unknown and names checking the collection — rather than a claim that
-nothing happened.
+- **A session outliving its collection row.** An open comparison session is not covered by
+  `_assert_unranked`, so unlogging a title mid-ranking left the session standing and a
+  later finalise would have written a ranking for a title the reader had removed. `unlog`
+  now deletes the title's open session with the row.
+- **A finalise contradicting a bucket that moved.** A session spans transactions, so no
+  lock reaches the gap between two. `_rank_finalize` now upserts the collection row with
+  the bucket it is writing, which makes I3 true by construction rather than only checked.
 
-The real fix is `_claim_operation` on the ranking functions, which is a migration and is
-the same mechanism [`../product/deferred-roadmap.md`](../product/deferred-roadmap.md) §19
-needs.
+Proved rather than asserted: `supabase/tests/concurrency/races/ranking.mjs` requires the
+second writer to be found waiting on the exact `_lock_media` key from an independent
+connection — a `user_media` row lock would satisfy a bare `awaitBlocked`, which is why the
+correlation matters — and `mutation-check.mjs` reintroduces the old `set_bucket` and
+requires the suite to go red on both counts: the bucketer stops waiting, and
+`user_media.bucket` ends up disagreeing with `rankings.bucket`.
+
+### M4 — Rank Again is two operations with no atomicity and no idempotency — **RESOLVED 2026-08-25**
+
+Both halves closed by `20260825000200`.
+
+**Atomicity.** `rank_again(media_item_id, bucket, operation_id?)` is a server-side
+transaction that drops the position and opens the fresh session. If the session cannot be
+opened, the old position is still there. The client makes one call.
+
+**Idempotency.** Every ranking RPC now takes a trailing optional `p_operation_id` and
+claims it through `_claim_operation_result`, which **stores the answer** and returns it
+verbatim on a replay — because a bare `already_applied` reads to this client as a session
+that ended, and would tell a reader their title is unranked over a ranking that exists. A
+`rank_answer` that finalises and loses its reply is now recoverable: the retry carries the
+same id and comes back with the same position, score and one-shot `activated` flag.
+
+The sheet's honest copy is kept, and now has a **Try again** button behind it — offering a
+retry was only safe once the server could recognise one.
+
+**Deployment note, not yet discharged.** The id is *optional* so the installed friend-beta
+client keeps working against the new backend; it is required in TypeScript so this client
+cannot omit it. That makes the ordering strict: **backend first, then OTA.** A new client
+against an old database fails on the ranking RPCs with PGRST202.
 
 ### M5 — Privacy: UI copy, PRD and schema alignment — **RESOLVED 2026-08-23**
 
@@ -537,3 +578,42 @@ independent of it.
 **M1, M10 and M11 are unchanged and were not acted on.** UGC moderation, public open
 signup and push all stay recorded decisions rather than work. Nothing in this pass touches
 a privacy gate, a note's visibility, or the bucket/score semantics the Reviews pass pinned.
+
+## 10. Changes made in the data-contract pass, 2026-08-25
+
+Migration `20260825000200_a_ranking_that_cannot_split.sql`, plus the client and document
+changes it required. **Three majors close and three open questions are decided.**
+
+| Change | Effect on this register |
+|---|---|
+| `_lock_media(user, media_item)` added, taken by all fourteen writers that can change whether a title is logged, bucketed or ranked | Closes **M3**. The `(user, category)` lock is kept where the band arithmetic needs it; the order is ledger claim → media lock → category lock, and nothing takes them the other way round |
+| `unlog` deletes the title's open comparison session | A session could outlive the collection row it was placing, and finalising it would have written a ranking for a removed title. Found while closing M3 |
+| `_rank_finalize` upserts the collection row it is a claim about | Makes **I3** true by construction across the multi-transaction gap a lock cannot reach. `assert_ranking_valid` becomes a backstop rather than the only thing that would notice |
+| `processed_operations.result`; ranking RPCs claim through `_claim_operation_result` | Closes the idempotency half of **M4**. A replay is answered with the stored position, score and one-shot `activated` flag — a bare `already_applied` would read to this client as a session that ended |
+| `_claim_operation` raises 22023 on an id spent under a different kind | A composite writer reusing one id turned its second RPC into a no-op that reported success. `removeFromCollection` is one line from exactly that |
+| `rank_again` — one transaction replacing the client's unrank-then-start pair | Closes the atomicity half of **M4**. A failure leaves the previous position standing |
+| "Try again" on the sheet's unknown-outcome branch | The copy was the whole protection while replays could not be recognised. Offering the retry is only safe now that they can be |
+| NR-1: a new note with no stated visibility is private, in both writers | Closes the last residual from the privacy-contract pass. No stored row changed; an existing Review still survives an edit that omits the field |
+| TV-1 decided and the documents corrected | Closes **M2** with no SQL. The gate was unenforced at every layer, so retiring the rule meant deleting the claim |
+| DOB-1 decided: retain the exact date, with a written fence | Store declarations unaffected — all three already assert that Bingd stores a date of birth. Signup copy widened, with the personalisation clause in the future tense |
+| `races/ranking.mjs`, `ranking-contract.test.mjs`, two new mutants | The locking and idempotency claims are observed from independent connections and required to go red when the protection is removed |
+
+**Unlike the 2026-08-23 passes, this one changed SQL.** Nine functions were rebuilt in
+full from their true latest ancestors rather than patched, following the convention
+`20260819000500` set: a `create or replace` assembled from the wrong ancestor loses
+behaviour silently and is invisible in a diff. Two such regressions were caught during
+the work — a `rank_skip` written from the migration its name appears in rather than from
+`20260813002100` lost the band-relative skip walk, and a `rank_start` written the same way
+dropped the suspension guard, because `20260813001700` made every public ranking name a
+two-line wrapper. Both were caught by tests rather than by reading, which is the argument
+for the convention rather than against it.
+
+**Independent review 39** found two further writers that look exempt and are not:
+`set_season_progress`, whose upsert creates the collection row even though the column it
+writes is dormant, and `rank_cancel`, which deletes a session another call may be halfway
+through. Both fixed and covered; re-reviewed as 39b.
+
+**Deployment is coordinated and ordered.** The operation id is trailing and optional so
+the installed friend-beta client keeps working against the new backend, and required in
+TypeScript so this client cannot omit it. Backend first, then OTA. A new client against
+an old database fails on the ranking RPCs with PGRST202.

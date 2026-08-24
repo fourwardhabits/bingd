@@ -409,6 +409,42 @@ export async function createRaceDb() {
       return rows[0].k;
     },
 
+    /**
+     * The key `_lock_media` computes for one account and one media item
+     * (20260825000200 §1).
+     *
+     * Same shape and same reason as `pairKey`: correlating `awaitBlocked` with this
+     * value is what makes a test say "`_lock_media` serialised these two" rather than
+     * "something did". The expression is the function's own, recomputed rather than
+     * called, because `select _lock_media(...)` would take a transaction-scoped lock
+     * that this connection's implicit commit immediately drops.
+     */
+    async mediaKey(userId, mediaItemId) {
+      const { rows } = await observer.query(
+        `select hashtextextended(
+           'media:' || coalesce($1::text, '') || ':' || coalesce($2::text, ''), 0)::text as k`,
+        [userId, mediaItemId],
+      );
+      return rows[0].k;
+    },
+
+    /**
+     * The key the ranking arithmetic computes for one account and one category — the
+     * third and innermost lock in `20260825000200`'s hierarchy, held by `_rank_finalize`,
+     * `_rank_unrank_impl` and `rank_reorder`.
+     *
+     * No prefix and no separator, because that is what the schema does: this key has
+     * been `hashtextextended(user || category, 0)` since `20260813000700` and the point
+     * of recomputing it here is to match what is deployed, not what would be tidier.
+     */
+    async categoryKey(userId, category) {
+      const { rows } = await observer.query(
+        `select hashtextextended($1::text || $2::text, 0)::text as k`,
+        [userId, category],
+      );
+      return rows[0].k;
+    },
+
     async barrierKey(name) {
       const { rows } = await observer.query(
         `select hashtextextended('race:' || $1, 0)::text as k`,

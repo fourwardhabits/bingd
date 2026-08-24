@@ -266,13 +266,26 @@ export default function CreateProfileScreen() {
                 only place the reason appeared was the refusal screen, which you see
                 only if you are turned away.
 
-                Both halves are literally true and neither overstates. It is used for
-                the 13+ comparison in `create_profile` and for nothing else: the value
-                lands in `profile_private`, which has RLS enabled and no policy, so no
-                API returns it to anybody — including the person who typed it. It is on
-                the analytics denylist. Nothing personalises anything from it. */}
+                **Widened on 2026-08-25, with DOB-1.** The previous line said this is
+                used to check you are 13 or over, full stop. That was true of the code
+                and too narrow as a statement of intent: the founder's decision is to
+                retain the date for eligibility *and* for future personalisation and
+                aggregate taste analysis, so a promise that it is used for one thing
+                only is a promise this app intends to outgrow. Better to say the honest
+                thing now than to quietly broaden the use later under copy that ruled
+                it out.
+
+                Every clause is still literally true of what ships today. The 13+
+                comparison is `create_profile`'s and is the only current reader. "May
+                also help" is a hedge on purpose: nothing personalises anything from it
+                yet, and claiming otherwise would be the opposite error. The value lands
+                in `profile_private`, which has RLS enabled and no policy and no select
+                grant, so no API returns it to anybody — including the person who typed
+                it — and it is on the analytics denylist. What is deliberately *not*
+                here is "we don't save it", which would be false. */}
             <Text variant="caption" tone="tertiary">
-              We use this to check you are 13 or over. It is never shown to anyone.
+              We use your birthday to confirm you are 13 or older. It may also help us
+              personalise recommendations as bingd. improves. It is never shown to anyone.
             </Text>
             <View style={styles.birthRow}>
               <View style={styles.birthDay}>

@@ -15,7 +15,10 @@ import { useReducedMotion } from '@/ui/motion';
 import { theme } from '@/ui/tokens';
 import { Button, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
+import { useOperationIntent } from '@/lib/operation-intent';
+
 import {
+  outcomeUnknown,
   rankAgain,
   rankAnswer,
   rankBack,
@@ -103,6 +106,56 @@ function Session({
   const [step, setStep] = useState<SessionStep | null>(null);
   // Starts true: the session is already being opened by the time anything renders.
   const [busy, setBusy] = useState(true);
+
+  /**
+   * The attempt to run again if the reader asks, and **the reason the operation id is
+   * worth threading through this component at all.**
+   *
+   * Every one of these thunks closes over a `withIntent` call with a fixed key, so
+   * running one a second time reuses the id the first attempt carried — which, since
+   * `20260825000200`, is what makes the server answer the retry with the stored result
+   * instead of doing the work twice. Without it a retry of an opening would be a second
+   * genuine `rank_again`, unranking the title the lost attempt had just re-ranked, and a
+   * retry of an answer would record a second comparison.
+   *
+   * State rather than a ref, unlike `answeredCount` and `openSession` below, because
+   * this one is *rendered from*: whether there is a Try again button on screen is
+   * exactly the question of whether there is an attempt to repeat. Wrapped in an object
+   * because `useState` calls a bare function argument as an initialiser rather than
+   * storing it.
+   */
+  const [lastAttempt, setLastAttempt] = useState<{ run: () => Promise<SessionStep> } | null>(null);
+
+  /**
+   * One operation id per intent, for the ranking RPCs that gained one in
+   * `20260825000200`.
+   *
+   * **What an intent is here, and why each key is shaped the way it is.** The rule
+   * `lib/operation-intent.ts` states is that the id belongs to the intent and not to
+   * the attempt — so the key has to name the thing the reader meant, and has to change
+   * when they mean something else.
+   *
+   *   opening   `open:<mode>:<title>:<bucket>` — one intent per opening of this sheet.
+   *             The mode is in the key because a rebucket and a rerank of the same
+   *             title at the same bucket are different acts, and both destroy a
+   *             position. Retrying an open under the id it already used is what stops
+   *             a `rank_again` whose reply was lost from unranking a second time.
+   *
+   *   answering `answer:<session>:<winner>` — one intent per comparison answered.
+   *             Picking the *other* title after a failure is a different judgement and
+   *             gets a different key, which is correct: it is a new answer, not a
+   *             retry of the old one.
+   *
+   *   skipping  `skip:<session>:<pivot>` and `back:<session>:<pivot>` — one intent per
+   *             comparison declined or stepped back from. The pivot is in the key
+   *             because it is what identifies the comparison on screen; the session id
+   *             alone would make every skip in a session the same intent, and the
+   *             second one would be answered with the first one's pivot.
+   *
+   * The hook holds an id only while the outcome is unknown, so an ordinary sequence of
+   * answers mints a fresh id each time and nothing accumulates.
+   */
+  const withIntent = useOperationIntent();
 
   /**
    * How many comparisons the reader actually answered, for `ranking_completed`.
@@ -203,7 +256,13 @@ function Session({
     let live = true;
     const open =
       subject.mode === 'rebucket' ? rankRebucket : subject.mode === 'rerank' ? rankAgain : rankStart;
-    void open(subject.id, subject.bucket).then((next) => {
+    const attempt = () =>
+      withIntent(
+        `open:${subject.mode ?? 'start'}:${subject.id}:${subject.bucket}`,
+        (operationId) => open(subject.id, subject.bucket, operationId),
+        outcomeUnknown,
+      );
+    void attempt().then((next) => {
       /**
        * **A rebucket has already happened by the time this resolves**, and that is the
        * whole reason this is here rather than only in `apply`.
@@ -232,6 +291,10 @@ function Session({
       }
 
       if (live) {
+        // Recorded here rather than before the call, so that the effect body stays free
+        // of a synchronous setState. It lands in the same batch as `apply` below, which
+        // is what the Try again button reads — see `lastAttempt`.
+        setLastAttempt({ run: attempt });
         setBusy(false);
         apply(next);
         return;
@@ -247,10 +310,11 @@ function Session({
     return () => {
       live = false;
     };
-  }, [subject, apply, profile.id, queryClient, opensDestructively]);
+  }, [subject, apply, profile.id, queryClient, opensDestructively, withIntent]);
 
   const act = async (run: () => Promise<SessionStep>, progress = 0) => {
     if (busy) return;
+    setLastAttempt({ run });
     setBusy(true);
     const next = await run();
     setBusy(false);
@@ -295,10 +359,36 @@ function Session({
 
             busy={busy}
             onPick={(winnerId) =>
-              void act(() => rankAnswer(step.sessionId, winnerId, subject.id), 1)
+              void act(
+                () =>
+                  withIntent(
+                    `answer:${step.sessionId}:${winnerId}`,
+                    (op) => rankAnswer(step.sessionId, winnerId, subject.id, op),
+                    outcomeUnknown,
+                  ),
+                1,
+              )
             }
-            onBack={() => void act(() => rankBack(step.sessionId, subject.id), -1)}
-            onSkip={() => void act(() => rankSkip(step.sessionId, subject.id))}
+            onBack={() =>
+              void act(
+                () =>
+                  withIntent(
+                    `back:${step.sessionId}:${step.pivotId}`,
+                    (op) => rankBack(step.sessionId, subject.id, op),
+                    outcomeUnknown,
+                  ),
+                -1,
+              )
+            }
+            onSkip={() =>
+              void act(() =>
+                withIntent(
+                  `skip:${step.sessionId}:${step.pivotId}`,
+                  (op) => rankSkip(step.sessionId, subject.id, op),
+                  outcomeUnknown,
+                ),
+              )
+            }
             onClose={() => void close()}
           />
         ) : step?.state === 'failed' ? (
@@ -319,10 +409,18 @@ function Session({
            * the protection has to be the sentence: a reader who is told the outcome is
            * unknown checks before they repeat it.
            *
-           * **It is not idempotency and does not claim to be.** The ranking RPCs carry
-           * no operation id, so nothing on the server can recognise a replay. That is a
-           * migration and it is recorded in the deferred roadmap under rewatch history,
-           * which is the same problem asked from the other end.
+           * **It is idempotency now, and the offer of a retry is what changed.** The
+           * ranking RPCs took no operation id until `20260825000200`, so nothing on the
+           * server could recognise a replay and the only safe thing this screen could
+           * say was "go and look". They take one now, `lastAttempt` re-runs under the
+           * same one, and the server answers the retry with what the lost reply said —
+           * so the button below cannot rank the title a second time, record a second
+           * comparison, or write a second `title_ranked` event.
+           *
+           * The sentence stays honest about the uncertainty even so, because the
+           * uncertainty is real: this reader genuinely does not know yet whether their
+           * ranking landed. What has changed is that finding out no longer costs them a
+           * trip to their collection.
            */
           <Centred>
             <Text variant="title2" style={styles.centre}>
@@ -334,9 +432,21 @@ function Session({
             </Text>
             <Text variant="body" tone="secondary" style={styles.centre}>
               {step.changed
-                ? `We lost the connection before hearing back, so ${subject.title} may already be ranked. Check your collection before you rank it again.`
+                ? `We lost the connection before hearing back, so ${subject.title} may already be ranked. Try again — we will pick up where this left off rather than ranking it twice.`
                 : step.message}
             </Text>
+            {step.changed && lastAttempt ? (
+              <Button
+                label="Try again"
+                disabled={busy}
+                disabledReason="Still trying."
+                onPress={() => {
+                  // No progress: a retry is the same comparison, not another one, and
+                  // counting it would inflate `ranking_completed`'s `comparisons`.
+                  void act(lastAttempt.run);
+                }}
+              />
+            ) : null}
             <Button label="Close" kind="secondary" onPress={() => void close()} />
           </Centred>
         ) : step?.state === 'ended' ? (

@@ -686,8 +686,11 @@ Every claim here was checked against HEAD rather than inherited from an earlier 
   the first and the first is gone. `docs/architecture/data-model.md` already records this
   as known debt.
 - **The collection RPCs are idempotent by operation id** through `_claim_operation` and the
-  `processed_operations` ledger. **The ranking RPCs are not** — `rank_start`, `rank_answer`
-  and `rank_rebucket` take no operation id at all.
+  `processed_operations` ledger. ~~**The ranking RPCs are not**~~ — **they are, as of
+  `20260825000200`.** Every ranking RPC bar `rank_cancel` now takes a trailing optional
+  `p_operation_id` and claims it through `_claim_operation_result`, which also stores the
+  answer so a replay returns the position and score the lost reply carried. This entry
+  wanted that mechanism and no longer has to build it.
 - **`title_logged` already exists and has no producer.** It is in the `feed_events` type
   CHECK, it is rendered by the client with the verb *watched* (`features/feed/activity.ts`),
   and `unlog` already cleans it up — but **no SQL anywhere inserts one**. The "watched"
@@ -809,11 +812,12 @@ None, by design. `rank_start`, `rank_answer`, `rank_rebucket`, `rank_unrank` and
 `_rank_finalize` are untouched, read nothing from `watch_events`, and write nothing to it.
 "Rank again" continues to mean only what it means today.
 
-The one ranking defect this design **does not** fix, and must not be confused with, is that
-`rankAgain` is still `rank_unrank` followed by `rank_start` with no transaction and no
-operation id, so a failure between the two leaves a title logged-but-unranked. That is a
-separate pre-public hardening item and is tracked as such — but it shares a mechanism with
-this entry, because both want `_claim_operation` on the ranking functions.
+~~The one ranking defect this design **does not** fix~~ — **fixed 2026-08-25, ahead of this
+entry.** `rankAgain` was `rank_unrank` followed by `rank_start` with no transaction and no
+operation id, so a failure between the two left a title logged-but-unranked. It is now a
+single server-side `rank_again` transaction, and the whole ranking family carries an
+operation id (`20260825000200`). That was the mechanism this entry shares with it, so the
+prerequisite is already in place rather than still owed.
 
 ### 19.8 Watchlist interaction — and the screenshot
 

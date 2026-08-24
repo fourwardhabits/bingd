@@ -161,7 +161,7 @@ describe('the first five', () => {
     // `rank_start` is the same session opener the Log tab drives. Nothing about the
     // ranking algorithm is reimplemented here.
     await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
-    expect(callsTo('rank_start')[0][1]).toEqual({
+    expect(callsTo('rank_start')[0][1]).toMatchObject({
       p_media_item_id: 'film-1',
       p_bucket: 'loved',
     });
@@ -386,7 +386,7 @@ describe('the rating sheet', () => {
     });
     // And the comparison flow still opens on the same bucket, unchanged by the layout.
     await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
-    expect(callsTo('rank_start')[0][1]).toEqual({
+    expect(callsTo('rank_start')[0][1]).toMatchObject({
       p_media_item_id: 'film-1',
       p_bucket: 'fine',
     });
@@ -406,7 +406,7 @@ describe('the rating sheet', () => {
       p_operation_id: expect.any(String),
     });
     await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
-    expect(callsTo('rank_start')[0][1]).toEqual({
+    expect(callsTo('rank_start')[0][1]).toMatchObject({
       p_media_item_id: 'film-1',
       p_bucket: 'not_for_me',
     });

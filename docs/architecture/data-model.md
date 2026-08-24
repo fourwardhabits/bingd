@@ -879,12 +879,21 @@ create table processed_operations (
   operation_id uuid not null,
   user_id      uuid not null references profiles(id) on delete cascade,
   kind         text,
+  result       jsonb,
   processed_at timestamptz not null default now(),
   primary key (user_id, operation_id)
 );
 ```
 
-Every outbox-eligible RPC begins by inserting here. A duplicate key means the operation already ran, and the function answers `{"status": "already_applied"}` — not the prior result, which is not stored — and repeats no write. This is the whole of PRD §18's idempotency requirement, in one table.
+Every outbox-eligible RPC begins by inserting here. A duplicate key means the operation already ran, and the function answers `{"status": "already_applied"}` and repeats no write. This is the whole of PRD §18's idempotency requirement, in one table.
+
+**`result` holds the answer, for the RPCs whose answer cannot be re-derived — added 2026-08-25.** The sentence above used to end "not the prior result, which is not stored", and that was sufficient while every claiming writer answered only `{"status": "ok"}`: the client can re-read its own row. It is not sufficient for the ranking family, which `20260825000200` brought under the same mechanism. `rank_answer` answers with a position, a score, a category and the once-in-an-account-lifetime `activated` flag, and a body carrying none of those reads to the client as a session that ended — so a bare `already_applied` would tell a reader their title is unranked over a ranking that exists.
+
+So the ranking RPCs claim through `_claim_operation_result`, which writes the answer into this column inside the same transaction and returns it verbatim on a replay. Null for every other writer.
+
+A replay cannot observe a claim without its answer: `insert … on conflict do nothing` against a key another transaction has inserted and not yet committed waits on that transaction rather than skipping past it, so by the time the replay reads `result`, the claimer has either committed — writing it in the same transaction — or aborted and released the id entirely.
+
+**One id, one kind — enforced 2026-08-25.** `kind` used to be diagnostics only. Both claim helpers now compare it and raise `22023` when an id was already spent on a different function, because a composite writer that passes one id to two RPCs turns its second call into a no-op that reports success. `removeFromCollection` (`rank_unrank` then `unlog`) is one line from exactly that, and the failure would be a removal that says it worked and leaves the title in place.
 
 **The key is per account, not global — corrected 2026-08-13.** `20260813000100` built it as `operation_id uuid primary key`, and `20260813002300` narrowed it when the first real callers arrived. Ids are generated on the device, so a shared key means an id disclosed by one account can silence another's genuine write while its client reports success. Idempotency only has to hold within one account's queue, so scoping it there costs nothing. The same migration added the foreign key this section had described all along, so a deleted account no longer leaves its ledger behind. `kind` records which function claimed the id, for debugging a stuck outbox.
 

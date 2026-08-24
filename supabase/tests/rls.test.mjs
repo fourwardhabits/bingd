@@ -83,9 +83,76 @@ describe('date of birth', () => {
     assert.ok(err, 'the documented guarantee excludes the owner too');
   });
 
+  /**
+   * The table the column actually lives in, reached directly.
+   *
+   * The two tests above prove `profiles` no longer carries it. This one proves the
+   * place it moved to is closed, which is a different claim and the one that matters
+   * after DOB-1 — the founder's decision on 2026-08-24 was to **keep** the exact date
+   * for eligibility and for future recommendation work, so the retention is now
+   * permanent and the read path has to be permanently shut rather than merely unused.
+   *
+   * Two mechanisms, both asserted, because either alone would be a single point of
+   * failure: `profile_private` has RLS enabled with **no policy at all** (20260813001400),
+   * and `select` is revoked from `anon` and `authenticated` outright (20260813002000).
+   * A future policy added by mistake would still hit the missing grant; a grant restored
+   * by mistake would still hit the absent policy.
+   */
+  it('is not readable from profile_private either, by anyone', async () => {
+    for (const [who, run] of [
+      ['another user', (fn) => t.asUser(mallory, fn)],
+      ['the owner', (fn) => t.asUser(alice, fn)],
+      ['an anonymous reader', (fn) => t.asAnon(fn)],
+    ]) {
+      const err = await run(() =>
+        t.errorFrom(`select date_of_birth from profile_private where profile_id = $1`, [alice]),
+      );
+      assert.ok(err, `profile_private was readable by ${who}`);
+      assert.equal(err.code, '42501', `${who} must be refused by the grant, not by a policy alone`);
+    }
+  });
+
+  it('is not projected by any of the profile read paths', async () => {
+    // The sweep, because the failure mode is a *new* view or definer function that
+    // joins `profile_private` for convenience — which no existing test would notice.
+    // Asked of the catalogue rather than of a list somebody maintains here.
+    const { rows } = await t.sql(`
+      select c.relname
+        from pg_attribute a
+        join pg_class c on c.oid = a.attrelid
+        join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = 'public'
+         and a.attname = 'date_of_birth'
+         and not a.attisdropped
+         and c.relkind in ('v', 'm')
+    `);
+    assert.deepEqual(rows, [], 'no view exposes a date of birth');
+  });
+
   it('still answers the only question the product asks of it', async () => {
     const { rows } = await t.sql(`select is_over_13($1) as ok`, [alice]);
     assert.equal(rows[0].ok, true);
+  });
+
+  it('goes when the account goes', async () => {
+    // The other half of retention: keeping it means keeping it only while there is an
+    // account it belongs to. `profile_private.profile_id` references `profiles(id)` on
+    // delete cascade, so this is structural — but a future table holding a copy would
+    // not be, which is what makes it worth asserting rather than reading off the schema.
+    const leaver = await t.createUser({ username: 'dob_leaver', dob: '1991-02-03' });
+
+    let { rows } = await t.sql(
+      `select count(*)::int as n from profile_private where profile_id = $1`,
+      [leaver],
+    );
+    assert.equal(rows[0].n, 1);
+
+    await t.sql(`delete from auth.users where id = $1`, [leaver]);
+
+    ({ rows } = await t.sql(`select count(*)::int as n from profile_private where profile_id = $1`, [
+      leaver,
+    ]));
+    assert.equal(rows[0].n, 0, 'the date of birth does not outlive the account');
   });
 });
 

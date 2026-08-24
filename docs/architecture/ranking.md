@@ -15,10 +15,14 @@ For every `(user_id, category)` pair, at all times outside a transaction:
 |---|---|---|
 | **I1** | Positions are exactly `1..n` with no gaps and no duplicates | Unique constraint plus the shift in every write path |
 | **I2** | Every `loved` position precedes every `fine`, which precedes every `not_for_me` | Insertion is restricted to the target band |
-| **I3** | Every `rankings` row has a matching `user_media` row with the same bucket | Ranking RPCs write both |
+| **I3** | Every `rankings` row has a matching `user_media` row with the same bucket | Ranking RPCs write both; `_rank_finalize` re-asserts it at the moment the ranking is created |
 | **I4** | No two titles share a position | `unique (user_id, category, position)` |
+| **I5** | A retried ranking mutation applies exactly once — no second movement, feed event, comparison or activation | `_claim_operation_result` (§9) |
+| **I6** | Rank Again is atomic: one transaction, and a failure leaves the previous position standing | `rank_again` (§7) |
 
 I1 and I2 cannot be expressed as constraints. They hold because **every write goes through the functions in this document** (AD-4), and because `assert_ranking_valid()` in §8 checks them in tests and on a schedule.
+
+I5 and I6 are not properties of a row at rest and so cannot be checked by `assert_ranking_valid` at all. They are pinned by `supabase/tests/ranking-contract.test.mjs`, which asserts them against *observables* — the position, the score, the feed, the comparison history and the one-shot `activated` flag — rather than against row counts. Almost every RPC in this schema assigns or replaces, so "can a replay store a duplicate row" is answered no even by a function with no idempotency at all.
 
 ---
 
@@ -243,6 +247,14 @@ update rankings set position = $new
 
 `p_new` is clamped to the title's own band. A drag that would cross a band boundary is refused, because crossing means the bucket changed and that path re-runs comparisons.
 
+### Ranking again, in the same band
+
+A reader who re-opens a rating they have already given and chooses the *same* bucket is saying the **position** is wrong. `rank_rebucket` cannot serve that: it raises `22023` on a bucket that is not moving, by design, because it exists to change a band.
+
+`rank_again(media_item_id, bucket, operation_id?)` is that case. Drop the position, then open a fresh session in the band — one transaction, the same steps a rebucket takes minus the band change, and it handles a band change too if the bucket differs. A title that is *not* ranked is not an error: that is the state the call was reaching for, so it goes straight to the session.
+
+**It was two client calls until `20260825000200`**, `rank_unrank` then `rank_start`, with no transaction around them. Nobody's data was ever wrong — the gap between them is Logged and Unranked, a state the app has a name and a queue for — but a reader who pressed one button and lost their network in the middle got half of what they asked for, and the only repair was to notice. Client compensation is not atomicity.
+
 ### Unranking
 
 Delete the `rankings` row, close the gap, leave `user_media` intact. The title reverts to Logged with its bucket. Watch history is never lost — PRD §10 requires that reranking and recalibration never delete viewing history.
@@ -287,6 +299,10 @@ Called after every mutation in tests, and by a scheduled job across all users in
 
 ## 9. Concurrency
 
+Two locks, at two grains, for two different failures.
+
+### The category lock — band arithmetic
+
 Two ranking sessions finalizing at once for the same user would interleave their shifts and corrupt I1.
 
 The finalize transaction takes an advisory lock on `(user_id, category)`:
@@ -297,7 +313,56 @@ select pg_advisory_xact_lock(hashtextextended(user_id::text || cat::text, 0));
 
 Ranking is a single-user, single-device, deliberate act, so contention is close to nonexistent — but "close to nonexistent" is exactly the kind of race that surfaces once and is never reproducible. The lock costs nothing and removes the class of bug entirely.
 
+**The band bounds are recomputed after the lock is taken, not before.** That is what makes the second of two overlapping finalizes place correctly: in READ COMMITTED each statement inside a PL/pgSQL function takes a fresh snapshot, so the recompute performed *after* waiting sees the ranking the other transaction just committed. Read the bounds before the lock and the second insertion measures itself against a ranking that no longer exists.
+
+### The media lock — everything about one title
+
+The category grain protects the arithmetic and nothing else. Two writers naming the same *title* collide on that key only by coincidence of category, and `set_bucket`, `unlog` and `clear_watch_date` took no advisory lock at all — so `set_bucket`'s "is it ranked?" check and its upsert were two statements with a committing `rank_start` free to land between them, which is I3 broken by one account on two devices. Recorded at the time as a known gap in `20260813002300`'s own header and as **M3** in the public-launch risk register.
+
+`20260825000200` adds a second lock, taken by every writer that can change whether a title is logged, bucketed or ranked — `set_bucket`, `log_watched`, `unlog`, `clear_watch_date`, `set_season_progress`, `rank_start`, `rank_answer`, `rank_skip`, `rank_back`, `rank_cancel`, `rank_unrank`, `rank_reorder`, `rank_rebucket` and `rank_again`:
+
+```sql
+select pg_advisory_xact_lock(
+  hashtextextended('media:' || user_id::text || ':' || media_item_id::text, 0));
+```
+
+The `media:` prefix and the `:` separator keep this key space disjoint from the category lock's, which hashes `user || category` with no prefix. Without them the deadlock argument below would rest on a hash collision not happening.
+
+**Two writers on that list are there because a reviewer read it against the schema rather than against the brief**, and both are worth naming because both look exempt:
+
+- **`set_season_progress`** writes a column TV-1 leaves dormant — nothing reads `progress` and ranking neither requires nor sets it — so it reads like a function with nothing at stake. Its upsert **creates the `user_media` row**, and a row is a Logged title however it got there. A dormant column with a live writer is still a live writer.
+- **`rank_cancel`** only deletes a session, so it touches neither `rankings` nor `user_media`. But `rank_answer`, `rank_skip` and `rank_back` each read a session, act on it and write it back — and a cancel landing inside that window lets an answer record its comparison and then update zero rows, answering with a session id that no longer exists.
+
+`rank_cancel` is also the one mutating function in the family that takes **no operation id**, and that is deliberate rather than an omission: a replayed cancel names a session id that is already gone — deleted by the first attempt, or by the finalise — and raises `P0002`, which the client has always read as the outcome it wanted. A later session for the same title has a different id and cannot be hit. There is no observable a replay changes twice, which is the test that decides whether an id is worth a signature change.
+
+### The order, which is the part not to change
+
+```
+1. the operation ledger row   _claim_operation / _claim_operation_result
+2. the media lock             _lock_media(user, media_item)
+3. the category lock          (user, category)
+```
+
+Every function that takes more than one takes them in this order. The ledger claim is first because a replay must be recognised before it acquires anything else, and two transactions carrying the same id block on the ledger row while holding nothing else. The media lock is second because every writer that touches one title takes exactly one of them, and a writer that then needs the category lock always takes it after. **Nothing acquires a category lock and then asks for a media lock**, which is the only shape that could deadlock the pair.
+
+Two transactions ranking two different titles in the same category therefore hold different media locks and queue on the same category lock. That is contention, not deadlock: neither holds what the other wants first.
+
+`_lock_pair` (20260817000200) keys on two *accounts* and is not in this hierarchy. The only ranking path that reaches it is `_maybe_activate_invite`, called at the end of `_rank_finalize` when both ranking locks are already held, so it is strictly fourth and nothing holding it ever asks for a ranking lock.
+
+### What a lock cannot reach
+
+A session spans several transactions, and no lock held inside one of them reaches the gap between two. Between `rank_start` and the `rank_answer` that finalises, a `set_bucket` on another device is a legitimate write that moves `user_media.bucket`, and an `unlog` is a legitimate write that deletes the row.
+
+Two things close that:
+
+- **`unlog` deletes the title's open comparison session** along with the collection row. Removing a title withdraws the claim its comparisons were placing, and the answers already given stay in `comparisons` exactly as `rank_cancel` leaves them.
+- **`_rank_finalize` upserts the collection row it is a claim about**, with the bucket it is writing. The insertion of a `rankings` row is the one moment the schema can state the whole truth about a title, so it states it — and `assert_ranking_valid`'s I3 check goes from being the only thing that would ever notice a drift to being a backstop.
+
 Sessions themselves need no locking: `(user_id, media_item_id)` is unique, so a second attempt to rank the same title resumes the first session.
+
+### Proof rather than assertion
+
+`supabase/tests/concurrency/races/ranking.mjs` drives each of these from independent PostgreSQL connections and requires the second writer to be found *waiting on the exact advisory key* — not merely blocked, since a `user_media` row lock would satisfy that anyway. `mutation-check.mjs` reintroduces the pre-`20260825000200` `set_bucket` and requires the suite to go red: the bucketer stops waiting, and `user_media.bucket` ends up disagreeing with `rankings.bucket`.
 
 ---
 
