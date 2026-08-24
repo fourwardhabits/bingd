@@ -162,7 +162,9 @@ export function TitleReviews({
                   accessibilityLabel={`Report ${review.name}'s review`}
                   accessibilityHint="Tells whoever runs bingd. about this review"
                   onPress={() => setReporting(review.id)}
-                  hitSlop={theme.space[2]}
+                  // Slop to the 44pt floor (`layout.minTapTarget`) around a 20pt
+                  // glyph: the ellipsis stays visually quiet and the target does not.
+                  hitSlop={(theme.layout.minTapTarget - theme.layout.icon.sm) / 2}
                   style={({ pressed }) => pressed && styles.pressed}
                 >
                   <Ionicons

@@ -130,6 +130,31 @@ if (distribution.app?.scheme && !/^[a-z][a-z0-9+.-]*$/.test(distribution.app.sch
  */
 const LEGAL_ENTITY = '[LEGAL ENTITY / DEVELOPER NAME &mdash; FOUNDER TO CONFIRM]';
 
+/**
+ * Where the Terms of Use is in its life: 'draft' or 'final'.
+ *
+ * A second launch input beside LEGAL_ENTITY, and it exists because the entity check
+ * alone had a hole an independent review walked straight through: fill in the entity,
+ * set both store URLs, flip the mode — and the site would have published a Terms that
+ * names a real party while its own first paragraph still said the document was an
+ * unreviewed draft. The most contradictory possible state for exactly that paragraph.
+ *
+ * So the draft language and this constant are the same fact. While it says 'draft',
+ * the page carries the draft-for-review notice and the stamp says so — which is the
+ * honest beta state. The build refuses `public` until it says 'final', and 'final' is
+ * a word the founder writes deliberately, after L-1 in the risk register is settled:
+ * entity confirmed, governing-law decision made, a lawyer has read it. Setting it
+ * final is what removes the draft language, so the two can never disagree.
+ *
+ * Do not set this 'final' to make a build pass. It is the record that legal review
+ * happened, and a record written to silence a gate is worse than no record.
+ */
+const TERMS_STATUS = 'draft';
+
+if (!['draft', 'final'].includes(TERMS_STATUS)) {
+  problems.push(`TERMS_STATUS is "${TERMS_STATUS}", which is not 'draft' or 'final'.`);
+}
+
 const MODES = ['beta', 'public'];
 const mode = distribution.mode ?? 'beta';
 
@@ -179,6 +204,24 @@ if (mode === 'public') {
         'placeholder. A public launch asks every new account to agree to it at signup, ' +
         'and it does not yet name who the agreement is with. Fill in LEGAL_ENTITY, or ' +
         'stay in beta. See L-1 in docs/release/public-launch-risk-register.md.',
+    );
+  }
+
+  /**
+   * And the third: the entity being filled in does not make the document reviewed.
+   *
+   * Without this, a launch commit could satisfy every other gate and still publish a
+   * Terms whose first paragraph says "Draft for review — not yet reviewed by a
+   * lawyer" to every new account being asked to agree to it. The draft language is
+   * conditioned on the same TERMS_STATUS this checks, so a public build can never
+   * carry it: the build that would has refused to exist.
+   */
+  if (TERMS_STATUS !== 'final') {
+    problems.push(
+      'mode is "public" but TERMS_STATUS is still "draft". The Terms page would tell ' +
+        'every new account it is agreeing to an unreviewed draft. Settle L-1 in ' +
+        'docs/release/public-launch-risk-register.md, have the document read, and set ' +
+        "TERMS_STATUS to 'final' in the commit that records that — or stay in beta.",
     );
   }
 }
@@ -656,6 +699,19 @@ const SUPPORT_EMAIL = 'hello@bingd.app';
  */
 const DOCUMENT_DATE = '20 August 2026';
 
+/**
+ * The Terms' own date, separate from the other three documents'.
+ *
+ * The Terms was drafted five days after them, and a "last updated" that predates the
+ * page's own existence is the kind of small wrongness that makes a reader doubt the
+ * large claims around it. Also a literal, for DOCUMENT_DATE's reason.
+ *
+ * **This is the line to change when the Terms text changes** — most notably in the
+ * commit that fills in LEGAL_ENTITY and sets TERMS_STATUS to 'final', which revises
+ * the document and should say so.
+ */
+const TERMS_DATE = '25 August 2026';
+
 const PRIVACY_BODY = `      <p class="lede">
         ${isPublic ? 'Bingd' : 'Bingd is a closed beta. This'} describes what it actually
         stores, why, and who else sees it &mdash; written against the database schema
@@ -980,17 +1036,29 @@ const DELETION_BODY = `      <p class="lede">
  * with the content, rather than the perpetual worldwide sublicensable grant a template
  * would supply for a product that has no use for one.
  */
+/**
+ * The draft-for-review notice, present exactly while TERMS_STATUS says 'draft'.
+ *
+ * One condition for the notice, the stamp and the public-mode refusal, so the three
+ * cannot drift: the page stops calling itself a draft in the same commit that records
+ * it stopped being one, and no public build exists in between.
+ */
+const TERMS_DRAFT_NOTICE =
+  TERMS_STATUS === 'draft'
+    ? `
+      <p>
+        <strong>Draft for review.</strong> This document has not yet been reviewed by a
+        lawyer, and the operating entity named below is not yet confirmed.
+      </p>
+`
+    : '';
+
 const TERMS_BODY = `      <p class="lede">
         These are the terms you agree to by using Bingd. They are written to be read
         &mdash; short sentences, no glossary of defined terms &mdash; and they describe
         what the app actually does.
       </p>
-
-      <p>
-        <strong>Draft for review.</strong> This document has not yet been reviewed by a
-        lawyer, and the operating entity named below is not yet confirmed.
-      </p>
-
+${TERMS_DRAFT_NOTICE}
       <h2>Who these terms are with</h2>
       <p>
         Bingd is made and run by ${LEGAL_ENTITY} (&ldquo;we&rdquo;, &ldquo;us&rdquo;).
@@ -1159,7 +1227,9 @@ const DOCUMENTS = [
     dir: 'terms',
     title: 'Terms of Use — Bingd',
     heading: 'Terms of Use',
-    stamp: `Last updated ${DOCUMENT_DATE}. Draft &mdash; not yet reviewed by a lawyer.`,
+    stamp: `Last updated ${TERMS_DATE}.${
+      TERMS_STATUS === 'draft' ? ' Draft &mdash; not yet reviewed by a lawyer.' : ''
+    }`,
     body: TERMS_BODY,
   },
   {

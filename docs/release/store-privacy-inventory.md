@@ -263,7 +263,7 @@ with itself about which string it is.
 
 | | Address | Occurrences |
 |---|---|---|
-| **Tracked** — the live site, the app's support page, this document, the release docs, the seed builder's User-Agent | `hello@bingd.app` | 8, across 7 files |
+| **Tracked** — the live site, the app's support page, this document, the release docs, the seed builder's User-Agent | `hello@bingd.app` | 9, across 6 files — 8 literal, plus the escaped copy `web/router.test.mjs` asserts into the built support page |
 | **Untracked** — `store-assets/google-play/store-listing.md`, the founder-local Play listing copy | `support@bingd.app` | 3 |
 
 The founder's Play listing therefore publishes an address that appears nowhere in the
@@ -275,6 +275,7 @@ assumed.
 picks one address, these are the tracked files to normalise:
 
 - `web/build.mjs` — the `SUPPORT_EMAIL` constant, which every page and both footers read
+- `web/router.test.mjs` — asserts the address into the built support page
 - `supabase/seed/fetch-catalogue.mjs` — the TMDB User-Agent
 - `docs/release/store-privacy-inventory.md` (this file)
 - `docs/release/beta-distribution-readiness.md`

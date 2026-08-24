@@ -480,6 +480,24 @@ describe('their notes', () => {
   });
 
   /**
+   * This screen *can* be the viewer's own: Settings › Privacy links here as "see your
+   * public profile". An earlier comment in the screen claimed otherwise, and the
+   * control it justified was a Report on your own review — a button whose only
+   * possible outcome is the server's 22023 refusal. The review stays visible; only
+   * the recourse against its own author goes.
+   */
+  it('offers no Report on the viewer’s own reviews, on their own profile', async () => {
+    tableRows.public_profiles = [{ ...anna, id: 'viewer' }];
+    mockRpcResults.public_notes = [{ ...note, id: 'um-viewer-film1', user_id: 'viewer' }];
+    const view = await open();
+
+    await waitFor(() =>
+      expect(view.getByText('The last twenty minutes are the whole film.')).toBeTruthy(),
+    );
+    expect(view.queryByLabelText('Report this review of Inception')).toBeNull();
+  });
+
+  /**
    * **Reviews, because that is what they are.** This section is fed by `public_notes` —
    * writing its author chose to publish, the same rows the title page lists under a tab
    * called Reviews, through the same predicate. It was headed "Notes", which put the

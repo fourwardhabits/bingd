@@ -472,7 +472,11 @@ function CommentRow({
               accessibilityLabel={`Report ${comment.authorName}'s comment`}
               accessibilityHint="Tells whoever runs bingd. about this comment"
               onPress={onReport}
-              hitSlop={theme.space[1]}
+              // The slop is what carries the 44pt floor (`layout.minTapTarget`): the
+              // control is one caption line, and a taller box beside every comment
+              // would change what the surface reads as. Slop rather than size is the
+              // Button `sm` reasoning, applied to a control smaller still.
+              hitSlop={(theme.layout.minTapTarget - theme.typography.caption.lineHeight) / 2}
             >
               <Text variant="caption" tone="tertiary">
                 Report

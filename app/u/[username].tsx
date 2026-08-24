@@ -366,19 +366,29 @@ export default function PublicProfileScreen() {
                         is read, so a reader who finds it here rather than on the title
                         has the same recourse.
 
-                        This screen is somebody else's profile, so the review is never
-                        the viewer's own and the self-report branch cannot arise. */}
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Report this review of ${entry.title}`}
-                      accessibilityHint="Tells whoever runs bingd. about this review"
-                      onPress={() => setReportingReview(entry.id)}
-                      hitSlop={theme.space[2]}
-                    >
-                      <Text variant="caption" tone="tertiary">
-                        Report
-                      </Text>
-                    </Pressable>
+                        Absent on the viewer's own profile — which this screen can be:
+                        Settings › Privacy links here as "see your public profile". The
+                        server refuses a self-report with a 22023, so the control would
+                        only ever produce an error.
+
+                        The slop is what carries the 44pt floor (`layout.minTapTarget`):
+                        the control is one caption line, and a taller box would make
+                        one word read as a button under every review. */}
+                    {!isSelf ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Report this review of ${entry.title}`}
+                        accessibilityHint="Tells whoever runs bingd. about this review"
+                        onPress={() => setReportingReview(entry.id)}
+                        hitSlop={
+                          (theme.layout.minTapTarget - theme.typography.caption.lineHeight) / 2
+                        }
+                      >
+                        <Text variant="caption" tone="tertiary">
+                          Report
+                        </Text>
+                      </Pressable>
+                    ) : null}
                   </View>
                 </View>
               ))}

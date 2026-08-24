@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,7 @@ import {
   destinationFor,
   detectPlatform,
   handleFromPath,
+  installLabel,
   titleIdFromPath,
   tokenFromPath,
 } from './src/router.mjs';
@@ -149,6 +151,54 @@ describe('destinationFor', () => {
   it('survives a missing config rather than throwing on a page nobody can then read', () => {
     assert.equal(destinationFor('ios', undefined), null);
     assert.deepEqual(allDestinations(undefined), []);
+  });
+});
+
+describe('installLabel', () => {
+  it('keeps the three beta labels exactly as the beta has always shown them', () => {
+    assert.equal(
+      installLabel({ platform: 'ios', kind: 'testflight', url: 'x' }),
+      'Get the Bingd beta for iPhone',
+    );
+    assert.equal(
+      installLabel({ platform: 'android', kind: 'play-opt-in', url: 'x' }),
+      'Join the Bingd beta on Android',
+    );
+    assert.equal(
+      installLabel({ platform: 'android', kind: 'play', url: 'x' }),
+      'Get Bingd for Android',
+    );
+  });
+
+  it('labels the iOS store button for an iPhone', () => {
+    assert.equal(
+      installLabel(destinationFor('ios', { ios: { storeUrl: 'https://apps.apple.com/x' } })),
+      'Get Bingd for iPhone',
+    );
+  });
+
+  /**
+   * The public-mode defect an independent review found before it could ship.
+   *
+   * Both platforms' public listings share `kind: 'store'`, and the label used to be a
+   * map keyed on kind alone — so the day the Play listing went live, every Android
+   * visitor's one dominant button would have read "Get Bingd for iPhone". Invisible in
+   * beta because Android's closed test takes the `play-opt-in` branch, which is
+   * exactly why it needs a test rather than an eye.
+   */
+  it('never labels the Android store button as an iPhone one', () => {
+    const label = installLabel(
+      destinationFor('android', {
+        android: { storeUrl: 'https://play.google.com/store/apps/details?id=app.bingd' },
+      }),
+    );
+    assert.equal(label, 'Get Bingd for Android');
+    assert.ok(!/iphone/i.test(label), 'the Android button must not name an iPhone');
+  });
+
+  it('answers null for nothing, matching destinationFor', () => {
+    assert.equal(installLabel(null), null);
+    assert.equal(installLabel({ platform: 'ios', kind: 'nonsense', url: 'x' }), null);
   });
 });
 
@@ -751,6 +801,22 @@ describe('the Terms of Use', () => {
   });
 
   /**
+   * The date is a source literal, and it is the Terms' own.
+   *
+   * `TERMS_DATE` rather than the shared `DOCUMENT_DATE`, because the Terms was drafted
+   * five days after the other three documents and a "last updated" predating a page's
+   * own existence is the small wrongness that makes its large claims doubtable. A
+   * build stamp would be worse — a redeploy with no text change would claim a
+   * revision — so both dates are literals, and the finalisation commit is what moves
+   * this one.
+   */
+  it('dates itself from its own deterministic revision date', () => {
+    assert.match(read('terms', 'index.html'), /Last updated 25 August 2026\./);
+    // The other three keep the shared date; the Terms did not drag them forward.
+    assert.match(read('privacy', 'index.html'), /Last updated 20 August 2026\./);
+  });
+
+  /**
    * Every power the moderation section claims has to exist in `moderation_actions`.
    *
    * A Terms is the one document where an unbacked promise is worse than silence: it is
@@ -876,6 +942,98 @@ describe('the release mode', () => {
         `${file} names a store that has no URL configured`,
       );
     }
+  });
+});
+
+/**
+ * The public build, exercised for real — in a sandbox, one launch input at a time.
+ *
+ * Everything above asserts the beta; nothing there can answer the adversarial
+ * question, which is what a `mode: "public"` build would actually publish. An
+ * independent review answered it by hand and found a hole: fill in the entity, set
+ * both store URLs, flip the mode, and the site would have shipped a Terms whose first
+ * paragraph still called itself an unreviewed draft.
+ *
+ * So this copies the site's sources into a scratch directory, applies the launch
+ * commit's edits step by step, and runs the real `build.mjs` there. The working tree
+ * is never touched, which is what lets these run beside the beta assertions.
+ */
+describe('the public build, in a sandbox', () => {
+  const sandbox = mkdtempSync(join(tmpdir(), 'bingd-public-build-'));
+  const sandboxDist = join(sandbox, 'dist');
+
+  const patch = (file, edits) => {
+    let source = readFileSync(join(sandbox, file), 'utf8');
+    for (const [from, to] of edits) source = source.replace(from, to);
+    writeFileSync(join(sandbox, file), source);
+  };
+
+  /** Runs the sandbox build; returns what it refused with, or null on success. */
+  const build = () => {
+    try {
+      execFileSync(process.execPath, [join(sandbox, 'build.mjs')], { stdio: 'pipe' });
+      return null;
+    } catch (error) {
+      return String(error.stderr);
+    }
+  };
+
+  before(() => {
+    for (const file of ['build.mjs', 'deep-links.config.json', 'distribution.config.json']) {
+      cpSync(join(here, file), join(sandbox, file));
+    }
+    cpSync(join(here, 'src'), join(sandbox, 'src'), { recursive: true });
+
+    // The launch commit's first edit: the mode, with both store URLs real.
+    patch('distribution.config.json', [
+      ['"mode": "beta"', '"mode": "public"'],
+      ['"storeUrl": null', '"storeUrl": "https://apps.apple.com/app/id0000000000"'],
+      ['"storeUrl": null', '"storeUrl": "https://play.google.com/store/apps/details?id=app.bingd"'],
+    ]);
+  });
+
+  after(() => {
+    rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  it('refuses while the entity placeholder and the draft status both stand', () => {
+    const refusal = build();
+    assert.ok(refusal, 'the build must refuse public with the legal inputs unresolved');
+    assert.match(refusal, /TERMS_STATUS is still "draft"/);
+    // And refused before writing anything: a partial dist/ holding public-mode
+    // _headers — no noindex — from a failed build is the half-deploy the gate's
+    // ordering exists to prevent.
+    assert.ok(!existsSync(sandboxDist), 'a refused build must write no output');
+  });
+
+  it('still refuses with the entity filled in, because filling it in is not a legal read', () => {
+    patch('build.mjs', [
+      ["'[LEGAL ENTITY / DEVELOPER NAME &mdash; FOUNDER TO CONFIRM]'", "'Example Operator'"],
+    ]);
+
+    const refusal = build();
+    assert.ok(refusal, 'the entity alone must not open the gate');
+    assert.match(refusal, /TERMS_STATUS is still "draft"/);
+    assert.ok(!existsSync(sandboxDist), 'a refused build must write no output');
+  });
+
+  it('builds once the Terms is final, and ships no draft language anywhere', () => {
+    patch('build.mjs', [["const TERMS_STATUS = 'draft';", "const TERMS_STATUS = 'final';"]]);
+
+    assert.equal(build(), null, 'the full launch commit must build');
+
+    const terms = readFileSync(join(sandboxDist, 'terms', 'index.html'), 'utf8');
+    assert.doesNotMatch(terms, /Draft for review/);
+    assert.doesNotMatch(terms, /not yet (?:been )?reviewed by a\s+lawyer/);
+    assert.doesNotMatch(terms, /FOUNDER TO CONFIRM/);
+    assert.match(terms, /Example Operator/, 'the filled-in entity must be the one named');
+
+    // And the launch state around it is the one the flag promises.
+    const headers = readFileSync(join(sandboxDist, '_headers'), 'utf8');
+    assert.doesNotMatch(headers, /X-Robots-Tag: noindex/);
+    const front = readFileSync(join(sandboxDist, 'index.html'), 'utf8');
+    assert.doesNotMatch(front, /closed testing/);
+    assert.doesNotMatch(front, /<meta name="robots"/);
   });
 });
 

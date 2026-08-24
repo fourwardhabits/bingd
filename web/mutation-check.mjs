@@ -17,7 +17,7 @@
  * the browser, or opens the app onto `+not-found`, and the reasonable conclusion for
  * whoever tapped it is that Bingd does not work.
  *
- * Twelve mutants. The last three arrived with the public-launch tranche, and are the
+ * Thirteen mutants. The last four arrived with the public-launch tranche, and are the
  * only ones whose defect is a *claim* rather than a broken link — a site that says the
  * apps have launched, a search engine invited in while the test is still closed, and a
  * Terms of Use naming a company that does not exist. None of the three breaks anything
@@ -46,6 +46,10 @@
  *      still says the right thing, so the mistake is invisible from the HTML alone.
  *  12. The Terms' unconfirmed-entity placeholder replaced with a plausible company name,
  *      which is what tidying it away rather than filling it in correctly looks like.
+ *  13. The Terms-status gate deleted from the public block, so filling in the entity
+ *      alone would open the launch — and publish a Terms still calling itself an
+ *      unreviewed draft, exactly the hole an independent review found before the gate
+ *      existed.
  *
  * **The Apple team id is not here, and cannot be.** It has exactly one source in this
  * repository and nothing to cross-check it against, so a wrong value is consistent
@@ -163,6 +167,20 @@ const MUTANTS = [
         "'[LEGAL ENTITY / DEVELOPER NAME &mdash; FOUNDER TO CONFIRM]'",
         "'Bingd Ltd'",
       ),
+  },
+  {
+    /**
+     * The Terms-status gate deleted from the public block.
+     *
+     * The gate exists because the entity check alone had a hole: entity filled, store
+     * URLs set, mode flipped — and the site would publish a Terms whose own first
+     * paragraph still said "Draft for review". This checks the sandbox suite would
+     * notice the gate going: with it inert, the launch-commit rehearsal in
+     * router.test.mjs builds where a refusal is asserted.
+     */
+    name: 'the Terms-status gate deleted, so a public build could ship a draft Terms',
+    file: BUILD,
+    apply: (s) => s.replace("if (TERMS_STATUS !== 'final')", 'if (false)'),
   },
   {
     name: 'the Android filter widened back to the whole host, so /privacy opens the app',
