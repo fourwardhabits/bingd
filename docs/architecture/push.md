@@ -152,6 +152,15 @@ wrong.
 The account-switch case is safe on both sides: sign-out revokes, and if that fails,
 registering moves the row anyway.
 
+**A sign-out during an in-flight registration is the third side**, and it was found by
+review rather than by design. Registering is two network round trips; a sign-out during
+either of them finds no token to revoke — because none has been written yet — and the write
+then lands *after* the revoke. `pushSessionEpoch` moves on every sign-out and is compared
+either side of both awaits; a write that landed too late **revokes itself**. The residual
+is a dispatch in the sub-millisecond gap after the last check, whose compensating revoke
+may itself fail because the session has ended by then, and the backstop for that is the
+server's move-on-conflict.
+
 ## 6. Delivery
 
 ```
@@ -179,6 +188,15 @@ leaves a row behind. The inbox already refuses to draw that row; this refuses to
 
 **Delivery is at least once, bounded at three attempts.** Rows are leased for five minutes
 with `skip locked`.
+
+**A partial success is settled rather than retried.** The queue is keyed on the
+notification, not on the (notification, token) pair, so a retry re-sends to *every* live
+token the recipient has. Where one of two devices accepted and the other failed retryably,
+retrying would buzz the first phone again on every attempt — up to three times for one
+event. The second device misses that push instead, which is the failure the product can
+absorb: the in-app row is the notification and it is already on both devices. The complete
+fix is per-token attempt tracking, and it buys a second delivery of a message the account
+has already received.
 
 ### Provider
 
@@ -247,6 +265,13 @@ throwing, because that code path is a cold start from a tap.
   *receipt* fetched later. Polling them needs a second scheduled process and a table of
   ticket ids. Send-time `DeviceNotRegistered` already catches the ordinary uninstall, and
   the rest is caught on that token's next send.
+
+  The consequence, since a review raised it as a defect rather than a deferral: **a token
+  that dies between the send and the delivery is reported only in the receipt**, so that
+  send is recorded as delivered and the token stays active until its *next* send returns
+  `DeviceNotRegistered` synchronously. It self-heals one notification late. That is the
+  whole of what receipt polling would buy, and it is why it is not built.
+- **Per-token retry accounting.** §6.
 - **A way back from "Not now".** Settings → Notification Settings is where a "turn on push"
   row would go.
 - **The scheduled nudge** (PRD §15). It ships with push in the PRD's plan and is not in this

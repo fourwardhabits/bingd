@@ -22,6 +22,7 @@ import {
   nudgePushDelivery,
   pushPermission,
   registerPushToken,
+  pushSessionEpoch,
   releaseDeviceOnSignOut,
   rememberToken,
   resetNudgeThrottle,
@@ -261,6 +262,27 @@ describe('signing out', () => {
     expect(heldToken()).toBeNull();
   });
 
+  /**
+   * The epoch is what an in-flight registration compares against, and it has to move
+   * **before** the revoke round trip — a registration that completes at any point during
+   * sign-out must see a stale value and undo itself. Asserted here rather than only in
+   * `push-permission.test.ts`, because that suite mocks this module out.
+   */
+  it('advances the session epoch before anything else, so an in-flight register can tell', async () => {
+    const before = pushSessionEpoch();
+    rememberToken('user-1', TOKEN);
+    await releaseDeviceOnSignOut();
+
+    expect(pushSessionEpoch()).not.toBe(before);
+  });
+
+  it('advances the epoch even when there was no token to revoke', async () => {
+    const before = pushSessionEpoch();
+    await releaseDeviceOnSignOut();
+
+    expect(pushSessionEpoch()).not.toBe(before);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
   it('does nothing when this process never registered one', async () => {
     await releaseDeviceOnSignOut();
     expect(mockRpc).not.toHaveBeenCalled();

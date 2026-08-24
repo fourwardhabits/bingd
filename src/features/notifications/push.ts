@@ -330,13 +330,53 @@ export function heldToken(): { userId: string; token: string } | null {
 }
 
 /**
+ * How many sessions this process has released, so an in-flight registration can tell that
+ * the account it was registering for has since left.
+ *
+ * **This exists because of a race an independent review found**, and the race is the
+ * account-switch hole arriving by the back door rather than through a missing call:
+ *
+ *   1. `usePush` sees permission already granted and starts registering for A;
+ *   2. acquiring an Expo token is a network round trip, and A signs out during it;
+ *   3. `releaseDeviceOnSignOut` looks for a token to revoke and finds **none**, because
+ *      the registration has not finished writing one yet;
+ *   4. the registration completes — A's session is still valid for the moment it takes
+ *      `supabase.auth.signOut()` to return — and the device ends up owned by A, *after*
+ *      the revoke that was supposed to release it.
+ *
+ * A boolean "cancelled" flag scoped to the effect cannot see this: the effect's own
+ * cleanup runs, but the promise it started is already past its last check. A counter that
+ * lives in this module can, and `registerThisDevice` compares it either side of every
+ * awaited step.
+ */
+let sessionEpoch = 0;
+
+/** The epoch to compare against later. Captured before a registration begins. */
+export function pushSessionEpoch(): number {
+  return sessionEpoch;
+}
+
+/**
  * Everything sign-out has to do about push, in the order it has to do it.
  *
  * Called **before** `supabase.auth.signOut()`, because revoking needs the session that is
  * about to end. Returns rather than throws, always: `auth/methods.ts` awaits this and a
  * rejection there would leave somebody signed in.
+ *
+ * The epoch moves **first**, before the revoke round trip, so a registration that
+ * completes at any point during this function already sees a stale epoch and undoes
+ * itself.
+ *
+ * **The residual, stated rather than left to be discovered.** A registration whose RPC is
+ * dispatched in the gap between `registerThisDevice`'s last epoch check and this line
+ * still writes, and its compensating revoke can itself fail if `supabase.auth.signOut()`
+ * has by then ended the session. The window is sub-millisecond and the backstop is the
+ * server's: `register_device_token` moves the row on conflict, so the next account to sign
+ * in on this device takes it whether or not any of this succeeded.
  */
 export async function releaseDeviceOnSignOut(): Promise<void> {
+  sessionEpoch += 1;
+
   const held = heldToken();
   forgetToken();
   heldOperations.clear();

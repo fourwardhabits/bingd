@@ -8,9 +8,11 @@ import {
   noteFailure,
   pushPermission,
   pushPlatform,
+  pushSessionEpoch,
   registerPushToken,
   rememberToken,
   requestPushPermission,
+  revokePushToken,
   type PushPermission,
 } from './push';
 
@@ -117,18 +119,46 @@ function ask(moment: PermissionMoment): Promise<boolean> {
  *
  * Idempotent on the server — the token is unique and the write is an upsert — so calling
  * it on every launch is one round trip and no rows.
+ *
+ * ---------------------------------------------------------------------------
+ * IT ABANDONS ITSELF IF THE ACCOUNT LEAVES WHILE IT RUNS
+ *
+ * Two awaits, and a sign-out during either of them is a device left registered to somebody
+ * who has gone — the account-switch hole arriving by a race rather than a missing call.
+ * Independent review found it: `releaseDeviceOnSignOut` looks for a token to revoke, this
+ * function has not written one yet, so the revoke releases nothing and the write lands
+ * afterwards.
+ *
+ * `pushSessionEpoch` moves on every sign-out, so it is compared either side of both
+ * awaits. The check after the write is the one that matters most, and it does not merely
+ * decline to remember the token — it **revokes what it just wrote**, because by then the
+ * row exists and nothing else is going to look for it.
  */
 export async function registerThisDevice(userId: string): Promise<void> {
   const platform = pushPlatform();
   if (!platform) return;
 
+  const epoch = pushSessionEpoch();
+
   const token = await acquirePushToken();
   if (!token) return;
+  // Signed out while Expo was minting a token. Nothing was written, so there is nothing
+  // to undo — just do not write it.
+  if (pushSessionEpoch() !== epoch) return;
 
   const result = await registerPushToken(userId, token, platform);
+  if (result !== 'ok') return;
+
+  if (pushSessionEpoch() !== epoch) {
+    // The write landed after the sign-out's revoke had already run and found nothing.
+    // Undo it rather than leaving the phone addressed to an account that has left.
+    await revokePushToken(userId, token);
+    return;
+  }
+
   // Remembered only on success, so sign-out does not try to revoke a token the server
   // never heard of — which would spend a round trip to be told nothing changed.
-  if (result === 'ok') rememberToken(userId, token);
+  rememberToken(userId, token);
 }
 
 /**
