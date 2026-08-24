@@ -155,11 +155,21 @@ registering moves the row anyway.
 **A sign-out during an in-flight registration is the third side**, and it was found by
 review rather than by design. Registering is two network round trips; a sign-out during
 either of them finds no token to revoke — because none has been written yet — and the write
-then lands *after* the revoke. `pushSessionEpoch` moves on every sign-out and is compared
-either side of both awaits; a write that landed too late **revokes itself**. The residual
-is a dispatch in the sub-millisecond gap after the last check, whose compensating revoke
-may itself fail because the session has ended by then, and the backstop for that is the
-server's move-on-conflict.
+then lands *after* the revoke, leaving the device addressed to an account that has gone.
+
+Two mechanisms, because one was not enough:
+
+- **`pushSessionEpoch`** moves on every sign-out and is compared either side of both
+  awaits. A registration that has not written yet abandons itself; one that has **revokes
+  what it wrote**.
+- **`trackDispatchedWrite`** announces the write to sign-out, which waits for it — bounded
+  at three seconds, and only when one is genuinely in flight. Without this the compensating
+  revoke races `supabase.auth.signOut()` for the session it needs, which a re-review was
+  right to call the original hole merely narrowed. Only the *write* is announced, not the
+  token acquisition before it: that can hang for a long time on a bad connection, sign-out
+  must not, and a registration still at that stage has written nothing to release.
+
+Past the three seconds the backstop is the server's move-on-conflict, as it always was.
 
 ## 6. Delivery
 

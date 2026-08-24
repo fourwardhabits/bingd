@@ -357,25 +357,92 @@ export function pushSessionEpoch(): number {
 }
 
 /**
+ * A registration whose write has been **dispatched**, which sign-out has to let finish.
+ *
+ * The epoch alone was not enough, and the re-review was right about why. It closes the
+ * case where the account leaves *before* the write goes out — nothing is written, so
+ * there is nothing to release. It does not close the case where the write is already in
+ * flight: that registration lands, notices the stale epoch and revokes itself, but by then
+ * `supabase.auth.signOut()` may have ended the session and the compensating revoke fails
+ * with nothing to authenticate as. The row survives, addressed to an account that has
+ * left.
+ *
+ * So sign-out **waits** for it. Not for the whole registration — acquiring a token from
+ * Expo can hang for a long time on a bad connection, and a registration still at that
+ * stage writes nothing anyway. Only from the moment the RPC is dispatched, which is one
+ * round trip, plus the compensating revoke it may then need, which is a second.
+ *
+ * Null almost always: a registration happens once per session start, so a sign-out that
+ * collides with one is rare and this costs nothing on every other sign-out.
+ */
+let dispatchedWrite: Promise<unknown> | null = null;
+
+/**
+ * Marks `write` as the thing sign-out must let finish. Returns it unchanged.
+ *
+ * Rejections are swallowed **for the tracked copy only** — sign-out races this promise and
+ * must not inherit its failure — while the caller still gets the original to await.
+ */
+export function trackDispatchedWrite<T>(write: Promise<T>): Promise<T> {
+  const tracked = write.then(
+    () => undefined,
+    () => undefined,
+  );
+  dispatchedWrite = tracked;
+  void tracked.then(() => {
+    // Cleared only if nothing newer has taken its place, so a slow write cannot release a
+    // faster one that started after it.
+    if (dispatchedWrite === tracked) dispatchedWrite = null;
+  });
+  return write;
+}
+
+/**
+ * How long sign-out will wait for a dispatched registration to settle.
+ *
+ * Two round trips' worth. It is a ceiling rather than a delay: the wait ends the moment
+ * the write does, and there is no wait at all unless one is in flight. Sign-out is a
+ * control somebody presses, so this cannot be generous — and past it the server's
+ * move-on-conflict is the backstop, as it always was.
+ */
+const DISPATCHED_WRITE_GRACE_MS = 3000;
+
+/** Test seam: leaves no dispatched write behind for the next test to wait on. */
+export function resetDispatchedWrite() {
+  dispatchedWrite = null;
+}
+
+/**
  * Everything sign-out has to do about push, in the order it has to do it.
  *
  * Called **before** `supabase.auth.signOut()`, because revoking needs the session that is
  * about to end. Returns rather than throws, always: `auth/methods.ts` awaits this and a
  * rejection there would leave somebody signed in.
  *
- * The epoch moves **first**, before the revoke round trip, so a registration that
- * completes at any point during this function already sees a stale epoch and undoes
- * itself.
+ * Three steps, and the order of the first two is the whole correctness argument:
  *
- * **The residual, stated rather than left to be discovered.** A registration whose RPC is
- * dispatched in the gap between `registerThisDevice`'s last epoch check and this line
- * still writes, and its compensating revoke can itself fail if `supabase.auth.signOut()`
- * has by then ended the session. The window is sub-millisecond and the backstop is the
- * server's: `register_device_token` moves the row on conflict, so the next account to sign
- * in on this device takes it whether or not any of this succeeded.
+ *   1. the epoch moves, so a registration that has not written yet abandons itself and a
+ *      registration that has will revoke what it wrote;
+ *   2. a **dispatched** write is waited for, bounded, so that revoke happens while the
+ *      session it needs still exists;
+ *   3. whatever this process is holding is released.
  */
 export async function releaseDeviceOnSignOut(): Promise<void> {
   sessionEpoch += 1;
+
+  const pending = dispatchedWrite;
+  if (pending) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      pending,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, DISPATCHED_WRITE_GRACE_MS);
+      }),
+    ]);
+    // Or the timer holds the event loop open for three seconds after a sign-out that
+    // did not need it — which on a device is a background task nobody asked for.
+    if (timer) clearTimeout(timer);
+  }
 
   const held = heldToken();
   forgetToken();
