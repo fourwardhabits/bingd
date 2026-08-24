@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import { nudgePushDelivery } from '@/features/notifications/push';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
@@ -204,6 +205,10 @@ export function useSetReaction(viewerId: string) {
     }
 
     if (error) return { ok: false as const, message: diagnose(error) ?? error.message };
+    // The event's actor has a `reaction` notification as of the statement above, and this
+    // reader is the only person holding a phone on its behalf. Debounced, and awaited by
+    // nothing (`nudgePushDelivery`).
+    nudgePushDelivery();
     return { ok: true as const, message: null };
   };
 

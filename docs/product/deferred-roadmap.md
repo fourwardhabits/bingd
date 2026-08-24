@@ -117,6 +117,18 @@ presentation decision · nothing else.
 
 ## 4. Native push notifications
 
+> **Built on 2026-08-24 (`public/push-v1`), and this entry stays for the correction in it.**
+> Registration, delivery, permission timing and deep-link routing all exist;
+> [`docs/architecture/push.md`](../architecture/push.md) is the architecture and
+> [`push-sender/README.md`](../../supabase/functions/push-sender/README.md) is the founder
+> checklist. What remains deferred is a **scheduler** for the outbox and **receipt
+> reconciliation**, both recorded there.
+>
+> **The "no new native binary" conclusion below was wrong**, and it is left in place with
+> its correction rather than deleted, because it was reached twice from the same true
+> premise and the reasoning is worth being able to find. See the block at the end of this
+> section.
+
 **What it is.** Device-token registration and real push delivery for the notification
 types that already exist.
 
@@ -146,9 +158,10 @@ lifecycle · a delivery path · the preference-axis decision above · OS permiss
 phone notification. The entry above was accurate and remains so. Two things worth adding,
 because they decide how expensive this is when it is scheduled:
 
-- **No new native binary is needed.** `expo-notifications` and its config plugin are in
+- ~~**No new native binary is needed.** `expo-notifications` and its config plugin are in
   every build, which is exactly what §15 bought them for. The smallest slice is
-  JavaScript, one RPC and one delivery path.
+  JavaScript, one RPC and one delivery path.~~ **False, and corrected 2026-08-24 — see
+  below.**
 - **The credentials are not configured, and PRD §15 said they were.** `app.config.ts`
   declares no `googleServicesFile` on either platform and no `aps-environment`
   entitlement; both credential files are gitignored. This is a founder task with Apple
@@ -167,6 +180,83 @@ because they decide how expensive this is when it is scheduled:
 
 **Still not friend-beta work.** The inbox is the channel the beta was built to test, and
 it works. Push is a public-launch item and belongs in the same release as the credentials.
+
+### Corrected 2026-08-24: push **does** gate a new native binary
+
+The premise was true and the conclusion drawn from it was not. `expo-notifications` and its
+config plugin have been in every build since the first one — and the plugin's **iOS
+defaults** were never examined (`expo-notifications@57.0.10`,
+`plugin/build/withNotificationsIOS.js`):
+
+```js
+const withNotificationsIOS = (config, { mode = 'development', ... }) => {
+  config = withEntitlementsPlist(config, (config) => {
+    if (!config.modResults['aps-environment']) {
+      config.modResults['aps-environment'] = mode;
+```
+
+`app.config.ts` passed only `{ color }`. So **every binary this project has ever produced is
+entitled to the APNs sandbox**, including the ones bound for the App Store. A production
+build with that entitlement registers against a service the production sender never talks
+to, and nothing about it looks wrong — no crash, no warning, no visible difference.
+
+Android reaches the same place by a different route: FCM needs `google-services.json`
+compiled in, and `android.googleServicesFile` was declared nowhere. The second bullet above
+noticed both absences and read them as *credentials*, which is a founder task; they are
+also *native configuration*, which is an engineering one, and that is the half that was
+missed.
+
+Both are native inputs and neither can change over the air. The corrected statement:
+
+> **Enabling push needs a new production binary and a store submission.** What
+> `expo-notifications` being present from the first build actually bought is smaller and
+> still real: no new native *dependency*, so autolinking, the native module graph and every
+> other build input are unchanged — and the change is three lines of configuration rather
+> than a dependency upgrade.
+
+`public/push-v1` makes that configuration production-only, so the published friend-beta
+binary's fingerprint does not move and it keeps receiving over-the-air updates.
+[`docs/architecture/push.md` §2](../architecture/push.md) records the measurements.
+
+**The preference-axis decision above has been made: one axis**, enforced structurally
+rather than by a second check — a suppressed notification is never written, and the enqueue
+is an `AFTER INSERT` trigger. No per-channel settings were added.
+
+### What is still deferred
+
+1. **A scheduler for `push_outbox`.** Nothing drains it on a timer; the app nudges the
+   sender after a write and on foreground. A notification created while nobody has the app
+   open waits until somebody does. One scheduled job against the same Edge Function closes
+   it, and nothing else changes.
+2. **Receipt reconciliation.** Expo answers a send with a *ticket*; the final outcome is a
+   *receipt* fetched later. Polling them needs a second scheduled process and a table of
+   ticket ids — a queue-processing platform for the one thing receipts add over tickets.
+   Send-time `DeviceNotRegistered` catches the ordinary uninstall and revokes the token;
+   the rest is caught on that token's next send.
+3. **A way back from "Not now."** The permission question is asked once ever, and there is
+   no control in Settings to change that answer afterwards.
+4. **The scheduled nudge** (PRD §15), which ships with push in the PRD's plan and is not in
+   this tranche. It stays deferred as §15 below.
+5. **A sign-out that cannot be outrun.** `releaseDeviceOnSignOut` moves a session epoch,
+   then waits up to three seconds for registrations already in flight so their compensating
+   revoke happens while the session still exists. Past that ceiling it proceeds. A
+   registration that lands *after* it — with a JWT still valid server-side — leaves the
+   token owned by the account that just signed out, and the compensating revoke fails
+   because the local session is gone. The backstop is the server's move-on-conflict: the
+   **next** account to sign in on that phone takes the device in one statement. So the
+   exposure is a phone signed out and left signed out, and it ends the moment anybody signs
+   in. Closing it properly needs server-side ownership epochs — an `operation_id` the
+   server can recognise as belonging to an ended session — which is a schema change and new
+   push behaviour rather than a fix. **Raised by independent review 40 and accepted as a
+   bounded residual risk**, not a defect introduced by the integration.
+6. **An outbox row can outlive its attempt ceiling.** `claim_push_batch` increments
+   `attempts` as it claims, and the due predicate is `attempts < 3`. A sender that dies
+   between its **third** claim and its settlement therefore leaves a row that no lease
+   expiry can make claimable again — it is deleted only by the cascade when its notification
+   goes. One stranded row per crashed final attempt, invisible to every client, and the
+   in-app notification it was for has already arrived. Left alone deliberately: every fix
+   changes claim or lease semantics, and this tranche is the last one before the native
+   surface freezes. **Raised by independent review 40.**
 
 ---
 

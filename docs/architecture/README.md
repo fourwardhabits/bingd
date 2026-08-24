@@ -21,6 +21,7 @@ This directory describes **how** Bingd is built. The PRD describes **what** it d
 | [`offline-sync.md`](./offline-sync.md) | Outbox, idempotency, conflict handling |
 | [`recommendations.md`](./recommendations.md) | Candidate generation through delivery, and how each guardrail is enforced |
 | [`client.md`](./client.md) | App structure, navigation, state, device cache |
+| [`push.md`](./push.md) | Device tokens, the outbox, the sender, and why push needs a new production binary |
 
 Architecture decisions are recorded inline as **AD-n** with their rationale and what would reverse them. Anything an implementation agent may not decide alone is marked **Ask first**.
 

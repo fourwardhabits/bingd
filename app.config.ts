@@ -42,6 +42,46 @@ const lane = process.env.BINGD_LANE;
 
 assertBackendIsAllowed(process.env.EXPO_PUBLIC_SUPABASE_URL, lane);
 
+/** The brand plum the notification plugin tints an Android notification with. */
+const NOTIFICATION_COLOR = '#773744';
+
+/**
+ * The push notification declarations, which are native and therefore fingerprint-bearing.
+ *
+ * **The `require` is inside this function on purpose, and moving it to the top of the
+ * file would strand the friend beta.** `@expo/fingerprint` hashes the modules actually
+ * loaded while a config resolves — `config/backends.cjs` is in the source list today, and
+ * adding a second required file was measured to move all four lanes' hashes, beta
+ * included. A lane that never takes the branch never loads the module and never sees it
+ * in its hash. `config/push.cjs` records the measurements.
+ *
+ * The two comparisons below are `declaresPushNatively` restated, and they have to be:
+ * answering "does this lane configure push" is what decides whether the module may be
+ * loaded at all, so it cannot come from the module. `config/push.test.mjs` asserts the
+ * two agree for every lane, which is the seam this arrangement creates.
+ *
+ * Production **throws** from here when its credential is missing, which is why this
+ * resolves once, early, rather than inside the config object below.
+ */
+function pushNative(): { plugin: { color: string; mode?: string }; googleServicesFile: string | null } {
+  const declared =
+    lane === 'production' || (lane === 'development' && Boolean(process.env.GOOGLE_SERVICES_JSON));
+
+  if (!declared) {
+    // Byte-identical to what every lane produced before push was configured.
+    return { plugin: { color: NOTIFICATION_COLOR }, googleServicesFile: null };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const push = require('./config/push.cjs');
+  return {
+    plugin: push.notificationPluginProps(lane, { color: NOTIFICATION_COLOR }),
+    googleServicesFile: push.googleServicesFileFor(lane),
+  };
+}
+
+const push = pushNative();
+
 /**
  * `eas init` could not write this itself: it edits app.json, and this project uses a
  * TypeScript config so the variant logic above is expressible.
@@ -118,6 +158,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 
   android: {
     package: current.bundleId,
+    /**
+     * FCM, spread rather than assigned, because the key has to be **absent** — not
+     * present and undefined — for every lane that does not configure push.
+     *
+     * `@expo/fingerprint` stringifies the resolved config, and a key whose value is
+     * undefined is dropped by `JSON.stringify` anyway; the spread says the intent out
+     * loud rather than relying on that. What it protects is the friend beta's runtime
+     * version: any movement in the `beta` lane's resolved config strands the published
+     * binary on its last update, silently. See `config/push.cjs`.
+     */
+    ...(push.googleServicesFile ? { googleServicesFile: push.googleServicesFile } : {}),
     // A launcher masks this to its own shape and may crop the outer third of
     // each axis, so the foreground is the mark well inside a Paper field rather
     // than the square icon above.
@@ -244,10 +295,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         cameraPermission: false,
       },
     ],
-    // Present in all variants from the first build (PRD §15). Delivery is
-    // flagged off server-side in production rather than omitted here.
-    // Icon and sound assets are added with the brand asset pass (PRD §5).
-    ['expo-notifications', { color: '#773744' }],
+    /**
+     * Present in all variants from the first build (PRD §15), and until now that was
+     * taken to mean push needed no new binary. It did.
+     *
+     * The plugin defaults `mode` to `'development'` and writes it into
+     * `aps-environment`, so every binary this project has ever produced was entitled to
+     * the APNs **sandbox** — including the ones bound for the App Store, which would
+     * have registered against a service the production sender never talks to. That is a
+     * native entitlement and cannot be changed over the air, which is why this lands
+     * before the release candidate.
+     *
+     * `notificationPluginProps` adds `mode` for the production lane and returns exactly
+     * `{ color }` for every other, so the beta and preview fingerprints do not move.
+     * Icon and sound assets are still deferred to the brand asset pass (PRD §5).
+     */
+    ['expo-notifications', push.plugin],
     [
       'expo-build-properties',
       {

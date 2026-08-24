@@ -534,6 +534,21 @@ describe('the guard is wired in, not merely present', () => {
     // no target, acts only on auth.uid(), and its effect is to remove the account
     // rather than to reach anybody else.
     'delete_account',
+    // 20260825000300, and the second writer to skip the guard deliberately — for
+    // `delete_account`'s reason applied to a smaller act.
+    //
+    // This is what sign-out calls. Refusing it for a suspended account would mean the
+    // account most likely to be signed out of in a hurry, or handed to somebody else,
+    // is the one whose device **stays registered** — and the next notification for them
+    // would land, with a name and a film title, on a lock screen somebody else is
+    // holding. The guard would be protecting nobody while causing exactly the thing it
+    // exists to prevent.
+    //
+    // Safe on the same three counts: it takes no target, acts only on
+    // `user_id = auth.uid()`, and its effect is to remove a capability rather than to
+    // reach anybody. `register_device_token` — the half that *grants* one — does call
+    // the guard, and that asymmetry is the point.
+    'revoke_device_token',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

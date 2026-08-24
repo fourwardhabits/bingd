@@ -4,6 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 
+import { releaseDeviceOnSignOut } from '@/features/notifications/push';
 import { track } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase';
 
@@ -218,8 +219,21 @@ export async function signInWithGoogle(): Promise<SignInOutcome> {
  * Neither exists yet; when they do, this is where they get torn down, and leaving
  * a note is better than leaving a silent omission — another account's queued
  * writes on a shared device are both a privacy leak and a correctness bug.
+ *
+ * **The push token is now one of those things, and it is the one with a name attached.**
+ * A device registered to this account and left registered would deliver their follows,
+ * comments and recommendations — with the sender's name and the film's title on the lock
+ * screen — to whoever signs in next. So the release happens **here**, before the session
+ * ends, because revoking needs a JWT and there is none a line later.
+ *
+ * It cannot fail loudly. `releaseDeviceOnSignOut` reports and returns rather than
+ * throwing: a rejection here would leave somebody signed in, which is a worse outcome
+ * than a stale token — and a stale token is not the last line of defence anyway.
+ * `register_device_token` moves a device to whoever registers it next, so the account
+ * that signs in after this takes the device whether or not this succeeded.
  */
 export async function signOut() {
+  await releaseDeviceOnSignOut();
   await clearPendingDisplayName();
   await supabase.auth.signOut();
 }

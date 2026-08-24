@@ -414,31 +414,40 @@ Recorded because it was in question and the answer is "it already works":
 
 ---
 
-### M11 — Push notifications are not built, and the credentials are not configured — **OPEN**
+### M11 — Push is built; it needs a production binary and founder credentials — **OPEN, narrowed**
 
-**Verified 2026-08-23** after a real follow produced an inbox row and no phone
-notification. That was expected behaviour, not a bug: nothing in the repository has ever
-been able to send a push.
+**Originally verified 2026-08-23**, after a real follow produced an inbox row and no phone
+notification. That was expected behaviour, not a bug: nothing in the repository could send
+a push.
+
+**Built 2026-08-24 (`public/push-v1`).** Every engineering stage below is now closed. What
+keeps M11 open is a **new production binary** and **founder credentials** — and the binary
+requirement is itself a correction, because the 2026-08-23 table asserted the opposite.
 
 | Stage | State |
 |---|---|
-| `expo-notifications` + config plugin in every build | **done** — so enabling push needs no new binary |
-| Apple / Google credentials in `app.config.ts` | **absent** — no `googleServicesFile`, no `aps-environment`; both files gitignored |
-| OS permission request | absent — zero call sites |
-| Token acquisition and persistence | absent — `device_tokens` exists, no writer, no `register_device_token` RPC |
-| Delivery path | absent — `tmdb-adapter` is the only Edge Function |
-| Foreground handler / listeners | absent |
+| `expo-notifications` + config plugin in every build | **done** — but see the row below; this bought no new *dependency*, not no new *binary* |
+| Production native push configuration | **done** — `aps-environment: production` (iOS) and `googleServicesFile` (Android), production lane only. **Native, so it requires a new production binary and a store submission.** The 2026-08-23 row above read "so enabling push needs no new binary", which was wrong |
+| OS permission request | **done** — asked after a first follow or a first invite, never at launch (PRD §15) |
+| Token acquisition and persistence | **done** — `register_device_token` / `revoke_device_token`; token globally unique, so a device moves between accounts in one statement |
+| Delivery path | **done** — `push_outbox` fed by an `AFTER INSERT` trigger on `notifications`, drained by the `push-sender` Edge Function via Expo Push |
+| Foreground handler / listeners | **done** — arrival refreshes the inbox; a tap deep-links |
+| Apple / Google credentials | **absent — founder task.** APNs `.p8`, Key ID, Team ID; Firebase project, `google-services.json`, FCM V1 service account. Checklist in [`push-sender/README.md`](../../supabase/functions/push-sender/README.md) |
+| Outbox scheduler | **deferred** — the app nudges the sender; nothing drains on a timer |
+| Receipt reconciliation | **deferred** — send-time `DeviceNotRegistered` revokes dead tokens; receipts are not polled |
 
-**The in-app inbox is the channel the friend beta was built to test, and it works** — the
-follow row was created, categorised, routed and rendered correctly. Push is additive.
+**The friend beta is unaffected, deliberately.** The native configuration is production-lane
+only, so the published beta binary's fingerprint does not move and it keeps receiving
+over-the-air updates. Push is not enabled for beta testers and the beta binary cannot prove
+the production push path — which is why this tranche is **not** published as a beta OTA.
 
-**Not a friend-beta blocker.** It is a public-launch item, and the credentials are a
-founder task with Apple and Google rather than an engineering one. The smallest
-implementation slice, in order, is in
-[`../product/deferred-roadmap.md`](../product/deferred-roadmap.md) §4.
+**Still not a friend-beta blocker.** It is a public-launch item. The in-app inbox remains the
+channel the beta was built to test, and it works.
 
-**Corrected alongside it:** PRD §15's build posture and the §27 launch checklist both
-asserted the push credentials were configured. Only the module is.
+**Corrected alongside it:** PRD §15's build posture, its As-built block and the §27 launch
+checklist all asserted that push needed no new binary. All three now carry the correction.
+See [`../product/deferred-roadmap.md`](../product/deferred-roadmap.md) §4 and
+[`../architecture/push.md`](../architecture/push.md).
 
 ## 2. Beta-safe minors
 

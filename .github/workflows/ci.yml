@@ -73,3 +73,19 @@ jobs:
       - run: npm run functions:check
 
       - run: npm run functions:lint
+
+      # push-sender, checked the same way and for the same reason the comment above
+      # gives — otherwise it is checked by nothing until a deploy fails, and it is the
+      # one function that can send somebody a notification.
+      #
+      # **Spelled out here rather than added as npm scripts, deliberately.**
+      # `packageJson:scripts` is an @expo/fingerprint input: adding a script moves the
+      # runtime version of every lane, and the published friend-beta binary is pinned to
+      # its fingerprint. A new script here would stop that binary receiving over-the-air
+      # updates — silently, and with a redistribution as the only fix. Three lines of
+      # duplication is the cheaper side of that trade. See config/push.cjs.
+      - run: npx deno check --config supabase/functions/push-sender/deno.json supabase/functions/push-sender/index.ts
+
+      - run: npx deno lint --config supabase/functions/push-sender/deno.json supabase/functions/push-sender
+
+      - run: npx deno test --config supabase/functions/push-sender/deno.json --allow-net supabase/functions/push-sender
