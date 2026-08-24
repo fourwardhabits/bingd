@@ -56,8 +56,9 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-import { contentFor, type PushJob } from './copy.ts';
-import { chunk, isDeadToken, isRetryable, sendChunk, type ExpoMessage } from './expo.ts';
+import { messagesFor, summarise } from './batch.ts';
+import type { PushJob } from './copy.ts';
+import { chunk, isDeadToken, isRetryable, sendChunk } from './expo.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -125,74 +126,6 @@ async function isKnownCaller(db: SupabaseClient, req: Request): Promise<boolean>
 
 // ---------------------------------------------------------------------------
 
-/** One message, and the notification and token it belongs to, so tickets can be mapped back. */
-type Addressed = { notificationId: string; token: string; message: ExpoMessage };
-
-function messagesFor(jobs: PushJob[]): Addressed[] {
-  const out: Addressed[] = [];
-
-  for (const job of jobs) {
-    const content = contentFor(job);
-    // A job whose actor cannot be named. `claim_push_batch` already refuses these, so
-    // this is the second of two — and the cheaper one to be wrong about.
-    if (!content) continue;
-
-    for (const device of job.tokens ?? []) {
-      out.push({
-        notificationId: job.notification_id,
-        token: device.token,
-        message: {
-          to: device.token,
-          title: content.title,
-          body: content.body,
-          data: content.data as unknown as Record<string, unknown>,
-          sound: 'default',
-          // Android delivers to a channel or not at all. `default` is the one
-          // `expo-notifications` creates for us, and the client sets its name.
-          channelId: 'default',
-          priority: 'high',
-        },
-      });
-    }
-  }
-
-  return out;
-}
-
-/**
- * What happened to each notification, from the tickets its messages came back with.
- *
- * `delivered` means **nothing is left to retry**, which is not the same as "every device
- * got it". A notification sent to two phones where one is uninstalled is delivered: the
- * dead token is revoked in the same settlement, and re-sending would produce the same
- * answer for ever.
- */
-function summarise(
-  addressed: Addressed[],
-  ticketFor: (index: number) => { retryable: boolean; dead: boolean; message: string | null },
-) {
-  const byNotification = new Map<string, { retryable: boolean; error: string | null }>();
-  const deadTokens = new Set<string>();
-
-  addressed.forEach((entry, index) => {
-    const outcome = ticketFor(index);
-    if (outcome.dead) deadTokens.add(entry.token);
-
-    const current = byNotification.get(entry.notificationId) ?? { retryable: false, error: null };
-    byNotification.set(entry.notificationId, {
-      retryable: current.retryable || outcome.retryable,
-      error: current.error ?? (outcome.retryable ? outcome.message : null),
-    });
-  });
-
-  const results = [...byNotification].map(([notification_id, outcome]) => ({
-    notification_id,
-    delivered: !outcome.retryable,
-    error: outcome.error,
-  }));
-
-  return { results, deadTokens: [...deadTokens] };
-}
 
 // ---------------------------------------------------------------------------
 

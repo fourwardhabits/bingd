@@ -34,8 +34,10 @@ jest.mock('./push', () => ({
   requestPushPermission: jest.fn(),
   acquirePushToken: jest.fn(),
   registerPushToken: jest.fn(),
+  revokePushToken: jest.fn(),
   rememberToken: jest.fn(),
   pushPlatform: jest.fn(() => 'ios'),
+  pushSessionEpoch: jest.fn(() => 0),
   noteFailure: jest.fn(),
 }));
 
@@ -55,8 +57,10 @@ const push = jest.requireMock('./push') as {
   requestPushPermission: jest.Mock;
   acquirePushToken: jest.Mock;
   registerPushToken: jest.Mock;
+  revokePushToken: jest.Mock;
   rememberToken: jest.Mock;
   pushPlatform: jest.Mock;
+  pushSessionEpoch: jest.Mock;
 };
 
 const TOKEN = 'ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]';
@@ -76,7 +80,9 @@ beforeEach(() => {
   push.requestPushPermission.mockResolvedValue('granted');
   push.acquirePushToken.mockResolvedValue(TOKEN);
   push.registerPushToken.mockResolvedValue('ok');
+  push.revokePushToken.mockResolvedValue('ok');
   push.pushPlatform.mockReturnValue('ios');
+  push.pushSessionEpoch.mockReturnValue(0);
 });
 
 afterEach(() => {
@@ -223,6 +229,39 @@ describe('registerThisDevice', () => {
     expect(push.registerPushToken).not.toHaveBeenCalled();
   });
 
+  /**
+   * The race an independent review found, and the reason it has no symptom: the sign-out
+   * looked for a token to revoke and this function had not written one yet, so the revoke
+   * released nothing and the write landed **after** it. The device ends up addressed to an
+   * account that has left, on a phone somebody else may now be holding.
+   */
+  it('undoes a registration that landed after the account signed out', async () => {
+    let epoch = 0;
+    push.pushSessionEpoch.mockImplementation(() => epoch);
+    push.registerPushToken.mockImplementation(() => {
+      epoch = 1;
+      return Promise.resolve('ok');
+    });
+
+    await registerThisDevice('user-1');
+
+    expect(push.revokePushToken).toHaveBeenCalledWith('user-1', TOKEN);
+    expect(push.rememberToken).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing at all when the account leaves while a token is being minted', async () => {
+    let epoch = 0;
+    push.pushSessionEpoch.mockImplementation(() => epoch);
+    push.acquirePushToken.mockImplementation(() => {
+      epoch = 1;
+      return Promise.resolve(TOKEN);
+    });
+
+    await registerThisDevice('user-1');
+
+    expect(push.registerPushToken).not.toHaveBeenCalled();
+    expect(push.revokePushToken).not.toHaveBeenCalled();
+  });
   it('stops on a platform with no device tokens at all', async () => {
     push.pushPlatform.mockReturnValue(null);
     await registerThisDevice('user-1');

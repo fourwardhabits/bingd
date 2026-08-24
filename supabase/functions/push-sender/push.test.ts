@@ -15,6 +15,7 @@ import { assert, assertEquals } from '@std/assert';
 
 import { contentFor, subjectName, type PushJob } from './copy.ts';
 import { chunk, isDeadToken, isRetryable, sendChunk, type ExpoTicket } from './expo.ts';
+import { summarise, type Addressed } from './batch.ts';
 
 const job = (overrides: Partial<PushJob> = {}): PushJob => ({
   notification_id: '11111111-1111-1111-1111-111111111111',
@@ -207,4 +208,86 @@ Deno.test('sends nothing for an empty chunk', async () => {
     }),
   );
   assertEquals(outcome, { tickets: [], failure: null });
+});
+
+// ---------------------------------------------------------------------------
+// Deciding what a batch's outcome was
+// ---------------------------------------------------------------------------
+
+const addressed = (notificationId: string, token: string): Addressed => ({
+  notificationId,
+  token,
+  message: { to: token, title: 't', body: 'b', data: {} },
+});
+
+/** Reads outcomes out of a list, in the shape `summarise` asks for. */
+const from = (outcomes: ExpoTicket[]) => (index: number) => ({
+  retryable: isRetryable(outcomes[index]),
+  dead: isDeadToken(outcomes[index]),
+  message: outcomes[index].status === 'error' ? outcomes[index].message : null,
+});
+
+Deno.test('a clean send is delivered and revokes nothing', () => {
+  const { results, deadTokens } = summarise([addressed('n1', 'a')], from([ok]));
+
+  assertEquals(results, [{ notification_id: 'n1', delivered: true, error: null }]);
+  assertEquals(deadTokens, []);
+});
+
+Deno.test('a wholly failed send is retried, carrying why', () => {
+  const { results } = summarise([addressed('n1', 'a')], from([rateLimited]));
+
+  assertEquals(results[0].delivered, false);
+  assertEquals(results[0].error, 'slow down');
+});
+
+Deno.test('every token dead is settled rather than retried, and all are revoked', () => {
+  const { results, deadTokens } = summarise(
+    [addressed('n1', 'a'), addressed('n1', 'b')],
+    from([gone, gone]),
+  );
+
+  assertEquals(results[0].delivered, true, 'retrying dead tokens would repeat for ever');
+  assertEquals(deadTokens.sort(), ['a', 'b']);
+});
+
+/**
+ * The case an independent review found. The queue is keyed on the notification, so a retry
+ * re-sends to **every** live token — and the phone that already received it buzzes again,
+ * on every attempt, up to three times for one event.
+ *
+ * The in-app row is the notification and it is already on both devices. A missed buzz on a
+ * second phone is the better failure.
+ */
+Deno.test('a partial success is not retried, so the device that got it is not buzzed twice', () => {
+  const { results } = summarise(
+    [addressed('n1', 'a'), addressed('n1', 'b')],
+    from([ok, rateLimited]),
+  );
+
+  assertEquals(results.length, 1);
+  assertEquals(results[0].delivered, true);
+  // Still recorded, so a half-failing send is diagnosable rather than silent.
+  assertEquals(results[0].error, 'slow down');
+});
+
+Deno.test('one device dead beside one that worked is delivered, and the dead one revoked', () => {
+  const { results, deadTokens } = summarise(
+    [addressed('n1', 'a'), addressed('n1', 'b')],
+    from([ok, gone]),
+  );
+
+  assertEquals(results[0].delivered, true);
+  assertEquals(deadTokens, ['b']);
+});
+
+Deno.test('two notifications in one batch are settled independently', () => {
+  const { results } = summarise(
+    [addressed('n1', 'a'), addressed('n2', 'b')],
+    from([ok, rateLimited]),
+  );
+
+  assertEquals(results.length, 2);
+  assertEquals(results.find((r) => r.notification_id === 'n1')?.delivered, true);
+  assertEquals(results.find((r) => r.notification_id === 'n2')?.delivered, false);
 });
