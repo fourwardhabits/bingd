@@ -352,7 +352,12 @@ describe('the rating sheet', () => {
     // `Sheet` hides its backdrop from the accessibility tree, so tapping outside is
     // not a route a screen reader can take. Leaving must not cost a rating, and it
     // must not leave a title behind either.
-    await fireEvent.press(view.getByRole('button', { name: 'Close' }));
+    // A real 44pt target rather than a word with `hitSlop` around it: slop that
+    // reaches past its parent's bounds is not delivered on Android.
+    const close = view.getByRole('button', { name: 'Close' });
+    expect(flatten(close.props.style).minHeight).toBe(44);
+
+    await fireEvent.press(close);
 
     await waitFor(() => expect(view.queryByText('How was it?')).toBeNull());
     expect(callsTo('set_bucket')).toHaveLength(0);

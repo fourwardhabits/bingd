@@ -129,6 +129,7 @@ export function TasteBucketSheet({
             accessibilityRole="button"
             accessibilityLabel="Close"
             onPress={onClose}
+            style={styles.close}
             hitSlop={theme.space[3]}
           >
             <Text variant="callout" tone="secondary">
@@ -195,6 +196,14 @@ const styles = StyleSheet.create({
   },
   head: { flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
   heading: { flex: 1 },
+  /**
+   * The height is the target, not the `hitSlop`. A word of `callout` type is about
+   * twenty points tall, and slop that reaches past its parent's bounds is not
+   * delivered on Android — so a control relying on it alone is 28pt however wide the
+   * slop is written. The slop stays for horizontal reach; the minimum height is what
+   * makes the 44 real.
+   */
+  close: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
   subject: { flexDirection: 'row', gap: theme.space[3], alignItems: 'center' },
   subjectText: { flex: 1, gap: theme.space[1] },
 });
