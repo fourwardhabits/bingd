@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 
+import { ReportSheet } from '@/features/moderation/ReportSheet';
 import type { Surface } from '@/lib/analytics';
 import { Button } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -50,6 +52,7 @@ export function FollowControl({
 }: FollowControlProps) {
   const { follow, unfollow, block, unblock, busy } = useSocialWrites(viewerId, surface);
   const state = relationship ?? noRelationship();
+  const [reporting, setReporting] = useState(false);
 
   if (isSelf) return null;
 
@@ -60,6 +63,40 @@ export function FollowControl({
   // A blocked account is not a profile to follow. The only control it offers is the
   // way back — and the page around it is already empty, because `can_view_profile` is
   // false in both directions, so this is the whole of what a blocked profile shows.
+  /**
+   * Report, wherever the profile is.
+   *
+   * Present on the blocked branch too, and that is the client half of a rule the
+   * database already states: `report()` checks that a subject exists and deliberately
+   * not that the caller can still see it, so that blocking somebody cannot become a
+   * way to suppress the complaint about them (20260813002000 §4). Hiding the control
+   * the moment you block would reintroduce, in the UI, exactly the inversion the
+   * server refuses to have.
+   *
+   * It is a tertiary control beside Block rather than a red button, and it is not
+   * bundled with Block: the two are different acts. A block is between two people and
+   * takes effect immediately; a report is a message to whoever runs Bingd, and
+   * neither one implies the other.
+   */
+  const reportControl = (
+    <Button
+      label="Report"
+      kind="tertiary"
+      onPress={() => setReporting(true)}
+      accessibilityHint={`Tells whoever runs bingd. about ${name}`}
+    />
+  );
+
+  const reportSheet = (
+    <ReportSheet
+      visible={reporting}
+      onClose={() => setReporting(false)}
+      subject="profile"
+      subjectId={userId}
+      noun="profile"
+    />
+  );
+
   if (state.blocked) {
     return (
       <View style={styles.row}>
@@ -74,6 +111,8 @@ export function FollowControl({
             })()
           }
         />
+        {reportControl}
+        {reportSheet}
       </View>
     );
   }
@@ -147,6 +186,8 @@ export function FollowControl({
         }}
       />
       <Button label="Block" kind="tertiary" disabled={busy} disabledReason="Saving your last change." onPress={confirmBlock} />
+      {reportControl}
+      {reportSheet}
     </View>
   );
 }

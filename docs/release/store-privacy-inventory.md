@@ -250,10 +250,39 @@ other IDs.
 | Privacy policy | `https://bingd.app/privacy` | **written, deploys with `main`** |
 | Support URL | `https://bingd.app/support` | **written, deploys with `main`** |
 | Account deletion | `https://bingd.app/account-deletion` | **written, deploys with `main`** |
-| Support email | `hello@bingd.app` | **FOUNDER — confirm the mailbox is real** |
+| **Terms of Use** | `https://bingd.app/terms` | **drafted 2026-08-25, deploys with `main`. Draft — unconfirmed legal entity, no lawyer read. See L-1** |
+| Support email | `hello@bingd.app` | **FOUNDER — SUPPORT-1: two addresses are in play. See below** |
 | Marketing URL | — | not required; leave blank |
 
-All three returned **HTTP 200 with the wrong page** before 2026-08-20: Cloudflare Pages
+### SUPPORT-1 — one canonical support address, and there are currently two
+
+**Unresolved, and it must be settled before either store form is submitted.** Both stores
+publish this address and Apple emails it during review, so it has to be a mailbox somebody
+reads rather than a plausible-looking string — and right now the repository does not agree
+with itself about which string it is.
+
+| | Address | Occurrences |
+|---|---|---|
+| **Tracked** — the live site, the app's support page, this document, the release docs, the seed builder's User-Agent | `hello@bingd.app` | 8, across 7 files |
+| **Untracked** — `store-assets/google-play/store-listing.md`, the founder-local Play listing copy | `support@bingd.app` | 3 |
+
+The founder's Play listing therefore publishes an address that appears nowhere in the
+product, and the product publishes one that appears nowhere in the listing. **Whether
+either mailbox exists is not a thing this repository can establish**, and neither was
+assumed.
+
+`store-assets/` is founder-local and was deliberately not modified. Once the founder
+picks one address, these are the tracked files to normalise:
+
+- `web/build.mjs` — the `SUPPORT_EMAIL` constant, which every page and both footers read
+- `supabase/seed/fetch-catalogue.mjs` — the TMDB User-Agent
+- `docs/release/store-privacy-inventory.md` (this file)
+- `docs/release/beta-distribution-readiness.md`
+- `docs/architecture/web-deployment.md`
+
+Everything user-facing routes through one constant, so the web change is a single line.
+
+All four returned **HTTP 200 with the wrong page** before 2026-08-20: Cloudflare Pages
 served the generic "closed testing" page for any unknown path, so a reviewer following the
 privacy link got a success status and no policy. They are real documents now and
 `web/router.test.mjs` asserts that each one carries its own content and loads no
@@ -293,8 +322,10 @@ attribution section exists to satisfy, which is why the file's provenance is rec
 
 ## 6. FOUNDER actions before either store form is submitted
 
-1. **Confirm `hello@bingd.app` is a mailbox somebody reads.** Both stores publish it and
-   Apple emails it during review.
+1. **SUPPORT-1 — choose one canonical support address, and confirm it is a mailbox
+   somebody reads.** Both stores publish it and Apple emails it during review. The
+   tracked product says `hello@bingd.app`; the Play listing in `store-assets/` says
+   `support@bingd.app`. Pick one; the files to normalise afterwards are listed in §4.
 2. ~~**Add the official TMDB logo** (§5).~~ Done 2026-08-21 — downloaded, unmodified.
 3. **Decide the legal entity named on the privacy page.** It currently says "one
    independent developer" and names no person or company. A public launch — particularly

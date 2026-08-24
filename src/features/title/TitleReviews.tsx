@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { ReportSheet } from '@/features/moderation/ReportSheet';
 import type { TitleReview, ReviewSort } from '@/features/title/use-title-reviews';
 import {
   Avatar,
@@ -30,6 +32,12 @@ export type TitleReviewsProps = {
   onWrite: () => void;
   /** Movie or season, for the copy. Never "title". */
   noun: string;
+  /**
+   * Who is reading, so that the reporting control is absent from their own review.
+   * `report()` refuses your own content with a 22023, so offering it there would be a
+   * button whose only outcome is an error.
+   */
+  viewerId: string;
 };
 
 /**
@@ -63,7 +71,11 @@ export function TitleReviews({
   viewerHasReview,
   onWrite,
   noun,
+  viewerId,
 }: TitleReviewsProps) {
+  // Which review's reason sheet is open, by `user_media.id`.
+  const [reporting, setReporting] = useState<string | null>(null);
+
   return (
     <View style={styles.tab}>
       {/* The control first, because somebody who has just ranked something is more
@@ -136,6 +148,30 @@ export function TitleReviews({
               {review.score !== null ? (
                 <ScoreBadge score={review.score} size="sm" />
               ) : null}
+
+              {/* The overflow, and the only thing behind it is Report.
+
+                  An ellipsis rather than the word, because a review is a paragraph
+                  somebody wrote and a permanent labelled Report beside every one of
+                  them reads as an accusation waiting to be made. It is absent on your
+                  own review: the server refuses a self-report, so the control would
+                  only ever produce an error. */}
+              {review.userId !== viewerId ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Report ${review.name}'s review`}
+                  accessibilityHint="Tells whoever runs bingd. about this review"
+                  onPress={() => setReporting(review.id)}
+                  hitSlop={theme.space[2]}
+                  style={({ pressed }) => pressed && styles.pressed}
+                >
+                  <Ionicons
+                    name="ellipsis-horizontal"
+                    size={theme.layout.icon.sm}
+                    color={theme.text.tertiary}
+                  />
+                </Pressable>
+              ) : null}
             </View>
 
             <SpoilerNote
@@ -165,6 +201,14 @@ export function TitleReviews({
           </View>
         ))
       )}
+
+      <ReportSheet
+        visible={reporting !== null}
+        onClose={() => setReporting(null)}
+        subject="review"
+        subjectId={reporting ?? ''}
+        noun="review"
+      />
     </View>
   );
 }
@@ -191,4 +235,5 @@ const styles = StyleSheet.create({
   person: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
   personCopy: { flex: 1, gap: 1 },
   reactions: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
+  pressed: { opacity: 0.7 },
 });

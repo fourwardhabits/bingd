@@ -220,11 +220,23 @@ describe('public_notes', () => {
     const names = fields.map((f) => f.name).sort();
     assert.deepEqual(names, [
       'has_spoilers',
+      // The row's surrogate name, added by 20260825000100 so a reader can report the
+      // review. A key rather than a fact about the watch — it discloses nothing the
+      // caller could not already see, and reporting needs a subject id.
+      'id',
       'media_item_id',
       'note',
       'updated_at',
       'user_id',
     ]);
+
+    // The point of the assertion above, stated so it cannot be widened by accident.
+    // `watched_on` is private at every visibility level (PRD §22) and `bucket` is the
+    // rating; neither belongs in a note read. A future column added to `user_media`
+    // fails the deepEqual, and this says what the failure would mean.
+    for (const forbidden of ['watched_on', 'bucket', 'progress', 'note_visibility', 'source']) {
+      assert.ok(!names.includes(forbidden), `public_notes must not project ${forbidden}`);
+    }
   });
 
   it('caps the limit', async () => {

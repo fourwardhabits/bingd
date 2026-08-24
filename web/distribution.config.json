@@ -19,6 +19,34 @@
     "person concludes Bingd does not exist, and the inviter never finds out."
   ],
 
+  "mode": "beta",
+
+  "$modeComment": [
+    "Which Bingd this site is describing: 'beta' or 'public'.",
+    "",
+    "One field, because the alternative was the same sentence — 'Bingd is in closed",
+    "testing' — hardcoded in seven places including the front page, and a launch day",
+    "spent finding all of them. It decides three things and nothing else:",
+    "",
+    "  - the closed-testing language on every page,",
+    "  - whether the site asks search engines to index it,",
+    "  - whether the install buttons and invitation copy assume a store.",
+    "",
+    "IT IS 'beta' TODAY AND MUST STAY THAT WAY UNTIL THE APPS ARE ACTUALLY PUBLIC.",
+    "Flipping it is the launch switch rather than a copy edit: 'public' tells the",
+    "world the stores are live and invites Google to index the site permanently, and",
+    "an indexed /u/<handle> cannot be un-published by any privacy setting in the app.",
+    "",
+    "The build REFUSES 'public' while either storeUrl is null, so the flag cannot get",
+    "ahead of the reality it describes. That is a deliberate lock and not a validation",
+    "nicety: it means this file can be merged and reviewed with no window in which",
+    "pushing to main would make bingd.app claim a store listing that does not exist.",
+    "",
+    "Anything unset, misspelt or missing reads as 'beta'. The failure modes are not",
+    "symmetric — stale beta copy is a day of embarrassment, a premature launch claim",
+    "is a 404 under a download button and a search index that remembers it."
+  ],
+
   "ios": {
     "$comment": [
       "The public TestFlight link, of the form https://testflight.apple.com/join/XXXXXXXX.",

@@ -98,6 +98,94 @@ if (distribution.app?.scheme && !/^[a-z][a-z0-9+.-]*$/.test(distribution.app.sch
   problems.push(`distribution.config.json app.scheme "${distribution.app.scheme}" is not a scheme.`);
 }
 
+/**
+ * Which Bingd this build is describing.
+ *
+ * `beta` is the default in every sense that matters: an unset, misspelt or missing
+ * value resolves to it, because the failure modes are not symmetric. A site that
+ * wrongly says "in closed testing" is a day of stale copy; a site that wrongly says
+ * the app is on the App Store sends people to a store page that does not exist and
+ * asks Google to keep the claim.
+ *
+ * **`public` is refused while either store URL is null**, and that lock is the whole
+ * reason the mode is safe to leave in the repository. Flipping the flag alone cannot
+ * publish launch copy: the URLs the copy promises have to exist first, and they cannot
+ * exist before the apps are approved. So the code can be merged, reviewed and sat on
+ * until T4/T5 without any window in which pushing it makes bingd.app lie.
+ */
+/**
+ * The placeholder a legal identity goes in.
+ *
+ * **Deliberately not filled in, and deliberately loud.** A Terms of Use has to name who
+ * the agreement is with, and Bingd's answer to that is a decision the founder has not
+ * made and this repository holds no evidence of: whether there is a company, what it is
+ * called, and where it is registered are facts rather than defaults. Inventing a
+ * plausible one — "Bingd Ltd", a jurisdiction picked because it is common — would
+ * produce a document that reads as finished and names a party that does not exist,
+ * which is worse than an obviously unfinished one.
+ *
+ * So it renders in the page, in capitals, where neither the founder nor a store
+ * reviewer can miss it. web/router.test.mjs asserts it is still present, which turns
+ * "remember to fill this in" into a failing test on the day it stops being true.
+ */
+const LEGAL_ENTITY = '[LEGAL ENTITY / DEVELOPER NAME &mdash; FOUNDER TO CONFIRM]';
+
+const MODES = ['beta', 'public'];
+const mode = distribution.mode ?? 'beta';
+
+if (!MODES.includes(mode)) {
+  problems.push(
+    `distribution.config.json mode is "${distribution.mode}", which is not one of ${MODES.join(', ')}.`,
+  );
+}
+
+if (mode === 'public') {
+  for (const [name, value] of [
+    ['ios.storeUrl', distribution.ios?.storeUrl],
+    ['android.storeUrl', distribution.android?.storeUrl],
+  ]) {
+    if (value == null) {
+      problems.push(
+        `mode is "public" but ${name} is null. Public copy claims both apps are ` +
+          'downloadable now; publishing that over a button with no destination is the ' +
+          'one failure this refuses to ship.',
+      );
+    }
+  }
+
+  /**
+   * The second half of the lock, and it guards a worse failure than the first.
+   *
+   * A store button with no destination is embarrassing. A **Terms of Use naming a party
+   * that does not exist**, on a public launch, is a contract every new account is asked
+   * to agree to at signup and cannot identify the other side of. The draft is entirely
+   * appropriate for a closed test whose users all know the founder personally; carrying
+   * it across a launch by forgetting about it is not.
+   *
+   * Enforced by the build rather than left to review, because that is exactly the
+   * difference: the placeholder is *designed* to be conspicuous, and a conspicuous thing
+   * seen every day for six weeks stops being conspicuous. The build is the reader that
+   * does not acclimatise.
+   *
+   * **Checked here, with the other problems, rather than beside TERMS_BODY where it
+   * reads more naturally.** Everything in this block runs before a single file is
+   * written; a refusal further down would abort halfway, leaving `dist/` holding the
+   * public-mode `_headers` — no noindex — from a build that failed. A partial deploy of
+   * exactly the thing the lock exists to prevent is a poor consolation prize.
+   */
+  if (LEGAL_ENTITY.includes('FOUNDER TO CONFIRM')) {
+    problems.push(
+      'mode is "public" but the Terms of Use still carries the unconfirmed-entity ' +
+        'placeholder. A public launch asks every new account to agree to it at signup, ' +
+        'and it does not yet name who the agreement is with. Fill in LEGAL_ENTITY, or ' +
+        'stay in beta. See L-1 in docs/release/public-launch-risk-register.md.',
+    );
+  }
+}
+
+/** True when the site should describe a shipped product rather than a closed test. */
+const isPublic = mode === 'public';
+
 if (problems.length > 0) {
   console.error('\nCannot build the site:\n');
   for (const problem of problems) console.error(`  - ${problem}`);
@@ -111,8 +199,92 @@ if (problems.length > 0) {
 }
 
 await mkdir(join(dist, '.well-known'), { recursive: true });
-await cp(join(here, 'public'), dist, { recursive: true });
+// `web/public/` is gone as of the public-launch tranche. It held exactly two files —
+// `_headers` and `index.html` — and both had to become mode-aware, which a directory
+// copied verbatim cannot be. They are generated below. `src/` still copies, because
+// `page.mjs` and `router.mjs` are shipped as-is and are run directly by the tests.
 await cp(join(here, 'src'), dist, { recursive: true });
+
+/**
+ * Cloudflare Pages headers.
+ *
+ * **Generated rather than committed, as of the public-launch tranche**, and for one
+ * reason: `X-Robots-Tag` has to follow the release mode. It was a static file in
+ * `web/public/`, which meant the single most consequential line on the site — whether
+ * Google may index it — was the one line no configuration could reach. Launch day
+ * would have been "remember to edit `_headers` too", and the failure of forgetting is
+ * silent in the direction that matters: the site goes public and stays invisible.
+ *
+ * Everything else in it is unconditional and unchanged from the committed version.
+ */
+const headers = `# Cloudflare Pages headers.
+#
+# GENERATED BY web/build.mjs — edit that, not this. The robots directive below
+# follows distribution.config.json's \`mode\`, which is why this file is built.
+
+# Apple requires this file be served as JSON despite having no extension. Served
+# as text/plain, iOS fetches it and silently declines to parse it, and every
+# Universal Link keeps opening Safari with nothing to indicate why.
+/.well-known/apple-app-site-association
+  Content-Type: application/json
+  Cache-Control: public, max-age=3600
+
+/.well-known/assetlinks.json
+  Content-Type: application/json
+  Cache-Control: public, max-age=3600
+
+# Everything on the site, in four parts.
+#
+${
+  isPublic
+    ? `# INDEXING IS ON. mode is "public", so no X-Robots-Tag is sent and the pages carry
+# no robots meta either. This is the launch state and it is not quietly reversible:
+# a /u/<handle> route that Google has indexed has published a list of Bingd's members,
+# and no privacy setting in the app can take that back afterwards. The router pages
+# name no account — the handle is read from the URL by the browser and never rendered
+# server-side — which is what makes indexing them safe at all.`
+    : `# The closed beta is noindex by founder decision (decision log §3). Set as a header
+# rather than a meta tag so it also covers the JSON files and anything served that is
+# not HTML. It lifts when distribution.config.json's mode becomes "public", which the
+# build refuses until both store URLs exist.`
+}
+#
+# bingd.app is the domain an invitation teaches people to trust, which makes it the
+# one worth framing inside somebody else's page. Nothing here is clickable into an
+# account, so this is not a session-riding risk — it is that a store button rendered
+# under another site's chrome sends somebody to an install they did not choose. Both
+# framing headers, because the older one is what some corporate proxies enforce.
+#
+# .app is HSTS-preloaded at the top level, so browsers already refuse plain HTTP
+# here. Strict-Transport-Security is stated anyway: preloading is a property of the
+# TLD rather than of this site, and not a thing to depend on silently.
+#
+# Deliberately no script-src, style-src or default-src. Those belong in the security
+# tranche, with a real browser to check them in. A wrong script-src does not fail
+# loudly — the page still renders and the buttons are simply never painted, which is
+# indistinguishable from no install destination being configured, the site's honest
+# empty state today. The three directives below cannot cause that, because none of
+# them governs whether something loads. What would otherwise justify a strict policy
+# is already true by construction and tested in web/router.test.mjs: no innerHTML, no
+# destination read out of the URL, and no third-party origin on any page beyond the
+# font host the app already uses.
+/*
+${isPublic ? '' : '  X-Robots-Tag: noindex, nofollow\n'}  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy: frame-ancestors 'none'; base-uri 'none'; form-action 'none'
+  X-Frame-Options: DENY
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+# The router's two modules. Cloudflare Pages types .mjs correctly today; stated
+# anyway, because a module served as text/plain is refused by the browser outright
+# and the page then renders with no buttons at all — which looks exactly like the
+# install destinations not being configured.
+/*.mjs
+  Content-Type: text/javascript; charset=utf-8
+  Cache-Control: public, max-age=300
+`;
+
+await writeFile(join(dist, '_headers'), headers);
 
 /**
  * Apple. `applinks` claims the paths; `webcredentials` is what lets the keychain
@@ -302,20 +474,29 @@ const styles = `
 `;
 
 /**
+ * The robots meta tag, or nothing.
+ *
+ * Belt to `_headers`' braces while the beta is closed — the header covers the JSON
+ * files too, and the meta tag survives a host that drops custom headers. Both come
+ * from the same `isPublic`, so they cannot disagree, which is the failure a second
+ * hardcoded copy of this decision would eventually produce.
+ */
+const ROBOTS = isPublic ? '' : '\n    <meta name="robots" content="noindex, nofollow" />';
+
+/**
  * One page.
  *
- * `noindex` on every route, by founder decision (decision log §3) and reinforced by
- * the `X-Robots-Tag` in `_headers` — a `/u/<handle>` route that Google indexed would
- * publish a list of Bingd's members, which is a thing no privacy setting in the app
- * would then be able to take back.
+ * `noindex` while the test is closed, by founder decision (decision log §3) — a
+ * `/u/<handle>` route that Google indexed would publish a list of Bingd's members,
+ * which is a thing no privacy setting in the app would then be able to take back. It
+ * lifts with the release mode and not before.
  */
 const page = ({ title, kind, heading, tagline, body }) => `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${title}</title>
-    <meta name="robots" content="noindex, nofollow" />
+    <title>${title}</title>${ROBOTS}
     <meta name="referrer" content="no-referrer" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -348,13 +529,14 @@ ${body}
         </div>
 
         <p id="no-destination" hidden>
-          The Bingd beta is not open for this device yet. ${heading}
+          ${isPublic ? 'Bingd is not available for this device yet.' : 'The Bingd beta is not open for this device yet.'} ${heading}
         </p>
       </div>
 
       <footer>
         <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> &middot;
-        <a href="/privacy">Privacy</a> &middot; <a href="/support">Support</a>
+        <a href="/privacy">Privacy</a> &middot; <a href="/terms">Terms</a> &middot;
+        <a href="/support">Support</a>
       </footer>
     </main>
 
@@ -378,17 +560,41 @@ ${body}
  * somebody installing from TestFlight, launching Bingd from their home screen, and
  * silently losing the invitation with nothing anywhere to say what happened.
  */
+/**
+ * The invitation's second paragraph, which is the deferred-install limitation stated to
+ * the person it affects rather than only in a document.
+ *
+ * It survives public launch, and the wording is the only part that moves. Bingd
+ * deliberately implements no deferred attribution — no Branch, no AppsFlyer, no Install
+ * Referrer — so an invitation genuinely does not follow somebody through a store
+ * install, and the page has to say so in both modes. What changes is the name of the
+ * thing they installed from: "TestFlight or Play" is meaningless to somebody who tapped
+ * an App Store button.
+ */
+const INVITE_RETURN = isPublic
+  ? `          <p>
+            <strong>After installing Bingd, come back to this page</strong> and tap
+            &ldquo;I already have Bingd&rdquo; to finish connecting with your friend.
+            Opening the app straight from the store works too, but the invitation will
+            not follow you there.
+          </p>`
+  : `          <p>
+            <strong>Come back to this page once Bingd is installed</strong> and tap
+            &ldquo;I already have Bingd&rdquo;. Opening the app straight from TestFlight
+            or Play works too, but the invitation will not follow you there.
+          </p>`;
+
 const INVITE_BODY = `        <span id="invite-intro">
           <p class="subject">You have been invited to Bingd.</p>
           <p>
             Bingd is where you rank what you have watched and see what your friends
-            really think. It is in closed testing, and this invitation is how you get in.
+            really think.${
+              isPublic
+                ? ' Get it below, and this invitation connects you when you arrive.'
+                : ' It is in closed testing, and this invitation is how you get in.'
+            }
           </p>
-          <p>
-            <strong>Come back to this page once Bingd is installed</strong> and tap
-            &ldquo;I already have Bingd&rdquo;. Opening the app straight from TestFlight
-            or Play works too, but the invitation will not follow you there.
-          </p>
+${INVITE_RETURN}
         </span>
         <p id="invite-broken" hidden>
           That invitation link is incomplete &mdash; messaging apps sometimes cut long
@@ -408,10 +614,28 @@ const TITLE_BODY = `        <p class="subject">A film or series on Bingd</p>
           Open it in Bingd to see where your friends placed it, and where you would.
         </p>`;
 
-const GENERIC_BODY = `        <p>
+const GENERIC_BODY = isPublic
+  ? `        <p>
+          Bingd is where you rank what you have watched and see what your friends really
+          think. Get it below.
+        </p>`
+  : `        <p>
           Bingd is in closed testing. Invitations are going out to a small first group,
           and this page will become the app&rsquo;s public face when it opens up.
         </p>`;
+
+/**
+ * The second half of an "unavailable" sentence, and each route's `heading`.
+ *
+ * In beta it says the test is closed, which is why a stranger who found a profile link
+ * cannot get in. After launch that sentence is simply false — anybody can get in — and
+ * the only remaining reason a device has no destination is a platform Bingd has not
+ * shipped to. Two different facts, so two different sentences rather than one edited
+ * to be vague enough for both.
+ */
+const UNAVAILABLE = isPublic
+  ? 'Bingd is not on this platform yet.'
+  : 'Bingd is in closed testing.';
 
 /**
  * The one address in this project a stranger is told to write to.
@@ -433,8 +657,9 @@ const SUPPORT_EMAIL = 'hello@bingd.app';
 const DOCUMENT_DATE = '20 August 2026';
 
 const PRIVACY_BODY = `      <p class="lede">
-        Bingd is a closed beta. This describes what it actually stores, why, and who else
-        sees it &mdash; written against the database schema rather than from a template.
+        ${isPublic ? 'Bingd' : 'Bingd is a closed beta. This'} describes what it actually
+        stores, why, and who else sees it &mdash; written against the database schema
+        rather than from a template.
       </p>
 
       <h2>Who runs Bingd</h2>
@@ -559,8 +784,9 @@ const PRIVACY_BODY = `      <p class="lede">
       <h2>Changes</h2>
       <p>
         If this changes in a way that affects what is collected or who sees it, the date at
-        the top of this page changes. During the closed beta this page is the record; there
-        is no mailing list and no in-app announcement to promise you.
+        the top of this page changes. ${
+          isPublic ? 'This page is the record' : 'During the closed beta this page is the record'
+        }; there is no mailing list and no in-app announcement to promise you.
       </p>
 
       <h2>Attribution</h2>
@@ -569,15 +795,16 @@ const PRIVACY_BODY = `      <p class="lede">
       </p>`;
 
 const SUPPORT_BODY = `      <p class="lede">
-        Bingd is in closed testing. There is no help desk and there is no support team
-        &mdash; there is one address, and one person on the other end of it.
+        There is no help desk and there is no support team &mdash; there is one address,
+        and one person on the other end of it.
       </p>
 
       <h2>Getting help</h2>
       <p>
         Write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>. Replies are not
-        instant and there is no queue you can check; a closed beta run by one person is
-        exactly as informal as that sounds.
+        instant and there is no queue you can check; ${
+          isPublic ? 'a small product run by one person' : 'a closed beta run by one person'
+        } is exactly as informal as that sounds.
       </p>
 
       <h2>What to include</h2>
@@ -613,7 +840,14 @@ const SUPPORT_BODY = `      <p class="lede">
 
       <h2>Reporting something serious</h2>
       <p>
-        Abuse, impersonation, or a security problem: write to
+        <strong>Reviews, comments and profiles can be reported from inside the app.</strong>
+        Open the review or comment and choose Report, or use Report on somebody&rsquo;s
+        profile. It reaches the person who runs Bingd, and the person you reported is
+        never told who reported them.
+      </p>
+      <p>
+        For what that does not cover &mdash; somebody impersonating you, or a security
+        problem: write to
         <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> with the word
         <strong>URGENT</strong> in the subject. Please do not post security findings
         publicly before they are fixed.
@@ -704,13 +938,229 @@ const DELETION_BODY = `      <p class="lede">
         quote something you typed. See the <a href="/privacy">privacy page</a>.
       </p>`;
 
+/**
+ * Terms of Use.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THIS IS, AND WHAT IT IS NOT
+ *
+ * A **draft for founder and legal review**. No lawyer has read it. It is written under
+ * the same rule as the privacy page — every sentence describes what the app and the
+ * schema actually do — because the failure mode of a templated Terms is a promise the
+ * product cannot keep, and a promise about moderation is the one most likely to be
+ * tested by somebody who was harmed.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IT DELIBERATELY DOES NOT SAY
+ *
+ * No governing law, no venue, no arbitration clause, no company number, no address.
+ * Each is a fact about a legal entity that no document in this repository establishes,
+ * and a Terms that states them wrongly is worse than one that omits them — an
+ * arbitration clause in particular is a substantive waiver of a user's rights, and
+ * writing one on a guess is not a thing to do quietly. They are founder inputs, listed
+ * as such in docs/release/.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE MODERATION SECTION IS SPECIFIC
+ *
+ * Because the backend is. `moderation_actions` accepts exactly six actions —
+ * suspend_account, restore_account, remove_content, force_username_change,
+ * dismiss_report, warn — and the prohibited-content list is `reports_known_reason`
+ * read back in English. Describing powers Bingd does not have is the ordinary way to
+ * write this section and would make the document unfalsifiable; describing the ones it
+ * does makes it checkable against a migration.
+ *
+ * Thirteen is not a number chosen here either: `create_profile` collects a date of
+ * birth and refuses an under-13 account, so the schema already enforces it and this
+ * states it.
+ *
+ * The licence paragraph is the one clause that is *load-bearing for the product rather
+ * than for us*: without permission to store and display what somebody writes, a public
+ * review cannot legally be shown on a title page. It is scoped to exactly that and ends
+ * with the content, rather than the perpetual worldwide sublicensable grant a template
+ * would supply for a product that has no use for one.
+ */
+const TERMS_BODY = `      <p class="lede">
+        These are the terms you agree to by using Bingd. They are written to be read
+        &mdash; short sentences, no glossary of defined terms &mdash; and they describe
+        what the app actually does.
+      </p>
+
+      <p>
+        <strong>Draft for review.</strong> This document has not yet been reviewed by a
+        lawyer, and the operating entity named below is not yet confirmed.
+      </p>
+
+      <h2>Who these terms are with</h2>
+      <p>
+        Bingd is made and run by ${LEGAL_ENTITY} (&ldquo;we&rdquo;, &ldquo;us&rdquo;).
+        Questions about anything here go to
+        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.
+      </p>
+
+      <h2>You need to be 13 or older</h2>
+      <p>
+        Bingd asks for your date of birth when you create an account, and will not create
+        one if you are under 13. If we find out an account belongs to someone younger, we
+        delete it. If the law where you live sets a higher age for a service like this,
+        that age applies to you instead.
+      </p>
+
+      <h2>Your account is yours to look after</h2>
+      <ul>
+        <li>Keep your sign-in method secure. What happens through your account is treated
+          as done by you.</li>
+        <li>One person per account. Do not share it, sell it, or transfer it.</li>
+        <li>Write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> if you think
+          somebody else is using it.</li>
+      </ul>
+
+      <h2>What you write on Bingd</h2>
+      <p>
+        Reviews, comments, your handle and display name, your bio, list titles, and
+        anything else you type are <strong>your content</strong>. It stays yours. We do
+        not claim ownership of it.
+      </p>
+      <p>
+        We do need your permission to run the app, and it is a narrow one: by posting
+        something on Bingd you allow us to store it and to show it to the people your own
+        privacy settings allow it to be shown to. That is what lets a public review appear
+        on a title page and a private note stay private. The permission lasts as long as
+        the content is on Bingd &mdash; delete the content or the account and it ends,
+        apart from the safety records described under
+        <a href="/account-deletion">deleting your account</a>.
+      </p>
+      <p>
+        You are responsible for what you publish. Post only what you have the right to
+        post.
+      </p>
+
+      <h2>What you must not post or do</h2>
+      <p>Do not use Bingd to post or send:</p>
+      <ul>
+        <li>Harassment, bullying, or threats.</li>
+        <li>Hate speech, or content attacking people for who they are.</li>
+        <li>Content encouraging self-harm or suicide.</li>
+        <li>Sexual content, or anything that sexualises a minor.</li>
+        <li>Impersonation of another person, or of us.</li>
+        <li>Illegal content, or content that infringes somebody else&rsquo;s rights.</li>
+        <li>Spam, scams, or bulk unsolicited messages.</li>
+      </ul>
+      <p>
+        And do not attack the service itself: no attempting to reach accounts or systems
+        you are not entitled to, no scraping, no automated access, no working around the
+        limits on what an account may see or do, and no reverse engineering beyond what
+        the law permits regardless of this paragraph.
+      </p>
+
+      <h2>Reporting, and what we can do about it</h2>
+      <p>
+        Reviews, comments and profiles can be reported from inside the app. Reports reach
+        the person who runs Bingd rather than an automated system, and the person you
+        report is never told who reported them.
+      </p>
+      <p>If something breaks these terms, we may:</p>
+      <ul>
+        <li>remove the review, comment, or other content;</li>
+        <li>require a handle to be changed;</li>
+        <li>issue a warning; or</li>
+        <li>suspend the account, which hides it and stops it posting.</li>
+      </ul>
+      <p>
+        <strong>Suspension is the strongest of those, and it can be lifted.</strong> We do
+        not delete accounts as a punishment &mdash; a suspended account still exists, and
+        so does the record of why. Closing one permanently is something we do only where
+        we have to, which is covered under <em>Ending it</em> below.
+      </p>
+      <p>
+        We try to match the response to what happened.
+        There is no formal appeals process today: if you think we got it wrong, write to
+        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> and a person will read it.
+        We are not obliged to monitor everything posted on Bingd, and we do not.
+      </p>
+      <p>
+        You can also block somebody yourself, at any time, without reporting them.
+        Blocking and reporting are separate things: a block takes effect immediately and
+        is between the two of you, while a report is a message to us.
+      </p>
+
+      <h2>Our content, and other people&rsquo;s</h2>
+      <p>
+        The Bingd name, the app, this site and their design are ours. These terms give you
+        no licence to them beyond using the app normally.
+      </p>
+      <p>
+        Film and television information &mdash; titles, artwork, cast, descriptions
+        &mdash; comes from TMDB and belongs to TMDB or its contributors. Bingd uses the
+        TMDB API but is <strong>not endorsed or certified by TMDB</strong>, and your use
+        of that material is also subject to TMDB&rsquo;s own terms. Signing in with Apple
+        or Google, and the store you installed from, are governed by those companies&rsquo;
+        terms rather than by these.
+      </p>
+      <p>
+        Bingd shows you what other people have ranked and written. Those opinions are
+        theirs, not ours.
+      </p>
+
+      <h2>The service will change</h2>
+      <p>
+        Bingd is a small and actively developed product. Features will be added, changed
+        and removed, and it will sometimes be unavailable. We do not promise that it will
+        always be available, or that it will keep working the way it does today.
+      </p>
+      <p>
+        If we change these terms in a way that affects you, the date at the top of this
+        page changes. Continuing to use Bingd after that means the new terms apply.
+      </p>
+
+      <h2>Ending it</h2>
+      <p>
+        You can delete your account at any time from inside the app &mdash; see
+        <a href="/account-deletion">deleting your account</a>, which sets out exactly what
+        is removed and which safety records are kept.
+      </p>
+      <p>
+        We may suspend or close an account that breaks these terms, and may close an
+        account or withdraw the service where we have to for legal or safety reasons.
+      </p>
+
+      <h2>Privacy</h2>
+      <p>
+        What Bingd stores, why, and who else can see it is set out on the
+        <a href="/privacy">privacy page</a>, which forms part of your agreement with us.
+      </p>
+
+      <h2>Where the law lets us limit things, we do</h2>
+      <p>
+        Bingd is provided as it is. To the extent the law where you live allows it, we
+        give no warranties about the service, and we are not liable for indirect or
+        consequential loss, for content other people post, or for anything outside our
+        reasonable control.
+      </p>
+      <p>
+        <strong>Nothing here removes rights you have that cannot be removed.</strong>
+        Consumer protection law in many countries gives you rights a contract cannot sign
+        away. Where any part of these terms conflicts with those, your rights win and the
+        rest of this document still stands.
+      </p>
+
+      <h2>Contact</h2>
+      <p><a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>`;
+
 const DOCUMENTS = [
   {
     dir: 'privacy',
     title: 'Privacy — Bingd',
     heading: 'Privacy',
-    stamp: `Last updated ${DOCUMENT_DATE}. Bingd is in closed testing.`,
+    stamp: `Last updated ${DOCUMENT_DATE}.${isPublic ? '' : ' Bingd is in closed testing.'}`,
     body: PRIVACY_BODY,
+  },
+  {
+    dir: 'terms',
+    title: 'Terms of Use — Bingd',
+    heading: 'Terms of Use',
+    stamp: `Last updated ${DOCUMENT_DATE}. Draft &mdash; not yet reviewed by a lawyer.`,
+    body: TERMS_BODY,
   },
   {
     dir: 'support',
@@ -734,7 +1184,9 @@ const ROUTES = [
     kind: 'invite',
     title: 'You have been invited to Bingd',
     tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
-    heading: 'Ask whoever invited you to let you know when it is.',
+    heading: isPublic
+      ? 'Bingd is not on this platform yet.'
+      : 'Ask whoever invited you to let you know when it is.',
     body: INVITE_BODY,
   },
   {
@@ -742,7 +1194,7 @@ const ROUTES = [
     kind: 'profile',
     title: 'A profile on Bingd',
     tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
-    heading: 'Bingd is in closed testing.',
+    heading: UNAVAILABLE,
     body: PROFILE_BODY,
   },
   {
@@ -750,7 +1202,7 @@ const ROUTES = [
     kind: 'title',
     title: 'A title on Bingd',
     tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
-    heading: 'Bingd is in closed testing.',
+    heading: UNAVAILABLE,
     body: TITLE_BODY,
   },
   {
@@ -758,7 +1210,7 @@ const ROUTES = [
     kind: 'generic',
     title: 'A list on Bingd',
     tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
-    heading: 'Bingd is in closed testing.',
+    heading: UNAVAILABLE,
     body: GENERIC_BODY,
   },
 ];
@@ -777,7 +1229,76 @@ for (const route of ROUTES) {
 }
 
 // ---------------------------------------------------------------------------
-// The three documents both stores require a URL for
+// The site's root
+// ---------------------------------------------------------------------------
+
+/**
+ * `/` — the holding page, and Cloudflare Pages' fallback for anything unmatched.
+ *
+ * **Generated as of the public-launch tranche; it used to be a committed
+ * `web/public/index.html`.** It carried its own copy of the colour tokens, its own
+ * `noindex` meta and its own hardcoded "Bingd is in closed testing" — which made the
+ * front page of the site the one page no release-mode switch could reach. Launch would
+ * have flipped every generated page and left the address people actually type saying
+ * the product was not out yet.
+ *
+ * Same content, same shape, same styles as the router pages it sits beside. What it
+ * does not have is theirs: no install buttons and no `page.mjs`, because this page is
+ * not the end of a link somebody was sent and has no token, handle or title to resolve.
+ */
+const ROOT_BODY = isPublic
+  ? `        <p>
+          Bingd is where you rank what you&rsquo;ve watched and see what your friends
+          really think &mdash; a ranked list of everything, built one comparison at a
+          time.
+        </p>`
+  : `        <p>
+          Bingd is in closed testing. Invitations are going out to a small first group,
+          and this page will become the app&rsquo;s public face when it opens up.
+        </p>`;
+
+await writeFile(
+  join(dist, 'index.html'),
+  `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bingd</title>
+    <meta name="description" content="Rank what you have watched, and see what your friends really think." />${ROBOTS}
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>${styles}</style>
+  </head>
+
+  <body>
+    <main>
+      <h1>Bingd</h1>
+      <p class="tagline">Rank what you&rsquo;ve watched. See what your friends really think.</p>
+
+      <div class="card">
+${ROOT_BODY}
+      </div>
+
+      <footer>
+        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> &middot;
+        <a href="/privacy">Privacy</a> &middot; <a href="/terms">Terms</a> &middot;
+        <a href="/support">Support</a>
+      </footer>
+    </main>
+  </body>
+</html>
+`,
+);
+
+// ---------------------------------------------------------------------------
+// The four documents the stores and the Terms require a URL for
 // ---------------------------------------------------------------------------
 
 /**
@@ -845,8 +1366,7 @@ const document_ = ({ title, heading, stamp, body }) => `<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${title}</title>
-    <meta name="robots" content="noindex, nofollow" />
+    <title>${title}</title>${ROBOTS}
     <meta name="referrer" content="no-referrer" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -865,7 +1385,8 @@ const document_ = ({ title, heading, stamp, body }) => `<!doctype html>
       <p class="stamp">${stamp}</p>
 ${body}
       <footer>
-        <a href="/privacy">Privacy</a> &middot; <a href="/support">Support</a> &middot;
+        <a href="/privacy">Privacy</a> &middot; <a href="/terms">Terms</a> &middot;
+        <a href="/support">Support</a> &middot;
         <a href="/account-deletion">Delete your account</a> &middot;
         <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>
       </footer>

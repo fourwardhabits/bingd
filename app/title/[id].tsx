@@ -937,6 +937,9 @@ export default function TitleScreen() {
             // would be a second content model wearing a different button.
             onWrite={() => openLog('review')}
             noun={title.kind === 'season' ? 'season' : 'movie'}
+            // So the reporting control is absent from the viewer's own review, which
+            // the server would refuse anyway.
+            viewerId={profile.id}
           />
         ) : null}
 

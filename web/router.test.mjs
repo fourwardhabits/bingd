@@ -416,7 +416,7 @@ describe('the built site', () => {
     }
   });
 
-  it('serves the three documents the stores demand a URL for', () => {
+  it('serves the four documents the stores and the Terms demand a URL for', () => {
     /**
      * Until 2026-08-20 all three of these returned Cloudflare Pages' fallback
      * `index.html` with a **200**. That is the worst possible shape for this failure:
@@ -431,6 +431,10 @@ describe('the built site', () => {
       ['privacy', /Privacy/, /never leaves your device as\s+analytics|allowlist/],
       ['support', /Support/, new RegExp('hello@bingd\\.app')],
       ['account-deletion', /Deleting your account/, /Settings &rsaquo; Account &amp; Data/],
+      // The Terms, whose own marker is the moderation list: it is the section that has
+      // to stay checkable against `moderation_actions`' six allowed actions, and a
+      // Terms rendered from the wrong constant would still have the right heading.
+      ['terms', /Terms of Use/, /suspend the account, which hides it and stops it posting/],
     ];
 
     for (const [dir, heading, marker] of expected) {
@@ -455,7 +459,7 @@ describe('the built site', () => {
      * until the same day these pages were written, which is exactly how that would have
      * happened.
      */
-    const documents = ['privacy', 'support', 'account-deletion'];
+    const documents = ['privacy', 'terms', 'support', 'account-deletion'];
     const aasa = JSON.parse(read('.well-known', 'apple-app-site-association'));
     const claimed = aasa.applinks.details[0].components.map((c) => c['/']);
     const appConfig = readFileSync(join(here, '..', 'app.config.ts'), 'utf8');
@@ -707,6 +711,173 @@ describe('the app the site claims to open', () => {
 // ---------------------------------------------------------------------------
 // What the host is told to send
 // ---------------------------------------------------------------------------
+
+/**
+ * The Terms of Use, and the two things about it that are worth a test.
+ *
+ * Not the prose — a test that asserts paragraphs is a test that fails on every edit and
+ * teaches people to update it without reading. These are the two claims that would be
+ * *wrong* rather than merely different if they changed by accident.
+ */
+describe('the Terms of Use', () => {
+  // Defined here and called inside the tests: the site is built by the first suite's
+  // `before`, so a read at this level would run during collection and fail on a clean
+  // tree.
+  const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
+
+  /**
+   * The placeholder is the whole reason this document is safe to publish unfinished.
+   *
+   * It names no company because there is no confirmed company to name, and the failure
+   * this guards against is somebody filling in a plausible-looking entity to make the
+   * page look finished — which produces a contract with a party that does not exist.
+   * When the founder supplies the real one, this test fails and is deleted in the same
+   * commit, which is the point: the reminder lives where it cannot be lost.
+   */
+  it('still says out loud that the legal entity is unconfirmed', () => {
+    const html = read('terms', 'index.html');
+    assert.match(
+      html,
+      /LEGAL ENTITY \/ DEVELOPER NAME &mdash; FOUNDER TO CONFIRM/,
+      'the Terms names an operating entity that nothing in this repository establishes',
+    );
+    // `\s+` rather than a space: the source wraps at 90 columns, so a literal match
+    // here would break on a reflow that changed nothing about the meaning.
+    assert.match(
+      html,
+      /not yet been reviewed by a\s+lawyer/,
+      'the draft status must be stated',
+    );
+  });
+
+  /**
+   * Every power the moderation section claims has to exist in `moderation_actions`.
+   *
+   * A Terms is the one document where an unbacked promise is worse than silence: it is
+   * what somebody points at when they say Bingd said it would act. The six actions
+   * below are the check constraint in 20260813001700, and the document may describe
+   * those and nothing more.
+   */
+  it('claims only powers the moderation schema actually has', () => {
+    const html = read('terms', 'index.html');
+    for (const claim of [
+      /remove the review, comment, or other content/,
+      /require a handle to be changed/,
+      /issue a warning/,
+      /suspend the account/,
+    ]) {
+      assert.match(html, claim, 'a stated moderation power is missing from the Terms');
+    }
+
+    /**
+     * **And the enumerated list stops there**, because `moderation_actions` does.
+     *
+     * Its check constraint allows six values — suspend_account, restore_account,
+     * remove_content, force_username_change, dismiss_report, warn — and none of them is
+     * "delete this account". A Terms that listed account removal beside the four above
+     * would claim a routine enforcement power the operator system cannot record, which
+     * is the class of over-claim this whole document is written to avoid. Permanent
+     * closure is covered separately under "Ending it", where it is tied to a legal or
+     * safety obligation rather than offered as a response to a report.
+     */
+    assert.doesNotMatch(
+      html.split('<h2>Our content')[0],
+      /<li>remove the account/,
+      'the Terms lists an enforcement action moderation_actions has no value for',
+    );
+
+    // And the ones it must not claim, because nothing implements them. An appeals
+    // process and automated detection are both things a templated Terms supplies by
+    // default and this product does not have.
+    assert.doesNotMatch(html, /automated (?:detection|moderation|systems? (?:detect|scan))/i);
+    assert.match(
+      html,
+      /no formal appeals process/,
+      'the absence of an appeals process must be stated rather than implied',
+    );
+  });
+
+  it('is reachable from every other document and from the router pages', () => {
+    for (const dir of ['privacy', 'support', 'account-deletion']) {
+      assert.match(read(dir, 'index.html'), /href="\/terms"/, `/${dir} does not link the Terms`);
+    }
+    assert.match(read('i.html'), /href="\/terms"/, 'the invitation page does not link the Terms');
+    assert.match(read('index.html'), /href="\/terms"/, 'the root page does not link the Terms');
+  });
+});
+
+/**
+ * The release mode, which is the switch the whole public launch turns on.
+ *
+ * These run against the *built* site, so they assert the state that would actually be
+ * deployed if this commit were pushed — which is the only version of this question
+ * worth answering. `web/mutation-check.mjs` covers the other direction.
+ */
+describe('the release mode', () => {
+  const distribution = JSON.parse(
+    readFileSync(join(here, 'distribution.config.json'), 'utf8'),
+  );
+  const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
+
+  /**
+   * **The lock, stated as a test.**
+   *
+   * Bingd is not public today. A commit that flips this to "public" while the store
+   * URLs are still null cannot build at all — but a commit that flips it *and* invents
+   * URLs would build, and this is the line that says the decision is deliberate. It
+   * fails on launch day and is updated then, by somebody who meant to.
+   */
+  it('is still beta, because the apps are not on the stores', () => {
+    assert.equal(
+      distribution.mode ?? 'beta',
+      'beta',
+      'mode is no longer beta — if the apps really have launched, update this test with the commit that launched them',
+    );
+  });
+
+  it('keeps the closed test honestly described while it is a closed test', () => {
+    assert.match(read('index.html'), /closed testing/, 'the front page must say so');
+    assert.match(read('i.html'), /closed testing/, 'the invitation page must say so');
+  });
+
+  /**
+   * The two halves of noindex, which must agree.
+   *
+   * The header covers the JSON files and anything not HTML; the meta tag survives a
+   * host that drops custom headers. Both come from one `isPublic`, and this asserts
+   * they landed together rather than one of them being edited alone.
+   */
+  it('asks not to be indexed, in the header and in the pages', () => {
+    assert.match(read('_headers'), /X-Robots-Tag: noindex, nofollow/);
+    for (const file of ['index.html', 'i.html', 'u.html']) {
+      assert.match(
+        read(file),
+        /<meta name="robots" content="noindex, nofollow" \/>/,
+        `${file} is missing the robots meta`,
+      );
+    }
+    assert.match(read('terms', 'index.html'), /<meta name="robots"/);
+  });
+
+  /**
+   * Store URLs are null, and the copy must not have got ahead of them.
+   *
+   * The failure this prevents is subtle and would ship silently: a page that says
+   * "download it from the App Store" over a button whose destination is null renders a
+   * dead control and reads as a broken product rather than an unlaunched one.
+   */
+  it('promises no store while no store URL exists', () => {
+    assert.equal(distribution.ios?.storeUrl ?? null, null);
+    assert.equal(distribution.android?.storeUrl ?? null, null);
+    for (const file of ['index.html', 'i.html', 'u.html', 'title.html', 'lists.html']) {
+      assert.doesNotMatch(
+        read(file),
+        /apps\.apple\.com|play\.google\.com\/store/,
+        `${file} names a store that has no URL configured`,
+      );
+    }
+  });
+});
 
 /**
  * `_headers` is the only part of this site that is not code and cannot be run, and it
