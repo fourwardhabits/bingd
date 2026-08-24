@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useRef } from 'react';
 
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
@@ -117,11 +119,21 @@ const ACTORLESS_KINDS = new Set<string>(['award_earned']);
  * when something does, this is where it gets a case rather than a blank avatar.
  */
 export function useNotifications(viewerId: string) {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['notifications', viewerId],
     // Short, because the useful thing about an inbox is that it is current, and this
     // is one round trip against an index on (recipient_id, created_at desc).
     staleTime: 30_000,
+    /**
+     * The one query in the app that opts out of the global `refetchOnWindowFocus:
+     * false`, because it is the one whose whole job is to be current about something
+     * somebody else did.
+     *
+     * It does nothing without `startQueryFocusTracking` (`lib/query.ts`), which is
+     * what makes "focus" mean "the app came back to the foreground" rather than a
+     * browser event that never fires here.
+     */
+    refetchOnWindowFocus: true,
     queryFn: async (): Promise<Notification[]> => {
       const { data, error } = await supabase.rpc('my_notifications', { p_limit: 100 });
       if (error) throw error;
@@ -165,6 +177,35 @@ export function useNotifications(viewerId: string) {
         }));
     },
   });
+
+  /**
+   * The other half of "current": moving between tabs.
+   *
+   * Foreground is covered above, but the tab navigator keeps every visited tab
+   * mounted, so walking from Collection back to Feed creates no new observer and
+   * asks the server nothing. This is the boundary that closes it.
+   *
+   * **Gated on staleness rather than firing every time.** An ungated `refetch()`
+   * ignores `staleTime` by design, which would turn a reader flicking between two
+   * tabs into a request per tap. Read through a ref so the callback identity does
+   * not change with the flag and re-run the effect on its own.
+   */
+  const { refetch, isStale } = query;
+  const stale = useRef(isStale);
+  // Mirrored in an effect rather than assigned during render: a ref written while
+  // rendering is torn between two passes under concurrent rendering, and the lint rule
+  // that says so is right even where this one would have got away with it.
+  useEffect(() => {
+    stale.current = isStale;
+  }, [isStale]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (stale.current) void refetch();
+    }, [refetch]),
+  );
+
+  return query;
 }
 
 /**

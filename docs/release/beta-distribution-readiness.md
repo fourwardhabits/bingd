@@ -22,10 +22,32 @@ bingd.app/i/<token>
   └── Android, no Bingd    → android.optInUrl   → Play closed-test opt-in page
 ```
 
-Both destinations are `null` today, and every route honestly says *"The Bingd beta is not
-open for this device yet"* rather than guessing. `web/build.mjs` refuses any value that is
-not an absolute `https://` URL, because these are the highest-value places in the project to
-plant a link somewhere else.
+`web/build.mjs` refuses any value that is not an absolute `https://` URL, because these are
+the highest-value places in the project to plant a link somewhere else.
+
+> **Both destinations are filled in as of `2fbdc66` (#32), and verified live 2026-08-23.**
+> `ios.betaUrl` is a public TestFlight join link and `android.optInUrl` is the Play
+> closed-test opt-in page. This paragraph used to say both were `null` and that every
+> route answered *"The Bingd beta is not open for this device yet"* — that fallback is now
+> unreachable on iOS, Android and desktop, which is the intended state.
+
+### What to tell a tester
+
+> **Invite friends from Bingd. Send the Bingd invite link, not the raw TestFlight link.**
+>
+> Profile → **Invite friends** → share. That one link installs the app *and* carries the
+> invitation; a TestFlight URL sent separately installs the app and loses the inviter.
+
+Verified 2026-08-23: `create_invite_link` is granted to `authenticated` with no allowlist
+and no founder check, so **every tester can generate their own** — this is not an
+admin-only capability, and nothing in the app asks anybody to contact the founder.
+
+**Two caveats that are the platform's, not the product's.** A Google closed test only
+admits accounts on the Play Console tester list, so the founder still adds Android testers
+there. And the token does not survive the trip through TestFlight or Play, so the recipient
+has to return to the same `bingd.app/i/<token>` page after installing and tap *I already
+have Bingd* — the page says so, and it is the manual step that will lose some attributions
+until deferred attribution exists (`public-launch-risk-register.md` M7).
 
 ### The two values to fill in, when they exist
 

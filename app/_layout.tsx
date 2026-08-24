@@ -20,7 +20,7 @@ import { AuthProvider, AuthStatusOverlay, useAuthRouting } from '@/features/auth
 import { useRedeemPendingInvite } from '@/features/invite';
 import { initAnalytics } from '@/lib/analytics';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
-import { createQueryClient } from '@/lib/query';
+import { createQueryClient, startQueryFocusTracking } from '@/lib/query';
 import { startUpdateChecks } from '@/lib/updates';
 import { theme } from '@/ui/tokens';
 
@@ -62,6 +62,9 @@ function RootLayout() {
   // Two events for one launch is the duplicate-capture problem in miniature.
 
   useEffect(() => startUpdateChecks(), []);
+  // Without this, `refetchOnWindowFocus` cannot fire at all on a phone — see
+  // `startQueryFocusTracking`.
+  useEffect(() => startQueryFocusTracking(), []);
 
   useEffect(() => {
     if (fontsLoaded || fontError) {

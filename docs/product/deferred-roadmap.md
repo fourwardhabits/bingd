@@ -142,6 +142,32 @@ tranche as a store submission.
 lifecycle · a delivery path · the preference-axis decision above · OS permission timing
 (PRD §15: after a first invite or first follow, never at launch).
 
+**Re-verified 2026-08-23**, prompted by a real follow that produced an inbox row and no
+phone notification. The entry above was accurate and remains so. Two things worth adding,
+because they decide how expensive this is when it is scheduled:
+
+- **No new native binary is needed.** `expo-notifications` and its config plugin are in
+  every build, which is exactly what §15 bought them for. The smallest slice is
+  JavaScript, one RPC and one delivery path.
+- **The credentials are not configured, and PRD §15 said they were.** `app.config.ts`
+  declares no `googleServicesFile` on either platform and no `aps-environment`
+  entitlement; both credential files are gitignored. This is a founder task with Apple
+  and Google, not an engineering one, and it is the long pole. PRD §15 and §27 have been
+  corrected.
+
+**The smallest honest slice**, in order, none of which is started:
+
+1. `register_device_token(p_operation_id, p_token, p_platform)` — a definer writer for
+   `device_tokens`, which already exists and has no read policy by design.
+2. A client that asks for permission at the moment PRD §15 names, takes a token, and
+   registers it. Revoke on sign-out, or a second account inherits the first one's device.
+3. A delivery path — most cheaply an Edge Function invoked from the same place the
+   `notifications` insert happens, reading `device_tokens` and calling Expo Push.
+4. The preference-axis decision above, which has to be made *before* 3 rather than after.
+
+**Still not friend-beta work.** The inbox is the channel the beta was built to test, and
+it works. Push is a public-launch item and belongs in the same release as the credentials.
+
 ---
 
 ## 5. Award notifications, and `award_earned` analytics

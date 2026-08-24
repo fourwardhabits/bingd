@@ -1,4 +1,5 @@
-import { QueryClient } from '@tanstack/react-query';
+import { focusManager, QueryClient } from '@tanstack/react-query';
+import { AppState } from 'react-native';
 
 /**
  * Structured so invalidation can be surgical (docs/architecture/client.md §3).
@@ -53,6 +54,31 @@ export const queryKeys = {
   // evict the user from the flow they were in the middle of.
   tasteOnboarding: (userId: string) => ['taste-onboarding', userId] as const,
 } as const;
+
+/**
+ * Teaches React Query what "focused" means on a phone.
+ *
+ * Its own focus detection is `visibilitychange`, which is a browser event and never
+ * fires here — so without this, `refetchOnWindowFocus` is not merely disabled by the
+ * default below, it is *inert*, and a query can only ever refetch when a new observer
+ * mounts against stale data. That is what the notification badge was living with: the
+ * Feed tab stays mounted, so nothing asked the server again while somebody sat on it.
+ *
+ * Wired once at the root, next to the session refresh and the update check, which are
+ * the two things already listening to this event for the same reason. Returns its own
+ * teardown so the effect that starts it can stop it.
+ *
+ * The global default below stays `false`. This makes the mechanism *work*; which
+ * queries opt into it is still each query's own decision, and today only the inbox
+ * does.
+ */
+export function startQueryFocusTracking() {
+  const subscription = AppState.addEventListener('change', (next) => {
+    focusManager.setFocused(next === 'active');
+  });
+
+  return () => subscription.remove();
+}
 
 export const createQueryClient = () =>
   new QueryClient({
