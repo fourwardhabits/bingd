@@ -238,7 +238,7 @@ describe('a film in the results', () => {
     await fireEvent.press(view.getByLabelText('It was fine'));
 
     await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
-    expect(callsTo('rank_start')[0][1]).toEqual({
+    expect(callsTo('rank_start')[0][1]).toMatchObject({
       p_media_item_id: 'film-1',
       p_bucket: 'fine',
     });

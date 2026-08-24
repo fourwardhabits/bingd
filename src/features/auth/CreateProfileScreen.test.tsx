@@ -54,23 +54,47 @@ describe('why the signup screen asks for a birthday', () => {
 
     await waitFor(() =>
       expect(
-        view.getByText('We use this to check you are 13 or over. It is never shown to anyone.'),
+        view.getByText(
+          'We use your birthday to confirm you are 13 or older. It may also help us ' +
+            'personalise recommendations as bingd. improves. It is never shown to anyone.',
+        ),
       ).toBeTruthy(),
     );
   });
 
   /**
-   * The claim has to stay narrow. Saying it powers recommendations, or that it is
-   * "kept secure", would be a sentence the code does not back — and this screen is
-   * exactly where an unbacked privacy claim does the most damage.
+   * **The claim widened on 2026-08-25, and the test that guarded the old one had to
+   * widen with it — carefully, because the direction it guards still matters.**
+   *
+   * This used to assert that the screen said *nothing* about personalisation. That was
+   * the right rule while the retention story was "one comparison at signup and never
+   * read again": a screen promising personalisation from a value nothing personalises
+   * would have been an unbacked privacy claim in the place they do the most damage.
+   *
+   * DOB-1 changed the underlying fact. The founder's decision is to keep the date for
+   * eligibility *and* for future personalisation and aggregate taste analysis, so
+   * silence is now the misleading option — it would rule out a use the product intends
+   * to make, and broadening it later under copy that excluded it is exactly the move
+   * this screen should not make.
+   *
+   * So what is pinned instead is the **tense**. "May also help ... as bingd. improves"
+   * is a statement about intent; "we use your birthday to recommend things" would be a
+   * statement about today, and today it is false — nothing reads the column but the
+   * age gate. The assertions below are that the hedge is present and the present-tense
+   * claim is absent.
    */
-  it('claims nothing about personalisation', async () => {
+  it('describes personalisation as a possibility, never as something already happening', async () => {
     const view = await renderWithProviders(<CreateProfileScreen />);
 
-    await waitFor(() => expect(view.getByText(/13 or over/)).toBeTruthy());
-    expect(view.queryByText(/recommend/i)).toBeNull();
-    expect(view.queryByText(/personalis/i)).toBeNull();
-    expect(view.queryByText(/personaliz/i)).toBeNull();
+    await waitFor(() => expect(view.getByText(/13 or older/)).toBeTruthy());
+
+    expect(view.getByText(/may also help/i)).toBeTruthy();
+    // The forms that would claim it is already true.
+    expect(view.queryByText(/we use .*to personalise/i)).toBeNull();
+    expect(view.queryByText(/powers your recommendations/i)).toBeNull();
+    // And the claim that would be plainly false, which is the one the founder ruled
+    // out by name: the date is stored, in `profile_private`.
+    expect(view.queryByText(/we (do not|don.t) (save|store|keep)/i)).toBeNull();
   });
 
   it('still asks for the date itself, which the gate needs', async () => {

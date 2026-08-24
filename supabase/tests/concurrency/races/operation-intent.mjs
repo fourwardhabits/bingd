@@ -312,7 +312,27 @@ export default function suite() {
       await t2.end();
     });
 
-    it('one operation id cannot be reused for a different kind', async () => {
+    /**
+     * **This test asserted the opposite until 2026-08-25, and the inversion is the
+     * point.**
+     *
+     * The ledger is keyed `(user, operation)` and not `(user, operation, kind)`, so an
+     * id spent on one kind and then passed to another used to answer `already_applied`
+     * for something that never happened. This file recorded that as "the observed
+     * contract" — operation ids are per intent and must never be reused across kinds —
+     * which is a rule stated in a comment and enforced by nobody.
+     *
+     * `20260825000200` found the cost of leaving it there. `removeFromCollection` is
+     * one intent made of two RPCs, `rank_unrank` then `unlog`, and passing its single
+     * operation id to both is the obvious thing to write: the first claims the id, the
+     * second finds it taken and reports success **having deleted nothing.** A removal
+     * that says it worked and leaves the title on the shelf.
+     *
+     * So `_claim_operation` now compares the kind and raises 22023 instead. The rule is
+     * the same rule; it is enforced by the database rather than by whoever last read
+     * this comment.
+     */
+    it('refuses an operation id already spent on a different kind', async () => {
       const { db, fx } = ctx;
       const alice = await fx.createUser();
       const bob = await fx.createUser();
@@ -323,17 +343,20 @@ export default function suite() {
 
       assert.equal((await call(s, `follow($1, $2)`, [op, bob])).status, 'ok');
 
-      // The ledger is keyed (user, operation) and not (user, operation, kind), so the
-      // same id spent on a second kind answers already_applied for something that
-      // never happened. Recorded here as the observed contract: operation ids are
-      // generated per intent on the device and must never be reused across kinds.
-      const second = await call(s, `unfollow($1, $2)`, [op, bob]);
-      assert.equal(second.status, 'already_applied');
+      const error = await s.errorFrom(`select unfollow($1, $2)`, [op, bob]);
+      assert.equal(error?.code, '22023', 'a loud refusal, not a silent no-op');
+      assert.match(error.message, /different operation/);
+
       assert.equal(
         (await db.rows(`select 1 from follows where follower_id = $1 and followee_id = $2`, [alice, bob])).length,
         1,
-        'the unfollow did not happen, which is what already_applied means here',
+        'the unfollow still did not happen — but now the caller is told so',
       );
+
+      // And the id keeps its original meaning, so the operation it really belongs to is
+      // still replayable. A guard that poisoned the id would trade one silent failure
+      // for another.
+      assert.equal((await call(s, `follow($1, $2)`, [op, bob])).status, 'already_applied');
 
       await s.end();
     });

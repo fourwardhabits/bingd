@@ -296,10 +296,24 @@ export async function setWatchlist(input: {
  * the whole point of offering this separately from removal — an accidental comparison
  * is a mistake about an ordering, not about having seen the film.
  *
- * No operation id, because the server's function does not take one. It is idempotent by
- * shape rather than by ledger: a second call finds nothing to delete and answers P0002,
- * which reads here as "it is already not ranked" and is mapped to success by the caller
- * rather than surfaced as a failure the user cannot act on.
+ * **No operation id, and the reason changed on 2026-08-25.** It used to be that the
+ * server's function did not take one. `20260825000200` gave it a trailing optional
+ * `p_operation_id`, so that is no longer true — and this call still does not send one,
+ * deliberately, for two reasons.
+ *
+ * It does not need one. This is idempotent by shape rather than by ledger: a second call
+ * finds nothing to delete and answers P0002, which reads here as "it is already not
+ * ranked" and is mapped to success below rather than surfaced as a failure the user
+ * cannot act on. There is no observable a replay changes twice.
+ *
+ * And the id that is in scope at the only call site is **not this operation's id.**
+ * `removeFromCollection` holds one id for one intent and spends it on `unlog`. Passing
+ * that same id here would claim it first, and `unlog` would then find it taken and
+ * answer `already_applied` **having deleted nothing** — a removal that reports success
+ * and leaves the title on the shelf. The server refuses that outright since
+ * `20260825000200` (`_claim_operation` raises 22023 on an id spent under another kind),
+ * so it is a loud failure rather than a silent one; it is still not a thing to write.
+ * A second intent here would need a second id, and there is nothing for it to buy.
  */
 export async function unrank(mediaItemId: string): Promise<WriteResult> {
   const { error } = await supabase.rpc('rank_unrank', { p_media_item_id: mediaItemId });

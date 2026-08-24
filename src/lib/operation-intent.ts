@@ -1,5 +1,5 @@
 import * as Crypto from 'expo-crypto';
-import { useRef } from 'react';
+import { useCallback, useRef } from 'react';
 
 import { classifyWrite, type ServerError } from './write-outcome';
 
@@ -65,8 +65,15 @@ export function useOperationIntent() {
    * `unresolved` says whether the server left the outcome open. It is required rather
    * than defaulted: every caller shapes its result differently, and a default that
    * guessed wrong would fail in the silent direction this whole module is about.
+   *
+   * **Stable across renders**, which is not decoration. `RankingSheet` calls this from
+   * the `useEffect` that opens a session, and an identity that changed every render
+   * would put it in that effect's dependency list and re-open the session on any
+   * unrelated re-render — a second `rank_start`, or a second `rank_again` that unranks
+   * a title twice. Every value the body reads is a ref, so there is nothing for the
+   * dependency array to hold.
    */
-  return async function withIntent<T>(
+  return useCallback(async function withIntent<T>(
     key: string,
     // `PromiseLike`, because a supabase builder is a thenable rather than a Promise.
     call: (operationId: string) => PromiseLike<T>,
@@ -132,7 +139,7 @@ export function useOperationIntent() {
     }
 
     return result;
-  };
+  }, []);
 }
 
 /**

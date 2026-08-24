@@ -47,6 +47,16 @@ jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({ id: 'user-1', username: 'sai', display_name: 'Sai' }),
 }));
 
+/**
+ * `expo-crypto` has no implementation under Jest, so `randomUUID()` answers `undefined`
+ * — and an operation id that is undefined is indistinguishable, at the assertion, from
+ * one this component forgot to send. Counting instead of guessing makes the difference
+ * visible: `useOperationIntent` minting a fresh id where it should have reused one
+ * shows up as two different strings rather than as two `undefined`s that compare equal.
+ */
+let issuedIds = 0;
+jest.mock('expo-crypto', () => ({ randomUUID: () => `op-${(issuedIds += 1)}` }));
+
 const subject = { id: 'film-a', title: 'Film A', bucket: 'loved' as const, posterUri: null };
 
 /** What `renderWithProviders` passes; repeated here for the one test that owns its client. */
@@ -172,7 +182,7 @@ describe('the comparison', () => {
     await waitFor(() => expect(sheet.getByText('Which did you like more?')).toBeTruthy());
     expect(sheet.card('Film A')).toBeTruthy();
     expect(await sheet.findByLabelText('Choose Film P')).toBeTruthy();
-    expect(mockRpc).toHaveBeenCalledWith('rank_start', {
+    expect(callsTo('rank_start')[0][1]).toMatchObject({
       p_media_item_id: 'film-a',
       p_bucket: 'loved',
     });
@@ -221,7 +231,7 @@ describe('the comparison', () => {
     await fireEvent.press(await sheet.ready('Film A'));
 
     await waitFor(() => expect(callsTo('rank_answer')).toHaveLength(1));
-    expect(callsTo('rank_answer')[0][1]).toEqual({
+    expect(callsTo('rank_answer')[0][1]).toMatchObject({
       p_session_id: SESSION,
       p_winner: 'film-a',
     });
@@ -245,7 +255,7 @@ describe('the comparison', () => {
     await fireEvent.press(sheet.getByRole('button', { name: 'Undo' }));
 
     await waitFor(() => expect(callsTo('rank_back')).toHaveLength(1));
-    expect(callsTo('rank_back')[0][1]).toEqual({ p_session_id: SESSION });
+    expect(callsTo('rank_back')[0][1]).toMatchObject({ p_session_id: SESSION });
     expect(callsTo('rank_answer')).toHaveLength(0);
   });
 
@@ -257,7 +267,7 @@ describe('the comparison', () => {
     await fireEvent.press(sheet.getByLabelText('Skip this comparison'));
 
     await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
-    expect(callsTo('rank_skip')[0][1]).toEqual({ p_session_id: SESSION });
+    expect(callsTo('rank_skip')[0][1]).toMatchObject({ p_session_id: SESSION });
     // The comparison is replaced, not answered — no judgement is recorded for a pair
     // the reader declined to judge.
     expect(callsTo('rank_answer')).toHaveLength(0);
@@ -653,40 +663,93 @@ describe('moving a title to another band', () => {
    * The founder's device finding, at the layer that answers it.
    *
    * A ranked title re-ranked *inside* its own band cannot go through `rank_rebucket`,
-   * which raises 22023 on a bucket that is not moving. `rerank` unranks and re-opens in
-   * the same band instead, and everything downstream — the comparisons, the reveal, the
-   * refresh — is the same session.
+   * which raises 22023 on a bucket that is not moving. `rerank` drops the position and
+   * re-opens in the same band instead, and everything downstream — the comparisons, the
+   * reveal, the refresh — is the same session.
+   *
+   * **This was two calls from here until `20260825000200`**, `rank_unrank` then
+   * `rank_start`, and this test asserted that both were made in that order. It is now
+   * one `rank_again`, so what it asserts is the opposite: that the second call is *not*
+   * made, because there is no longer a moment between them for a dropped connection to
+   * land in.
    */
-  it('re-ranks inside the same band by unranking and starting again', async () => {
+  it('re-ranks inside the same band in one call', async () => {
     answering(comparison());
     const { invalidated } = await mount({ subject: { ...subject, mode: 'rerank' as const } });
 
-    await waitFor(() => expect(callsTo('rank_start')).toHaveLength(1));
-    // The position is dropped first, because `rank_start` refuses a title that has one.
-    expect(callsTo('rank_unrank')).toHaveLength(1);
-    // Never the rebucket RPC: the bucket is not moving and that call would be refused.
+    await waitFor(() => expect(callsTo('rank_again')).toHaveLength(1));
+    // The unrank and the fresh session are one transaction inside the server now, so
+    // neither of the two RPCs this used to make is called at all.
+    expect(callsTo('rank_unrank')).toHaveLength(0);
+    expect(callsTo('rank_start')).toHaveLength(0);
+    // Never the rebucket RPC either: the bucket is not moving and that call would be
+    // refused.
     expect(callsTo('rank_rebucket')).toHaveLength(0);
     // The bucket the session opens in is the bucket it already had.
-    expect(callsTo('rank_start')[0][1]).toMatchObject({ p_bucket: 'loved' });
-    // The unrank is committed before a single comparison, exactly as a rebucket is.
+    expect(callsTo('rank_again')[0][1]).toMatchObject({ p_bucket: 'loved' });
+    // The old position is gone before a single comparison, exactly as a rebucket is.
     await waitFor(() => expect(invalidated(['awards', 'user-1'])).toBe(true));
     expect(invalidated(['collection', 'user-1'])).toBe(true);
   });
 
-  it('does not open a session when the unrank was refused', async () => {
-    // A suspension is a refusal, not a lost reply: the position is still there, and
-    // starting a session over it would earn a 23505 and read as a different fault.
+  it('makes no second call when the re-rank was refused', async () => {
+    // A suspension is a refusal, not a lost reply: the position is still there. The
+    // transaction rolled back whole, so there is nothing to compensate for and nothing
+    // for this component to do but report it.
     mockRpc.mockImplementation((name: string) =>
       Promise.resolve(
-        name === 'rank_unrank'
+        name === 'rank_again'
           ? { data: null, error: { code: '42501', message: 'suspended' } }
           : { data: { done: false, session_id: 's', pivot: 'p' }, error: null },
       ),
     );
     await mount({ subject: { ...subject, mode: 'rerank' as const } });
 
-    await waitFor(() => expect(callsTo('rank_unrank')).toHaveLength(1));
+    await waitFor(() => expect(callsTo('rank_again')).toHaveLength(1));
     expect(callsTo('rank_start')).toHaveLength(0);
+    expect(callsTo('rank_unrank')).toHaveLength(0);
+  });
+
+  /**
+   * **One intent, one operation id, across a retry** — the property `20260825000200`
+   * exists to make reachable, checked at the layer that decides what an intent is.
+   *
+   * The dangerous direction is specific and it is this one. A `rank_again` that commits
+   * and loses its reply has already dropped the reader's position; a retry carrying a
+   * *fresh* id would be a second genuine `rank_again`, and it would unrank the title the
+   * first attempt had just re-ranked. Two intents out of one press.
+   *
+   * So the retry carries the id the lost attempt used, which is what makes the server
+   * answer it with the stored result instead of doing the work again — and it is what
+   * makes offering the retry at all safe enough to do. The assertion is that the two ids
+   * are equal rather than that either is any particular value: which uuid it is belongs
+   * to `useOperationIntent`, and is tested there.
+   */
+  it('retries a lost re-rank under the id the lost attempt used', async () => {
+    answering({ data: null, error: { code: '', message: 'TypeError: fail' } });
+    const view = await mount({ subject: { ...subject, mode: 'rerank' as const } });
+
+    await waitFor(() => expect(callsTo('rank_again')).toHaveLength(1));
+    await waitFor(() => expect(view.getByText('Try again')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Try again'));
+    await waitFor(() => expect(callsTo('rank_again')).toHaveLength(2));
+
+    const firstArgs = callsTo('rank_again')[0][1] as Record<string, unknown>;
+    const secondArgs = callsTo('rank_again')[1][1] as Record<string, unknown>;
+    expect(firstArgs.p_operation_id).toBeTruthy();
+    expect(secondArgs.p_operation_id).toBe(firstArgs.p_operation_id);
+  });
+
+  it('offers no retry for a refusal, because there is nothing uncertain about one', async () => {
+    // A 22023 rolled the transaction back. The reader's position is exactly where it
+    // was, so "Try again" would invite them to repeat something that will be refused
+    // again for the same reason.
+    answering({ data: null, error: { code: '22023', message: 'title is already in that bucket' } });
+    const view = await mount({ subject: rebucket });
+
+    await waitFor(() => expect(callsTo('rank_rebucket')).toHaveLength(1));
+    expect(view.queryByText('Try again')).toBeNull();
   });
 
   /**

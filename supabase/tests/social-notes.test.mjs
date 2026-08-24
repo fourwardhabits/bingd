@@ -110,8 +110,24 @@ describe('historical notes stay private', () => {
   });
 });
 
-describe('new notes are social by default', () => {
-  it('publishes a note written on a fresh row', async () => {
+/**
+ * NR-1, decided by the founder on 2026-08-24 and implemented in `20260825000200`.
+ *
+ * These two tests asserted the opposite until that date, and the inversion is the
+ * point of the change rather than a correction to the tests. Both writers used to
+ * read a *null* `p_note_visibility` on a note that had never existed as `public`,
+ * while `user_media.note_visibility` is `not null default 'private'`, PRD §22 says a
+ * note is private until its author publishes it, and every screen in the app has sent
+ * an explicit value since 2026-08-23. So the safe-looking call — omit the argument —
+ * was the publishing call, and the disagreement was a trap for the next importer,
+ * backfill or second client rather than a live exposure.
+ *
+ * The product hierarchy is unchanged and is not what this pins: the app still offers
+ * *Write a review* first and *Add a private note* second. What the server now
+ * guarantees is only that silence is not consent.
+ */
+describe('a new note nobody has published is private', () => {
+  it('keeps a note written on a fresh row private', async () => {
     const id = await movie('fresh_note');
     await logNote(id, 'the first act is the whole film');
 
@@ -119,12 +135,15 @@ describe('new notes are social by default', () => {
       `select note_visibility from user_media where user_id = $1 and media_item_id = $2`,
       [alice, id],
     );
-    assert.equal(rows[0].note_visibility, 'public');
+    assert.equal(rows[0].note_visibility, 'private');
+    assert.equal((await notesFor(null, [id])).length, 0, 'and it is not readable by anyone else');
   });
 
-  it('publishes the first note on a row that existed without one', async () => {
-    // A bucket-only row created after the migration still carries the column
-    // default. Its first note is new content and must not inherit that default.
+  it('keeps the first note on a row that existed without one private', async () => {
+    // A bucket-only row carries the column default, and its first note is new content
+    // rather than an edit — so it takes the forward default rather than inheriting.
+    // Both answers are 'private' now, which is exactly why the *next* test matters:
+    // it is the one that proves this branch is still distinguishing new from existing.
     const id = await movie('bucket_first');
     await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved'::taste_bucket)`, [id]);
     await t.sql(`select save_note(gen_random_uuid(), $1, $2, null)`, [id, 'added later']);
@@ -133,7 +152,46 @@ describe('new notes are social by default', () => {
       `select note_visibility from user_media where user_id = $1 and media_item_id = $2`,
       [alice, id],
     );
+    assert.equal(rows[0].note_visibility, 'private');
+  });
+
+  it('honours an explicit review, and an edit that omits the field does not unpublish it', async () => {
+    // The half of NR-1 that is easy to break while fixing the other half. A published
+    // Review must survive an ordinary text edit that names no visibility — otherwise
+    // the fix is the same defect pointed the other way, and it would take somebody's
+    // review off the Reviews tab without them touching the control.
+    const id = await movie('review_survives_edit');
+    await logNote(id, 'a real review', { visibility: 'public' });
+    assert.equal((await notesFor(null, [id])).length, 1);
+
+    await t.sql(`select save_note(gen_random_uuid(), $1, $2, null)`, [id, 'a real review, edited']);
+
+    const { rows } = await t.sql(
+      `select note, note_visibility from user_media where user_id = $1 and media_item_id = $2`,
+      [alice, id],
+    );
+    assert.equal(rows[0].note, 'a real review, edited');
     assert.equal(rows[0].note_visibility, 'public');
+    assert.equal((await notesFor(null, [id])).length, 1);
+  });
+
+  it('leaves an existing private note private through an edit that omits the field', async () => {
+    const id = await movie('private_survives_edit');
+    await logNote(id, 'just for me, first draft', { visibility: 'private' });
+    await t.sql(`select save_note(gen_random_uuid(), $1, $2, null)`, [id, 'just for me, second']);
+
+    const { rows } = await t.sql(
+      `select note_visibility from user_media where user_id = $1 and media_item_id = $2`,
+      [alice, id],
+    );
+    assert.equal(rows[0].note_visibility, 'private');
+    assert.equal((await notesFor(null, [id])).length, 0);
+  });
+
+  it('publishes when the caller explicitly says so', async () => {
+    const id = await movie('explicit_review');
+    await logNote(id, 'deliberately social', { visibility: 'public' });
+    assert.equal((await notesFor(null, [id])).length, 1);
   });
 
   it('honours an explicit private choice', async () => {
@@ -145,7 +203,7 @@ describe('new notes are social by default', () => {
 
   it('lets the author move a note between public and private', async () => {
     const id = await movie('toggled');
-    await logNote(id, 'public at first');
+    await logNote(id, 'public at first', { visibility: 'public' });
     assert.equal((await notesFor(null, [id])).length, 1);
 
     await t.sql(`select save_note(gen_random_uuid(), $1, $2, null, 'private'::note_visibility)`, [
@@ -163,7 +221,7 @@ describe('new notes are social by default', () => {
 
   it('records and clears the author spoiler claim', async () => {
     const id = await movie('spoiler_claim');
-    await logNote(id, 'he was dead the whole time', { spoilers: true });
+    await logNote(id, 'he was dead the whole time', { visibility: 'public', spoilers: true });
     assert.equal((await notesFor(null, [id]))[0].has_spoilers, true);
 
     // Clearing the note clears the claim, so a later note written through
@@ -256,7 +314,7 @@ describe('public_notes', () => {
     const carol = await t.createUser({ username: 'carol_private', visibility: 'private' });
     const id = await movie('private_account_note');
     await t.actAs(carol);
-    await logNote(id, 'behind a private account');
+    await logNote(id, 'behind a private account', { visibility: 'public' });
     await t.actAs(alice);
 
     assert.equal((await notesFor([carol], null)).length, 0);
@@ -272,7 +330,7 @@ describe('public_notes', () => {
     const dave = await t.createUser({ username: 'dave_blocks' });
     const id = await movie('blocked_note');
     await t.actAs(dave);
-    await logNote(id, 'not for alice');
+    await logNote(id, 'not for alice', { visibility: 'public' });
     await t.actAs(alice);
     assert.equal((await notesFor([dave], null)).length, 1);
 
@@ -284,7 +342,7 @@ describe('public_notes', () => {
     const erin = await t.createUser({ username: 'erin_suspended' });
     const id = await movie('suspended_note');
     await t.actAs(erin);
-    await logNote(id, 'written before suspension');
+    await logNote(id, 'written before suspension', { visibility: 'public' });
     await t.actAs(alice);
     assert.equal((await notesFor([erin], null)).length, 1);
 
@@ -294,7 +352,7 @@ describe('public_notes', () => {
 
   it('is reachable by a signed-in client and not by anon', async () => {
     const id = await movie('grant_check');
-    await logNote(id, 'readable by signed-in users');
+    await logNote(id, 'readable by signed-in users', { visibility: 'public' });
 
     await t.asUser(bob, async () => {
       const { rows } = await t.sql(`select * from public_notes(null, $1::uuid[], 50)`, [[id]]);

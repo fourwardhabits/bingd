@@ -89,15 +89,36 @@ When the client supplies `p_base_updated_at` and it does not match, the function
 
 | Function | Purpose |
 |---|---|
-| `rank_start(media_item_id, bucket)` | Open a session, or return a position directly if the band is empty |
-| `rank_answer(session_id, winner_id)` | Record one comparison, return the next pivot or the final position |
-| `rank_skip(session_id)` | Re-anchor. Places at the midpoint on the third skip |
-| `rank_back(session_id)` | Step back one comparison |
+| `rank_start(media_item_id, bucket, operation_id?)` | Open a session, or return a position directly if the band is empty |
+| `rank_answer(session_id, winner_id, operation_id?)` | Record one comparison, return the next pivot or the final position |
+| `rank_skip(session_id, operation_id?)` | Re-anchor. Places at the midpoint on the third skip |
+| `rank_back(session_id, operation_id?)` | Step back one comparison |
 | `rank_cancel(session_id)` | Abandon the session. The bucket survives; the title stays Logged |
-| `rank_reorder(media_item_id, new_position)` | Manual reorder, clamped to the title's own band |
-| `rank_unrank(media_item_id)` | Remove the position, keep the `user_media` row and its history |
+| `rank_reorder(media_item_id, new_position, operation_id?)` | Manual reorder, clamped to the title's own band |
+| `rank_unrank(media_item_id, operation_id?)` | Remove the position, keep the `user_media` row and its history |
+| `rank_again(media_item_id, bucket, operation_id?)` | Drop the position and open a fresh session, in one transaction |
 
 Every one of these is **absent from the outbox allowlist**, which is how PRD §18's rule that no ranking mutation is ever queued is enforced. Offline, the client does not attempt them and says so.
+
+### The operation id is optional here, and only here
+
+Every other writer in this API takes `p_operation_id` **first and mandatory**. The ranking family takes it **last and defaulted to null** (`20260825000200`), which is a deliberate exception with a rollout reason and an expiry.
+
+An operation id makes a replay recognisable, which matters most in this family: `rank_answer` finalises a placement, writes the score and emits the feed event in one transaction, so an answer that commits and loses its HTTP reply is a title that *is* ranked and is reported to the reader as a failure. With an id, the retry is answered with the stored result — the same position, the same score, the same one-shot `activated` flag — and applies nothing a second time.
+
+It is optional because a friend-beta build is installed on real devices and calls these functions by the arguments it has. A trailing defaulted parameter is the one shape that keeps that client working against the new database without leaving a second overload for PostgREST to resolve ambiguously. A null id claims nothing and runs; it is not faked into an id generated server-side, because a generated id is fresh on every retry and would protect nothing while looking like it did.
+
+**The cost, stated plainly:** omitting the argument is a legal call that silently gets no replay protection. `src/features/ranking/session.ts` therefore makes the id a *required* TypeScript argument on every wrapper, so the client cannot forget what the server will not refuse.
+
+**`rank_cancel` takes no operation id at all**, which is the one exception and is deliberate. A replayed cancel names a session id that is already gone — deleted by the first attempt, or by the finalise — and raises `P0002`, which this client has always read as the outcome it wanted; a later session for the same title has a different id and cannot be hit. There is no observable a replay changes twice, so an id would be a signature change that buys nothing and widens the deployment surface. It does take the media lock, because deleting a session out from under an answer that is mid-flight is a different problem from replaying one.
+
+### Idempotency that carries an answer
+
+`_claim_operation` returns a boolean and every caller turns a false into `{"status": "already_applied"}`. That is enough for the collection writers, whose answer carries nothing the client cannot re-read from its own row.
+
+It is not enough for ranking, so `processed_operations` gained a `result jsonb` column and the ranking family claims through `_claim_operation_result`, which stores the answer and returns it verbatim on a replay. A body with no `done` and no `session_id` reads to the client as a session that ended — so a bare `already_applied` would tell a reader their title is unranked over a ranking that exists.
+
+**One id, one kind.** Both claim helpers now raise `22023` when an id was already spent on a *different* function. Without it, a composite writer that passes one id to two RPCs turns its second call into a no-op that reports success — `removeFromCollection` (`rank_unrank` then `unlog`) is one line away from exactly that, and the failure would be a removal that says it worked and leaves the title in place.
 
 > **Corrected 2026-08-14.** Two of these names were wrong here and one function did not exist. The table said `rank_move` and `unrank`; the implementations have always been `rank_reorder` and `rank_unrank`. And `rank_cancel` was specified from the beginning and never written — the gap survived because nothing called it, there being no comparison screen and therefore no close control. Building that screen is what found it. It exists now (`20260814050000`), because the alternatives were making a user unwind five answers with Back to escape a session, or leaving the row behind for `rank_start` to resume mid-search the next time that title came up.
 

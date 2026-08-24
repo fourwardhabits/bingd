@@ -182,11 +182,51 @@ describe('create_profile', () => {
       assert.equal(rows[0].n, 0, 'the refused date must not survive anywhere in the table');
     });
 
+    /**
+     * The boundary, from both sides, on real calendar dates.
+     *
+     * DOB-1, decided by the founder on 2026-08-24: the exact date of birth is retained
+     * privately, and **13+ stays exactly-calendar and server-side**. `create_profile`
+     * compares `p_date_of_birth > current_date - interval '13 years'`, which is why day
+     * precision is worth keeping — a birth *year* would have to decide what to do with
+     * somebody who turns 13 later this year, and would get one of those two answers
+     * wrong for every one of them.
+     *
+     * Three cases and not one, because an off-by-one in either direction is invisible
+     * to a test that only checks an obviously-young and an obviously-old date. The
+     * middle case is the one that moves if the comparison is ever loosened to `>=`.
+     */
+    it('refuses the day before a thirteenth birthday', async () => {
+      const user = await newAuthUser();
+      const { rows } = await t.sql(
+        `select (current_date - interval '13 years' + interval '1 day')::date as d`,
+      );
+      const result = await createProfileResult(user, {
+        username: 'thirteen_tomorrow',
+        dob: rows[0].d,
+      });
+
+      assert.equal(result.ok, false, 'not yet thirteen is not thirteen');
+      assert.equal(result.reason, 'under_13');
+    });
+
     it('accepts exactly thirteen years to the day', async () => {
       const user = await newAuthUser();
       const { rows } = await t.sql(`select (current_date - interval '13 years')::date as d`);
       const result = await createProfileResult(user, {
         username: 'thirteen_today',
+        dob: rows[0].d,
+      });
+      assert.equal(result.ok, true);
+    });
+
+    it('accepts the day after a thirteenth birthday', async () => {
+      const user = await newAuthUser();
+      const { rows } = await t.sql(
+        `select (current_date - interval '13 years' - interval '1 day')::date as d`,
+      );
+      const result = await createProfileResult(user, {
+        username: 'thirteen_yesterday',
         dob: rows[0].d,
       });
       assert.equal(result.ok, true);

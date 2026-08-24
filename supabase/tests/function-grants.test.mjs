@@ -55,15 +55,34 @@ const ALLOWED = {
   'create_profile(text,text,date)': ['authenticated'],
 
   // Signed-in writes.
-  'rank_start(uuid,taste_bucket)': ['authenticated'],
-  'rank_answer(uuid,uuid)': ['authenticated'],
-  'rank_skip(uuid)': ['authenticated'],
-  'rank_back(uuid)': ['authenticated'],
-  'rank_unrank(uuid)': ['authenticated'],
+  //
+  // The ranking family gained a trailing `p_operation_id` on 2026-08-25
+  // (20260825000200), so that a `rank_answer` which commits and loses its reply can be
+  // replayed instead of guessed at. Trailing and optional, not leading and required:
+  // a friend-beta client is installed on real devices and calls these by the arguments
+  // it has, and one function with a defaulted tail is the only shape that keeps
+  // working for it without leaving a second overload for PostgREST to resolve
+  // ambiguously — the finding `log_watched` records below.
+  //
+  // The old arities are dropped rather than kept, because an old public signature that
+  // still worked would be a route around the claim. So are the seven
+  // `_rank_x_unguarded` implementations 20260813001700 created: each public name was a
+  // two-line wrapper around one, and an entry point that now has to claim an operation
+  // and take a lock has nothing left to delegate. They are absent from this list
+  // because they are absent from the schema.
+  'rank_start(uuid,taste_bucket,uuid)': ['authenticated'],
+  'rank_answer(uuid,uuid,uuid)': ['authenticated'],
+  'rank_skip(uuid,uuid)': ['authenticated'],
+  'rank_back(uuid,uuid)': ['authenticated'],
+  'rank_unrank(uuid,uuid)': ['authenticated'],
   // Added 2026-08-14 with the comparison screen, which needed a way out of a session.
   'rank_cancel(uuid)': ['authenticated'],
-  'rank_reorder(uuid,integer)': ['authenticated'],
-  'rank_rebucket(uuid,taste_bucket)': ['authenticated'],
+  'rank_reorder(uuid,integer,uuid)': ['authenticated'],
+  'rank_rebucket(uuid,taste_bucket,uuid)': ['authenticated'],
+  // New in 20260825000200. The same-band re-rank the client used to perform as an
+  // unrank followed by a start, now one transaction: if the fresh session cannot be
+  // opened, the position it was replacing is still there.
+  'rank_again(uuid,taste_bucket,uuid)': ['authenticated'],
   'report(report_subject,uuid,text,text)': ['authenticated'],
 
   // The collection writes (api.md §1). Their helpers are absent on purpose:

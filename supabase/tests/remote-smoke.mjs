@@ -204,7 +204,22 @@ expectRefused('anon cannot execute is_over_13', await rpc('is_over_13', { target
 expectRefused('anon cannot execute assert_ranking_valid', await rpc('assert_ranking_valid', { target: NIL, cat: 'film' }));
 expectRefused('anon cannot execute _rank_pivot_at', await rpc('_rank_pivot_at', { target: NIL, cat: 'film', pos: 1 }));
 expectRefused('anon cannot execute _rank_session_state', await rpc('_rank_session_state', { p_session_id: NIL, p_user: NIL }));
-expectRefused('anon cannot execute _rank_start_unguarded', await rpc('_rank_start_unguarded', { p_media_item_id: NIL, p_bucket: 'loved' }));
+// `_rank_start_unguarded` was probed here until 2026-08-25. `20260825000200` dropped the
+// whole `_rank_x_unguarded` layer that `20260813001700` created: each public name was a
+// two-line wrapper adding `assert_can_write()`, and an entry point that now has to claim
+// an operation and take a lock has nothing left to delegate. Probing a function that no
+// longer exists is not a failure here — `expectRefused` reports a missing signature as
+// inconclusive rather than as a pass — but it is a line that can never do its job again,
+// so it is replaced by the helpers the same migration introduced.
+expectRefused('anon cannot execute _rank_start_impl', await rpc('_rank_start_impl', { p_user: NIL, p_media_item_id: NIL, p_bucket: 'loved' }));
+expectRefused('anon cannot execute _rank_unrank_impl', await rpc('_rank_unrank_impl', { p_user: NIL, p_media_item_id: NIL }));
+// A client that could take this lock could stall every writer for one title.
+expectRefused('anon cannot execute _lock_media', await rpc('_lock_media', { p_user: NIL, p_media_item_id: NIL }));
+// And one that could claim or write an operation result could make a later genuine
+// write return success without happening — the same reason `_claim_operation` is not
+// callable from a client.
+expectRefused('anon cannot execute _claim_operation_result', await rpc('_claim_operation_result', { p_operation_id: NIL, p_kind: 'rank_start' }));
+expectRefused('anon cannot execute _record_operation_result', await rpc('_record_operation_result', { p_operation_id: NIL, p_result: {} }));
 
 // Its own capabilities and nobody else's — but only for someone signed in.
 expectRefused('anon cannot execute my_capabilities', await rpc('my_capabilities', {}));
@@ -214,6 +229,10 @@ expectRefused('anon cannot execute assert_can_write', await rpc('assert_can_writ
 expectRefused('anon cannot execute rank_start', await rpc('rank_start', { p_media_item_id: NIL, p_bucket: 'loved' }));
 expectRefused('anon cannot execute rank_answer', await rpc('rank_answer', { p_session_id: NIL, p_winner: NIL }));
 expectRefused('anon cannot execute rank_reorder', await rpc('rank_reorder', { p_media_item_id: NIL, p_new_position: 1 }));
+// New in 20260825000200, and probed without an operation id on purpose: that is the
+// shape the installed client sends, so this checks the signature an old build resolves
+// to as well as the privilege.
+expectRefused('anon cannot execute rank_again', await rpc('rank_again', { p_media_item_id: NIL, p_bucket: 'loved' }));
 expectRefused(
   'anon cannot execute report',
   await rpc('report', { p_subject_type: 'profile', p_subject_id: NIL, p_reason: 'spam', p_note: null }),

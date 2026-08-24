@@ -435,7 +435,7 @@ Comments, DMs, discussion boards, and long-form reviews. Destination-specific so
 
 1. Search and select the series.
 2. The series page lists seasons with progress.
-3. Mark a season *Watching* or *Completed*. Only completed seasons are rankable.
+3. Rank the season. **Ranking a season is the claim that it was watched** — the "How was it?" that opens the flow says so, and there is no separate Completed step (decided 2026-08-24, superseding an earlier rule that was never enforced anywhere in the build).
 4. Bucket and compare the season against other ranked TV seasons in the same bucket.
 5. The series page aggregates progress and all ranked seasons.
 
@@ -1802,8 +1802,8 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 ### 26.2 Search, titles, and seasons
 
 1. A signed-in user can search movies and TV series online and open a detail page with poster, year, and summary.
-2. A series page lists seasons, and a season can be marked *Watching* or *Completed*.
-3. Only completed seasons can be bucketed and ranked.
+2. A series page lists seasons, marked *Ranked* or *Not ranked yet*.
+3. A season can be bucketed and ranked with no prior step: ranking it is the watch claim (decided 2026-08-24). A whole series still cannot be ranked.
 4. Episodes are not rankable anywhere in the product.
 5. With no connectivity, global search is disabled with an explanation, and the user's own collection remains searchable.
 6. No TMDB credential is present in the client bundle.

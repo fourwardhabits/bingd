@@ -26,6 +26,14 @@
  *   5. `redeem_invite` with the row lock dropped from its token read — the version
  *      independent review 26 rejected. The revocation must stop waiting, so a link its
  *      owner has just withdrawn still pays out to them.
+ *   6. `set_bucket` with `_lock_media` deleted — M3, exactly as the register describes
+ *      it. The bucketer must stop waiting, and `user_media.bucket` must end up
+ *      disagreeing with `rankings.bucket`: invariant I3, from one account on two
+ *      devices doing two ordinary things.
+ *   7. `rank_answer` with its operation claim deleted. A replay must become a second
+ *      genuine answer — a second comparison recorded, and a session narrowed twice for
+ *      one judgement. This is the mutant that would otherwise pass a naive test: the
+ *      *rows* still look plausible afterwards, and only the count of them is wrong.
  */
 import { createRaceDb, fixtures, startCluster, stopCluster } from './harness.mjs';
 
@@ -139,6 +147,68 @@ begin
   values (v_self, v_inviter, v_token_id, now())
   on conflict (invitee_id) do update set inviter_id = excluded.inviter_id, token_id = excluded.token_id;
   return jsonb_build_object('status','ok','inviter_id',v_inviter);
+end; $$;`;
+
+/**
+ * Mutant 6. `set_bucket` as it stood before `20260825000200`: the unranked check and
+ * the upsert with nothing serialising them against a ranking on the same title.
+ */
+const UNLOCKED_BUCKET = `
+create or replace function set_bucket(p_operation_id uuid, p_media_item_id uuid, p_bucket taste_bucket)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform assert_can_write();
+  if not _claim_operation(p_operation_id,'set_bucket') then return jsonb_build_object('status','already_applied'); end if;
+  if p_bucket is null then raise exception 'bucket is required' using errcode='22023'; end if;
+  perform _assert_loggable(p_media_item_id);
+  perform _assert_unranked(p_media_item_id);
+  insert into user_media (user_id, media_item_id, bucket)
+  values (auth.uid(), p_media_item_id, p_bucket)
+  on conflict (user_id, media_item_id) do update set bucket = excluded.bucket;
+  return jsonb_build_object('status','ok');
+end; $$;`;
+
+/**
+ * Mutant 7. `rank_answer` with the claim dropped and everything else kept, including
+ * the media lock — so this isolates idempotency from locking rather than removing both
+ * and calling the result a finding.
+ */
+const UNCLAIMED_ANSWER = `
+create or replace function rank_answer(p_session_id uuid, p_winner uuid, p_operation_id uuid default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_user uuid := auth.uid(); v_item uuid; v_s record; v_pivot_item uuid;
+  v_new_lo integer; v_new_hi integer; v_next integer;
+begin
+  perform assert_can_write();
+  select rs.media_item_id into v_item from ranking_sessions rs
+   where rs.id = p_session_id and rs.user_id = v_user;
+  if v_item is null then raise exception 'no such ranking session' using errcode='P0002'; end if;
+  perform _lock_media(v_user, v_item);
+  select * into v_s from _rank_session_state(p_session_id, v_user);
+  if v_s.lo >= v_s.hi then
+    return _rank_finalize(v_user, v_s.media_item_id, v_s.category, v_s.bucket, v_s.band_lo + v_s.lo, v_s.session_id);
+  end if;
+  v_pivot_item := _rank_pivot_at(v_user, v_s.category, v_s.band_lo + v_s.pivot);
+  if p_winner <> v_s.media_item_id and p_winner <> v_pivot_item then
+    raise exception 'winner must be one of the two titles being compared' using errcode='22023';
+  end if;
+  if p_winner = v_s.media_item_id then
+    v_new_lo := v_s.lo; v_new_hi := v_s.pivot;
+    insert into comparisons (user_id, winner_id, loser_id) values (v_user, v_s.media_item_id, v_pivot_item);
+  else
+    v_new_lo := v_s.pivot + 1; v_new_hi := v_s.hi;
+    insert into comparisons (user_id, winner_id, loser_id) values (v_user, v_pivot_item, v_s.media_item_id);
+  end if;
+  if v_new_lo >= v_new_hi then
+    return _rank_finalize(v_user, v_s.media_item_id, v_s.category, v_s.bucket, v_s.band_lo + v_new_lo, v_s.session_id);
+  end if;
+  v_next := (v_new_lo + v_new_hi) / 2;
+  update ranking_sessions set lo = v_new_lo, hi = v_new_hi, pivot = v_next,
+    history = history || jsonb_build_object('lo', v_s.lo, 'hi', v_s.hi, 'pivot', v_s.pivot),
+    updated_at = now() where id = v_s.session_id;
+  return jsonb_build_object('done', false, 'session_id', v_s.session_id,
+    'pivot', _rank_pivot_at(v_user, v_s.category, v_s.band_lo + v_next));
 end; $$;`;
 
 await startCluster();
@@ -347,6 +417,130 @@ const results = [];
   await t1.end();
   await t2.end();
   await ctl.end();
+  await db.close();
+}
+
+// --- Mutant 6: M3 itself. set_bucket with no media lock.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+  await db.sql(UNLOCKED_BUCKET);
+  const user = await fx.createUser();
+  const film = await fx.createMovie('Mutant 6');
+
+  await db.armBarrier('rankings', 'm6');
+  const ctl = await db.controller();
+  await ctl.hold('m6');
+
+  const ranker = await db.session('ranker');
+  const bucketer = await db.session('bucketer');
+  await ranker.actAs(user);
+  await bucketer.actAs(user);
+
+  await ranker.begin();
+  await ranker.pauseAt('m6');
+  const ranking = ranker.start(`select rank_start($1, 'loved') as r`, [film]);
+  await ranker.awaitBlocked();
+
+  await bucketer.begin();
+  const bucketing = bucketer.start(`select set_bucket($1, $2, 'fine') as r`, [
+    crypto.randomUUID(),
+    film,
+  ]);
+
+  // With the lock, this is where the bucketer waits. Without it, `_assert_unranked`
+  // passes — the ranking is not committed yet — and it walks straight into the upsert.
+  let blockedOnMedia = true;
+  try {
+    await bucketer.awaitBlocked({
+      on: 'advisory',
+      advisoryKey: await db.mediaKey(user, film),
+      timeoutMs: 1500,
+    });
+  } catch {
+    blockedOnMedia = false;
+  }
+
+  await ctl.release('m6');
+  await ranking;
+  await ranker.commit();
+  await bucketing;
+  await bucketer.commit();
+
+  const rows = await db.rows(
+    `select r.bucket as ranked, um.bucket as logged
+       from rankings r join user_media um
+         on um.user_id = r.user_id and um.media_item_id = r.media_item_id
+      where r.user_id = $1 and r.media_item_id = $2`,
+    [user, film],
+  );
+
+  // The damage, in the schema's own words. `assert_ranking_valid` has checked I3 since
+  // the first ranking migration and had no writer maintaining it until now.
+  let i3Broken = false;
+  try {
+    await db.sql(`select assert_ranking_valid($1, 'movies'::ranking_category)`, [user]);
+  } catch {
+    i3Broken = true;
+  }
+
+  results.push(['media lock removed -> set_bucket no longer waits for a ranking', blockedOnMedia === false]);
+  results.push([
+    'media lock removed -> user_media.bucket disagrees with rankings.bucket (I3)',
+    i3Broken && rows[0]?.ranked !== rows[0]?.logged,
+  ]);
+
+  await ranker.end();
+  await bucketer.end();
+  await ctl.end();
+  await db.close();
+}
+
+// --- Mutant 7: rank_answer with no operation claim. A replay becomes a second answer.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+  const user = await fx.createUser();
+  const anchor = await fx.createMovie('Mutant 7 anchor');
+  const film = await fx.createMovie('Mutant 7');
+
+  const s = await db.session('client');
+  await s.actAs(user);
+  await s.q(`select rank_start($1, 'loved')`, [anchor]);
+
+  const started = (await s.one(`select rank_start($1, 'loved') as r`, [film])).r;
+
+  await db.sql(UNCLAIMED_ANSWER);
+
+  const op = crypto.randomUUID();
+  await s.q(`select rank_answer($1, $2, $3)`, [started.session_id, film, op]);
+  const replayed = await s.errorFrom(`select rank_answer($1, $2, $3)`, [
+    started.session_id,
+    film,
+    op,
+  ]);
+
+  const comparisons = await db.rows(`select 1 from comparisons where user_id = $1`, [user]);
+
+  /**
+   * Two shapes of damage, and either one is the mutant being caught.
+   *
+   * The band here is one title deep, so the first answer finalises and deletes the
+   * session — and the unclaimed replay then finds nothing and raises P0002, where the
+   * honest version answers with the placement the caller lost. That alone is the
+   * defect: a reader retrying after a dropped reply is told their session has ended
+   * over a title that is ranked.
+   *
+   * On a wider band the replay would not raise at all; it would record a second
+   * comparison for one judgement. The count is checked too, so this stays a real
+   * assertion if the fixture ever grows.
+   */
+  results.push([
+    'rank_answer claim removed -> a replay is not answered with the first answer',
+    Boolean(replayed) || comparisons.length > 1,
+  ]);
+
+  await s.end();
   await db.close();
 }
 
