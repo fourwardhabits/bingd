@@ -630,6 +630,32 @@ create table device_tokens (
 
 `device_tokens` is populated in v1 even though push delivery is off (PRD §15, AD-10). Collecting tokens from the start means that enabling push does not begin with an empty table and a wait for every user to reopen the app.
 
+> **As built, 2026-08-24 — the table finally has writers, and one more column.** `20260825000300` adds `updated_at`, a `char_length(token) between 1 and 512` bound, and the two writers this table waited for: `register_device_token` and `revoke_device_token`. Nothing else writes it, and **no client role may read it** — there is still no policy and no `select` grant, including for the token's own owner. A push token is an operational secret and there is nothing a client would do with one.
+>
+> **`token` being globally unique is the load-bearing constraint**, and it is why the column was right from the start. A token identifies a *physical installation*, not a person, so one phone that two people sign into in turn produces one token which must name whoever is signed in **now**. `register_device_token` upserts `on conflict (token)`, moving the row to the caller in a single statement — so there is no window in which the device belongs to nobody or to both, and a second person on a shared phone cannot inherit the first one's notifications. A per-user key would have made that state representable.
+>
+> A revoked row is **not** deleted: re-registering un-revokes it, so signing back in on the same phone is one update rather than a new row.
+
+```sql
+create table push_outbox (
+  notification_id uuid primary key references notifications(id) on delete cascade,
+  recipient_id    uuid not null references profiles(id) on delete cascade,
+  state           text not null default 'pending' check (state in ('pending', 'claimed')),
+  attempts        integer not null default 0,
+  claimed_at      timestamptz,
+  created_at      timestamptz not null default now(),
+  last_error      text
+);
+```
+
+> **`push_outbox`, added 2026-08-24.** Notifications waiting to be delivered to a phone. **The primary key is the notification id**, which is the whole design in one line: a row here *is* a notification that was written, it cannot be fabricated, and it cannot outlive the notification — `on delete cascade` means `block()` and account deletion take pending pushes with them.
+>
+> Rows are written **only** by `_enqueue_push()`, an `AFTER INSERT` trigger on `notifications`. That is what makes the notification preference govern push without a second check: `_apply_notification_preference` is a `BEFORE INSERT` trigger returning null, and a row skipped by a before-row trigger fires no after-row trigger at all. **No notification row, no push.**
+>
+> RLS is on with **no policy**, and `select` is revoked from `anon` and `authenticated` — the same belt-and-braces `20260819000300` applied to `notifications`. It is read and written only by `claim_push_batch` and `settle_push_batch`, both `service_role`.
+>
+> **A settled row is a deleted row.** Nothing records that a push was delivered, so this stays a bounded queue rather than becoming a second, weaker copy of somebody's inbox. The in-app notification remains the record of what happened. Delivery is **at least once**, bounded at three attempts, with a five-minute lease claimed `for update skip locked`.
+
 Preferences default to enabled by absence: a missing row means enabled. This avoids writing seven rows per signup and avoids a backfill every time a category is added.
 
 > **As built, 2026-08-19 — absence resolves to the *category's* default.** `20260819000300` replaced "absence means enabled" with `_notification_default(category)`, because `reactions` and `awards` default **off** and the old rule could not express that without a row per account per signup. Six of the eight categories still default on, so for those nothing changed. The paragraph above describes the v0.6 design.

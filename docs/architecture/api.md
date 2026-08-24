@@ -276,11 +276,22 @@ So attribution and acceptance are separated. **First inviter wins the attributio
 | `set_avatar(object_path)` | Points `profiles.avatar_path` at an object in the public `avatars` bucket. Takes a path, not a URL | 2026-08-15 |
 | `change_username(operation_id, username)` | 30-day cooldown; the triggers write `username_history` | 2026-08-17 |
 | `delete_account(confirmation)` | Removes the avatar objects, then the `auth.users` row, and lets the cascade do the rest | 2026-08-17 |
-| `set_notification_preference(category, enabled)` | Per-category toggle | **not built** |
-| `set_all_notifications(enabled)` | Master switch | **not built** |
-| `register_device_token(token, platform)` | Register for push | **not built** |
+| `set_notification_preference(category, enabled)` | Per-category toggle | 2026-08-17 |
+| `set_notification_preferences(categories, enabled)` | One call for a whole section, so a section master is not several round trips | 2026-08-19 |
+| `register_device_token(operation_id, token, platform)` | Claims this device for the caller, or **moves** it from whoever held it. Idempotent through `_claim_operation`. Refuses anything that is not an Expo push token, and refuses a suspended account | 2026-08-24 |
+| `revoke_device_token(operation_id, token)` | Releases one of the caller's own devices, which is what sign-out does. Answers `ok` either way, so it cannot report whether a token exists. Deliberately **not** gated on `assert_can_write` — a suspended account must still be able to sign out | 2026-08-24 |
+| `claim_push_batch(limit)` | Leases queued pushes and returns everything needed to send them. **`service_role` only** | 2026-08-24 |
+| `settle_push_batch(results, invalid_tokens)` | Records the outcome of a batch and revokes tokens the provider reported gone. **`service_role` only** | 2026-08-24 |
 
-**Three rows are marked not built and stay that way for V1.** `notification_preferences` and `device_tokens` exist and nothing writes either. There is one delivery channel — the inbox — it cannot be switched off without making follow requests unanswerable, and a screen of switches over a table nothing reads is a control that does nothing. Push delivery is off by AD-10, so a token registry would collect credentials for a channel that does not exist. Both wait for a push architecture, which is Beta Hardening.
+**The preference rows were built on 2026-08-17 and 2026-08-19** and this table said otherwise for longer than it should have. `set_all_notifications` was never built under that name: a section master is `set_notification_preferences` over the categories in that section, which is one call rather than a second switch with its own state to disagree with.
+
+**The two push writers take an operation id and the two sender functions are unreachable by a client.** `register_device_token` and `revoke_device_token` are granted to `authenticated`; `claim_push_batch` and `settle_push_batch` are granted to `service_role` and revoked from `public`, `anon` and `authenticated`. That split is the whole authorisation model:
+
+- **No caller names a recipient.** `claim_push_batch` takes a batch size and nothing else. The recipient, the copy and the tokens are resolved from the notification row itself, so there is no parameter through which one account could arrange a push to another.
+- **A preference that is off suppresses the push, without a second check.** `_apply_notification_preference` is a `BEFORE INSERT` trigger returning null, and the enqueue is an `AFTER INSERT` trigger — a row that was never written fires no after-trigger. **No notification, no push.**
+- **`device_tokens` has no read policy and no client `select` grant**, including for the owner. A push token is an operational secret and there is nothing a client would do with it.
+
+See [`push.md`](./push.md) for the architecture and `20260825000300` for the definitions.
 
 **`update_profile` lost its `visibility` parameter and gained an operation id.** Splitting the two is not cosmetic: a display name is an edit and visibility is a permission, they belong on different screens, and folding them into one call would mean every name change re-asserted a privacy setting the caller had not touched. `mark_notifications_read` lost its `ids` array for the opposite reason — there is no per-row surface, and the useful meaning of "read" on a list somebody opens is "has seen this screen".
 
