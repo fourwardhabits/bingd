@@ -23,6 +23,8 @@ import {
   pushPermission,
   registerPushToken,
   pushSessionEpoch,
+  resetDispatchedWrite,
+  trackDispatchedWrite,
   releaseDeviceOnSignOut,
   rememberToken,
   resetNudgeThrottle,
@@ -117,6 +119,7 @@ beforeEach(() => {
   mockRpcError = null;
   mockIsDevice = true;
   resetNudgeThrottle();
+  resetDispatchedWrite();
   mockNotifications.getPermissionsAsync.mockResolvedValue(permissions({ granted: true }));
   mockNotifications.getExpoPushTokenAsync.mockResolvedValue({ type: 'expo', data: TOKEN });
 });
@@ -391,5 +394,103 @@ describe('foreground presentation', () => {
     configurePushPresentation();
     expect(mockNotifications.requestPermissionsAsync).not.toHaveBeenCalled();
     expect(mockNotifications.getPermissionsAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe('sign-out waits for a write that is already in flight', () => {
+  /**
+   * The half the epoch cannot do on its own, and the re-review was right to insist on it.
+   *
+   * A registration whose RPC has already gone out will land, see the stale epoch and try
+   * to revoke what it wrote — but that revoke needs a session, and `signOut` is one line
+   * away from ending it. So sign-out lets the write finish first.
+   */
+  it('does not return until a dispatched write settles', async () => {
+    let land: () => void = () => {};
+    const write = new Promise<void>((resolve) => {
+      land = resolve;
+    });
+    trackDispatchedWrite(write);
+
+    let released = false;
+    const signOut = releaseDeviceOnSignOut().then(() => {
+      released = true;
+    });
+
+    // Several microtask turns, which is more than enough for a `then` chain that was
+    // going to resolve immediately.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(released).toBe(false);
+
+    land();
+    await signOut;
+    expect(released).toBe(true);
+  });
+
+  /**
+   * The epoch moves before the wait, not after. A write that lands during the wait has to
+   * see a stale value, or it would remember a token for an account that is leaving.
+   */
+  it('advances the epoch before it starts waiting', async () => {
+    const before = pushSessionEpoch();
+    let epochDuringWrite = before;
+
+    let land: () => void = () => {};
+    const write = new Promise<void>((resolve) => {
+      land = resolve;
+    }).then(() => {
+      epochDuringWrite = pushSessionEpoch();
+    });
+    trackDispatchedWrite(write);
+
+    const signOut = releaseDeviceOnSignOut();
+    land();
+    await signOut;
+
+    expect(epochDuringWrite).not.toBe(before);
+  });
+
+  it('is not delayed at all when nothing is in flight', async () => {
+    let released = false;
+    const signOut = releaseDeviceOnSignOut().then(() => {
+      released = true;
+    });
+
+    await signOut;
+    expect(released).toBe(true);
+  });
+
+  /** A write that fails must not take the sign-out down with it. */
+  it('survives a dispatched write that rejects', async () => {
+    trackDispatchedWrite(Promise.reject(new Error('offline')).catch(() => undefined));
+    await expect(releaseDeviceOnSignOut()).resolves.toBeUndefined();
+  });
+
+  /**
+   * The grace period is a ceiling, not a delay — but a wedged write must not hold a
+   * sign-out open for ever. Asserted with fake timers so the suite does not wait for it.
+   */
+  it('gives up on a wedged write rather than holding sign-out open', async () => {
+    jest.useFakeTimers();
+    try {
+      // Never settles.
+      trackDispatchedWrite(new Promise<void>(() => {}));
+
+      let released = false;
+      const signOut = releaseDeviceOnSignOut().then(() => {
+        released = true;
+      });
+
+      await Promise.resolve();
+      expect(released).toBe(false);
+
+      jest.advanceTimersByTime(3000);
+      await signOut;
+      expect(released).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

@@ -38,6 +38,9 @@ jest.mock('./push', () => ({
   rememberToken: jest.fn(),
   pushPlatform: jest.fn(() => 'ios'),
   pushSessionEpoch: jest.fn(() => 0),
+  // Passes the write straight through: the *waiting* half is asserted in push.test.ts,
+  // against the real module. Here it only has to not swallow the promise.
+  trackDispatchedWrite: jest.fn((write: Promise<unknown>) => write),
   noteFailure: jest.fn(),
 }));
 

@@ -13,6 +13,7 @@ import {
   rememberToken,
   requestPushPermission,
   revokePushToken,
+  trackDispatchedWrite,
   type PushPermission,
 } from './push';
 
@@ -133,6 +134,16 @@ function ask(moment: PermissionMoment): Promise<boolean> {
  * awaits. The check after the write is the one that matters most, and it does not merely
  * decline to remember the token — it **revokes what it just wrote**, because by then the
  * row exists and nothing else is going to look for it.
+ *
+ * **And the write is announced to sign-out before it goes out.** The epoch alone leaves
+ * the compensating revoke racing `supabase.auth.signOut()` for the session it needs, which
+ * a re-review was right to call the original hole only narrowed. `trackDispatchedWrite`
+ * makes sign-out wait for the block below — briefly, and only when one is genuinely in
+ * flight — so the revoke happens while there is still an account to revoke as.
+ *
+ * Only the write is announced, not the token acquisition above it: that can hang for a
+ * long time on a bad connection, sign-out must not, and a registration still at that stage
+ * has written nothing to release.
  */
 export async function registerThisDevice(userId: string): Promise<void> {
   const platform = pushPlatform();
@@ -146,19 +157,24 @@ export async function registerThisDevice(userId: string): Promise<void> {
   // to undo — just do not write it.
   if (pushSessionEpoch() !== epoch) return;
 
-  const result = await registerPushToken(userId, token, platform);
-  if (result !== 'ok') return;
+  await trackDispatchedWrite(
+    (async () => {
+      const result = await registerPushToken(userId, token, platform);
+      if (result !== 'ok') return;
 
-  if (pushSessionEpoch() !== epoch) {
-    // The write landed after the sign-out's revoke had already run and found nothing.
-    // Undo it rather than leaving the phone addressed to an account that has left.
-    await revokePushToken(userId, token);
-    return;
-  }
+      if (pushSessionEpoch() !== epoch) {
+        // The write landed after the sign-out's revoke had already run and found nothing.
+        // Undo it rather than leaving the phone addressed to an account that has left.
+        // Sign-out is waiting on this promise, so the session is still there.
+        await revokePushToken(userId, token);
+        return;
+      }
 
-  // Remembered only on success, so sign-out does not try to revoke a token the server
-  // never heard of — which would spend a round trip to be told nothing changed.
-  rememberToken(userId, token);
+      // Remembered only on success, so sign-out does not try to revoke a token the server
+      // never heard of — which would spend a round trip to be told nothing changed.
+      rememberToken(userId, token);
+    })(),
+  );
 }
 
 /**
