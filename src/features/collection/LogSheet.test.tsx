@@ -401,18 +401,67 @@ describe('forgetting the watch date', () => {
     expect(callsTo('log_watched')[0][1].p_watched_on).toEqual(expect.any(String));
   });
 
-  it('writes nothing for a title that has no row to clear a date from', async () => {
-    // Nothing stored means nothing to remove; the flag alone suppresses the pending
-    // default and the stamp that would have saved it.
+  it('asks the server even when the row it can see has no date', async () => {
+    // `state` lags every write this sheet makes, so "no row, no date" is also what it
+    // says for the whole window after a bucket stamp or a picked date has been sent and
+    // not refetched. Deciding not to call from that read is how the clear gets skipped
+    // and the date it was meant to remove lands a moment later. The server answers ok
+    // and creates nothing for the genuinely empty cases (20260824000100).
     stubReads(null, null);
     const sheet = await open(filmA);
 
     await sheet.openDate();
     await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
 
-    await waitFor(() => expect(sheet.getByText('Not recorded')).toBeTruthy());
-    expect(callsTo('clear_watch_date')).toHaveLength(0);
+    await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
+    expect(sheet.getByText('Not recorded')).toBeTruthy();
+    // And it still creates nothing itself.
     expect(callsTo('log_watched')).toHaveLength(0);
+    expect(callsTo('set_bucket')).toHaveLength(0);
+  });
+
+  /**
+   * Independent review 36, MAJOR. Two writes to one column, neither carrying a version
+   * the server could reject a stale one by, so the one that *lands* last decides what
+   * is stored — and overlapping them made that a function of network timing rather than
+   * of the order the reader tapped.
+   */
+  it('sends contradictory date taps in the order they were made', async () => {
+    stubReads({ bucket: 'loved', watched_on: '2026-08-01', note: '' }, null);
+
+    // The clear is held open, so the date picked after it would finish first if the two
+    // were allowed to overlap. Reproduces the exact race before the queue existed.
+    let releaseClear: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseClear = resolve;
+    });
+    mockRpc.mockImplementation(async (name: string) => {
+      if (name === 'clear_watch_date') await held;
+      return { data: { status: 'ok' }, error: null };
+    });
+
+    const sheet = await open(filmA);
+    await sheet.openDate();
+
+    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Today' }));
+
+    // The second tap has not reached the server while the first is still in flight.
+    expect(callsTo('log_watched')).toHaveLength(0);
+
+    await act(async () => {
+      releaseClear();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    // Order, which is the whole property: the clear went first and the date the reader
+    // ended on is what the server was left holding.
+    const order = mockRpc.mock.calls.map(([name]) => name);
+    expect(order.indexOf('clear_watch_date')).toBeLessThan(order.indexOf('log_watched'));
+    // The row, not the chip of the same name: what the sheet claims is stored has to
+    // agree with what the server was left holding.
+    expect(sheet.getByLabelText('Watch date').props.accessibilityValue.text).toBe('Today');
   });
 });
 

@@ -524,6 +524,11 @@ function Comparison({
           kind="tertiary"
           size="sm"
           tone="secondary"
+          // 36pt plus 4 either side is the 44 design-system.md §8 requires. `sm` is
+          // deliberately shorter than that on its own and says so — slop is the right
+          // tool for a compact control, and a taller box is not — but the slop has to
+          // be passed, which is the half review 36 found missing.
+          hitSlop={theme.space[1]}
           onPress={onBack}
           disabled={busy}
           disabledReason="Waiting for the last answer to save."
@@ -554,6 +559,7 @@ function Comparison({
           kind="tertiary"
           size="sm"
           tone="secondary"
+          hitSlop={theme.space[1]}
           onPress={onSkip}
           disabled={busy}
           disabledReason="Waiting for the last answer to save."
