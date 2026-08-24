@@ -580,3 +580,63 @@ describe('a write that never settles', () => {
     }
   });
 });
+
+/**
+ * A registration that starts *while* sign-out is waiting is the case a plain `clear()`
+ * dropped: it would be untracked, sign-out would return, and it would land with no session
+ * behind it and no reason to think anything was wrong — its own epoch check passes,
+ * because it captured the epoch sign-out had already moved. Fifth review round.
+ */
+describe('a registration that starts during the wait', () => {
+  it('is waited for too, inside the same budget', async () => {
+    let landFirst: () => void = () => {};
+    trackDispatchedWrite(
+      new Promise<void>((resolve) => {
+        landFirst = resolve;
+      }),
+    );
+
+    let released = false;
+    const signOut = releaseDeviceOnSignOut().then(() => {
+      released = true;
+    });
+
+    let landSecond: () => void = () => {};
+    const second = new Promise<void>((resolve) => {
+      landSecond = resolve;
+    });
+    trackDispatchedWrite(second);
+
+    landFirst();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(released).toBe(false);
+
+    landSecond();
+    await signOut;
+    expect(released).toBe(true);
+  });
+
+  /** However many arrive, the budget is spent once rather than once per round. */
+  it('does not restart the budget for each new arrival', async () => {
+    jest.useFakeTimers();
+    try {
+      trackDispatchedWrite(new Promise<void>(() => {}));
+
+      let released = false;
+      const signOut = releaseDeviceOnSignOut().then(() => {
+        released = true;
+      });
+
+      await Promise.resolve();
+      trackDispatchedWrite(new Promise<void>(() => {}));
+
+      jest.advanceTimersByTime(3000);
+      await signOut;
+      expect(released).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
