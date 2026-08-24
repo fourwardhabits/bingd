@@ -32,6 +32,7 @@ import {
 import { emptyLogState, useLogState, type LogState } from './use-log-state';
 import { WatchDatePicker } from './WatchDatePicker';
 import {
+  clearWatchDate,
   logWatched,
   mustReconcile,
   newOperationId,
@@ -213,8 +214,37 @@ function Body({
   const [visibilityEdit, setVisibilityEdit] = useState<NoteVisibility | null>(null);
   const [spoilersEdit, setSpoilersEdit] = useState<boolean | null>(null);
   const [dateEdit, setDateEdit] = useState<string | null>(null);
+  /**
+   * "I watched this, I do not remember when", held separately from `dateEdit`.
+   *
+   * Not folded into `dateEdit` as a third value, because that field follows this
+   * sheet's overlay convention exactly — null means *untouched* — and a null that
+   * sometimes meant "untouched" and sometimes meant "cleared" is the ambiguity the
+   * server side of this feature exists to remove (20260824000100). A separate flag
+   * says which of the two happened.
+   */
+  const [dateCleared, setDateCleared] = useState(false);
   const [expanded, setExpanded] = useState<Expanded>(null);
   const [saving, setSaving] = useState(false);
+  /**
+   * How many writes are in flight, because "Saving…" is a claim and a boolean stopped
+   * being able to keep it.
+   *
+   * Date writes share one lane now (`queueDateWrite`), so two of them genuinely overlap:
+   * the second is queued while the first is running. With a plain flag the *first* one
+   * to finish cleared it, so the indicator went away with a write still outstanding and
+   * `choose` — which refuses while saving — was unblocked early. Counting depth and
+   * clearing only at zero is the smallest thing that keeps the sentence true.
+   */
+  const savingDepth = useRef(0);
+  const beginSaving = () => {
+    savingDepth.current += 1;
+    setSaving(true);
+  };
+  const endSaving = () => {
+    savingDepth.current = Math.max(0, savingDepth.current - 1);
+    if (savingDepth.current === 0) setSaving(false);
+  };
   const [problem, setProblem] = useState<string | null>(null);
   const [confirmRebucket, setConfirmRebucket] = useState<BucketId | null>(null);
 
@@ -237,6 +267,32 @@ function Body({
   // (independent review 33d). One decision in flight answers for both taps: if it
   // stamps, the second was redundant; if it finds a date, the second would too.
   const stampPending = useRef(false);
+  /**
+   * One lane for every write that touches `watched_on`.
+   *
+   * The same machinery, and the same reason, as `companionQueue` below. Two date
+   * writes target one column, neither carries a version the server could reject a
+   * stale one by, and the one that *lands* last decides what is stored — so
+   * overlapping them makes the result a function of network timing rather than of the
+   * order the reader tapped. Independent review 36 found the concrete pair: tap
+   * "Don't remember", then "Today" before the first reply arrives, and whichever
+   * response wins the race decides whether the date is stored, while the sheet goes on
+   * displaying the second tap either way.
+   *
+   * Chaining is enough here. It does not need the sequence number the companion picker
+   * carries, because no reply is applied to state — the local overlay already shows the
+   * tap, and the queue is only deciding what reaches the server.
+   *
+   * A ref rather than state: it is machinery, and re-rendering on it would be a render
+   * per tap for nothing on screen.
+   */
+  const dateQueue = useRef<Promise<void>>(Promise.resolve());
+  const queueDateWrite = (run: () => Promise<void>) => {
+    // Both arms, so one rejected write does not poison the lane for every later one.
+    const next = dateQueue.current.then(run, run);
+    dateQueue.current = next.catch(() => {});
+    return next;
+  };
   const stored = companions.data?.map((c) => c.id) ?? [];
   const chosen = companionEdit ?? stored;
   // Mutual follows plus whoever is already on this watch. See `taggableWith`.
@@ -258,6 +314,20 @@ function Body({
     (state.note ? state.noteVisibility : noteIntent === 'review' ? 'public' : 'private');
   const spoilers = spoilersEdit ?? state.noteSpoilers;
   const effectiveDate = dateEdit ?? state.watchedOn ?? today();
+  /**
+   * Whether the row is deliberately dateless, which is a different thing from having
+   * no date *yet*.
+   *
+   * Today is a pending default and the sheet is allowed to display it as one — that is
+   * what `choose`'s stamp below makes true. It stops being honest once the row exists
+   * and still has no date, because by then the stamp has either run or been declined:
+   * a title that has been logged and carries no date is one nobody recorded a date for,
+   * and "Today" over it is the sheet claiming something it did not save.
+   *
+   * `dateEdit` overrides it, so a date picked in this session shows immediately rather
+   * than waiting for the write and the refetch.
+   */
+  const datelessOnPurpose = dateCleared || (state.exists && !state.watchedOn && !dateEdit);
 
   // Logging is a collection change like any other: it writes a feed event, moves the
   // watchlist, and changes what this reader has watched. The same set as ranking.
@@ -341,7 +411,7 @@ function Body({
     }
 
     setBucketEdit(chosen);
-    setSaving(true);
+    beginSaving();
     setProblem(null);
 
     // One operation id per intent. If this call is retried it must carry the same one, or
@@ -350,7 +420,7 @@ function Body({
     const result = await setBucket({ operationId, mediaItemId: title.id, bucket: chosen });
 
     if (!report(result)) {
-      setSaving(false);
+      endSaving();
       setBucketEdit(null);
       // **The revert above is a guess, so it is checked rather than trusted.**
       // `set_bucket` creates the `user_media` row, and an unknown outcome means it may
@@ -396,7 +466,12 @@ function Body({
     // What remains unclosable from this side is the instant between that answer
     // and the write — a date recorded on another device in that gap needs a
     // server-side conditional write, which the beta accepts as a residual risk.
-    if (!stampPending.current) {
+    // And not at all once the reader has said they do not remember when. Without this
+    // guard the stamp is the thing that undoes the clear: clearing leaves `watched_on`
+    // null, which is exactly the condition the stamp treats as "no date yet", so the
+    // next bucket tap would write today's date back over an explicit "I don't
+    // remember" and nothing on screen would say it had happened.
+    if (!stampPending.current && !dateCleared) {
       stampPending.current = true;
       void (async () => {
         try {
@@ -417,7 +492,7 @@ function Body({
       })();
     }
 
-    setSaving(false);
+    endSaving();
     refresh();
     onRank?.(chosen, 'start');
   };
@@ -476,7 +551,7 @@ function Body({
 
     if (!noteChanged && !dateChanged && !claimsChanged) return;
 
-    setSaving(true);
+    beginSaving();
     setProblem(null);
 
     /**
@@ -493,44 +568,98 @@ function Body({
     let ok = true;
     let touched = false;
     const writesNoteHere = (noteChanged || claimsChanged) && !state.exists;
-    if (dateChanged || writesNoteHere) {
-      const result = await logWatched({
-        operationId: newOperationId(),
-        mediaItemId: title.id,
-        // Omitting a field leaves the stored value alone — the server coalesces — so
-        // an untouched date is not resent and cannot overwrite one already recorded.
-        watchedOn: dateChanged ? nextDate : null,
-        note: writesNoteHere ? trimmed : null,
-        // Sent only alongside the text they describe. Passing them on a
-        // date-only call would republish a note the user was not editing.
-        noteVisibility: writesNoteHere ? nextVisibility : null,
-        noteSpoilers: writesNoteHere ? nextSpoilers : null,
-      });
-      ok = report(result);
-      touched = touched || mustReconcile(result);
-    }
 
-    // An existing note goes through save_note, which assigns rather than coalesces.
-    // log_watched cannot clear one: it treats an empty string as "no change", so a
-    // deleted note would reappear on the next read.
-    if (ok && (noteChanged || claimsChanged) && state.exists) {
-      const result = await saveNote({
-        operationId: newOperationId(),
-        mediaItemId: title.id,
-        note: trimmed,
-        baseVersion: state.noteVersion,
-        // Always the value the sheet is displaying, so what the user can see is
-        // what gets stored — including for a note written before notes were
-        // social, which opens on `private` and stays there unless they change it.
-        noteVisibility: nextVisibility,
-        noteSpoilers: nextSpoilers,
-      });
-      ok = report(result);
-      touched = touched || mustReconcile(result);
-    }
+    // On the shared lane, so a date written here cannot overtake — or be overtaken by —
+    // a clear the reader tapped a moment earlier. See `queueDateWrite`.
+    await queueDateWrite(async () => {
+      if (dateChanged || writesNoteHere) {
+        const result = await logWatched({
+          operationId: newOperationId(),
+          mediaItemId: title.id,
+          // Omitting a field leaves the stored value alone — the server coalesces — so
+          // an untouched date is not resent and cannot overwrite one already recorded.
+          watchedOn: dateChanged ? nextDate : null,
+          note: writesNoteHere ? trimmed : null,
+          // Sent only alongside the text they describe. Passing them on a
+          // date-only call would republish a note the user was not editing.
+          noteVisibility: writesNoteHere ? nextVisibility : null,
+          noteSpoilers: writesNoteHere ? nextSpoilers : null,
+        });
+        ok = report(result);
+        touched = touched || mustReconcile(result);
+      }
 
-    setSaving(false);
+      // An existing note goes through save_note, which assigns rather than coalesces.
+      // log_watched cannot clear one: it treats an empty string as "no change", so a
+      // deleted note would reappear on the next read.
+      if (ok && (noteChanged || claimsChanged) && state.exists) {
+        const result = await saveNote({
+          operationId: newOperationId(),
+          mediaItemId: title.id,
+          note: trimmed,
+          baseVersion: state.noteVersion,
+          // Always the value the sheet is displaying, so what the user can see is
+          // what gets stored — including for a note written before notes were
+          // social, which opens on `private` and stays there unless they change it.
+          noteVisibility: nextVisibility,
+          noteSpoilers: nextSpoilers,
+        });
+        ok = report(result);
+        touched = touched || mustReconcile(result);
+      }
+    });
+
+    endSaving();
     if (touched) refresh();
+  };
+
+  /**
+   * "I don't remember", which is a save and not a cancel.
+   *
+   * Separate from `saveDetails` because it is a different call for a structural
+   * reason: `log_watched` coalesces its date, so there is no argument to it that means
+   * *remove*. `clear_watch_date` is the one writer that can, and it does nothing else —
+   * the bucket, the note and the companions on the row are untouched, and the title
+   * stays logged, because a bucket is a watch signal in its own right.
+   *
+   * The optimistic flag is set first and kept even if the write fails, alongside the
+   * problem message. The alternative — reverting on failure — would put the date the
+   * reader just said they did not remember back under their thumb while an error sat
+   * above it, and the sheet's other writers all take this shape.
+   *
+   * **It queues rather than refusing while another date write is in flight, and it
+   * does not try to decide whether there is anything to clear.** Both of those were
+   * wrong in the same way, and independent review 36 found the first of them.
+   *
+   * Refusing on `saving` silently dropped the clear when it followed a date the reader
+   * had only just picked — the one sequence where dropping it is most obviously wrong.
+   * `queueDateWrite` makes the server see the taps in the order they happened instead.
+   *
+   * Skipping the call when `state` shows no row and no date was the same mistake one
+   * step further in: `state` is a read that lags every write this sheet makes, so it
+   * says "no date" for the whole window after a bucket stamp or a picked date has been
+   * sent and not yet refetched — exactly the window in which somebody changes their
+   * mind. The clear would be skipped and the date it was meant to remove would land a
+   * moment later, with the row reading "Not recorded" over it.
+   *
+   * So it always calls, and the server is specified for the empty cases: a row that is
+   * absent or already dateless answers `ok` and creates nothing (20260824000100). One
+   * request on a rare path is the cost of not reasoning about a stale read.
+   */
+  const clearDate = async () => {
+    setDateEdit(null);
+    setDateCleared(true);
+    setProblem(null);
+    beginSaving();
+    await queueDateWrite(async () => {
+      const result = await clearWatchDate({
+        operationId: newOperationId(),
+        mediaItemId: title.id,
+      });
+      report(result);
+      if (mustReconcile(result)) refresh();
+    });
+    endSaving();
   };
 
   /**
@@ -847,7 +976,9 @@ function Body({
           <SheetRow
             icon="calendar-outline"
             label="Watch date"
-            value={loaded ? formatWatchDate(effectiveDate) : undefined}
+            value={
+              loaded ? (datelessOnPurpose ? 'Not recorded' : formatWatchDate(effectiveDate)) : undefined
+            }
             expanded={expanded === 'date'}
             onPress={loaded ? () => setExpanded(expanded === 'date' ? null : 'date') : undefined}
             disabledReason={GATE_REASON[fieldState]}
@@ -855,11 +986,16 @@ function Body({
           {loaded && expanded === 'date' ? (
             <View style={styles.expanded}>
               <WatchDatePicker
-                value={effectiveDate}
+                value={datelessOnPurpose ? null : effectiveDate}
+                // The grid still has to open on *some* month, and today is the only
+                // sensible one for a title with no date to anchor it.
+                anchor={effectiveDate}
                 onChange={(iso) => {
+                  setDateCleared(false);
                   setDateEdit(iso);
                   void saveDetails({ date: iso });
                 }}
+                onClear={() => void clearDate()}
               />
             </View>
           ) : null}

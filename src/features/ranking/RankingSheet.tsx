@@ -25,6 +25,7 @@ import {
   rankStart,
   type SessionStep,
 } from './session';
+import { TitleRecallSheet } from './TitleRecallSheet';
 
 export type RankingSubject = {
   id: string;
@@ -102,15 +103,18 @@ function Session({
   const [step, setStep] = useState<SessionStep | null>(null);
   // Starts true: the session is already being opened by the time anything renders.
   const [busy, setBusy] = useState(true);
-  const [answered, setAnswered] = useState(0);
+
   /**
-   * The same count, kept in a ref because `ranking_completed` needs it *now*.
+   * How many comparisons the reader actually answered, for `ranking_completed`.
    *
-   * `act` queues `setAnswered` and then calls `apply` in the same tick, so the state
-   * `apply` closes over is the value from before the comparison that finished the
-   * session — the placing answer would be missing from every event. A ref is updated
-   * synchronously, so the number in the event is the number of comparisons the person
-   * actually answered.
+   * A ref and not state, because the event needs it *now*: `act` calls `apply` in the
+   * same tick it updates this, and a queued `setState` would leave `apply` closing over
+   * the value from before the comparison that finished the session — so the placing
+   * answer would be missing from every event. A ref is updated synchronously.
+   *
+   * Nothing renders from it. It was mirrored into state to feed a "Getting closer"
+   * line under the posters, and that line is gone (see `Comparison`), so the mirror
+   * went with it rather than being left as a re-render nobody reads.
    */
   const answeredCount = useRef(0);
 
@@ -252,7 +256,6 @@ function Session({
     setBusy(false);
     if (progress) {
       answeredCount.current = Math.max(0, answeredCount.current + progress);
-      setAnswered(answeredCount.current);
     }
     apply(next);
   };
@@ -289,7 +292,7 @@ function Session({
             subject={subject}
             pivotId={step.pivotId}
             skipped={step.skipped}
-            answered={answered}
+
             busy={busy}
             onPick={(winnerId) =>
               void act(() => rankAnswer(step.sessionId, winnerId, subject.id), 1)
@@ -365,7 +368,6 @@ function Comparison({
   subject,
   pivotId,
   skipped,
-  answered,
   busy,
   onPick,
   onBack,
@@ -375,13 +377,22 @@ function Comparison({
   subject: { id: string; title: string; posterUri?: string | null };
   pivotId: string;
   skipped: boolean;
-  answered: number;
   busy: boolean;
   onPick: (winnerId: string) => void;
   onBack: () => void;
   onSkip: () => void;
   onClose: () => void;
 }) {
+  /**
+   * Which title the reader asked to be reminded about, if any.
+   *
+   * Local to the comparison and deliberately not lifted: it is not session state, the
+   * server knows nothing about it, and a comparison that ends while the reminder is
+   * open takes the reminder with it — which is correct, because the title it was about
+   * is no longer on screen.
+   */
+  const [recalling, setRecalling] = useState<string | null>(null);
+
   const {
     data: pivot,
     isError,
@@ -440,6 +451,7 @@ function Comparison({
           posterUri={subject.posterUri ?? null}
           disabled={waiting}
           onPress={() => onPick(subject.id)}
+          onRecall={() => setRecalling(subject.id)}
         />
         {/* Beli's device (beli-252). It turns two pictures side by side into a
             question, and it costs one 32pt circle. */}
@@ -453,41 +465,114 @@ function Comparison({
           posterUri={posterUri(pivot?.poster_path, 'card')}
           disabled={waiting}
           onPress={() => pivot && onPick(pivot.id)}
+          onRecall={() => pivot && setRecalling(pivot.id)}
         />
       </View>
 
-      {/* Progress as a line of text, not a bar. The remaining count is an estimate from a
-          binary search whose range only the server knows, and a bar would imply a
-          precision the algorithm does not have (screens.md §4). */}
-      <Text variant="footnote" tone="tertiary" style={styles.centre}>
-        {skipped
-          ? 'Try this one instead'
-          : answered === 0
-            ? 'A few comparisons to go'
-            : 'Getting closer'}
-      </Text>
+      {/**
+       * One line, and only when it is saying something.
+       *
+       * It used to say "Getting closer" on every comparison after the first, and "A few
+       * comparisons to go" on the first. Founder feedback, and it is right: neither is
+       * information. "Getting closer" is encouragement with nothing behind it — the
+       * binary search's remaining range is the server's and this screen has never known
+       * it — and the count it *could* honestly give is one the algorithm cannot promise
+       * either. A line that changes on every comparison while telling the reader nothing
+       * is a moving object next to the two posters they are trying to compare.
+       *
+       * What survives is the one message that is not encouragement: after a skip the
+       * pair changes, and without a word for it a poster silently becoming a different
+       * poster looks like a bug. The slot keeps its height either way so the controls
+       * below do not jump when the sentence appears.
+       */}
+      <View style={styles.note}>
+        {skipped ? (
+          <Text variant="footnote" tone="tertiary" style={styles.centre}>
+            Try this one instead
+          </Text>
+        ) : null}
+      </View>
 
-      {/* One row, and subordinate. Two stacked full-width buttons read as the main
-          event on a screen whose main event is the two posters. */}
+      {/**
+       * One row, and subordinate.
+       *
+       * `sm` and a secondary tone, which is the founder's note: at `md` these were 48pt
+       * tall, `headline` weight and full ink — the same physical control the app uses
+       * for the primary act of a screen, sitting directly under the two posters that
+       * *are* the act. They read as the question. Compact and quieter puts them back
+       * where they belong without making them hard to hit: 36pt plus `hitSlop` clears
+       * the 44pt target, which is the rule `Button`'s own `sm` note states.
+       */}
       <View style={styles.controls}>
+        {/**
+         * `Undo`, not `Back`.
+         *
+         * Checked against `rank_back` rather than assumed: it restores `lo`, `hi` and
+         * `pivot` from the last history entry, pops that entry, and decrements the skip
+         * count (20260813001600). It genuinely reverses the previous answer — the
+         * search range returns to what it was before it — so `Back` was the weaker of
+         * the two words, and on a screen with no navigation stack it also invited the
+         * reading "leave this sheet", which is the X above.
+         *
+         * At the first comparison there is no answer to reverse and the server ends the
+         * session instead. That is still the same promise kept: the last thing the
+         * reader did was start ranking, and this undoes it. The title keeps its bucket
+         * and stays Logged.
+         */}
         <Button
-          label="Back"
+          label="Undo"
           kind="tertiary"
+          size="sm"
+          tone="secondary"
+          // 36pt plus 4 either side is the 44 design-system.md §8 requires. `sm` is
+          // deliberately shorter than that on its own and says so — slop is the right
+          // tool for a compact control, and a taller box is not — but the slop has to
+          // be passed, which is the half review 36 found missing.
+          hitSlop={theme.space[1]}
           onPress={onBack}
           disabled={busy}
           disabledReason="Waiting for the last answer to save."
         />
-        {/* Beli offers "Too tough" and "Skip" as separate controls and both call the same
-            thing. One control, because two buttons that do the same thing is a choice the
-            user has to think about for no reason. */}
+        {/**
+         * `Skip`, which is one control for two reasons.
+         *
+         * It was "Too tough to call", which names only half of what `rank_skip` is for.
+         * The founder's case is the other half: the poster is familiar and the memory is
+         * not, and "too tough to call" is the wrong sentence for "I do not remember this
+         * one well enough to say". Both want the same thing — a different opponent — and
+         * both already got it, because this button has always called `rank_skip`.
+         *
+         * So the mechanism is unchanged and the word is the fix. `Skip` covers both
+         * readings, and it is the shortest label in a row that had to fit under two
+         * posters on a 375pt screen. The accessibility label spells out what is being
+         * skipped, because "Skip" alone could be heard as skipping the whole ranking —
+         * which is the X, and is a different thing.
+         *
+         * Still one control and not two. Beli offers "Too tough" and "Skip" separately
+         * and both call the same thing; two buttons with one effect is a decision the
+         * reader has to make for no reason.
+         */}
         <Button
-          label="Too tough to call"
+          label="Skip"
+          accessibilityLabel="Skip this comparison"
+          accessibilityHint="Compares against a different title instead."
           kind="tertiary"
+          size="sm"
+          tone="secondary"
+          hitSlop={theme.space[1]}
           onPress={onSkip}
           disabled={busy}
           disabledReason="Waiting for the last answer to save."
         />
       </View>
+
+      {/**
+       * Mounted only while open, like every other sheet in the app, and *inside* the
+       * comparison rather than beside it — so the session, the pivot and the answers
+       * already given are all still standing behind it. Dismissing returns to the exact
+       * same pair because nothing about the pair was ever unmounted.
+       */}
+      <TitleRecallSheet mediaItemId={recalling} onClose={() => setRecalling(null)} />
     </View>
   );
 }
@@ -514,27 +599,68 @@ function Card({
   posterUri,
   disabled,
   onPress,
+  onRecall,
 }: {
   title: string;
   posterUri?: string | null;
   disabled: boolean;
   onPress: () => void;
+  onRecall: () => void;
 }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Choose ${title}`}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-    >
-      <Poster uri={posterUri} title={title} width="fill" size="md" />
-      <View style={styles.cardTitleBox}>
-        <Text variant="callout" numberOfLines={2} style={styles.centre}>
-          {title}
+    <View style={styles.card}>
+      {/**
+       * Tap chooses, press-and-hold remembers.
+       *
+       * `Pressable` does not fire both: a press that runs long enough to call
+       * `onLongPress` has its `onPress` suppressed on release, so holding a poster to
+       * read about it cannot also register as picking it. That is the whole safety
+       * property this gesture needed — a long press that also answered the comparison
+       * would put a judgement on the server for a title the reader was still trying to
+       * place.
+       *
+       * `delayLongPress` is React Native's default 500ms, left alone: shorter starts
+       * catching deliberate taps, and this gesture is not one anybody is in a hurry to
+       * complete.
+       */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Choose ${title}`}
+        disabled={disabled}
+        onPress={onPress}
+        onLongPress={onRecall}
+        style={({ pressed }) => [styles.cardPress, pressed && styles.pressed]}
+      >
+        <Poster uri={posterUri} title={title} width="fill" size="md" />
+        <View style={styles.cardTitleBox}>
+          <Text variant="callout" numberOfLines={2} style={styles.centre}>
+            {title}
+          </Text>
+        </View>
+      </Pressable>
+
+      {/**
+       * The same thing again, as something you can reach.
+       *
+       * A long press is invisible and unreachable: VoiceOver and TalkBack have no
+       * general gesture for it, and a reader who cannot hold steady has no way to
+       * perform one at all. design-system.md §8's rule is that a hidden gesture may be
+       * the *fast* path and never the only one, so the affordance is a real button with
+       * its own label — small, under the poster it belongs to, and out of the way of
+       * the two cards that are the actual question.
+       */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Remind me about ${title}`}
+        hitSlop={theme.layout.minTapTarget / 2}
+        onPress={onRecall}
+        style={({ pressed }) => [styles.recall, pressed && styles.pressed]}
+      >
+        <Text variant="caption" tone="tertiary">
+          What is this?
         </Text>
-      </View>
-    </Pressable>
+      </Pressable>
+    </View>
   );
 }
 
@@ -719,6 +845,13 @@ const styles = StyleSheet.create({
     maxWidth: theme.poster.md.width,
     gap: theme.space[2],
   },
+  // The poster and its name, which is the part that answers the comparison. Split out
+  // from `card` so the recall affordance below can be its own control rather than a
+  // second gesture on the same one.
+  cardPress: { alignSelf: 'stretch', alignItems: 'center', gap: theme.space[2] },
+  // Caption, tertiary, no border, no background. It has to be reachable and it must
+  // not compete: the two things that look like buttons on this screen are the posters.
+  recall: { paddingVertical: theme.space[1] },
   or: {
     width: 32,
     height: 32,
@@ -734,6 +867,10 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   pressed: { opacity: 0.85 },
+  // The skip explanation's slot. Fixed at one `footnote` line so the controls below do
+  // not move when the sentence appears and disappears — a row of buttons that shifts
+  // under the reader's thumb between comparisons is worse than the copy it saved.
+  note: { minHeight: theme.typography.footnote.lineHeight, justifyContent: 'center' },
   // A row, not a stack. Two full-width buttons under the posters read as the primary
   // action on a screen whose primary action is tapping a poster.
   controls: {

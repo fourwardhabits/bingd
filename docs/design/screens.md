@@ -94,7 +94,11 @@ Opened from **+**, from a title page, or from a search result. A sheet, not a sc
 
 Anatomy: title header with poster and a close control; a category indicator (Movies or TV seasons); **"How was it?"** with the three bucket chips; then optional rows for who you watched it with, a private note, and the date.
 
-**Built 2026-08-14 without two of those rows.** The tagging picker needs the social graph, which does not exist yet. The date row is not built either, and the consequence is worth stating plainly: the watch date is written only alongside a note, so a user cannot record "I watched this last night" without also typing something. Recorded in [`open-questions.md`](../product/open-questions.md).
+**Built 2026-08-14 without two of those rows.** The tagging picker needs the social graph, which does not exist yet. The date row is not built either, and the consequence is worth stating plainly: the watch date is written only alongside a note, so a user cannot record "I watched this last night" without also typing something. Recorded in [`open-questions.md`](../product/open-questions.md). *Both were built later; the date row's own behaviour is below.*
+
+**The watch date, and forgetting it (2026-08-24).** The row offers Today, Yesterday, a month grid, and **"Don't remember"**. Choosing a bucket stamps today the first time, and it must — the row displays "Today" as a pending default, and a default the sheet never saved is a claim it cannot keep. What was missing was the way back: `log_watched` coalesces its date, so nothing in the app could say "I watched this, I just don't know when", and the founder had to leave the flow and edit the title afterwards, which does not work either for the same reason.
+
+**Clearing the date does not un-log the title.** The bucket is an independent watch signal, so the title stays Logged with `watched_on = null`; the server enforces that rather than merely allowing it, refusing the one case where the date is the only record of the watch (api.md §1). The label is **"Don't remember"** and not "Clear date": clear is what the control does to the field, not what the person means, and it reads as undoing the log. The row then reads **"Not recorded"** rather than "Today", and the bucket stamp is suppressed so the next rating tap cannot silently write the date back.
 
 Two rules the architecture depends on:
 
@@ -113,9 +117,27 @@ Beli's version is a stacked card inside the same sheet, with Undo, "Too tough," 
 
 Bingd's version is barer. Two `poster.xl` cards, **"Which did you like more?"** above them in `title2`, the film's title beneath each card, and the controls below. No year, no runtime, no genre. Everything else is something the user reads instead of deciding.
 
-**Two controls, not three (built 2026-08-14).** This section previously specified three, mapping to `rank_back`, `rank_skip` and `rank_skip`. Beli's "Too tough" and Skip call the same thing, so Bingd ships **Back** and **Too tough to call**: two buttons that do the same work is a choice the user has to think about for no reason.
+**Two controls, not three (built 2026-08-14).** This section previously specified three, mapping to `rank_back`, `rank_skip` and `rank_skip`. Beli's "Too tough" and Skip call the same thing, so Bingd ships one control for both: two buttons that do the same work is a choice the user has to think about for no reason.
 
-Progress is shown as a quiet line rather than a bar, because the count is an estimate from the binary search and a bar implies precision the algorithm does not have. **Built without the count.** This section previously specified "About 3 more". The remaining count is a property of a range only the server knows, and the server does not return it, so the line reads "A few comparisons to go" and then "Getting closer" — an estimate stated as one, rather than a fabricated number.
+**Undo and Skip (renamed 2026-08-24).** The two were **Back** and **Too tough to call**, and both words were checked against what the server does rather than kept.
+
+`rank_back` restores `lo`, `hi` and `pivot` from the history entry it pops, and decrements the skip count (20260813001600). It genuinely reverses the previous answer, so **Undo** is the accurate word and **Back** was the weaker one — and on a screen with no navigation stack, "Back" also invited the reading "leave this sheet", which is the close control in the corner. At the first comparison there is nothing to reverse and the server ends the session instead; the title keeps its bucket and stays Logged, which is the same promise kept.
+
+**Skip** replaces **Too tough to call** because that wording named only half of what `rank_skip` is for. The founder's case is the other half: the poster is familiar and the memory is not, and "too tough to call" is the wrong sentence for "I do not remember this one well enough to say". Both want a different opponent and both always got one — the mechanism is unchanged and the word is the fix. It is also the shortest label in a row that has to fit under two posters on a 375pt screen. Its accessibility label is "Skip this comparison", because "Skip" alone could be heard as skipping the whole ranking, which is a different act with a different control.
+
+Both are `sm` and secondary-toned since the same date. At `md` they were 48pt tall, `headline` weight and full ink — physically the control the app uses for the primary act of a screen, sitting directly under the two posters that *are* the act, so they read as the question rather than as the way out of it.
+
+**No progress line at all (2026-08-24).** This section previously specified a quiet line rather than a bar, on the grounds that the remaining count is an estimate from a range only the server knows. That reasoning was right and it argued one step further than the section took it: an estimate this screen cannot make is not information, and "A few comparisons to go" followed by "Getting closer" is encouragement. Founder feedback called it distracting and non-actionable, and it was also a line that changed on every comparison beside two posters somebody is trying to compare.
+
+What survives is the one message that is not encouragement: after a skip the pair changes, and **"Try this one instead"** says why. Without it a poster silently becoming a different poster reads as a fault. The slot keeps its height when the sentence is absent, so the controls below do not move between comparisons.
+
+**Long press to remember a title (2026-08-24).** Founder request: a poster and a name are enough to recognise a film and not always enough to *remember* it, and the only way out of that was to abandon the ranking and look the title up — which loses the session and every answer already given.
+
+Pressing and holding either poster opens a compact sheet inside the comparison: the full name, the year, certification, length, genres, who directed or created it, the top cast and the overview, scrollable if it runs long. Nothing to act on — no score, no watchlist control, no reviews — because an action here would be a second decision competing with the one the reader is in the middle of. Dismissing returns to the same pair, because the reminder renders *inside* the comparison and nothing about the pair was ever unmounted.
+
+React Native suppresses `onPress` after a long press, so holding a poster to read about it cannot also register as choosing it — the correctness property this gesture needed. A long press is invisible and unreachable to a screen reader, so each card also carries a small **"What is this?"** control with its own label, per design-system.md §8's rule that a hidden gesture may be the fast path and never the only one.
+
+It adds no new data path: the row comes from `media_items`, which the comparison card already reads, and the credits from the `credits` facet of `media_cache`, which the title page has read since the integration landed. Nothing is fetched until somebody actually asks.
 
 **No prefetch, and none is possible (corrected 2026-08-14).** This section previously claimed the next pivot's poster prefetches while the user decides. It cannot: the next pivot's identity is chosen by `rank_answer` from the answer being given, so it does not exist until the round trip returns. What is built instead is that neither card can be tapped until the opponent is on screen — answering against a card showing an ellipsis records a preference over something the user was never shown. A stall here still damages the mechanic, and the honest fix is the server round trip, not a prefetch.
 

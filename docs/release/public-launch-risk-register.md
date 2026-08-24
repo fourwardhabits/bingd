@@ -439,3 +439,26 @@ recorded decision, not work. No existing major changed classification in this pa
 **No SQL, no migration, no native change.** The one thing this pass proved about the
 data model is that it did not need changing: a review has always been a note with
 `note_visibility = 'public'`, and every privacy gate around it was already correct.
+
+## 9. Changes made in the ranking / Trending pass, 2026-08-24
+
+| Change | Effect on this register |
+|---|---|
+| Trending Now disappearance diagnosed | **No code regression.** The cache aged past the 168-hour cutoff because nothing schedules its refresh. Recorded as **TREND-1** |
+| Trending: pull-to-refresh and focus refetch | Client-only. Removes the case where one dropped connection hid the shelf until the process restarted |
+| Trending freshness asserted in `remote-smoke.mjs` | Operational. A silent shelf is now a failing operator check rather than a surprise on somebody's phone |
+| Ranking controls: `Back` → `Undo`, `Too tough to call` → `Skip`, both `sm`/secondary | **None on risk.** Labels and type only; `rank_back` and `rank_skip` are untouched and no bucket, position or score semantics moved |
+| "Getting closer" removed | Cosmetic |
+| Long-press title recall during a comparison | Client-only, and read-only: two existing queries (`media_items`, the `credits` facet), no new provider endpoint, nothing to act on in the sheet |
+| `clear_watch_date` (`20260824000100`) | **A migration, so this tranche needs a backend deploy.** New definer function, `authenticated` only; no column, constraint or data change. Reaches a state the schema has permitted since `20260813000500` |
+| "Don't remember" in the log sheet's date row | Client-only, and inert against a backend that has not deployed the migration above — the button would report a failure rather than write anything wrong |
+| Bounded logging sanity scan | **NO OBVIOUS BUG.** Recorded as **LOG-1** |
+
+**Deployment order matters this once.** The client half of the watch-date clear calls a
+function that does not exist on a project still on `20260823000100`. Deploy the migration
+before shipping the build or the OTA that contains it; every other change in this pass is
+independent of it.
+
+**M1, M10 and M11 are unchanged and were not acted on.** UGC moderation, public open
+signup and push all stay recorded decisions rather than work. Nothing in this pass touches
+a privacy gate, a note's visibility, or the bucket/score semantics the Reviews pass pinned.

@@ -194,6 +194,32 @@ export async function logWatched(input: {
 }
 
 /**
+ * Forgets the exact date, and keeps the watch.
+ *
+ * The counterpart to `logWatched`'s coalescing, and it exists for the same reason
+ * `saveNote` does: a writer that can only ever *set* a value has no way to remove one,
+ * and "I watched this, I do not remember when" is a state the schema has always allowed
+ * and nothing could reach (20260824000100).
+ *
+ * The title stays logged. A bucket is a watch signal in its own right, so clearing the
+ * date leaves the collection row, the rating, the note and the watchlist exactly as
+ * they were. The one case the server refuses — 22023 — is a row where the date is the
+ * *only* thing saying the title was watched, because clearing that one would un-log it
+ * rather than forget a date. Callers show that refusal rather than retrying it.
+ */
+export async function clearWatchDate(input: {
+  operationId: string;
+  mediaItemId: string;
+}): Promise<WriteResult> {
+  const { data, error } = await supabase.rpc('clear_watch_date', {
+    p_operation_id: input.operationId,
+    p_media_item_id: input.mediaItemId,
+  });
+
+  return error ? interpret(error) : statusOf(data);
+}
+
+/**
  * Writes a note, including clearing one.
  *
  * Separate from `log_watched` because that one coalesces: it can create a note and can

@@ -9,15 +9,34 @@ import { RankingSheet, type RankingSheetProps } from './RankingSheet';
 
 const mockRpc = jest.fn();
 const mockPivotRead = jest.fn();
+const mockRecallRead = jest.fn();
+const mockCreditsRead = jest.fn();
 const mockSelect = jest.fn();
 
+/**
+ * Three reads share this mock, told apart by their columns rather than by their table.
+ *
+ * The comparison card and the title reminder both select from `media_items`, and the
+ * whole point of `queryKeys.titleRecall` existing separately is that they ask for
+ * different shapes — so the column list is the honest discriminator, and a test that
+ * dispatched on the table name would pass even if the two collapsed onto one key.
+ */
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (...args: unknown[]) => mockRpc(...args),
     from: () => ({
       select: (columns: string) => {
         mockSelect(columns);
-        return { eq: () => ({ single: () => mockPivotRead() }) };
+        const chain = {
+          eq: () => ({
+            single: () => (columns.includes('overview') ? mockRecallRead() : mockPivotRead()),
+            // `use-credits` narrows by media item and then by facet.
+            eq: () => ({ maybeSingle: () => mockCreditsRead() }),
+          }),
+          // The head-count probe `use-credits` opens with, awaited directly.
+          then: (resolve: (value: unknown) => unknown) => resolve({ count: 1, error: null }),
+        };
+        return chain;
       },
     }),
   },
@@ -82,6 +101,29 @@ beforeEach(() => {
   mockPivotRead.mockReset();
   mockPivotRead.mockResolvedValue({
     data: { id: 'film-p', title: 'Film P', poster_path: null },
+    error: null,
+  });
+  mockRecallRead.mockReset();
+  mockRecallRead.mockResolvedValue({
+    data: {
+      id: 'film-p',
+      kind: 'movie',
+      title: 'Film P',
+      season_number: null,
+      release_date: '1998-01-01',
+      runtime_minutes: 117,
+      episode_count: null,
+      overview: 'A courier misplaces a briefcase.',
+      poster_path: null,
+      genres: ['Thriller'],
+      certification: 'R',
+      parent: null,
+    },
+    error: null,
+  });
+  mockCreditsRead.mockReset();
+  mockCreditsRead.mockResolvedValue({
+    data: { payload: { cast: [{ id: 1, name: 'A Name' }], crew: [{ name: 'A Director', job: 'Director' }] } },
     error: null,
   });
 });
@@ -185,6 +227,60 @@ describe('the comparison', () => {
     });
   });
 
+  /**
+   * The two secondary controls, pinned to what the server actually does.
+   *
+   * Both labels changed on 2026-08-24 and neither mechanism did. `Back` became `Undo`
+   * because `rank_back` genuinely reverses the last answer — it restores `lo`, `hi` and
+   * `pivot` from the history entry it pops (20260813001600) — and `Too tough to call`
+   * became `Skip` because the founder's case for it is "I do not remember this one",
+   * which the old wording excluded and the same `rank_skip` has always served. These
+   * assert the pairing so a future rename cannot quietly point a word at a new call.
+   */
+  it('undoes the last comparison through rank_back', async () => {
+    answering(comparison(), comparison({ pivot: 'film-q' }));
+    const sheet = await openSheet();
+
+    await sheet.ready('Film P');
+    await fireEvent.press(sheet.getByRole('button', { name: 'Undo' }));
+
+    await waitFor(() => expect(callsTo('rank_back')).toHaveLength(1));
+    expect(callsTo('rank_back')[0][1]).toEqual({ p_session_id: SESSION });
+    expect(callsTo('rank_answer')).toHaveLength(0);
+  });
+
+  it('skips to a different opponent through rank_skip, and places nothing', async () => {
+    answering(comparison(), comparison({ pivot: 'film-q', skipped: true }));
+    const sheet = await openSheet();
+
+    await sheet.ready('Film P');
+    await fireEvent.press(sheet.getByLabelText('Skip this comparison'));
+
+    await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
+    expect(callsTo('rank_skip')[0][1]).toEqual({ p_session_id: SESSION });
+    // The comparison is replaced, not answered — no judgement is recorded for a pair
+    // the reader declined to judge.
+    expect(callsTo('rank_answer')).toHaveLength(0);
+    await waitFor(() => expect(sheet.getByText('Try this one instead')).toBeTruthy());
+  });
+
+  it('says nothing about progress it cannot measure', async () => {
+    // Founder feedback, 2026-08-24. The line under the posters used to read "Getting
+    // closer" on every comparison after the first, which is encouragement rather than
+    // information: the binary search's remaining range belongs to the server and this
+    // screen has never known it.
+    answering(comparison(), comparison({ pivot: 'film-q' }));
+    const sheet = await openSheet();
+
+    await sheet.ready('Film P');
+    expect(sheet.queryByText('Getting closer')).toBeNull();
+    expect(sheet.queryByText('A few comparisons to go')).toBeNull();
+
+    await fireEvent.press(sheet.card('Film A'));
+    await waitFor(() => expect(callsTo('rank_answer')).toHaveLength(1));
+    expect(sheet.queryByText('Getting closer')).toBeNull();
+  });
+
   it('will not take an answer against a card that is not on screen yet', async () => {
     // Answering here would record a preference over a card reading "…". The subject's card
     // has to wait too, not just the pivot's.
@@ -199,6 +295,101 @@ describe('the comparison', () => {
     expect(sheet.card('Film A').props.accessibilityState.disabled).toBe(true);
     await fireEvent.press(sheet.card('Film A'));
     expect(callsTo('rank_answer')).toHaveLength(0);
+  });
+
+  /**
+   * Title recall (founder request, 2026-08-24).
+   *
+   * The property that matters is negative: a reader who holds a poster to remember what
+   * it is must not thereby vote for it. Everything else about this feature is a sheet;
+   * that one thing is a correctness rule about the ranking.
+   */
+  describe('remembering a title mid-comparison', () => {
+    it('opens the reminder on a long press without answering the comparison', async () => {
+      answering(comparison());
+      const sheet = await openSheet();
+
+      await sheet.ready('Film P');
+      await fireEvent(sheet.card('Film P'), 'longPress');
+
+      await waitFor(() =>
+        expect(sheet.getByText('A courier misplaces a briefcase.')).toBeTruthy(),
+      );
+      // The whole point. React Native suppresses `onPress` after a long press, and this
+      // is the assertion that keeps that guarantee load-bearing rather than assumed.
+      expect(callsTo('rank_answer')).toHaveLength(0);
+      expect(callsTo('rank_skip')).toHaveLength(0);
+    });
+
+    it('shows what jogs a memory, and nothing to act on', async () => {
+      answering(comparison());
+      const sheet = await openSheet();
+
+      await sheet.ready('Film P');
+      await fireEvent(sheet.card('Film P'), 'longPress');
+      await waitFor(() => expect(sheet.getByText('Directed by A Director')).toBeTruthy());
+
+      expect(sheet.getByText('1998')).toBeTruthy();
+      expect(sheet.getByText('R · 117m · Thriller')).toBeTruthy();
+      expect(sheet.getByText('With A Name')).toBeTruthy();
+      // A reminder, not the title page: nothing here changes the collection.
+      expect(sheet.queryByRole('button', { name: 'Add to watchlist' })).toBeNull();
+    });
+
+    it('returns to the same pair and the same session when dismissed', async () => {
+      answering(comparison());
+      const sheet = await openSheet();
+
+      await sheet.ready('Film P');
+      await fireEvent(sheet.card('Film P'), 'longPress');
+      await waitFor(() =>
+        expect(sheet.getByText('A courier misplaces a briefcase.')).toBeTruthy(),
+      );
+
+      await fireEvent.press(sheet.getByRole('button', { name: 'Back to ranking' }));
+
+      await waitFor(() =>
+        expect(sheet.queryByText('A courier misplaces a briefcase.')).toBeNull(),
+      );
+      expect(sheet.getByText('Which did you like more?')).toBeTruthy();
+      expect(sheet.card('Film P')).toBeTruthy();
+      // The session was never cancelled and never restarted — the reminder rendered
+      // inside the comparison rather than in place of it.
+      expect(callsTo('rank_cancel')).toHaveLength(0);
+      expect(callsTo('rank_start')).toHaveLength(1);
+    });
+
+    it('offers the same thing to somebody who cannot long press', async () => {
+      // design-system.md §8: a hidden gesture may be the fast path and never the only
+      // one. VoiceOver and TalkBack have no general long-press gesture.
+      answering(comparison());
+      const sheet = await openSheet();
+
+      await sheet.ready('Film P');
+      await fireEvent.press(sheet.getByLabelText('Remind me about Film P'));
+
+      await waitFor(() =>
+        expect(sheet.getByText('A courier misplaces a briefcase.')).toBeTruthy(),
+      );
+      expect(callsTo('rank_answer')).toHaveLength(0);
+    });
+
+    it('reads a different shape from the comparison card, under its own key', async () => {
+      // If these ever collapsed onto one query key, whichever ran first would serve the
+      // other a row it did not ask for — the hazard `queryKeys.comparisonCard` records.
+      answering(comparison());
+      const sheet = await openSheet();
+
+      await sheet.ready('Film P');
+      await fireEvent(sheet.card('Film P'), 'longPress');
+      await waitFor(() =>
+        expect(sheet.getByText('A courier misplaces a briefcase.')).toBeTruthy(),
+      );
+
+      const columns = mockSelect.mock.calls.map(([value]) => value as string);
+      expect(columns.some((value) => value.includes('overview'))).toBe(true);
+      expect(columns).toContain('id, title, poster_path');
+    });
   });
 
   it('says so when the other title cannot be loaded, instead of showing an ellipsis', async () => {
@@ -284,18 +475,36 @@ describe('closing', () => {
     expect(sheet.onClose).toHaveBeenCalled();
   });
 
-  it('does not cancel a session that Back already ended', async () => {
+  it('does not cancel a session that Undo already ended', async () => {
     // rank_back at the first comparison deletes the session itself.
     answering(comparison(), { data: { done: false, cancelled: true }, error: null });
     const sheet = await openSheet();
 
     await sheet.ready('Film P');
-    await fireEvent.press(sheet.getByRole('button', { name: 'Back' }));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Undo' }));
     await waitFor(() => expect(sheet.getByText('Still in your collection')).toBeTruthy());
 
     await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
 
     expect(callsTo('rank_cancel')).toHaveLength(0);
+  });
+
+  it('abandoning a session writes no collection state of its own', async () => {
+    // The Unranked contract, pinned. Leaving mid-comparison cancels the session and
+    // nothing else: the bucket the reader already chose survives, the title stays
+    // Logged, and it is Logged-and-not-Ranked — which is exactly what the unranked
+    // reminder is for. Nothing here logs a watch that the bucket tap had not already
+    // claimed.
+    answering(comparison());
+    const sheet = await openSheet();
+
+    await sheet.ready('Film P');
+    await fireEvent.press(sheet.close());
+
+    await waitFor(() => expect(callsTo('rank_cancel')).toHaveLength(1));
+    expect(callsTo('log_watched')).toHaveLength(0);
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('rank_answer')).toHaveLength(0);
   });
 
   it('does not cancel a session the server says has gone', async () => {

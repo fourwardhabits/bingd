@@ -517,6 +517,97 @@ push other people's recent activity off the bottom with no way to page past it. 
 pre-existing and affects every follow today; it is the thing that will actually be
 noticed as follow counts grow, and it is what a social-density tranche should budget for.
 
+**Re-checked 2026-08-24 and unchanged.** `useFeed` still reads the approved follow set
+at query time and still passes it to a `feed_events` read with `.limit(30)` and no
+cursor. Confirmed while diagnosing TREND-1 below, which is a different query against a
+different table — the flat window was not implicated in it and was left alone.
+
+---
+
+### TREND-1 — Trending Now disappeared because nothing refreshes the cache
+
+**Diagnosed and fixed 2026-08-24, on a founder report that the shelf had vanished from
+the top of the Feed and would not come back on a restart.**
+
+**Not a code regression.** The four `provider_list_cache` rows were last written at
+`2026-08-17T02:33Z` and were 172.6 hours old when the report came in —
+`TRENDING_MAX_AGE_MS` is 168. `isTooOldToShow` therefore dropped every row,
+`useTrending` returned no items, and `TrendingShelf` correctly rendered nothing, because
+"Trending now" over a week-old list is a claim the screen cannot support. Classification:
+**client filtered all**, with an operational cause upstream.
+
+The cause is that **nothing schedules `npm run trending:refresh`**. The seed script's own
+docstring says exactly what would happen — "one not refreshed within the week
+disappears" — and names running it on a cron as the intended arrangement and running it
+by hand as the current one. So the shelf worked for a week and then stopped, on a clock
+nobody was watching.
+
+The 168-hour cutoff was **not** relaxed. Widening it would be inventing stale content to
+keep a section visible, which is the failure the cutoff exists to prevent.
+
+Three things changed instead:
+
+1. **It is observable.** `remote-smoke.mjs` now reads `fetched_at` on both `.day` lists
+   and fails when either is past the cutoff, naming the command that fixes it. The shelf
+   fails silently by design, so a shelf that has stopped rendering is invisible to
+   everyone including whoever runs the project; this puts the condition where an
+   operator already looks.
+2. **Pull-to-refresh reaches it.** The Feed's `RefreshControl` refreshed the feed,
+   reactions, comment counts and the bell, and not the shelf above them — so "Trending is
+   gone, let me pull to refresh" was the obvious recovery and the one gesture that could
+   not perform it. It now refetches by key, since the shelf owns its own query.
+3. **A transient failure can no longer become permanent.** `useTrending` opts into
+   `refetchOnWindowFocus`. The Feed tab stays mounted for the life of the app, so a
+   failed read had no observer remounting against it and `staleTime` does not apply to a
+   query with no data; one dropped connection removed the shelf until the process was
+   restarted. The 30-minute `staleTime` bounds the cost — a healthy shelf is not
+   refetched on focus at all.
+
+**The residual is operational and stated rather than closed:** the lists still have no
+scheduler, so they still need `npm run trending:refresh` at least weekly. The smoke test
+is what makes that a check rather than a surprise.
+
+**Checked and cleared:** the `focusManager`/`AppState` wiring added with the notification
+tranche was not implicated. It gates retry continuation (`retryer.js`), which pauses
+while backgrounded and resumes on focus; it cannot produce a permanent disappearance,
+and the cache ages recorded above are a complete explanation on their own.
+
+---
+
+### LOG-1 — Can a passive action mark a title as watched?
+
+**Bounded scan, 2026-08-24. Verdict: NO OBVIOUS BUG.** Recorded so the next person does
+not repeat it, and so the semantics it relies on are written down rather than inferred.
+
+Every writer that can create collection state was enumerated from its call site, not from
+its name. There are six, and all six sit behind a tap:
+
+| Call site | Trigger |
+|---|---|
+| `LogSheet` → `setBucket` | tapping a bucket chip under **"How was it?"** |
+| `LogSheet` → `logWatched` (date stamp) | the same tap, and only when no date is stored |
+| `LogSheet` → `logWatched` / `saveNote` | saving a note or a date the reader edited |
+| `LogSheet` → `clearWatchDate` | tapping **"Don't remember"** |
+| `LogSheet` → `logWatched` (row for a tag) | ticking a companion on a watch |
+| `TasteBucketSheet` → `setBucket` | tapping a bucket during onboarding |
+
+`LogSheet` contains no `useEffect` at all, so opening it writes nothing. The passive paths
+named in the scan were each checked and each writes nothing: opening a title page,
+`set_watchlist` (which touches only the `watchlist` table), opening and dismissing the log
+sheet, opening the review composer or the private note, Recommend, and feed interaction.
+
+**The ranking sheet cannot start a session that a bucket tap did not authorise.** All three
+of its mount points — the Log tab, the title page and taste onboarding — set their subject
+from an `onRank`/`onChosen` callback that fires after the bucket is chosen. Abandoning a
+session calls `rank_cancel` and writes nothing else, which leaves the title Logged and not
+Ranked: the canonical **Unranked** state, and what the unranked reminder is for.
+
+**The semantics this rests on, stated plainly:** *choosing a bucket is the watch claim.*
+The prompt is "How was it?" in the past tense over three chips, which is unambiguous, and
+the stamp that follows it is the sheet making true the "Today" it was already displaying.
+Regression coverage for the passive half is in `LogSheet.test.tsx` and
+`RankingSheet.test.tsx`.
+
 ---
 
 ### FS-1 — The Following-score drilldown

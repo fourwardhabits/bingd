@@ -25,6 +25,7 @@ import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { TrendingShelf } from '@/features/trending/TrendingShelf';
 import { track } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
+import { queryKeys } from '@/lib/query';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
 import {
   ActivityRow,
@@ -194,6 +195,13 @@ export default function FeedScreen() {
               // this page" gesture in the app refreshed everything on it except the
               // control most likely to be wrong.
               void notifications.refetch();
+              // And the shelf above the activity, which is the part of this screen a
+              // reader is most likely to be pulling *at*: it renders nothing when its
+              // read fails, so "Trending is gone, let me pull to refresh" was the
+              // obvious recovery and the one gesture that could not perform it. The
+              // shelf owns its own query, so this reaches it by key rather than by
+              // handing a `refetch` back up through props.
+              void queryClient.refetchQueries({ queryKey: queryKeys.trending() });
             }}
             tintColor={theme.semantic.action}
             colors={[theme.semantic.action]}

@@ -38,10 +38,17 @@ Outbox-eligible functions additionally take `p_operation_id uuid` as their first
 | `set_watchlist(p_operation_id, media_item_id, present bool)` | Add or remove from the watchlist | **yes** |
 | `set_season_progress(p_operation_id, media_item_id, progress)` | Mark a season *watching* or *completed* | **yes** |
 | `save_note(p_operation_id, media_item_id, note, p_base_updated_at?)` | Update the private note | **yes** |
+| `clear_watch_date(p_operation_id, media_item_id)` | Set `watched_on` to null, leaving the title logged | **yes** |
 
 **Implemented in `20260813002300_collection_writers.sql`.** Two behaviours the table above does not state, both settled while building it:
 
 `set_bucket` creates the collection row when the title has not been logged. A bucket is a statement about something the user has watched, so bucketing implies logging, and making the client send two operations to express one tap would open a window in which a title is watched with no opinion attached — a state no screen asks for.
+
+**`clear_watch_date` is the only writer that can put a null into `watched_on` (added 2026-08-24, `20260824000100`).** Both note writers upsert with `set watched_on = coalesce(excluded.watched_on, user_media.watched_on)`, and that coalesce is load-bearing in the other direction: it is what stops `save_note` and every date-less re-log from wiping a date already recorded. The consequence was that null meant *leave it alone* to every caller, `user_media` has no INSERT or UPDATE policy, and "I watched this, I do not remember when" was a state the schema had always allowed and nothing could reach. The log sheet stamps today the first time a bucket is chosen, so the founder met the gap from the product side.
+
+A flag on `log_watched` was rejected: its date argument already means "leave it alone" when null, and a flag would give one parameter two contradictory readings decided by a second one — on the function most often called with arguments assembled from a form.
+
+**Clearing a date is not un-watching, and the function refuses to let it become that.** For nearly every row it cannot: the bucket remains, and a bucket is an independent watch signal (`20260815040000`). The exception is reachable, because the log sheet lets a date be set before a bucket is chosen — a row whose *only* watch signal is the date. Clearing that one would leave a `user_media` row asserting nothing at all, which is the deletion of a log dressed up as an edit, so it raises `BG422` (`22023`) instead. The watchlist is untouched either way, and that falls out of the trigger rather than from a rule here: it fires only when a signal *becomes* non-null.
 
 **A series can be watchlisted but not logged.** PRD §10 forbids ranking a whole series, and the collection is what feeds ranking. "I want to watch this show" is also a coherent statement where "I watched this show" is ambiguous about which seasons, so `set_watchlist` accepts any kind and the rest of §1 requires a movie or a season.
 

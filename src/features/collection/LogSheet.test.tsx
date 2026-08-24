@@ -288,6 +288,183 @@ describe('choosing a bucket', () => {
  * finding: a Loved title, Change your rating, Loved, and no response of any kind. The
  * first test below is the one that changed, and it is the regression guard.
  */
+/**
+ * The bounded logging sanity check (2026-08-24).
+ *
+ * The question behind it: can a passive act — opening something, looking at it, backing
+ * out — leave a title marked as watched. Every writer that can create collection state
+ * lives in this file or in `TasteBucketSheet`, and each one sits behind a tap; these
+ * pin the passive half so a future effect cannot quietly acquire a write.
+ */
+describe('opening the sheet and leaving', () => {
+  it('writes nothing at all when it is opened and dismissed', async () => {
+    stubReads(null, null);
+    const sheet = await open(filmA);
+
+    await waitFor(() =>
+      expect(sheet.getByLabelText('Watch date').props.accessibilityState.disabled).toBe(false),
+    );
+    await sheet.show(null);
+
+    // "How was it?" is the watch claim, and it is a question, not an answer.
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing when the date picker is opened and closed again', async () => {
+    stubReads(null, null);
+    const sheet = await open(filmA);
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.dateRow());
+    await sheet.show(null);
+
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * "I watched this, but I don't remember when" (founder report, 2026-08-24).
+ *
+ * The sheet stamps today's date the first time a bucket is chosen, and there was no way
+ * to take it back: `log_watched` coalesces its date, so passing null means *leave it
+ * alone*, and nothing else could write the column. `clear_watch_date` is the one writer
+ * that can (20260824000100), and the two properties worth pinning are that it does not
+ * un-log the title and that the stamp cannot silently put the date back.
+ */
+describe('forgetting the watch date', () => {
+  it('clears a stored date through clear_watch_date, and says so on the row', async () => {
+    stubReads({ bucket: 'loved', watched_on: '2026-08-01', note: '' }, null);
+    const sheet = await open(filmA);
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+
+    await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
+    expect(callsTo('clear_watch_date')[0][1].p_media_item_id).toBe('film-a');
+    // Not through log_watched, which cannot express it.
+    expect(callsTo('log_watched')).toHaveLength(0);
+    await waitFor(() => expect(sheet.getByText('Not recorded')).toBeTruthy());
+  });
+
+  it('leaves the rating alone, so the title stays logged', async () => {
+    stubReads({ bucket: 'loved', watched_on: '2026-08-01', note: '' }, null);
+    const sheet = await open(filmA);
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+    await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
+
+    // Nothing touched the bucket, which is what keeps the title watched: a bucket is a
+    // watch signal in its own right (20260815040000).
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true);
+  });
+
+  it('does not let the default stamp write the date back', async () => {
+    // The failure this guards is silent: clearing leaves `watched_on` null, which is
+    // exactly the condition the bucket stamp reads as "no date yet".
+    stubReads({ bucket: 'loved', watched_on: '2026-08-01', note: '' }, null);
+    const sheet = await open(filmA, { onRank: jest.fn() });
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+    await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
+
+    await fireEvent.press(sheet.bucket('It was fine'));
+
+    await waitFor(() => expect(callsTo('set_bucket')).toHaveLength(1));
+    expect(callsTo('log_watched')).toHaveLength(0);
+  });
+
+  it('shows a logged row with no date as dateless rather than as today', async () => {
+    // "Today" is a pending default and only honest before the row exists. Once it does
+    // and still carries no date, printing today is the sheet claiming a value it never
+    // saved — which is the shape of the bug the stamp was added to fix, seen from the
+    // other side.
+    stubReads({ bucket: 'loved', watched_on: null, note: '' }, null);
+    const sheet = await open(filmA);
+
+    await waitFor(() => expect(sheet.getByText('Not recorded')).toBeTruthy());
+  });
+
+  it('takes a real date again after a clear', async () => {
+    stubReads({ bucket: 'loved', watched_on: '2026-08-01', note: '' }, null);
+    const sheet = await open(filmA);
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+    await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
+
+    await fireEvent.press(sheet.getByRole('button', { name: 'Today' }));
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_watched_on).toEqual(expect.any(String));
+  });
+
+  it('asks the server even when the row it can see has no date', async () => {
+    // `state` lags every write this sheet makes, so "no row, no date" is also what it
+    // says for the whole window after a bucket stamp or a picked date has been sent and
+    // not refetched. Deciding not to call from that read is how the clear gets skipped
+    // and the date it was meant to remove lands a moment later. The server answers ok
+    // and creates nothing for the genuinely empty cases (20260824000100).
+    stubReads(null, null);
+    const sheet = await open(filmA);
+
+    await sheet.openDate();
+    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+
+    await waitFor(() => expect(callsTo('clear_watch_date')).toHaveLength(1));
+    expect(sheet.getByText('Not recorded')).toBeTruthy();
+    // And it still creates nothing itself.
+    expect(callsTo('log_watched')).toHaveLength(0);
+    expect(callsTo('set_bucket')).toHaveLength(0);
+  });
+
+  /**
+   * Independent review 36, MAJOR. Two writes to one column, neither carrying a version
+   * the server could reject a stale one by, so the one that *lands* last decides what
+   * is stored — and overlapping them made that a function of network timing rather than
+   * of the order the reader tapped.
+   */
+  it('sends contradictory date taps in the order they were made', async () => {
+    stubReads({ bucket: 'loved', watched_on: '2026-08-01', note: '' }, null);
+
+    // The clear is held open, so the date picked after it would finish first if the two
+    // were allowed to overlap. Reproduces the exact race before the queue existed.
+    let releaseClear: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseClear = resolve;
+    });
+    mockRpc.mockImplementation(async (name: string) => {
+      if (name === 'clear_watch_date') await held;
+      return { data: { status: 'ok' }, error: null };
+    });
+
+    const sheet = await open(filmA);
+    await sheet.openDate();
+
+    await fireEvent.press(sheet.getByRole('button', { name: "Don't remember" }));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Today' }));
+
+    // The second tap has not reached the server while the first is still in flight.
+    expect(callsTo('log_watched')).toHaveLength(0);
+
+    await act(async () => {
+      releaseClear();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    // Order, which is the whole property: the clear went first and the date the reader
+    // ended on is what the server was left holding.
+    const order = mockRpc.mock.calls.map(([name]) => name);
+    expect(order.indexOf('clear_watch_date')).toBeLessThan(order.indexOf('log_watched'));
+    // The row, not the chip of the same name: what the sheet claims is stored has to
+    // agree with what the server was left holding.
+    expect(sheet.getByLabelText('Watch date').props.accessibilityValue.text).toBe('Today');
+  });
+});
+
 describe('a title that is already ranked', () => {
   beforeEach(() => {
     stubReads({ bucket: 'loved', watched_on: '2026-08-01', note: '' }, { bucket: 'loved' });

@@ -81,6 +81,11 @@ const ALLOWED = {
   'set_watchlist(uuid,uuid,boolean)': ['authenticated'],
   'set_season_progress(uuid,uuid,season_progress)': ['authenticated'],
   'save_note(uuid,uuid,text,timestamp with time zone,note_visibility,boolean)': ['authenticated'],
+  // Added 2026-08-24 (20260824000100). The one writer that can put a null into
+  // watched_on: every other path coalesces, which is what protects a recorded date
+  // from a date-less re-log and is also why "I don't remember when" had no route.
+  // Own-row only through auth.uid(), like the rest of this group.
+  'clear_watch_date(uuid,uuid)': ['authenticated'],
 
   // Added 2026-08-16 with social notes. Both are definer reads, and both take a
   // subject rather than a viewer, so neither can be pointed at someone else's
