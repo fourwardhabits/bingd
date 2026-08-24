@@ -10,8 +10,7 @@ import { compactName } from '@/lib/titles';
 import { useCurrentProfile } from '@/features/auth';
 import { theme } from '@/ui/tokens';
 import {
-  BUCKETS,
-  BucketChip,
+  BucketChoices,
   Button,
   Poster,
   Sheet,
@@ -795,20 +794,18 @@ function Body({
           </Pressable>
         </View>
 
-        <View style={styles.buckets} accessibilityRole="radiogroup">
+        <View style={styles.buckets}>
           <Text variant="title2" style={styles.prompt}>
             How was it?
           </Text>
-          <View style={styles.chips}>
-            {BUCKETS.map((option) => (
-              <BucketChip
-                key={option.id}
-                bucket={option}
-                selected={bucket === option.id}
-                onPress={() => void choose(option.id)}
-              />
-            ))}
-          </View>
+          {/* The row itself is `BucketChoices`, which is also what the onboarding
+              sheet shows. The radiogroup role travels with it, so the two surfaces
+              cannot drift apart in layout or in what a screen reader is told. */}
+          <BucketChoices
+            selected={bucket}
+            onSelect={(option) => void choose(option)}
+            testID="bucket-choices"
+          />
         </View>
 
         {confirmRebucket ? (
@@ -1046,9 +1043,8 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[2],
   },
   headerText: { flex: 1, gap: 2 },
-  buckets: { gap: theme.space[3] },
+  buckets: { gap: theme.space[3], paddingHorizontal: theme.layout.gutter },
   prompt: { textAlign: 'center' },
-  chips: { flexDirection: 'row', gap: theme.space[3], paddingHorizontal: theme.layout.gutter },
   confirm: {
     marginHorizontal: theme.layout.gutter,
     padding: theme.space[3],

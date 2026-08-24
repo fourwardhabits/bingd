@@ -7,7 +7,7 @@ import { invalidateAfterCollectionChange } from '@/features/collection/invalidat
 import { mustReconcile, newOperationId, setBucket } from '@/features/collection/writes';
 import { track } from '@/lib/analytics';
 import { theme } from '@/ui/tokens';
-import { BUCKETS, BucketChip, Poster, Sheet, Text, type BucketId } from '@/ui/components';
+import { BucketChoices, Poster, Sheet, Text, type BucketId } from '@/ui/components';
 
 export type TasteSubject = {
   id: string;
@@ -122,16 +122,14 @@ export function TasteBucketSheet({
           </View>
         </View>
 
-        <View style={styles.buckets}>
-          {BUCKETS.map((bucket) => (
-            <BucketChip
-              key={bucket.id}
-              bucket={bucket}
-              selected={false}
-              onPress={() => void choose(bucket.id)}
-            />
-          ))}
-        </View>
+        {/* The same control the Log tab shows, not a second one that resembles it.
+            Nothing is pre-selected: this sheet asks the question once and closes on
+            the answer, so a filled circle would be describing a choice nobody made. */}
+        <BucketChoices
+          selected={null}
+          onSelect={(bucket) => void choose(bucket)}
+          testID="bucket-choices"
+        />
 
         {problem ? (
           <Text variant="footnote" tone="secondary">
@@ -150,8 +148,22 @@ export function TasteBucketSheet({
 }
 
 const styles = StyleSheet.create({
-  body: { gap: theme.space[5], paddingBottom: theme.space[4] },
+  /**
+   * The gutter every other sheet body observes. Its absence is why the heading sat
+   * flush against the left edge of the sheet — `Sheet` pads its foot for the home
+   * indicator and nothing else, on purpose, because its children pad themselves.
+   *
+   * `paddingTop` clears the drag handle. Handle, question, title, choices, note:
+   * the order is the order it is read in, and the gap between them is one token
+   * rather than five, so nothing here needs a fixed offset to land correctly on a
+   * particular phone.
+   */
+  body: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[2],
+    gap: theme.space[4],
+  },
   subject: { flexDirection: 'row', gap: theme.space[3], alignItems: 'center' },
   subjectText: { flex: 1, gap: theme.space[1] },
-  buckets: { gap: theme.space[2] },
 });

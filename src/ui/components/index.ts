@@ -4,7 +4,13 @@ export { Avatar, type AvatarProps } from './Avatar';
 export { Backdrop, type BackdropProps } from './Backdrop';
 export { BrandLockup, type BrandLockupProps } from './BrandLockup';
 export { BrandMark, type BrandMarkProps } from './BrandMark';
-export { BUCKETS, BucketChip, Chip, type BucketId, type ChipProps } from './BucketChip';
+export {
+  BucketChoices,
+  Chip,
+  type BucketChoicesProps,
+  type BucketId,
+  type ChipProps,
+} from './BucketChip';
 export { Button } from './Button';
 export { CastStrip, type CastMember } from './CastStrip';
 export {
