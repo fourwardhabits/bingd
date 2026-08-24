@@ -162,7 +162,9 @@ Two mechanisms, because one was not enough:
 - **`pushSessionEpoch`** moves on every sign-out and is compared either side of both
   awaits. A registration that has not written yet abandons itself; one that has **revokes
   what it wrote**.
-- **`trackDispatchedWrite`** announces the write to sign-out, which waits for it — bounded
+- **`trackDispatchedWrite`** announces the write to sign-out, which waits for **every**
+  one in flight — three paths can start a registration and they can overlap, so waiting on
+  the newest and returning would leave an older, slower one to land unauthenticated. Bounded
   at three seconds, and only when one is genuinely in flight. Without this the compensating
   revoke races `supabase.auth.signOut()` for the session it needs, which a re-review was
   right to call the original hole merely narrowed. Only the *write* is announced, not the

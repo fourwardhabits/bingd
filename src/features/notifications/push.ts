@@ -372,28 +372,33 @@ export function pushSessionEpoch(): number {
  * stage writes nothing anyway. Only from the moment the RPC is dispatched, which is one
  * round trip, plus the compensating revoke it may then need, which is a second.
  *
- * Null almost always: a registration happens once per session start, so a sign-out that
+ * Empty almost always: a registration happens once per session start, so a sign-out that
  * collides with one is rare and this costs nothing on every other sign-out.
+ *
+ * **A set rather than a slot**, which the third review round was right to insist on. There
+ * are three entry points — the launch registration, the token-change listener, and the
+ * permission flow — and they can overlap. A single slot is overwritten by whichever
+ * started last, so sign-out would wait for the *newest* write and return while an older,
+ * slower one was still out there; that one then lands with no session left to revoke as,
+ * which is the whole scenario back again.
  */
-let dispatchedWrite: Promise<unknown> | null = null;
+const dispatchedWrites = new Set<Promise<unknown>>();
 
 /**
- * Marks `write` as the thing sign-out must let finish. Returns it unchanged.
+ * Marks `write` as something sign-out must let finish. Returns it unchanged.
  *
- * Rejections are swallowed **for the tracked copy only** — sign-out races this promise and
- * must not inherit its failure — while the caller still gets the original to await.
+ * Rejections are swallowed **for the tracked copy only** — sign-out waits on these and
+ * must not inherit a failure — while the caller still gets the original to await.
  */
 export function trackDispatchedWrite<T>(write: Promise<T>): Promise<T> {
   const tracked = write.then(
     () => undefined,
     () => undefined,
   );
-  dispatchedWrite = tracked;
-  void tracked.then(() => {
-    // Cleared only if nothing newer has taken its place, so a slow write cannot release a
-    // faster one that started after it.
-    if (dispatchedWrite === tracked) dispatchedWrite = null;
-  });
+
+  dispatchedWrites.add(tracked);
+  void tracked.then(() => dispatchedWrites.delete(tracked));
+
   return write;
 }
 
@@ -408,8 +413,8 @@ export function trackDispatchedWrite<T>(write: Promise<T>): Promise<T> {
 const DISPATCHED_WRITE_GRACE_MS = 3000;
 
 /** Test seam: leaves no dispatched write behind for the next test to wait on. */
-export function resetDispatchedWrite() {
-  dispatchedWrite = null;
+export function resetDispatchedWrites() {
+  dispatchedWrites.clear();
 }
 
 /**
@@ -423,15 +428,22 @@ export function resetDispatchedWrite() {
  *
  *   1. the epoch moves, so a registration that has not written yet abandons itself and a
  *      registration that has will revoke what it wrote;
- *   2. a **dispatched** write is waited for, bounded, so that revoke happens while the
+ *   2. **every** dispatched write is waited for, bounded, so that revoke happens while the
  *      session it needs still exists;
  *   3. whatever this process is holding is released.
+ *
+ * Step 2 waits on all of them rather than the latest. Three paths can start a
+ * registration and they can overlap; waiting on one and returning would leave an older,
+ * slower write to land with no session behind it.
  */
 export async function releaseDeviceOnSignOut(): Promise<void> {
   sessionEpoch += 1;
 
-  const pending = dispatchedWrite;
-  if (pending) {
+  if (dispatchedWrites.size) {
+    // Snapshotted, because the set is mutated as its members settle. `Promise.all` over
+    // the tracked copies cannot reject — `trackDispatchedWrite` already absorbed that.
+    const pending = Promise.all([...dispatchedWrites]);
+
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
       pending,

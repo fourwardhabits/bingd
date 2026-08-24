@@ -23,7 +23,7 @@ import {
   pushPermission,
   registerPushToken,
   pushSessionEpoch,
-  resetDispatchedWrite,
+  resetDispatchedWrites,
   trackDispatchedWrite,
   releaseDeviceOnSignOut,
   rememberToken,
@@ -119,7 +119,7 @@ beforeEach(() => {
   mockRpcError = null;
   mockIsDevice = true;
   resetNudgeThrottle();
-  resetDispatchedWrite();
+  resetDispatchedWrites();
   mockNotifications.getPermissionsAsync.mockResolvedValue(permissions({ granted: true }));
   mockNotifications.getExpoPushTokenAsync.mockResolvedValue({ type: 'expo', data: TOKEN });
 });
@@ -492,5 +492,58 @@ describe('sign-out waits for a write that is already in flight', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+/**
+ * Three paths can start a registration — the launch one, the token-change listener, and
+ * the permission flow — and they can overlap. A tracker with one slot waits for whichever
+ * started last and returns while an older, slower write is still out there; that one lands
+ * with no session left to revoke as, which is the original hole by another route. Found on
+ * the third review round.
+ */
+describe('two registrations in flight at once', () => {
+  it('waits for the slow one as well as the fast one', async () => {
+    let landSlow: () => void = () => {};
+    let landFast: () => void = () => {};
+
+    trackDispatchedWrite(
+      new Promise<void>((resolve) => {
+        landSlow = resolve;
+      }),
+    );
+    trackDispatchedWrite(
+      new Promise<void>((resolve) => {
+        landFast = resolve;
+      }),
+    );
+
+    let released = false;
+    const signOut = releaseDeviceOnSignOut().then(() => {
+      released = true;
+    });
+
+    landFast();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(released).toBe(false);
+
+    landSlow();
+    await signOut;
+    expect(released).toBe(true);
+  });
+
+  it('stops tracking a write once it settles, so the next sign-out is not delayed', async () => {
+    const write = Promise.resolve();
+    trackDispatchedWrite(write);
+    await write;
+    await Promise.resolve();
+
+    let released = false;
+    await releaseDeviceOnSignOut().then(() => {
+      released = true;
+    });
+    expect(released).toBe(true);
   });
 });
