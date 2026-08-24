@@ -432,43 +432,47 @@ export function resetDispatchedWrites() {
  *      session it needs still exists;
  *   3. whatever this process is holding is released.
  *
- * Step 2 waits on all of them rather than the latest. Three paths can start a
- * registration and they can overlap; waiting on one and returning would leave an older,
- * slower write to land with no session behind it.
+ * Step 2 waits on all of them rather than the latest, and keeps waiting while more arrive
+ * inside its budget. Three paths can start a registration and they can overlap; the loop
+ * below is what four rounds of review reduced to, and each clause of it is a defect that
+ * was found rather than one that was anticipated:
+ *
+ *   · **a snapshot, not the live set** — it is mutated as its members settle;
+ *   · **every member removed after its wait**, not just the settled ones. A write that
+ *     never settles removes itself in a callback that will never run, so it would sit
+ *     there for the life of the process and charge every later sign-out the full budget;
+ *   · **removing the batch rather than clearing** — a registration that starts *during*
+ *     the wait belongs to the next iteration, and clearing would drop it untracked;
+ *   · **a shared deadline**, so however many arrive, sign-out is bounded once rather than
+ *     once per round.
  */
 export async function releaseDeviceOnSignOut(): Promise<void> {
   sessionEpoch += 1;
 
-  if (dispatchedWrites.size) {
-    // Snapshotted, because the set is mutated as its members settle. `Promise.all` over
-    // the tracked copies cannot reject — `trackDispatchedWrite` already absorbed that.
-    const pending = Promise.all([...dispatchedWrites]);
+  const deadline = Date.now() + DISPATCHED_WRITE_GRACE_MS;
+
+  while (dispatchedWrites.size) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+
+    // `Promise.all` over the tracked copies cannot reject — `trackDispatchedWrite` has
+    // already absorbed that — so this races a settlement against the remaining budget.
+    const batch = [...dispatchedWrites];
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
-      pending,
+      Promise.all(batch),
       new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, DISPATCHED_WRITE_GRACE_MS);
+        timer = setTimeout(resolve, remaining);
       }),
     ]);
-    // Or the timer holds the event loop open for three seconds after a sign-out that
-    // did not need it — which on a device is a background task nobody asked for.
+    // Or the timer holds the event loop open for the rest of the budget after a sign-out
+    // that did not need it — on a device, a background task nobody asked for.
     if (timer) clearTimeout(timer);
 
-    /**
-     * Everything waited on above has had its grace, settled or not.
-     *
-     * Without this a write that **never** settles stays in the set for the life of the
-     * process — its own removal runs in a callback that will not fire — and every later
-     * sign-out pays the full three seconds again, on a promise no second wait can help.
-     * A wedged fetch is exactly the shape that produces one. Found on the fourth review
-     * round.
-     *
-     * Safe to clear rather than to prune: a write dispatched *after* this line adds
-     * itself, and one dispatched before has already been given the only wait it is going
-     * to get.
-     */
-    dispatchedWrites.clear();
+    // Given their grace, settled or not. Anything added while this was waiting is still
+    // in the set and is picked up by the next turn of the loop.
+    for (const write of batch) dispatchedWrites.delete(write);
   }
 
   const held = heldToken();
