@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { invalidateAwards } from '@/features/awards/invalidate';
+import { nudgePushDelivery } from '@/features/notifications/push';
+import { offerPushPermission } from '@/features/notifications/push-permission';
 import { track, type Surface } from '@/lib/analytics';
 import { diagnose } from '@/lib/diagnose';
 import { readAllByKey } from '@/lib/read-all';
@@ -246,6 +248,10 @@ export function useRecommendTitle(viewerId: string) {
         };
       }
 
+      // The recipient's `recommendation` notification was written by the statement above,
+      // and this is the only moment anybody is holding a phone on its behalf. Fire and
+      // forget, and debounced (`nudgePushDelivery`).
+      nudgePushDelivery();
       return { ok: true };
     },
     /**
@@ -321,6 +327,19 @@ export async function createInviteLink(
    */
   if (body?.status === 'ok') {
     track({ name: 'invite_link_created', props: { surface, has_title: Boolean(mediaItemId) } });
+    /**
+     * The second of PRD §15's two moments, and the one with the longest payoff: the
+     * notification an invitation earns — somebody joined from your invite — arrives days
+     * later, when the app is closed. It is the one event in this product that cannot be
+     * replaced by opening the app at the right moment, which is what makes minting a link
+     * the honest place to ask.
+     *
+     * Behind the same `status === 'ok'` guard the event above uses, so a replayed
+     * operation id — a share whose reply was lost and was pressed again — does not spend
+     * the one question iOS will ever present. Awaited by nothing: the share sheet opens
+     * next and must not wait behind a dialog.
+     */
+    void offerPushPermission('invite');
   }
 
   const token = body?.token;

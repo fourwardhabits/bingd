@@ -18,6 +18,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, AuthStatusOverlay, useAuthRouting } from '@/features/auth';
 import { useRedeemPendingInvite } from '@/features/invite';
+import { configurePushPresentation } from '@/features/notifications/push';
+import { usePush } from '@/features/notifications/use-push';
 import { initAnalytics } from '@/lib/analytics';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
 import { createQueryClient, startQueryFocusTracking } from '@/lib/query';
@@ -29,6 +31,17 @@ import { theme } from '@/ui/tokens';
 // with no Sentry or PostHog account at all.
 initMonitoring();
 initAnalytics();
+
+/**
+ * How a push behaves when it arrives, which has to be decided before one can.
+ *
+ * At module scope beside the two above, and for the same reason: a notification can be
+ * delivered to a cold-started process before the first render, and a handler registered
+ * in an effect would be registered too late to say what happens to it. It asks for
+ * nothing and prompts for nothing — see `usePush`, which is the half that runs under the
+ * session.
+ */
+configurePushPresentation();
 
 SplashScreen.preventAutoHideAsync().catch(() => {
   // Already hidden, or the module is unavailable in this environment.
@@ -104,6 +117,18 @@ function Navigation() {
    * which are almost all of them, where there is nothing held.
    */
   useRedeemPendingInvite();
+  /**
+   * The push lifecycle: register a device that already has permission, follow a token
+   * that rolls, refresh the inbox on arrival, route a tap, and nudge the sender when the
+   * app comes forward.
+   *
+   * Here rather than in a screen because two of those are process-wide — a tap can start
+   * the app cold, and a token can roll on any screen — and because it must sit under
+   * `AuthProvider`, whose session is what a registration belongs to. **It never asks for
+   * permission**; that is `offerPushPermission`, called from the two social moments PRD
+   * §15 names.
+   */
+  usePush();
 
   return (
     <>

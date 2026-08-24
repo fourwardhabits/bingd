@@ -2,6 +2,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { invalidateAwards } from '@/features/awards/invalidate';
+import { nudgePushDelivery } from '@/features/notifications/push';
+import { offerPushPermission } from '@/features/notifications/push-permission';
 import { track, type Surface } from '@/lib/analytics';
 import { avatarUri } from '@/lib/images';
 import { diagnose } from '@/lib/diagnose';
@@ -274,17 +276,44 @@ export function useSocialWrites(viewerId: string, surface: Surface) {
       priorState: 'none' | 'existing' | 'unknown';
     }) =>
       rpc('follow', { p_followee_id: userId }, (data) => {
-        if (priorState !== 'none') return;
         const body = data as { status?: string; state?: string } | null;
         if (body?.status !== 'ok') return;
         if (body.state !== 'approved' && body.state !== 'pending') return;
+
+        // Their phone, if they have one: the recipient's `follow` or `follow_request`
+        // notification was written by the statement that just returned. Before the
+        // `priorState` guard, because `unknown` is "nobody has looked" rather than
+        // "nothing happened" — and a nudge that finds an empty queue costs nothing.
+        nudgePushDelivery();
+
+        if (priorState !== 'none') return;
+        /**
+         * **The moment PRD §15 names**, and the reason it is here rather than at launch:
+         * somebody who has just followed a person has decided they care what that person
+         * does, which is the whole content of a notification. It is one of two such
+         * moments, and the other is an invitation.
+         *
+         * After the write, never before, and awaited by nothing — a permission dialog
+         * must not sit between the tap and the follow. It shares the guard with
+         * `follow_created` above it, so a re-follow that changed nothing does not spend
+         * the one question iOS will ever present.
+         *
+         * `offerPushPermission` asks at most once per install and returns immediately
+         * when the OS has already decided, so this being on a common path is not a cost.
+         */
+        void offerPushPermission('follow');
         track({ name: 'follow_created', props: { surface, state: body.state } });
       }),
     unfollow: ({ userId }: { userId: string }) => rpc('unfollow', { p_followee_id: userId }),
     block: ({ userId }: { userId: string }) => rpc('block', { p_blocked_id: userId }),
     unblock: ({ userId }: { userId: string }) => rpc('unblock', { p_blocked_id: userId }),
     respondToRequest: ({ userId, approve }: { userId: string; approve: boolean }) =>
-      rpc('respond_follow_request', { p_requester_id: userId, p_approve: approve }),
+      // Approving writes the requester a `follow_approved`, which is inbox-only
+      // (PRD §15). The nudge is still right: it drains everything, and this is a
+      // foreground moment like any other.
+      rpc('respond_follow_request', { p_requester_id: userId, p_approve: approve }, () =>
+        nudgePushDelivery(),
+      ),
     busy,
   };
 }

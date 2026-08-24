@@ -21,3 +21,20 @@ project_id = "bingd"
 # makes `enrich` and `refresh` forgeable, which is the worst shape a regression can
 # have: invisible, and only in the privileged path.
 verify_jwt = true
+
+[functions.push-sender]
+# Same flag and the same coupling as above, and the same warning: `index.ts` recognises
+# `service_role` from the `role` claim without verifying a signature, and it may only do
+# that because the platform has already verified one.
+#
+# The gate is deliberately weak beyond that — any signed-in account may invoke this
+# function, because invoking it chooses nothing. It takes no recipient, no copy and no
+# batch size; everything sent is read from `push_outbox`, whose primary key is a
+# notification id. What an invocation *is* is a nudge that there may be work, and the
+# reason a client is allowed to give one is that the person who caused a notification is
+# holding a phone at that moment.
+#
+# The anon key is itself a valid JWT, which is why `verify_jwt` is not sufficient on its
+# own here either: `isKnownCaller` resolves the token to a real user or to service_role
+# before anything is claimed.
+verify_jwt = true

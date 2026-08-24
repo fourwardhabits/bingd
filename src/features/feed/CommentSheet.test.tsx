@@ -28,6 +28,11 @@ let mockRpcGate: Promise<void> | null = null;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
+    // Writes that create a notification nudge push-sender afterwards
+    // (notifications/push.ts). It chooses nothing and this suite asserts nothing about
+    // it; the stub is here so the nudge is exercised rather than swallowed by its own
+    // guard.
+    functions: { invoke: () => Promise.resolve({ data: null, error: null }) },
     rpc: async (name: string, args: Record<string, unknown>) => {
       if (mockRpcGate) await mockRpcGate;
       mockRpcCalls.push({ name, args });

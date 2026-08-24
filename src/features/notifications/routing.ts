@@ -213,6 +213,64 @@ export function hintFor(row: Notification): string {
   }
 }
 
+/**
+ * The same resolver, entered from a push payload instead of from an inbox row.
+ *
+ * `push-sender` sends four fields (`supabase/functions/push-sender/copy.ts`), and three
+ * of them are here because those are precisely the three `targetChainFor` reads. That is
+ * not a coincidence to be relied on quietly — it is the reason the payload has the shape
+ * it has, and it is what makes a tap on a push land where a tap on the row would.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE STALE CASE IS *MORE* LIKELY HERE, NOT LESS
+ *
+ * An inbox row is resolved from a fresh read: `my_notifications` ran seconds ago, so a
+ * null media id means the server has just confirmed the subject is gone. A push payload
+ * was composed when the notification was **written** and may be tapped days later, after
+ * the title left the catalogue, the event was deleted, or the actor was blocked.
+ *
+ * So the chain matters more here, and the last link cannot be the inbox's "stay where you
+ * are and say why" — a tap arriving from the notification centre has nowhere to stay.
+ * This ends at the inbox itself, which is the one screen that is always right: it holds
+ * the row this push was about, resolved fresh, with its own fallback behaviour and its own
+ * explanation.
+ */
+export type PushTapPayload = {
+  kind?: unknown;
+  actorUsername?: unknown;
+  mediaItemId?: unknown;
+};
+
+/** The inbox. Reached when nothing better survived, and a real destination either way. */
+export const PUSH_FALLBACK_HREF = '/settings/notifications' as Href;
+
+const readString = (value: unknown): string | null =>
+  typeof value === 'string' && value.length > 0 ? value : null;
+
+/**
+ * Where a tapped push leads. Always somewhere.
+ *
+ * The payload is read defensively rather than trusted. It arrives from outside the app,
+ * through two operating systems and a delivery service, and a notification composed by an
+ * older build is a shape this one has never seen. An unrecognised kind resolves to the
+ * inbox rather than throwing, because the path this runs on is a cold start from a tap —
+ * the launch with the least recovery available to it.
+ */
+export function hrefForPush(payload: PushTapPayload | null | undefined): Href {
+  if (!payload) return PUSH_FALLBACK_HREF;
+
+  const kind = readString(payload.kind);
+  if (!kind || !ROUTED_KINDS.includes(kind as NotificationKind)) return PUSH_FALLBACK_HREF;
+
+  const target = targetFor({
+    kind: kind as NotificationKind,
+    actorUsername: readString(payload.actorUsername),
+    mediaItemId: readString(payload.mediaItemId),
+  } as Notification);
+
+  return hrefFor(target) ?? PUSH_FALLBACK_HREF;
+}
+
 /** Every kind, for the tests and for anything that needs to enumerate the matrix. */
 export const ROUTED_KINDS: readonly NotificationKind[] = [
   'follow_request',

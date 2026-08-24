@@ -27,6 +27,11 @@ let mockRpcErrors: Record<string, unknown[]> = {};
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
+    // Writes that create a notification nudge push-sender afterwards
+    // (notifications/push.ts). It chooses nothing and this suite asserts nothing about
+    // it; the stub is here so the nudge is exercised rather than swallowed by its own
+    // guard.
+    functions: { invoke: () => Promise.resolve({ data: null, error: null }) },
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
       const error = mockRpcErrors[name]?.shift() ?? null;
