@@ -55,9 +55,28 @@ jest.mock('@/features/auth', () => ({
 
 /** Empty by default, which is the state that offers Follow back. */
 const mockRelationships = new Map<string, { following: string | null }>();
+/** The ids the screen actually asked about, most recent call last. */
+const mockAskedAbout: string[][] = [];
 
+/**
+ * **Answers only for the ids it was asked about**, which is the whole point.
+ *
+ * A mock that returned the map wholesale would satisfy a screen that never asked, and
+ * that is precisely the defect independent review found: `invite_welcome` reached
+ * `canFollowBack` without reaching the list of actors whose state gets fetched, so the
+ * real screen saw `undefined` and offered Follow to somebody already followed. A test
+ * has to be able to fail that way or it is not testing it.
+ */
 jest.mock('@/features/profile/use-social', () => ({
-  useRelationships: () => ({ data: mockRelationships }),
+  useRelationships: (ids: string[]) => {
+    mockAskedAbout.push(ids);
+    const answered = new Map<string, { following: string | null }>();
+    for (const id of ids) {
+      const known = mockRelationships.get(id);
+      if (known) answered.set(id, known);
+    }
+    return { data: answered };
+  },
   useSocialWrites: () => ({ follow: jest.fn(), respondToRequest: jest.fn(), busy: false }),
 }));
 
@@ -84,6 +103,7 @@ beforeEach(() => {
   mockNotifications.length = 0;
   mockNotifications.push(follow());
   mockRelationships.clear();
+  mockAskedAbout.length = 0;
 });
 
 const open = async () => {
@@ -173,5 +193,111 @@ describe('read is something the reader does', () => {
 
     // Still unread after the screen has rendered: only the control changes this.
     expect(view.getByText('1 unread')).toBeTruthy();
+  });
+});
+/**
+ * **The row a brand-new account opens Bingd to.**
+ *
+ * `redeem_invite` has always notified the inviter and, since `20260819000500`, created
+ * the invitee's follow for them. The invitee was told nothing — so the person who had
+ * never seen the app arrived to a follow they did not watch happen and an empty inbox.
+ * `20260823000100` files the missing half; these assert how it reads.
+ */
+describe('the welcome an invitation writes back', () => {
+  const welcome = (overrides: Record<string, unknown> = {}) =>
+    follow({
+      id: 'w1',
+      kind: 'invite_welcome',
+      type: 'invite_welcome',
+      actor_username: 'ada',
+      actor_display_name: 'Ada',
+      ...overrides,
+    });
+
+  it('greets before it reports, and names the inviter', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(welcome());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Welcome to Bingd. ')).toBeTruthy());
+    expect(view.getByText('Ada')).toBeTruthy();
+    expect(view.getByText(' invited you 🎉')).toBeTruthy();
+  });
+
+  /**
+   * The emoji is drawn and not spoken. "Party popper" in the middle of the only
+   * sentence naming the person who brought them helps nobody, and the celebration is
+   * the part that survives being dropped.
+   */
+  it('spells the greeting out for a screen reader, without the emoji', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(welcome());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() =>
+      expect(view.getByLabelText(/Welcome to Bingd\. Ada invited you/)).toBeTruthy(),
+    );
+    expect(view.queryByLabelText(/🎉/)).toBeNull();
+  });
+
+  it('counts toward unread like any other row', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(welcome());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('1 unread')).toBeTruthy());
+  });
+
+  /**
+   * "Follow back" is wrong here — the inviter never followed them, so there is nothing
+   * to return. In practice this control is rare, because the redemption already made
+   * the follow; it appears if the reader later unfollows and comes back to the row.
+   */
+  it('offers Follow rather than Follow back when there is no edge', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(welcome());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByRole('button', { name: 'Follow' })).toBeTruthy());
+    expect(view.queryByRole('button', { name: 'Follow back' })).toBeNull();
+  });
+
+  /**
+   * The defect independent review found, as its cause rather than its symptom: the
+   * screen has to *ask* about the inviter, or every answer downstream is "unknown"
+   * and unknown reads as "no edge".
+   */
+  it('asks the server what the reader already owes the inviter', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(welcome());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(mockAskedAbout.at(-1)).toContain('them');
+  });
+
+  it('offers nothing once the follow the redemption made is in place', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(welcome());
+    mockRelationships.set('them', { following: 'approved' });
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.queryByRole('button', { name: 'Follow' })).toBeNull();
+  });
+
+  /**
+   * A private inviter leaves the invitee's follow *pending*, which is not the same as
+   * not following. The row shows no control; the profile behind it is where
+   * `FollowControl` draws "Requested".
+   */
+  it('offers nothing while a request to a private inviter is pending', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(welcome());
+    mockRelationships.set('them', { following: 'pending' });
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.queryByRole('button', { name: 'Follow' })).toBeNull();
   });
 });

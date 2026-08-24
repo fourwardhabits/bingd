@@ -17,7 +17,7 @@ grounds for removal from Play, and an inaccurate App Privacy label is a review r
 |---|---|---|---|
 | Email address | `auth.users` | yes | sign-in |
 | Apple / Google account identifier | `auth.identities` | yes | sign-in |
-| Date of birth | **`profile_private.date_of_birth`** | yes | the 13+ gate, and nothing else. Never returned by any API, including to its owner. It was moved out of `profiles` by `20260813001400_security_fixes.sql` precisely so that no profile read could reach it |
+| Date of birth | **`profile_private.date_of_birth`** | yes | the 13+ gate, and nothing else. Never returned by any API, including to its owner. It was moved out of `profiles` by `20260813001400_security_fixes.sql` precisely so that no profile read could reach it. **Audited 2026-08-23: the stored value is never read again after signup** — `is_over_13` is its only reader and has no production callers — so the retention, not the collection, is the open question. See `../product/open-questions.md` §8 **DOB-1** |
 | Handle, display name, bio | `profiles` | yes | the profile |
 | Profile picture | Supabase Storage, `avatars/{uuid}/` | yes | the profile |
 | Public/private setting | `profiles.visibility` | yes | who can read the account |

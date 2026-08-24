@@ -57,6 +57,7 @@ describe('the routing matrix', () => {
     watch_tag: { kind: 'title', mediaItemId: 'media-1' },
     recommendation: { kind: 'title', mediaItemId: 'media-1' },
     invite_activated: { kind: 'profile', username: 'suraj' },
+    invite_welcome: { kind: 'profile', username: 'suraj' },
     award_earned: { kind: 'awards' },
   };
 

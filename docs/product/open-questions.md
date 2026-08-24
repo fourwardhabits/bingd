@@ -383,3 +383,61 @@ turning it into a schema tranche on the way past is how a narrow change stops be
 
 Related: PRD §22's Notes and Reviews block, `decision-log.md` §3 *Note and Review
 visibility*, and **M5** in `../release/public-launch-risk-register.md`.
+### DOB-1 — The birthday is collected for one comparison and then never read again
+
+**Status: OPEN as a data-minimisation question. No change made, and none should be made
+without a founder decision.**
+
+Opened 2026-08-23 after a beta tester asked, reasonably, why Bingd wants their birthday.
+The screen answered it nowhere, which is now fixed in copy — this entry is about the
+thing the copy revealed.
+
+**What is true today, audited rather than assumed.**
+
+- **The minimum age is 13**, enforced in exactly one place: `create_profile`
+  (`20260813002200_signup.sql`) compares `p_date_of_birth > current_date - interval
+  '13 years'` and, on failure, **deletes the `auth.users` row** and returns
+  `under_13`. There is no client-side age check — only a real-calendar-date check.
+- **A refused date is written nowhere.** Not to `profiles`, not to `profile_private`,
+  not to a log. The only trace is the absence of an account.
+- **An accepted date goes to `profile_private.date_of_birth`**, a table with RLS
+  enabled and **no policy at all**, with `select` revoked from `anon` and
+  `authenticated`. No API returns it — **including to the person who typed it.**
+- **Nothing else consumes it.** It is absent from `public_profiles`,
+  `profile_identity` and `search_users`; it is on the analytics denylist
+  (`FORBIDDEN_PROPERTY_KEYS`) and `identify()` sends the UUID and nothing else; no
+  recommendation, taste-match or award code references it.
+- **`is_over_13` — the one function that reads the column — has zero production
+  callers.** It exists, it is revoked from client roles, and nothing invokes it.
+
+**So the collection is justified and the retention is the open question.** The rule
+being enforced is a boolean evaluated once, at signup. After that the stored date is
+never read by anything, by anyone, ever. Bingd is holding a date of birth for every
+account in order to answer a question it has already answered and will not ask again.
+
+**The smallest privacy-minimising alternatives**, in increasing order of change:
+
+1. **Keep collecting the full date, store only the outcome.** `create_profile` compares
+   and discards, exactly as the refusal path already does. Day precision is preserved
+   for the comparison — the boundary case at somebody's thirteenth birthday still
+   resolves correctly — and the retained-data story becomes identical for accepted and
+   refused accounts. **This is the recommendation.**
+2. Store birth *year* only. Loses the boundary case and needs a "turns 13 this year"
+   decision. Cheaper to explain, worse to reason about.
+3. Collect an age confirmation rather than a date. Weakest of the three as an
+   eligibility signal, and a change to the signup flow rather than to storage.
+
+**Why it is not being changed here.** It is a schema change with a declared-data
+consequence, not an implementation detail: **the store declarations say Bingd stores a
+date of birth.** Apple's App Privacy answer (Other Data Types), Google Play's Data
+safety answer (Personal info → Other info) and the public privacy page all assert it.
+Changing what is retained means revisiting all three, and the Apple classification is
+already carrying a note to verify against the live questionnaire.
+
+**Whether it should change before public release: probably yes, and it is cheap.**
+Option 1 is a handful of lines in one function plus a `drop table`, and it removes a
+category of personal data from the declarations rather than adding one. But it is a
+founder decision about declared data collection, and it should be taken deliberately
+alongside the store forms rather than folded into an unrelated tranche.
+
+**Do not delete `profile_private` or its data without that decision.**
