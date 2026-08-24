@@ -16,7 +16,7 @@
  * **It cannot bypass a preference.** Not because it checks one, but because a suppressed
  * notification was never written: `_apply_notification_preference` is a before-insert
  * trigger returning null, and the enqueue is an after-insert trigger. There is no second
- * axis and nothing here consults one. See `20260824000300`.
+ * axis and nothing here consults one. See `20260825000300`.
  *
  * ===========================================================================
  * WHO MAY INVOKE IT, AND WHY THAT IS A WEAK GATE ON PURPOSE

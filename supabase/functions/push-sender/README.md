@@ -27,7 +27,7 @@ applied to two credentials instead of one.
 category the recipient switched off. A row a before-row trigger skips fires **no after-row
 trigger**, and the enqueue is an after-insert trigger. So push is not "allowed by" the
 preference; a suppressed notification does not exist to be pushed. One axis, enforced
-structurally. ([`20260824000300`](../../migrations/20260824000300_a_notification_that_reaches_the_phone.sql))
+structurally. ([`20260825000300`](../../migrations/20260825000300_a_notification_that_reaches_the_phone.sql))
 
 The operating system's own permission remains independent, because it is the platform's to
 hold.
