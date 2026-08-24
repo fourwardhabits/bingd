@@ -367,7 +367,7 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 - User profiles, one-way follow and unfollow, chronological feed, people discovery and leaderboard, match score.
 - **Reactions** on feed activity.
 - **Watch tagging** of Bingd users, with the invite hand-off for non-users.
-- **Notification system**: events, in-app inbox, per-category preferences. Push built and credentialed but **delivery flagged off**.
+- **Notification system**: events, in-app inbox, per-category preferences. Push built and credentialed but **delivery flagged off**. *(As built: there is no delivery flag. Push was built on 2026-08-24 and is gated on a production binary and founder credentials — §15 As-built, §27 items 5–7.)*
 - Automatic recommendations from collaborative, content, and bucket signals with cold-start fallback and the full guardrail set.
 - Custom lists with the **three-list limit enforced**.
 - A central capability resolver supporting `base_free` and `alpha_early_access`, with backend enforcement and no billing code.
@@ -912,7 +912,7 @@ v0.6 listed Achievements under §8 **Deferred** and specified them in [`backlog.
 
 Build the **entire** system in v1: event generation, in-app inbox, per-category preferences, and a delivery abstraction that can route to inbox, push, or both.
 
-**Push is installed but off.** `expo-notifications` and the Apple and Google push credentials are configured in the **first** development build. Push **delivery** is flagged off at launch.
+**Push is installed but off.** `expo-notifications` and the Apple and Google push credentials are configured in the **first** development build. Push **delivery** is flagged off at launch. *(As built: the module shipped, the credentials and the native configuration did not, and no delivery flag was ever built. See the two notes below.)*
 
 > **As built:** the module is in every build and the credentials are not. See the As-built block at the end of this section.
 >
@@ -1725,7 +1725,7 @@ All three are installable side by side and **visibly distinct** — name, icon, 
 ### Build and update model
 
 - A **development build** is a private app containing the native modules the project needs. Required because the project uses `expo-notifications`, Sign in with Apple, and Google sign-in, which Expo Go cannot host.
-- **Required:** `expo-notifications` and the Apple and Google push credentials are present in the **first** development build, even though delivery is flagged off. Adding them later forces a new native build and a new store submission.
+- **Required:** `expo-notifications` and the Apple and Google push credentials are present in the **first** development build, even though delivery is flagged off. Adding them later forces a new native build and a new store submission. *(As built: only the module shipped. The credentials and the production native configuration did not, so this requirement's own warning came true — push needed a new native build after all. §27 item 5.)*
 - **EAS Update** ships JavaScript and asset changes over the air without a store submission. Native changes — new native modules, permissions, icons, splash, or SDK upgrades — always require a new build.
 - Every build is traceable to an exact commit. Sentry releases are tagged accordingly.
 
@@ -2134,7 +2134,7 @@ v0.5 used two near-definitions interchangeably; this is the canonical one. See I
 | **3. Ranking** | Three buckets, band partitioning, binary insertion, skip/back, reveal, manual reorder, Logged/Ranked states | §26.3 and §26.4 pass |
 | **4. Import** | Upload, parse, match, preview, bucket mapping, list import, anchor session, unranked card | §26.5 passes |
 | **5. Social** | Follows and requests, feed, people discovery, leaderboard, match score, reactions, tagging, blocking, **reporting and the operator moderation surface** | §26.6, §26.7, §26.15 pass |
-| **6. Notifications** | Event generation, inbox, preferences, delivery abstraction with push flagged off | §26.8 passes |
+| **6. Notifications** | Event generation, inbox, preferences, delivery abstraction with push flagged off *(as built: no delivery flag; push built 2026-08-24 and gated on a production binary)* | §26.8 passes |
 | **7. Recommendations** | Candidate generation, eligibility, scoring, re-ranking, explanations, impressions, feedback, guardrail test suite | §26.9 passes; every guardrail has a passing test |
 | **8. Lists and capabilities** | Lists with the three-list limit, capability resolver, gate component, *Coming soon* surface, gate analytics | §26.10 and §26.11 pass |
 | **9. Sharing and invitations** | Card rendering, canonical routes, web fallback, Open Graph, polished Top 10, invite tokens, acceptance, attribution | §26.12 and §26.13 pass |
