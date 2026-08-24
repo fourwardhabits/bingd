@@ -226,6 +226,25 @@ function Body({
   const [dateCleared, setDateCleared] = useState(false);
   const [expanded, setExpanded] = useState<Expanded>(null);
   const [saving, setSaving] = useState(false);
+  /**
+   * How many writes are in flight, because "Saving…" is a claim and a boolean stopped
+   * being able to keep it.
+   *
+   * Date writes share one lane now (`queueDateWrite`), so two of them genuinely overlap:
+   * the second is queued while the first is running. With a plain flag the *first* one
+   * to finish cleared it, so the indicator went away with a write still outstanding and
+   * `choose` — which refuses while saving — was unblocked early. Counting depth and
+   * clearing only at zero is the smallest thing that keeps the sentence true.
+   */
+  const savingDepth = useRef(0);
+  const beginSaving = () => {
+    savingDepth.current += 1;
+    setSaving(true);
+  };
+  const endSaving = () => {
+    savingDepth.current = Math.max(0, savingDepth.current - 1);
+    if (savingDepth.current === 0) setSaving(false);
+  };
   const [problem, setProblem] = useState<string | null>(null);
   const [confirmRebucket, setConfirmRebucket] = useState<BucketId | null>(null);
 
@@ -392,7 +411,7 @@ function Body({
     }
 
     setBucketEdit(chosen);
-    setSaving(true);
+    beginSaving();
     setProblem(null);
 
     // One operation id per intent. If this call is retried it must carry the same one, or
@@ -401,7 +420,7 @@ function Body({
     const result = await setBucket({ operationId, mediaItemId: title.id, bucket: chosen });
 
     if (!report(result)) {
-      setSaving(false);
+      endSaving();
       setBucketEdit(null);
       // **The revert above is a guess, so it is checked rather than trusted.**
       // `set_bucket` creates the `user_media` row, and an unknown outcome means it may
@@ -473,7 +492,7 @@ function Body({
       })();
     }
 
-    setSaving(false);
+    endSaving();
     refresh();
     onRank?.(chosen, 'start');
   };
@@ -532,7 +551,7 @@ function Body({
 
     if (!noteChanged && !dateChanged && !claimsChanged) return;
 
-    setSaving(true);
+    beginSaving();
     setProblem(null);
 
     /**
@@ -590,7 +609,7 @@ function Body({
       }
     });
 
-    setSaving(false);
+    endSaving();
     if (touched) refresh();
   };
 
@@ -631,7 +650,7 @@ function Body({
     setDateEdit(null);
     setDateCleared(true);
     setProblem(null);
-    setSaving(true);
+    beginSaving();
     await queueDateWrite(async () => {
       const result = await clearWatchDate({
         operationId: newOperationId(),
@@ -640,7 +659,7 @@ function Body({
       report(result);
       if (mustReconcile(result)) refresh();
     });
-    setSaving(false);
+    endSaving();
   };
 
   /**
