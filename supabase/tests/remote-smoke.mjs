@@ -391,6 +391,44 @@ expectAllowed(
   await get('provider_list_cache?select=list_key&limit=1'),
 );
 
+/**
+ * And whether the shelf would actually render, which is the half the check above
+ * cannot see.
+ *
+ * The Feed's Trending shelf fails silently on purpose: no error card, no empty state,
+ * the row is simply absent (`src/features/trending/TrendingShelf.tsx`). That is the
+ * right behaviour for a discovery strip above somebody's social feed, and it means a
+ * shelf that has stopped rendering is invisible to everyone including whoever runs the
+ * project. On 2026-08-24 it had been gone for four hours before anyone noticed, and
+ * the cause was not a bug: nothing schedules `npm run trending:refresh`, the lists
+ * aged past the seven-day cutoff in `trending.ts`, and the client correctly refused to
+ * call a week-old list "Trending now".
+ *
+ * So the condition is asserted here, where an operator is already looking, rather than
+ * left to be noticed on a phone. Both `.day` lists, because those are the two the
+ * shelf mixes; `.week` feeds recommendations and has no such cliff.
+ */
+{
+  const res = await get(
+    'provider_list_cache?select=list_key,fetched_at&list_key=in.(trending.movie.day,trending.series.day)',
+  );
+  const rows = res.status === 200 ? JSON.parse(res.body) : [];
+  // The same seven days as TRENDING_MAX_AGE_MS. Duplicated rather than imported: this
+  // file is a standalone node script and does not load the app's TypeScript.
+  const cutoffMs = 7 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const ages = rows.map((row) => (now - Date.parse(row.fetched_at)) / 3600000);
+  const fresh = rows.length === 2 && ages.every((hours) => hours * 3600000 < cutoffMs);
+  report(
+    'the trending lists are recent enough for the Feed shelf to render',
+    fresh ? 'pass' : 'fail',
+    rows.length === 0
+      ? 'no .day rows: the adapter has never run against this project — `npm run trending:refresh`'
+      : `${rows.length}/2 lists, ages ${ages.map((h) => `${h.toFixed(1)}h`).join(', ')} (cutoff 168h) — ` +
+        'past it the shelf disappears with no error anywhere; `npm run trending:refresh`',
+  );
+}
+
 // RLS with no policy at all. How often someone searches is not their own business
 // to read and is certainly not a stranger's.
 {

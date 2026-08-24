@@ -16,8 +16,13 @@ import {
 } from './dates';
 
 export type WatchDatePickerProps = {
-  value: string;
+  /** The chosen date, or null for a watch with no date recorded. */
+  value: string | null;
+  /** Which month the grid opens on when `value` is null. */
+  anchor: string;
   onChange: (iso: string) => void;
+  /** "I don't remember" — see the note on that chip below. */
+  onClear: () => void;
 };
 
 /**
@@ -34,9 +39,9 @@ export type WatchDatePickerProps = {
  * genuinely editable rather than a two-option toggle, which matters for someone
  * catching up on things they watched weeks ago.
  */
-export function WatchDatePicker({ value, onChange }: WatchDatePickerProps) {
+export function WatchDatePicker({ value, anchor, onChange, onClear }: WatchDatePickerProps) {
   const now = today();
-  const [month, setMonth] = useState(value);
+  const [month, setMonth] = useState(value ?? anchor);
   const [gridOpen, setGridOpen] = useState(false);
 
   const cells = monthGrid(month);
@@ -54,10 +59,25 @@ export function WatchDatePicker({ value, onChange }: WatchDatePickerProps) {
           label={gridOpen ? 'Hide calendar' : 'Pick a date'}
           selected={gridOpen}
           onPress={() => {
-            setMonth(value);
+            setMonth(value ?? anchor);
             setGridOpen((open) => !open);
           }}
         />
+        {/**
+         * The fourth choice, and the founder's: "I watched this, but I don't want or
+         * remember an exact date."
+         *
+         * It sits with the other three rather than under the grid because it is one of
+         * the four answers to the same question, not an escape from it — and because
+         * the reader who needs it is the one who has *not* opened the calendar.
+         *
+         * **"Don't remember", not "Clear date".** Clear is what the control does to
+         * the field; it is not what the person means, and it reads as undoing the log.
+         * The date going away is the mechanism — what is being said is that there was a
+         * watch and the day is gone. The title stays logged either way, which the
+         * server enforces rather than merely allowing (20260824000100).
+         */}
+        <QuickChip label="Don't remember" selected={value === null} onPress={onClear} />
       </View>
 
       {gridOpen ? (
@@ -188,7 +208,9 @@ function Day({
 
 const styles = StyleSheet.create({
   container: { gap: theme.space[3], paddingHorizontal: theme.layout.gutter },
-  quick: { flexDirection: 'row', gap: theme.space[2] },
+  // Wraps, since 2026-08-24. Three chips fit one line on a 375pt screen and four do
+  // not, and a row that overflows silently clips whichever choice happens to be last.
+  quick: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.space[2] },
   chip: {
     minHeight: theme.layout.control.chipHeight,
     borderRadius: theme.radius.control,

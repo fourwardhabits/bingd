@@ -32,6 +32,7 @@ import {
 import { emptyLogState, useLogState, type LogState } from './use-log-state';
 import { WatchDatePicker } from './WatchDatePicker';
 import {
+  clearWatchDate,
   logWatched,
   mustReconcile,
   newOperationId,
@@ -213,6 +214,16 @@ function Body({
   const [visibilityEdit, setVisibilityEdit] = useState<NoteVisibility | null>(null);
   const [spoilersEdit, setSpoilersEdit] = useState<boolean | null>(null);
   const [dateEdit, setDateEdit] = useState<string | null>(null);
+  /**
+   * "I watched this, I do not remember when", held separately from `dateEdit`.
+   *
+   * Not folded into `dateEdit` as a third value, because that field follows this
+   * sheet's overlay convention exactly — null means *untouched* — and a null that
+   * sometimes meant "untouched" and sometimes meant "cleared" is the ambiguity the
+   * server side of this feature exists to remove (20260824000100). A separate flag
+   * says which of the two happened.
+   */
+  const [dateCleared, setDateCleared] = useState(false);
   const [expanded, setExpanded] = useState<Expanded>(null);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -258,6 +269,20 @@ function Body({
     (state.note ? state.noteVisibility : noteIntent === 'review' ? 'public' : 'private');
   const spoilers = spoilersEdit ?? state.noteSpoilers;
   const effectiveDate = dateEdit ?? state.watchedOn ?? today();
+  /**
+   * Whether the row is deliberately dateless, which is a different thing from having
+   * no date *yet*.
+   *
+   * Today is a pending default and the sheet is allowed to display it as one — that is
+   * what `choose`'s stamp below makes true. It stops being honest once the row exists
+   * and still has no date, because by then the stamp has either run or been declined:
+   * a title that has been logged and carries no date is one nobody recorded a date for,
+   * and "Today" over it is the sheet claiming something it did not save.
+   *
+   * `dateEdit` overrides it, so a date picked in this session shows immediately rather
+   * than waiting for the write and the refetch.
+   */
+  const datelessOnPurpose = dateCleared || (state.exists && !state.watchedOn && !dateEdit);
 
   // Logging is a collection change like any other: it writes a feed event, moves the
   // watchlist, and changes what this reader has watched. The same set as ranking.
@@ -396,7 +421,12 @@ function Body({
     // What remains unclosable from this side is the instant between that answer
     // and the write — a date recorded on another device in that gap needs a
     // server-side conditional write, which the beta accepts as a residual risk.
-    if (!stampPending.current) {
+    // And not at all once the reader has said they do not remember when. Without this
+    // guard the stamp is the thing that undoes the clear: clearing leaves `watched_on`
+    // null, which is exactly the condition the stamp treats as "no date yet", so the
+    // next bucket tap would write today's date back over an explicit "I don't
+    // remember" and nothing on screen would say it had happened.
+    if (!stampPending.current && !dateCleared) {
       stampPending.current = true;
       void (async () => {
         try {
@@ -531,6 +561,40 @@ function Body({
 
     setSaving(false);
     if (touched) refresh();
+  };
+
+  /**
+   * "I don't remember", which is a save and not a cancel.
+   *
+   * Separate from `saveDetails` because it is a different call for a structural
+   * reason: `log_watched` coalesces its date, so there is no argument to it that means
+   * *remove*. `clear_watch_date` is the one writer that can, and it does nothing else —
+   * the bucket, the note and the companions on the row are untouched, and the title
+   * stays logged, because a bucket is a watch signal in its own right.
+   *
+   * The optimistic flag is set first and kept even if the write fails, alongside the
+   * problem message. The alternative — reverting on failure — would put the date the
+   * reader just said they did not remember back under their thumb while an error sat
+   * above it, and the sheet's other writers all take this shape.
+   *
+   * A row that does not exist yet has no date to clear and needs no call: the flag
+   * alone suppresses the pending "Today" default and the stamp that would store it.
+   */
+  const clearDate = async () => {
+    if (saving) return;
+    setDateEdit(null);
+    setDateCleared(true);
+    setProblem(null);
+    if (!state.exists || !state.watchedOn) return;
+
+    setSaving(true);
+    const result = await clearWatchDate({
+      operationId: newOperationId(),
+      mediaItemId: title.id,
+    });
+    setSaving(false);
+    report(result);
+    if (mustReconcile(result)) refresh();
   };
 
   /**
@@ -847,7 +911,9 @@ function Body({
           <SheetRow
             icon="calendar-outline"
             label="Watch date"
-            value={loaded ? formatWatchDate(effectiveDate) : undefined}
+            value={
+              loaded ? (datelessOnPurpose ? 'Not recorded' : formatWatchDate(effectiveDate)) : undefined
+            }
             expanded={expanded === 'date'}
             onPress={loaded ? () => setExpanded(expanded === 'date' ? null : 'date') : undefined}
             disabledReason={GATE_REASON[fieldState]}
@@ -855,11 +921,16 @@ function Body({
           {loaded && expanded === 'date' ? (
             <View style={styles.expanded}>
               <WatchDatePicker
-                value={effectiveDate}
+                value={datelessOnPurpose ? null : effectiveDate}
+                // The grid still has to open on *some* month, and today is the only
+                // sensible one for a title with no date to anchor it.
+                anchor={effectiveDate}
                 onChange={(iso) => {
+                  setDateCleared(false);
                   setDateEdit(iso);
                   void saveDetails({ date: iso });
                 }}
+                onClear={() => void clearDate()}
               />
             </View>
           ) : null}

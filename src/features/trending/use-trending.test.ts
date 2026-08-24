@@ -1,5 +1,7 @@
+import { focusManager } from '@tanstack/react-query';
 import { waitFor } from '@testing-library/react-native';
 
+import { queryKeys } from '@/lib/query';
 import { renderHookWithProviders } from '@/test-utils/render';
 
 import { useTrending } from './use-trending';
@@ -8,6 +10,8 @@ type Read = { table: string; columns: string; ins: { column: string; values: unk
 
 const reads: Read[] = [];
 const rows: Record<string, unknown[]> = {};
+/** Errors to serve, one per read, before falling back to `rows`. */
+const errors: (unknown | null)[] = [];
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -24,8 +28,12 @@ jest.mock('@/lib/supabase', () => ({
           read.ins.push({ column, values });
           return chain;
         },
-        then: (resolve: (value: unknown) => unknown) =>
-          resolve({ data: rows[table] ?? [], error: null }),
+        then: (resolve: (value: unknown) => unknown) => {
+          const failure = errors.length ? errors.shift() : null;
+          return failure
+            ? resolve({ data: null, error: failure })
+            : resolve({ data: rows[table] ?? [], error: null });
+        },
       };
 
       return chain;
@@ -58,6 +66,7 @@ const title = (id: string, popularity: number | null) => ({
 
 beforeEach(() => {
   reads.length = 0;
+  errors.length = 0;
   for (const key of Object.keys(rows)) delete rows[key];
 });
 
@@ -77,6 +86,21 @@ describe('reading the trending shelf', () => {
       'trending.movie.day',
       'trending.series.day',
     ]);
+  });
+
+  it('caches under the shared key, which is how pull-to-refresh reaches it', async () => {
+    // The Feed's RefreshControl cannot call this hook's `refetch` — the shelf owns it —
+    // so it names the key instead (`app/(tabs)/feed.tsx`). Writing the key inline here
+    // rather than through `queryKeys` is what would silently break that gesture, and it
+    // would break it invisibly, because a shelf that never refreshes looks exactly like
+    // a shelf with nothing new to show.
+    rows.provider_list_cache = [list('trending.movie.day', ['film-1'])];
+    rows.media_items = [title('film-1', 50)];
+
+    const { result, client } = await renderHookWithProviders(() => useTrending());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(client.getQueryData(queryKeys.trending())).toBeDefined();
   });
 
   it('mixes the two lists into one shelf', async () => {
@@ -143,5 +167,51 @@ describe('reading the trending shelf', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data).toEqual({ items: [], stale: false });
+  });
+
+  /**
+   * The shelf renders nothing when this read fails, and nothing is indistinguishable
+   * from "there was nothing to show" — which is the right silence for a discovery strip
+   * and the reason a transient failure must not be able to become permanent. The Feed
+   * tab stays mounted for the life of the app, so nothing remounts to try again.
+   */
+  describe('after a failed read', () => {
+    it('serves the list on the next attempt rather than staying empty', async () => {
+      errors.push({ message: 'connection reset' });
+      rows.provider_list_cache = [list('trending.movie.day', ['film-1'])];
+      rows.media_items = [title('film-1', 50)];
+
+      const { result } = await renderHookWithProviders(() => useTrending());
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.data).toBeUndefined();
+
+      await result.current.refetch();
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(result.current.data?.items.map((item) => item.mediaItemId)).toEqual(['film-1']);
+    });
+
+    it('asks again on its own when the app comes back to the foreground', async () => {
+      // The recovery that needs no gesture. `refetchOnWindowFocus` is off by default
+      // across the app and this query opts in; `startQueryFocusTracking` (lib/query.ts)
+      // is what makes the event fire at all on a phone, and this stands in for it.
+      //
+      // A successful shelf is *not* refetched here — `staleTime` is thirty minutes and
+      // focus only refetches stale data — so returning to the app costs nothing when
+      // there is nothing wrong. An errored query has no data to be fresh, which is
+      // precisely the state this has to get out of.
+      errors.push({ message: 'connection reset' });
+      rows.provider_list_cache = [list('trending.movie.day', ['film-1'])];
+      rows.media_items = [title('film-1', 50)];
+
+      const { result } = await renderHookWithProviders(() => useTrending());
+      await waitFor(() => expect(result.current.isError).toBe(true));
+
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(result.current.data?.items.map((item) => item.mediaItemId)).toEqual(['film-1']);
+    });
   });
 });

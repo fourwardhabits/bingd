@@ -33,6 +33,11 @@ export const queryKeys = {
   // sharing a key with a full title row would let whichever query ran first serve the
   // other a shape it did not ask for.
   comparisonCard: (mediaItemId: string) => ['comparison-card', mediaItemId] as const,
+  // What a long press during ranking opens: enough of a title to remember it by. Its
+  // own key rather than `title`'s for the reason directly above — it reads a different
+  // subset of the same row, and two shapes under one key is a race over which screen
+  // ran first. Fetched only on the long press, so a reader who never asks never pays.
+  titleRecall: (mediaItemId: string) => ['title-recall', mediaItemId] as const,
   // Not keyed by user: the catalogue is the same for everyone, so a sign-out need not
   // discard it and two accounts on one device share the cache.
   search: (query: string) => ['search', query] as const,
@@ -48,6 +53,11 @@ export const queryKeys = {
   // reachable from a second account signed in on the same device.
   goals: (userId: string, year: number) => ['goals', userId, year] as const,
   notifications: () => ['notifications'] as const,
+  // Not keyed by account, for the reason `search` records: what TMDB is featuring is
+  // the same list for everyone. Named here rather than left inline in the hook because
+  // the Feed's pull-to-refresh has to name it too — the shelf owns its own query, so
+  // the key is the only way that gesture can reach it.
+  trending: () => ['trending', 'day'] as const,
   // Whether this account has ever ranked or logged anything, read once on arrival.
   // Deliberately *not* under `collection`, which the ranking flow invalidates: sharing
   // that prefix would answer "no longer new" the moment the first film was placed and
@@ -69,8 +79,8 @@ export const queryKeys = {
  * teardown so the effect that starts it can stop it.
  *
  * The global default below stays `false`. This makes the mechanism *work*; which
- * queries opt into it is still each query's own decision, and today only the inbox
- * does.
+ * queries opt into it is still each query's own decision, and today that is the
+ * notification inbox and the Trending shelf.
  */
 export function startQueryFocusTracking() {
   const subscription = AppState.addEventListener('change', (next) => {

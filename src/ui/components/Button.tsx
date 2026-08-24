@@ -16,10 +16,26 @@ type Kind = 'primary' | 'secondary' | 'tertiary';
  */
 type Size = 'md' | 'sm';
 
+/**
+ * How loudly the label reads, where the default is wrong.
+ *
+ * Every kind has a tone that follows from it — a primary button is inverse on Maroon,
+ * everything else is full ink — and that is right for a control which is the point of
+ * its screen. It is wrong for one that deliberately is not: the ranking sheet's Undo
+ * and Skip sit under two posters, and full-ink at `headline` weight made them read as
+ * the question rather than as the way out of it.
+ *
+ * Optional, and the default is exactly what every existing caller already gets. A
+ * button asks for a quieter tone; it cannot be given a louder one than its kind
+ * implies, because that is what `kind` is for.
+ */
+type Tone = 'default' | 'secondary';
+
 export type ButtonProps = Omit<PressableProps, 'children' | 'style'> & {
   label: string;
   kind?: Kind;
   size?: Size;
+  tone?: Tone;
   /**
    * Required when disabled. An unexplained dead button is the most common
    * accessibility failure in this pattern (design-system.md §8), so the reason
@@ -32,6 +48,7 @@ export function Button({
   label,
   kind = 'primary',
   size = 'md',
+  tone = 'default',
   disabled,
   disabledReason,
   ...rest
@@ -58,7 +75,9 @@ export function Button({
       <View pointerEvents="none">
         <Text
           variant={size === 'sm' ? 'callout' : 'headline'}
-          tone={kind === 'primary' ? 'inverse' : 'primary'}
+          tone={
+            kind === 'primary' ? 'inverse' : tone === 'secondary' ? 'secondary' : 'primary'
+          }
         >
           {label}
         </Text>

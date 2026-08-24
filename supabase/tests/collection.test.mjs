@@ -354,6 +354,94 @@ describe('collection writes', () => {
     });
   });
 
+  /**
+   * `clear_watch_date` (20260824000100).
+   *
+   * The one writer that puts a null into `watched_on`. Three properties, and the
+   * middle one is the whole point of the function existing: clearing a date must
+   * leave the title watched, because a bucket is a watch signal in its own right
+   * (20260815040000) and "I do not remember when" is not "I did not see it".
+   */
+  describe('clear_watch_date', () => {
+    const dated = async (name, tmdbId) => {
+      const film = await t.createMovie(name, tmdbId);
+      await call(`set_bucket($1, $2, 'loved')`, [await uuid(), film]);
+      await call(`log_watched($1, $2, '2026-08-01')`, [await uuid(), film]);
+      return film;
+    };
+
+    it('clears the date and leaves the title logged', async () => {
+      const film = await dated('Andrei Rublev', 1040);
+      assert.equal((await collectionRow(film)).watched_on?.toISOString().slice(0, 10), '2026-08-01');
+
+      const result = await call(`clear_watch_date($1, $2)`, [await uuid(), film]);
+      assert.equal(result.status, 'ok');
+
+      const row = await collectionRow(film);
+      assert.equal(row.watched_on, null, 'the date is gone');
+      // The two things that must survive it. Losing either would turn "forget the
+      // date" into "forget that I watched it", which is the failure this refuses.
+      assert.equal(row.bucket, 'loved', 'the rating is untouched');
+      assert.ok(row, 'the collection row still exists');
+    });
+
+    it('does not put a watched title back on the watchlist', async () => {
+      const film = await dated('The Mirror', 1041);
+      const onList = async () => {
+        const { rows } = await t.sql(
+          `select count(*)::int as n from watchlist where user_id = $1 and media_item_id = $2`,
+          [user, film],
+        );
+        return rows[0].n;
+      };
+      assert.equal(await onList(), 0);
+
+      await call(`clear_watch_date($1, $2)`, [await uuid(), film]);
+
+      // Falls out of 20260815040000 rather than from a rule in this function: the
+      // update trigger fires only when a signal *becomes* non-null.
+      assert.equal(await onList(), 0, 'forgetting the date is not intending to watch it');
+    });
+
+    it('refuses when the date is the only record that this was watched', async () => {
+      // Reachable from the log sheet, which lets a date be set before a bucket.
+      const film = await t.createMovie('Nostalghia', 1042);
+      await call(`log_watched($1, $2, '2026-08-01')`, [await uuid(), film]);
+
+      const err = await t.errorFrom(`select clear_watch_date($1, $2)`, [await uuid(), film]);
+      assert.equal(err?.code, '22023');
+
+      const row = await collectionRow(film);
+      assert.equal(
+        row.watched_on?.toISOString().slice(0, 10),
+        '2026-08-01',
+        'the refusal left the row exactly as it was',
+      );
+    });
+
+    it('is a successful no-op on a row with no date, and on no row at all', async () => {
+      const bucketed = await t.createMovie('Ivan’s Childhood', 1043);
+      await call(`set_bucket($1, $2, 'fine')`, [await uuid(), bucketed]);
+      assert.equal((await collectionRow(bucketed)).watched_on, null);
+      assert.equal((await call(`clear_watch_date($1, $2)`, [await uuid(), bucketed])).status, 'ok');
+
+      const untouched = await t.createMovie('The Sacrifice', 1044);
+      assert.equal((await call(`clear_watch_date($1, $2)`, [await uuid(), untouched])).status, 'ok');
+      assert.equal(await collectionRow(untouched), null, 'and it created nothing');
+    });
+
+    it('reports a replay as already applied', async () => {
+      const film = await dated('Solaris II', 1045);
+      const operation = await uuid();
+
+      assert.equal((await call(`clear_watch_date($1, $2)`, [operation, film])).status, 'ok');
+      assert.equal(
+        (await call(`clear_watch_date($1, $2)`, [operation, film])).status,
+        'already_applied',
+      );
+    });
+  });
+
   describe('set_watchlist', () => {
     it('adds, is safe to repeat, and removes', async () => {
       const film = await t.createMovie('Kagemusha', 1012);

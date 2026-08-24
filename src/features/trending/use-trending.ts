@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 
 import { isExpired, isTooOldToShow, mixTrending, type TrendingCandidate } from './trending';
@@ -46,11 +47,28 @@ export function useTrending() {
     // Not keyed by account. This is catalogue data, identical for everyone, so two
     // accounts on one device share it and a sign-out need not discard it — the same
     // reasoning `queryKeys.search` records.
-    queryKey: ['trending', 'day'],
+    queryKey: queryKeys.trending(),
     // The list itself only changes when the adapter runs, every six hours. Refetching
     // it on every Feed mount would be a request per tab switch for a row that cannot
     // have changed.
     staleTime: 30 * 60_000,
+    /**
+     * **The one query besides the inbox that opts in, and for a different reason.**
+     *
+     * The shelf fails silently by design (`TrendingShelf`), so a `select` that lost
+     * its connection leaves no error state anywhere on screen — just a Feed with no
+     * Trending row. That is fine for the second it takes to retry, and it was not
+     * retrying: the Feed tab stays mounted for the life of the app, so no new observer
+     * ever mounts against the failed query, and `staleTime` does not apply to a query
+     * that has no data to be stale. One transient failure removed the shelf until the
+     * process was restarted.
+     *
+     * `startQueryFocusTracking` (lib/query.ts) is what makes this fire at all on a
+     * phone. The cost is bounded by the same `staleTime` above — a successful shelf is
+     * fresh for thirty minutes, so returning to the app cannot cost more than one
+     * `select` per half hour, and nothing here touches the TMDB quota either way.
+     */
+    refetchOnWindowFocus: true,
     queryFn: async (): Promise<TrendingShelfData> => {
       const { data: lists, error } = await supabase
         .from('provider_list_cache')
