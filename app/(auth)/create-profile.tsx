@@ -144,7 +144,10 @@ export default function CreateProfileScreen() {
     setBusy(true);
     setError(null);
     try {
-      await create();
+      // Passed rather than read again inside: the guard above is what proves it is
+      // there, and a guard TypeScript cannot see across a function boundary is a cast
+      // waiting to be written.
+      await create(dateOfBirth);
     } finally {
       // **Cleared in a `finally`, after everything the submission does.**
       //
@@ -195,11 +198,11 @@ export default function CreateProfileScreen() {
       queryKey: queryKeys.myProfile(auth.status === 'onboarding' ? auth.userId : 'none'),
     });
 
-  const create = async () => {
+  const create = async (dateOfBirth: string) => {
     const result = await createProfile({
       username: normalised,
       displayName: displayName.trim() || null,
-      dateOfBirth: dateOfBirth as string,
+      dateOfBirth,
     });
 
     switch (result.outcome) {
