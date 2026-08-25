@@ -1,4 +1,5 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
 
 import { queryKeys } from '@/lib/query';
 import { renderWithProviders } from '@/test-utils/render';
@@ -157,7 +158,31 @@ const failing = (fn: string, error: { code?: string; message: string }) => {
 };
 
 /** Whichever of the two names the one writing field is wearing right now. */
-const WRITING = /^(Private note|Review)$/;
+/**
+ * **The two writing rows, which used to be one row wearing two names.**
+ *
+ * `user_media` holds one `note` under one `note_visibility`, and the sheet used to
+ * draw a single row labelled by whichever state that was in. The founder's objection:
+ * somebody who wanted to write a *review* had to find a row called Private note, open
+ * it, and notice a chip inside — which is a bad way to discover the social half of the
+ * product, and the way most people never discovered it at all.
+ *
+ * There are two rows now and exactly one of them ever holds the writing. `WRITING` is
+ * the private one, because that is where a note with no stored visibility opens and so
+ * is the row every test in this file that predates the split was implicitly using.
+ * Tests about the *other* row say `REVIEW` and mean it.
+ */
+const WRITING = 'Private note';
+const REVIEW = 'Review';
+
+/**
+ * The one confirmation this sheet raises, and the only way to observe it.
+ *
+ * Publishing writing somebody kept private is the single act here that tapping again
+ * cannot undo, so the Review row asks before it converts. Under Jest nobody presses
+ * anything, so the spy both proves the question was asked and provides the answer.
+ */
+const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
 const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> = {}) => {
   const view = await renderWithProviders(<LogSheet title={title} onClose={() => {}} surface="search" {...props} />);
@@ -175,6 +200,7 @@ const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> =
     // because almost every test here is about the field rather than about its state —
     // the ones that *are* about the state assert the exact word themselves.
     notesRow: () => view.getByRole('button', { name: WRITING }),
+    reviewRow: () => view.getByRole('button', { name: REVIEW }),
     // Both rows are inert until `useLogState` resolves, so that nothing can be
     // decided about a note the sheet has not been told about yet. A user waits for
     // that without noticing; a test has to say so.
@@ -183,6 +209,13 @@ const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> =
         expect(view.getByLabelText(WRITING).props.accessibilityState.disabled).toBe(false),
       );
       return fireEvent.press(view.getByRole('button', { name: WRITING }));
+    },
+    /** The other row. Opens the same field, on the public side of it. */
+    openReview: async () => {
+      await waitFor(() =>
+        expect(view.getByLabelText(REVIEW).props.accessibilityState.disabled).toBe(false),
+      );
+      return fireEvent.press(view.getByRole('button', { name: REVIEW }));
     },
     note: () => view.getByPlaceholderText('What did you think?'),
     dateRow: () => view.getByRole('button', { name: 'Watch date' }),
@@ -798,7 +831,10 @@ describe('what a note says about itself', () => {
    */
   it('opens public when the reader came through Write a review', async () => {
     const sheet = await open(filmA, { noteIntent: 'review' });
-    await sheet.openNotes();
+    // The Review row, because that is what "Write a review" now lands on. The intent
+    // prop still decides the *visibility* of a note that does not exist yet; what the
+    // row decides is which of the two the reader opened.
+    await sheet.openReview();
 
     expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(true);
     expect(sheet.getByText(/Shown with your rating/)).toBeTruthy();
@@ -859,7 +895,7 @@ describe('what a note says about itself', () => {
     // Through the review door, so the spoiler claim is being made about something
     // that will actually be shown to somebody.
     const sheet = await open(filmA, { noteIntent: 'review' });
-    await sheet.openNotes();
+    await sheet.openReview();
     await fireEvent.changeText(sheet.note(), 'he was dead the whole time');
     await fireEvent.press(spoilerToggle(sheet));
 
@@ -884,7 +920,10 @@ describe('what a note says about itself', () => {
       null,
     );
     const sheet = await open(filmA);
-    await sheet.openNotes();
+    // Opened on the row it is currently filed under. A stored public note lives on the
+    // Review row, and pressing Private note is the *other* way to take it back — the
+    // row-level conversion, asserted separately below.
+    await sheet.openReview();
     await waitFor(() => expect(sheet.note().props.value).toBe('out in the open'));
 
     // Unticking "Share as a review" is how a published note is taken back.
@@ -1163,7 +1202,7 @@ describe('when the log state cannot be read', () => {
     await waitFor(() =>
       expect(sheet.getByLabelText(WRITING).props.accessibilityHint).toBe('Unavailable'),
     );
-    for (const label of [WRITING, 'Who I watched with', 'Watch date']) {
+    for (const label of [WRITING, REVIEW, 'Who I watched with', 'Watch date']) {
       expect(sheet.getByLabelText(label).props.accessibilityHint).not.toBe('Loading');
     }
   });
@@ -1547,38 +1586,124 @@ describe('who I watched with', () => {
  * over a caption promising it would appear in friends' feeds — so the word for the
  * private thing was heading the composer for the public one.
  */
+/**
+ * **Two rows, and which of them is holding the writing.**
+ *
+ * The sheet used to draw one row and rename it — Private note or Review, whichever the
+ * stored visibility happened to be. That was an honest label for a state and a bad
+ * offer: a reader who wanted to write a review had to open a row called Private note
+ * and notice a chip inside it. The founder's brief for this tranche makes both names
+ * visible before either is opened, Review first, because Bingd should nudge the social
+ * contribution rather than hide it behind the private one.
+ *
+ * The storage did not move and is not going to: one `note`, one `note_visibility`. So
+ * the invariant these tests hold is that **exactly one row ever has words in it**, and
+ * that moving them across is an act the reader takes rather than one they stumble into.
+ */
 describe('what the writing is called', () => {
+  it('offers both before either is opened, with Review first', async () => {
+    const sheet = await open(filmA);
+    await waitFor(() =>
+      expect(sheet.getByLabelText('Private note').props.accessibilityState.disabled).toBe(false),
+    );
+
+    expect(sheet.getByRole('button', { name: 'Review' })).toBeTruthy();
+    expect(sheet.getByRole('button', { name: 'Private note' })).toBeTruthy();
+    // Neither holds anything yet, and both say so rather than one pretending to.
+    expect(sheet.reviewRow().props.accessibilityValue.text).toBe('Add');
+    expect(sheet.notesRow().props.accessibilityValue.text).toBe('Add');
+  });
+
   it('is a private note until it is shared', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
 
-    expect(sheet.getByRole('button', { name: 'Private note' })).toBeTruthy();
-    expect(sheet.queryByRole('button', { name: 'Review' })).toBeNull();
     expect(sheet.getByText('Only you can read this.')).toBeTruthy();
+    expect(sheet.notesRow().props.accessibilityState.expanded).toBe(true);
+    expect(sheet.reviewRow().props.accessibilityState.expanded).toBe(false);
   });
 
   it('is a review once it is', async () => {
     const sheet = await open(filmA, { noteIntent: 'review' });
-    await sheet.openNotes();
+    await sheet.openReview();
 
-    expect(sheet.getByRole('button', { name: 'Review' })).toBeTruthy();
-    expect(sheet.queryByRole('button', { name: 'Private note' })).toBeNull();
+    expect(sheet.reviewRow().props.accessibilityState.expanded).toBe(true);
+    expect(sheet.notesRow().props.accessibilityState.expanded).toBe(false);
   });
 
-  it('renames itself the moment the reader shares it', async () => {
+  it('moves the writing across when the reader shares it', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
-    expect(sheet.getByRole('button', { name: 'Private note' })).toBeTruthy();
+    await fireEvent.changeText(sheet.note(), 'three words here');
 
     await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
 
-    await waitFor(() => expect(sheet.getByRole('button', { name: 'Review' })).toBeTruthy());
+    // The word count follows the visibility, because there is one piece of writing and
+    // the rows are two views of it.
+    await waitFor(() => expect(sheet.reviewRow().props.accessibilityValue.text).toBe('3 words'));
+    expect(sheet.notesRow().props.accessibilityValue.text).toBe('Add');
+  });
+
+  /**
+   * **Publishing asks. Un-publishing does not.**
+   *
+   * The asymmetry is the same one the note claims have had since visibility existed:
+   * putting somebody's private writing on their profile and in their friends' feeds is
+   * the one move on this sheet that tapping again cannot take back, because by then it
+   * has been read. Making a review private is the safe direction and costs a tap.
+   */
+  it('will not publish a private note on one tap of the Review row', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'kept back',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+    await sheet.openReview();
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    expect(alertSpy.mock.calls[0]?.[0]).toBe('Share this as a review?');
+    // Nothing was written by asking.
+    expect(callsTo('save_note')).toHaveLength(0);
+    expect(callsTo('log_watched')).toHaveLength(0);
+  });
+
+  it('publishes once the reader confirms', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'kept back',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+    await sheet.openReview();
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    const share = alertSpy.mock.calls[0]?.[2]?.find((button) => button.style !== 'cancel');
+    await share?.onPress?.();
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1]).toMatchObject({
+      p_note: 'kept back',
+      p_note_visibility: 'public',
+    });
   });
 
   /**
    * The stored value still wins over the door the reader came through — the guarantee
-   * `20260823000100`'s tranche established, restated here because the label is now
-   * derived from the same expression and would be the first thing to drift.
+   * `20260823000100`'s tranche established, restated because the rows are now derived
+   * from the same expression and would be the first thing to drift.
    */
   it('calls a stored private note a private note, even under Write a review', async () => {
     stubReads(
@@ -1596,6 +1721,122 @@ describe('what the writing is called', () => {
     await sheet.openNotes();
 
     await waitFor(() => expect(sheet.note().props.value).toBe('kept back'));
+    // The writing is on the private row, and the review row is empty — the intent prop
+    // did not move anything.
+    expect(sheet.notesRow().props.accessibilityValue.text).toBe('2 words');
+    expect(sheet.reviewRow().props.accessibilityValue.text).toBe('Add');
+  });
+});
+
+/**
+ * **The state a finished ranking returns to.**
+ *
+ * The founder's central complaint about the log flow: tap a bucket, answer the
+ * comparisons, see a number, and it is over. The review you might write and the people
+ * you watched it with were behind a second, unprompted visit to a sheet you had just
+ * been thrown out of, and nothing on the reveal said so.
+ *
+ * Ranking is a subflow of logging now, and this sheet is what it returns to —
+ * deliberately *this* sheet rather than a Finish screen of its own, because the rows
+ * below the header are the canonical implementation of "the rest of your log" and a
+ * second copy of them is a second copy that drifts. What `postRank` changes is the top
+ * of the sheet, where the bucket question is replaced by its answer, and the addition of
+ * a Done at the foot.
+ */
+describe('the state after a ranking', () => {
+  const placed = { score: 8.7, position: 3, category: 'movies' };
+
+  it('restates the score instead of asking the question again', async () => {
+    const sheet = await open(filmA, { postRank: placed });
+
+    await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
+    expect(sheet.getByText('#3 in Movies')).toBeTruthy();
+    // Re-asking "How was it?" with a bucket already chosen would be the sheet
+    // pretending the last minute did not happen — and worse, offering a control whose
+    // next tap discards the position the reader just earned.
+    expect(sheet.queryByText('How was it?')).toBeNull();
+    expect(sheet.queryByTestId('bucket-choices')).toBeNull();
+  });
+
+  it('offers the writing and the details, with Review first', async () => {
+    const sheet = await open(filmA, { postRank: placed });
+
+    await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
+    expect(sheet.getByRole('button', { name: 'Review' })).toBeTruthy();
     expect(sheet.getByRole('button', { name: 'Private note' })).toBeTruthy();
+    expect(sheet.getByRole('button', { name: 'Who I watched with' })).toBeTruthy();
+    expect(sheet.getByRole('button', { name: 'Watch date' })).toBeTruthy();
+  });
+
+  it('lets somebody finish without writing anything', async () => {
+    const onDone = jest.fn();
+    const sheet = await open(filmA, { postRank: placed, onDone });
+
+    await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
+    await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
+
+    expect(onDone).toHaveBeenCalled();
+    // Done is "I am finished", not "commit" — every row above writes on its own, as
+    // this sheet always has.
+    expect(callsTo('save_note')).toHaveLength(0);
+    expect(callsTo('log_watched')).toHaveLength(0);
+  });
+
+  it('does not open a composer by itself', async () => {
+    const sheet = await open(filmA, { postRank: placed });
+
+    await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
+    // A form that opens itself is a form that has to be dismissed. Writing is offered,
+    // never required.
+    expect(sheet.queryByPlaceholderText('What did you think?')).toBeNull();
+  });
+
+  it('is a review that gets written, if one does', async () => {
+    const sheet = await open(filmA, { postRank: placed });
+    await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
+
+    await sheet.openReview();
+    await fireEvent.changeText(sheet.note(), 'The last twenty minutes are the whole film.');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1]).toMatchObject({
+      p_note: 'The last twenty minutes are the whole film.',
+      p_note_visibility: 'public',
+    });
+  });
+
+  it('is a private note that stays private, if that is what gets written', async () => {
+    const sheet = await open(filmA, { postRank: placed });
+    await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
+
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'must rewatch');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1]).toMatchObject({
+      p_note: 'must rewatch',
+      p_note_visibility: 'private',
+    });
+  });
+
+  it('keeps the ordinary sheet exactly as it was', async () => {
+    const sheet = await open(filmA);
+
+    // No `postRank`, so the bucket question is the top of the sheet and there is no
+    // Done — this sheet has a Close in its header and a backdrop, and a title that has
+    // not been ranked has no moment a Done would be the end of.
+    await waitFor(() => expect(sheet.getByText('How was it?')).toBeTruthy());
+    expect(sheet.queryByRole('button', { name: 'Done' })).toBeNull();
+    expect(sheet.queryByText('Ranked')).toBeNull();
+  });
+
+  it('names TV seasons by the category the server sent', async () => {
+    const sheet = await open(filmA, {
+      postRank: { score: 6.2, position: 11, category: 'tv_seasons' },
+    });
+
+    await waitFor(() => expect(sheet.getByText('#11 in TV seasons')).toBeTruthy());
   });
 });

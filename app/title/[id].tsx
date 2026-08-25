@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
-import { LogSheet, type LoggableTitle } from '@/features/collection/LogSheet';
+import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
+import { BUCKET_IDS } from '@/features/collection/use-log-state';
 import { heroRankFor } from '@/features/collection/hero-rank';
 import { useCompanions } from '@/features/collection/use-companions';
 import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
@@ -124,11 +125,24 @@ export default function TitleScreen() {
   const [tab, setTab] = useState<Tab | null>(null);
   const [loggingTitle, setLoggingTitle] = useState<LoggableTitle | null>(null);
   /**
+   * The title the open ranking is about, and what it scored — the two halves of
+   * returning to the log sheet once the comparisons are done.
+   *
+   * `loggingTitle` is cleared at the handoff, because screens.md §4 wants one continuous
+   * motion and two stacked sheets is the opposite of that. So the `LoggableTitle` is
+   * kept here across it, and `placement` carries the number the session produced rather
+   * than making the sheet re-query for it.
+   */
+  const [rankedTitle, setRankedTitle] = useState<LoggableTitle | null>(null);
+  const [placement, setPlacement] = useState<PostRank | null>(null);
+  /**
    * Which door the log sheet was opened through, which decides how a *new* note
    * starts out. "Write a review" means publish; everything else means a private note
    * until the reader says otherwise. A note that already exists ignores this entirely.
    */
   const [logIntent, setLogIntent] = useState<'note' | 'review'>('note');
+  /** Which composer the log sheet should already be showing when it appears, if any. */
+  const [openWriting, setOpenWriting] = useState<'public' | 'private' | null>(null);
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
@@ -187,7 +201,10 @@ export default function TitleScreen() {
       const [logged, ranked, watchlist] = await Promise.all([
         supabase
           .from('user_media')
-          .select('bucket, watched_on, note, note_has_spoilers')
+          // `note_visibility` since the Ranked menu had to say Edit *review* or Edit
+          // *private note*: one column stores both, and the menu cannot name the right
+          // one without it. `useLogState` has selected it since notes became social.
+          .select('bucket, watched_on, note, note_has_spoilers, note_visibility')
           .eq('user_id', profile.id)
           .eq('media_item_id', id ?? '')
           .maybeSingle(),
@@ -375,6 +392,23 @@ export default function TitleScreen() {
         year: 'numeric',
       })
     : null;
+  /**
+   * Which of the two the writing on this title currently is, or neither.
+   *
+   * One column stores both, so these are mutually exclusive by construction and the
+   * Ranked menu names the state it is actually in rather than offering two Adds for one
+   * slot. Both false while the read is in flight, which is the safe way round: the menu
+   * says Write rather than Edit, and Write on an existing note opens it for editing
+   * anyway — the sheet resolves visibility from what is stored, not from which door was
+   * used.
+   */
+  const noteText = (data.logged?.note ?? '').trim();
+  const hasReview = Boolean(noteText) && data.logged?.note_visibility === 'public';
+  const hasPrivateNote = Boolean(noteText) && data.logged?.note_visibility !== 'public';
+
+  /** The band this title is already in, in the chips' spelling. Null until the read lands. */
+  const rankedBucket = data.ranked?.bucket ? (BUCKET_IDS[data.ranked.bucket] ?? null) : null;
+
   const rankCategoryLabel = data.ranked?.category === 'tv_seasons' ? 'TV seasons' : 'Movies';
   // One line only, chosen by the founder's rule: top ten overall, else the
   // strongest category placement. Derived from rows already cached.
@@ -446,19 +480,36 @@ export default function TitleScreen() {
   // so it falls back rather than rendering nothing under a live tab row.
   const activeTab = tabs.some((option) => option.id === tab) ? tab : tabs[0]?.id;
 
-  const openLog = (intent: 'note' | 'review' = 'note') => {
+  /**
+   * This title as the log sheet wants it.
+   *
+   * It was built inline inside `openLog`, and Rank again needs the same object to hand
+   * back to the post-rank sheet once the comparisons finish — so it is a value rather
+   * than something two call sites each assemble from six fields.
+   */
+  const loggable: LoggableTitle = {
+    id: title.id,
+    title: title.title,
+    year,
+    posterUri: posterUri(title.poster_path, 'card'),
+    kind: title.kind,
+    seriesTitle: parent?.title ?? null,
+    seasonNumber: title.season_number ?? null,
+  };
+
+  const openLog = (
+    intent: 'note' | 'review' = 'note',
+    // Set by the Ranked menu's two writing rows, which name a piece of writing and so
+    // should land the reader inside it rather than in a sheet where they have to find
+    // the row again. Null everywhere else, which is the sheet's ordinary behaviour.
+    writing: 'public' | 'private' | null = null,
+  ) => {
     if (!rankable) return;
     setActionError(null);
     setLogIntent(intent);
-    setLoggingTitle({
-      id: title.id,
-      title: title.title,
-      year,
-      posterUri: posterUri(title.poster_path, 'card'),
-      kind: title.kind,
-      seriesTitle: parent?.title ?? null,
-      seasonNumber: title.season_number ?? null,
-    });
+    setOpenWriting(writing);
+    setPlacement(null);
+    setLoggingTitle(loggable);
   };
 
   const toggleWatchlist = async () => {
@@ -508,19 +559,27 @@ export default function TitleScreen() {
    * date, the note, the position. The alert names what goes rather than asking "are you
    * sure", which is a question nobody can answer without being told the consequence.
    *
-   * The activity goes too, as of `20260818000100`, and the alert names the reactions
-   * and comments by name. Review 19 asked for that and it is right: the cascade reaches
-   * other people's writing, and a consequence that falls on somebody who is not in the
-   * room is exactly the sort a confirmation exists to state. Saying "the activity" and
-   * leaving the rest implied is the kind of true-but-incomplete wording review 14
-   * rejected on the deletion inventory. The copy stays plain and serious — this is the
-   * one place in the app the playful voice does not go.
+   * The activity goes too, as of `20260818000100`, and the reactions and comments on it
+   * are still named. Review 19 asked for that and it is right: the cascade reaches other
+   * people's writing, and a consequence that falls on somebody who is not in the room is
+   * exactly the sort a confirmation exists to state.
+   *
+   * **Shortened on founder review, and nothing was dropped.** It was one paragraph of
+   * four clauses that read as a wall at the moment somebody is trying to make a
+   * decision. It is now two sentences: what goes, then who else it touches. Every
+   * consequence the old copy listed is still listed — rating, watch date, writing,
+   * activity, reactions, comments, and that you can log it again — and the second
+   * sentence is separate because it is the one about other people, which is the half a
+   * reader is least likely to have thought of.
+   *
+   * The copy stays plain and serious. This is the one place in the app the playful
+   * voice does not go, and the deletion behaviour behind it is untouched.
    */
   const confirmRemoval = () => {
     setManaging(false);
     Alert.alert(
       `Remove ${displayTitle ?? title.title} from your collection?`,
-      'Your rating, your watch date and anything you wrote go with it. The activity about it goes too, along with any reactions and comments on it. You can log it again later.',
+      'This removes your rating, watch date, review or private note, and related activity. You can log it again later.\n\nIt also removes any reactions and comments on that activity.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -1018,8 +1077,15 @@ export default function TitleScreen() {
         title={loggingTitle}
         surface="title"
         noteIntent={logIntent}
+        openWriting={openWriting}
+        postRank={placement}
+        onDone={() => {
+          setLoggingTitle(null);
+          setPlacement(null);
+        }}
         onClose={() => {
           setLoggingTitle(null);
+          setPlacement(null);
           setActionError(null);
         }}
         onRank={(bucket, mode) => {
@@ -1031,6 +1097,8 @@ export default function TitleScreen() {
             posterUri: loggingTitle.posterUri,
             mode,
           });
+          setRankedTitle(loggingTitle);
+          setPlacement(null);
           setLoggingTitle(null);
         }}
       />
@@ -1038,6 +1106,16 @@ export default function TitleScreen() {
         subject={rankingSubject}
         onClose={() => setRankingSubject(null)}
         onRankAnother={() => setRankingSubject(null)}
+        // Ranking is a subflow of logging, so it returns to the log rather than ending
+        // at a number. The same sheet, on the same title, with the score at the top of
+        // it — there is one implementation of "the rest of your log" and this is it.
+        onFinishLog={(result) => {
+          setRankingSubject(null);
+          if (!rankedTitle) return;
+          setLogIntent('note');
+          setPlacement(result);
+          setLoggingTitle(rankedTitle);
+        }}
         surface="title"
       />
       {/* Mounted only while open, like every other sheet here: it seeds its own
@@ -1074,14 +1152,110 @@ export default function TitleScreen() {
           label={`Options for ${displayTitle ?? title.title}`}
         >
           <View style={styles.menu}>
+            {/**
+              * **Three groups, because seven undifferentiated rows is a list rather than
+              * a menu.**
+              *
+              * Your log is what you wrote about it, ranking is where it sits, collection
+              * is whether you keep it at all — and the destructive one is last and on its
+              * own, which is the only ordering that never puts Remove under a thumb
+              * reaching for something else.
+              */}
+            <MenuGroup title="Your log" />
+            {/**
+              * **One field, two rows, and the label says which state it is in.**
+              *
+              * `user_media` holds one `note` under one `note_visibility`, so exactly one
+              * of these two ever reads Edit. The other offers the conversion, named as
+              * the act it performs rather than as "add" — writing already exists, and a
+              * row that said Add would be promising a second piece of writing this
+              * schema has nowhere to put.
+              *
+              * Publishing confirms; making something private does not. That asymmetry is
+              * the log sheet's, and it is enforced there rather than duplicated here —
+              * these rows open the sheet, and the sheet owns what a conversion costs.
+              */}
+            <SheetRow
+              icon="chatbubble-ellipses-outline"
+              label={hasReview ? 'Edit review' : hasPrivateNote ? 'Share as a review' : 'Write review'}
+              value={hasReview ? undefined : 'Anyone who can see your profile'}
+              onPress={() => {
+                setManaging(false);
+                openLog('review', 'public');
+              }}
+            />
+            <SheetRow
+              icon="lock-closed-outline"
+              label={
+                hasPrivateNote
+                  ? 'Edit private note'
+                  : hasReview
+                    ? 'Make it a private note'
+                    : 'Add private note'
+              }
+              value={hasPrivateNote ? undefined : 'Only you can read this'}
+              onPress={() => {
+                setManaging(false);
+                openLog('note', 'private');
+              }}
+            />
+
+            <MenuGroup title="Ranking" />
+            {/**
+              * **Rank again, which T2 built and nothing offered.**
+              *
+              * `rank_again` (20260825000200) unranks and re-opens a session inside the
+              * same band in one atomic call, and it exists because `rank_rebucket`
+              * refuses a bucket that is not moving. The client writer is
+              * `session.rankAgain`, reached by opening the ranking sheet in `rerank`
+              * mode — which is the *only* way this app is allowed to do it. Composing
+              * `rank_unrank` and `rank_start` on the client would be two calls with a
+              * window between them in which the title has no position and no session,
+              * and a dropped connection in that window loses the ranking outright. That
+              * is the guarantee T2 bought and this row spends nothing of it.
+              *
+              * Distinct from Change your rating below, and the two are not synonyms:
+              * this redoes the *comparisons* inside the band you already chose. The
+              * bucket is passed straight through from `rankings.bucket`, so nothing here
+              * decides a rating.
+              */}
+            <SheetRow
+              icon="repeat-outline"
+              label="Rank again"
+              value="Compare it again in the same rating"
+              onPress={
+                rankedBucket
+                  ? () => {
+                      setManaging(false);
+                      setActionError(null);
+                      setRankedTitle(loggable);
+                      setRankingSubject({
+                        id: title.id,
+                        title: title.title,
+                        bucket: rankedBucket,
+                        posterUri: posterUri(title.poster_path, 'card'),
+                        mode: 'rerank',
+                      });
+                    }
+                  : undefined
+              }
+              disabledReason={rankedBucket ? undefined : 'Loading'}
+            />
+            {/* Kept, and now with a line saying what it is *for*: it changes the band —
+                loved, fine, not for me — which is a different question from where the
+                title sits inside one. The two used to be one row apart with nothing
+                distinguishing them but a verb. */}
             <SheetRow
               icon="star-outline"
               label="Change your rating"
+              value="Pick a different loved, fine or not for me"
               onPress={() => {
                 setManaging(false);
                 openLog();
               }}
             />
+
+            <MenuGroup title="Collection" />
             <SheetRow
               icon="trash-outline"
               label="Remove from collection"
@@ -1128,6 +1302,28 @@ function RecommendedCallout({ label, overlay = false }: { label: string; overlay
       <Ionicons name="paper-plane" size={theme.layout.icon.sm} color={theme.semantic.action} />
       <Text variant="footnote" numberOfLines={1} style={styles.recommendedLabel}>
         {label}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * A heading inside an action sheet.
+ *
+ * The Ranked menu grew from two rows to five across three different kinds of act —
+ * what you wrote, where it sits, whether you keep it — and five rows in one column
+ * with no structure is a list you read rather than a menu you use. Deliberately not
+ * `SectionHeader`: that one carries the page gutter and a `title3`, which inside a
+ * sheet is the same size as the rows it is meant to be subordinate to.
+ *
+ * `header` rather than plain text, so a screen reader can jump between the groups
+ * instead of hearing five sibling buttons.
+ */
+function MenuGroup({ title }: { title: string }) {
+  return (
+    <View style={styles.menuGroup} accessibilityRole="header">
+      <Text variant="caption" tone="tertiary">
+        {title.toUpperCase()}
       </Text>
     </View>
   );
@@ -1345,6 +1541,13 @@ const styles = StyleSheet.create({
   // callout wider than the gutters allow.
   recommendedLabel: { flex: 1 },
   menu: { paddingBottom: theme.space[4], paddingTop: theme.space[2] },
+  // Enough air above to separate the group from the rows before it, and none below:
+  // the heading belongs to what follows it.
+  menuGroup: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[4],
+    paddingBottom: theme.space[1],
+  },
   rowAction: {
     flexDirection: 'row',
     alignItems: 'center',

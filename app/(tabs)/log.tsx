@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
-import { LogSheet, type LoggableTitle } from '@/features/collection/LogSheet';
+import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
 import { useRecentSearches } from '@/features/search/use-recent-searches';
@@ -76,6 +76,17 @@ export default function LogScreen() {
   const [series, setSeries] = useState<{ id: string; title: string } | null>(null);
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
   const [ranking, setRanking] = useState<RankingSubject | null>(null);
+  /**
+   * What a finished ranking scored, held only while the log sheet is showing it.
+   *
+   * Kept beside `logging` rather than inside it: it is a fact about a session that has
+   * ended, not about the title, and folding it into `LoggableTitle` would put it on
+   * every other caller of that type for nothing.
+   */
+  const [placement, setPlacement] = useState<PostRank | null>(null);
+  // The title the open ranking is about, kept because `logging` is cleared at the
+  // handoff and the post-rank sheet needs the same `LoggableTitle` back.
+  const [ranked, setRanked] = useState<LoggableTitle | null>(null);
 
   const { recent, remember, clear } = useRecentSearches(profile.id);
 
@@ -326,8 +337,16 @@ export default function LogScreen() {
 
       <LogSheet
         title={logging}
-        onClose={() => setLogging(null)}
+        onClose={() => {
+          setLogging(null);
+          setPlacement(null);
+        }}
         surface="search"
+        postRank={placement}
+        onDone={() => {
+          setLogging(null);
+          setPlacement(null);
+        }}
         onRank={(bucket, mode) => {
           if (!logging) return;
           // The log sheet closes as the comparison opens. screens.md §4 asks for one
@@ -339,6 +358,7 @@ export default function LogScreen() {
             posterUri: logging.posterUri,
             mode,
           });
+          setRanked(logging);
           setLogging(null);
         }}
       />
@@ -347,6 +367,15 @@ export default function LogScreen() {
         subject={ranking}
         onClose={() => setRanking(null)}
         onRankAnother={() => setInput('')}
+        // Back into the sheet the ranking came out of, on the title it was about.
+        // `ranked` is that title held across the handoff — `logging` was cleared when the
+        // comparison opened, because two stacked sheets is what screens.md §4 forbids.
+        onFinishLog={(result) => {
+          setRanking(null);
+          if (!ranked) return;
+          setPlacement(result);
+          setLogging(ranked);
+        }}
         surface="search"
       />
     </Screen>

@@ -2,6 +2,8 @@ import { fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
+import { TAB_ROUTES } from '@/lib/routes';
+
 import { resetTasteIntent } from './use-taste-onboarding';
 
 // Not colocated with the route: everything under app/ is bundled by expo-router's
@@ -410,5 +412,92 @@ describe('the rating sheet', () => {
       p_media_item_id: 'film-1',
       p_bucket: 'not_for_me',
     });
+  });
+});
+
+
+/**
+ * **Where the last screen of onboarding actually sends people.**
+ *
+ * The founder tapped "Explore For You" on a physical device and landed on the Feed.
+ *
+ * The root cause was not a typo. `leave()` did `complete()` and then
+ * `router.replace('/(tabs)/feed')`, with the destination written into the helper rather
+ * than passed to it — so one function served two buttons that mean two different things,
+ * and the one whose label makes a promise was the one silently broken. A bare
+ * `'/(tabs)/feed'` looks correct wherever it appears; nothing about it says which button
+ * it belongs to.
+ *
+ * The second half of the trap is that **the tab labels and the route names disagree on
+ * purpose**: the bar reads For you and the route is `recommendations`, because the file
+ * was never renamed. So a screen navigating by the word on the bar guesses wrong.
+ *
+ * These assert the destination by route, which is what `TAB_ROUTES` exists to make
+ * checkable — an index would pass today and break the next time the bar is reordered.
+ */
+describe('where onboarding lets go', () => {
+  const finished = () => {
+    mockCounts.rankings = 5;
+    mockCounts.user_media = 5;
+    return renderWithProviders(<TasteScreen />);
+  };
+
+  it('sends Explore For You to the For You tab', async () => {
+    const view = await finished();
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
+    // The bug, named. Not "some route other than feed" — the exact wrong answer.
+    expect(mockReplace).not.toHaveBeenCalledWith(TAB_ROUTES.feed);
+  });
+
+  it('names the route rather than the label, because those differ', async () => {
+    const view = await finished();
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+
+    // The tab says "For you" and the file is `recommendations`. Asserted literally so
+    // that a future rename of one has to account for the other.
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(tabs)/recommendations'));
+  });
+
+  it('still sends See my collection to the collection', async () => {
+    const view = await finished();
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'See my collection' }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.collection));
+  });
+
+  /**
+   * Declining is not exploring. Somebody who would not rank five films is put where the
+   * app has something to show them that is not about their own taste yet — which is the
+   * Feed, and is the one destination that did not change.
+   */
+  it('leaves Not now on the feed', async () => {
+    mockCounts.rankings = 0;
+    mockCounts.user_media = 0;
+    const view = await renderWithProviders(<TasteScreen />);
+    await waitFor(() => expect(view.getByText('Build your taste')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.feed));
+  });
+
+  it('completes the flow before it navigates, either way', async () => {
+    const view = await finished();
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+
+    // The destination changed; what it is a destination *from* did not. The phase is
+    // recorded in prefs — an account left `active` would be held on this screen again on
+    // the next launch, which is the half of `leave` that had to survive the fix.
+    await waitFor(() => expect([...mockPrefs.values()]).toContain('done'));
   });
 });

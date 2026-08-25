@@ -14,6 +14,7 @@ import { useFeed } from '@/features/feed/use-feed';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { GoalsSection } from '@/features/goals/GoalsSection';
 import { InviteFriendsButton } from '@/features/profile/InviteFriendsButton';
+import { ProfileActions } from '@/features/profile/ProfileActions';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
 import { ProfileWatchlist } from '@/features/profile/ProfileWatchlist';
 import { TopRanked } from '@/features/profile/TopRanked';
@@ -23,7 +24,6 @@ import { theme } from '@/ui/tokens';
 import {
   ActivityRow,
   AppHeader,
-  Button,
   EmptyState,
   Screen,
   SectionHeader,
@@ -142,27 +142,15 @@ export default function ProfileScreen() {
              * home behind the gear, so promoting it here made the most common act the
              * second-most prominent one.
              *
-             * Awards takes the filled Maroon and Share takes the outline, which is the
-             * reverse of what "primary action" would suggest and is deliberate: Share
-             * is the useful one and Awards is the fun one, and a row of two identical
-             * outlined buttons says neither. The fill is the only thing on this screen
-             * competing with the poster wall below it, so it is spent on the control
-             * that is meant to be tempting rather than on the one people already know
-             * how to find.
+             * The pair itself is `ProfileActions`, which is also what `/u/[username]`
+             * draws — the ordering, the fill and the narrow-width behaviour all live
+             * there, so the two screens cannot drift apart again.
              */
             <View style={styles.controlStack}>
-              <View style={styles.controls}>
-                <View style={styles.control}>
-                  <Button
-                    label="Share Profile"
-                    kind="secondary"
-                    onPress={() => void shareProfile()}
-                  />
-                </View>
-                <View style={styles.control}>
-                  <Button label="bingd. Awards" onPress={() => setAwardsOpen(true)} />
-                </View>
-              </View>
+              <ProfileActions
+                onShare={() => void shareProfile()}
+                onOpenAwards={() => setAwardsOpen(true)}
+              />
               {/* Under the pair, full width, outlined like Share: inviting somebody is
                   sharing pointed at a person who is not on Bingd yet. Own profile only —
                   `/u/[username]` deliberately does not render this, because an invite is
@@ -289,10 +277,7 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   section: { paddingTop: theme.space[5], gap: theme.space[2] },
-  // Two equal halves rather than one button and a chip: they are different kinds of
-  // thing and equal weight is what stops the fill reading as the only real control.
-  controls: { flexDirection: 'row', gap: theme.space[2] },
-  control: { flex: 1 },
-  // The pair, then Invite friends beneath it, at the same rhythm the pair keeps.
+  // The pair, then Invite friends beneath it, at the same rhythm the pair keeps. The
+  // pair's own layout is `ProfileActions`.
   controlStack: { gap: theme.space[2] },
 });

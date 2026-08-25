@@ -22,9 +22,18 @@ import CreateProfileScreen from '../../../app/(auth)/create-profile';
  *
  *   - **the 13+ gate is the only consumer.** `create_profile` compares the date and
  *     nothing reads it afterwards — `is_over_13` has no production caller at all.
- *   - **it is never shown to anyone.** `profile_private` has RLS enabled with no
+ *   - **it is not shown on a profile.** `profile_private` has RLS enabled with no
  *     policy and its select grant revoked, so no API returns it, including to the
- *     person who typed it. It is on the analytics denylist.
+ *     person who typed it. It is on the analytics denylist, and nothing renders it.
+ *
+ * **The second clause used to read "it is never shown to anyone", and that sentence is
+ * gone on founder review (2026-08-25).** The narrower statement above is the one this
+ * app can keep on its own account. "Shown to anyone" is heard as a claim about
+ * everything that ever touches the value — staff, processors, whoever operates the
+ * database — and that is a Privacy Policy's claim to make, with the whole handling
+ * story behind it, not a caption's. The tests below pin the narrower promise *and*
+ * assert the broad one has not come back, because the way this defect returns is
+ * somebody restoring a sentence that reads better.
  */
 
 jest.mock('@/lib/supabase', () => ({
@@ -49,17 +58,35 @@ jest.mock('@/features/auth', () => ({
 jest.mock('@/lib/analytics', () => ({ track: jest.fn() }));
 
 describe('why the signup screen asks for a birthday', () => {
-  it('says what it is for, and that it is never shown', async () => {
+  it('says what it is for, and that it is not on your profile', async () => {
     const view = await renderWithProviders(<CreateProfileScreen />);
 
     await waitFor(() =>
       expect(
         view.getByText(
-          'We use your birthday to confirm you are 13 or older. It may also help us ' +
-            'personalise recommendations as bingd. improves. It is never shown to anyone.',
+          'Your birthday is private and isn’t shown on your profile. We use it to ' +
+            'confirm you’re 13 or older, and may use age to improve recommendations.',
         ),
       ).toBeTruthy(),
     );
+  });
+
+  /**
+   * The sentence the founder struck out, asserted absent by its own words.
+   *
+   * A copy test that only pins the new string passes the moment somebody adds the old
+   * one back beside it, which is precisely the shape this regression would take: the
+   * broad sentence reads warmer, and warmer is why it was written the first time.
+   */
+  it('does not promise the birthday is never shown to anyone', async () => {
+    const view = await renderWithProviders(<CreateProfileScreen />);
+
+    await waitFor(() => expect(view.getByText(/13 or older/)).toBeTruthy());
+
+    expect(view.queryByText(/never shown to anyone/i)).toBeNull();
+    // The neighbouring forms of the same over-claim.
+    expect(view.queryByText(/nobody (can )?(ever )?sees?/i)).toBeNull();
+    expect(view.queryByText(/no one will ever see/i)).toBeNull();
   });
 
   /**
@@ -88,7 +115,10 @@ describe('why the signup screen asks for a birthday', () => {
 
     await waitFor(() => expect(view.getByText(/13 or older/)).toBeTruthy());
 
-    expect(view.getByText(/may also help/i)).toBeTruthy();
+    // The hedge, in whichever words carry it. It was "may also help us personalise
+    // recommendations as bingd. improves" and is now "may use age to improve
+    // recommendations" — shorter, same tense, same claim.
+    expect(view.getByText(/may use age to improve/i)).toBeTruthy();
     // The forms that would claim it is already true.
     expect(view.queryByText(/we use .*to personalise/i)).toBeNull();
     expect(view.queryByText(/powers your recommendations/i)).toBeNull();

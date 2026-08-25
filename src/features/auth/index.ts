@@ -21,6 +21,6 @@ export {
   type SignInOutcome,
 } from './methods';
 
-export { createProfile, usernameAvailability } from './create-profile';
+export { applyInitialVisibility, createProfile, usernameAvailability } from './create-profile';
 
 export { AuthStatusOverlay } from './status-overlay';

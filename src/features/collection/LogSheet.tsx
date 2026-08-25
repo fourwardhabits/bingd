@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { invalidateAfterCollectionChange } from './invalidate';
 import { diagnose } from '@/lib/diagnose';
@@ -13,6 +13,7 @@ import {
   BucketChoices,
   Button,
   Poster,
+  ScoreBadge,
   Sheet,
   SheetRow,
   Text,
@@ -93,6 +94,64 @@ export type LogSheetProps = {
    * log something.
    */
   surface: Surface;
+  /**
+   * Set when this sheet is being shown as the state *after* a ranking rather than
+   * before one — the score the title just landed on, and where it landed.
+   *
+   * **This is the answer to the founder's central complaint**, which was that ranking
+   * threw you out of the log. Tap a bucket, answer four comparisons, see a number, and
+   * the flow was over: the review you might have written and the people you watched it
+   * with were behind a second visit to a sheet you had just left, and nothing on the
+   * reveal said so.
+   *
+   * So ranking becomes a subflow of logging and this sheet is what it returns to. It
+   * is deliberately *this* sheet and not a new one: the rows below are the canonical
+   * implementation of "the rest of your log", and a dedicated Finish screen would be a
+   * second copy of them that could drift. What `postRank` changes is only the top of
+   * the sheet — the bucket question is answered, so its place is taken by the answer —
+   * and the addition of a Done at the foot.
+   *
+   * Null in the ordinary case, which is every entry point that is not a ranking that
+   * just finished.
+   */
+  postRank?: PostRank | null;
+  /**
+   * Open the writing composer as soon as the sheet appears, on the named kind.
+   *
+   * The Ranked menu's Write review and Add private note rows are what use it: a row
+   * that names a piece of writing should land the reader in it rather than in a sheet
+   * where they have to find the row again.
+   *
+   * **It cannot publish anything by itself.** It seeds which row is open, and the
+   * visibility still resolves the way it always has — a note that already exists opens
+   * on the value it was *saved* with, whichever door was used. So asking for `public`
+   * on a title carrying a private note opens the private note, with the Review row
+   * directly above it and its confirmation behind that tap. That ordering is the whole
+   * privacy property of this sheet and this prop is deliberately too weak to break it.
+   */
+  openWriting?: NoteVisibility | null;
+  /**
+   * Finishing from the post-rank state, which is a different act from dismissing.
+   *
+   * The caller usually wants both to close the sheet, and the reason they are two
+   * props is that the ranking flow has more to unwind than a dismissal does — the
+   * ranking sheet behind this one is still mounted. Falls back to `onClose`.
+   */
+  onDone?: () => void;
+};
+
+/**
+ * What a ranking just decided, as this sheet needs to restate it.
+ *
+ * Passed in rather than read: the ranking session already had all three from
+ * `rank_answer`'s reply, and re-querying for a number the previous screen was
+ * holding would put a spinner in the middle of a finished act.
+ */
+export type PostRank = {
+  score: number;
+  position: number;
+  /** The server's own word — `movies` or `tv_seasons`. */
+  category: string;
 };
 
 /**
@@ -103,7 +162,16 @@ export type LogSheetProps = {
  * space only when opened. What is borrowed is density and hierarchy; the palette,
  * the serif and the poster treatment stay Bingd's (PRD §5).
  */
-export function LogSheet({ title, onClose, onRank, surface, noteIntent }: LogSheetProps) {
+export function LogSheet({
+  title,
+  onClose,
+  onRank,
+  surface,
+  noteIntent,
+  postRank,
+  openWriting,
+  onDone,
+}: LogSheetProps) {
   if (!title) return null;
 
   // Keyed by the title, and unmounted entirely when there is none. Both matter: a sheet
@@ -118,6 +186,9 @@ export function LogSheet({ title, onClose, onRank, surface, noteIntent }: LogShe
       onRank={onRank}
       surface={surface}
       noteIntent={noteIntent}
+      postRank={postRank}
+      openWriting={openWriting}
+      onDone={onDone}
     />
   );
 }
@@ -146,6 +217,9 @@ function Body({
   onRank,
   surface,
   noteIntent = 'note',
+  postRank = null,
+  openWriting = null,
+  onDone,
 }: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
@@ -223,7 +297,10 @@ function Body({
    * says which of the two happened.
    */
   const [dateCleared, setDateCleared] = useState(false);
-  const [expanded, setExpanded] = useState<Expanded>(null);
+  // Seeded rather than set in an effect: the sheet is keyed by the title and mounts
+  // fresh for each one, so the initial value *is* the answer and an effect would only
+  // be a second render saying the same thing.
+  const [expanded, setExpanded] = useState<Expanded>(openWriting ? 'notes' : null);
   const [saving, setSaving] = useState(false);
   /**
    * How many writes are in flight, because "Saving…" is a claim and a boolean stopped
@@ -310,7 +387,9 @@ function Body({
    */
   const visibility =
     visibilityEdit ??
-    (state.note ? state.noteVisibility : noteIntent === 'review' ? 'public' : 'private');
+    (state.note
+      ? state.noteVisibility
+      : openWriting ?? (noteIntent === 'review' ? 'public' : 'private'));
   const spoilers = spoilersEdit ?? state.noteSpoilers;
   const effectiveDate = dateEdit ?? state.watchedOn ?? today();
   /**
@@ -759,11 +838,93 @@ function Body({
       : `${chosen.length} people`
     : 'Add';
 
+  /**
+   * The bucket in the database's own spelling, which is what `ScoreBadge` reads.
+   *
+   * The chips speak camelCase — `notForMe` — and `user_media.bucket` is `not_for_me`.
+   * The badge only uses it for the spoken label ("8.7, I didn't like it"), so a null
+   * here costs a clause and not a colour; it is mapped rather than cast because the two
+   * vocabularies genuinely differ in one of the three values and a cast would be right
+   * two thirds of the time.
+   */
+  const storedBucket = bucket === 'notForMe' ? 'not_for_me' : bucket;
+
   const category = title.kind === 'movie' ? 'Movies' : 'TV season';
   // The compact identity, which is what a sheet heading is: one line, series and
   // season joined the way every other row in the app joins them (`lib/titles.ts`).
   const heading = compactName(title) ?? title.title;
-  const noteValue = note.trim() ? `${note.trim().split(/\s+/).length} words` : 'Add';
+  const written = note.trim();
+  const wordCount = written ? `${written.split(/\s+/).length} words` : null;
+  /**
+   * **One field, two rows, and the row that has it is the one it is currently saved
+   * as.**
+   *
+   * `user_media` holds exactly one `note` and one `note_visibility`. A review and a
+   * private note are the same text under two different answers to "who may read this"
+   * — which is what `20260817001100`'s "one object, two names" already established
+   * and what this sheet is not going to relitigate.
+   *
+   * What changes is that both names are now on screen at once. The row it used to be
+   * was labelled by whichever state the note happened to be in, so a reader who wanted
+   * to write a *review* had to find a row called Private note, open it, and notice a
+   * chip — the founder's exact complaint, and a genuinely bad way to discover the
+   * social half of the product. Two rows say what the two things are before either is
+   * opened, and the empty one says Add rather than pretending to hold something.
+   *
+   * Review is first because Bingd should nudge the social contribution. Neither is
+   * forced, and finishing without writing anything is one tap on Done.
+   */
+  const reviewValue = loaded ? (visibility === 'public' && wordCount ? wordCount : 'Add') : undefined;
+  const privateValue = loaded ? (visibility === 'private' && wordCount ? wordCount : 'Add') : undefined;
+
+  /**
+   * Open the composer as one of the two, converting if something is already written.
+   *
+   * (Named `chooseWriting` rather than `openWriting` only because the prop above owns
+   * that name; the prop decides what is open on arrival and this decides what a tap
+   * opens.)
+   *
+   * The conversion is the "Share as a review" chip's job said as a row instead, and it
+   * confirms in exactly one direction. Publishing something the author kept private is
+   * the one move on this sheet that cannot be taken back by tapping again — the text is
+   * on a profile and in a feed the moment it saves — so it asks. Making a review private
+   * is the safe direction and does not ask, which is the same asymmetry the note claims
+   * have had since visibility became a thing at all.
+   *
+   * With nothing written there is nothing to convert: the tap just decides what the next
+   * save will be, and no write happens until there are words.
+   */
+  const chooseWriting = (next: NoteVisibility) => {
+    if (expanded === 'notes' && visibility === next) {
+      setExpanded(null);
+      return;
+    }
+
+    const converting = Boolean(written) && visibility !== next;
+
+    if (converting && next === 'public') {
+      Alert.alert(
+        'Share this as a review?',
+        `Anyone who can see your profile will be able to read it, and it appears with your rating on ${heading}.`,
+        [
+          { text: 'Keep it private', style: 'cancel' },
+          {
+            text: 'Share as review',
+            onPress: () => {
+              setVisibilityEdit('public');
+              setExpanded('notes');
+              void saveDetails({ visibility: 'public' });
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    setVisibilityEdit(next);
+    setExpanded('notes');
+    if (converting) void saveDetails({ visibility: next });
+  };
 
   return (
     <Sheet visible onClose={onClose} label={`Log ${heading}`}>
@@ -794,19 +955,45 @@ function Body({
           </Pressable>
         </View>
 
-        <View style={styles.buckets}>
-          <Text variant="title2" style={styles.prompt}>
-            How was it?
-          </Text>
-          {/* The row itself is `BucketChoices`, which is also what the onboarding
-              sheet shows. The radiogroup role travels with it, so the two surfaces
-              cannot drift apart in layout or in what a screen reader is told. */}
-          <BucketChoices
-            selected={bucket}
-            onSelect={(option) => void choose(option)}
-            testID="bucket-choices"
-          />
-        </View>
+        {postRank ? (
+          /**
+           * **The question, answered.**
+           *
+           * The reader has just come out of the comparisons, so re-asking "How was it?"
+           * with a bucket already selected would be the sheet pretending the last minute
+           * did not happen — and worse, offering a control whose next tap discards the
+           * position they just earned. The bucket chooser is what `Change your rating`
+           * is for, and it is one row away in the Ranked menu.
+           *
+           * The score is restated compactly rather than animated again: the reveal has
+           * already had its moment, and this is a receipt at the top of a form. It is the
+           * same `ScoreBadge` that appears in every list and on every title page, so the
+           * number the reader meets a second later is visibly the same number.
+           */
+          <View style={styles.ranked} accessibilityRole="summary">
+            <ScoreBadge score={postRank.score} bucket={storedBucket} size="md" />
+            <View style={styles.rankedText}>
+              <Text variant="headline">Ranked</Text>
+              <Text variant="footnote" tone="secondary">
+                {`#${postRank.position} in ${postRank.category === 'tv_seasons' ? 'TV seasons' : 'Movies'}`}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.buckets}>
+            <Text variant="title2" style={styles.prompt}>
+              How was it?
+            </Text>
+            {/* The row itself is `BucketChoices`, which is also what the onboarding
+                sheet shows. The radiogroup role travels with it, so the two surfaces
+                cannot drift apart in layout or in what a screen reader is told. */}
+            <BucketChoices
+              selected={bucket}
+              onSelect={(option) => void choose(option)}
+              testID="bucket-choices"
+            />
+          </View>
+        )}
 
         {confirmRebucket ? (
           <View style={styles.confirm}>
@@ -895,19 +1082,23 @@ function Body({
               sheet's shape, and having them appear a beat after the buckets would
               make the sheet resize under the thumb that just tapped one. What is
               withheld is the ability to act on a baseline that is not there yet. */}
-          {/* **The row says which of the two things this is.**
-
-              One field stores both, and the row used to be called "Notes" whichever
-              state it was in — so the composer for a review was headed with the word
-              for the private one, two lines above a caption saying it would appear in
-              your friends' feeds. Naming the state is the smallest honest fix: the
-              label follows the visibility, and the chip inside still switches it. */}
+          {/* **Two rows, Review first.** See `openWriting` above for why one stored
+              field gets two rows and what happens when the reader moves writing
+              between them — `chooseWriting`. */}
           <SheetRow
-            icon="create-outline"
-            label={visibility === 'public' ? 'Review' : 'Private note'}
-            value={loaded ? noteValue : undefined}
-            expanded={expanded === 'notes'}
-            onPress={loaded ? () => setExpanded(expanded === 'notes' ? null : 'notes') : undefined}
+            icon="chatbubble-ellipses-outline"
+            label="Review"
+            value={reviewValue}
+            expanded={expanded === 'notes' && visibility === 'public'}
+            onPress={loaded ? () => chooseWriting('public') : undefined}
+            disabledReason={GATE_REASON[fieldState]}
+          />
+          <SheetRow
+            icon="lock-closed-outline"
+            label="Private note"
+            value={privateValue}
+            expanded={expanded === 'notes' && visibility === 'private'}
+            onPress={loaded ? () => chooseWriting('private') : undefined}
             disabledReason={GATE_REASON[fieldState]}
           />
           {loaded && expanded === 'notes' ? (
@@ -997,6 +1188,25 @@ function Body({
             </View>
           ) : null}
         </View>
+
+        {/**
+          * **The end of the flow, said out loud.**
+          *
+          * Only in the post-rank state, and it is the whole reason that state is not a
+          * dead end: everything above it is optional, and without a control that says so
+          * a form of four Add rows reads as four things you have to do. Nothing here is
+          * saved by pressing it — every row above writes on its own, as this sheet
+          * always has — so Done is genuinely "I am finished", not "commit".
+          *
+          * The ordinary sheet does not get one. It has a Close in its header and a
+          * backdrop, and a title that has not been ranked yet has no moment this would
+          * be the end of.
+          */}
+        {postRank ? (
+          <View style={styles.done}>
+            <Button label="Done" onPress={() => (onDone ?? onClose)()} />
+          </View>
+        ) : null}
       </ScrollView>
     </Sheet>
   );
@@ -1045,6 +1255,21 @@ const styles = StyleSheet.create({
   headerText: { flex: 1, gap: 2 },
   buckets: { gap: theme.space[3], paddingHorizontal: theme.layout.gutter },
   prompt: { textAlign: 'center' },
+  /**
+   * The post-rank receipt: badge left, two lines beside it.
+   *
+   * A row rather than the reveal's centred stack, and that is the density decision. The
+   * reveal is a moment and gets the whole width; this is the header of a form and has
+   * three more rows and a Done underneath it, so it takes one line's worth of height.
+   */
+  ranked: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[3],
+    paddingHorizontal: theme.layout.gutter,
+  },
+  rankedText: { flex: 1, gap: 2 },
+  done: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3] },
   confirm: {
     marginHorizontal: theme.layout.gutter,
     padding: theme.space[3],

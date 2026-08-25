@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
 import { TasteBucketSheet, type TasteSubject } from '@/features/onboarding/TasteBucketSheet';
 import {
   FIRST_FIVE,
@@ -13,6 +14,7 @@ import {
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
 import { posterUri } from '@/lib/images';
+import { TAB_ROUTES, type TabRoute } from '@/lib/routes';
 import { theme } from '@/ui/tokens';
 import {
   Button,
@@ -53,6 +55,18 @@ export default function TasteOnboardingScreen() {
   const profile = useCurrentProfile();
   const [input, setInput] = useState('');
   const [choosing, setChoosing] = useState<TasteSubject | null>(null);
+  /**
+   * The title an open ranking is about, and what it scored — the two halves of the
+   * post-rank log state. Kept beside the ranking rather than inside `RankingSubject`,
+   * which is about a comparison and not about a log entry.
+   *
+   * Onboarding is films only (a series cannot be ranked, so offering one here would be
+   * offering a dead end), which is why `kind` is a constant below rather than a field
+   * this screen has to carry.
+   */
+  const [justRanked, setJustRanked] = useState<LoggableTitle | null>(null);
+  const [logging, setLogging] = useState<LoggableTitle | null>(null);
+  const [placement, setPlacement] = useState<PostRank | null>(null);
   const [ranking, setRanking] = useState<RankingSubject | null>(null);
 
   const state = useTasteOnboarding(profile.id);
@@ -86,7 +100,7 @@ export default function TasteOnboardingScreen() {
     settled.current = true;
 
     if (!state.data.needed) {
-      router.replace('/(tabs)/feed');
+      router.replace(TAB_ROUTES.feed);
       return;
     }
 
@@ -98,9 +112,22 @@ export default function TasteOnboardingScreen() {
   // dead end at the exact moment somebody is deciding whether this app works.
   const films = results.filter((result) => result.kind === 'movie');
 
-  const leave = async ({ skipped }: { skipped: boolean }) => {
+  /**
+   * Finish the flow and go somewhere, where *somewhere* is the caller's to name.
+   *
+   * It used to be `/(tabs)/feed` for both callers, which is the founder's device
+   * defect: "Explore For You" is a sentence naming a destination, and it landed on the
+   * Feed. The root cause is that the destination was baked into `leave` rather than
+   * chosen by the button — one helper served two buttons that mean two different
+   * things, and the one whose label makes a promise was the one silently broken.
+   *
+   * `to` is a route rather than a tab index for the reason `TAB_ROUTES` states: the
+   * order of the tabs is a layout decision and this is a navigation one, and an index
+   * would re-break this the next time the bar is reordered.
+   */
+  const leave = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
     await complete({ skipped });
-    router.replace('/(tabs)/feed');
+    router.replace(to);
   };
 
   // Nothing until the answer arrives. Rendering the flow first and then deciding shows
@@ -121,11 +148,11 @@ export default function TasteOnboardingScreen() {
 
       {done ? (
         <Summary
-          onExplore={() => void leave({ skipped: false })}
-          onCollection={async () => {
-            await complete({ skipped: false });
-            router.replace('/(tabs)/collection');
-          }}
+          // The button says For You, so it goes to For You. The tab is the route
+          // `recommendations` — the label on the bar and the name of the file have
+          // never matched, which is most of how this went wrong in the first place.
+          onExplore={() => void leave({ skipped: false, to: TAB_ROUTES.forYou })}
+          onCollection={() => void leave({ skipped: false, to: TAB_ROUTES.collection })}
         />
       ) : (
         <>
@@ -210,10 +237,39 @@ export default function TasteOnboardingScreen() {
               thing offered rather than an equal alternative to the thing that makes
               the app work. */}
           <View style={styles.skip}>
-            <Button label="Not now" kind="tertiary" onPress={() => void leave({ skipped: true })} />
+            {/* Declining is not exploring, so this one keeps the Feed it always had:
+                somebody who would not rank five films is being put where the app has
+                something to show them that is not about their own taste yet. */}
+            <Button
+              label="Not now"
+              kind="tertiary"
+              onPress={() => void leave({ skipped: true, to: TAB_ROUTES.feed })}
+            />
           </View>
         </>
       )}
+
+      {/* The post-rank state, and nothing else: onboarding never opens this sheet to
+          *log* something — the bucket is chosen in `TasteBucketSheet` and goes straight
+          into comparisons — so there is no `onRank` to give it. It appears only once a
+          ranking has finished and the reader asked to finish their log. */}
+      <LogSheet
+        title={logging}
+        surface="onboarding"
+        postRank={placement}
+        onDone={() => {
+          setLogging(null);
+          setPlacement(null);
+          setInput('');
+          void state.refetch();
+        }}
+        onClose={() => {
+          setLogging(null);
+          setPlacement(null);
+          setInput('');
+          void state.refetch();
+        }}
+      />
 
       <TasteBucketSheet
         subject={choosing}
@@ -228,6 +284,13 @@ export default function TasteOnboardingScreen() {
             bucket,
             posterUri: choosing.posterUri,
             mode: 'start',
+          });
+          setJustRanked({
+            id: choosing.id,
+            title: choosing.title,
+            year: choosing.year ?? null,
+            posterUri: choosing.posterUri ?? null,
+            kind: 'movie',
           });
           setChoosing(null);
         }}
@@ -246,6 +309,28 @@ export default function TasteOnboardingScreen() {
           setRanking(null);
           setInput('');
           void state.refetch();
+        }}
+        /**
+         * **The same post-rank state the rest of the app gets, and deliberately not a
+         * cut-down one.**
+         *
+         * The temptation here is to leave onboarding out of it: five films in a row is
+         * the funnel that decides whether somebody keeps the app, and a form after each
+         * one sounds like friction. But the reveal still offers Rank another and Done
+         * side by side, so the fast path costs exactly the taps it always did — and the
+         * person ranking their fifth favourite film is the single most likely person in
+         * the product to have something to say about it. Offering the composer to
+         * everybody except them would be an odd place to draw the line.
+         *
+         * It is also the same `LogSheet`, which is the rule this pass is holding to:
+         * one implementation of the rest of your log, not an onboarding copy of it that
+         * drifts.
+         */
+        onFinishLog={(result) => {
+          setRanking(null);
+          if (!justRanked) return;
+          setPlacement(result);
+          setLogging(justRanked);
         }}
         surface="onboarding"
       />

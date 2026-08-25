@@ -12,6 +12,8 @@ import { useActorActivity } from '@/features/feed/use-feed';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
 import { FollowControl } from '@/features/profile/FollowControl';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
+import { ProfileActions } from '@/features/profile/ProfileActions';
+import { ProfileMenu } from '@/features/profile/ProfileMenu';
 import { ProfileWatchlist } from '@/features/profile/ProfileWatchlist';
 import { TopRanked } from '@/features/profile/TopRanked';
 import {
@@ -25,7 +27,6 @@ import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
   ActivityRow,
-  Button,
   EmptyState,
   LoadingScreen,
   Screen,
@@ -145,11 +146,35 @@ export default function PublicProfileScreen() {
 
   return (
     <Screen includeBottomInset edges={[]}>
+      {/**
+        * **The corner the owner's profile uses for its gear and bell.**
+        *
+        * Report and Block live behind this rather than as permanent buttons in the
+        * action area — the founder's note, and the reasoning is in `ProfileMenu`. What
+        * matters here is only that it is the *same corner*: a reader who has learned
+        * that the controls for a profile are top right is right on both screens.
+        *
+        * `subjectId` rather than `profile.data.id`, so it is present on the
+        * discoverable-but-unreadable branch too — a private account somebody wants to
+        * report is exactly a case where the control has to exist. Absent on the
+        * viewer's own profile, which this screen can be, and absent when the handle
+        * resolved to nothing at all: there is nobody to report.
+        */}
       <Stack.Screen
         options={{
           headerShown: true,
           title: profile.data?.name ?? '',
           headerBackTitle: 'Back',
+          headerRight: () =>
+            subjectId && !isSelf ? (
+              <ProfileMenu
+                userId={subjectId}
+                name={profile.data?.name ?? identity.data?.name ?? `@${username}`}
+                viewerId={viewer.id}
+                relationship={relationships.data?.get(subjectId)}
+                surface="profile"
+              />
+            ) : null,
         }}
       />
 
@@ -266,21 +291,34 @@ export default function PublicProfileScreen() {
             }
             controls={
               /**
-               * Follow, then Share Profile and Bingd Awards — the same pair, in the
-               * same order and the same row shape as the own profile.
+               * **The same stack as the owner's profile, position for position.**
                *
-               * The founder found them missing here. They are not own-profile controls:
-               * a profile is a thing you hand to somebody, and the person most likely to
-               * hand somebody else’s profile on is the one reading it. Awards is the
-               * same reading of the same public collection, taken about whoever is being
-               * looked at.
+               *     [ Share Profile ]  [ bingd. Awards ]
+               *     [        Follow / Following        ]
                *
-               * **Both outlined here, where the own profile fills Awards.** The fill is
-               * spent on the one control that depends on who is looking, and on this
-               * screen that is Follow. Three filled buttons in a stack is three primary
-               * actions, which is none.
+               * The founder's rule for this pass: looking at somebody else should feel
+               * like looking at your own profile, so the pair sits where the pair sits
+               * and the full-width slot underneath — Invite friends on your own — holds
+               * the one control that depends on who is looking. It was the other way
+               * round here, which put a different thing in the top row on each screen
+               * and made the two read as two designs again.
+               *
+               * **The pair is `ProfileActions`, which the owner's profile draws too.**
+               * It was two `Button`s written out here, and they had drifted: Awards was
+               * `secondary` on this screen and filled Maroon on the owner's, so the same
+               * object wore two treatments one tap apart. The founder's device pass also
+               * found the label wrapping to two lines at iPhone width. Both are fixed in
+               * the component rather than here, because a rule two call sites keep by
+               * agreement is a rule that will be broken again.
+               *
+               * Follow does not lose by Awards taking the fill — it is full-width Maroon
+               * on its own row underneath, which is the louder of the two positions.
                */
               <View style={styles.controls}>
+                <ProfileActions
+                  onShare={() => void shareProfile()}
+                  onOpenAwards={() => setAwardsOpen(true)}
+                />
                 <FollowControl
                   userId={subjectId}
                   name={profile.data.name}
@@ -289,22 +327,6 @@ export default function PublicProfileScreen() {
                   isSelf={isSelf}
                   surface="profile"
                 />
-                <View style={styles.actions}>
-                  <View style={styles.action}>
-                    <Button
-                      label="Share Profile"
-                      kind="secondary"
-                      onPress={() => void shareProfile()}
-                    />
-                  </View>
-                  <View style={styles.action}>
-                    <Button
-                      label="bingd. Awards"
-                      kind="secondary"
-                      onPress={() => setAwardsOpen(true)}
-                    />
-                  </View>
-                </View>
               </View>
             }
           />
@@ -488,13 +510,10 @@ const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   // Centred under the photo, tight: two short lines about the person in it.
   taste: { alignItems: 'center', gap: 0 },
-  // Follow on its own line, the two actions under it. The gap is the one between two
-  // rows of controls; `ProfileIdentity` owns the space above and the gutter beside.
-  controls: { gap: theme.space[3] },
-  // Two equal halves, as on the own profile — equal weight is what stops either
-  // reading as the only real control.
-  actions: { flexDirection: 'row', gap: theme.space[2] },
-  action: { flex: 1 },
+  // The pair, then the relationship action under it — the owner's profile keeps the
+  // same rhythm between its pair and Invite friends. `ProfileIdentity` owns the space
+  // above and the gutter beside.
+  controls: { gap: theme.space[2] },
   section: { paddingTop: theme.space[5], gap: theme.space[2] },
   note: { paddingBottom: theme.space[2] },
   noteBody: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[1] },

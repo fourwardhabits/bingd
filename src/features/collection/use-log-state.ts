@@ -6,8 +6,16 @@ import type { BucketId } from '@/ui/components';
 
 import type { NoteVisibility } from './writes';
 
-/** The database's bucket names, back into the UI's. `not_for_me` is `notForMe`. */
-const BUCKET_IDS: Record<string, BucketId> = {
+/**
+ * The database's bucket names, back into the UI's. `not_for_me` is `notForMe`.
+ *
+ * Exported since the Ranked menu gained Rank again: that row has to hand the ranking
+ * sheet the band a title is already in, and `rankings.bucket` is the database's
+ * spelling. One shared table rather than a fourth inline ternary — the two vocabularies
+ * differ in exactly one of three values, which is precisely the shape of mapping that
+ * gets written correctly four times and then wrongly the fifth.
+ */
+export const BUCKET_IDS: Record<string, BucketId> = {
   loved: 'loved',
   fine: 'fine',
   not_for_me: 'notForMe',

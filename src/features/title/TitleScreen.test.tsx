@@ -296,6 +296,10 @@ describe('a title this user has ranked', () => {
         bucket: 'loved',
         watched_on: '2026-08-12',
         note: 'Held up better than I expected.',
+        // Stated rather than left to the column default, because the Ranked menu now
+        // names which of the two this writing is and a fixture that omits it would be
+        // asserting against an assumption.
+        note_visibility: 'private',
         note_has_spoilers: false,
       },
     ];
@@ -342,14 +346,16 @@ describe('a title this user has ranked', () => {
    * sheet — `rank_unrank` and `unlog` were granted from the first migration and nothing
    * on the client had ever called either.
    *
-   * **Two rows now, not three.** The founder's final pass removed "Remove ranking". It
-   * offered a state Bingd does not otherwise have — a title kept in the collection with
-   * no position, permanently, by choice — and the product rule is that a title you keep
-   * is one you have an opinion about. Changing the rating covers a wrong score;
-   * removing from the collection covers an accidental log, which is what the middle row
-   * was really being used for.
+   * **Two rows became five, in three groups.** The founder's device pass found the menu
+   * was where writing went to be unreachable: once a title was ranked there was no
+   * obvious way back to a review or a private note, and Rank again — which T2 built as
+   * an atomic server call — was offered nowhere at all.
+   *
+   * "Remove ranking" is still gone and is still not coming back. It offered a state
+   * Bingd does not otherwise have: a title kept in the collection with no position,
+   * permanently, by choice.
    */
-  it('offers exactly two rows: change the rating, or remove it', async () => {
+  it('groups the rows: your log, then ranking, then the collection', async () => {
     const view = await open();
     await waitFor(() =>
       expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
@@ -357,7 +363,191 @@ describe('a title this user has ranked', () => {
     await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
 
     await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
+    // Five rows in one column with no structure is a list you read rather than a menu
+    // you use, and the destructive one has to be last and on its own.
+    expect(view.getByText('YOUR LOG')).toBeTruthy();
+    expect(view.getByText('RANKING')).toBeTruthy();
+    expect(view.getByText('COLLECTION')).toBeTruthy();
     expect(view.getByLabelText('Remove from collection')).toBeTruthy();
+  });
+
+  /**
+   * **Rank again, which T2 built and nothing offered.**
+   *
+   * `rank_again` (20260825000200) unranks and re-opens a session inside the *same* band
+   * in one atomic call — it exists because `rank_rebucket` refuses a bucket that is not
+   * moving. The client reaches it by opening the ranking sheet in `rerank` mode, which
+   * is the only way this app is allowed to do it: composing `rank_unrank` and
+   * `rank_start` here would open a window in which the title has no position and no
+   * session, and a dropped connection inside it loses the ranking outright.
+   */
+  it('offers Rank again, through the atomic call rather than an unrank and a restart', async () => {
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
+    await waitFor(() => expect(view.getByLabelText('Rank again')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Rank again'));
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('rank_again', expect.anything()),
+    );
+    // One call, and the guarantee T2 bought: never the pair.
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_start', expect.anything());
+  });
+
+  it('re-ranks inside the band the title is already in', async () => {
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
+    await waitFor(() => expect(view.getByLabelText('Rank again')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Rank again'));
+
+    // Rank again redoes the comparisons; it does not decide a rating. The bucket goes
+    // straight through from `rankings.bucket`, in the database's own spelling.
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'rank_again',
+        expect.objectContaining({ p_bucket: 'loved' }),
+      ),
+    );
+  });
+
+  /**
+   * The two are not synonyms and the menu has to say which is which. Rank again redoes
+   * the pairwise placement inside a band; Change your rating changes the band. They sat
+   * one row apart with nothing between them but a verb.
+   */
+  it('keeps Change your rating as the band control, distinct from Rank again', async () => {
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
+
+    await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
+    expect(view.getByText('Pick a different loved, fine or not for me')).toBeTruthy();
+    expect(view.getByText('Compare it again in the same rating')).toBeTruthy();
+  });
+
+  /**
+   * **Writing, reachable after the fact.**
+   *
+   * The founder's report: after ranking there was no intuitive moment to write a review
+   * or a private note, and tapping Ranked later gave no obvious path either. One
+   * `user_media` row holds one `note` under one `note_visibility`, so exactly one of
+   * these two rows is ever in "Edit" — the other offers the conversion, named as the act
+   * it performs rather than as an Add for a second piece of writing the schema has
+   * nowhere to put.
+   */
+  const openMenu = async () => {
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
+    await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
+    return view;
+  };
+
+  it('says Edit private note for the note this title already carries', async () => {
+    const view = await openMenu();
+
+    // The fixture's writing is private, so that row is the one in Edit — and the other
+    // offers the conversion by the name of the act rather than as an Add for a second
+    // piece of writing there is nowhere to put.
+    expect(view.getByLabelText('Edit private note')).toBeTruthy();
+    expect(view.getByLabelText('Share as a review')).toBeTruthy();
+    expect(view.queryByLabelText('Add private note')).toBeNull();
+  });
+
+  it('says Edit review when the writing is one', async () => {
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        watched_on: '2026-08-12',
+        note: 'Held up better than I expected.',
+        note_visibility: 'public',
+        note_has_spoilers: false,
+      },
+    ];
+    const view = await openMenu();
+
+    expect(view.getByLabelText('Edit review')).toBeTruthy();
+    // And the private row is the conversion, in the other direction.
+    expect(view.getByLabelText('Make it a private note')).toBeTruthy();
+  });
+
+  /**
+   * **The removal confirmation, shortened without dropping a consequence.**
+   *
+   * It was one paragraph of four clauses, which is a wall at the moment somebody is
+   * trying to make a decision — the founder's note. It is two sentences now: what goes,
+   * then who else it touches.
+   *
+   * Nothing was traded away for the length. Every consequence the old copy named is
+   * still named — rating, watch date, writing, activity, reactions, comments, and that
+   * you can log it again — and the second sentence stands alone because it is the half
+   * that falls on somebody who is not in the room, which is exactly the sort a
+   * confirmation exists to state.
+   */
+  it('names every consequence in two short sentences', async () => {
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Remove from collection'));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    const [heading, body] = alertSpy.mock.calls.at(-1) ?? [];
+    // Media-aware, as the rest of the app is: a film by its name, a season by its
+    // compact one.
+    expect(heading).toBe('Remove Inception from your collection?');
+    expect(body).toBe(
+      'This removes your rating, watch date, review or private note, and related ' +
+        'activity. You can log it again later.\n\nIt also removes any reactions and ' +
+        'comments on that activity.',
+    );
+  });
+
+  it('still asks before it removes anything, and removes nothing until it is answered', async () => {
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Remove from collection'));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    // Shorter copy, same gate. The deletion behaviour behind it is untouched by this
+    // tranche.
+    expect(mockRpc).not.toHaveBeenCalledWith('unlog', expect.anything());
+    const buttons = alertSpy.mock.calls.at(-1)?.[2] ?? [];
+    expect(buttons.map((button) => button.text)).toEqual(['Cancel', 'Remove']);
+    expect(buttons.find((button) => button.text === 'Remove')?.style).toBe('destructive');
+  });
+
+  it('offers both as fresh writing when there is none', async () => {
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        watched_on: '2026-08-12',
+        note: '',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+    const view = await openMenu();
+
+    // Review first, because Bingd should nudge the social contribution rather than
+    // leave it behind the private one.
+    expect(view.getByLabelText('Write review')).toBeTruthy();
+    expect(view.getByLabelText('Add private note')).toBeTruthy();
   });
 
   it('no longer offers to keep a title in the collection without a ranking', async () => {

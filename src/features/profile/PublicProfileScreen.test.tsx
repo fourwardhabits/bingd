@@ -1,5 +1,7 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
-import { Alert, Share } from 'react-native';
+import { Alert, Share, StyleSheet } from 'react-native';
+
+import { theme } from '@/ui/tokens';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -89,10 +91,23 @@ jest.mock('@/features/awards/AwardsSheet', () => ({
   },
 }));
 
+/**
+ * `Stack.Screen` renders its `headerRight`, which it did not used to.
+ *
+ * It was `() => null`, which was fine while the only thing this screen put in the
+ * navigation header was a title. Report and Block now live behind a menu in the corner
+ * — the same corner the owner's profile keeps its gear and bell in — so a double that
+ * throws the options away hides the controls these tests are about. Rendering only
+ * `headerRight` rather than pretending to be a navigator: it is the one option with a
+ * component in it, and the title is asserted through `options` where it matters.
+ */
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
   useLocalSearchParams: () => ({ username: 'anna' }),
-  Stack: { Screen: () => null },
+  Stack: {
+    Screen: ({ options }: { options?: { headerRight?: () => React.ReactNode } }) =>
+      options?.headerRight?.() ?? null,
+  },
 }));
 
 jest.mock('@/features/auth', () => ({
@@ -366,10 +381,25 @@ describe('what this person likes', () => {
 describe('reporting from a profile', () => {
   const reportCalls = () => mockRpcCalls.filter((call) => call.name === 'report');
 
+  /**
+   * **Report moved into the header menu, and this is how you reach it now.**
+   *
+   * It was a tertiary button in the row beside Follow. The founder's device pass is
+   * that the primary action area of somebody else's profile then read as a moderation
+   * console — follow them, block them, report them, all at one altitude — so the two
+   * rare and severe acts went behind the hamburger in the corner. Still one tap from
+   * every profile; no longer permanently beside the control the page is for.
+   */
+  const openMenu = async (view: Awaited<ReturnType<typeof open>>) => {
+    await waitFor(() => expect(view.getByLabelText('More options for Anna')).toBeTruthy());
+    return fireEvent.press(view.getByLabelText('More options for Anna'));
+  };
+
   it('reports the profile itself, resolving nothing on the client', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
 
+    await openMenu(view);
     await fireEvent.press(view.getByText('Report'));
     await fireEvent.press(view.getByText('Pretending to be someone'));
 
@@ -394,6 +424,10 @@ describe('reporting from a profile', () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
 
+    // Report and Block are two rows in one menu now, which makes this assertion more
+    // rather than less worth keeping: they are adjacent, and adjacency is how a wire
+    // gets crossed.
+    await openMenu(view);
     await fireEvent.press(view.getByText('Report'));
     await fireEvent.press(view.getByText('Harassment or bullying'));
 
@@ -405,6 +439,7 @@ describe('reporting from a profile', () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
 
+    await openMenu(view);
     await fireEvent.press(view.getByText('Report'));
     await fireEvent.press(view.getByText('Something else'));
 
@@ -418,6 +453,7 @@ describe('reporting from a profile', () => {
     await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
 
     mockRpcErrors.report = { code: '53400', message: 'report limit reached for today' };
+    await openMenu(view);
     await fireEvent.press(view.getByText('Report'));
     await fireEvent.press(view.getByText('Spam or a scam'));
 
@@ -889,5 +925,156 @@ describe('sharing and awards on somebody else’s profile', () => {
     await waitFor(() => expect(view.getByText('This account is private')).toBeTruthy());
     expect(view.queryByRole('button', { name: 'bingd. Awards' })).toBeNull();
     expect(view.queryByRole('button', { name: 'Share Profile' })).toBeNull();
+  });
+});
+
+/**
+ * **"Viewing another user's profile does not feel like viewing your own."**
+ *
+ * The founder's device pass, and the four differences it named: a different action
+ * hierarchy, Awards styled differently, Follow and Block and Report dominating the
+ * header, and Share and Awards in a different place. All four are one defect — the two
+ * screens each drew their own action area, so they drifted the way two copies of
+ * anything drift.
+ *
+ * The pair is `ProfileActions` now and is asserted in its own suite; what belongs here
+ * is the *arrangement* this screen puts around it, which is the half that has to match
+ * the owner's profile position for position:
+ *
+ *     [ Share Profile ]  [ bingd. Awards ]
+ *     [        Follow / Following        ]
+ *
+ * The full-width slot underneath the pair holds Invite friends on your own profile, and
+ * here it holds the one control that depends on who is looking.
+ */
+describe('the shape of somebody else’s profile', () => {
+  it('puts Share and Awards in the pair, and the relationship underneath', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
+
+    // Rendered order is the arrangement. Follow was above the pair, which put a
+    // different thing in the top row on each of the two screens.
+    const controls = view
+      .getAllByText(/^(Share Profile|bingd\. Awards|Follow)$/)
+      .map((node) => node.props.children);
+    expect(controls).toEqual(['Share Profile', 'bingd. Awards', 'Follow']);
+  });
+
+  it('fills Awards in maroon, as the owner’s profile does', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('bingd. Awards')).toBeTruthy());
+
+    // It was `secondary` here and filled on the owner's — the same object in two
+    // treatments one tap apart. The founder wants Awards to pop on both.
+    const awards = view.getByRole('button', { name: 'bingd. Awards' });
+    expect(StyleSheet.flatten(awards.props.style).backgroundColor).toBe(theme.semantic.action);
+  });
+
+  it('fills Follow in maroon while there is no relationship', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Follow')).toBeTruthy());
+
+    const follow = view.getByRole('button', { name: 'Follow' });
+    const style = StyleSheet.flatten(follow.props.style);
+    expect(style.backgroundColor).toBe(theme.semantic.action);
+    // Full width, which is the shape of the slot it sits in.
+    expect(StyleSheet.flatten(follow.parent?.props?.style).alignSelf).toBe('stretch');
+  });
+
+  /**
+   * **Following keeps the colour and gives up the fill.**
+   *
+   * It was `secondary` — grey — which made the control the reader had just pressed look
+   * as though it had been swapped for a different, unrelated one. An outline in the same
+   * Maroon says "same button, new state", which is what actually happened.
+   */
+  it('outlines Following in maroon rather than turning it grey', async () => {
+    mockRpcResults.follow_state_with = [
+      { user_id: 'anna-id', following: 'approved', followed_by: null, blocked: false },
+    ];
+    const view = await open();
+    await waitFor(() => expect(view.getAllByText('Following')).toHaveLength(2));
+
+    const following = view.getByRole('button', { name: 'Following' });
+    const style = StyleSheet.flatten(following.props.style);
+    expect(style.borderColor).toBe(theme.semantic.action);
+    expect(style.backgroundColor).toBe(theme.surface.raised);
+    expect(style.backgroundColor).not.toBe(theme.semantic.action);
+  });
+
+  it('gives Requested the same treatment without the same word', async () => {
+    mockRpcResults.follow_state_with = [
+      { user_id: 'anna-id', following: 'pending', followed_by: null, blocked: false },
+    ];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Requested')).toBeTruthy());
+
+    // The act is done and the button is reporting rather than offering, so it shares
+    // the outline. It does not share the word: a pending request is not a follow, and
+    // saying "Following" would tell somebody they have access nobody granted.
+    const requested = view.getByRole('button', { name: 'Requested' });
+    expect(StyleSheet.flatten(requested.props.style).borderColor).toBe(theme.semantic.action);
+    // One match, and it is the stat row's count label rather than a button. Two would
+    // mean the control had collapsed a pending request into an approved follow.
+    expect(view.getAllByText('Following')).toHaveLength(1);
+    expect(view.queryByRole('button', { name: 'Following' })).toBeNull();
+  });
+
+  it('will not unfollow on one tap', async () => {
+    mockRpcResults.follow_state_with = [
+      { user_id: 'anna-id', following: 'approved', followed_by: null, blocked: false },
+    ];
+    const view = await open();
+    await waitFor(() => expect(view.getAllByText('Following')).toHaveLength(2));
+
+    await fireEvent.press(view.getByRole('button', { name: 'Following' }));
+
+    // Withdrawing an approved follow means the next one is a *request* somebody else
+    // has to answer, so it is worth a sentence — and an accidental tap on a button that
+    // now sits full-width under the thumb must not sever anything.
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Unfollow Anna?', expect.any(String), expect.any(Array)));
+    expect(mockRpcCalls.map((call) => call.name)).not.toContain('unfollow');
+  });
+
+  it('keeps Report and Block out of the action area entirely', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Follow')).toBeTruthy());
+
+    // They are in the header menu, and the point of moving them was that a profile's
+    // primary action area should not read as a moderation console. Closed menu, so
+    // neither row is on screen.
+    expect(view.queryByRole('button', { name: 'Block' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Report' })).toBeNull();
+    expect(view.getByLabelText('More options for Anna')).toBeTruthy();
+  });
+
+  it('offers Report and Block behind the menu, in that order', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('More options for Anna')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('More options for Anna'));
+
+    // Report first: it is the lighter of the two and the one somebody is more often
+    // looking for. Two rows rather than one, because neither act implies the other.
+    await waitFor(() => expect(view.getByLabelText('Report')).toBeTruthy());
+    expect(view.getByLabelText('Block')).toBeTruthy();
+  });
+
+  it('offers Unblock instead of Block once the account is blocked, and keeps Report', async () => {
+    mockRpcResults.follow_state_with = [
+      { user_id: 'anna-id', following: null, followed_by: null, blocked: true },
+    ];
+    const view = await open();
+    await waitFor(() => expect(view.getByLabelText('More options for Anna')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('More options for Anna'));
+
+    await waitFor(() => expect(view.getByLabelText('Unblock')).toBeTruthy());
+    // Report survives a block, which is the client half of a rule the database states:
+    // `report()` checks that a subject exists and deliberately not that the caller can
+    // still see it, so blocking cannot become a way to suppress the complaint
+    // (20260813002000 §4).
+    expect(view.getByLabelText('Report')).toBeTruthy();
+    expect(view.queryByLabelText('Block')).toBeNull();
   });
 });

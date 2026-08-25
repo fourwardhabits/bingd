@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, StyleSheet, TextInput, View } from 'react-native';
 
 import {
+  applyInitialVisibility,
   clearPendingDisplayName,
   createProfile,
   signOut,
@@ -14,7 +15,7 @@ import {
 import { track } from '@/lib/analytics';
 import { openLegal } from '@/lib/legal';
 import { queryKeys } from '@/lib/query';
-import { Button, Field, KeyboardScreen, Screen, Text } from '@/ui/components';
+import { Button, Field, KeyboardScreen, Screen, SegmentedControl, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -32,6 +33,16 @@ export default function CreateProfileScreen() {
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [birth, setBirth] = useState({ day: '', month: '', year: '' });
+  /**
+   * **Public, because that is what the column already does** — not because this screen
+   * has an opinion. PRD §22 keeps public as the product default and `profiles.visibility`
+   * defaults to it, so seeding the control any other way would show somebody a choice
+   * whose answer differs from what `create_profile` is about to store.
+   *
+   * What has changed is that the default is now *shown* before the account exists
+   * rather than described in a paragraph underneath the button that creates it.
+   */
+  const [visibility, setVisibility] = useState<'public' | 'private'>('public');
   /**
    * The answer *and the name it is about*. Storing only the boolean lets a slow
    * reply for `ros` land while the field reads `rosalind`, and the form then reports
@@ -140,17 +151,39 @@ export default function CreateProfileScreen() {
     setBusy(false);
 
     switch (result.outcome) {
-      case 'created':
+      case 'created': {
         // `created` only. `already_exists` below is a replay of an account that was
         // already there, and counting it would report a second signup for one person.
         track({ name: 'signup_completed' });
         await clearPendingDisplayName();
+        /**
+         * The privacy choice, applied to the account that now exists.
+         *
+         * After `create_profile` rather than inside it: the RPC takes no visibility and
+         * giving it one is a migration. `set_profile_visibility` is the same function the
+         * Privacy screen calls, so this is the existing path rather than a second one.
+         *
+         * Awaited, so that a private account is private before the gate below lets the
+         * app in — a beat spent public is a beat during which somebody's first ranking is
+         * readable. Not blocking: a refusal here leaves a real account with the default
+         * setting, and holding somebody on a signup form for an account they already have
+         * is the dead end `already_exists` exists to prevent. They are told instead, and
+         * pointed at the screen that finishes the job.
+         */
+        const applied = await applyInitialVisibility(visibility);
+        if (!applied.ok) {
+          Alert.alert(
+            'Your account is ready',
+            'We could not set your profile to private just now. You can turn it on in Settings › Privacy.',
+          );
+        }
         // The gate re-reads the profile and moves the user. Navigating from here as
         // well would race it.
         await queryClient.invalidateQueries({
           queryKey: queryKeys.myProfile(auth.status === 'onboarding' ? auth.userId : 'none'),
         });
         return;
+      }
 
       case 'already_exists':
         await queryClient.invalidateQueries({
@@ -216,11 +249,17 @@ export default function CreateProfileScreen() {
           at all, and the birthday fields in the lower half of this form were behind
           the keyboard that had just been opened to fill them in. */}
       <KeyboardScreen contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* **One line, not three.** The founder's screenshot of this screen on a
+            physical device is mostly prose: an intro paragraph, a hint under every
+            field, a paragraph about privacy under the button, and the legal line. The
+            fields themselves — which are the whole point — were the smallest part of
+            it. What survives here is the half of the sentence that is a *fact the
+            reader needs before typing*; "you can change it later, once a month" is
+            true, is not needed now, and is on the Settings screen that changes it. */}
         <View style={styles.intro}>
           <Text variant="title1">Pick your name</Text>
-          <Text variant="body" tone="secondary">
-            Your username is how friends find you. You can change it later, once a
-            month.
+          <Text variant="footnote" tone="secondary">
+            Your username is how friends find you.
           </Text>
         </View>
 
@@ -235,6 +274,10 @@ export default function CreateProfileScreen() {
             maxLength={24}
             editable={!busy}
             error={usernameError()}
+            // The steady-state hint is gone: the rule it stated is already in
+            // `usernameError`, which says it at the moment it is broken and in more
+            // useful words. A permanent line restating a constraint nobody has hit yet
+            // is a line of prose per field, which is what made this screen long.
             hint={
               checking
                 ? 'Checking…'
@@ -242,7 +285,7 @@ export default function CreateProfileScreen() {
                   ? 'Available.'
                   : settled && available === null
                     ? 'Could not check just now. You can still continue.'
-                    : 'Lowercase letters, numbers, and underscores.'
+                    : undefined
             }
           />
 
@@ -253,7 +296,7 @@ export default function CreateProfileScreen() {
             autoCapitalize="words"
             maxLength={50}
             editable={!busy}
-            hint="Optional. We will use your username if you leave this empty."
+            hint="Optional."
           />
 
           <View style={styles.birth}>
@@ -266,26 +309,29 @@ export default function CreateProfileScreen() {
                 only place the reason appeared was the refusal screen, which you see
                 only if you are turned away.
 
-                **Widened on 2026-08-25, with DOB-1.** The previous line said this is
-                used to check you are 13 or over, full stop. That was true of the code
-                and too narrow as a statement of intent: the founder's decision is to
-                retain the date for eligibility *and* for future personalisation and
-                aggregate taste analysis, so a promise that it is used for one thing
-                only is a promise this app intends to outgrow. Better to say the honest
-                thing now than to quietly broaden the use later under copy that ruled
-                it out.
+                **"It is never shown to anyone" is gone, on founder review.** It was the
+                broadest sentence on the screen and the only one this app cannot keep on
+                its own account: "shown to anyone" reads as a claim about everything that
+                ever touches the value — staff, processors, whoever operates the database
+                — and what is actually true is narrower and checkable. The date lands in
+                `profile_private`, which has RLS enabled with no policy and no select
+                grant, so no API returns it to anybody including the person who typed it;
+                it is on the analytics denylist; and nothing renders it on a profile.
+                "Private and isn't shown on your profile" states exactly that and nothing
+                wider. The whole handling story belongs in the Privacy Policy, which is
+                linked at the foot of this screen.
 
-                Every clause is still literally true of what ships today. The 13+
-                comparison is `create_profile`'s and is the only current reader. "May
-                also help" is a hedge on purpose: nothing personalises anything from it
-                yet, and claiming otherwise would be the opposite error. The value lands
-                in `profile_private`, which has RLS enabled and no policy and no select
-                grant, so no API returns it to anybody — including the person who typed
-                it — and it is on the analytics denylist. What is deliberately *not*
-                here is "we don't save it", which would be false. */}
+                The rest is unchanged in meaning. The 13+ comparison is
+                `create_profile`'s and is the only current reader. "May use age" is a
+                hedge on purpose: nothing personalises anything from it yet, and claiming
+                otherwise would be the opposite error. What is deliberately *not* here is
+                "we don't save it", which would be false.
+
+                **Copy only.** Storage, the age threshold, the analytics denylist and the
+                RLS on `profile_private` are untouched by this change. */}
             <Text variant="caption" tone="tertiary">
-              We use your birthday to confirm you are 13 or older. It may also help us
-              personalise recommendations as bingd. improves. It is never shown to anyone.
+              Your birthday is private and isn’t shown on your profile. We use it to
+              confirm you’re 13 or older, and may use age to improve recommendations.
             </Text>
             <View style={styles.birthRow}>
               <View style={styles.birthDay}>
@@ -335,6 +381,56 @@ export default function CreateProfileScreen() {
             </View>
           </View>
 
+          {/**
+            * **The choice, above the button that acts on it.**
+            *
+            * It used to be a paragraph *under* Create my account saying the account
+            * starts public and can be changed in Settings — a description of a decision
+            * already taken rather than a decision offered. The founder's correction is
+            * that somebody should see and set this before the account exists.
+            *
+            * **The helper text is held to what the schema actually does.** A private
+            * account is still findable: `search_users` moved to `can_discover_profile`
+            * on 2026-08-19 precisely so somebody who knows you can find you and ask,
+            * while `can_view_profile` keeps rankings, watchlist, reviews and activity
+            * behind approval. So the sentence says "people can still find you" rather
+            * than promising invisibility — the Privacy screen already learned this
+            * lesson once, and a signup screen that overstates the protection is the
+            * sentence somebody decides what to write against.
+            *
+            * The default stays Public (PRD §22), which is the column default too. The
+            * control shows it rather than changing it.
+            */}
+          <View style={styles.visibility}>
+            <Text variant="caption" tone="secondary">
+              Profile visibility
+            </Text>
+            <SegmentedControl
+              label="Profile visibility"
+              value={visibility}
+              onChange={setVisibility}
+              disabled={busy}
+              testID="profile-visibility"
+              options={[
+                {
+                  id: 'public',
+                  label: 'Public',
+                  hint: 'Anyone can see your rankings and reviews.',
+                },
+                {
+                  id: 'private',
+                  label: 'Private',
+                  hint: 'Only approved followers can see your activity.',
+                },
+              ]}
+            />
+            <Text variant="caption" tone="tertiary">
+              {visibility === 'public'
+                ? 'Anyone can see your rankings and reviews.'
+                : 'People can still find you, but only approved followers can see your activity.'}
+            </Text>
+          </View>
+
           {error ? (
             <Text variant="caption" tone="action">
               {error}
@@ -352,18 +448,13 @@ export default function CreateProfileScreen() {
             }
           />
 
-          {/* **The one thing a new account is never told.**
-              Visibility is set by the column default and by nothing the user does,
-              so until this line the first time anybody learned their profile was
-              public was by finding the switch that turns it off. One sentence, under
-              the button that creates the account, naming the setting and where to
-              change it — deliberately not a screen, not a choice, and not a step:
-              PRD §22 keeps public as the default, and this only stops it being a
-              silent one. */}
-          <Text variant="caption" tone="tertiary">
-            Your account starts public, so people can find you and see what you rank.
-            You can make it private whenever you like, in Settings.
-          </Text>
+          {/* The paragraph that used to sit here — "Your account starts public, so
+              people can find you and see what you rank. You can make it private
+              whenever you like, in Settings." — is gone, and its job went with it. It
+              existed because visibility was set by a column default and by nothing the
+              reader did, so a sentence after the fact was the only way they would ever
+              learn. There is a control above the button now, so the same sentence would
+              be describing a choice the reader has just made for themselves. */}
 
           {/* **The acknowledgment, and deliberately not a checkbox.**
 
@@ -440,16 +531,22 @@ function confirmDateOfBirth(iso: string) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  // Tightened along with the prose. The gap between the heading and the form was
+  // `space[8]` on a screen that also padded itself `space[8]` top and bottom — three of
+  // the largest steps in the scale, on the one screen with the most to fit.
+  // `justifyContent` stays `center` so a short form still sits mid-screen on a large
+  // phone rather than clinging to the status bar.
   content: {
     flexGrow: 1,
     justifyContent: 'center',
-    gap: theme.space[8],
+    gap: theme.space[5],
     paddingHorizontal: theme.layout.gutter,
-    paddingVertical: theme.space[8],
+    paddingVertical: theme.space[6],
   },
-  intro: { gap: theme.space[3] },
+  intro: { gap: theme.space[2] },
   form: { gap: theme.space[4] },
   birth: { gap: theme.space[2] },
+  visibility: { gap: theme.space[2] },
   birthRow: { flexDirection: 'row', gap: theme.space[3] },
   birthDay: { flex: 1 },
   birthYear: { flex: 1.4 },
