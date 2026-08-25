@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useRef } from 'react';
 
 import { invalidateAwards } from '@/features/awards/invalidate';
 import { newOperationId } from '@/features/collection/writes';
@@ -172,6 +173,59 @@ export type RequestActionResult =
   | { ok: false; message: string; changed: boolean };
 
 /**
+ * The Dismiss all intent: one operation id, and whether a sweep is in flight.
+ *
+ * **The two live together because they have to have the same lifetime**, and keeping
+ * them apart is a mistake this made twice. The id is held so a retry after a lost reply
+ * cannot sweep what arrived since; the in-flight flag is held so a second confirmation
+ * cannot clear the id out from under the first. Either one reset while the other
+ * survives reopens the hole: an overlap guard that forgets means two calls share an id,
+ * the first clears it on success, and a second that loses its reply leaves nothing to
+ * hold.
+ *
+ * **Instantiate it on the screen, not in the sheet.** The sheet is unmounted every time
+ * it closes, and closing the sheet after a failure and opening it again is the most
+ * ordinary recovery a reader has. The screen is a tab and outlives all of that.
+ *
+ * Leaving the app clears it, and that bound is deliberate rather than a gap. An id that
+ * survived a kill would need durable storage and an expiry policy, and would buy a case
+ * the reader has already been given the honest answer to: on relaunch there is no stale
+ * error message, the list refetches, and they are looking at exactly what a sweep would
+ * clear when they confirm it. That is an informed decision. The in-session case is not,
+ * which is why that one is closed — there the reader was told it failed.
+ */
+export type SweepIntent = {
+  /** Claims the sweep. Returns the id to send, or null if one is already in flight. */
+  begin: () => string | null;
+  /** Reports what the server said, releasing the claim and possibly the id. */
+  settle: (result: RequestActionResult) => void;
+};
+
+export function useSweepIntent(): SweepIntent {
+  const id = useRef<string | null>(null);
+  const inFlight = useRef(false);
+
+  return useMemo(
+    () => ({
+      begin: () => {
+        if (inFlight.current) return null;
+        inFlight.current = true;
+        id.current ??= newOperationId();
+        return id.current;
+      },
+      settle: (result) => {
+        inFlight.current = false;
+        // Held only while the outcome was never established. Holding a *spent* id is
+        // the other way to lose: the next deliberate sweep would be answered
+        // `already_applied` and dismiss nothing while reporting success.
+        if (result.ok || !result.changed) id.current = null;
+      },
+    }),
+    [],
+  );
+}
+
+/**
  * Add one, dismiss one, dismiss all.
  *
  * **No optimism.** Every one of these is a decision about somebody else's suggestion,
@@ -183,7 +237,7 @@ export type RequestActionResult =
  * is still `pending`, and both transitions out of pending are terminal — so a replay
  * after a lost reply is a no-op the server can answer without a ledger. The sweep is
  * addressed at *whatever is pending when it runs*, so a replay would eat requests that
- * arrived in between. See §9 of the migration.
+ * arrived in between. See §9 of the migration, and `useSweepIntent` above for the id.
  */
 export function useRequestActions(viewerId: string) {
   const queryClient = useQueryClient();

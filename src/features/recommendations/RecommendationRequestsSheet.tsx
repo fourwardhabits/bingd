@@ -1,8 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRef, useState, type MutableRefObject } from 'react';
+import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { newOperationId } from '@/features/collection/writes';
 import { useRelationships, useSocialWrites, type Relationship } from '@/features/profile/use-social';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
@@ -14,6 +13,7 @@ import {
   useRequestActions,
   type RecommendationRequest,
   type RequestGroup,
+  type SweepIntent,
 } from './use-recommendation-requests';
 
 export type RecommendationRequestsSheetProps = {
@@ -22,21 +22,15 @@ export type RecommendationRequestsSheetProps = {
   /** Opens somebody's profile. The sheet closes on the way — see `openProfile`. */
   onPressProfile: (username: string) => void;
   /**
-   * The Dismiss all operation id, **owned by the screen rather than by this sheet**.
+   * The Dismiss all intent, **owned by the screen rather than by this sheet**.
    *
-   * A ref passed in rather than held here, and that is the whole reason it is a prop:
-   * the screen unmounts this component when it closes, so a ref of its own would be
-   * cleared by the reader doing the most ordinary thing available to them — closing the
-   * sheet after a failure and opening it again to try. The retry would then carry a
-   * fresh id, walk past `_claim_operation`, and sweep whatever had arrived in between.
-   *
-   * The screen is a tab and outlives every open and close of this sheet, which makes it
-   * the longest scope that is still honest. Leaving the app clears it, and that is
-   * correct rather than a gap: an id held indefinitely would eventually be spent on a
-   * sweep months later, be answered `already_applied`, and report success having
-   * dismissed nothing.
+   * Passed in rather than created here, and that is the whole reason it is a prop: the
+   * screen unmounts this component when it closes, so state of its own would be cleared
+   * by the most ordinary recovery a reader has — a sweep fails, they close the sheet,
+   * look at the list, open it and try again. See `useSweepIntent` for what it holds and
+   * why the id and the in-flight flag have to share a lifetime.
    */
-  sweepIntent: MutableRefObject<string | null>;
+  sweepIntent: SweepIntent;
 };
 
 /**
@@ -88,8 +82,6 @@ export function RecommendationRequestsSheet({
   const [menuOpen, setMenuOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** Whether a Dismiss all is in flight right now. See `confirmDismissAll`. */
-  const sweeping = useRef(false);
 
   const report = (result: { ok: boolean; message?: string }) => {
     setError(result.ok ? null : (result.message ?? 'Something went wrong. Try again.'));
@@ -116,49 +108,21 @@ export function RecommendationRequestsSheet({
           onPress: () =>
             void (async () => {
               /**
-               * **One sweep at a time**, which is not only tidiness.
+               * The id to send, or nothing because a sweep is already in flight.
                *
-               * Two confirmations in flight share the held id, so the server is safe
-               * either way — the second is answered `already_applied`. The *ref* is
-               * not: the one that answers first clears it, and if the other then loses
-               * its reply there is nothing left to hold, so the next retry mints a
-               * fresh id and can sweep what arrived since. Refusing the overlap is a
-               * smaller fix than reference-counting it, and a second destructive sweep
-               * queued behind the first is not a thing anybody meant to ask for.
-               *
-               * A ref rather than `actions.busy`: that is React state and does not
-               * update between two presses in the same tick, which is exactly the
-               * interval this has to cover.
+               * Both halves of that decision live in `useSweepIntent`, on the screen,
+               * and neither is expressible here — which is the point. A guard held in
+               * this component would be reset by closing the sheet, and two calls could
+               * then share an id whose first answer clears it while the second is still
+               * out; a `busy` flag from `useMutation` would not update between two
+               * presses in the same tick, which is the interval it has to cover.
                */
-              if (sweeping.current) return;
-              sweeping.current = true;
+              const held = sweepIntent.begin();
+              if (!held) return;
 
-              /**
-               * **Held only while the outcome is unknown**, which is the asymmetry
-               * `lib/operation-intent.ts` records and this got wrong twice — once by
-               * clearing it unconditionally, and once by keeping it in a ref this
-               * component owned, which closing the sheet reset.
-               *
-               * Both directions lose something. Minting a fresh id after a lost reply
-               * sweeps requests that arrived since, which the reader never saw. Reusing
-               * a *spent* one has the next deliberate sweep answered `already_applied`
-               * — nothing dismissed, success reported.
-               *
-               * **It is memory, and deliberately not storage.** An id that survived the
-               * app being killed would need a durable store and an expiry policy, and
-               * the case it buys is one where the reader has already been given the
-               * honest answer: on relaunch there is no stale error message, the sheet
-               * refetches, and they are looking at the exact list a sweep would clear
-               * when they confirm. That is an informed decision rather than a silent
-               * loss — which is precisely what the in-session case is not, because
-               * there the reader was told it failed.
-               */
-              const held = sweepIntent.current ?? newOperationId();
-              sweepIntent.current = held;
               setError(null);
               const result = await actions.dismissAll({ operationId: held });
-              sweeping.current = false;
-              if (result.ok || !result.changed) sweepIntent.current = null;
+              sweepIntent.settle(result);
               report(result);
             })(),
         },

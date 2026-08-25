@@ -1,5 +1,5 @@
 import { Alert } from 'react-native';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -27,12 +27,25 @@ const mockRpc = jest.fn();
 let mockRpcResults: Record<string, unknown> = {};
 let mockRpcErrors: Record<string, unknown> = {};
 
+/**
+ * RPCs whose reply is held open, and the resolvers that let a test end them.
+ *
+ * A sweep that is genuinely still in flight is the only way to test the overlap guard —
+ * a promise that resolves in the same tick cannot overlap with anything.
+ */
+let mockRpcHeld: string[] = [];
+let mockRelease: (() => void)[] = [];
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
       const error = mockRpcErrors[name] ?? null;
-      return Promise.resolve({ data: error ? null : (mockRpcResults[name] ?? null), error });
+      const answer = { data: error ? null : (mockRpcResults[name] ?? null), error };
+      if (mockRpcHeld.includes(name)) {
+        return new Promise((resolve) => mockRelease.push(() => resolve(answer)));
+      }
+      return Promise.resolve(answer);
     },
     from: () => {
       const chain = {
@@ -128,6 +141,8 @@ beforeEach(() => {
   mockPush.mockReset();
   mockRpcResults = {};
   mockRpcErrors = {};
+  mockRpcHeld = [];
+  mockRelease = [];
 });
 
 afterEach(() => {
@@ -495,5 +510,59 @@ describe('dismiss all', () => {
     confirm?.();
 
     await waitFor(() => expect(sweeps()).toHaveLength(1));
+  });
+
+  /**
+   * The overlap that survives closing the sheet.
+   *
+   * A guard belonging to the sheet is reset when it unmounts, so confirming a sweep,
+   * closing before its reply lands, reopening and confirming again gets two calls
+   * through. They share the held id, so the server is safe — but the first to answer
+   * clears the id, and if the second then loses its reply there is nothing left to hold
+   * and the next retry mints a fresh one. Codex found this after the first overlap fix;
+   * the guard lives beside the id, on the screen, for exactly this.
+   */
+  it('refuses a second sweep even across closing and reopening the sheet', async () => {
+    let confirm: (() => void) | undefined;
+    jest.spyOn(Alert, 'alert').mockImplementation((_title, _body, buttons) => {
+      confirm = (buttons ?? []).find((button) => button.text === 'Dismiss all')?.onPress as
+        | (() => void)
+        | undefined;
+    });
+    const sweeps = () =>
+      mockRpc.mock.calls.filter(([name]) => name === 'dismiss_all_recommendation_requests');
+
+    // The reply is held open, so the first sweep is genuinely still in flight.
+    mockRpcHeld = ['dismiss_all_recommendation_requests'];
+    const view = await openSheet();
+
+    await fireEvent.press(view.getByLabelText('More options'));
+    await fireEvent.press(view.getByText('Dismiss all'));
+    confirm?.();
+    await waitFor(() => expect(sweeps()).toHaveLength(1));
+
+    // Out and back in while it is still out there.
+    await fireEvent.press(view.getByText('Done'));
+    await fireEvent.press(view.getByTestId('recommendation-requests-alert'));
+    await waitFor(() => expect(view.getByLabelText('More options')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('More options'));
+    await fireEvent.press(view.getByText('Dismiss all'));
+    confirm?.();
+
+    // Flushed before asserting: the call goes out through `mutateAsync`, so a guard
+    // that had let it through would issue the RPC a microtask later and an immediate
+    // assertion would pass without proving anything.
+    await act(async () => {});
+    expect(sweeps()).toHaveLength(1);
+
+    // And once it lands, the next one is allowed again.
+    mockRelease.forEach((release) => release());
+    await waitFor(() => expect(view.getByLabelText('More options')).toBeTruthy());
+    mockRpcHeld = [];
+    await fireEvent.press(view.getByLabelText('More options'));
+    await fireEvent.press(view.getByText('Dismiss all'));
+    confirm?.();
+    await waitFor(() => expect(sweeps()).toHaveLength(2));
   });
 });

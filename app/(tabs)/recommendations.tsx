@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -18,7 +18,10 @@ import { mustReconcile, newOperationId, setWatchlist } from '@/features/collecti
 import { headlineFor } from '@/features/recommendations/rank';
 import { RecommendationRequestsSheet } from '@/features/recommendations/RecommendationRequestsSheet';
 import { RequestAlertRow } from '@/features/recommendations/RequestAlertRow';
-import { useRecommendationRequests } from '@/features/recommendations/use-recommendation-requests';
+import {
+  useRecommendationRequests,
+  useSweepIntent,
+} from '@/features/recommendations/use-recommendation-requests';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
 import { refreshRecommendations } from '@/features/recommendations/session-seed';
 import { useForYou, type ForYouItem, type Medium } from '@/features/recommendations/use-for-you';
@@ -89,19 +92,19 @@ export default function RecommendationsScreen() {
   /** The Requests sheet. Nothing else on this screen knows it exists. */
   const [reviewingRequests, setReviewingRequests] = useState(false);
   /**
-   * The Dismiss all operation id, held here rather than inside the sheet.
+   * The Dismiss all intent, held here rather than inside the sheet.
    *
-   * The sheet is unmounted every time it closes, so a ref of its own would be cleared by
-   * the most ordinary recovery available to the reader: a sweep fails, they close the
-   * sheet, open it again, and try. A fresh id on that retry walks past
-   * `_claim_operation` and dismisses whatever arrived in between — recommendations they
-   * never saw, which is the one thing this tranche exists to make impossible.
+   * The sheet is unmounted every time it closes, so anything it owned would be cleared
+   * by the most ordinary recovery a reader has: a sweep fails, they close the sheet,
+   * look at the list, open it and try again. A fresh operation id on that retry walks
+   * past `_claim_operation` and dismisses whatever arrived in between — recommendations
+   * they never saw, which is the one thing this tranche exists to make impossible.
    *
    * This screen is a tab and outlives every open and close of the sheet, so it is the
-   * longest scope that is still honest. See the prop's own comment for why an even
-   * longer one would be worse.
+   * longest scope that is still honest. `useSweepIntent` carries the rest of the
+   * reasoning, including why the in-flight guard has to live here too.
    */
-  const sweepIntent = useRef<string | null>(null);
+  const sweepIntent = useSweepIntent();
 
   const slate = useForYou(profile.id, medium, filters);
   const logged = useLoggedCollection(profile.id);
