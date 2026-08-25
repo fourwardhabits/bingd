@@ -79,10 +79,14 @@ const ALLOWED = {
   'rank_cancel(uuid)': ['authenticated'],
   'rank_reorder(uuid,integer,uuid)': ['authenticated'],
   'rank_rebucket(uuid,taste_bucket,uuid)': ['authenticated'],
-  // New in 20260825000200. The same-band re-rank the client used to perform as an
-  // unrank followed by a start, now one transaction: if the fresh session cannot be
-  // opened, the position it was replacing is still there.
-  'rank_again(uuid,taste_bucket,uuid)': ['authenticated'],
+  // New in 20260825000200, and re-signed in 20260826000500. The same-band re-rank the
+  // client used to perform as an unrank followed by a start. It no longer unranks at
+  // all: the session runs over the position the title already has, and only a completed
+  // placement replaces it. The trailing `p_new_watch` is what separates Rank again —
+  // another viewing, and one feed activity — from Change your rating, which is a
+  // correction and writes none. It defaults to false, so the friend-beta build calling
+  // the three-argument form gets the conservative answer.
+  'rank_again(uuid,taste_bucket,uuid,boolean)': ['authenticated'],
   'report(report_subject,uuid,text,text)': ['authenticated'],
 
   // The collection writes (api.md §1). Their helpers are absent on purpose:
@@ -190,6 +194,18 @@ const ALLOWED = {
   // ranking it folds in belongs to an account rankings_read already lets the caller
   // select individually, which is the same safety argument following_score records.
   'taste_match(uuid)': ['authenticated'],
+
+  // Added 2026-08-26 with People discovery (20260826000500). Two definer reads taking
+  // no subject at all — only a limit — so 20260813001900's rule holds in its strongest
+  // form: the single perspective either can answer from is auth.uid()'s own.
+  //
+  // `people_mutuals` counts, and never names, edges that follows_read would admit to
+  // the caller one at a time: both parties to every counted edge must pass
+  // can_view_profile. `people_taste_matches` calls taste_match itself rather than
+  // reimplementing it, so it inherits that function's refusals along with its
+  // arithmetic and cannot show a number the profile would decline to.
+  'people_mutuals(integer)': ['authenticated'],
+  'people_taste_matches(integer)': ['authenticated'],
 
   // Added 2026-08-17 with Settings (20260817000600). Every one of these is about the
   // caller's own account and none takes a target, which is 20260813001900's rule in

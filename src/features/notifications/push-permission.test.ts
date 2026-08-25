@@ -113,6 +113,57 @@ describe('shouldOfferPush', () => {
   });
 });
 
+/**
+ * The founder's device pass, 2026-08-26, pinned as copy rather than as behaviour.
+ *
+ * There were two dialogs and each was written as a follow-up to its own moment — "Know
+ * when they follow you back?" after a follow, "Know when they join?" after an
+ * invitation. Both read as questions about one specific future event from one specific
+ * person, when what is actually being requested is the operating system's permission to
+ * notify this account about anything, permanently. Somebody who does not care about
+ * *that* follow-back says Not now, `push.offered` is written, and the OS prompt is never
+ * reached at all.
+ *
+ * Asserted here because it is user-visible text that two call sites share and nothing
+ * else would notice being wrong: the flow works identically whatever the alert says.
+ */
+describe('what the priming alert says', () => {
+  const shown = async (moment: 'follow' | 'invite') => {
+    const alert = press('Not now');
+    await offerPushPermission(moment);
+    const [title, body, buttons] = alert.mock.calls[0] as [
+      string,
+      string,
+      { text: string; style?: string }[],
+    ];
+    return { title, body, buttons };
+  };
+
+  it.each(['follow', 'invite'] as const)('is the same one question after a %s', async (moment) => {
+    const { title, body, buttons } = await shown(moment);
+
+    expect(title).toBe('Turn on notifications?');
+    expect(body).toBe(
+      'Get notified when someone follows you, recommends something, or comments on what you watched.',
+    );
+    // "Not now" first and cancel-styled: the safe answer is the easy one.
+    expect(buttons.map((b) => b.text)).toEqual(['Not now', 'Turn on']);
+    expect(buttons[0]?.style).toBe('cancel');
+  });
+
+  it('has retired both of the moment-specific questions', async () => {
+    for (const moment of ['follow', 'invite'] as const) {
+      const { title, body } = await shown(moment);
+      expect(`${title} ${body}`).not.toMatch(/Know when/i);
+      // And it no longer claims to be about what bingd. *can* do, which was the old
+      // body's shape and reads as a feature list rather than as a permission.
+      expect(body).not.toMatch(/bingd\. can/i);
+      jest.restoreAllMocks();
+      mockPrefs = {};
+    }
+  });
+});
+
 describe('offering it', () => {
   it('shows the priming alert before the OS dialog, not instead of it', async () => {
     const alert = press('Turn on');
@@ -183,18 +234,25 @@ describe('offering it', () => {
     expect(push.registerPushToken).toHaveBeenCalled();
   });
 
-  it('uses different copy for the two moments PRD §15 names', async () => {
+  /**
+   * **This asserted the opposite until the founder's device pass**, and the reversal is
+   * the point: the two moments PRD §15 names decide *when* the question may be put, not
+   * what it says. Tailoring the wording to the tap made a request for a permanent OS
+   * permission read as a question about one follow. See `what the priming alert says`
+   * above for the copy itself.
+   */
+  it('asks the same question whichever moment reached it', async () => {
     const alert = press('Not now');
     await offerPushPermission('follow');
-    const followTitle = alert.mock.calls[0]?.[0];
+    const followCopy = alert.mock.calls[0]?.slice(0, 2);
 
     mockPrefs = {};
     jest.clearAllMocks();
     const second = press('Not now');
     await offerPushPermission('invite');
-    const inviteTitle = second.mock.calls[0]?.[0];
+    const inviteCopy = second.mock.calls[0]?.slice(0, 2);
 
-    expect(followTitle).not.toEqual(inviteTitle);
+    expect(followCopy).toEqual(inviteCopy);
   });
 
   /**

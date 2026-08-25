@@ -14,6 +14,23 @@ export type FollowControlProps = {
   isSelf: boolean;
   /** Where this control is being shown, for `follow_created` alone. */
   surface: Surface;
+  /**
+   * `full` — the default — is the profile's own action area: one control across the
+   * width of the screen, in the slot that holds Invite friends on the reader's own page.
+   *
+   * `compact` is the same control at the end of a row. People discovery needs one per
+   * suggestion, and a full-width button under each of ten names would be a screen of
+   * buttons with names on it.
+   *
+   * **A size, and deliberately not a second component.** The founder's rule for this
+   * tranche is that a Follow performed from People discovery, from a profile and from a
+   * recommendation request must be one mutation with one set of cache effects — three
+   * implementations is how the picker ends up stale on one surface and not another,
+   * which is the bug this pass is fixing elsewhere. Everything below the styling is
+   * shared: the confirmation before unfollowing, the three-state label, `priorState`
+   * and its `unknown` case, and `useSocialWrites`.
+   */
+  size?: 'full' | 'compact';
 };
 
 /**
@@ -61,9 +78,11 @@ export function FollowControl({
   relationship,
   isSelf,
   surface,
+  size = 'full',
 }: FollowControlProps) {
   const { follow, unfollow, unblock, busy } = useSocialWrites(viewerId, surface);
   const state = relationship ?? noRelationship();
+  const compact = size === 'compact';
 
   if (isSelf) return null;
 
@@ -77,10 +96,11 @@ export function FollowControl({
   // somebody may not become a way to suppress the complaint about them.
   if (state.blocked) {
     return (
-      <View style={styles.control}>
+      <View style={compact ? styles.compact : styles.control}>
         <Button
           label="Unblock"
           kind="secondary"
+          size={compact ? 'sm' : 'md'}
           disabled={busy}
           disabledReason="Saving your last change."
           onPress={() =>
@@ -116,7 +136,7 @@ export function FollowControl({
     );
 
   return (
-    <View style={styles.control}>
+    <View style={compact ? styles.compact : styles.control}>
       <Button
         label={following ? 'Following' : requested ? 'Requested' : 'Follow'}
         /**
@@ -134,6 +154,7 @@ export function FollowControl({
          * and the button is now reporting rather than offering.
          */
         kind={following || requested ? 'outline' : 'primary'}
+        size={compact ? 'sm' : 'md'}
         accessibilityHint={
           following
             ? `Unfollow ${name}`
@@ -175,4 +196,8 @@ const styles = StyleSheet.create({
   // Full width, which is the shape of the slot it sits in: on the owner's profile that
   // slot holds Invite friends, and the two screens are meant to be the same screen.
   control: { alignSelf: 'stretch' },
+  // As wide as its own label and no wider, so a row of people is a row of names with a
+  // control at the end rather than a column of buttons. `Button`'s `sm` is 36pt and
+  // clears the 44pt target through hit slop, which is the right tool inside a list.
+  compact: { alignSelf: 'center' },
 });

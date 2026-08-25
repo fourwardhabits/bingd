@@ -270,10 +270,15 @@ export const rankStart = (mediaItemId: string, bucket: BucketId, operationId: st
  * one: the RPC ends with `return rank_start(...)`, so it answers with the same
  * `SessionStep` shape and the sheet drives it identically from there.
  *
- * The position is genuinely discarded — the server unranks first, then recomputes the
- * band bounds, then inserts fresh. PRD §10 requires that a bucket change re-runs
- * comparisons rather than estimating a new position, so this cannot be made cheaper.
- * That is why the caller confirms with the user before reaching it.
+ * PRD §10 requires that a bucket change re-runs comparisons rather than estimating a
+ * new position, so this cannot be made cheaper. What it no longer costs is the position
+ * itself: since `20260826000500` the old placement and the old bucket both survive
+ * until the new one completes, so a reader who opens the new band and changes their
+ * mind has changed nothing. The confirmation the caller shows is about the comparisons
+ * they are being asked for, not about a ranking they are about to lose.
+ *
+ * Never a new watch. Changing your mind about a rating is not a second viewing, so this
+ * writes no feed activity at all.
  */
 export const rankRebucket = (mediaItemId: string, bucket: BucketId, operationId: string) =>
   call(
@@ -285,40 +290,54 @@ export const rankRebucket = (mediaItemId: string, bucket: BucketId, operationId:
 /**
  * Ranks an already-ranked title **again, inside the band it is already in**.
  *
- * The founder reproduced this on the device: a Loved title, Change your rating, Loved
- * — and nothing happened. `LogSheet` read “same bucket” as “no change” and returned
- * before anything ran. It is not no change: a reader who re-opens a rating they have
- * already given is saying the *position* is wrong, which is the one thing re-selecting
- * the bucket ought to fix.
+ * Two callers, two meanings, and the boolean is what separates them.
  *
- * `rank_rebucket` cannot do it. It raises 22023 on a bucket that is not moving, by
- * design — it exists to change a band. So there is now a `rank_again` RPC that drops
- * the position and opens a fresh session in the same band, in one transaction. The
- * server recomputes the band bounds inside its start, so the title re-enters
- * comparison against its own bucket exactly as a rebucket does against the new one.
- * The bucket never moves; the ordinal and the score may.
+ * *Rank again*, from the Ranked menu, is **another watch**: the reader saw the film a
+ * second time and is placing it a second time. `newWatch` is true, and completing it
+ * writes exactly one new `title_ranked` activity.
+ *
+ * *Change your rating* re-choosing the band it already has is a **correction**. The
+ * founder reproduced the original bug on the device — a Loved title, Change your
+ * rating, Loved, and nothing happened, because `LogSheet` read "same bucket" as "no
+ * change" and returned before anything ran. It is not no change: a reader re-opening a
+ * rating they already gave is saying the *position* is wrong. But it is not a viewing
+ * either, so `newWatch` is false and no activity is written — which is the founder's
+ * four-War-Dogs report, where changing a rating posted a duplicate every time.
+ *
+ * `rank_rebucket` can serve neither: it raises 22023 on a bucket that is not moving, by
+ * design, because it exists to change a band.
+ *
+ * **Nothing visible is given up to open the session** (20260826000500). The server used
+ * to unrank first, so the score disappeared from the collection, the profile and the
+ * title page before a single comparison had been answered — and closing the sheet left
+ * it gone. Now the session runs *over* the position the title holds, and only a
+ * completed placement replaces it. Cancel, navigate away, lose the connection or kill
+ * the app, and the ranking is untouched.
  *
  * **It used to be two calls from here, and that was the honest cost at the time.**
  * `rank_unrank` then `rank_start`, with no transaction around them: an unrank that
  * landed and a start that did not left the title logged, in the same bucket, without a
- * position. Nobody's data was ever wrong — the app has a name and a queue for that
- * state (`unranked_queue`) — but a reader who pressed one button and lost their
- * network in the middle got half of what they asked for, and the only repair was to
- * notice and press it again. The alternative was a migration to a ranking function,
- * and a beta already installed on two devices was not the moment to attempt one.
- *
- * `20260825000200` is that migration, and this is now a single call. If the session
- * cannot be opened, the position it was replacing is still there.
+ * position. `20260825000200` made it one call; `20260826000500` made that call cost
+ * nothing until it succeeds.
  *
  * A title that is not ranked is still not an error: it means the title lost its
  * position between the screen reading it and this call, which is the state this call
- * was trying to reach. The server takes the same reading, so there is no `P0002` to
- * absorb here any more.
+ * was trying to reach.
  */
-export const rankAgain = (mediaItemId: string, bucket: BucketId, operationId: string) =>
+export const rankAgain = (
+  mediaItemId: string,
+  bucket: BucketId,
+  operationId: string,
+  newWatch: boolean,
+) =>
   call(
     'rank_again',
-    { p_media_item_id: mediaItemId, p_bucket: BUCKET_VALUES[bucket], p_operation_id: operationId },
+    {
+      p_media_item_id: mediaItemId,
+      p_bucket: BUCKET_VALUES[bucket],
+      p_operation_id: operationId,
+      p_new_watch: newWatch,
+    },
     mediaItemId,
   );
 

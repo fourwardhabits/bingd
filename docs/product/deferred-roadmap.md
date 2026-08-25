@@ -1,6 +1,6 @@
 # Deferred roadmap — product capability that is specified, wanted, and not being built yet
 
-**Status:** current as of 2026-08-23, at the friend-beta follow-up pass.
+**Status:** current as of 2026-08-26, at the final pre-RC product pass.
 
 **Companion documents:** [`PRD.md`](./PRD.md) · [`analytics.md`](./analytics.md) ·
 [`growth-instrumentation.md`](./growth-instrumentation.md) · [`backlog.md`](./backlog.md) ·
@@ -65,6 +65,28 @@ grouping · no schema change to anything user-owned.
 ---
 
 ## 2. People by taste match
+
+> **Built on 2026-08-26 (`20260826000500`), and this entry stays for what it got right.**
+> For You gained a **`[ Titles ] [ People ]`** switch, and People is two sections —
+> **Mutuals** (friend-of-a-friend, by shared-connection count) and **Taste matches**
+> (scored by `taste_match` itself). PRD §13 As-built is the specification.
+>
+> **Every disqualification below was honoured rather than waived.** There is no
+> all-users × all-ratings calculation anywhere near the client: `people_taste_matches` is a
+> definer RPC that narrows candidates to accounts sharing at least `taste.min_common` exact
+> titles *before* it computes anything, excludes self, blocks in either direction, anybody
+> already followed and anybody already **asked**, and applies `can_view_profile` and
+> `can_discover_profile` from the caller's own side. `people_mutuals` counts only edges
+> `follows_read` would admit to the caller individually, and never names them.
+>
+> **What changed the timing** is the second section. This entry was deferred to 50–100 real
+> users because taste alone would answer "here are the four people you already follow" in a
+> cohort of thirty — which is true, and is exactly why Mutuals leads. A friend beta has a
+> dense follow graph and a sparse ranking graph, so the graph-based section carries the
+> screen at the size where the taste-based one cannot.
+>
+> **What is still deferred from this entry:** nothing of the design, and one thing that was
+> never in it — finding people through the address book, which is now §21.
 
 **What it is.** A **Users** surface inside For You: other members ranked by Taste Match,
 each with a Follow action and a route to their profile.
@@ -899,8 +921,27 @@ collection writers do.
 ### 19.7 Ranking interaction
 
 None, by design. `rank_start`, `rank_answer`, `rank_rebucket`, `rank_unrank` and
-`_rank_finalize` are untouched, read nothing from `watch_events`, and write nothing to it.
-"Rank again" continues to mean only what it means today.
+`_rank_finalize` read nothing from `watch_events` and write nothing to it.
+
+**Updated 2026-08-26.** "Rank again" no longer means only what it meant when this entry
+was written: the founder's final pre-RC pass decided that **Rank again is another watch**
+and **Change your rating is a correction** (PRD §10 As-built, `20260826000500`). That is a
+product decision about a *feed activity* and about which control a reader reaches for — it
+does not create a watch record, because there is nowhere to put one until this entry
+ships, and it does not change the ranking arithmetic.
+
+What it does do is make the eventual `watch_events` table's job smaller and clearer.
+`rank_again` now carries an explicit `p_new_watch`, so the moment a reader declares a
+second viewing is already named at the RPC boundary — this design's `log_rewatch` would
+write the row that declaration deserves rather than having to infer one from a re-ranking.
+
+~~The one ranking defect this design **does not** fix~~ — **fixed 2026-08-25, ahead of this
+entry.** `rankAgain` was `rank_unrank` followed by `rank_start` with no transaction and no
+operation id, so a failure between the two left a title logged-but-unranked. It is now a
+single server-side `rank_again` transaction, and the whole ranking family carries an
+operation id (`20260825000200`). That was the mechanism this entry shares with it, so the
+prerequisite is already in place rather than still owed. Since `20260826000500` it does not
+unrank at all until the replacement is ready to land.
 
 ~~The one ranking defect this design **does not** fix~~ — **fixed 2026-08-25, ahead of this
 entry.** `rankAgain` was `rank_unrank` followed by `rank_start` with no transaction and no
@@ -935,7 +976,16 @@ Three acts, three different truths, and today only one of them speaks:
 |---|---|---|
 | First watch | silent — `title_logged` has no producer | Probably yes, and the type already exists and already renders |
 | Rewatch | impossible to express | Yes, and it needs **its own verb** rather than borrowing *watched*, or the feed reads as a duplicate |
-| Rerank | **already emits another `title_ranked`** every time | Arguably already too loud |
+| Rerank | **one `title_ranked` for a Rank again, none for a Change your rating** — corrected 2026-08-26 | Settled. See below. |
+
+**The rerank row is no longer "arguably too loud"; it was measurably wrong, and it is
+fixed.** The founder saw four identical *ranked War Dogs* activities produced by changing a
+rating three times: `_rank_finalize` posted on every completion, and every re-ranking
+completes one. `20260826000500` splits the two acts — a second viewing earns exactly one
+activity at completion, a correction earns none — which also settles half of the question
+this sub-section was holding open. What remains open here is the *first watch*
+(`title_logged` still has no producer) and the rewatch verb, both of which need this
+entry's schema.
 
 A rewatch can be given a feed event **without** creating a second ranking identity, because
 the two are unrelated tables — `title_ranked` carries the position and score, a watch event
@@ -1066,6 +1116,52 @@ matching against.
 
 **Depends on.** A file picker and CSV parser · a title-matching pipeline · the bucket
 mapping in `decision-log.md` §4 · the post-import anchor session.
+
+---
+
+## 21. Find friends from contacts
+
+**Deferred by the founder, 2026-08-26**, in the same pass that built People discovery.
+
+**What it is.** A third section under For You → People — *From contacts* — that finds the
+people already in the reader's address book who are on Bingd, so that a new account is not
+starting from an empty follow graph and a search box.
+
+**Why it is wanted.** It is the single highest-yield discovery mechanism any social product
+has, and it is the one gap People discovery does not close. Mutuals needs a follow graph
+the reader does not have yet, and taste matches needs a ranking catalogue they have not
+built yet — so on day one, which is exactly when discovery matters most, both sections are
+empty and the screen can only say *rank more and follow people*. Contacts is the only
+source that works before either exists.
+
+**Why it is not being built now.** Requesting the address book is a decision about what
+Bingd uploads concerning **people who never signed up**, and it cannot be made as a side
+effect of adding a section to a screen. It needs a privacy design of its own, a line in the
+privacy policy, a store-listing disclosure on both platforms, and a matching scheme that
+does not amount to shipping somebody's phone book to a server. None of that is
+pre-RC-sized, and the pre-RC pass that surfaced it said so explicitly.
+
+**Requirements for any future implementation**, recorded now so they are not re-litigated:
+
+- **Explicit opt-in.** The OS permission is requested only after a deliberate tap on a
+  control that says what it is for — never at launch, never as part of onboarding, and
+  never bundled into another prompt.
+- **An explanation before the OS dialog**, in Bingd's own words, saying what will be read
+  and what will be sent. The same two-step the notification primer uses, and for the same
+  reason: our "Not now" is recoverable and the OS answer is not.
+- **Privacy-preserving matching, preferred.** Hashed or otherwise blinded identifiers over
+  raw numbers and emails, with the scheme written down and reviewed rather than assumed.
+- **Never a silent upload.** No background sync, no re-upload on launch, and a way to
+  delete whatever was matched.
+- **Bingd works fully without it.** Declining costs the reader nothing but this section.
+
+**What should bring it back.** A cohort large enough that an empty People screen on day one
+is the thing stopping people — which the friend beta, where everybody already knows each
+other, cannot tell us.
+
+**Depends on.** A privacy-policy revision · store-listing disclosures for iOS and Android ·
+a matching scheme · a contacts permission, which is a **native** change and therefore
+downstream of the RC binary.
 
 ---
 

@@ -37,9 +37,11 @@ import {
  * ours is not, so the cheap question goes first and only somebody who has already said
  * yes is shown the expensive one.
  *
- * It is one alert with two buttons, not a screen and not a sequence. The moment is the
- * context — this fires within a second of following somebody — so the copy has to add
- * only what the moment does not say.
+ * It is one alert with two buttons, not a screen and not a sequence — and since the
+ * founder's device pass it is *the same* alert whichever act reached it. The moment
+ * governs the timing, not the wording: what is being asked for is the operating
+ * system's permission to notify this account at all, and writing that as a follow-up to
+ * one particular tap made it read as a question about that tap. See `COPY`.
  *
  * ---------------------------------------------------------------------------
  * ASKED ONCE, EVER
@@ -55,30 +57,49 @@ import {
  * would go, and it is recorded in the deferred list rather than built here.
  */
 
-/** Which social act earned the question. Both are PRD §15's, and both are one sentence. */
+/**
+ * Which social act earned the question. Both are PRD §15's.
+ *
+ * It no longer selects the copy — see `COPY` — but it is still what the caller passes
+ * and what `noteFailure` records, which is the only way to tell afterwards *when* the
+ * one question this app ever gets to ask was spent.
+ */
 export type PermissionMoment = 'follow' | 'invite';
 
 const OFFERED_PREF = 'push.offered';
 
-const COPY: Record<PermissionMoment, { title: string; body: string }> = {
-  /**
-   * The one that matters most. Following somebody is the moment a person has decided
-   * they care what somebody else does, which is exactly what a notification carries.
-   */
-  follow: {
-    title: 'Know when they follow you back?',
-    body: 'bingd. can let you know when someone follows you, recommends you something, or comments on what you watched.',
-  },
-  /**
-   * An invitation is a promise to somebody who is not here yet, and the payoff — they
-   * joined — arrives days later when the app is closed. It is the one notification that
-   * cannot be replaced by opening the app at the right moment.
-   */
-  invite: {
-    title: 'Know when they join?',
-    body: 'bingd. can let you know when someone you invited joins, and when people follow or recommend you something.',
-  },
-};
+/**
+ * **One dialog, and it is about notifications rather than about the tap that preceded
+ * it.** The founder's device pass, 2026-08-26.
+ *
+ * There were two, and each was written as a follow-up to its moment: "Know when they
+ * follow you back?" after a follow, "Know when they join?" after an invitation. Read on
+ * a phone, a second after the act, the first one is a strange question — it asks about
+ * one specific future event, from one specific person, when what it is actually
+ * requesting is the operating system's permission to notify this account about
+ * anything, for good.
+ *
+ * That mismatch has a cost beyond the wording. Somebody who does not care whether
+ * *that* person follows back says Not now, and `push.offered` is written whichever
+ * button they press, so they are never asked again — and the OS prompt, which is the
+ * one that is permanent, is never reached. The narrow question was losing the broad
+ * permission.
+ *
+ * So: one title that names what is being turned on, and one body that lists what would
+ * arrive. Three examples rather than an exhaustive list, because the point is the
+ * shape of the thing and Settings is where the categories live.
+ *
+ * **This is the OS permission and not Bingd's own preferences**, which are a separate
+ * set of switches under Settings → Notifications and are all on by default
+ * (`20260820000100`). Somebody can have every Bingd category enabled and still receive
+ * nothing, because iOS has never been asked. That is exactly the state this dialog
+ * exists to resolve, and it is why the copy talks about being notified rather than
+ * about what Bingd will send.
+ */
+const COPY = {
+  title: 'Turn on notifications?',
+  body: 'Get notified when someone follows you, recommends something, or comments on what you watched.',
+} as const;
 
 /**
  * Whether to put the question, as a function of what is known rather than as a sequence
@@ -100,9 +121,15 @@ export function shouldOfferPush({
   return !offered;
 }
 
-/** The native alert, as a promise. Separated so a test can answer it. */
-function ask(moment: PermissionMoment): Promise<boolean> {
-  const { title, body } = COPY[moment];
+/**
+ * The native alert, as a promise. Separated so a test can answer it.
+ *
+ * It takes no moment any more: there is one dialog. The moment is still carried through
+ * `offerPushPermission` because `noteFailure` records it, and because the *timing* rule
+ * — PRD §15, never at first launch — is about which moments may ask at all.
+ */
+function ask(): Promise<boolean> {
+  const { title, body } = COPY;
 
   return new Promise((resolve) => {
     Alert.alert(title, body, [
@@ -209,7 +236,7 @@ export async function offerPushPermission(moment: PermissionMoment): Promise<voi
     const offered = (await readPref<boolean>(OFFERED_PREF)) === true;
     if (!shouldOfferPush({ permission, offered })) return;
 
-    const wants = await ask(moment);
+    const wants = await ask();
     // Written for both answers. See the header: asking again after "Not now" is the
     // behaviour that trains people to dismiss dialogs.
     await writePref(OFFERED_PREF, true);

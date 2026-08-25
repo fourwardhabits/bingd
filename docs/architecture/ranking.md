@@ -18,11 +18,12 @@ For every `(user_id, category)` pair, at all times outside a transaction:
 | **I3** | Every `rankings` row has a matching `user_media` row with the same bucket | Ranking RPCs write both; `_rank_finalize` re-asserts it at the moment the ranking is created |
 | **I4** | No two titles share a position | `unique (user_id, category, position)` |
 | **I5** | A retried ranking mutation applies exactly once — no second movement, feed event, comparison or activation | `_claim_operation_result` (§9) |
-| **I6** | Rank Again is atomic: one transaction, and a failure leaves the previous position standing | `rank_again` (§7) |
+| **I6** | Re-ranking is **provisional**: the previous position, band, score and collection row survive until a new placement completes, and an abandoned or failed attempt leaves all of them standing | `rank_again` and `rank_rebucket` (§7), `_rank_finalize` (§6) |
+| **I7** | One completed ranking is one feed activity: a first ranking and a **Rank again** each post exactly one `title_ranked`, a **Change your rating** posts none, and a retry posts none | `_rank_finalize` (§6), `_claim_operation_result` (§9) |
 
 I1 and I2 cannot be expressed as constraints. They hold because **every write goes through the functions in this document** (AD-4), and because `assert_ranking_valid()` in §8 checks them in tests and on a schedule.
 
-I5 and I6 are not properties of a row at rest and so cannot be checked by `assert_ranking_valid` at all. They are pinned by `supabase/tests/ranking-contract.test.mjs`, which asserts them against *observables* — the position, the score, the feed, the comparison history and the one-shot `activated` flag — rather than against row counts. Almost every RPC in this schema assigns or replaces, so "can a replay store a duplicate row" is answered no even by a function with no idempotency at all.
+I5, I6 and I7 are not properties of a row at rest and so cannot be checked by `assert_ranking_valid` at all. They are pinned by `supabase/tests/ranking-contract.test.mjs` and `supabase/tests/watch-again.test.mjs`, which asserts them against *observables* — the position, the score, the feed, the comparison history and the one-shot `activated` flag — rather than against row counts. Almost every RPC in this schema assigns or replaces, so "can a replay store a duplicate row" is answered no even by a function with no idempotency at all.
 
 ---
 
@@ -251,9 +252,31 @@ update rankings set position = $new
 
 A reader who re-opens a rating they have already given and chooses the *same* bucket is saying the **position** is wrong. `rank_rebucket` cannot serve that: it raises `22023` on a bucket that is not moving, by design, because it exists to change a band.
 
-`rank_again(media_item_id, bucket, operation_id?)` is that case. Drop the position, then open a fresh session in the band — one transaction, the same steps a rebucket takes minus the band change, and it handles a band change too if the bucket differs. A title that is *not* ranked is not an error: that is the state the call was reaching for, so it goes straight to the session.
+`rank_again(media_item_id, bucket, operation_id?, new_watch?)` is that case, and it handles a band change too if the bucket differs.
+
+**It takes nothing away to begin** (`20260826000500`). The session opens *over* the position the title already holds; the old row, the old band and the `user_media` bucket all stay exactly where they are, and `_rank_finalize` drops the old row and inserts the new one in the same transaction, inside the category lock, at the end. A title that is *not* ranked is not an error: that is a state the call can legitimately find, and it is finalised as a first ranking.
+
+Two things follow from leaving the subject in place, and both are mechanical:
+
+- **The session's arithmetic excludes the subject.** `band_bounds_excluding` counts the band as it will be once the old row is gone, and `_rank_pivot_at` takes an `exclude` argument and addresses candidates by `row_number()` over the same filtered set. Without either, the binary search can offer the title against itself and measures a band one too long. For a non-provisional session the two forms are identical, because I1 keeps positions contiguous from 1.
+- **`ranking_sessions` carries two flags.** `provisional` says the old position is still there and fixes which numbering `lo`/`hi`/`pivot` are expressed in — so a resume that disagrees with it restarts rather than adapts. `new_watch` says the completion is another viewing and therefore earns a feed activity; it changes nothing until finalise, so a resume may update it.
+
+**Why it matters more than atomicity did.** `20260825000200` made this one transaction, which was real and is unchanged. But atomicity is a promise about crashes, not about intent: the transaction committed the destruction the instant the sheet opened, and the founder's device pass found exactly that — tap **Rank again**, and the score disappears from Collection, the profile and the title page before a single comparison has been answered. Close the sheet and it stays gone.
+
+**`new_watch` is the product distinction, carried on the wire.** Two controls reach this RPC — *Rank again*, which means the reader watched it again, and *Change your rating* re-choosing the band it already has, which means the rating was wrong. Only the first is a viewing, and only the first posts an activity. It defaults to **false**, because the friend-beta build installed on two devices calls the three-argument form from both places and under-posting is the recoverable direction.
 
 **It was two client calls until `20260825000200`**, `rank_unrank` then `rank_start`, with no transaction around them. Nobody's data was ever wrong — the gap between them is Logged and Unranked, a state the app has a name and a queue for — but a reader who pressed one button and lost their network in the middle got half of what they asked for, and the only repair was to notice. Client compensation is not atomicity.
+
+### The feed activity a completion earns
+
+`_rank_finalize` writes a `title_ranked` event when, and only when:
+
+- the placement **created** a position where there was none — a first ranking, which posts unconditionally whatever the caller said; or
+- the session was declared a **new watch**.
+
+A placement that replaces a position as a *correction* — `rank_rebucket`, or `rank_again` with `new_watch` false — posts nothing. Until `20260826000500` every completion posted, and every re-ranking completes one: the founder saw four identical *ranked War Dogs* activities produced by changing one rating three times.
+
+An abandoned session posts nothing because it never reaches finalise, and a retried completion posts nothing because `_claim_operation_result` answers it from the ledger.
 
 ### Unranking
 

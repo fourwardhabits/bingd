@@ -563,6 +563,15 @@ describe('the guard is wired in, not merely present', () => {
     // reach anybody. `register_device_token` — the half that *grants* one — does call
     // the guard, and that asymmetry is the point.
     'revoke_device_token',
+    // 20260826000500, both of them. Suggestion lists for the People segment of For You:
+    // pure reads, no argument but a limit, and every row filtered through
+    // `can_discover_profile` and `can_view_profile` from the caller's own side. A
+    // suspended *subject* is already absent from both — `can_discover_profile` requires
+    // `status = 'active'` — which is the direction that matters, and a suspended
+    // *caller* being able to look at a list of people is not a way to reach anybody:
+    // `follow`, which is the act these rows lead to, calls the guard.
+    'people_mutuals',
+    'people_taste_matches',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

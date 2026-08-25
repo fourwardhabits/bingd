@@ -420,9 +420,18 @@ describe('a title this user has ranked', () => {
   });
 
   /**
-   * The two are not synonyms and the menu has to say which is which. Rank again redoes
-   * the pairwise placement inside a band; Change your rating changes the band. They sat
-   * one row apart with nothing between them but a verb.
+   * The two are not synonyms and the menu has to say which is which. Rank again is
+   * another watch; Change your rating corrects a rating already given.
+   *
+   * **The subtext under each of them is gone, and this test now says so.** It asserted
+   * both sentences were present, and the founder's device pass is the reason it does the
+   * opposite: `SheetRow` puts the label and its secondary sentence on one line, so at
+   * the width of a phone every explanation in this menu truncated. Five rows of clipped
+   * grey text under five clear labels is worse than no explanation, because the reader
+   * can see something was meant to be said and cannot read it. The distinction the
+   * sentences were drawing is now drawn by the flow itself — Rank again opens
+   * comparisons, Change your rating opens the bucket chooser — and is stated in the
+   * PRD.
    */
   it('keeps Change your rating as the band control, distinct from Rank again', async () => {
     const view = await open();
@@ -432,8 +441,47 @@ describe('a title this user has ranked', () => {
     await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
 
     await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
-    expect(view.getByText('Pick a different loved, fine or not for me')).toBeTruthy();
-    expect(view.getByText('Compare it again in the same rating')).toBeTruthy();
+    expect(view.getByLabelText('Rank again')).toBeTruthy();
+    expect(view.queryByText('Pick a different loved, fine or not for me')).toBeNull();
+    expect(view.queryByText('Compare it again in the same rating')).toBeNull();
+  });
+
+  /**
+   * Every row in this menu, and not one secondary sentence between them.
+   *
+   * Asserted as a sweep rather than row by row, because the failure mode is *a row
+   * somebody adds later with a `value` on it* — which is how the menu accumulated five
+   * of them in the first place.
+   */
+  it('draws the whole ranked menu without a line of truncating subtext', async () => {
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
+
+    await waitFor(() => expect(view.getByLabelText('Rank again')).toBeTruthy());
+    // This fixture holds a private note, so the log group reads Edit private note over
+    // Share as a review — the other pair of the two states one `user_media.note` can be
+    // in. The three headings and the last three rows are the same whichever it is.
+    for (const label of [
+      'Share as a review',
+      'Edit private note',
+      'Rank again',
+      'Change your rating',
+      'Remove from collection',
+    ]) {
+      expect(view.getByLabelText(label)).toBeTruthy();
+    }
+    for (const subtext of [
+      'Anyone who can see your profile',
+      'Only you can read this',
+      'Compare it again in the same rating',
+      'Pick a different loved, fine or not for me',
+      'Rating, date and anything you wrote',
+    ]) {
+      expect(view.queryByText(subtext)).toBeNull();
+    }
   });
 
   /**

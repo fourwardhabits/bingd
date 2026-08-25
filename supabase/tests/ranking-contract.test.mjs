@@ -317,7 +317,21 @@ describe('I5: a replayed ranking mutation applies exactly once', () => {
 // ---------------------------------------------------------------------------
 
 describe('I6: Rank Again is one transaction', () => {
-  it('drops the position and opens a fresh session in the same band', async () => {
+  /**
+   * **The assertion in this test is the reverse of what it was, and the reversal is the
+   * product decision `20260826000500` exists for.**
+   *
+   * It used to read `the old position is gone`, and it was faithful: `rank_again`
+   * unranked before it opened the session, so the score vanished from the collection,
+   * the profile and the title page the instant the sheet appeared — before a single
+   * comparison had been answered. The founder reproduced exactly that on the device and
+   * called it what it is. Atomicity was never the problem; the transaction always
+   * committed cleanly. What it committed was a destruction nobody had asked for yet.
+   *
+   * So the session now runs *over* the ranking, and the position survives until a
+   * placement is ready to replace it.
+   */
+  it('opens a session without touching the position the title already has', async () => {
     for (let i = 0; i < 3; i += 1) {
       await t.rankToCompletion(await movie(`Again anchor ${i}`), 'loved', async (p) => p);
     }
@@ -326,13 +340,90 @@ describe('I6: Rank Again is one transaction', () => {
 
     const before = (await rankingRows(film))[0];
     assert.ok(before, 'the title starts with a position');
+    const listBefore = await t.ranking(user);
 
     const step = await one(t.db, `select rank_again($1, 'loved', $2) as r`, [film, await op()]);
 
     assert.equal(step.done, false, 'a non-empty band re-enters comparison');
-    assert.equal((await rankingRows(film)).length, 0, 'the old position is gone');
+    assert.deepEqual(
+      (await rankingRows(film))[0],
+      before,
+      'and the old position is exactly where it was',
+    );
+    assert.deepEqual(await t.ranking(user), listBefore, 'as is everything around it');
     assert.equal((await collectionRow(film)).bucket, 'loved', 'and the title is still logged');
     assert.equal((await sessionsFor(film)).length, 1);
+    assert.equal(
+      (await t.sql(`select provisional from ranking_sessions where media_item_id = $1`, [film]))
+        .rows[0].provisional,
+      true,
+      'the session knows it is standing on a position it has not taken yet',
+    );
+    await t.assertValid(user);
+  });
+
+  /**
+   * The comparison is against the *other* members of the band, and the subject is not
+   * one of them even though it is still sitting there. Without the exclusion the
+   * binary search can offer a title against itself, and the band is measured one too
+   * long — which places every re-ranking one step lower than it belongs.
+   */
+  it('never offers the title against itself, and measures the band without it', async () => {
+    const others = [];
+    for (let i = 0; i < 3; i += 1) {
+      const other = await movie(`Opponent ${i}`);
+      await t.rankToCompletion(other, 'loved', async (p) => p);
+      others.push(other);
+    }
+    const film = await movie('Compared again');
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+
+    let step = await one(t.db, `select rank_again($1, 'loved', $2) as r`, [film, await op()]);
+    let guard = 0;
+    while (!step.done) {
+      assert.notEqual(step.pivot, film, 'the subject is never its own opponent');
+      assert.ok(others.includes(step.pivot), 'and every opponent is a real other title');
+      step = await one(t.db, `select rank_answer($1, $2, $3) as r`, [
+        step.session_id,
+        step.pivot,
+        await op(),
+      ]);
+      guard += 1;
+      assert.ok(guard < 16, 'the search converges');
+    }
+
+    assert.equal((await rankingRows(film)).length, 1, 'exactly one position, still');
+    assert.equal((await t.ranking(user)).length, 4, 'and the list did not grow or shrink');
+    await t.assertValid(user);
+  });
+
+  /**
+   * The whole point of the contract, stated as the thing a reader actually does:
+   * open Rank again, look at one comparison, change their mind, close the sheet.
+   */
+  it('leaves the ranking untouched when the session is abandoned', async () => {
+    for (let i = 0; i < 3; i += 1) {
+      await t.rankToCompletion(await movie(`Abandon anchor ${i}`), 'loved', async (p) => p);
+    }
+    const film = await movie('Abandoned rerank');
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+
+    const listBefore = await t.ranking(user);
+    const eventsBefore = (await feedEvents(film)).length;
+
+    const step = await one(t.db, `select rank_again($1, 'loved', $2, true) as r`, [
+      film,
+      await op(),
+    ]);
+    await t.sql(`select rank_cancel($1)`, [step.session_id]);
+
+    assert.deepEqual(await t.ranking(user), listBefore, 'nothing moved');
+    assert.equal((await sessionsFor(film)).length, 0, 'and the session is gone');
+    assert.equal(
+      (await feedEvents(film)).length,
+      eventsBefore,
+      'an abandoned rank again is not an activity',
+    );
     await t.assertValid(user);
   });
 

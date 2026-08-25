@@ -37,18 +37,26 @@ export type RankingSubject = {
   bucket: BucketId;
   posterUri?: string | null;
   /**
-   * How this session begins, which is three different calls.
+   * How this session begins, which is four different acts over three calls.
    *
-   * `start` — the default — is a first ranking. `rebucket` is a title that had a
-   * position and is changing band: `rank_rebucket` unranks, moves the bucket and
-   * re-opens in one call. `rerank` is a title that had a position and is keeping its
-   * band: `rankAgain` drops the position and re-opens in the same one, because
-   * `rank_rebucket` refuses a bucket that is not moving.
+   * `start` — the default — is a first ranking: the title had no position and gets one.
    *
-   * The last two both destroy the position before a single comparison is answered,
-   * which is why they share everything below that `start` does not get.
+   * `rebucket` is a title that had a position and is changing band. `rank_rebucket`.
+   *
+   * `rerank` is *Change your rating* re-choosing the band it already has. `rankAgain`
+   * with `newWatch: false`, because `rank_rebucket` refuses a bucket that is not moving.
+   *
+   * `again` is *Rank again* from the Ranked menu, which means the reader watched it a
+   * second time. `rankAgain` with `newWatch: true`. Identical to `rerank` in every
+   * respect a person can see, and different in the one they cannot: it earns a feed
+   * activity and `rerank` does not.
+   *
+   * **None of them destroys anything to begin.** That was true of the last three until
+   * `20260826000500` and it was the founder's disappearing score: the position was gone
+   * the instant the sheet opened, and closing it left it gone. The server now runs the
+   * session over the ranking that is already there.
    */
-  mode?: 'start' | 'rebucket' | 'rerank';
+  mode?: 'start' | 'rebucket' | 'rerank' | 'again';
 };
 
 export type RankingSheetProps = {
@@ -272,53 +280,66 @@ function Session({
   );
 
   /**
-   * Whether opening this session has already changed the collection.
+   * **There is no longer such a thing as opening destructively**, and the constant that
+   * used to say there was has gone with the behaviour.
    *
-   * True of both re-ranking modes and of neither first ranking. It used to be spelled
-   * `mode === 'rebucket'` in the two places below, and adding a third mode that also
-   * unranks before it opens is exactly how that spelling goes wrong — so it is one
-   * name asked once.
+   * It was `mode === 'rebucket' || mode === 'rerank'`, and it was true: both calls
+   * unranked the title before they opened a session, so merely *arriving* on this
+   * screen had already changed the collection and the two invalidations below existed
+   * to stop the rest of the app describing a ranking that no longer existed.
+   *
+   * `20260826000500` removed the cause. `rank_again` and `rank_rebucket` now open a
+   * session over the position the title already holds and replace it only at the
+   * placement, so opening this sheet writes a `ranking_sessions` row and nothing else.
+   * There is no collection change to reconcile until `apply` sees `placed`, which it
+   * already handles — and *not* invalidating here is what keeps the reader's score on
+   * screen behind the comparison they are being asked for.
    */
-  const opensDestructively = subject.mode === 'rebucket' || subject.mode === 'rerank';
-
   useEffect(() => {
     let live = true;
+    const newWatch = subject.mode === 'again';
     const open =
-      subject.mode === 'rebucket' ? rankRebucket : subject.mode === 'rerank' ? rankAgain : rankStart;
+      subject.mode === 'rebucket'
+        ? (id: string, bucket: BucketId, operationId: string) =>
+            rankRebucket(id, bucket, operationId)
+        : subject.mode === 'rerank' || subject.mode === 'again'
+          ? (id: string, bucket: BucketId, operationId: string) =>
+              rankAgain(id, bucket, operationId, newWatch)
+          : (id: string, bucket: BucketId, operationId: string) =>
+              rankStart(id, bucket, operationId);
     const attempt = () =>
       withIntent(
+        // The mode is in the intent key, so Rank again and Change your rating cannot
+        // share an operation id: they are different acts and one of them writes an
+        // activity the other must not.
         `open:${subject.mode ?? 'start'}:${subject.id}:${subject.bucket}`,
         (operationId) => open(subject.id, subject.bucket, operationId),
         outcomeUnknown,
       );
     void attempt().then((next) => {
       /**
-       * **A rebucket has already happened by the time this resolves**, and that is the
-       * whole reason this is here rather than only in `apply`.
+       * **Nothing is reconciled here any more, and that is a deletion rather than an
+       * omission.**
        *
-       * `rank_rebucket` calls `rank_unrank` and updates `user_media.bucket` before it
-       * opens a session (`20260813000700`). Both are committed. So a reader who moves a
-       * film from Loved to Fine and then closes the sheet without answering a single
-       * comparison has changed their collection — the ranking is gone, the bucket has
-       * moved — while the ranked list, the score denominators and Rating Rascal all still
-       * describe the ranking that no longer exists. Invalidating only on `placed` left
-       * that standing for the full one-minute `staleTime`. Independent review 21c.
+       * This used to call `invalidateAfterCollectionChange` on every resolution of a
+       * rebucket or a rerank, and it was correct for the server it was written against:
+       * `rank_rebucket` unranked the title and moved `user_media.bucket` *before* it
+       * opened a session, both committed, so a reader who arrived here and closed the
+       * sheet had already changed their collection while the ranked list, the score
+       * denominators and Rating Rascal still described the ranking that no longer
+       * existed. Independent reviews 21c and 21d put it here and made it fire on
+       * `failed` too, because a commit whose reply is lost is indistinguishable from a
+       * refusal.
        *
-       * `rank_start` is not a mutation and needs none of this: it opens a session and
-       * writes nothing else.
+       * `20260826000500` removed what it was reconciling. Opening a session writes one
+       * `ranking_sessions` row and touches nothing the collection reads, whichever mode
+       * this is. Invalidating anyway would be worse than pointless: it would refetch the
+       * collection behind the comparison the reader is looking at, and the score this
+       * tranche exists to keep on screen is one of the things it would redraw.
        *
-       * **On every resolution, including `failed`.** A Postgres exception does roll the
-       * whole `rank_rebucket` transaction back — but a transaction can commit and its
-       * HTTP response can then be lost, and the client maps that to `failed` too. There
-       * is no answer here that distinguishes "refused" from "committed, reply dropped",
-       * so the only safe reading is that it may have landed. A definite rollback costs a
-       * redundant refetch; the other way costs a screen describing a ranking that is
-       * gone. Independent review 21d.
+       * The placement still reconciles, in `apply` — that is where a ranking actually
+       * changes now, and it always did.
        */
-      if (opensDestructively) {
-        invalidateAfterCollectionChange(queryClient, profile.id, subject.id);
-      }
-
       if (live) {
         // Recorded here rather than before the call, so that the effect body stays free
         // of a synchronous setState. It lands in the same batch as `apply` below, which
@@ -339,7 +360,7 @@ function Session({
     return () => {
       live = false;
     };
-  }, [subject, apply, profile.id, queryClient, opensDestructively, withIntent]);
+  }, [subject, apply, withIntent]);
 
   const act = async (run: () => Promise<SessionStep>, progress = 0) => {
     if (busy) return;

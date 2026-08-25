@@ -1174,11 +1174,19 @@ export default function TitleScreen() {
               * Publishing confirms; making something private does not. That asymmetry is
               * the log sheet's, and it is enforced there rather than duplicated here —
               * these rows open the sheet, and the sheet owns what a conversion costs.
+              *
+              * **The founder's device pass: every `value` in this menu is gone.**
+              * `SheetRow` draws the label and the secondary sentence on one line, so at
+              * the width of a phone each of the five explanations truncated — five rows
+              * of clipped grey text under five clear labels, which is worse than no
+              * explanation at all, because the reader can see that something was meant
+              * to be said and cannot read it. The labels below carry their own meaning;
+              * the sentences that did not fit are in this comment, where they are for
+              * whoever changes the rows next rather than for somebody choosing one.
               */}
             <SheetRow
               icon="chatbubble-ellipses-outline"
               label={hasReview ? 'Edit review' : hasPrivateNote ? 'Share as a review' : 'Write review'}
-              value={hasReview ? undefined : 'Anyone who can see your profile'}
               onPress={() => {
                 setManaging(false);
                 openLog('review', 'public');
@@ -1193,7 +1201,6 @@ export default function TitleScreen() {
                     ? 'Make it a private note'
                     : 'Add private note'
               }
-              value={hasPrivateNote ? undefined : 'Only you can read this'}
               onPress={() => {
                 setManaging(false);
                 openLog('note', 'private');
@@ -1202,27 +1209,33 @@ export default function TitleScreen() {
 
             <MenuGroup title="Ranking" />
             {/**
-              * **Rank again, which T2 built and nothing offered.**
+              * **Rank again means you watched it again.**
               *
-              * `rank_again` (20260825000200) unranks and re-opens a session inside the
-              * same band in one atomic call, and it exists because `rank_rebucket`
-              * refuses a bucket that is not moving. The client writer is
-              * `session.rankAgain`, reached by opening the ranking sheet in `rerank`
-              * mode — which is the *only* way this app is allowed to do it. Composing
-              * `rank_unrank` and `rank_start` on the client would be two calls with a
-              * window between them in which the title has no position and no session,
-              * and a dropped connection in that window loses the ranking outright. That
-              * is the guarantee T2 bought and this row spends nothing of it.
+              * That is the product definition (`docs/product/prd.md` §10), and it is why
+              * this row is the one place in the app that declares a second viewing:
+              * completing it writes exactly one new `title_ranked` activity, where
+              * Change your rating below writes none.
               *
-              * Distinct from Change your rating below, and the two are not synonyms:
-              * this redoes the *comparisons* inside the band you already chose. The
-              * bucket is passed straight through from `rankings.bucket`, so nothing here
-              * decides a rating.
+              * `rank_again` (20260825000200, re-signed 20260826000500) opens a
+              * comparison session **over the position the title already has**. Nothing
+              * the reader can see moves until they finish: close the sheet, lose the
+              * network, kill the app, and the score, the band and the place in the list
+              * are exactly where they were. The founder's device pass found the
+              * opposite — the score vanished the moment this row was tapped — and that
+              * was the server unranking before it opened the session.
+              *
+              * The client writer is `session.rankAgain`, reached by opening the ranking
+              * sheet in `again` mode, which is the *only* way this app is allowed to do
+              * it. Composing `rank_unrank` and `rank_start` here would be two calls with
+              * a window between them in which the title has no position and no session.
+              *
+              * The bucket is passed straight through from `rankings.bucket`, so this row
+              * decides no rating — it redoes the comparisons inside the band that is
+              * already chosen.
               */}
             <SheetRow
               icon="repeat-outline"
               label="Rank again"
-              value="Compare it again in the same rating"
               onPress={
                 rankedBucket
                   ? () => {
@@ -1234,21 +1247,20 @@ export default function TitleScreen() {
                         title: title.title,
                         bucket: rankedBucket,
                         posterUri: posterUri(title.poster_path, 'card'),
-                        mode: 'rerank',
+                        mode: 'again',
                       });
                     }
                   : undefined
               }
               disabledReason={rankedBucket ? undefined : 'Loading'}
             />
-            {/* Kept, and now with a line saying what it is *for*: it changes the band —
-                loved, fine, not for me — which is a different question from where the
-                title sits inside one. The two used to be one row apart with nothing
-                distinguishing them but a verb. */}
+            {/* The other half of the pair, and not a synonym for it: this changes the
+                *band* — loved, fine, not for me — which is a correction to an opinion
+                already recorded rather than a second viewing. It writes no new activity
+                and it does not surrender the current position while it runs. */}
             <SheetRow
               icon="star-outline"
               label="Change your rating"
-              value="Pick a different loved, fine or not for me"
               onPress={() => {
                 setManaging(false);
                 openLog();
@@ -1259,7 +1271,6 @@ export default function TitleScreen() {
             <SheetRow
               icon="trash-outline"
               label="Remove from collection"
-              value="Rating, date and anything you wrote"
               onPress={confirmRemoval}
             />
           </View>

@@ -403,8 +403,10 @@ other. A one-way follow is the case half of this section is about.
 
 - [ ] Open any film. The action row reads **Watchlist · Recommend · Share**, in that order.
 - [ ] Open a **series** (not a season). There is **no Recommend** on it.
-- [ ] Tap **Recommend** on a film. The sheet is headed `Recommend <the film>` and lists
-      only people who follow you back. Somebody you follow one way must **not** be there.
+- [ ] ~~Tap **Recommend** on a film. The sheet is headed `Recommend <the film>` and lists
+      only people who follow you back. Somebody you follow one way must **not** be there.~~
+      **Reversed 2026-08-26 (`20260826000400`).** The sheet lists **everybody you follow**,
+      whether or not they follow back. See the 2026-08-26 section at the end of this file.
 - [ ] Tap a person. It sends on that one tap: no second Send button, no checkboxes, no
       spinner left behind. The sheet closes and the title screen says
       `Recommended to <name>`.
@@ -459,3 +461,107 @@ other. A one-way follow is the case half of this section is about.
 - The invite link resolves to nothing. There is no web property; `app/i/[token].tsx` says
   invitations are not active in this build. Redemption and activation are Beta Hardening.
 - No push notification arrives. Delivery is dark by design (AD-10).
+
+---
+
+## Final pre-RC product pass — 2026-08-26
+
+**Do this section first.** It is the whole of what the pass added, and every item in it is
+a founder finding from the previous device run. Everything above is unchanged except the
+one struck line in the Recommend list, which this pass reversed.
+
+Baseline, superseding the three items at the top of this file:
+
+- [ ] `npx supabase migration list --linked` shows local and remote in step through
+      **`20260826000500`**.
+- [ ] Build fingerprint in **Settings › Build** matches the build under test. **No native
+      change this pass** — an OTA update is enough.
+
+You need **two accounts**, A and B. Several items need B to have ranked a few of the same
+titles as A, so do that early: it is what makes Match calculable at all.
+
+### The Ranked menu
+
+- [ ] Open a title you have ranked and tap the **Ranked** chip. The menu reads:
+      `YOUR LOG` — write/edit review, add/edit private note · `RANKING` — **Rank again**,
+      **Change your rating** · `COLLECTION` — Remove from collection.
+- [ ] **No row has a grey sentence beside its label.** This is the finding: every one of
+      them truncated at phone width. If any row shows clipped grey text, it has come back.
+
+### Rank again keeps your score
+
+- [ ] Note the score and the position of a ranked film. Tap **Rank again**.
+- [ ] ⚠ **The score must still be there.** Before this pass it disappeared the moment the
+      sheet opened. Swipe the sheet away *without answering anything* and check the title
+      page, Collection and your profile: the score, the position and the band are all
+      exactly as they were.
+- [ ] Do it again and **answer one comparison**, then close the sheet. Still unchanged.
+- [ ] Do it again and **finish**. Now the score may move — and the reveal is followed by
+      **Finish your log**, which offers **Edit review** and **Edit private note** if you
+      had written either. Neither must have been cleared.
+- [ ] Turn on airplane mode mid-session and close the sheet. The old ranking survives.
+
+### One activity per watch
+
+- [ ] Open **Feed** on B (who follows A). Count A's `ranked` entries for one film.
+- [ ] On A, **Change your rating** on that film — pick the same band, finish the
+      comparisons. Refresh B's feed. ⚠ **No new entry.** Repeat twice more: still none.
+- [ ] On A, change it to a *different* band and finish. Still **no new entry**.
+- [ ] On A, use **Rank again** and finish. ⚠ **Exactly one** new entry, and only after the
+      comparisons are done — not when the sheet opened.
+
+### Notifications primer
+
+- [ ] On a fresh install that has never been asked, follow somebody. The alert reads
+      **Turn on notifications?** over *Get notified when someone follows you, recommends
+      something, or comments on what you watched.* with **Not now** and **Turn on**.
+- [ ] ⚠ It must **not** say *Know when they follow you back?* — that copy is retired.
+
+### Recommending to somebody who does not follow you back
+
+- [ ] On A, follow B. B does **not** follow A.
+- [ ] Open a film on A and tap **Recommend**. ⚠ **B is in the list**, without restarting
+      the app, signing out, or waiting. This is the silkyy finding.
+- [ ] Send it. It succeeds quietly and A is told nothing about where it landed.
+- [ ] On B, open **For you**. The request row is there; **Add** puts the title in the list.
+- [ ] Make a third account C **private**. Request to follow C from A, do not approve.
+      C must **not** be in A's Recommend list. Approve on C, and C appears.
+
+### For you → People
+
+- [ ] Open **For you**. There is a **`[ Titles ] [ People ]`** switch at the top, and
+      Titles looks exactly as it did — same wall, same filters, same requests row.
+- [ ] Tap **People**. Sections appear only when they have somebody in them: **Mutuals**
+      (`3 mutuals`) and **Taste matches** (`87% Match`). Never an empty heading.
+- [ ] A row is an avatar, a name, a handle, one line, and a Follow button. No bios, no
+      posters, no explanation paragraph.
+- [ ] Tap a name → their profile. Tap **Follow** → it becomes **Following** without the
+      row jumping away under your thumb.
+- [ ] ⚠ Nobody you already follow, or have already requested, appears in either section.
+      Nor do you.
+- [ ] With a brand-new account: one line, *Rank more titles and follow people to improve
+      suggestions.* — and nothing else. No banner, no repeated prompt.
+- [ ] ⚠ **Recommendation requests must not appear under People.** They are a Titles thing.
+
+### Match on a profile
+
+- [ ] Open B's profile from A. **Match sits directly under `@handle`**, not under the
+      avatar.
+- [ ] With five or more titles ranked by **both** accounts: `87% Match`, in maroon.
+- [ ] With A having ranked almost nothing and B plenty: **Rank more to see Match**.
+- [ ] With B having ranked almost nothing: **Not enough shared taste yet** — and it must
+      **not** tell A to rank more, because that would not fix it.
+- [ ] ⚠ Nothing anywhere reads `TBD`, `0%`, or a percentage the app cannot justify.
+- [ ] On your **own** profile there is no Match line at all.
+- [ ] A **private** account you do not follow shows its name, handle and avatar and **no
+      Match** — that is the existing privacy contract and was not widened.
+- [ ] Rank three more titles B has also ranked, then reopen B's profile. The number has
+      moved without a force-quit.
+
+### What is not testable here, and is not a defect
+
+- **No contacts anywhere.** There is no *Find friends from contacts*, no permission
+  prompt and no address-book access. It is deferred by decision — `deferred-roadmap.md`
+  §21 — and its absence is the expected result.
+- Mutuals will be thin or empty in a two-account cohort. That is the algorithm being
+  honest, not a failure.

@@ -32,10 +32,27 @@ export type ProfileIdentityProps = {
    */
   controls?: ReactNode;
   /**
-   * Sits under the avatar, in the avatar's column. Taste Match, on somebody else's
-   * profile, and nothing at all on the reader's own.
+   * Sits under the avatar, in the avatar's column.
+   *
+   * Unused by both profiles since Taste Match moved under the handle — kept because the
+   * slot is the right shape for anything that genuinely belongs to the *photo* rather
+   * than to the name, and removing it would be a change to a shared component made for
+   * one caller's convenience.
    */
   badge?: ReactNode;
+  /**
+   * Directly under `@handle`, inside the identity block. Taste Match, on somebody else's
+   * profile.
+   *
+   * **The founder's placement, and the reason it moved.** Under the avatar it was a
+   * number in a sixty-point column, which is why it could only ever be a figure and a
+   * word — and why the states where there is no figure had to render as nothing at all,
+   * so the feature was invisible on exactly the profiles a friend beta produces. Under
+   * the handle it has a line's width, so it can say what it knows in all four cases
+   * (`tasteMatchState`), and it reads as what it is: a fact about the reader's
+   * relationship to this person, next to the two things that identify them.
+   */
+  match?: ReactNode;
 };
 
 /**
@@ -54,8 +71,8 @@ export type ProfileIdentityProps = {
  * THE LAYOUT, AFTER THE FINAL TUNING PASS
  *
  *     [avatar]   Name
- *      [84%]     @handle
- *      Match
+ *                @handle
+ *                87% Match
  *
  *     Bio, across the full width
  *
@@ -69,11 +86,23 @@ export type ProfileIdentityProps = {
  * and it now gets the width of a sentence, below the header rather than inside it. Two
  * lines still, because a profile is not a blog.
  *
- * **Taste Match moved under the avatar.** It was in the name column, where it was a
- * third thing stacked against the identity and pushed the bio further down. Under the
- * photo it reads as what it is — a small subheading about the *person* in the picture —
- * and it costs the identity column nothing. Absent entirely on the reader's own
- * profile: a 100% match with your own catalogue is a tautology.
+ * **Taste Match sits under the handle**, which is the founder's final placement and a
+ * reversal of the one before it.
+ *
+ * It was under the avatar for a good reason — in the name column it had been a third
+ * thing stacked against the identity, pushing the bio down — and that move had a cost
+ * nobody priced: the avatar's column is about sixty points wide, so the badge could hold
+ * a figure and a word and nothing else, and every state *without* a figure had to render
+ * as nothing at all. On a friend beta, where five shared rankings is a high bar, that is
+ * almost every profile. The founder's report was simply that Match is missing.
+ *
+ * Under the handle it has a line's width, so it can say `87% Match` when there is a
+ * number and say why when there is not (`tasteMatchState`). The bio's move to full width
+ * is what makes the room: this is the third line of a two-line column that used to hold
+ * four things.
+ *
+ * Absent entirely on the reader's own profile: a 100% match with your own catalogue is a
+ * tautology.
  *
  * **Stats above the buttons**, which is the swap the founder asked for. Identity flows
  * into the numbers that describe it without a row of controls interrupting, and Share
@@ -93,6 +122,7 @@ export function ProfileIdentity({
   stats,
   controls,
   badge,
+  match,
 }: ProfileIdentityProps) {
   return (
     <View style={styles.block}>
@@ -111,6 +141,10 @@ export function ProfileIdentity({
           <Text variant="footnote" tone="secondary" numberOfLines={1}>
             @{username}
           </Text>
+          {/* Directly under the handle and nowhere else. Absent entirely on the reader's
+              own profile and while the answer is still in flight, rather than holding a
+              line open for something that may never arrive. */}
+          {match}
         </View>
       </View>
 

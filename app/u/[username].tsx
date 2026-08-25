@@ -4,6 +4,7 @@ import { Alert, Pressable, ScrollView, Share, StyleSheet, View } from 'react-nat
 
 import { useCurrentProfile } from '@/features/auth';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
+import { useLoggedCollection } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
@@ -27,7 +28,7 @@ import {
   useRelationships,
   useSocialWrites,
 } from '@/features/profile/use-social';
-import { tasteMatchBadge, useTasteMatch } from '@/features/profile/use-taste-match';
+import { tasteMatchState, useTasteMatch } from '@/features/profile/use-taste-match';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
@@ -160,7 +161,30 @@ export default function PublicProfileScreen() {
     viewer.id,
   );
   const openComments = commentsFor ? (recent.find((e) => e.id === commentsFor) ?? null) : null;
-  const tasteBadge = tasteMatchBadge(taste.data);
+
+  /**
+   * The one line under the handle, and the two counts it needs to be honest.
+   *
+   * The founder reported Match missing on other people's profiles. It was wired and it
+   * was silent: below `taste.min_common` shared rankings `taste_match` has no score, and
+   * the badge under the avatar drew nothing rather than saying why. On a friend beta
+   * that is nearly every profile.
+   *
+   * Saying *why* means knowing which side is short, and the intersection count cannot
+   * tell — so both catalogue sizes go in. The subject's is on screen already; the
+   * viewer's comes from their own logged collection, which Collection has usually
+   * warmed and which is a cheap read either way. `tasteMatchState` owns the decision;
+   * this line owns the inputs.
+   */
+  const viewerCollection = useLoggedCollection(viewer.id);
+  const matchState = tasteMatchState({
+    match: taste.data,
+    isSelf: profile.data?.id === viewer.id,
+    viewerRanked: viewerCollection.data?.rankedCount,
+    subjectRanked: profile.data
+      ? profile.data.rankedMovies + profile.data.rankedSeasons
+      : undefined,
+  });
 
   /**
    * This profile as a link, and **this** profile means the one being looked at.
@@ -309,23 +333,27 @@ export default function PublicProfileScreen() {
               movies: profile.data.rankedMovies,
               seasons: profile.data.rankedSeasons,
             }}
-            badge={
-              /* Under the avatar, in the avatar's own column — the founder's final
-                 layout. It was in the name column, where it was a third thing stacked
-                 against the identity and pushed the bio down the page.
+            match={
+              /* Directly under the handle — the founder's final placement.
 
-                 Absent on the viewer's own profile, absent while the answer is still
-                 loading rather than showing a placeholder number that then changes,
-                 and absent when there is not enough overlap to have a number at all. */
-              !isSelf && tasteBadge ? (
-                <View style={styles.taste}>
-                  <Text variant="callout" tone="action">
-                    {tasteBadge.value}
-                  </Text>
-                  <Text variant="caption" tone="tertiary">
-                    {tasteBadge.label}
-                  </Text>
-                </View>
+                 It was under the avatar, in a sixty-point column, which is why it could
+                 only ever be a figure and a word and why every state without a figure
+                 rendered as nothing at all. That is the "Match is missing" report: not a
+                 wiring bug, a layout that had no room to explain itself.
+
+                 Maroon for a number, because that is the fact the row is for. Tertiary
+                 grey for the two absences, which are context rather than a result — and
+                 which say what is true without inventing a count of titles to go and
+                 rank. Never a placeholder percentage. Absent entirely on the reader's own
+                 profile and while the answer is still in flight. */
+              matchState ? (
+                <Text
+                  variant="footnote"
+                  tone={matchState.kind === 'match' ? 'action' : 'tertiary'}
+                  numberOfLines={1}
+                >
+                  {matchState.label}
+                </Text>
               ) : null
             }
             controls={
@@ -547,8 +575,9 @@ export default function PublicProfileScreen() {
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
-  // Centred under the photo, tight: two short lines about the person in it.
-  taste: { alignItems: 'center', gap: 0 },
+  // Taste Match had a style here — centred under the photo, two tight lines — and needs
+  // none now that it is one line inside the identity column, which `ProfileIdentity`
+  // already spaces.
   // The pair, then the relationship action under it — the owner's profile keeps the
   // same rhythm between its pair and Invite friends. `ProfileIdentity` owns the space
   // above and the gutter beside.
