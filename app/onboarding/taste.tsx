@@ -4,6 +4,11 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
+import {
+  NotificationStep,
+  shouldShowNotificationStep,
+} from '@/features/onboarding/NotificationStep';
+import { pushAlreadyOffered } from '@/features/notifications/push-permission';
 import { TasteBucketSheet, type TasteSubject } from '@/features/onboarding/TasteBucketSheet';
 import {
   FIRST_FIVE,
@@ -68,6 +73,15 @@ export default function TasteOnboardingScreen() {
   const [logging, setLogging] = useState<LoggableTitle | null>(null);
   const [placement, setPlacement] = useState<PostRank | null>(null);
   const [ranking, setRanking] = useState<RankingSubject | null>(null);
+  /**
+   * The exit somebody has asked for, held while the notification step is on screen.
+   *
+   * The destination is captured rather than recomputed, because the two buttons on the
+   * summary mean two different places — "Explore For You" and "See my collection" — and
+   * the founder's device pass found exactly this kind of destination getting lost when a
+   * helper decided it instead of the button. Null means no step is showing.
+   */
+  const [leaving, setLeaving] = useState<{ skipped: boolean; to: TabRoute } | null>(null);
 
   const state = useTasteOnboarding(profile.id);
   const complete = useCompleteTasteOnboarding(profile.id);
@@ -125,9 +139,34 @@ export default function TasteOnboardingScreen() {
    * order of the tabs is a layout decision and this is a navigation one, and an index
    * would re-break this the next time the bar is reordered.
    */
-  const leave = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
+  /**
+   * The exit, which now has one step in front of it.
+   *
+   * **Both ways out pass through the notification step**, and that is deliberate rather
+   * than incidental: PRD §15 forbids asking at first launch and this is the last moment
+   * before the app opens, so it is the one place the question can be put to *everybody*
+   * exactly once. Routing it through `leave` rather than hanging it off the summary means
+   * the person who taps "Not now" on the films is offered it too — they are, if anything,
+   * the reader most worth reaching later.
+   *
+   * `complete({ skipped })` is still called with the answer the *films* got. The
+   * notification step has no bearing on whether taste onboarding was skipped, and folding
+   * the two would make a flag about the collection mean something about a permission.
+   */
+  const finish = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
     await complete({ skipped });
     router.replace(to);
+  };
+
+  const leave = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
+    // Resolved now rather than on mount: the OS state can change while somebody is
+    // ranking five films — they may have granted it from a system prompt elsewhere — and
+    // an answer cached at the start of the flow would ask a question already settled.
+    if (await shouldShowNotificationStep(await pushAlreadyOffered())) {
+      setLeaving({ skipped, to });
+      return;
+    }
+    await finish({ skipped, to });
   };
 
   // Nothing until the answer arrives. Rendering the flow first and then deciding shows
@@ -140,6 +179,18 @@ export default function TasteOnboardingScreen() {
         <LoadingScreen />
       </Screen>
     );
+  }
+
+  /**
+   * The last step, and it replaces the screen rather than covering it.
+   *
+   * A sheet was the obvious alternative and is wrong here: everything behind it is the
+   * flow the reader has just finished, so a translucent view of five ranked films under
+   * a permission question reads as an interruption of something still in progress. This
+   * is the handoff, and it should look like one.
+   */
+  if (leaving) {
+    return <NotificationStep onDone={() => void finish(leaving)} />;
   }
 
   return (

@@ -12,6 +12,7 @@ import { useCommentCounts } from '@/features/feed/use-comments';
 import { useActorActivity } from '@/features/feed/use-feed';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
 import { FollowControl } from '@/features/profile/FollowControl';
+import { FollowListSheet } from '@/features/profile/FollowListSheet';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
 import { ProfileActions } from '@/features/profile/ProfileActions';
 import { ProfileMenu } from '@/features/profile/ProfileMenu';
@@ -72,6 +73,8 @@ export default function PublicProfileScreen() {
   const [awardsOpen, setAwardsOpen] = useState(false);
   // Which review's reason sheet is open, by `user_media.id`.
   const [reportingReview, setReportingReview] = useState<string | null>(null);
+  /** Which of the two people lists is open, if either. One sheet, so one piece of state. */
+  const [followList, setFollowList] = useState<'followers' | 'following' | null>(null);
 
   const profile = usePublicProfile(username ?? null);
   /**
@@ -333,6 +336,24 @@ export default function PublicProfileScreen() {
               movies: profile.data.rankedMovies,
               seasons: profile.data.rankedSeasons,
             }}
+            /**
+             * **The privacy gate for these two lists is the branch they are inside.**
+             *
+             * This whole block renders only when `usePublicProfile` returned a row, and
+             * that hook reads `public_profiles` — a `security_invoker` view, so
+             * `profiles_read` decides. A private account this viewer has not been
+             * approved by never gets here at all: the screen falls through to the
+             * identity-only surface below, which has no stats row and therefore no
+             * counts to tap.
+             *
+             * So there is no visibility check written here, deliberately. The server
+             * checks again anyway — `followers_of` is `security invoker` over
+             * `follows_read` — and two gates that are each the existing rule is the
+             * arrangement this codebase wants. What it must not grow is a *third* rule,
+             * written on the client, that could disagree with both.
+             */
+            onPressFollowers={() => setFollowList('followers')}
+            onPressFollowing={() => setFollowList('following')}
             match={
               /* Directly under the handle — the founder's final placement.
 
@@ -569,6 +590,19 @@ export default function PublicProfileScreen() {
           router.push(`/u/${handle}`);
         }}
       />
+
+      {/* `profile.data` is what the counts came from, so the sheet cannot be opened for
+          a profile whose stats were never drawn — see the note on the stat callbacks. */}
+      {profile.data ? (
+        <FollowListSheet
+          kind={followList}
+          userId={profile.data.id}
+          name={profile.data.name}
+          viewerId={viewer.id}
+          isSelf={profile.data.id === viewer.id}
+          onClose={() => setFollowList(null)}
+        />
+      ) : null}
     </Screen>
   );
 }

@@ -172,17 +172,37 @@ function ask(): Promise<boolean> {
  * long time on a bad connection, sign-out must not, and a registration still at that stage
  * has written nothing to release.
  */
-export async function registerThisDevice(userId: string): Promise<void> {
+/**
+ * What a registration attempt actually did.
+ *
+ * `void` was enough while every caller was a background lifecycle effect that could not
+ * act on the answer. The onboarding step can: it puts a question to somebody and then
+ * has to decide what to tell them, and *"the OS said yes and the token could not be
+ * minted"* is a real state on the friend-beta binary rather than a hypothetical —
+ * Android has no `google-services.json` compiled in, so FCM registration fails and
+ * `getExpoPushTokenAsync` throws (`config/push.cjs`). A step that reported success there
+ * would be the app claiming a delivery path it does not have.
+ *
+ *   `registered`   a token exists and the server owns it for this account
+ *   `unsupported`  no platform, a simulator, or no project id — nothing was attempted
+ *   `failed`       it was attempted and did not produce a usable token
+ *   `abandoned`    the session ended mid-flight; see below
+ */
+export type RegistrationOutcome = 'registered' | 'unsupported' | 'failed' | 'abandoned';
+
+export async function registerThisDevice(userId: string): Promise<RegistrationOutcome> {
   const platform = pushPlatform();
-  if (!platform) return;
+  if (!platform) return 'unsupported';
 
   const epoch = pushSessionEpoch();
 
   const token = await acquirePushToken();
-  if (!token) return;
+  if (!token) return 'failed';
   // Signed out while Expo was minting a token. Nothing was written, so there is nothing
   // to undo — just do not write it.
-  if (pushSessionEpoch() !== epoch) return;
+  if (pushSessionEpoch() !== epoch) return 'abandoned';
+
+  let outcome: RegistrationOutcome = 'failed';
 
   await trackDispatchedWrite(
     (async () => {
@@ -194,14 +214,18 @@ export async function registerThisDevice(userId: string): Promise<void> {
         // Undo it rather than leaving the phone addressed to an account that has left.
         // Sign-out is waiting on this promise, so the session is still there.
         await revokePushToken(userId, token);
+        outcome = 'abandoned';
         return;
       }
 
       // Remembered only on success, so sign-out does not try to revoke a token the server
       // never heard of — which would spend a round trip to be told nothing changed.
       rememberToken(userId, token);
+      outcome = 'registered';
     })(),
   );
+
+  return outcome;
 }
 
 /**
@@ -233,13 +257,17 @@ export async function offerPushPermission(moment: PermissionMoment): Promise<voi
       return;
     }
 
-    const offered = (await readPref<boolean>(OFFERED_PREF)) === true;
+    // The same flag the onboarding step writes, which is what makes the two mutually
+    // exclusive rather than merely unlikely to collide — see `markPushOffered`. Somebody
+    // who answered the question at the end of onboarding is not asked it again here five
+    // minutes later, whichever way they answered.
+    const offered = await pushAlreadyOffered();
     if (!shouldOfferPush({ permission, offered })) return;
 
     const wants = await ask();
     // Written for both answers. See the header: asking again after "Not now" is the
     // behaviour that trains people to dismiss dialogs.
-    await writePref(OFFERED_PREF, true);
+    await markPushOffered();
     if (!wants) return;
 
     const granted = await requestPushPermission();
@@ -255,3 +283,36 @@ export async function offerPushPermission(moment: PermissionMoment): Promise<voi
 
 /** Test seam, and the only writer of this preference besides the flow above. */
 export const PUSH_OFFERED_PREF = OFFERED_PREF;
+
+/**
+ * Whether Bingd has already put the question, anywhere.
+ *
+ * ---------------------------------------------------------------------------
+ * ONE FLAG, TWO SURFACES, AND THAT IS THE WHOLE OF PART K
+ *
+ * Onboarding now asks (`features/onboarding/NotificationStep.tsx`) and the contextual
+ * primer still asks after a first follow or a first invite. The founder's rule for the
+ * pair is that they must not become a campaign: *"Not now in onboarding → immediate
+ * repeated primer five minutes later"* is the behaviour that teaches people to dismiss
+ * dialogs without reading them, and it would be spent on the same person the OS prompt
+ * would then also fail on.
+ *
+ * The smallest mechanism that prevents it is the flag that already existed. `push.offered`
+ * was written by `offerPushPermission` and read by `shouldOfferPush`; both surfaces now
+ * write and read it, so whichever asks first closes the question for the other. There is
+ * no new state, no per-surface counter, and no scheduling — which is deliberate: a
+ * generalised prompt system is the thing that grows into a campaign, and the founder
+ * asked for the smallest existing mechanism instead.
+ *
+ * The relationship is therefore **onboarding is the opportunity, the primer is the
+ * fallback for somebody who skipped it** — and "skipped" here means *never reached the
+ * step*, not "reached it and said Not now", because Not now writes this flag too.
+ */
+export async function markPushOffered(): Promise<void> {
+  await writePref(OFFERED_PREF, true);
+}
+
+/** Whether it has been put. Read by whichever surface is deciding whether to ask. */
+export async function pushAlreadyOffered(): Promise<boolean> {
+  return (await readPref<boolean>(OFFERED_PREF)) === true;
+}

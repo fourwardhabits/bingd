@@ -25,6 +25,18 @@ export type ProfileIdentityProps = {
     seasons: number | string;
   };
   /**
+   * What tapping Followers or Following opens.
+   *
+   * Optional, and both screens pass it — but it stays optional because the *stat row*
+   * has a case where it must not be a control: a profile whose numbers are drawn while
+   * still loading shows `—`, and a button over a dash opens a list of nothing. The two
+   * numbers that lead somewhere are named individually rather than as one callback with
+   * an argument, so a screen cannot wire Followers to the Following list by passing the
+   * wrong string.
+   */
+  onPressFollowers?: () => void;
+  onPressFollowing?: () => void;
+  /**
    * What this viewer can do here.
    *
    * Self gets Share Profile and Bingd Awards; anybody else gets the follow control. The
@@ -123,6 +135,8 @@ export function ProfileIdentity({
   controls,
   badge,
   match,
+  onPressFollowers,
+  onPressFollowing,
 }: ProfileIdentityProps) {
   return (
     <View style={styles.block}>
@@ -162,8 +176,21 @@ export function ProfileIdentity({
       {stats ? (
         <StatRow
           stats={[
-            { label: 'Followers', value: stats.followers },
-            { label: 'Following', value: stats.following },
+            {
+              label: 'Followers',
+              value: stats.followers,
+              onPress: onPressFollowers,
+              hint: 'Opens the list',
+            },
+            {
+              label: 'Following',
+              value: stats.following,
+              onPress: onPressFollowing,
+              hint: 'Opens the list',
+            },
+            // Deliberately not controls. The collection these two count is the next
+            // section down the same screen, so a tap would scroll you to something
+            // already in view.
             { label: 'Movies', value: stats.movies },
             { label: 'TV seasons', value: stats.seasons },
           ]}
