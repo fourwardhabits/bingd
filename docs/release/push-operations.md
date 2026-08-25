@@ -226,3 +226,101 @@ fetched later from `/push/getReceipts`. Polling them needs a second scheduled pr
 table of ticket ids — a queue-processing platform for the one thing receipts add over tickets:
 catching a token that died between the send and the delivery. Send-time `DeviceNotRegistered`
 already catches the ordinary case. Recorded in `../product/deferred-roadmap.md`.
+
+---
+
+## 10. Why the founder receives nothing outside the app — diagnosis, 2026-08-26
+
+Traced end to end on `abheeqyjzekiowkztfxv` (nonprod) rather than reasoned about, because
+every layer below is downstream of one fact.
+
+### The measurement
+
+```
+device_tokens (live)        0
+device_tokens (ios)         0
+device_tokens (android)     0
+notifications (total)      16
+push_outbox (queued)        0
+```
+
+**Nothing downstream of that first line can be the cause.** Sixteen notifications have been
+written and not one phone is registered to receive any of them. `claim_push_batch` drops a
+job whose recipient has no live device — correctly, since a token arriving tomorrow should
+not produce a buzz about a follow from today — so the empty outbox is the pipeline working
+as designed on an empty registry, not evidence that it drained anything.
+
+So the question is not "why did delivery fail" but **"why has no device ever registered"**,
+and that has a different answer per platform.
+
+### Android — classification **E: the current beta binary cannot receive push**
+
+`config/push.cjs`:
+
+```
+declaresPushNatively('beta')  ->  false
+googleServicesFileFor('beta') ->  null
+```
+
+No `google-services.json` is compiled into the beta binary, so the app has no FCM sender
+id, `getDevicePushTokenAsync` fails, and `getExpoPushTokenAsync` throws. `acquirePushToken`
+catches it and returns null, which is why this fails *silently* — the client is behaving
+exactly as designed for a device that cannot mint a token.
+
+This is a **native input**. It cannot be changed over the air. Works on the current beta:
+**no**. New binary required: **yes**.
+
+### iOS — classification **E**, by a different mechanism
+
+`apnsEnvironmentFor('beta')` returns null, so the `expo-notifications` plugin writes its own
+default and every binary this project has produced carries **`aps-environment: development`**
+— the APNs *sandbox*. Beta is `distribution: store` in `eas.json`, i.e. TestFlight, where the
+token a device is issued belongs to the **production** APNs environment.
+
+`expo-application`'s `getIosPushNotificationServiceEnvironmentAsync()` reads that same
+entitlement and `getExpoPushTokenAsync` defaults its `development` flag from it, so Expo
+addresses the sandbox for a token that only production APNs will accept.
+
+Also a native input. Works on the current beta: **no**. New binary required: **yes**, taking
+`mode: 'production'` with it.
+
+### And a second thing that would bite immediately afterwards — **D: missing server credential**
+
+Even with a binary that can register, Expo Push Service needs the credentials held against
+the EAS project: an **APNs `.p8`** and an **FCM V1 service account**. Neither could be
+verified from this environment — it has no EAS token — so this is *unproven rather than
+absent*, and the checklist to settle it is in
+[`../../supabase/functions/push-sender/README.md`](../../supabase/functions/push-sender/README.md).
+
+Do not treat the binary fix and the credential fix as one task. They fail identically from
+the outside (nothing arrives) and are diagnosed in opposite places.
+
+### What is **not** the cause
+
+Ruled out, so nobody spends a day on them:
+
+- **The client.** `usePush` registers on a ready session, follows a rolled token, routes a
+  tap and nudges the drain. It is correct and it is the reason the failure is silent.
+- **The backend dispatch.** The trigger, the outbox, the lease and the sender are all in
+  place and tested; there is simply nothing addressed to send to.
+- **`push.delivery_enabled`.** It reads `false` on nonprod and **nothing consumes it** — it
+  is seeded by `20260813000100` and never read. A vestigial AD-10 flag, not a switch. Worth
+  deleting or wiring, and it is neither today.
+
+### Founder actions, in order
+
+1. **APNs auth key** and **FCM V1 service account** into EAS credentials — the checklist in
+   `push-sender/README.md` §Apple and §Android.
+2. **Build a new binary** with `BINGD_LANE=beta` *after* `config/push.cjs` gives beta
+   `mode: 'production'` and a `google-services.json`. That is a one-line change to
+   `apnsEnvironmentFor` and a decision about the file, and it is deliberately not made here:
+   it moves the beta lane's fingerprint, which strands every existing tester's over-the-air
+   updates until they reinstall. It belongs in the change that builds the release candidate.
+3. **Exercise it on a development build first.** iOS needs nothing extra — a development
+   build already carries `aps-environment: development` and the same `.p8` serves the
+   sandbox. Android needs `GOOGLE_SERVICES_JSON` set for one development build; `config/push.cjs`
+   already supports exactly that opt-in.
+
+Until step 2 ships, the onboarding notification step says so rather than claiming success —
+see `features/onboarding/NotificationStep.tsx`, which reports what `registerThisDevice`
+actually managed rather than what was asked for.
