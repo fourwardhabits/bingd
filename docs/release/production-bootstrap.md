@@ -155,12 +155,46 @@ Production Auth is configured per project and shares nothing with nonprod. Regis
   sign-in against.
 - **Apple** and **Google** providers, with **production** client credentials. Do not paste the
   nonprod ones: a shared OAuth client means one revocation takes both environments down.
-- **Custom SMTP.** Email one-time codes need it. Supabase refuses template edits entirely on
-  the free tier with the default sender, and the built-in template sends
-  `{{ .ConfirmationURL }}` — a magic link — while `verifyEmailCode` calls `verifyOtp` and needs
-  `{{ .Token }}`. Verified against the project, not inferred: *"Email template modification is
-  not available for free tier projects using the default email provider."*
-  See [`../architecture/auth.md`](../architecture/auth.md) §SMTP.
+- **Custom SMTP — a prerequisite, on nonprod as well as production.** Supabase refuses
+  template edits entirely on the free tier with the default sender, and the built-in
+  template sends `{{ .ConfirmationURL }}` — a magic link — while every verification path
+  in this app calls `verifyOtp` and needs `{{ .Token }}`. Verified against the project,
+  not inferred: *"Email template modification is not available for free tier projects
+  using the default email provider."*
+
+  **Password-first reduced the volume and did not remove the requirement.** Since the
+  2026-08-26 amendment a returning user signing in with a password generates no email at
+  all, which is most sessions. Mail still has to arrive for all of:
+
+  | | Why it is not optional |
+  | --- | --- |
+  | New-account verification | The first thing a new person does. No email, no account. |
+  | Passwordless sign-in | The **only** way in for every account created before the amendment, which is all of them today. |
+  | A forgotten password | Answered by that same code. |
+  | Future email changes | Not built yet; will need it. |
+
+  What the founder has to supply, on **`bingd-nonprod` first** so the friend beta can be
+  accepted at all, and again on production:
+
+  | Setting | Notes |
+  | --- | --- |
+  | Host, port | The provider's SMTP endpoint |
+  | Username | Usually an API key id |
+  | Password / API credential | **Never committed.** Dashboard only. |
+  | Sender address | See below — *not chosen here* |
+  | Sender name | `bingd.` — lowercase, with the period, as everywhere else |
+
+  > **The sender address is deliberately left open.** It should be on a `bingd.app`
+  > domain, and it should almost certainly be the same mailbox the stores publish — but
+  > **SUPPORT-1 is still open** (`store-privacy-inventory.md`): the repository currently
+  > names `hello@bingd.app` and the founder's Play listing names `support@bingd.app`, and
+  > which of those is a mailbox somebody reads has not been established. Picking one here
+  > would settle a question this document is not entitled to settle. Resolve SUPPORT-1,
+  > then use that address.
+
+  No provider is named and no credential belongs in this repository. See
+  [`../architecture/auth.md`](../architecture/auth.md) §SMTP and
+  [`../../supabase/auth-templates/README.md`](../../supabase/auth-templates/README.md).
 
 - **Both email templates, applied and verified.** This is a **hard gate**, not a checklist
   line, because it has already cost a friend-beta tester a week of not being able to sign in
@@ -183,15 +217,24 @@ Production Auth is configured per project and shares nothing with nonprod. Regis
   whole `[auth]` block and reverts every field it does not mention, including the Apple and
   Google client secrets.
 
-- **A real email, to a real inbox, before RC acceptance.** Nothing above proves delivery.
-  Two accounts, on the production project, with the store build:
+- **A real email, to a real inbox, before RC acceptance.** Nothing above proves delivery,
+  and since the password-first amendment there are more paths to walk than there were.
+  Run it against `bingd-nonprod` before the friend beta and against production before RC:
 
-  | | Expected |
+  | Case | Expected |
   | --- | --- |
-  | an address with **no** account | email arrives, contains a six-digit code, contains no link, code verifies, profile creation follows |
-  | an address that **has** one | same email, same code, code verifies, straight into the app |
-  | a wrong code | refused, and the screen says so |
-  | *Send a new code* | a second usable code arrives |
+  | **Create account**, address with no account | email arrives, contains a six-digit code, **contains no link**, code verifies in the app, profile creation follows |
+  | **Sign in**, correct password | straight into the app, and **no email is sent at all** |
+  | **Sign in**, wrong password | "That email and password do not match", and nothing else claimed |
+  | **Sign in**, account created but never verified | routed to the code screen, not told the password is wrong |
+  | **Sign in without a password**, address that has an account | code arrives, code verifies, session restored |
+  | **Sign in without a password**, address that does **not** | refused, and **no new account exists afterwards** — check `auth.users` |
+  | a wrong code, either flow | refused, and the screen says so |
+  | *Send a new code*, either flow | a second usable code arrives, within the rate limit |
+
+  The sixth row is the one to actually verify in the table rather than in the UI: the
+  refusal is visible, but "no account was created" is only observable in the database, and
+  it is the row that silently regresses if `shouldCreateUser` ever flips back.
 
   Sign-off is *seeing the email*. A green `check-auth-config.mjs` says the project is
   configured; it does not say SMTP is delivering, and those fail independently.

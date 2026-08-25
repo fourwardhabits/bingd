@@ -1,11 +1,18 @@
 <!--
-  Confirm signup. The template Supabase sends to an address with no account yet, which is
-  every friend-beta tester on their first launch — and the one that was actually sending
-  the link the tester reported. Same code, same words as magic-link.html: a product where
-  new users and returning users get different sign-in mechanics is a product whose
-  sign-in only the second group can test.
+  Confirm signup. The template Supabase sends to an address with no account yet.
 
-  There is deliberately no link of any kind in this email. See ./README.md.
+  Since the founder's 2026-08-26 password-first amendment this is the **account
+  verification** email rather than a sign-in one: it arrives because somebody chose an
+  email and a password on the Create account screen, and the code finishes creating the
+  account rather than logging anybody in. The wording follows, which is why it is no
+  longer identical to magic-link.html — that one is still a sign-in code.
+
+  What has not changed is the mechanic. There is deliberately no link of any kind in this
+  email: `verifySignUpCode` calls `verifyOtp({ type: 'signup' })` and the session is
+  established inside Bingd. A confirmation URL here would complete the sign-in in a
+  browser and produce a session the app never sees, which is exactly what a friend-beta
+  tester reported. The shape check forbids one by name, so this comment cannot spell it.
+  See ./README.md.
 -->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf8f6;padding:32px 0;">
   <tr>
@@ -16,7 +23,7 @@
         </tr>
         <tr>
           <td style="font-size:15px;line-height:22px;color:#4a4a4a;padding-bottom:20px;">
-            Your sign-in code is:
+            Your verification code is:
           </td>
         </tr>
         <tr>
@@ -26,9 +33,9 @@
         </tr>
         <tr>
           <td style="font-size:14px;line-height:20px;color:#767676;">
-            Enter it in the app. It expires in 10 minutes.
+            Enter this code in the app to finish creating your account. It expires in 10 minutes.
             <br /><br />
-            If you didn't ask for this code, you can ignore this email.
+            If you didn't create a bingd. account, you can ignore this email.
           </td>
         </tr>
       </table>

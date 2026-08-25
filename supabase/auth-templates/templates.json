@@ -2,27 +2,29 @@
   "//": "The canonical auth email configuration, as one source of truth for the CI shape test (config/auth-templates.test.mjs) and the live check (scripts/check-auth-config.mjs). Keys are Supabase Management API auth-config keys, verbatim, so the check can PATCH exactly these and nothing else -- see ./README.md on why a partial PATCH matters.",
 
   "settings": {
-    "//": "Six digits because app/(auth)/verify.tsx enables its button on /^\\d{6}$/ and nothing else. The project was issuing eight at one point, which would have produced a code that arrives and cannot be typed. Ten minutes because the screen says 'It expires in 10 minutes' in both templates, and copy that disagrees with configuration is a support ticket.",
+    "//": "Six digits because app/(auth)/verify.tsx enables its button on /^\\d{6}$/ and nothing else. The project was issuing eight at one point, which would have produced a code that arrives and cannot be typed. Ten minutes because both bodies say 'expires in 10 minutes', and copy that disagrees with configuration is a support ticket.",
     "mailer_otp_length": 6,
     "mailer_otp_exp": 600
   },
 
   "templates": [
     {
+      "name": "Confirm signup",
+      "reaches": "an address with no account yet -- everybody who creates one with a password",
+      "verifiedAs": "signup",
+      "subjectKey": "mailer_subjects_confirmation",
+      "subject": "Verify your bingd. email",
+      "bodyKey": "mailer_templates_confirmation_content",
+      "bodyFile": "confirm-signup.html"
+    },
+    {
       "name": "Magic Link",
-      "reaches": "an address that already has an account",
+      "reaches": "an address that already has an account -- 'Sign in without a password'",
+      "verifiedAs": "email",
       "subjectKey": "mailer_subjects_magic_link",
       "subject": "Your bingd. sign-in code",
       "bodyKey": "mailer_templates_magic_link_content",
       "bodyFile": "magic-link.html"
-    },
-    {
-      "name": "Confirm signup",
-      "reaches": "an address with no account yet -- every new tester",
-      "subjectKey": "mailer_subjects_confirmation",
-      "subject": "Your bingd. sign-in code",
-      "bodyKey": "mailer_templates_confirmation_content",
-      "bodyFile": "confirm-signup.html"
     }
   ]
 }

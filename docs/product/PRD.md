@@ -1844,9 +1844,31 @@ A user-initiated deletion path that removes personal data, invalidates tokens, r
 
 ### Authentication — Required
 
-Email one-time code, **Sign in with Apple**, and Google. Every account resolves to one stable internal user UUID that is independent of the sign-in method.
+**Email and password**, **Sign in with Apple**, and Google. Every account resolves to one stable internal user UUID that is independent of the sign-in method.
 
 > **Sign in with Apple is required on iOS, not optional.** Apple's guidelines require it wherever a third-party social login is offered, and Google sign-in is in scope. v0.5 listed it as "recommended"; that is corrected.
+
+#### The final email contract — founder decision, 2026-08-26
+
+Earlier versions of this document made a one-time code the primary email method. That is reversed, and the reason is delivery rather than taste: **a password is the only email method that sends no mail.** A returning user signing in with one generates zero transactional email, which is what makes the product usable while the project is on Supabase's built-in sender and its rate limit.
+
+| | |
+| --- | --- |
+| **Default email method** | Email and password. `signUp` to create, `signInWithPassword` to return. |
+| **Secondary sign-in** | "Sign in without a password" — a numeric code, `signInWithOtp`. |
+| **Social** | Apple and Google, unchanged, on both the sign-in and create-account screens. |
+| **New-account verification** | **In app, with a numeric code.** `signUp` → Confirm signup email → the code screen inside Bingd → `verifyOtp({ type: 'signup' })`. Never a browser. |
+| **Email confirmation** | Stays **on**. `mailer_autoconfirm` is `false` and must remain so: an address is verified before an account is finished. |
+| **Passwordless does not create accounts** | `shouldCreateUser: false`. Account creation has exactly one door, and it is the one that sets a password. |
+| **Forgotten password** | Answered by the passwordless code, which signs the person in without one. *Setting a new password is not built* — see below. |
+
+**Two populations depend on the secondary method and must not be locked out:** every account created before this decision has no password at all, and anybody who has forgotten theirs. Both are served by the same code flow, and neither is ever asked for a password they never chose.
+
+**No account linking is implied.** An address that signed up with Google keeps signing in with Google; nothing here merges identities, and nothing asks somebody to.
+
+**Deferred, deliberately: setting or changing a password.** There is no reset flow and no password field in Settings. A reset that mailed a link would put the browser back into a flow this decision exists to take it out of, and the fully in-app version — a `recovery` code, then `updateUser({ password })` — needs a third email template configured on the project and a screen to host it. Recorded here rather than half-built. The consequence to accept knowingly: somebody who forgets their password gets in with a code every time, and never gets the chance to set a new one.
+
+**Custom SMTP is a launch prerequisite, and password-first does not remove it.** It reduces the volume — most sessions send nothing — but every one of first-account verification, passwordless sign-in, a forgotten password, and any future email change still needs mail to arrive. `docs/release/production-bootstrap.md` carries it as a gate.
 
 ### Core entities
 

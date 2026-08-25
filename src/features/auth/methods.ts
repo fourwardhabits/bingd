@@ -47,62 +47,239 @@ export async function clearPendingDisplayName() {
 }
 
 // ---------------------------------------------------------------------------
-// Email one-time code
+// Email and password — the default method since the founder's 2026-08-26 decision
+//
+// It used to be the other way round: `sendEmailCode` was the door and this was a
+// sign-in-only affordance for store reviewers, who have no inbox to receive a code in.
+// The decision reversed for a reason the friend beta made concrete — **a password is the
+// only email method that sends no mail at all.** Every returning sign-in through it costs
+// zero transactional email, which matters while the project is still on Supabase's
+// built-in sender and its rate limit (docs/architecture/auth.md).
+//
+// Passwordless survives as an explicit secondary action, and §"Verifying a new account"
+// below is why the change did not cost the in-app experience: a new password account is
+// verified with a numeric code typed into Bingd, not a link tapped in a browser.
+// ---------------------------------------------------------------------------
+
+/** The four `EmailOtpType` values this app uses, named where they are decided. */
+const OTP_TYPE = {
+  /**
+   * A token from **Confirm signup**, which is what `signUp` triggers.
+   *
+   * `'signup'` and not `'email'`, and the difference is not cosmetic: GoTrue looks the
+   * token up in a different column per type, so verifying a signup token as `'email'`
+   * fails with `otp_expired` — a wrong code, indistinguishable from a mistyped one, on
+   * a path where the person definitely typed it correctly. Read off the installed
+   * `@supabase/auth-js@2.112.3` union (`EmailOtpType`), not guessed, and pinned in
+   * `methods.password.test.ts`.
+   */
+  signup: 'signup',
+  /** A token from `signInWithOtp` on an address that already has an account. */
+  passwordless: 'email',
+} as const;
+
+/**
+ * What a sign-up attempt actually did.
+ *
+ * Richer than `SignInOutcome` because the caller has three destinations rather than two:
+ * the verification screen, straight into the app, and back to the form.
+ */
+export type SignUpOutcome =
+  | { ok: true; needsVerification: boolean }
+  | { ok: false; message: string };
+
+/**
+ * Creates an account from an email and a password.
+ *
+ * ---------------------------------------------------------------------------
+ * IT DOES NOT SAY WHETHER THE EMAIL WAS ALREADY TAKEN
+ *
+ * Supabase deliberately obfuscates that: for an address that already has a **confirmed**
+ * account it returns a plausible-looking user with an empty `identities` array and sends
+ * nothing. Reading that array and reporting "you already have an account" would turn this
+ * form into an address-checker for anybody who wanted one, which is the enumeration the
+ * obfuscation exists to prevent.
+ *
+ * So this returns the same `needsVerification: true` either way and the verification
+ * screen carries a permanent "Sign in instead". Somebody who really does have an account
+ * gets a way out without the app having confirmed anything about the address; somebody
+ * who does not gets their code. An address that exists but is **unconfirmed** is the
+ * common case of a person who closed the app mid-signup, and `signUp` genuinely resends
+ * to it — so that person is simply back where they left off.
+ *
+ * ---------------------------------------------------------------------------
+ * `needsVerification` IS READ FROM THE SESSION, NOT ASSUMED
+ *
+ * With "Confirm email" on — which is the intended configuration and the one the founder
+ * asked not to weaken — `signUp` returns `session: null` and mail goes out. With it off
+ * a session comes back and the account is already usable. Branching on what is in front
+ * of us rather than on what the project is believed to be configured with means the
+ * screen behaves correctly under either, instead of stranding somebody on a code screen
+ * for a code that will never arrive.
+ */
+export async function signUpWithEmailPassword(
+  email: string,
+  password: string,
+): Promise<SignUpOutcome> {
+  const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
+
+  if (error) {
+    const message =
+      error.code === 'weak_password'
+        ? 'Choose a longer password.'
+        : error.code === 'over_email_send_rate_limit'
+          ? 'Too many emails just now. Wait a minute and try again.'
+          : error.code === 'signup_disabled'
+            ? 'New accounts are not being accepted right now.'
+            : error.message;
+    return { ok: false, message };
+  }
+
+  const needsVerification = !data.session;
+  if (!needsVerification) track({ name: 'sign_in_completed', props: { method: 'password' } });
+  return { ok: true, needsVerification };
+}
+
+/**
+ * Turns the code from a **Confirm signup** email into a session.
+ *
+ * The whole point of the amendment: the person never leaves Bingd. `verifyOtp` with a
+ * token establishes the session directly, where `{{ .ConfirmationURL }}` would have
+ * completed the sign-in inside a browser and produced a session this app never sees —
+ * which is exactly what a friend-beta tester reported.
+ */
+export async function verifySignUpCode(email: string, code: string): Promise<SignInOutcome> {
+  const { error } = await supabase.auth.verifyOtp({
+    email: email.trim(),
+    token: code.trim(),
+    type: OTP_TYPE.signup,
+  });
+  if (error) return { ok: false, cancelled: false, message: error.message };
+  track({ name: 'sign_in_completed', props: { method: 'password' } });
+  return { ok: true };
+}
+
+/**
+ * Sends another **Confirm signup** code.
+ *
+ * `resend` rather than calling `signUp` again, which is what a second Post would
+ * otherwise be. They are not equivalent: `signUp` carries a password and would overwrite
+ * the pending one, so somebody who typed a different password on the second attempt
+ * would end up with an account whose password is not the one they think they set.
+ * `resend` carries nothing but the address.
+ */
+export async function resendSignUpCode(email: string): Promise<SignInOutcome> {
+  const { error } = await supabase.auth.resend({ type: 'signup', email: email.trim() });
+  if (error) {
+    const message =
+      error.code === 'over_email_send_rate_limit'
+        ? 'Too many emails just now. Wait a minute and try again.'
+        : error.message;
+    return { ok: false, cancelled: false, message };
+  }
+  return { ok: true };
+}
+
+/**
+ * The returning-user path, and now the common one.
+ *
+ * ---------------------------------------------------------------------------
+ * `unverified` IS A THIRD OUTCOME, NOT A FAILURE MESSAGE
+ *
+ * Somebody who created an account and closed Bingd before typing the code comes back to
+ * a password that is correct and an account that cannot be used. GoTrue answers
+ * `email_not_confirmed`, and reporting that as "that email and password do not match" —
+ * which is what a single failure branch does — tells them something false about the
+ * password they just typed correctly, for ever. The founder's §7: *do not tell them
+ * merely "invalid login" forever.*
+ *
+ * So the caller gets a distinct outcome and sends them to the verification screen. It
+ * discloses nothing that the attempt did not already establish: whoever presented the
+ * correct password for that address is not learning anything new about it.
+ */
+export type PasswordSignInOutcome =
+  | { ok: true }
+  | { ok: false; unverified: true }
+  | { ok: false; unverified: false; message: string };
+
+export async function signInWithEmailPassword(
+  email: string,
+  password: string,
+): Promise<PasswordSignInOutcome> {
+  const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+  if (error) {
+    if (error.code === 'email_not_confirmed') return { ok: false, unverified: true };
+    // Supabase's "Invalid login credentials" reads like a system fault; say what
+    // it means. It is also deliberately the same answer for "no such account" and
+    // "wrong password", which is GoTrue's anti-enumeration behaviour and is kept.
+    const message =
+      error.code === 'invalid_credentials'
+        ? 'That email and password do not match.'
+        : error.message;
+    return { ok: false, unverified: false, message };
+  }
+  track({ name: 'sign_in_completed', props: { method: 'password' } });
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Email one-time code — now the explicit secondary method
 // ---------------------------------------------------------------------------
 
 /**
- * Sends the code. Possession of it is the verification, which is why email OTP is
- * the one method that can never present the unverified-address problem in
- * auth.md §2.
+ * Sends a sign-in code to an address that **already has an account**.
+ *
+ * ---------------------------------------------------------------------------
+ * `shouldCreateUser: false`, WHICH IS THE WHOLE OF THE CHANGE HERE
+ *
+ * It was `true`, correctly, while this was the door: an unknown address arriving here was
+ * somebody signing up. It is now a *secondary sign-in*, and leaving it `true` would make
+ * "Sign in without a password" a second, invisible registration route — one that mints a
+ * permanent `auth.users` row for every typo, and produces an account with no password on
+ * a screen whose sibling is the one that sets one.
+ *
+ * The cost is that an unknown address now fails instead of silently working, and GoTrue
+ * reports that as `otp_disabled` ("Signups not allowed for otp"), whose wording describes
+ * the *setting* rather than the situation. The caller says something usable instead —
+ * and deliberately says the same thing it would say for a known address whose mail
+ * failed, so this does not become an address-checker either.
+ *
+ * `docs/architecture/auth.md` §2's note that this method cannot present the unverified
+ * address problem still holds: possession of the code is the verification.
  */
 export async function sendEmailCode(email: string): Promise<SignInOutcome> {
   const { error } = await supabase.auth.signInWithOtp({
     email: email.trim(),
-    options: { shouldCreateUser: true },
+    options: { shouldCreateUser: false },
   });
-  return error ? { ok: false, cancelled: false, message: error.message } : { ok: true };
+  if (error) {
+    const message =
+      error.code === 'otp_disabled' || error.code === 'user_not_found'
+        ? 'We could not send a code to that address. Check it, or create an account.'
+        : error.code === 'over_email_send_rate_limit'
+          ? 'Too many emails just now. Wait a minute and try again.'
+          : error.message;
+    return { ok: false, cancelled: false, message };
+  }
+  return { ok: true };
 }
 
 export async function verifyEmailCode(email: string, code: string): Promise<SignInOutcome> {
   const { error } = await supabase.auth.verifyOtp({
     email: email.trim(),
     token: code.trim(),
-    type: 'email',
+    type: OTP_TYPE.passwordless,
   });
   if (error) return { ok: false, cancelled: false, message: error.message };
   track({ name: 'sign_in_completed', props: { method: 'email_code' } });
   return { ok: true };
 }
 
-// ---------------------------------------------------------------------------
-// Email + password
-// ---------------------------------------------------------------------------
+/** The two verification flows, so a screen can carry which one it is in. */
+export type VerifyMode = 'signup' | 'passwordless';
 
-/**
- * Sign-in only, never sign-up: `signInWithPassword` cannot create an account, so
- * this adds no second registration flow. It exists because store review requires
- * reusable credentials that work without a one-time code — the email method above
- * delivers its code to an inbox a reviewer at Google or Apple does not have.
- * Ordinary accounts are created by code or OAuth and have no password set, so
- * this path simply fails for them; nothing about their flow changes.
- */
-export async function signInWithEmailPassword(
-  email: string,
-  password: string,
-): Promise<SignInOutcome> {
-  const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-  if (error) {
-    // Supabase's "Invalid login credentials" reads like a system fault; say what
-    // it means. Every other error keeps its own message.
-    const message =
-      error.code === 'invalid_credentials'
-        ? 'That email and password do not match.'
-        : error.message;
-    return { ok: false, cancelled: false, message };
-  }
-  track({ name: 'sign_in_completed', props: { method: 'password' } });
-  return { ok: true };
-}
+/** Test seam and single source of truth for the two `EmailOtpType` values in use. */
+export const EMAIL_OTP_TYPES = OTP_TYPE;
 
 // ---------------------------------------------------------------------------
 // Apple

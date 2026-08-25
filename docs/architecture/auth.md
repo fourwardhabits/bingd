@@ -155,6 +155,45 @@ The built-in sender also carries a rate limit low enough that a handful of peopl
 
 Until it exists, **Google is the working method on Android and Apple on iOS**, both verified. Email is the one that is configured in code and unusable in the dashboard.
 
+#### The method order reversed — founder decision, 2026-08-26
+
+Everything below this heading was written when a one-time code was the primary email
+method. It is now the secondary one, and the reason is the paragraph above about the
+built-in sender's rate limit: **a password is the only email method that sends no mail.**
+A returning user signing in with one costs nothing, which is most sessions.
+
+| | |
+| --- | --- |
+| Default | `signUp` / `signInWithPassword` |
+| Secondary sign-in | `signInWithOtp`, `shouldCreateUser: **false**` |
+| New-account verification | `verifyOtp({ type: 'signup' })`, **in app**, from the Confirm signup email |
+| Passwordless verification | `verifyOtp({ type: 'email' })`, unchanged |
+
+Three consequences worth keeping in view.
+
+**`shouldCreateUser: false` is what stops a second registration route.** It was `true`
+while the code was the door, correctly; leaving it true would mint a permanent
+`auth.users` row for every mistyped address on a screen whose sibling is the one that
+sets a password.
+
+**The two OTP types are not interchangeable.** A signup token and a magic-link token look
+identical in an inbox and live in different columns, so verifying one as the other answers
+`otp_expired` — which every screen reports as "that code did not work", while the person
+is looking at the correct code. `EMAIL_OTP_TYPES` in `methods.ts` is the single place both
+are named, and `config/auth-templates.test.mjs` checks each template against the type its
+code is verified with.
+
+**An unconfirmed account is a third sign-in outcome, not an error message.** Somebody who
+closed Bingd before typing the code has a correct password and an unusable account;
+GoTrue answers `email_not_confirmed`, and folding that into "that email and password do
+not match" tells them something false about the password they just typed — for ever,
+since nothing else would correct it. `signInWithEmailPassword` returns `unverified` and
+the screen routes them back to the code.
+
+Still true and unchanged: **`shouldCreateUser` means abandoned rows accumulate** for
+addresses that never verify — the note further down about pruning them applies to
+`signUp` now rather than to the code flow, and the job still does not exist.
+
 #### It reached a tester, which is what a written-down risk is for
 
 Everything above was known and written here on 2026-08-21, and a friend-beta tester still hit it on 2026-08-25: *"When I open the app and put in email it sends me a link to confirm and no code. And the confirm link just opens in the email browser."*

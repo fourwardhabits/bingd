@@ -9,21 +9,42 @@ import {
   signInWithEmailPassword,
   signInWithGoogle,
 } from '@/features/auth';
-import { BrandLockup, Button, Field, Screen, Text } from '@/ui/components';
+import { BrandLockup, Button, Divider, Field, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
-/** Email one-time code, plus Apple and Google sign-in (PRD §8). Every method
- *  resolves to one stable internal user UUID, so a user who signs in a
- *  different way next time is the same account. */
+/**
+ * Sign in (PRD §23). Every method resolves to one stable internal user UUID, so a
+ * person who signs in a different way next time is the same account.
+ *
+ * ---------------------------------------------------------------------------
+ * PASSWORD IS THE DEFAULT, SINCE THE FOUNDER'S 2026-08-26 DECISION
+ *
+ * This screen used to lead with an email field that sent a one-time code, and password
+ * was a mode you had to find. The order is now reversed, and the reason is not taste:
+ * **a password is the only email method that sends no mail.** Every returning sign-in
+ * through it costs zero transactional email, which is what makes the product usable
+ * while the project is still on Supabase's built-in sender and its rate limit.
+ *
+ * Passwordless survives as one clearly secondary action, because two populations still
+ * need it: everybody who created an account before this change and has no password, and
+ * anybody who has forgotten theirs. It is the same screen and the same code flow it
+ * always was — see `verify.tsx` — with `shouldCreateUser: false`, so it can no longer
+ * quietly become a second registration route.
+ *
+ * ---------------------------------------------------------------------------
+ * NO MODE SWITCH
+ *
+ * The old screen toggled one form between "code" and "password" with a tertiary button,
+ * which meant the fields on screen depended on a state nothing on screen named. Both
+ * fields are simply present now: the form is what it looks like, autofill can see a
+ * complete credential pair, and "Sign in without a password" navigates rather than
+ * mutating what is in front of you.
+ */
 export default function SignInScreen() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  // The code flow is the door for everyone; the password flow is sign-in only,
-  // for accounts that already have one (store reviewers — see methods.ts). It is
-  // a mode of the same form rather than a second screen, so nothing forks.
-  const [withPassword, setWithPassword] = useState(false);
-  const [busy, setBusy] = useState<'email' | 'password' | 'apple' | 'google' | null>(null);
+  const [busy, setBusy] = useState<'password' | 'code' | 'apple' | 'google' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [appleAvailable, setAppleAvailable] = useState(false);
   const passwordField = useRef<TextInput>(null);
@@ -36,25 +57,53 @@ export default function SignInScreen() {
 
   const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
-  const submitEmail = async () => {
-    setBusy('email');
-    setError(null);
-    const result = await sendEmailCode(email);
-    setBusy(null);
-    if (result.ok) {
-      router.push({ pathname: '/(auth)/verify', params: { email: email.trim() } });
-    } else {
-      setError(result.message ?? 'That did not work. Try again.');
-    }
-  };
-
   const submitPassword = async () => {
     setBusy('password');
     setError(null);
     const result = await signInWithEmailPassword(email, password);
     setBusy(null);
-    if (!result.ok) setError(result.message ?? 'That did not work. Try again.');
-    // No navigation on success: useAuthRouting moves the user, same as OAuth.
+
+    if (result.ok) return; // useAuthRouting moves them, same as OAuth.
+
+    /**
+     * The account exists, the password was right, and the email was never verified.
+     *
+     * Somebody who created an account and closed Bingd before typing the code. Reporting
+     * this as "that email and password do not match" would tell them something false
+     * about a password they just typed correctly, and would keep telling them for ever —
+     * the founder's §7. They go back to the code screen instead, which can resend.
+     */
+    if (result.unverified) {
+      router.push({
+        pathname: '/(auth)/verify',
+        params: { email: email.trim(), mode: 'signup' },
+      });
+      return;
+    }
+
+    setError(result.message ?? 'That did not work. Try again.');
+  };
+
+  /**
+   * The secondary method, and the one an account with no password needs.
+   *
+   * It sends before navigating, so a refusal — an unknown address, a rate limit — is
+   * shown here beside the field somebody would fix, rather than on a code screen for a
+   * code that was never sent.
+   */
+  const submitCode = async () => {
+    setBusy('code');
+    setError(null);
+    const result = await sendEmailCode(email);
+    setBusy(null);
+    if (result.ok) {
+      router.push({
+        pathname: '/(auth)/verify',
+        params: { email: email.trim(), mode: 'passwordless' },
+      });
+    } else {
+      setError(result.message ?? 'That did not work. Try again.');
+    }
   };
 
   const submitProvider = async (
@@ -95,70 +144,56 @@ export default function SignInScreen() {
           keyboardType="email-address"
           inputMode="email"
           textContentType="emailAddress"
-          returnKeyType={withPassword ? 'next' : 'go'}
+          returnKeyType="next"
           editable={busy === null}
-          onSubmitEditing={
-            withPassword
-              ? () => passwordField.current?.focus()
-              : looksLikeEmail
-                ? submitEmail
-                : undefined
-          }
-          error={!withPassword ? (error ?? undefined) : undefined}
-          hint={
-            withPassword ? undefined : 'We will send a six-digit code. No password to remember.'
+          onSubmitEditing={() => passwordField.current?.focus()}
+        />
+        <Field
+          ref={passwordField}
+          label="Password"
+          value={password}
+          onChangeText={setPassword}
+          autoCapitalize="none"
+          // `current-password`, not `new-password`: this is the field a manager should
+          // fill from what it already holds, and the create-account screen is the one
+          // that should be offered a generated one.
+          autoComplete="current-password"
+          autoCorrect={false}
+          secureTextEntry
+          textContentType="password"
+          returnKeyType="go"
+          editable={busy === null}
+          onSubmitEditing={looksLikeEmail && password ? submitPassword : undefined}
+          error={error ?? undefined}
+        />
+
+        <Button
+          label={busy === 'password' ? 'Signing in…' : 'Sign in'}
+          onPress={submitPassword}
+          disabled={!looksLikeEmail || !password || busy !== null}
+          disabledReason={
+            busy !== null ? 'Signing in, one moment.' : 'Enter your email and password first.'
           }
         />
-        {withPassword ? (
-          <Field
-            ref={passwordField}
-            label="Password"
-            value={password}
-            onChangeText={setPassword}
-            autoCapitalize="none"
-            autoComplete="current-password"
-            autoCorrect={false}
-            secureTextEntry
-            textContentType="password"
-            returnKeyType="go"
-            editable={busy === null}
-            onSubmitEditing={looksLikeEmail && password ? submitPassword : undefined}
-            error={error ?? undefined}
-          />
-        ) : null}
-        {withPassword ? (
-          <Button
-            label={busy === 'password' ? 'Signing in…' : 'Sign in'}
-            onPress={submitPassword}
-            disabled={!looksLikeEmail || !password || busy !== null}
-            disabledReason={
-              busy !== null ? 'Signing in, one moment.' : 'Enter your email and password first.'
-            }
-          />
-        ) : (
-          <Button
-            label={busy === 'email' ? 'Sending…' : 'Continue with email'}
-            onPress={submitEmail}
-            disabled={!looksLikeEmail || busy !== null}
-            disabledReason={
-              looksLikeEmail ? 'Signing in, one moment.' : 'Enter your email address first.'
-            }
-          />
-        )}
+
+        {/* Secondary, and it is also the answer to "forgot password": it signs somebody
+            in without one. A reset that mailed a link would put the browser back in a
+            flow this whole amendment exists to take it out of, and this needs no third
+            email template to configure. Setting a *new* password afterwards is not built
+            — recorded in the PRD rather than half-done here. */}
         <Button
-          label={withPassword ? 'Email me a code instead' : 'Sign in with a password'}
+          label={busy === 'code' ? 'Sending…' : 'Sign in without a password'}
           kind="tertiary"
-          onPress={() => {
-            setWithPassword(!withPassword);
-            setError(null);
-            setPassword('');
-          }}
-          disabled={busy !== null}
-          disabledReason="Signing in, one moment."
+          onPress={submitCode}
+          disabled={!looksLikeEmail || busy !== null}
+          disabledReason={
+            busy !== null ? 'One moment.' : 'Enter your email address first.'
+          }
         />
       </View>
 
       <View style={styles.providers}>
+        <Divider label="or" />
         {appleAvailable ? (
           <Button
             label={busy === 'apple' ? 'Signing in…' : 'Continue with Apple'}
@@ -176,6 +211,19 @@ export default function SignInScreen() {
           disabledReason="Signing in, one moment."
         />
       </View>
+
+      <View style={styles.footer}>
+        <Text variant="footnote" tone="secondary">
+          New to bingd.?
+        </Text>
+        <Button
+          label="Create account"
+          kind="tertiary"
+          onPress={() => router.push('/(auth)/create-account')}
+          disabled={busy !== null}
+          disabledReason="One moment."
+        />
+      </View>
     </Screen>
   );
 }
@@ -184,4 +232,5 @@ const styles = StyleSheet.create({
   intro: { gap: theme.space[3], alignItems: 'flex-start' },
   form: { gap: theme.space[4] },
   providers: { gap: theme.space[3] },
+  footer: { alignItems: 'center', gap: theme.space[1] },
 });

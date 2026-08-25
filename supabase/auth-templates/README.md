@@ -20,22 +20,32 @@ the deployed ones were wrong. That is the gap these files close.
 
 ## The two templates, and why there are two
 
-Supabase chooses the template from the *account*, not from the call:
+**Since the founder's 2026-08-26 password-first amendment, each template belongs to a
+different call.** It used to be one call meeting two kinds of address; it is now two
+deliberate flows:
 
-| The address | Template | Management API key |
-| --- | --- | --- |
-| has no account yet | **Confirm signup** | `mailer_templates_confirmation_content` |
-| already has one | **Magic Link** | `mailer_templates_magic_link_content` |
+| Flow | Client call | Template | Management API key | Verified as |
+| --- | --- | --- | --- | --- |
+| Create an account | `signUp({ email, password })` | **Confirm signup** | `mailer_templates_confirmation_content` | `'signup'` |
+| Sign in without a password | `signInWithOtp` | **Magic Link** | `mailer_templates_magic_link_content` | `'email'` |
 
-`sendEmailCode` passes `shouldCreateUser: true`, so both are reachable from the one
-button on the sign-in screen, and `mailer_autoconfirm` is `false` on the project — which
-is what routes a brand-new address to *Confirm signup*.
+`mailer_autoconfirm` is `false` on the project and stays that way: a real address is
+verified before an account is finished, and the founder's §3 rules out solving the
+template problem by turning that off.
 
-**Fixing only one produces the worst possible bug.** Sign-in works for everybody who has
-used the app before and fails for everybody new, so it is invisible to the person testing
-it and total for the person arriving. The tester's report is that bug: she was new.
+**Fixing only one produces the worst possible bug.** Get Magic Link right and Confirm
+signup wrong and sign-in works for everybody who already has an account and fails for
+everybody new — invisible to whoever is testing it, total for whoever is arriving. That
+is the bug the tester hit: she was new.
 
-Both files below therefore say the same thing and carry `{{ .Token }}`.
+Both files carry `{{ .Token }}` and neither carries a link. They no longer say the *same*
+thing, and that is deliberate — one finishes creating an account and the other signs
+somebody in, which are different sentences to read at seven in the morning.
+
+**The `verifiedAs` column is in `templates.json` and is checked.** A signup token and a
+magic-link token look identical in an inbox and live in different columns, so verifying
+one as the other answers `otp_expired` — which every screen reports as "that code did not
+work", while the person is looking at the correct code.
 
 ## `{{ .Token }}` and `{{ .ConfirmationURL }}`
 
@@ -74,11 +84,29 @@ built-in email sender:
 > Email template modification is not available for free tier projects using the default
 > email provider. Please upgrade your plan or configure a custom SMTP provider.
 
-So **custom SMTP is a prerequisite for email sign-in working at all**, not a
-deliverability improvement to schedule later. Until it is configured on a project, these
-files describe a state that project cannot be put into, and `check-auth-config.mjs` will
-say so rather than appearing to succeed.
+So **custom SMTP is a prerequisite for email auth working at all**, not a deliverability
+improvement to schedule later. Until it is configured on a project, these files describe
+a state that project cannot be put into, and `check-auth-config.mjs` will say so rather
+than appearing to succeed.
 
 The built-in sender's rate limit is also low enough that a handful of people signing up
 within a few minutes will hit it — which is the shape of a movie night, and the exact
 population this app is for.
+
+### Password-first reduces the bill; it does not remove the requirement
+
+Worth stating because it is the obvious wrong conclusion to draw from the amendment.
+Making password the default means **a returning user generates no authentication email
+at all** — which is most sessions, and it is why the change helps.
+
+Email is still required for every one of these, and each of them is somebody's first or
+worst moment with the product:
+
+- verifying a brand-new account;
+- signing in without a password, which is the only way in for every account created
+  before the amendment;
+- a forgotten password, which today routes through that same code;
+- any future email change or transactional auth message.
+
+`docs/release/production-bootstrap.md` carries it as a launch prerequisite rather than a
+nice-to-have.
