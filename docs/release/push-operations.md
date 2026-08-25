@@ -100,6 +100,7 @@ select push_drain_status();
   "queued": 0,
   "older_than_15m": 0,
   "base_url_set": true,
+  "pg_net_available": true,
   "vault_available": true,
   "vault_secret_set": true,
   "problems": [],
@@ -125,12 +126,13 @@ included — because a check that cannot confirm has to say no. That is the less
 | `queued` | small, moving | — |
 | `older_than_15m` | **0** | rows arriving and nothing taking them |
 | `base_url_set` | `true` | `false` ⇒ re-run the bootstrap script |
+| **`pg_net_available`** | `true` | `false` ⇒ `pg_net` is off, so the tick has nothing to post with |
 | **`vault_available`** | `true` | `false` ⇒ the Vault extension is not enabled on this project |
 | **`vault_secret_set`** | `true` | `false` ⇒ store the key. **This is the one that was missing** |
 
 `problems` uses stable strings, and they are matched on by
 `supabase/tests/push-drain-acceptance.mjs`: `scheduler_not_installed`,
-`scheduler_inactive`, `base_url_missing`, `vault_unavailable`,
+`scheduler_inactive`, `base_url_missing`, `pg_net_unavailable`, `vault_unavailable`,
 `vault_service_role_key_missing`, `last_run_missing`, `last_run_not_succeeded`,
 `outbox_stalled`.
 

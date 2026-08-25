@@ -161,6 +161,7 @@ declare
   v_url      boolean;
   v_secret   boolean := false;
   v_vault    boolean := false;
+  v_net      boolean := false;
   v_problems text[] := array[]::text[];
 begin
   select count(*) into v_queued from push_outbox;
@@ -203,6 +204,26 @@ begin
     end;
   end if;
 
+  /**
+   * The transport, which is a dependency exactly as much as the scheduler and the secret
+   * are — review 46b.
+   *
+   * `_drain_push_outbox()` ends in `net.http_post`. If `pg_net` is disabled or dropped, a
+   * project with an active job, a good URL, a stored secret and an empty queue answered
+   * `healthy: true` while being completely unable to send the next push; the truth only
+   * surfaced later, as an undefined-function error on the first tick that had work. That is
+   * the same "healthy until somebody needs it" shape as the incident above.
+   *
+   * Asked of the catalogue rather than through `to_regproc`, which returns null for an
+   * ambiguous name and would read as absent the day pg_net adds an overload.
+   */
+  select exists (
+    select 1
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'net' and p.proname = 'http_post'
+  ) into v_net;
+
   if to_regclass('cron.job') is not null then
     execute $q$
       select jsonb_build_object('jobid', jobid, 'schedule', schedule, 'active', active)
@@ -232,6 +253,11 @@ begin
 
   if not v_url then
     v_problems := v_problems || 'base_url_missing'::text;
+  end if;
+
+  -- The transport. Without it the tick cannot post, whatever else is in place.
+  if not v_net then
+    v_problems := v_problems || 'pg_net_unavailable'::text;
   end if;
 
   if not v_vault then
@@ -277,6 +303,7 @@ begin
     'base_url_set',   v_url,
     -- Boolean, never the value, and never its length either: a length is a fingerprint of
     -- which key it is.
+    'pg_net_available', v_net,
     'vault_available',  v_vault,
     'vault_secret_set', v_secret,
     'problems',       to_jsonb(v_problems),

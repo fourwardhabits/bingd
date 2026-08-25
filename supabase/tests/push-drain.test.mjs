@@ -160,6 +160,38 @@ describe('push_drain_status fails closed', () => {
     assert.ok(!s.problems.includes('vault_service_role_key_missing'));
   });
 
+  /**
+   * The transport is a dependency too — independent review 46b.
+   *
+   * `_drain_push_outbox()` ends in `net.http_post`. A project whose `pg_net` has been
+   * disabled has an active job, a good URL, a stored secret and an empty queue, and could
+   * not send the next push if one arrived; the old summary called that healthy and let the
+   * truth surface later as an undefined-function error. Same shape as the incident this
+   * file is named after.
+   *
+   * PGlite has no `pg_net`, so a bare replay is the failing case and the fixture is the
+   * *presence* of a `net.http_post`.
+   */
+  it('is unhealthy when pg_net is not available to post with', async () => {
+    await installFakeVault('service_role_key');
+    const without = await status();
+
+    assert.equal(without.pg_net_available, false);
+    assert.ok(without.problems.includes('pg_net_unavailable'));
+    assert.equal(without.healthy, false);
+
+    await t.sql(`create schema if not exists net`);
+    await t.sql(`create function net.http_post(url text) returns bigint language sql as $fn$ select 1::bigint $fn$`);
+    try {
+      const withNet = await status();
+      assert.equal(withNet.pg_net_available, true);
+      assert.ok(!withNet.problems.includes('pg_net_unavailable'));
+    } finally {
+      await t.sql(`drop function if exists net.http_post(text)`);
+      await t.sql(`drop schema if exists net`);
+    }
+  });
+
   it('is unhealthy when the scheduler was never installed', async () => {
     const s = await status();
 
@@ -243,7 +275,7 @@ describe('push_drain_status fails closed', () => {
     await installFakeVault('service_role_key');
     const s = await status();
 
-    assert.deepEqual(s.problems, ['scheduler_not_installed']);
+    assert.deepEqual(s.problems.sort(), ['pg_net_unavailable', 'scheduler_not_installed']);
     assert.equal(s.base_url_set, true);
     assert.equal(s.vault_secret_set, true);
     // Still false, and that is the point: one missing dependency is enough.

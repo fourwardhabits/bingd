@@ -245,12 +245,23 @@ if (!replayed) {
 // reported rather than noticed in a migration log.
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether *this* invocation put the cron job there.
+ *
+ * It is the only thing that entitles the status block below to forgive a job that has never
+ * run. Review 46b: reading the problem list alone meant a read-only run against a
+ * permanently dead scheduler downgraded its one problem to a note and exited zero — which is
+ * the same shape of "reassuring answer over a broken pipeline" this whole tranche is about.
+ */
+let justScheduledTheJob = false;
+
 if (!replayed) {
   note('push drain: skipped, the schema has not been replayed');
 } else if (!apply) {
   note('push drain: would call schedule_push_drain()');
 } else {
   const scheduled = await rpc('schedule_push_drain', {});
+  justScheduledTheJob = scheduled.ok;
   if (!scheduled.ok) {
     problems.push(
       `schedule_push_drain: ${scheduled.status} ${scheduled.body.slice(0, 300)}\n` +
@@ -295,18 +306,24 @@ if (replayed) {
       const named = Array.isArray(s.problems) ? s.problems : [];
 
       /**
-       * The one problem this script is allowed to downgrade, because it is the only caller
-       * that knows the job was scheduled seconds ago.
+       * The one problem this script is allowed to downgrade, and only under both halves of
+       * the reason it is allowed to.
        *
        * `push_drain_status()` calls a job with no run record unhealthy — review 46, and it
        * is right: a scheduler that has never executed has demonstrated nothing, and a
-       * permanently null `last_run` means pg_cron is installed in the wrong database. But
-       * for the first minute after `schedule_push_drain()` it is simply true and about to
-       * stop being true, and failing the bootstrap on it would teach whoever runs this to
-       * ignore its exit code.
+       * permanently null `last_run` means pg_cron is enabled in the wrong database. For the
+       * first minute after `schedule_push_drain()` it is simply true and about to stop being
+       * true, and failing the bootstrap on that would teach whoever runs it to ignore the
+       * exit code.
+       *
+       * **`justScheduledTheJob` is the half review 46b found missing.** Without it a
+       * read-only run against a scheduler that had never fired in its life forgave the one
+       * problem and exited zero. The downgrade now requires that this process scheduled the
+       * job seconds ago *and* that nothing else is wrong.
        */
-      const justScheduled = named.length === 1 && named[0] === 'last_run_missing';
-      if (justScheduled) {
+      const forgivable =
+        justScheduledTheJob && named.length === 1 && named[0] === 'last_run_missing';
+      if (forgivable) {
         note(
           'the drain has not run yet — pg_cron fires at the top of the next minute.\n' +
             '          Confirm with: node supabase/tests/push-drain-acceptance.mjs',
