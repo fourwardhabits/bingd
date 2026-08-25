@@ -190,7 +190,11 @@ Deno.serve(async (req) => {
     // Claimed but unsendable. Settled as delivered so the rows leave the queue rather
     // than being retried into the same nothing three times.
     await db.rpc('settle_push_batch', {
-      p_results: jobs.map((job) => ({ notification_id: job.notification_id, delivered: true })),
+      p_results: jobs.map((job) => ({
+        notification_id: job.notification_id,
+        attempt: job.attempt,
+        delivered: true,
+      })),
       p_invalid_tokens: null,
     });
     return json(counts(caller, { claimed: jobs.length, sent: 0, failed: 0, revoked: 0 }));

@@ -220,17 +220,27 @@ policy, a rate limiter and a receipts poller, and this needs about forty lines o
 
 ### What triggers a drain
 
-Nothing on a timer. `pg_net` and `pg_cron` are not installed, and installing a networking
-extension so a trigger can make an HTTP call inside a social write is a large change with a
-bad failure mode — a follow that rolls back because a notification service was slow.
+**Two things now, and it used to be one.**
 
-Instead the app nudges: on session ready, on foreground, and after each write that can
-create a notification (follow, follow-request response, comment, reaction, recommendation,
-watch tag). Debounced to one call per ten seconds. **The client chooses nothing by
-nudging** — `push-sender` takes no input at all.
+`pg_cron`, once a minute, calling this same function through `pg_net`. `20260826000300`, and
+the operational half is [`../release/push-operations.md`](../release/push-operations.md). The
+trigger still does no networking — a follow that rolled back because a notification service
+was slow is exactly the failure mode this architecture refused, and the scheduler sits outside
+the write entirely, reading a queue rather than being called from one. The tick does nothing at
+all while `push_outbox` is empty, which it is almost always.
 
-The gap is stated rather than hidden: **a notification created while nobody has the app open
-waits until somebody does.** Closing it is one scheduled job against the same function.
+And the app still nudges: on session ready, on foreground, and after each write that can create
+a notification (follow, follow-request response, comment, reaction, recommendation, watch tag).
+Debounced to one call per ten seconds. **The client chooses nothing by nudging** —
+`push-sender` takes no input at all — so the nudge is a latency optimisation over the schedule
+rather than a second mechanism.
+
+The gap this closed was stated plainly for as long as it existed: *a notification created while
+nobody has the app open waits until somebody does.* Survivable for a friend beta, where the
+person who caused it is holding their phone. Not survivable publicly, and the three cases were
+ordinary rather than exotic — an app killed between the write and the nudge, an
+`invite_welcome` with no client behind it at all, and a retry, which nobody is holding a phone
+for by definition.
 
 ## 7. Permission timing
 

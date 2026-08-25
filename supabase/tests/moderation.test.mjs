@@ -522,6 +522,13 @@ describe('the guard is wired in, not merely present', () => {
     // 20260817000800. The caller's own two switches, defaulted on. Suspension does not
     // hide somebody's own settings from them.
     'my_notification_preferences',
+    // 20260826000100. Returns one of two strings — `prod` or `nonprod` — and takes no
+    // argument, so there is nothing for a suspended account to point it at and nothing it
+    // could learn that the project ref in the URL does not already tell it. Pure read.
+    //
+    // `set_environment_name` is emphatically not here: it is service_role only and is
+    // therefore not client-callable at all, which is why this sweep never sees it.
+    'environment_name',
     // 20260817000600, and the one entry here that is not a read.
     //
     // `delete_account` skips the guard **deliberately**, which is why it is declared

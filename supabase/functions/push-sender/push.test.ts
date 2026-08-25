@@ -26,6 +26,7 @@ import { summarise, type Addressed } from './batch.ts';
 
 const job = (overrides: Partial<PushJob> = {}): PushJob => ({
   notification_id: '11111111-1111-1111-1111-111111111111',
+  attempt: 1,
   type: 'follow',
   actor_username: 'ada',
   actor_name: 'Ada Lovelace',
@@ -276,8 +277,12 @@ Deno.test('sends nothing for an empty chunk', async () => {
 // Deciding what a batch's outcome was
 // ---------------------------------------------------------------------------
 
-const addressed = (notificationId: string, token: string): Addressed => ({
+// `attempt` defaults to 1 because these fixtures are all a first claim. It is the claim
+// generation `settle_push_batch` matches on, and `summarise` has to carry it through
+// untouched — a batch whose two devices came from one job must report one attempt, not two.
+const addressed = (notificationId: string, token: string, attempt = 1): Addressed => ({
   notificationId,
+  attempt,
   token,
   message: { to: token, title: 't', body: 'b', data: {} },
 });
@@ -292,7 +297,7 @@ const from = (outcomes: ExpoTicket[]) => (index: number) => ({
 Deno.test('a clean send is delivered and revokes nothing', () => {
   const { results, deadTokens } = summarise([addressed('n1', 'a')], from([ok]));
 
-  assertEquals(results, [{ notification_id: 'n1', delivered: true, error: null }]);
+  assertEquals(results, [{ notification_id: 'n1', attempt: 1, delivered: true, error: null }]);
   assertEquals(deadTokens, []);
 });
 

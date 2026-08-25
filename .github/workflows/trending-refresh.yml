@@ -1,0 +1,108 @@
+name: Trending refresh
+
+# ---------------------------------------------------------------------------
+# WHY THIS EXISTS
+#
+# The Feed's Trending shelf reads `provider_list_cache` and never calls TMDB, which is what
+# keeps a tab switch off the provider quota (docs/architecture/api.md). The cost of that
+# split is that something has to fill the table, and until now that something was a founder
+# typing `npm run trending:refresh` — which is why the shelf **vanished** once: the cached
+# lists aged past the 168-hour cutoff in `src/features/trending/trending.ts` and nothing was
+# scheduled to stop it.
+#
+# The freshness ceiling is deliberately not relaxed to hide that. A stale shelf that
+# disappears is correct behaviour; the missing piece was the schedule, and this is it.
+#
+# Daily, comfortably inside 168 hours. The TTL is six hours, so a shelf is "stale but shown"
+# for most of the day and refreshed long before it is dropped. More often would spend
+# provider quota to move numbers nobody is watching change.
+#
+# ---------------------------------------------------------------------------
+# CREDENTIALS
+#
+# `trending` is a service_role action on `tmdb-adapter` — four provider requests and eighty
+# upserts per call — so each target needs that project's own service-role key. They are
+# repository secrets and are never printed: the script logs the project ref and the
+# environment name, which are not secrets, and `--target` makes a URL/key pair from two
+# different projects a refusal rather than a green run against the wrong shelf.
+#
+#   SUPABASE_URL_NONPROD              https://abheeqyjzekiowkztfxv.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY_NONPROD
+#   SUPABASE_URL_PRODUCTION           set when the production project exists
+#   SUPABASE_SERVICE_ROLE_KEY_PRODUCTION
+#
+# ---------------------------------------------------------------------------
+# WHY PRODUCTION IS BEHIND A VARIABLE
+#
+# There is no production project yet. A scheduled job that fails every night until there is
+# teaches the founder to ignore a red workflow, which is the failure mode that lets the
+# *next* one go unnoticed — the same reasoning that keeps `mode: beta` locked in
+# web/distribution.config.json.
+#
+# So the nightly production run is gated on the repository variable
+# `BINGD_PRODUCTION_TRENDING`, set to `true` in the same session that provisions the project
+# and its secrets. `workflow_dispatch` ignores the variable: asking for production by hand is
+# an explicit act, and it should fail loudly if the secrets are not there.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    # 04:17 UTC. Off the hour on purpose — the top of an hour is where every cron on GitHub
+    # queues up, and a delayed run is a run that reports late.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which backend to refresh
+        type: choice
+        required: true
+        default: nonprod
+        options: [nonprod, production, both]
+
+concurrency:
+  group: trending-refresh
+  cancel-in-progress: false
+
+jobs:
+  nonprod:
+    name: nonprod
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'schedule' ||
+      contains(fromJSON('["nonprod", "both"]'), github.event.inputs.target)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Refresh the four trending lists
+        run: node supabase/seed/refresh-trending.mjs --target nonprod
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL_NONPROD }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_NONPROD }}
+
+  production:
+    name: production
+    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'schedule' && vars.BINGD_PRODUCTION_TRENDING == 'true') ||
+      contains(fromJSON('["production", "both"]'), github.event.inputs.target)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # The script refuses if the URL's project ref is not declared production in
+      # config/production-lane.cjs, so a nonprod secret pasted into a production slot is a
+      # refusal rather than a nightly refresh of the wrong shelf.
+      - name: Refresh the four trending lists
+        run: node supabase/seed/refresh-trending.mjs --target production
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL_PRODUCTION }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_PRODUCTION }}
