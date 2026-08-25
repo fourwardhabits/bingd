@@ -1,6 +1,6 @@
 # Public-launch risk register
 
-**Last verified against HEAD: 2026-08-25**, during the T2 data-contract pass (§10).
+**Last verified against HEAD: 2026-08-26**, during the T4 production-bootstrap pass (§11).
 
 ## What this document is
 
@@ -270,14 +270,37 @@ now disagree about what an unspecified new note means, and aligning them is a mi
 Recorded as a founder decision in `../product/open-questions.md` §8 **NR-1**. It is not a
 privacy exposure: the disagreement can only be reached by a caller that is not this app.
 
-### M6 — Production environment identity is seeded as `nonprod` — **OPEN**
+### M6 — Production environment identity is seeded as `nonprod` — **ENGINEERING RESOLVED 2026-08-26 · FOUNDER OPEN**
+
+> **What changed.** The trap is unchanged and the seed is deliberately untouched; what exists
+> now is the explicit step that corrects it, and three independent things that refuse to
+> proceed until it has run.
+>
+> | | |
+> |---|---|
+> | `environment_name()` | reads `env.name`, granted to `anon` so the release gate can check it with the one credential it has |
+> | `set_environment_name('prod')` | `service_role` only, idempotent, and **refuses to rename a database that already has profiles or invite tokens** — because those tokens carry the name that minted them |
+> | `scripts/bootstrap-production.mjs` | the step, guarded on the parsed host, refusing when `--target` and `REF_ENVIRONMENTS` disagree |
+> | `remote-smoke.mjs` | **first probe**, before anything else is asserted |
+> | `two-user-acceptance.mjs` | before the first account is created |
+>
+> `20260826000100`. Verified against `bingd-nonprod` 2026-08-25: `environment_name()` answers
+> `nonprod`, the smoke passes 97/97, and `set_environment_name('prod')` is refused there because
+> the database has people in it.
+>
+> **Still founder-open:** there is no production project to bootstrap. The step exists; it has
+> never run against a production database because none exists. See
+> [`production-bootstrap.md`](./production-bootstrap.md) §2.1.
+
+**The original finding, preserved verbatim, because the failure mode is silent:**
+
 
 Migrations seed `app_config['env.name'] = "nonprod"` with `on conflict do nothing`, and
 every reader defaults to `'nonprod'` when the key is absent. Invite resolution matches
 `t.env = v_env`, so a production database that never had `env.name` deliberately set to
 `'prod'` **silently mints and resolves nonprod tokens with no error at all**.
 
-No bootstrap step that sets it exists in `docs/release/**` or `scripts/`.
+~~No bootstrap step that sets it exists in `docs/release/**` or `scripts/`.~~ — `scripts/bootstrap-production.mjs`, 2026-08-26.
 
 **A fresh production environment must deliberately establish its own environment identity
 rather than inheriting that value.** Preserve this row verbatim until a provisioning step
@@ -433,7 +456,7 @@ requirement is itself a correction, because the 2026-08-23 table asserted the op
 | Delivery path | **done** — `push_outbox` fed by an `AFTER INSERT` trigger on `notifications`, drained by the `push-sender` Edge Function via Expo Push |
 | Foreground handler / listeners | **done** — arrival refreshes the inbox; a tap deep-links |
 | Apple / Google credentials | **absent — founder task.** APNs `.p8`, Key ID, Team ID; Firebase project, `google-services.json`, FCM V1 service account. Checklist in [`push-sender/README.md`](../../supabase/functions/push-sender/README.md) |
-| Outbox scheduler | **deferred** — the app nudges the sender; nothing drains on a timer |
+| Outbox scheduler | **done 2026-08-26** — `pg_cron` runs `_drain_push_outbox()` every minute through `pg_net`; the service-role key is a Supabase Vault secret and is in no migration, config table or repository file. Verified live on `bingd-nonprod`: job #2, `last_run.status = "succeeded"`. [`push-operations.md`](./push-operations.md) |
 | Receipt reconciliation | **deferred** — send-time `DeviceNotRegistered` revokes dead tokens; receipts are not polled |
 
 **The friend beta is unaffected, deliberately.** The native configuration is production-lane
@@ -448,6 +471,69 @@ channel the beta was built to test, and it works.
 checklist all asserted that push needed no new binary. All three now carry the correction.
 See [`../product/deferred-roadmap.md`](../product/deferred-roadmap.md) §4 and
 [`../architecture/push.md`](../architecture/push.md).
+
+### M12 — The production catalogue has no television — **OPEN (founder decision)**
+
+**Found 2026-08-26**, by a production-acceptance check that could not run.
+
+`bingd-nonprod` holds **1,027 `movie` rows and zero `tv_season` or `tv_series` rows.**
+`npm run seed:fetch` fetches series and seasons — `seasonsOf` reads season ordinals off the
+series' *has part* statement, deliberately and at some length — so the capability is built. The
+run that filled that project fetched films only.
+
+Two consequences, and the second is the one that matters:
+
+- **M2's season semantics have never been exercised against a deployed database.** The local
+  suite covers them; `two-user-acceptance.mjs` now *skips* them and says so, rather than
+  passing vacuously. See [`production-acceptance.md`](./production-acceptance.md) §5.
+- **A production catalogue seeded the same way launches Bingd as a film app.** Trending already
+  caches `trending.series.day` and `trending.series.week`, so the shelf would offer television
+  the collection cannot rank.
+
+This is a **founder decision about scope**, not a defect: launching with films only is a
+coherent choice. It has to be made rather than arrived at, and it is made before the production
+catalogue is seeded, because reseeding after launch changes what people already have.
+
+### M13 — A crashed sender could strand an outbox row permanently — **RESOLVED 2026-08-26**
+
+Recorded as a T3 residual. `push_outbox.attempts` incremented **on claim** and was read as
+"how many times delivery has failed". Those agree until a sender dies: claimed for the third
+time, killed before `settle_push_batch`, lease expires — and `attempts < 3` excludes the row
+from every future claim while `settle_push_batch`, the only thing that deletes, never sees it
+again. **Undeliverable and undeletable**, in a table documented as a queue that stays bounded
+with no pruner. It did not need three *failures* either: a row that never failed at all, claimed
+twice by senders that died, was on its last life.
+
+`20260826000200` separates the two counts — `failures` (settled delivery failures, ceiling 3)
+from `attempts` (claims, ceiling 6) — and adds a reaper to `claim_push_batch` for rows past
+either ceiling that nothing is holding. `push-sender/index.ts` needed no edit. Four new tests
+in `supabase/tests/push.test.mjs`, including the crash simulated as a crash rather than as a
+written counter.
+
+### M14 — A sign-out race can leave a device addressed to the account that left — **ACCEPTED for public v1**
+
+Recorded as a T3 residual, assessed 2026-08-26, **accepted rather than fixed**.
+
+`releaseDeviceOnSignOut` moves an epoch, waits up to three seconds for every dispatched write,
+then revokes. A `register_device_token` that lands *after* that window writes
+`device_tokens.user_id` for the departing account, and the compensating revoke it then attempts
+fails because the session is gone.
+
+**Why accepted.** It needs three things at once: a registration in flight at the moment of
+sign-out, an RPC slower than the three-second grace, **and** nobody signing in on that device
+afterwards — because `register_device_token`'s `on conflict (token) do update` moves ownership
+in one statement, with no window in which the device belongs to both. The next sign-in repairs
+it.
+
+**Why not fixed.** Closing the remaining sliver needs ownership epochs, or a JWT held in memory
+past sign-out so the compensating revoke can still authenticate. The first is device-session
+infrastructure; the second trades a narrow race for a credential that outlives the session that
+issued it. Neither is proportionate to a case the next sign-in already repairs.
+
+**What would change the verdict:** shared devices turning out to be common, or any report of a
+notification arriving for an account somebody had signed out of.
+
+---
 
 ## 2. Beta-safe minors
 
@@ -626,3 +712,60 @@ through. Both fixed and covered; re-reviewed as 39b.
 the installed friend-beta client keeps working against the new backend, and required in
 TypeScript so this client cannot omit it. Backend first, then OTA. A new client against
 an old database fails on the ranking RPCs with PGRST202.
+
+---
+
+## 11. Changes made in the production-bootstrap pass, 2026-08-26
+
+Branch `release/production-bootstrap`. No production Supabase project was created — see
+[`production-bootstrap.md`](./production-bootstrap.md) §2.1 for why that is a founder decision
+and what it needs. Everything below is repository-side and was verified against
+`bingd-nonprod`.
+
+| | |
+|---|---|
+| **M6** environment identity | **engineering resolved.** `environment_name()`, `set_environment_name()`, `scripts/bootstrap-production.mjs`, and refusals in both deployed test suites |
+| **M11** outbox scheduler | **closed.** `pg_cron` + `pg_net`, once a minute, Vault-held credential. Live on nonprod, `last_run.status = "succeeded"` |
+| **M13** stranded outbox row | **fixed.** Claims and failures counted separately, with a reaper |
+| **M14** sign-out race | **accepted**, with the rationale and the evidence that would reopen it |
+| **M12** no television in the catalogue | **new, founder decision.** Found by an acceptance check that could not run |
+
+**A production build could be made with no backend at all, and now cannot.**
+`assertBackendIsAllowed` returns early on a URL it cannot parse as a Supabase project —
+correct for CI's `https://ci.invalid` and for a local stack — and **an absent
+`EXPO_PUBLIC_SUPABASE_URL` is not a Supabase URL either.** With the production EAS environment
+holding zero variables, that early return was the state a first production build would have
+been attempted in: it would have built, signed, submitted, and thrown `Invalid app
+configuration` on a phone. Closed by `config/production-lane.cjs`, asserted from the outside in
+`release-gate.yml`.
+
+**That fix is in a new file rather than in `config/backends.cjs`, and the reason is the native
+freeze.** `backends.cjs` is a `@expo/fingerprint` input. Adding the rule there was measured to
+move beta's fingerprint from `ab794b37…` to `08e341d1…`, which would strand every friend
+tester's over-the-air updates. `config/production-lane.cjs` is required from **inside** the
+`lane === 'production'` branch of `app.config.ts`, exactly as `config/push.cjs` is, so no other
+lane loads it. Re-measured after the change: development, preview and beta are byte-identical
+to `db4883b`.
+
+**Sentry's `environment` is now the lane rather than the variant.** A beta build carries
+`variant: production`, so a friend-Beta crash against nonprod and a public crash against
+production were arriving under the same `environment: production`. `environment` is what alert
+rules, issue filters and release health are keyed on, and "production is broken" has to mean the
+thing strangers installed.
+
+**The release gate was not checking `push-sender` at all.** `functions:check` and
+`functions:lint` are tmdb-adapter's by name, and the Deno steps in `ci.yml` were never copied
+across — so the workflow between a commit and a store build was the one place the function that
+sends people notifications went unverified. Added.
+
+**Trending has a schedule.** `.github/workflows/trending-refresh.yml`, daily, both lanes, with
+the production job behind a repository variable so it is not red every night until production
+exists. The 168-hour cutoff is untouched — relaxing it would hide the next scheduler failure
+instead of fixing it. [`trending-operations.md`](./trending-operations.md).
+
+**New documents:** [`production-bootstrap.md`](./production-bootstrap.md),
+[`production-environment.md`](./production-environment.md),
+[`push-operations.md`](./push-operations.md),
+[`trending-operations.md`](./trending-operations.md),
+[`backup-and-recovery.md`](./backup-and-recovery.md),
+[`production-acceptance.md`](./production-acceptance.md).

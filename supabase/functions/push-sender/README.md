@@ -37,7 +37,7 @@ hold.
 ## Who may invoke it
 
 Any signed-in account, or `service_role`. `verify_jwt = true` in
-[`config.toml`](../../config.toml), and `isKnownCaller` additionally resolves the token to a
+[`config.toml`](../../config.toml), and `resolveCaller` additionally resolves the token to a
 real user — the anon key is itself a valid JWT.
 
 The gate is weak **because the caller chooses nothing**. An invocation is a nudge — "there
@@ -46,33 +46,43 @@ who caused a notification is holding a phone at that moment, which makes their c
 cheapest scheduler available. A determined caller invoking in a loop buys a bounded query
 against an empty queue.
 
-### There is no scheduler, and that is the one deliberate gap
+### The scheduler, which used to be the one deliberate gap
 
-Nothing drains `push_outbox` on a timer. `pg_net` and `pg_cron` are not installed, and
-installing a networking extension so a trigger can make an HTTP call inside a social write
-is a large change with a bad failure mode — a follow that rolls back because a notification
-service was slow.
+`pg_cron` runs `_drain_push_outbox()` once a minute; it posts here through `pg_net` when — and
+only when — `push_outbox` has something in it. `20260826000300`. Operations, failure modes and
+the Vault secret it needs: [`docs/release/push-operations.md`](../../../docs/release/push-operations.md).
 
-The consequence, stated plainly: **a notification created while nobody has the app open
-waits until somebody does.** In a friend beta, where the person who caused it is holding
-their phone, that is usually milliseconds. It is not a guarantee.
+Nothing about *this function* changed. It still takes no input, still claims its own batch, and
+still cannot be pointed at anybody — the scheduler is one more caller of the same weak gate.
 
-Closing it is one scheduled job against this same function, and nothing else changes:
+The trigger still does no networking. A follow that rolled back because a notification service
+was slow is the failure mode that argument was always about, and the scheduler sits outside the
+write entirely: it reads a queue on a timer rather than being called from a transaction.
 
-```
-Supabase dashboard → Integrations → Cron → new job, every minute
-  → invoke Edge Function `push-sender` with the service role key
-```
+What it closed, quoted from what stood here before: *a notification created while nobody has the
+app open waits until somebody does.* Usually milliseconds in a friend beta, where the person who
+caused it is holding their phone. Never a guarantee, and three ordinary cases had no phone
+behind them at all — an app killed between the write and the nudge, an `invite_welcome` written
+when a token is redeemed, and every retry.
 
-Recorded in [`deferred-roadmap.md` §4](../../../docs/product/deferred-roadmap.md).
+The client nudge remains, debounced to one call per ten seconds. It is now a latency
+optimisation over the schedule rather than the mechanism.
 
 ---
 
 ## Delivery guarantee
 
-**At least once, bounded at three attempts.** `claim_push_batch` leases rows for five
-minutes with `skip locked`, so a sender that dies between sending and settling sends again
-when the lease expires. That is the right side to fail on for a notification.
+**At least once, bounded at three settled failures and six claims.** `claim_push_batch` leases
+rows for five minutes with `skip locked`, so a sender that dies between sending and settling
+sends again when the lease expires. That is the right side to fail on for a notification.
+
+The two ceilings are two different things and `20260826000200` exists because they used to be
+one. `failures` counts sends the provider refused; `attempts` counts claims, including by
+senders that died before sending anything. Conflating them stranded a row permanently: claimed
+for the third time, killed before settling, and then `attempts < 3` excluded it from every
+future claim while `settle_push_batch` — the only thing that deletes — never saw it again.
+Undeliverable *and* undeletable, in a table documented as a queue that stays bounded with no
+pruner. `claim_push_batch` now reaps rows past either ceiling that nothing is holding.
 
 **Receipts are not polled.** Expo answers a send with a *ticket*; the final outcome is a
 *receipt* fetched later from `/push/getReceipts`. Polling them needs a second scheduled

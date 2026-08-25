@@ -60,6 +60,18 @@ jobs:
       - run: npm run functions:check
       - run: npm run functions:lint
 
+      # push-sender, which this gate was not checking at all — `functions:check` and
+      # `functions:lint` are tmdb-adapter's, by name, and the Deno half of ci.yml was never
+      # copied here. So the workflow that stands between a commit and a store build was the
+      # one place the function that sends people notifications went unverified.
+      #
+      # Spelled out rather than added as npm scripts for the reason ci.yml records:
+      # `packageJson:scripts` is an @expo/fingerprint input, and a new script moves every
+      # lane's runtime version including beta's.
+      - run: npx deno check --config supabase/functions/push-sender/deno.json supabase/functions/push-sender/index.ts
+      - run: npx deno lint --config supabase/functions/push-sender/deno.json supabase/functions/push-sender
+      - run: npx deno test --config supabase/functions/push-sender/deno.json --allow-net supabase/functions/push-sender
+
       # ---- And the part that only runs here ---------------------------------------
       #
       # Real PostgreSQL, many connections. `embedded-postgres` downloads and starts a
@@ -100,13 +112,13 @@ jobs:
       # which is not a Supabase URL at all, so it asserted nothing about backends. The
       # second called itself "every lane" and skipped production in a `continue`.
       #
-      # Named for what it does. It resolves the **three lanes that have a backend** —
-      # development, preview, beta — and asserts that `production` has none, which is why
-      # it is not among them. Review 28b caught the earlier version calling itself "every
-      # lane" while skipping production in a `continue`; the negative step below is what
-      # actually covers production, and saying so is the difference between a skip and a
-      # silent gap.
-      - name: The three lanes with a backend resolve against it
+      # Named for what it does. It resolves **every lane that has a backend**, which today is
+      # development, preview and beta, and becomes those three plus production the day a
+      # production project exists. Review 28b caught the earlier version calling itself
+      # "every lane" while skipping production in a `continue`; the negative steps below are
+      # what cover a lane with no backend, and saying so is the difference between a skip and
+      # a silent gap.
+      - name: Every lane with a backend resolves against it
         run: |
           set -e
           node -e "
@@ -117,15 +129,23 @@ jobs:
             const withBackend = Object.entries(LANE_BACKENDS).filter(([, refs]) => refs.length);
             const without = Object.entries(LANE_BACKENDS).filter(([, refs]) => !refs.length);
 
-            if (without.length !== 1 || without[0][0] !== 'production') {
+            // Production is the only lane allowed to have no backend, and it is allowed to
+            // *gain* one. An earlier version of this hard-failed the moment production got a
+            // ref, on the reasoning that the change deserved a review touch — but the touch
+            // it forced was to this file, in the middle of provisioning, which is the worst
+            // moment to be editing a release gate. config/production-lane.test.mjs asserts
+            // the ref, its name and its declared environment agree; that is the review.
+            if (without.some(([lane]) => lane !== 'production')) {
               throw new Error(
-                'Exactly one lane may have no backend and it must be production. Lanes without one: ' +
-                  (without.map(([l]) => l).join(', ') || 'none') +
-                  '. If a production Supabase project now exists, this step and its name need updating ' +
-                  'in the same change that adds it.'
+                'Only the production lane may have no backend. Lanes without one: ' +
+                  without.map(([l]) => l).join(', ')
               );
             }
-            console.log('production: no backend declared, covered by the negative step below');
+            console.log(
+              LANE_BACKENDS.production.length
+                ? `production: ${LANE_BACKENDS.production.join(', ')}`
+                : 'production: no backend declared, covered by the negative step below'
+            );
 
             for (const [lane, refs] of withBackend) {
               const variant = eas.build[lane].env.APP_VARIANT;
@@ -171,3 +191,30 @@ jobs:
             exit 1
           fi
           echo "production + nonprod: refused, as it must be"
+
+          # And the case the guard used to say nothing about, which is the state the
+          # production EAS environment is actually in today: **no Supabase variables at all.**
+          # `assertBackendIsAllowed` returns early on a URL it cannot parse as a Supabase
+          # project — deliberately, for `https://ci.invalid` and for a local stack — and an
+          # absent variable is not a Supabase URL either. So a production build with nothing
+          # configured passed every check and would have failed as "Invalid app configuration"
+          # on a phone, after a signed store build. config/production-lane.cjs closes it and
+          # this is the proof the closure is wired in rather than merely written.
+          if EAS_BUILD=true BINGD_LANE=production APP_VARIANT=production \
+             EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
+             npx expo config --type public --json > /dev/null 2>&1; then
+            echo "The production lane resolved with no Supabase URL at all. The guard is inert."
+            exit 1
+          fi
+          echo "production + no backend: refused, as it must be"
+
+          # The control. Without it the three refusals above pass just as well against an
+          # app.config.ts that throws for everything.
+          if ! EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
+             EXPO_PUBLIC_SUPABASE_URL=https://abheeqyjzekiowkztfxv.supabase.co \
+             EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
+             npx expo config --type public --json > /dev/null 2>&1; then
+            echo "The beta lane no longer resolves against nonprod. Every refusal above is meaningless."
+            exit 1
+          fi
+          echo "beta + nonprod: resolved, as it must"

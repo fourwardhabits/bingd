@@ -1,6 +1,6 @@
 import * as Sentry from '@sentry/react-native';
 
-import { env, isProduction } from './env';
+import { env, isProduction, lane } from './env';
 import { releaseTags } from './release';
 
 /**
@@ -31,7 +31,27 @@ export function initMonitoring(): void {
 
   Sentry.init({
     dsn: env.sentryDsn,
-    environment: env.variant,
+
+    /**
+     * **The lane, not the variant**, and the difference is the whole point once there are
+     * two backends.
+     *
+     * `variant` has three values and a Beta build carries `production` — the bundle
+     * identifier cannot change between a TestFlight build and the App Store release that
+     * replaces it. So while this read `env.variant`, a friend-Beta crash against
+     * `bingd-nonprod` and a public crash against the production database arrived in Sentry
+     * under the same `environment: production`, distinguishable only by the `eas_channel`
+     * tag below.
+     *
+     * That was survivable while beta was the only thing deployed. It is not survivable as a
+     * public launch property: `environment` is what a Sentry alert rule, an issue filter and
+     * a release-health chart are keyed on, and "production is broken" has to mean the thing
+     * strangers installed.
+     *
+     * Four values now, matching `eas.json`: development, preview, beta, production. The tags
+     * below stay — they answer a different question, which is *which device on the desk*.
+     */
+    environment: lane,
 
     // Off by default and left off. Sentry's "default PII" includes IP address
     // and, where it can find them, usernames and email addresses.
@@ -64,11 +84,11 @@ export function initMonitoring(): void {
    * minified output, which is most of what a crash reporter is for.
    *
    * These sit beside them and answer the question the founder will actually ask during
-   * the beta: *which of the four things on my desk did this come from.* An Android dev
-   * client, an iOS dev client, a Preview build and a TestFlight build all report the
-   * same `environment` in two cases out of four; `build_kind`, `eas_channel` and
-   * `eas_update_id` are what separate them. Nothing here is a secret — every value is
-   * printed on a build's own About screen (`lib/release.ts`).
+   * the beta: *which of the four things on my desk did this come from.* `environment` is
+   * the lane, so it separates the four lanes and nothing finer; two Preview builds a week
+   * apart share it, and `build_kind`, `eas_channel` and `eas_update_id` are what tell them
+   * apart. Nothing here is a secret — every value is printed on a build's own About screen
+   * (`lib/release.ts`).
    */
   Sentry.setTags(releaseTags());
 }

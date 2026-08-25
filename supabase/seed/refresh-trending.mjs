@@ -21,8 +21,13 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const { supabaseProjectRef } = require('../../config/backends.cjs');
+const { environmentForRef } = require('../../config/production-lane.cjs');
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -57,6 +62,55 @@ async function main() {
     );
     process.exit(1);
   }
+
+  /**
+   * Which project this is about to spend a service-role key on.
+   *
+   * Added when this became a scheduled job. By hand it was a founder typing a URL they had
+   * just looked at; on a schedule it is two secrets in a settings page, and the failure that
+   * matters is not a typo — it is the **production** secret paired with the **nonprod** URL,
+   * which refreshes the wrong project's shelf every night and looks like a green run.
+   *
+   * The guard is on the parsed host rather than on the string, for the reason
+   * `two-user-acceptance.mjs` records: `url.includes(ref)` says yes to
+   * `https://<ref>.example.com`, and the next thing that happens is a service-role key
+   * arriving at a hostname anybody can register.
+   */
+  const ref = supabaseProjectRef(url);
+  const environment = ref === null ? null : environmentForRef(ref);
+
+  if (environment === null) {
+    console.error(
+      `Refusing: ${url} is not a Supabase project this repository declares.\n` +
+        '  REF_ENVIRONMENTS in config/production-lane.cjs is the list of projects that may\n' +
+        '  receive a service-role key.',
+    );
+    process.exit(1);
+  }
+
+  // Optional, because `npm run trending:refresh` by hand has always been one argument-free
+  // command and there is no reason to break that. The scheduled workflow always passes it,
+  // which is where the mistake it catches actually happens.
+  const wanted = process.argv.includes('--target')
+    ? process.argv[process.argv.indexOf('--target') + 1]
+    : null;
+
+  if (wanted !== null) {
+    const expected = wanted === 'production' ? 'prod' : wanted === 'nonprod' ? 'nonprod' : null;
+    if (expected === null) {
+      console.error(`--target must be production or nonprod, not "${wanted}".`);
+      process.exit(1);
+    }
+    if (expected !== environment) {
+      console.error(
+        `Refusing: --target ${wanted} means the ${expected} database, and ${ref} is declared ` +
+          `${environment}. The URL and the key in this run do not describe the same project.`,
+      );
+      process.exit(1);
+    }
+  }
+
+  console.log(`Refreshing trending on ${ref} (${environment})`);
 
   const response = await fetch(new URL('/functions/v1/tmdb-adapter', url), {
     method: 'POST',

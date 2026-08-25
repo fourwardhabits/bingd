@@ -602,25 +602,113 @@ describe('settle_push_batch', () => {
       const row = await outboxFor(id);
       assert.equal(row.state, 'pending');
       assert.equal(row.attempts, attempt);
+      assert.equal(row.failures, attempt);
       assert.equal(row.last_error, 'provider timed out');
     }
 
     await claim();
     const final = await settle([{ notification_id: id, delivered: false, error: 'again' }]);
-    assert.equal(final.settled, 1, 'the third attempt should have been given up on');
+    assert.equal(final.settled, 1, 'the third failure should have been given up on');
     assert.equal(await outboxFor(id), null);
   });
 
-  it('stops claiming a row that has used its attempts', async () => {
+  it('stops claiming a row that has failed three times', async () => {
     await register(reader, TOKEN(42));
     const id = await notify(reader, 'follow');
 
-    // Three attempts spent without settling, which is what a sender dying mid-flight
-    // looks like once the lease has expired three times.
-    await t.sql(`update push_outbox set attempts = 3, state = 'pending' where notification_id = $1`, [
-      id,
-    ]);
-    assert.deepEqual(await claim(), [], 'an exhausted row was claimed again');
+    // Three settled failures. This is the bound `20260825000300` meant, and it is the one
+    // that still holds: the provider was reached three times and said no three times.
+    await t.sql(
+      `update push_outbox set failures = 3, state = 'pending' where notification_id = $1`,
+      [id],
+    );
+    assert.deepEqual(await claim(), [], 'a row that has failed three times was claimed again');
+  });
+
+  /**
+   * `20260826000200`, and the reason it exists.
+   *
+   * The old schema counted claims and read the count as failures, so a sender dying between
+   * its third claim and its settle left a row that `attempts < 3` would never claim again
+   * and that `settle_push_batch` would never see again — undeliverable *and* undeletable, in
+   * a table documented as a queue that stays bounded with no pruner.
+   *
+   * The crash is simulated the way it actually happens: claim, then nothing, then the lease
+   * expires. Not by writing a counter, because a test that sets up the state it is checking
+   * proves the predicate and not the path to it.
+   */
+  it('claims again after a sender dies mid-flight, however late it died', async () => {
+    await register(reader, TOKEN(46));
+    const id = await notify(reader, 'follow');
+
+    for (const death of [1, 2, 3]) {
+      const jobs = await claim();
+      assert.equal(jobs.length, 1, `the sender should have had work on death ${death}`);
+
+      // The sender is gone. Nothing settles; five minutes pass.
+      await t.sql(
+        `update push_outbox set claimed_at = now() - interval '6 minutes' where notification_id = $1`,
+        [id],
+      );
+    }
+
+    const row = await outboxFor(id);
+    assert.equal(row.attempts, 3, 'three claims');
+    assert.equal(row.failures, 0, 'nothing ever failed to deliver — nobody got that far');
+
+    const recovered = await claim();
+    assert.equal(recovered.length, 1, 'a row was stranded by a crash rather than by a failure');
+
+    const settled = await settle([{ notification_id: id, delivered: true }]);
+    assert.equal(settled.settled, 1);
+    assert.equal(await outboxFor(id), null);
+  });
+
+  /**
+   * The other half of the same fix, and the half that is easy to leave out. Something has to
+   * *delete* a row that will never be claimed again, or the queue grows for ever — and the
+   * only thing that used to delete was the call the stranded row never reaches.
+   */
+  it('reaps a row that no sender will ever claim again', async () => {
+    await register(reader, TOKEN(47));
+    const stranded = await notify(reader, 'follow');
+
+    // Six claims' worth of crashing, with the lease expired: past the crash ceiling and
+    // held by nobody.
+    await t.sql(
+      `update push_outbox
+          set attempts = 6, state = 'claimed', claimed_at = now() - interval '6 minutes'
+        where notification_id = $1`,
+      [stranded],
+    );
+
+    // A control, so an empty queue cannot be mistaken for a working reaper.
+    const live = await notify(control, 'follow');
+    await register(control, TOKEN(48));
+
+    const jobs = await claim();
+    assert.equal(await outboxFor(stranded), null, 'the exhausted row is still in the queue');
+    assert.deepEqual(
+      jobs.map((j) => j.notification_id),
+      [live],
+      'the reaper took the live row with it',
+    );
+  });
+
+  it('does not reap a row a sender is still holding', async () => {
+    await register(reader, TOKEN(49));
+    const id = await notify(reader, 'follow');
+
+    // At the ceiling, but leased seconds ago: somebody is working on it and may yet settle.
+    await t.sql(
+      `update push_outbox
+          set failures = 3, state = 'claimed', claimed_at = now()
+        where notification_id = $1`,
+      [id],
+    );
+
+    await claim();
+    assert.ok(await outboxFor(id), 'a leased row was reaped out from under its sender');
   });
 
   it('revokes the tokens the provider reported as gone, and only those', async () => {

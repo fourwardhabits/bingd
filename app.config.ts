@@ -83,6 +83,37 @@ function pushNative(): { plugin: { color: string; mode?: string }; googleService
 const push = pushNative();
 
 /**
+ * And one rule the production lane needs that the others must not pay for.
+ *
+ * `assertBackendIsAllowed` returns early on a URL that is not a Supabase project at all —
+ * correct for CI's `https://ci.invalid` and for a local stack, and it means **a production
+ * build with no `EXPO_PUBLIC_SUPABASE_URL` passes it**. The production EAS environment holds
+ * zero variables today, so that is precisely the state a first production build would be
+ * attempted in: it would build, sign, submit, and throw `Invalid app configuration` on a
+ * phone.
+ *
+ * Required **inside the branch**, exactly as `config/push.cjs` is and for the same measured
+ * reason: a module `app.config.ts` requires is hashed into the fingerprint, and a lane that
+ * never executes the `require` never loads it. Putting this rule in `config/backends.cjs` was
+ * measured to move beta's fingerprint and would have stranded every friend tester's
+ * over-the-air updates. Development, preview and beta resolve byte-identically to before.
+ *
+ * **After `pushNative()`, not before it**, and the order is asserted rather than incidental.
+ * Both refusals apply to a production build with nothing configured at all, and the useful one
+ * to surface first is the credential — that is the founder task with an Apple console and a
+ * Firebase console behind it, where the backend is a variable in a dashboard.
+ * `config/push.test.mjs` reads the two apart: with `GOOGLE_SERVICES_JSON` set, a production
+ * resolution must fail on the *backend*, which is what proves `config/push.cjs` was reached
+ * and satisfied rather than skipped.
+ */
+if (lane === 'production') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require('./config/production-lane.cjs').assertProductionBackend(
+    process.env.EXPO_PUBLIC_SUPABASE_URL,
+  );
+}
+
+/**
  * `eas init` could not write this itself: it edits app.json, and this project uses a
  * TypeScript config so the variant logic above is expressible.
  */
