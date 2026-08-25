@@ -423,4 +423,47 @@ describe('dismiss all', () => {
     await waitFor(() => expect(idsSent()).toHaveLength(4));
     expect(idsSent()[3]).not.toBe(idsSent()[2]);
   });
+
+  /**
+   * The retry path a reader actually takes, and the one the first fix missed.
+   *
+   * A sweep fails, and the obvious recovery is not to press the same menu item again —
+   * it is to close the sheet, look at the list, and try once more. The sheet is
+   * unmounted while closed, so an intent ref belonging to it would be gone by then and
+   * the retry would carry a fresh id. Codex found exactly this; the ref lives on the
+   * screen for exactly this.
+   */
+  it('keeps the operation id across closing and reopening the sheet', async () => {
+    let confirm: (() => void) | undefined;
+    jest.spyOn(Alert, 'alert').mockImplementation((_title, _body, buttons) => {
+      confirm = (buttons ?? []).find((button) => button.text === 'Dismiss all')?.onPress as
+        | (() => void)
+        | undefined;
+    });
+    const idsSent = () =>
+      mockRpc.mock.calls
+        .filter(([name]) => name === 'dismiss_all_recommendation_requests')
+        .map(([, args]) => (args as { p_operation_id: string }).p_operation_id);
+
+    mockRpcErrors.dismiss_all_recommendation_requests = { code: '08007' };
+    const view = await openSheet();
+
+    await fireEvent.press(view.getByLabelText('More options'));
+    await fireEvent.press(view.getByText('Dismiss all'));
+    confirm?.();
+    await waitFor(() => expect(idsSent()).toHaveLength(1));
+
+    // Out of the sheet and back in, which unmounts and remounts it.
+    await fireEvent.press(view.getByText('Done'));
+    await waitFor(() => expect(view.queryByText('Recommendation requests')).toBeTruthy());
+    await fireEvent.press(view.getByTestId('recommendation-requests-alert'));
+    await waitFor(() => expect(view.getByLabelText('More options')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('More options'));
+    await fireEvent.press(view.getByText('Dismiss all'));
+    confirm?.();
+
+    await waitFor(() => expect(idsSent()).toHaveLength(2));
+    expect(idsSent()[1]).toBe(idsSent()[0]);
+  });
 });

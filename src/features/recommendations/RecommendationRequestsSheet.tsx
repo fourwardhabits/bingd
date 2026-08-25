@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRef, useState } from 'react';
+import { useState, type MutableRefObject } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { newOperationId } from '@/features/collection/writes';
@@ -21,6 +21,22 @@ export type RecommendationRequestsSheetProps = {
   onClose: () => void;
   /** Opens somebody's profile. The sheet closes on the way — see `openProfile`. */
   onPressProfile: (username: string) => void;
+  /**
+   * The Dismiss all operation id, **owned by the screen rather than by this sheet**.
+   *
+   * A ref passed in rather than held here, and that is the whole reason it is a prop:
+   * the screen unmounts this component when it closes, so a ref of its own would be
+   * cleared by the reader doing the most ordinary thing available to them — closing the
+   * sheet after a failure and opening it again to try. The retry would then carry a
+   * fresh id, walk past `_claim_operation`, and sweep whatever had arrived in between.
+   *
+   * The screen is a tab and outlives every open and close of this sheet, which makes it
+   * the longest scope that is still honest. Leaving the app clears it, and that is
+   * correct rather than a gap: an id held indefinitely would eventually be spent on a
+   * sweep months later, be answered `already_applied`, and report success having
+   * dismissed nothing.
+   */
+  sweepIntent: MutableRefObject<string | null>;
 };
 
 /**
@@ -46,6 +62,7 @@ export function RecommendationRequestsSheet({
   viewerId,
   onClose,
   onPressProfile,
+  sweepIntent,
 }: RecommendationRequestsSheetProps) {
   const requests = useRecommendationRequests(viewerId);
   const actions = useRequestActions(viewerId);
@@ -72,26 +89,6 @@ export function RecommendationRequestsSheet({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  /**
-   * The operation id for Dismiss all, held across attempts.
-   *
-   * A ref because it is machinery and nothing renders from it. Held rather than minted
-   * per press for the reason `20260826000400` §9 gives: a sweep replayed under a fresh
-   * id would take away requests that arrived between the two attempts — which is the one
-   * way this feature could still silently lose a recommendation.
-   *
-   * **Released only when the server actually answered**, which is the asymmetry
-   * `lib/operation-intent.ts` records and the first version of this got wrong: it cleared
-   * the id unconditionally, so the exact case the id exists for — a sweep that commits,
-   * loses its reply, is reported to the reader as a failure, and is pressed again — got a
-   * fresh id and swept whatever had arrived since.
-   *
-   * The other direction is dangerous too, which is why this is not simply "always hold":
-   * holding a *spent* id would have the next deliberate sweep answered `already_applied`,
-   * dismissing nothing while reporting success.
-   */
-  const sweepIntent = useRef<string | null>(null);
-
   const report = (result: { ok: boolean; message?: string }) => {
     setError(result.ok ? null : (result.message ?? 'Something went wrong. Try again.'));
   };
@@ -116,12 +113,21 @@ export function RecommendationRequestsSheet({
           style: 'destructive',
           onPress: () =>
             void (async () => {
+              /**
+               * **Held only while the outcome is unknown**, which is the asymmetry
+               * `lib/operation-intent.ts` records and the first version of this got
+               * wrong twice — once by clearing it unconditionally, and once by keeping
+               * it in a ref this component owned, which closing the sheet reset.
+               *
+               * Both directions lose something. Minting a fresh id after a lost reply
+               * sweeps requests that arrived since, which the reader never saw. Reusing
+               * a *spent* one has the next deliberate sweep answered `already_applied`
+               * — nothing dismissed, success reported.
+               */
               const held = sweepIntent.current ?? newOperationId();
               sweepIntent.current = held;
               setError(null);
               const result = await actions.dismissAll({ operationId: held });
-              // Kept only while the outcome is unknown. See the ref's own comment: both
-              // directions of getting this wrong lose something.
               if (result.ok || !result.changed) sweepIntent.current = null;
               report(result);
             })(),
@@ -244,6 +250,17 @@ export function RecommendationRequestsSheet({
           ))
         )}
       </ScrollView>
+
+      {/* The way out, said in a word.
+
+          Not decoration and not a duplicate of the backdrop: `Sheet` hides its scrim
+          from the accessibility tree *on the understanding that every sheet carries its
+          own labelled Close control*, so without this there is no announced way out of
+          a modal for a screen-reader user. `AwardsSheet` and the filter sheet both end
+          the same way, which is also what keeps this one feeling like the others. */}
+      <View style={styles.foot}>
+        <Button label="Done" onPress={onClose} />
+      </View>
 
       {/* The overflow, drawn inside the sheet rather than as a second `Modal`.
 
@@ -494,6 +511,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: theme.space[2],
     paddingTop: theme.space[2],
+  },
+
+  /**
+   * Sticky, and visibly its own band: the hairline is what tells the reader the list
+   * above it is scrolled rather than ended. `Sheet` owns the space below this — it
+   * guarantees a gutter under every footer whatever the device reports as its bottom
+   * inset. Copied from `AwardsSheet` deliberately: two sheets that end differently read
+   * as two features.
+   */
+  foot: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.border.hairline,
   },
 
   menuScrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },

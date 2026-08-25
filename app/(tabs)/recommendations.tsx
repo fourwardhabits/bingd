@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -88,6 +88,20 @@ export default function RecommendationsScreen() {
   const [filtering, setFiltering] = useState(false);
   /** The Requests sheet. Nothing else on this screen knows it exists. */
   const [reviewingRequests, setReviewingRequests] = useState(false);
+  /**
+   * The Dismiss all operation id, held here rather than inside the sheet.
+   *
+   * The sheet is unmounted every time it closes, so a ref of its own would be cleared by
+   * the most ordinary recovery available to the reader: a sweep fails, they close the
+   * sheet, open it again, and try. A fresh id on that retry walks past
+   * `_claim_operation` and dismisses whatever arrived in between — recommendations they
+   * never saw, which is the one thing this tranche exists to make impossible.
+   *
+   * This screen is a tab and outlives every open and close of the sheet, so it is the
+   * longest scope that is still honest. See the prop's own comment for why an even
+   * longer one would be worse.
+   */
+  const sweepIntent = useRef<string | null>(null);
 
   const slate = useForYou(profile.id, medium, filters);
   const logged = useLoggedCollection(profile.id);
@@ -399,6 +413,7 @@ export default function RecommendationsScreen() {
           viewerId={profile.id}
           onClose={() => setReviewingRequests(false)}
           onPressProfile={(username) => router.push(`/u/${username}`)}
+          sweepIntent={sweepIntent}
         />
       ) : null}
     </Screen>
