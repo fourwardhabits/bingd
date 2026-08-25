@@ -139,16 +139,26 @@ export function useCommentCounts(eventIds: string[], viewerId: string) {
  * author had retracted. A minute is a perfectly good default for a feed; it is the wrong
  * default for the one surface in this app whose contents somebody can withdraw.
  *
- * Zero means "always refetch when the sheet opens", not "poll": there is one observer
- * and it mounts when the sheet does. The cached rows still render immediately underneath
- * the refetch, so the sheet does not flash empty — it shows what it had and corrects
- * itself, which is exactly the behaviour `LogSheet` records for the same reason.
+ * `staleTime: 0` alone was **not enough**, and independent review 43 was right to say so.
+ * It guarantees a refetch on mount; it does not stop React Query rendering the previous
+ * result while that refetch is in flight. So the second reader still saw the retracted
+ * words — for a shorter time, from a cache instead of from a stale window, which is the
+ * same bug with better timing.
+ *
+ * `gcTime: 0` is the other half: the entry is discarded when its last observer unmounts,
+ * so reopening a thread starts from `isPending` with nothing to draw. Everywhere else in
+ * this app the opposite is right — `LogSheet` deliberately shows what it had and corrects
+ * itself, because a watch date does not become *unsayable*. **A comment does.** This is
+ * the one surface whose contents somebody can withdraw, and a moment of correct-looking
+ * stale text is exactly what was reported. A skeleton for one round trip — 2.2ms of
+ * server time — is the right price.
  */
 export function useComments(eventId: string | null, viewerId: string) {
   return useQuery({
     queryKey: ['comments', viewerId, eventId],
     enabled: Boolean(eventId),
     staleTime: 0,
+    gcTime: 0,
     queryFn: async (): Promise<Comment[]> => {
       const { data, error } = await supabase.rpc('activity_comments', {
         p_feed_event_id: eventId as string,

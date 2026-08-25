@@ -133,9 +133,26 @@ function Navigation() {
    *
    * `(auth)` is deliberately outside it. That group is where a signed-out person
    * belongs, and gating it would leave the router with nowhere to send them.
+   *
+   * ---------------------------------------------------------------------------
+   * **`!== 'signed-out'`, AND NOT `=== 'ready'`**
+   *
+   * The obvious guard is "ready", and it is wrong in a way independent review 43 caught:
+   * `loading` is *not knowing yet*, not *signed out*. A cold start always passes through
+   * it, so a guard on `ready` removes every protected route from the navigator for the
+   * first few hundred milliseconds of every launch — and a launch that carries a URL
+   * (`bingd://activity/…`, a shared `/u/` link) has that URL arrive while the route it
+   * names does not exist. The navigator resolves it somewhere else, and nothing brings it
+   * back when the guard later flips: the deep link is silently lost.
+   *
+   * Only `signed-out` is a state where a protected screen is genuinely wrong to mount.
+   * `loading`, `onboarding` and `error` are all covered by `AuthStatusOverlay`, which
+   * draws over the whole navigator until the session resolves, so nothing half-rendered
+   * is visible underneath — and `RouteErrorBoundary` catches a screen that renders early
+   * and clears itself when the status moves on.
    */
   const auth = useAuth();
-  const signedIn = auth.status === 'ready';
+  const signedIn = auth.status !== 'signed-out';
   /**
    * An invitation opened before there was an account to attribute it to.
    *

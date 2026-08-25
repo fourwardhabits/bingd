@@ -1,14 +1,14 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { useCurrentProfile } from '@/features/auth';
+import { useAuth } from '@/features/auth';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentThread } from '@/features/feed/CommentThread';
 import { metadataFor, tailFor, verbFor } from '@/features/feed/activity';
 import { useActivityEvent } from '@/features/feed/use-feed';
 import { posterUri } from '@/lib/images';
 import { TAB_ROUTES } from '@/lib/routes';
-import { ActivityRow, EmptyState, Screen, SkeletonRow } from '@/ui/components';
+import { ActivityRow, EmptyState, LoadingScreen, Screen, SkeletonRow } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -53,12 +53,28 @@ import { theme } from '@/ui/tokens';
  */
 export default function ActivityScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const profile = useCurrentProfile();
+  /**
+   * `useAuth`, not `useCurrentProfile`, and this is the one screen in `app/` where that
+   * distinction earns its keep.
+   *
+   * Every other protected screen is reached from inside the app, with a session long
+   * since resolved, so the throwing accessor is exactly right for them. **This one is
+   * reached from outside** — a notification tap that starts the process — which means it
+   * can be asked to render while `getSession` is still in flight. The throwing accessor
+   * there is a caught error and a boundary reset for something that is not an error at
+   * all: the session is simply not known yet.
+   *
+   * So it waits, and the screen it waits with is the same `LoadingScreen`
+   * `AuthStatusOverlay` is drawing over it anyway. Independent review 43's cold-start
+   * finding is what this closes on the route it was actually about.
+   */
+  const auth = useAuth();
   const router = useRouter();
 
+  const viewerId = auth.status === 'ready' ? auth.profile.id : null;
   const eventId = typeof id === 'string' && id.length > 0 ? id : null;
-  const activity = useActivityEvent(eventId, profile.id);
-  const watched = useWatched(profile.id);
+  const activity = useActivityEvent(viewerId ? eventId : null, viewerId ?? '');
+  const watched = useWatched(viewerId ?? '');
 
   const event = activity.data ?? null;
 
@@ -78,6 +94,9 @@ export default function ActivityScreen() {
     if (router.canGoBack()) router.back();
     else router.replace(TAB_ROUTES.feed);
   };
+
+  // Nothing to draw and nothing to ask for until it is known who is asking.
+  if (!viewerId) return <LoadingScreen />;
 
   return (
     <Screen includeBottomInset>
@@ -123,7 +142,7 @@ export default function ActivityScreen() {
             actorName={event.actorName}
             actorAvatarUri={event.actorAvatarUri}
             onPressActor={
-              event.actorId === profile.id || !event.actorUsername
+              event.actorId === viewerId || !event.actorUsername
                 ? undefined
                 : () => router.push(`/u/${event.actorUsername}`)
             }
@@ -141,7 +160,7 @@ export default function ActivityScreen() {
             noteMasked={shouldMask({
               hasSpoilers: event.note?.hasSpoilers ?? false,
               mediaItemId: event.mediaItemId,
-              viewerId: profile.id,
+              viewerId: viewerId,
               authorId: event.actorId,
               watched: watched.data,
             })}
@@ -167,7 +186,7 @@ export default function ActivityScreen() {
             // series. Masking is decided against this and nothing else.
             mediaItemId={event.mediaItemId}
             title={event.title}
-            viewerId={profile.id}
+            viewerId={viewerId}
             watched={watched.data}
             onPressPerson={(username) => router.push(`/u/${username}`)}
             // Already inside a ScrollView. See `CommentThread`.

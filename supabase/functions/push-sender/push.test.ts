@@ -34,6 +34,9 @@ const job = (overrides: Partial<PushJob> = {}): PushJob => ({
   media_kind: null,
   media_title: null,
   series_title: null,
+  // Null by default, because most eligible types are not about a conversation. The two
+  // that are carry it, and the tests below assert both directions.
+  feed_event_id: null,
   tokens: [{ token: 'ExponentPushToken[aaa]', platform: 'ios' }],
   ...overrides,
 });
@@ -100,14 +103,48 @@ Deno.test('says nothing at all when it cannot name the actor', () => {
  * is the point: a push is read on a locked screen and its contents are a decision, not a
  * default.
  */
-Deno.test('the tap payload carries four fields and no more', () => {
+Deno.test('the tap payload carries five fields and no more', () => {
   const content = contentFor(job({ media_item_id: '22222222-2222-2222-2222-222222222222' }));
   assertEquals(Object.keys(content!.data).sort(), [
     'actorUsername',
+    'feedEventId',
     'kind',
     'mediaItemId',
     'notificationId',
   ]);
+});
+
+/**
+ * The field the thread page needs, and the reason it is a field rather than a lookup.
+ *
+ * A tapped push must land where a tapped inbox row lands. Before this the payload carried
+ * the title and not the event, so a comment push opened the title page while the same
+ * notification in the inbox opened the conversation — two destinations for one event, and
+ * the invisible half of the pair, because the inbox is what anybody testing looks at.
+ *
+ * It is still not content. An id names a row whose every read goes through
+ * `activity_comments`, which asks `can_view_profile` about the event before returning
+ * anything; the operating system renders it as nothing at all.
+ */
+Deno.test('a comment push carries the conversation it is about', () => {
+  const content = contentFor(
+    job({ type: 'comment', feed_event_id: '33333333-3333-3333-3333-333333333333' }),
+  );
+  assertEquals(content!.data.feedEventId, '33333333-3333-3333-3333-333333333333');
+});
+
+/**
+ * A job from a database that has not applied `20260826000600` has no such key at all, and
+ * `undefined` in a JSON payload is a field that silently disappears rather than one the
+ * client can read as absent. `hrefForPush` then falls back to the title, which is the
+ * behaviour that shipped before this field existed.
+ */
+Deno.test('an older job without the field sends an explicit null', () => {
+  const older = job();
+  delete (older as { feed_event_id?: unknown }).feed_event_id;
+  const content = contentFor(older);
+  assertEquals(content!.data.feedEventId, null);
+  assertEquals('feedEventId' in content!.data, true);
 });
 
 // ---------------------------------------------------------------------------

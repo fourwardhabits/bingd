@@ -524,13 +524,23 @@ create index comment_reactions_comment on comment_reactions (comment_id);
 create index comment_reactions_user on comment_reactions (user_id);
 
 /**
- * Read authorisation is the comment's own, restated by reference rather than by copy.
+ * Read authorisation is **two** predicates, exactly as `reactions_read` is.
  *
+ * The first is the comment's own, restated by reference rather than by copy:
  * `exists (select 1 from comments c where c.id = comment_id)` is evaluated as the
- * querying role, so `comments_read` applies to it -- meaning this policy admits a
- * reaction exactly when the caller may read the comment it is on. A blocked author's
- * comment is invisible, so the likes on it are too, and there is no second place where
- * the two-predicate rule could be got wrong.
+ * querying role, so `comments_read` applies to it -- meaning a reaction is admitted only
+ * when the caller may read the comment it is on. A blocked author's comment is
+ * invisible, so the likes on it are too.
+ *
+ * The second is `can_i_view(user_id)`, and **leaving it out was a real hole**, found by
+ * independent review 43 as a Major. Without it, the row is admitted on the strength of
+ * the *comment* alone -- so a blocked account liking a comment this reader can see puts
+ * that account's `user_id` into a `select comment_id, user_id from comment_reactions`
+ * that PostgREST will happily serve. The comment being readable says nothing about
+ * whether the person who liked it is, and those are two different disclosures.
+ *
+ * 20260816000200 wrote the same pair for `reactions` for the same reason, and the whole
+ * point of a convention is that a new table follows it. This is that table doing so.
  *
  * `anon` is revoked for the reason comments are: no signed-out surface renders any of
  * this, and a grant should follow a surface rather than precede it.
@@ -538,7 +548,10 @@ create index comment_reactions_user on comment_reactions (user_id);
 alter table comment_reactions enable row level security;
 
 create policy comment_reactions_read on comment_reactions for select
-  using (exists (select 1 from comments c where c.id = comment_id));
+  using (
+    can_i_view(user_id)
+    and exists (select 1 from comments c where c.id = comment_id)
+  );
 
 revoke select on comment_reactions from anon;
 
@@ -665,6 +678,44 @@ as $$
       from profiles p, me
      where p.id in (select distinct r.author_id from rows r)
        and can_view_profile(me.id, p.id)
+  ),
+  -- And each *reactor* once, for the same reason and at the same arity. A like count is
+  -- a number about people, so it is filtered by the same rule that decides whether those
+  -- people can be seen at all.
+  reactors as (
+    select p.id
+      from profiles p, me
+     where p.id in (
+             select distinct cr.user_id
+               from comment_reactions cr
+               join rows r on r.id = cr.comment_id
+           )
+       and can_view_profile(me.id, p.id)
+  ),
+  /**
+   * Which tombstones are worth drawing **for this reader**.
+   *
+   * A tombstone exists only to hold replies together, and whether it has any is a
+   * viewer-relative question: `delete_comment` runs as the owner and counts every reply,
+   * because a reply the *author* cannot see is still a reply somebody else can read and
+   * must not be destroyed. But the reader who blocked its author sees none of them, and
+   * would be left looking at "Comment deleted" with nothing under it — a spacer holding
+   * nothing apart. Independent review 43 found it as a Minor.
+   *
+   * So the row survives in the table and is dropped from *this* result, which is the only
+   * place the answer can be right for everybody at once.
+   */
+  live_roots as (
+    select r.id
+      from rows r
+     where r.deleted_at is null
+        or exists (
+             select 1
+               from rows reply
+               join authors a on a.id = reply.author_id
+              where reply.parent_id = r.id
+                and reply.deleted_at is null
+           )
   )
   select r.id,
          r.parent_id,
@@ -679,7 +730,16 @@ as $$
          r.created_at,
          r.edited_at,
          r.deleted_at,
-         (select count(*)::integer from comment_reactions cr where cr.comment_id = r.id),
+         -- Counted through the same visibility rule the policy applies, and not merely
+         -- summed. This function is definer, so `comment_reactions_read` does *not*
+         -- protect it: without the join a blocked account's like would be included in a
+         -- number this reader is shown, which is the "absent rather than counted
+         -- anonymously" rule `useReactions` states for the activity-level reactions and
+         -- which independent review 43 found missing here.
+         (select count(*)::integer
+            from comment_reactions cr
+            join reactors rv on rv.id = cr.user_id
+           where cr.comment_id = r.id),
          exists (
            select 1 from comment_reactions cr, me
             where cr.comment_id = r.id and cr.user_id = me.id
@@ -689,6 +749,10 @@ as $$
     -- reader may not see is *absent* rather than anonymised. A blocked person's remark
     -- does not appear, and neither does the fact that they made one.
     join authors a on a.id = r.author_id
+    -- And a tombstone only where this reader can see something under it. Joining on the
+    -- *root* rather than on the row is what makes one condition cover both cases: a root
+    -- must be live to appear, and a reply must have a live root to appear under.
+    join live_roots lr on lr.id = coalesce(r.parent_id, r.id)
    -- Oldest first, because a conversation runs downward -- and the root before its
    -- replies, because the client draws one indent level and needs no sorting of its own.
    order by coalesce(r.parent_id, r.id), (r.parent_id is not null), r.created_at, r.id;

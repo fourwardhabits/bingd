@@ -469,6 +469,54 @@ describe('liking a comment', () => {
     assert.equal(error.code, 'P0002');
   });
 
+  /**
+   * Independent review 43, as a Major: the policy admitted a like on the strength of the
+   * *comment* alone, so a blocked account's `user_id` was selectable by anybody who could
+   * read the comment they liked. `reactions_read` has required both predicates since
+   * 20260816000200 and this one now does too.
+   */
+  it('hides a blocked account’s like from a direct read', async () => {
+    const event = await eventOf(alice, await movie('ct_like_blocked'));
+    const one = await comment(bob, event, 'likeable by everybody');
+
+    await like(carol, one.comment_id, true);
+
+    // Dave can read Alice's activity and Bob's comment, and has blocked Carol.
+    await t.actAs(dave);
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2) on conflict do nothing`, [
+      dave,
+      carol,
+    ]);
+
+    const rows = await t.asUser(dave, async () => {
+      const { rows } = await t.sql(
+        `select user_id from comment_reactions where comment_id = $1`,
+        [one.comment_id],
+      );
+      return rows;
+    });
+    assert.deepEqual(rows, [], 'a comment being readable says nothing about who liked it');
+  });
+
+  it('does not count a blocked account’s like in the number shown', async () => {
+    const event = await eventOf(alice, await movie('ct_like_count_blocked'));
+    const one = await comment(bob, event, 'likeable');
+
+    await like(alice, one.comment_id, true);
+    await like(carol, one.comment_id, true);
+
+    await t.actAs(dave);
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2) on conflict do nothing`, [
+      dave,
+      carol,
+    ]);
+
+    const rows = await thread(dave, event);
+    // Two people liked it; Dave may see one of them. A number that counted the other
+    // anonymously would tell him something the list deliberately does not.
+    assert.equal(rows[0].reaction_count, 1);
+  });
+
   it('refuses a comment on activity the caller cannot see', async () => {
     const hidden = await t.createUser({ username: 'ct_hidden', visibility: 'private' });
     const event = await eventOf(hidden, await movie('ct_like_private'));
@@ -512,6 +560,36 @@ describe('who may read a thread', () => {
 
     const rows = await thread(dave, event);
     assert.deepEqual(rows.map((r) => r.username), ['ct_alice']);
+  });
+
+  /**
+   * Independent review 43, as a Minor.
+   *
+   * `delete_comment` runs as the owner and counts *every* reply, deliberately: a reply
+   * the deleting author cannot see is still somebody else's writing and must not be
+   * destroyed. The cost is that the author is then left looking at a tombstone whose only
+   * reply is invisible to them — a spacer holding nothing apart. The read is the only
+   * place that can be right for both readers at once.
+   */
+  it('hides a tombstone whose only replies this reader cannot see', async () => {
+    const event = await eventOf(alice, await movie('ct_orphan_tombstone'));
+    const root = await comment(alice, event, 'alice will retract this');
+    await comment(bob, event, "bob's reply", { parent: root.comment_id });
+
+    // Alice blocks Bob, then retracts her own root. The root is tombstoned rather than
+    // removed, because Bob's reply is still there for everybody else.
+    await t.actAs(alice);
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [alice, bob]);
+    assert.equal((await remove(alice, root.comment_id)).outcome, 'tombstoned');
+
+    // Alice sees an empty conversation rather than "Comment deleted" over nothing.
+    assert.deepEqual(await thread(alice, event), []);
+
+    // And Carol, who has blocked nobody, still sees both the tombstone and the reply.
+    const asCarol = await thread(carol, event);
+    assert.equal(asCarol.length, 2);
+    assert.ok(asCarol[0].deleted_at);
+    assert.equal(asCarol[1].body, "bob's reply");
   });
 
   it('counts nothing for an event the caller cannot see', async () => {

@@ -40,13 +40,17 @@ jest.mock('expo-router', () => ({
   useFocusEffect: () => {},
 }));
 
+const mockAuth = { status: 'ready' as string };
+
 jest.mock('@/features/auth', () => ({
-  useCurrentProfile: () => ({
-    id: 'viewer-1',
-    username: 'sai',
-    display_name: 'Sai',
-    avatarUri: null,
-  }),
+  useAuth: () => 
+    mockAuth.status === 'ready'
+      ? {
+          status: 'ready',
+          userId: 'viewer-1',
+          profile: { id: 'viewer-1', username: 'sai', display_name: 'Sai', avatarUri: null },
+        }
+      : { status: mockAuth.status },
 }));
 
 jest.mock('@/features/collection/use-watched', () => ({
@@ -129,6 +133,7 @@ beforeEach(() => {
   mockEvent = event();
   mockEventError = false;
   mockComments = [];
+  mockAuth.status = 'ready';
 });
 
 describe('the activity above the conversation', () => {
@@ -183,6 +188,36 @@ describe('the activity above the conversation', () => {
     await waitFor(() => expect(view.getByText(/recontextualises/)).toBeTruthy());
     // A control that scrolls you six points down the screen you are on is noise.
     expect(view.queryByLabelText(/comments/i)).toBeNull();
+  });
+});
+
+describe('arriving before the session has resolved', () => {
+  /**
+   * The cold start, which is how this screen is *usually* reached: a tap on a
+   * notification starts the process, and `getSession` is still in flight when the route
+   * mounts.
+   *
+   * Every other protected screen opens with `useCurrentProfile()`, which throws outside a
+   * ready session — correct for them, because they are reached from inside the app. Here
+   * it would turn "not known yet" into a caught error, so this one waits instead.
+   * Independent review 43 raised the cold-start path; this is the half of it that belongs
+   * to the route.
+   */
+  it('waits rather than throwing', async () => {
+    mockAuth.status = 'loading';
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    expect(view.queryByText('This conversation is no longer available.')).toBeNull();
+    expect(view.queryByLabelText(/Sinners/)).toBeNull();
+  });
+
+  it('renders the conversation once the session arrives', async () => {
+    mockComments = [comment()];
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    // The ready case, asserted next to the loading one so the pair reads as a transition
+    // rather than as two unrelated states.
+    await waitFor(() => expect(view.getByText(/recontextualises/)).toBeTruthy());
   });
 });
 
