@@ -601,20 +601,56 @@ describe('the pending ceiling', () => {
     assert.equal((await requests(recipient)).length, 5);
   });
 
-  it('does not count a resend of something already pending', async () => {
-    const ids = [];
+  /**
+   * The oracle Codex found in the first version of the cap, and the reason it is now
+   * asked of the pair rather than of the row.
+   *
+   * With the queue full, a resend used to answer differently depending on what the
+   * recipient had done with that exact title: `ok` for one still waiting, refused for
+   * one they had dismissed. Two answers separated by a decision made in private — the
+   * same disclosure §2 revokes a column privilege to prevent, rebuilt out of a refusal
+   * code. At the ceiling every resend must now answer identically.
+   */
+  it('answers identically at the ceiling whatever the recipient did with that title', async () => {
+    const waiting = [];
     for (let i = 0; i < 5; i += 1) {
-      const id = await movie(`req_cap_resend_${i}`);
-      ids.push(id);
+      const id = await movie(`req_cap_probe_${i}`);
+      waiting.push(id);
       await send(sender, recipient, id);
     }
 
-    assert.equal(
-      (await send(sender, recipient, ids[0])).status,
-      'ok',
-      'the fifth recommendation must stay repeatable',
-    );
+    // One of them is dismissed and immediately replaced, so the queue is full again and
+    // the pair now holds both a pending row and a dismissed one.
+    const [row] = await requests(recipient);
+    const dismissedMedia = row.media_item_id;
+    await dismiss(recipient, row.id);
+    await send(sender, recipient, await movie('req_cap_probe_refill'));
     assert.equal((await requests(recipient)).length, 5);
+
+    const stillWaiting = waiting.find((id) => id !== dismissedMedia);
+    const resendPending = await send(sender, recipient, stillWaiting);
+    const resendDismissed = await send(sender, recipient, dismissedMedia);
+
+    assert.equal(resendDismissed.status, 'refused');
+    assert.equal(resendDismissed.reason, 'too_many_pending');
+    assert.deepEqual(
+      { status: resendPending.status, reason: resendPending.reason },
+      { status: resendDismissed.status, reason: resendDismissed.reason },
+      'or the sender learns which of their recommendations was thrown away',
+    );
+    assert.equal((await requests(recipient)).length, 5, 'and nothing was revived');
+  });
+
+  it('does not apply to somebody who follows the sender back', async () => {
+    for (let i = 0; i < 5; i += 1) await send(sender, recipient, await movie(`req_cap_then_${i}`));
+
+    // The real writer, not a direct insert: the release lives inside `follow`, and a
+    // row put straight into `follows` would leave the queue full and prove nothing.
+    await as(recipient, () => t.sql(`select follow(gen_random_uuid(), $1)`, [sender]));
+
+    assert.equal((await send(sender, recipient, await movie('req_cap_after_follow'))).status, 'ok');
+    assert.equal((await delivered(recipient)).length, 6);
+    assert.equal((await requests(recipient)).length, 0);
   });
 
   it('frees a slot as soon as the recipient decides about one', async () => {

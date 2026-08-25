@@ -158,7 +158,18 @@ export function useRecommendationRequests(viewerId: string) {
   });
 }
 
-export type RequestActionResult = { ok: true } | { ok: false; message: string };
+/**
+ * `changed` carries the meaning it does in `collection/writes.ts`: **the write may
+ * already have happened**. Absent means the server answered no — a refusal this app
+ * raises on purpose — which is the only case in which nothing was written.
+ *
+ * The caller needs it for one thing beyond redrawing: an operation id must be *held*
+ * across a retry when, and only when, the outcome was never established. See
+ * `RecommendationRequestsSheet`.
+ */
+export type RequestActionResult =
+  | { ok: true }
+  | { ok: false; message: string; changed: boolean };
 
 /**
  * Add one, dismiss one, dismiss all.
@@ -188,8 +199,9 @@ export function useRequestActions(viewerId: string) {
     failed: string,
   ): Promise<RequestActionResult> => {
     const { error } = await call();
+    const outcome = classifyWrite(error as { code?: string } | null);
 
-    if (mustReconcile(classifyWrite(error as { code?: string } | null))) {
+    if (mustReconcile(outcome)) {
       invalidateRequests(queryClient, viewerId);
       // Hype Courier counts recommendations, and an add moves one into the list its
       // metric reads (`awards/invalidate.ts`).
@@ -197,12 +209,16 @@ export function useRequestActions(viewerId: string) {
     }
 
     if (error) {
+      // `unknown` is the outcome nobody established — a dropped socket, a timeout, an
+      // `08007` out of the pooler — any of which can carry a committed transaction.
+      const changed = outcome === 'unknown';
       const code = (error as { code?: string } | null)?.code;
-      // `assert_can_write`. Nothing else on these three paths raises on purpose.
+      // `assert_can_write`. Nothing else on these three paths raises on purpose, and it
+      // proves nothing was written.
       if (code === '42501') {
-        return { ok: false, message: 'Your account cannot make changes right now.' };
+        return { ok: false, changed, message: 'Your account cannot make changes right now.' };
       }
-      return { ok: false, message: failed };
+      return { ok: false, changed, message: failed };
     }
     return { ok: true };
   };

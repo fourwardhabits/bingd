@@ -306,6 +306,11 @@ comment on function _release_recommendations(uuid, uuid) is
 -- somebody will actually read. It is checked *after* the operation claim, like every
 -- other refusal here, so a refused attempt still costs a slot against the hourly rate
 -- limit. Free retries against a ceiling are how a ceiling becomes a busy loop.
+--
+-- It is asked of the **pair** rather than of the row being sent, and the comment at the
+-- check itself says why: a ceiling that answers differently depending on what the
+-- recipient did with a particular title is the privacy boundary of this whole tranche,
+-- rebuilt out of a refusal code.
 -- ---------------------------------------------------------------------------
 
 create or replace function recommend_title(
@@ -379,20 +384,39 @@ begin
 
   v_direct := _delivers_directly_to(p_recipient_id);
 
-  -- The state this send is aiming at. A delivered row stays delivered whatever the
-  -- relationship has since become -- see the header on unfollow.
-  if v_state = 'delivered' then
-    v_next := 'delivered';
-  elsif v_direct then
-    v_next := 'delivered';
-  else
-    v_next := 'pending';
-  end if;
-
-  -- The cap is about *adding* to the queue, so it is asked only when this send would.
-  -- A resend of something already pending has already been counted, and refusing it
-  -- would make the fifth recommendation unrepeatable for no benefit.
-  if v_next = 'pending' and v_state is distinct from 'pending' then
+  -- ---------------------------------------------------------------------------
+  -- The ceiling, asked BEFORE the existing row's state is consulted.
+  --
+  -- **That ordering is the whole of it, and the first version got it wrong.** The cap
+  -- used to be asked only when a send would *add* to the queue -- skipped for a resend
+  -- of something already pending, on the reasoning that it had been counted already.
+  -- Codex found what that buys a determined sender: with the queue full, resending a
+  -- **pending** title succeeded and resending a **dismissed** one was refused, because
+  -- only the second was trying to enter `pending`. Two different answers to the same
+  -- call, separated by a decision the recipient made in private. That is the exact
+  -- oracle §2 revokes a column privilege to prevent, rebuilt out of a refusal code.
+  --
+  -- So the question is now asked of the *pair* and nothing else: is the recipient
+  -- following back, and how many of this sender's recommendations are waiting. Neither
+  -- half is a fact about any one recommendation, and neither can be made into one.
+  --
+  -- What the sender can still learn is the aggregate -- that several of theirs are
+  -- waiting -- and that is deliberate: it is what the refusal message says out loud
+  -- (§22). Any cap discloses that it has been reached; what none of them may disclose
+  -- is *which* item is which.
+  --
+  -- `v_direct` gates it because a recipient who follows back has said "send me things",
+  -- and their queue is empty anyway: the release empties it the moment the follow lands.
+  -- The only way to reach this with `v_direct` true is a resend of a row delivered
+  -- before an unfollow, and refusing that would be a ceiling applied to somebody who
+  -- has opted out of needing one.
+  --
+  -- The cost is that a sender at the ceiling cannot bump their own waiting
+  -- recommendation back to the top of the list. That is not a loss worth an oracle,
+  -- and it is arguably the better behaviour: the thing they are resending is already
+  -- waiting, which is what the message tells them.
+  -- ---------------------------------------------------------------------------
+  if not v_direct then
     select coalesce(
              (select (value)::integer from app_config where key = 'recommendations.max_pending_per_pair'),
              5)
@@ -406,10 +430,19 @@ begin
 
     if v_pending >= v_cap then
       -- Neutral on purpose. It says how many are waiting and nothing about what the
-      -- recipient has or has not done with the others -- "they dismissed four of
-      -- yours" is the oracle §2 exists to close, said in a sentence.
+      -- recipient has or has not done with any of them.
       return jsonb_build_object('status', 'refused', 'reason', 'too_many_pending');
     end if;
+  end if;
+
+  -- The state this send is aiming at. A delivered row stays delivered whatever the
+  -- relationship has since become -- see the header on unfollow.
+  if v_state = 'delivered' then
+    v_next := 'delivered';
+  elsif v_direct then
+    v_next := 'delivered';
+  else
+    v_next := 'pending';
   end if;
 
   v_created := v_id is null;

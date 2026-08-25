@@ -77,8 +77,18 @@ export function RecommendationRequestsSheet({
    *
    * A ref because it is machinery and nothing renders from it. Held rather than minted
    * per press for the reason `20260826000400` §9 gives: a sweep replayed under a fresh
-   * id would take away requests that arrived between the two attempts. Cleared once the
-   * server has answered, so a *deliberate* second sweep later is a second intent.
+   * id would take away requests that arrived between the two attempts — which is the one
+   * way this feature could still silently lose a recommendation.
+   *
+   * **Released only when the server actually answered**, which is the asymmetry
+   * `lib/operation-intent.ts` records and the first version of this got wrong: it cleared
+   * the id unconditionally, so the exact case the id exists for — a sweep that commits,
+   * loses its reply, is reported to the reader as a failure, and is pressed again — got a
+   * fresh id and swept whatever had arrived since.
+   *
+   * The other direction is dangerous too, which is why this is not simply "always hold":
+   * holding a *spent* id would have the next deliberate sweep answered `already_applied`,
+   * dismissing nothing while reporting success.
    */
   const sweepIntent = useRef<string | null>(null);
 
@@ -110,9 +120,9 @@ export function RecommendationRequestsSheet({
               sweepIntent.current = held;
               setError(null);
               const result = await actions.dismissAll({ operationId: held });
-              // Released the moment the server answers anything: a spent id replayed
-              // would be met with `already_applied` and sweep nothing at all.
-              sweepIntent.current = null;
+              // Kept only while the outcome is unknown. See the ref's own comment: both
+              // directions of getting this wrong lose something.
+              if (result.ok || !result.changed) sweepIntent.current = null;
               report(result);
             })(),
         },

@@ -372,4 +372,55 @@ describe('dismiss all', () => {
       ),
     );
   });
+
+  /**
+   * The operation id is **held** across a retry whose outcome nobody established, and
+   * released once the server has actually answered.
+   *
+   * This is the one way this feature could still lose a recommendation silently: a
+   * sweep commits, its reply is lost, the reader is told it failed and presses again,
+   * and a fresh id walks past `_claim_operation` and takes away whatever arrived in
+   * between — requests they never saw. Found by Codex on the first version, which
+   * cleared the ref unconditionally.
+   */
+  it('reuses the operation id after a lost reply, and a fresh one after a real answer', async () => {
+    let confirm: (() => void) | undefined;
+    jest.spyOn(Alert, 'alert').mockImplementation((_title, _body, buttons) => {
+      confirm = (buttons ?? []).find((button) => button.text === 'Dismiss all')?.onPress as
+        | (() => void)
+        | undefined;
+    });
+
+    const sweep = async () => {
+      await fireEvent.press(view.getByLabelText('More options'));
+      await fireEvent.press(view.getByText('Dismiss all'));
+      confirm?.();
+    };
+    const idsSent = () =>
+      mockRpc.mock.calls
+        .filter(([name]) => name === 'dismiss_all_recommendation_requests')
+        .map(([, args]) => (args as { p_operation_id: string }).p_operation_id);
+
+    // A dropped socket: nothing proves the transaction did not commit.
+    mockRpcErrors.dismiss_all_recommendation_requests = { code: '08007' };
+    const view = await openSheet();
+
+    await sweep();
+    await waitFor(() => expect(idsSent()).toHaveLength(1));
+
+    await sweep();
+    await waitFor(() => expect(idsSent()).toHaveLength(2));
+    expect(idsSent()[0]).toBe(idsSent()[1]);
+
+    // Now the server answers. The intent is spent, so a later sweep is a new one —
+    // holding the id would have it met with `already_applied` and dismiss nothing.
+    mockRpcErrors = {};
+    await sweep();
+    await waitFor(() => expect(idsSent()).toHaveLength(3));
+    expect(idsSent()[2]).toBe(idsSent()[1]);
+
+    await sweep();
+    await waitFor(() => expect(idsSent()).toHaveLength(4));
+    expect(idsSent()[3]).not.toBe(idsSent()[2]);
+  });
 });
