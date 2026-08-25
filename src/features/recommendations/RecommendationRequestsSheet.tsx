@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState, type MutableRefObject } from 'react';
+import { useRef, useState, type MutableRefObject } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { newOperationId } from '@/features/collection/writes';
@@ -88,6 +88,8 @@ export function RecommendationRequestsSheet({
   const [menuOpen, setMenuOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Whether a Dismiss all is in flight right now. See `confirmDismissAll`. */
+  const sweeping = useRef(false);
 
   const report = (result: { ok: boolean; message?: string }) => {
     setError(result.ok ? null : (result.message ?? 'Something went wrong. Try again.'));
@@ -114,20 +116,48 @@ export function RecommendationRequestsSheet({
           onPress: () =>
             void (async () => {
               /**
+               * **One sweep at a time**, which is not only tidiness.
+               *
+               * Two confirmations in flight share the held id, so the server is safe
+               * either way — the second is answered `already_applied`. The *ref* is
+               * not: the one that answers first clears it, and if the other then loses
+               * its reply there is nothing left to hold, so the next retry mints a
+               * fresh id and can sweep what arrived since. Refusing the overlap is a
+               * smaller fix than reference-counting it, and a second destructive sweep
+               * queued behind the first is not a thing anybody meant to ask for.
+               *
+               * A ref rather than `actions.busy`: that is React state and does not
+               * update between two presses in the same tick, which is exactly the
+               * interval this has to cover.
+               */
+              if (sweeping.current) return;
+              sweeping.current = true;
+
+              /**
                * **Held only while the outcome is unknown**, which is the asymmetry
-               * `lib/operation-intent.ts` records and the first version of this got
-               * wrong twice — once by clearing it unconditionally, and once by keeping
-               * it in a ref this component owned, which closing the sheet reset.
+               * `lib/operation-intent.ts` records and this got wrong twice — once by
+               * clearing it unconditionally, and once by keeping it in a ref this
+               * component owned, which closing the sheet reset.
                *
                * Both directions lose something. Minting a fresh id after a lost reply
                * sweeps requests that arrived since, which the reader never saw. Reusing
                * a *spent* one has the next deliberate sweep answered `already_applied`
                * — nothing dismissed, success reported.
+               *
+               * **It is memory, and deliberately not storage.** An id that survived the
+               * app being killed would need a durable store and an expiry policy, and
+               * the case it buys is one where the reader has already been given the
+               * honest answer: on relaunch there is no stale error message, the sheet
+               * refetches, and they are looking at the exact list a sweep would clear
+               * when they confirm. That is an informed decision rather than a silent
+               * loss — which is precisely what the in-session case is not, because
+               * there the reader was told it failed.
                */
               const held = sweepIntent.current ?? newOperationId();
               sweepIntent.current = held;
               setError(null);
               const result = await actions.dismissAll({ operationId: held });
+              sweeping.current = false;
               if (result.ok || !result.changed) sweepIntent.current = null;
               report(result);
             })(),

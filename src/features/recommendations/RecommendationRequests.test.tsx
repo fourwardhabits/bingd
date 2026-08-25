@@ -466,4 +466,34 @@ describe('dismiss all', () => {
     await waitFor(() => expect(idsSent()).toHaveLength(2));
     expect(idsSent()[1]).toBe(idsSent()[0]);
   });
+
+  /**
+   * Two sweeps cannot be in flight at once.
+   *
+   * The server is safe either way — both would carry the held id and the second would be
+   * answered `already_applied` — but the *ref* is not: whichever answers first clears
+   * it, and if the other then loses its reply there is nothing left to hold. Codex found
+   * that tail; refusing the overlap closes it, and a second destructive sweep queued
+   * behind the first is not something anybody asked for.
+   */
+  it('refuses a second sweep while one is still in flight', async () => {
+    let confirm: (() => void) | undefined;
+    jest.spyOn(Alert, 'alert').mockImplementation((_title, _body, buttons) => {
+      confirm = (buttons ?? []).find((button) => button.text === 'Dismiss all')?.onPress as
+        | (() => void)
+        | undefined;
+    });
+    const sweeps = () =>
+      mockRpc.mock.calls.filter(([name]) => name === 'dismiss_all_recommendation_requests');
+
+    const view = await openSheet();
+    await fireEvent.press(view.getByLabelText('More options'));
+    await fireEvent.press(view.getByText('Dismiss all'));
+
+    // Both confirmations before either can settle.
+    confirm?.();
+    confirm?.();
+
+    await waitFor(() => expect(sweeps()).toHaveLength(1));
+  });
 });
