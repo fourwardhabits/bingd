@@ -45,6 +45,20 @@ beforeEach(() => {
   mockRpcCalls.length = 0;
 });
 
+/**
+ * The People suggestion lists, seeded alongside the rest and asserted **not** to move.
+ *
+ * Separate from `KEYS` only because the assertion about them is the opposite one — they
+ * are seeded at the same moment and by the same line, which is what makes the absence
+ * test mean something. Seeding them *after* the follow would create fresh entries that
+ * nothing had had the chance to invalidate, and the test would pass with the keys
+ * re-added. Independent review 42b.
+ */
+const PEOPLE_KEYS = [
+  ['people-mutuals', 'viewer'],
+  ['people-taste-matches', 'viewer'],
+];
+
 /** Seeds one entry per key so `isInvalidated` has something to report on. */
 const KEYS = [
   ['relationships', 'viewer'],
@@ -68,7 +82,7 @@ describe('a follow', () => {
     );
     // Awaited: everything in this library is async as of v14, `renderHook` included.
     const { result } = await renderHook(() => useSocialWrites('viewer', 'profile'), { wrapper });
-    for (const key of KEYS) client.setQueryData(key, 'seeded');
+    for (const key of [...KEYS, ...PEOPLE_KEYS]) client.setQueryData(key, 'seeded');
 
     // Inside act: the hook flips its own busy flag either side of the RPC, and a state
     // update outside act is a warning that would eventually become a flake.
@@ -129,13 +143,13 @@ describe('a follow', () => {
    * a different query and *is* invalidated.
    */
   it('leaves the People suggestion lists where they were', async () => {
-    const { client, invalidated } = await followAnna();
-    for (const key of [['people-mutuals', 'viewer'], ['people-taste-matches', 'viewer']]) {
-      client.setQueryData(key, 'seeded');
-    }
+    const { invalidated } = await followAnna();
 
+    // The follow has landed and everything it *does* move has moved, so this is a
+    // statement about the same instant rather than about ordering.
     await waitFor(() => expect(invalidated(['relationships', 'viewer'])).toBe(true));
-    expect(invalidated(['people-mutuals', 'viewer'])).toBe(false);
-    expect(invalidated(['people-taste-matches', 'viewer'])).toBe(false);
+    for (const key of PEOPLE_KEYS) {
+      expect(invalidated(key)).toBe(false);
+    }
   });
 });
