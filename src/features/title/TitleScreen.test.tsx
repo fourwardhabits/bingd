@@ -1290,8 +1290,22 @@ describe('the following score with nothing to say', () => {
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
+    /**
+     * Anchored on the **community** score, not on the "Following" heading.
+     *
+     * The heading is drawn before either number arrives, so waiting on it proves only
+     * that the section exists. This assertion needs more than that: it says "Not enough
+     * ratings" appears *once*, which is only true after the community row has resolved to
+     * its 7.4 — before that both rows are empty and both say it, and `getByText` fails
+     * with "found multiple elements".
+     *
+     * It passed locally and failed on CI (run 32876993932), which is the signature of a
+     * wait that gates on the wrong thing rather than of a real defect. Same class as the
+     * one `PrivacyScreen.test.tsx` records.
+     */
+    await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
     expect(view.getByText('Not enough ratings')).toBeTruthy();
+    expect(view.getByText('Following')).toBeTruthy();
     // The old copy named the reader's following list back to them. It is gone.
     expect(view.queryByText('Nobody you follow has ranked this')).toBeNull();
   });
@@ -1305,8 +1319,13 @@ describe('the following score with nothing to say', () => {
     // The row used to be absent in this case. Two silences told apart was a real
     // distinction and the founder collapsed it: the reader can act on neither, and a
     // row that materialises when the data arrives moves the page under them.
-    await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
+    //
+    // Anchored on the community score for the reason the test above records: the
+    // "Following" heading is drawn before either number arrives, so a single match for
+    // "Not enough ratings" is only a fact once the other row has resolved.
+    await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
     expect(view.getByText('Not enough ratings')).toBeTruthy();
+    expect(view.getByText('Following')).toBeTruthy();
   });
 
   it('draws the grey circle rather than a faded number', async () => {

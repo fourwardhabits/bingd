@@ -250,6 +250,46 @@ describe('spoilers', () => {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * The Feed's comments icon still opens a **sheet**, which is the founder's explicit
+ * instruction for this pass: a comment *notification* opens the dedicated thread page,
+ * and the comments *button* on a feed card goes on doing what it always did.
+ *
+ * Worth asserting rather than assuming, because `20260826000600` moved the entire body of
+ * this component into `CommentThread` so the page could share it. The obvious way for
+ * that refactor to go wrong is for the sheet to stop being a sheet — everything else in
+ * this file would still pass.
+ */
+describe('the Feed interaction, unchanged', () => {
+  it('opens as a sheet rather than as a screen', async () => {
+    mockCommentRows = [comment()];
+    const view = await open({ watched: new Set([FILM]) });
+
+    // `Sheet` announces itself by its label and is the app's one modal pattern
+    // (design-system.md §8). A page would have neither.
+    expect(view.getByLabelText('Comments')).toBeTruthy();
+    expect(view.getByText(/recontextualises/)).toBeTruthy();
+  });
+
+  it('draws nothing at all when no activity is open', async () => {
+    const view = await renderWithProviders(
+      <CommentSheet
+        eventId={null}
+        mediaItemId={FILM}
+        title="Sinners"
+        viewerId={VIEWER}
+        watched={new Set()}
+        onClose={jest.fn()}
+        onPressPerson={jest.fn()}
+      />,
+    );
+
+    // Closing the sheet is `eventId: null`, and a visible sheet with nothing in it would
+    // animate an empty panel up every time the feed closed one.
+    expect(view.queryByLabelText('Comments')).toBeNull();
+  });
+});
+
 describe('the list', () => {
   it('says so when there is nothing yet', async () => {
     const view = await open();
