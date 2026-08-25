@@ -141,9 +141,13 @@ jobs:
                   without.map(([l]) => l).join(', ')
               );
             }
+            // Every template hole in this script is escaped, because the whole thing is
+            // inside a double-quoted shell string — an unescaped one is a bash substitution
+            // and not a JS template hole. The loop below has always escaped them; this line
+            // did not, and bash answered "bad substitution" before node ever saw the file.
             console.log(
               LANE_BACKENDS.production.length
-                ? `production: ${LANE_BACKENDS.production.join(', ')}`
+                ? \`production: \${LANE_BACKENDS.production.join(', ')}\`
                 : 'production: no backend declared, covered by the negative step below'
             );
 
