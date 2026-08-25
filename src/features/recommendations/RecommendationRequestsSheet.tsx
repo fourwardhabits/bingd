@@ -355,6 +355,9 @@ function SenderGroup({
           label={label}
           kind="tertiary"
           size="sm"
+          // `sm` is 36pt tall; the slop is what carries it past the 44pt floor, which is
+          // the rule for every compact control in the app (`ui/components/Button.tsx`).
+          hitSlop={theme.space[2]}
           // Already following, or already asked. Present rather than hidden, because a
           // control that disappears reads as a control that failed.
           disabled={busy || following || requested}
@@ -437,6 +440,7 @@ function RequestItem({
             label="Add"
             kind="secondary"
             size="sm"
+            hitSlop={theme.space[2]}
             disabled={busy}
             disabledReason={working ? 'Adding this.' : 'Saving your last change.'}
             accessibilityHint={`Adds ${name} to your recommendations`}
@@ -447,6 +451,7 @@ function RequestItem({
             kind="tertiary"
             size="sm"
             tone="secondary"
+            hitSlop={theme.space[2]}
             disabled={busy}
             disabledReason={working ? 'Dismissing this.' : 'Saving your last change.'}
             accessibilityHint={`Removes ${name}. ${item.senderName} is not told.`}
