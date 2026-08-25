@@ -45,7 +45,18 @@ export default function SignInScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState<'password' | 'code' | 'apple' | 'google' | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * The message, and **which field it belongs under**.
+   *
+   * One string bound to the password field was wrong the moment this screen gained a
+   * second submit: 'we could not send a code to that address' is about the email, and
+   * printing it under Password sends somebody to correct the one thing that was not the
+   * problem. The field is part of the error because the error is only useful next to
+   * what it is about.
+   */
+  const [error, setError] = useState<{ field: 'email' | 'password'; message: string } | null>(
+    null,
+  );
   const [appleAvailable, setAppleAvailable] = useState(false);
   const passwordField = useRef<TextInput>(null);
 
@@ -81,7 +92,7 @@ export default function SignInScreen() {
       return;
     }
 
-    setError(result.message ?? 'That did not work. Try again.');
+    setError({ field: 'password', message: result.message ?? 'That did not work. Try again.' });
   };
 
   /**
@@ -102,7 +113,7 @@ export default function SignInScreen() {
         params: { email: email.trim(), mode: 'passwordless' },
       });
     } else {
-      setError(result.message ?? 'That did not work. Try again.');
+      setError({ field: 'email', message: result.message ?? 'That did not work. Try again.' });
     }
   };
 
@@ -116,7 +127,9 @@ export default function SignInScreen() {
     setBusy(null);
     // A dismissed sheet is not a failure and must not leave a message on screen.
     if (!result.ok && !result.cancelled) {
-      setError(result.message ?? 'That did not work. Try again.');
+      // A provider failure belongs to neither field; the password field is where this
+      // screen's messages live and is directly above the provider buttons.
+      setError({ field: 'password', message: result.message ?? 'That did not work. Try again.' });
     }
     // No navigation on success: the router moves the user once the session and the
     // profile check agree on where they belong (useAuthRouting).
@@ -147,6 +160,7 @@ export default function SignInScreen() {
           returnKeyType="next"
           editable={busy === null}
           onSubmitEditing={() => passwordField.current?.focus()}
+          error={error?.field === 'email' ? error.message : undefined}
         />
         <Field
           ref={passwordField}
@@ -164,7 +178,7 @@ export default function SignInScreen() {
           returnKeyType="go"
           editable={busy === null}
           onSubmitEditing={looksLikeEmail && password ? submitPassword : undefined}
-          error={error ?? undefined}
+          error={error?.field === 'password' ? error.message : undefined}
         />
 
         <Button

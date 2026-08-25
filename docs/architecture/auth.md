@@ -194,6 +194,34 @@ Still true and unchanged: **`shouldCreateUser` means abandoned rows accumulate**
 addresses that never verify — the note further down about pruning them applies to
 `signUp` now rather than to the code flow, and the job still does not exist.
 
+##### Accepted: passwordless sign-in distinguishes a known address from an unknown one
+
+Independent review 44, classified **accepted beta risk** rather than fixed.
+
+With `shouldCreateUser: false`, GoTrue answers a known address with a send and an unknown
+one with `otp_disabled`. Repeated attempts therefore tell somebody whether an address has
+a Bingd account. The distinction is GoTrue's own response, not something the client
+computes, and the app extracts nothing further from it — the message says *"We could not
+send a code to that address. Check it, or create an account"* and never *"no account
+exists"*.
+
+Removing it means picking one of two worse things:
+
+- **Navigate to the code screen regardless.** Now a mistyped address sends somebody to
+  wait for a code that will never arrive, with a Resend button aimed at the same wrong
+  place. That is the exact dead end the send-before-navigate ordering exists to prevent,
+  and it would be paid by every ordinary typo to deny a prober one bit.
+- **Set `shouldCreateUser: true`.** That is the second registration route the amendment
+  removed.
+
+Note the two paths that do **not** leak: `signInWithPassword` returns the same
+`invalid_credentials` for a wrong password and a nonexistent account, and `signUp` returns
+the same "check your email" for a free address and a taken one. Enumeration resistance is
+kept where it is free and spent only where the alternative is a dead end for real people.
+
+If it ever needs closing, the honest fix is server-side — a GoTrue setting or a hook that
+makes the two responses identical — not a client that pretends to have sent something.
+
 #### It reached a tester, which is what a written-down risk is for
 
 Everything above was known and written here on 2026-08-21, and a friend-beta tester still hit it on 2026-08-25: *"When I open the app and put in email it sends me a link to confirm and no code. And the confirm link just opens in the email browser."*
