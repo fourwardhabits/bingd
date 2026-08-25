@@ -94,10 +94,27 @@ after(async () => {
 // ---------------------------------------------------------------------------
 
 describe('the shape the founder specified', () => {
-  it('has no way to represent a reply, so threading cannot be added by a client', async () => {
-    // Not a style assertion. Every other exclusion in the addendum — reactions on
-    // comments, media, rich text — is enforced by there being nowhere to put the
-    // thing; this is the one that would otherwise be enforced by a convention.
+  /**
+   * **Two of the assertions that were here have been deliberately inverted**, and the
+   * inversion is the record of a product decision rather than a test being loosened.
+   *
+   * `20260817000100` excluded replies and comment reactions *by absence of a column*,
+   * and this file asserted that absence — for nine days, successfully: nothing drifted
+   * into threading by accident. `20260826000600` is the founder lifting both
+   * exclusions, and it replaces each absence with a rule that is enforced rather than
+   * merely unavailable. So these now assert the new rules, in the same spirit:
+   *
+   *   replies    -> `parent_id` exists, and `_comments_are_one_deep` refuses a second
+   *                 level. See `comment-threads.test.mjs`, which is where the depth
+   *                 bound, the cross-post guard and the tombstone contract are proved.
+   *   reactions  -> `comment_reactions` exists, and has no `kind` column: the six
+   *                 meanings in `reactions` are about a whole activity, and a single
+   *                 remark gets a like or nothing.
+   *
+   * Everything else in that migration's exclusion list is untouched and still asserted
+   * below: one `text` column, so there is nowhere to put a URL, a GIF or rich text.
+   */
+  it('can represent a reply, and exactly one level of them', async () => {
     const { rows } = await t.sql(
       `select column_name from information_schema.columns
         where table_name = 'comments' order by column_name`,
@@ -107,20 +124,68 @@ describe('the shape the founder specified', () => {
       'author_id',
       'body',
       'created_at',
+      'deleted_at',
       'edited_at',
       'feed_event_id',
       'has_spoilers',
       'id',
+      'parent_id',
     ]);
+
+    // The depth bound is a trigger because it is a question about another row, which a
+    // check constraint cannot ask. Its absence would make "one level" a convention.
+    const { rows: triggers } = await t.sql(
+      `select tgname from pg_trigger
+        where tgrelid = 'comments'::regclass and not tgisinternal
+        order by tgname`,
+    );
+    assert.ok(
+      triggers.some((r) => r.tgname === 'comments_are_one_deep'),
+      'the one-level rule must be enforced by the table, not by whichever writer arrives next',
+    );
   });
 
-  it('lets nothing reference a comment, so comment reactions cannot appear by accident', async () => {
+  it('still has exactly one column anybody can write words into', async () => {
+    // The exclusions that were *not* lifted. No media column, no url column, no
+    // rich-text column: a client can render this as anything it likes and there is
+    // still nowhere to put a link.
+    const { rows } = await t.sql(
+      `select column_name, data_type from information_schema.columns
+        where table_name = 'comments' and data_type = 'text'`,
+    );
+    assert.deepEqual(rows.map((r) => r.column_name), ['body']);
+  });
+
+  it('reacts to a comment with a like and not with the six', async () => {
+    const { rows } = await t.sql(
+      `select column_name from information_schema.columns
+        where table_name = 'comment_reactions' order by column_name`,
+    );
+    assert.deepEqual(rows.map((r) => r.column_name), ['comment_id', 'created_at', 'user_id']);
+
+    // The same discipline the original file applied to threading: the excluded thing
+    // has nowhere to go. Without a `kind`, nobody can quietly grow an emoji platform.
+    const { rows: kind } = await t.sql(
+      `select 1 from information_schema.columns
+        where table_name = 'comment_reactions' and column_name = 'kind'`,
+    );
+    assert.deepEqual(kind, []);
+  });
+
+  it('is referenced only by the two things that are meant to reference it', async () => {
     const { rows } = await t.sql(
       `select c.conrelid::regclass::text as referencing
          from pg_constraint c
-        where c.contype = 'f' and c.confrelid = 'comments'::regclass`,
+        where c.contype = 'f' and c.confrelid = 'comments'::regclass
+        order by referencing`,
     );
-    assert.deepEqual(rows, []);
+    // `comments` twice is `parent_id`; the third is the like. Anything else appearing
+    // here is a table that has attached itself to a comment without a migration saying
+    // why — which is the check the original "nothing may reference a comment" was for.
+    assert.deepEqual(
+      rows.map((r) => r.referencing),
+      ['comment_reactions', 'comments'],
+    );
   });
 });
 

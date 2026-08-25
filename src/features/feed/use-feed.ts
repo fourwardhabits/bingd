@@ -195,31 +195,91 @@ export function useActorActivity(actorId: string | null, limit = 5) {
   });
 }
 
+/**
+ * Everything an activity row needs, as one projection.
+ *
+ * Named rather than repeated because three reads now use it — the feed, one person's
+ * activity, and one single event for the comment-thread page — and a projection that
+ * drifts between them is three surfaces disagreeing about what an activity *is*. It was
+ * inline when there were two callers in one function; a third caller in another function
+ * is where that stops being safe.
+ */
+const ACTIVITY_SELECT =
+  'id, type, actor_id, media_item_id, created_at, payload, ' +
+  // The parent series, so a season can be named — and, since the founder standardised
+  // the subheading, so it can be described and rated too. A self-join through parent_id,
+  // which PostgREST resolves as an embed like any other, and a left one: a movie comes
+  // back with `parent: null`.
+  'media_items(kind, title, season_number, release_date, poster_path, genres, ' +
+  'certification, runtime_minutes, episode_count, ' +
+  'parent:parent_id(title, genres, certification)), ' +
+  'profiles:actor_id(username, display_name, avatar_path)';
+
 /** The shared read. `actorIds` is a filter, never the authorisation. */
 async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
   if (!actorIds.length) return [];
 
   const { data, error } = await supabase
     .from('feed_events')
-    .select(
-      'id, type, actor_id, media_item_id, created_at, payload, ' +
-        // The parent series, so a season can be named — and, since the founder
-        // standardised the subheading, so it can be described and rated too. A
-        // self-join through parent_id, which PostgREST resolves as an embed like any
-        // other, and a left one: a movie comes back with `parent: null`.
-        'media_items(kind, title, season_number, release_date, poster_path, genres, ' +
-        'certification, runtime_minutes, episode_count, ' +
-        'parent:parent_id(title, genres, certification)), ' +
-        'profiles:actor_id(username, display_name, avatar_path)',
-    )
+    .select(ACTIVITY_SELECT)
     .in('actor_id', actorIds)
     .in('type', [...ACTIVITY_TYPES])
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
 
-  const rows = (data ?? []) as unknown as FeedRow[];
+  return hydrate((data ?? []) as unknown as FeedRow[]);
+}
 
+/**
+ * One activity, by its id.
+ *
+ * Exists for the comment-thread page, and it cannot be expressed as a filter over
+ * `activityBy`: a notification is about the reader's **own** activity, which never
+ * appears in their own feed — the feed spans the people they follow. Filtering a list
+ * that structurally cannot contain the row is how the old routing concluded there was no
+ * per-event surface to send anybody to.
+ *
+ * **The authorisation is `feed_events_read`, which is `can_i_view(actor_id)`, and nothing
+ * here adds to it.** A row the caller may not see simply does not come back, and the
+ * caller renders "This conversation is no longer available." That is the same silence a
+ * deleted event gives, which is what stops a notification deep link confirming that a
+ * particular activity exists on an account that has since gone private.
+ *
+ * `.limit(1)` and not `.single()`: `single()` treats no rows as an *error*, and an
+ * unavailable conversation is an ordinary outcome on this path rather than a fault.
+ */
+async function oneActivity(eventId: string): Promise<FeedItem | null> {
+  const { data, error } = await supabase
+    .from('feed_events')
+    .select(ACTIVITY_SELECT)
+    .eq('id', eventId)
+    .in('type', [...ACTIVITY_TYPES])
+    .limit(1);
+  if (error) throw error;
+
+  const items = await hydrate((data ?? []) as unknown as FeedRow[]);
+  return items[0] ?? null;
+}
+
+/**
+ * The activity a comment notification is about, with its note and companions.
+ *
+ * Keyed by the viewer as well as the event, like every viewer-relative key in this app:
+ * what a reader may see of one activity genuinely differs between accounts, and a key
+ * without the account serves one reader another's answer after a switch on a shared
+ * device (reviews 6, 10 and 10b).
+ */
+export function useActivityEvent(eventId: string | null, viewerId: string) {
+  return useQuery({
+    queryKey: ['activity-event', viewerId, eventId],
+    enabled: Boolean(eventId),
+    queryFn: () => oneActivity(eventId as string),
+  });
+}
+
+/** Rows to items: the actor rule, the season naming, the notes and the companions. */
+async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
   const items: FeedItem[] = [];
 
   for (const row of rows) {

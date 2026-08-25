@@ -162,6 +162,40 @@ Production Auth is configured per project and shares nothing with nonprod. Regis
   not available for free tier projects using the default email provider."*
   See [`../architecture/auth.md`](../architecture/auth.md) §SMTP.
 
+- **Both email templates, applied and verified.** This is a **hard gate**, not a checklist
+  line, because it has already cost a friend-beta tester a week of not being able to sign in
+  — and it did so on a project where the risk was written down. A production project starts
+  from Supabase's defaults, which are magic links, so *production will arrive broken in
+  exactly the same way unless this step happens before anybody is invited.*
+
+  ```powershell
+  $env:SUPABASE_ACCESS_TOKEN = "<personal access token>"
+  node scripts/check-auth-config.mjs           # read it back first
+  node scripts/check-auth-config.mjs --apply   # write supabase/auth-templates/
+  ```
+
+  It applies **Confirm signup** and **Magic Link** together. Supabase picks between them by
+  whether the address already has an account, so applying one leaves sign-in working for
+  everybody who has used the app before and broken for everybody new — which is invisible to
+  whoever is testing and total for whoever is arriving.
+
+  The script sends a partial `PATCH`. Do not reach for `supabase config push`: it sends a
+  whole `[auth]` block and reverts every field it does not mention, including the Apple and
+  Google client secrets.
+
+- **A real email, to a real inbox, before RC acceptance.** Nothing above proves delivery.
+  Two accounts, on the production project, with the store build:
+
+  | | Expected |
+  | --- | --- |
+  | an address with **no** account | email arrives, contains a six-digit code, contains no link, code verifies, profile creation follows |
+  | an address that **has** one | same email, same code, code verifies, straight into the app |
+  | a wrong code | refused, and the screen says so |
+  | *Send a new code* | a second usable code arrives |
+
+  Sign-off is *seeing the email*. A green `check-auth-config.mjs` says the project is
+  configured; it does not say SMTP is delivering, and those fail independently.
+
 ### 2.5 Deploy the two Edge Functions
 
 ```

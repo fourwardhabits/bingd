@@ -43,20 +43,41 @@ export type PushJob = {
   actor_username: string | null;
   actor_name: string | null;
   media_item_id: string | null;
+  /**
+   * The activity, when the notification points at one.
+   *
+   * `claim_push_batch` reads it from `notifications.subject_id` directly rather than
+   * through the `feed_events` join beside it, because that join is narrowed to the
+   * recipient's *own* activity — and a reply notification's recipient is another
+   * commenter, for whom it yields null.
+   */
+  feed_event_id: string | null;
   media_kind: 'movie' | 'series' | 'season' | null;
   media_title: string | null;
   series_title: string | null;
   tokens: { token: string; platform: 'ios' | 'android' }[] | null;
 };
 
-/** What the app is handed when somebody taps. Deliberately four fields. */
+/** What the app is handed when somebody taps. Deliberately five fields. */
 export type PushData = {
   /** So the client can settle its own inbox without guessing which row this was. */
   notificationId: string;
   kind: string;
-  /** The two fields `features/notifications/routing.ts` resolves a destination from. */
+  /** The three fields `features/notifications/routing.ts` resolves a destination from. */
   actorUsername: string | null;
   mediaItemId: string | null;
+  /**
+   * The activity the notification is about, so a tapped comment or reply opens the
+   * conversation rather than the title page.
+   *
+   * **It is still not what anybody wrote.** An id is not content: it names a row whose
+   * every read goes through `activity_comments`, which asks `can_view_profile` about the
+   * event before returning anything. The privacy rule at the top of this file is that a
+   * push carries who, what kind, and which title — this adds *which conversation*, which
+   * is the same class of fact as the title and is rendered by the operating system as
+   * nothing at all.
+   */
+  feedEventId: string | null;
 };
 
 export type PushContent = {
@@ -166,6 +187,11 @@ export function contentFor(job: PushJob): PushContent | null {
       kind: job.type,
       actorUsername: job.actor_username,
       mediaItemId: job.media_item_id,
+      // `?? null` rather than passing it through, because a job produced by a database
+      // that has not yet applied 20260826000600 has no such key — and `undefined` in a
+      // JSON payload is a field that silently disappears rather than one the client can
+      // read as absent.
+      feedEventId: job.feed_event_id ?? null,
     },
   };
 }

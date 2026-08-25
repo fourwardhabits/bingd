@@ -16,7 +16,13 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { AuthProvider, AuthStatusOverlay, useAuthRouting } from '@/features/auth';
+import {
+  AuthProvider,
+  AuthStatusOverlay,
+  RouteErrorBoundary,
+  useAuth,
+  useAuthRouting,
+} from '@/features/auth';
 import { useRedeemPendingInvite } from '@/features/invite';
 import { configurePushPresentation } from '@/features/notifications/push';
 import { usePush } from '@/features/notifications/use-push';
@@ -109,6 +115,28 @@ function RootLayout() {
 function Navigation() {
   useAuthRouting();
   /**
+   * Whether the routes that assume an account may be mounted at all.
+   *
+   * Every screen behind this gate opens with `useCurrentProfile()`, which **throws**
+   * outside a `ready` session — deliberately, so those screens need no null checks. The
+   * cost, which the founder found by signing out, is that the throw is reachable:
+   * `supabase.auth.signOut()` emits its state change while one of them is still
+   * mounted, so the context flips and the screen re-renders and raises, in the same
+   * commit, before `useAuthRouting`'s effect can move anybody. With no error boundary
+   * anywhere in the app that unmounted the whole tree and left a blank screen — and
+   * "sometimes" only because it raced the `router.replace` in the sign-out handler.
+   *
+   * `Stack.Protected` removes those screens from the navigator in the same render the
+   * status changes, so the throw is not reached rather than merely survived. It covers
+   * the involuntary exits too, which no handler could: an expired refresh token and
+   * `delete_account` both end a session with nobody having pressed Sign out.
+   *
+   * `(auth)` is deliberately outside it. That group is where a signed-out person
+   * belongs, and gating it would leave the router with nowhere to send them.
+   */
+  const auth = useAuth();
+  const signedIn = auth.status === 'ready';
+  /**
    * An invitation opened before there was an account to attribute it to.
    *
    * Here rather than in the signup screen because there are three ways to reach a ready
@@ -138,40 +166,57 @@ function Navigation() {
           reason: on iOS a route's title is the back label of whatever is pushed on top
           of it, so they are an invariant worth asserting rather than seven strings
           spread down a JSX tree. */}
-      <Stack screenOptions={rootStackScreenOptions}>
-        <Stack.Screen name="(tabs)" options={{ title: ROOT_SCREEN_TITLES['(tabs)'] }} />
-        <Stack.Screen name="(auth)" options={{ title: ROOT_SCREEN_TITLES['(auth)'] }} />
-        <Stack.Screen
-          name="title/[id]"
-          options={{ headerShown: true, title: ROOT_SCREEN_TITLES['title/[id]'] }}
-        />
-        <Stack.Screen
-          name="u/[username]"
-          options={{ headerShown: true, title: ROOT_SCREEN_TITLES['u/[username]'] }}
-        />
-        {/* Reached from a cast strip. The header title is set by the screen once
-            the person resolves, so it is empty here rather than "Person". */}
-        <Stack.Screen
-          name="person/[id]"
-          options={{ headerShown: true, title: ROOT_SCREEN_TITLES['person/[id]'] }}
-        />
-        <Stack.Screen
-          name="lists/[id]"
-          options={{ headerShown: true, title: ROOT_SCREEN_TITLES['lists/[id]'] }}
-        />
-        {/* No header and no back: it is the first thing a new account sees, and there
-            is nowhere behind it to return to. Leaving is an explicit choice made on
-            the screen itself. */}
-        <Stack.Screen name="onboarding/taste" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="settings"
-          options={{
-            presentation: 'modal',
-            headerShown: true,
-            title: ROOT_SCREEN_TITLES.settings,
-          }}
-        />
-      </Stack>
+      <RouteErrorBoundary resetKey={auth.status}>
+        <Stack screenOptions={rootStackScreenOptions}>
+          {/* Always available, and the only group that is: it is where a signed-out
+              person belongs, and it is also what `onboarding` status routes to. */}
+          <Stack.Screen name="(auth)" options={{ title: ROOT_SCREEN_TITLES['(auth)'] }} />
+
+          <Stack.Protected guard={signedIn}>
+            <Stack.Screen name="(tabs)" options={{ title: ROOT_SCREEN_TITLES['(tabs)'] }} />
+            <Stack.Screen
+              name="title/[id]"
+              options={{ headerShown: true, title: ROOT_SCREEN_TITLES['title/[id]'] }}
+            />
+            <Stack.Screen
+              name="u/[username]"
+              options={{ headerShown: true, title: ROOT_SCREEN_TITLES['u/[username]'] }}
+            />
+            {/* Reached from a cast strip. The header title is set by the screen once
+                the person resolves, so it is empty here rather than "Person". */}
+            <Stack.Screen
+              name="person/[id]"
+              options={{ headerShown: true, title: ROOT_SCREEN_TITLES['person/[id]'] }}
+            />
+            <Stack.Screen
+              name="lists/[id]"
+              options={{ headerShown: true, title: ROOT_SCREEN_TITLES['lists/[id]'] }}
+            />
+            {/* Where a comment or reply notification lands. Declared here rather than
+                left to the file tree so it carries `ROOT_SCREEN_TITLES` like its
+                neighbours — on iOS a route's title is the back label of whatever is
+                pushed on top of it, and an undeclared route's is its directory name. */}
+            <Stack.Screen
+              name="activity/[id]"
+              options={{ headerShown: true, title: ROOT_SCREEN_TITLES['activity/[id]'] }}
+            />
+            {/* No header and no back: it is the first thing a new account sees, and
+                there is nowhere behind it to return to. Leaving is an explicit choice
+                made on the screen itself. */}
+            <Stack.Screen name="onboarding/taste" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="settings"
+              options={{
+                presentation: 'modal',
+                headerShown: true,
+                title: ROOT_SCREEN_TITLES.settings,
+              }}
+            />
+          </Stack.Protected>
+        </Stack>
+      </RouteErrorBoundary>
+      {/* Outside the boundary, so the two states that are not a place in the app are
+          still explained even if the navigator underneath them stopped. */}
       <AuthStatusOverlay />
     </>
   );

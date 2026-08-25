@@ -141,9 +141,46 @@ const ALLOWED = {
   // may not touch, so a comment id or an event id learned from a screenshot or a
   // crash report confirms nothing. `_assert_comment_length` is deliberately absent:
   // nothing outside these three needs it.
-  'add_comment(uuid,uuid,text,boolean)': ['authenticated'],
+  // `add_comment` gained a fifth argument on 2026-08-26 (20260826000600) and the
+  // four-argument form was **dropped** in the same migration rather than left beside it.
+  // A defaulted parameter added by `create or replace` creates a second function, and
+  // PostgREST resolving a four-key body against two candidates answers with an ambiguity
+  // error rather than a choice — so the overload would have broken the writer it was
+  // meant to extend. Its absence from this list is the assertion that it is gone.
+  'add_comment(uuid,uuid,text,boolean,uuid)': ['authenticated'],
   'edit_comment(uuid,uuid,text,boolean)': ['authenticated'],
   'delete_comment(uuid,uuid)': ['authenticated'],
+
+  // Added 2026-08-26 with threads (20260826000600).
+  //
+  // `set_comment_reaction` is the same shape as the three above: `comment_reactions` has
+  // a read policy and no insert policy, because the authorisation is "and only on a
+  // comment you can see", which is two joins a row policy cannot express without
+  // repeating them in the writer anyway. It takes the state wanted rather than "toggle",
+  // so a replay after a lost reply converges instead of undoing itself.
+  'set_comment_reaction(uuid,uuid,boolean)': ['authenticated'],
+
+  // The two reads that replaced a PostgREST select and its embed. Definer, and they take
+  // no viewer (20260813001900) — the perspective is always auth.uid()'s own, so neither
+  // can be pointed at somebody else's feed. They exist because the per-row cost of
+  // `comments_read` was measured at 25x the same read without it: they state the same
+  // rule and evaluate it once per event and once per distinct author instead of once per
+  // comment. Not granted to `anon`, for the reason `comments` revokes it: no signed-out
+  // surface in this app renders user-authored text.
+  'activity_comments(uuid)': ['authenticated'],
+  'activity_comment_counts(uuid[])': ['authenticated'],
+
+  // Followers and Following as lists (20260826000600 §5).
+  //
+  // **`security invoker`, alone among the reads added that day**, and that is the whole
+  // of their privacy rather than a detail: `follows_read` already says a viewer may see
+  // an approved edge only when they can view both ends of it, and `profiles_read` says
+  // whether the other end can be named. A definer version would have had to restate both
+  // and would have been the copy that got one wrong. They therefore hold no privilege
+  // the caller does not, and `anon` is excluded because these surfaces do not exist
+  // signed out.
+  'followers_of(uuid,text,integer,integer)': ['authenticated'],
+  'following_of(uuid,text,integer,integer)': ['authenticated'],
 
   // Added 2026-08-17 with the social graph writers (20260817000200). `follows` and
   // `blocks` had read policies and no writers at all until this migration, so the

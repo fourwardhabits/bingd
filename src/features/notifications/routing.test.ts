@@ -52,8 +52,21 @@ describe('the routing matrix', () => {
     follow_request: { kind: 'profile', username: 'suraj' },
     follow: { kind: 'profile', username: 'suraj' },
     follow_approved: { kind: 'profile', username: 'suraj' },
-    comment: { kind: 'title', mediaItemId: 'media-1' },
-    reaction: { kind: 'title', mediaItemId: 'media-1' },
+    /**
+     * **Changed 2026-08-26, and it is the founder's correction rather than a drift.**
+     *
+     * Both used to be `{ kind: 'title' }`, and this file argued for it: the title is
+     * the nearest surviving parent of an activity. What that reasoning missed is that
+     * the title page renders no comments, so a reader told "Ada commented on your
+     * activity" arrived where the remark is invisible — reported by a friend as the app
+     * freezing, which is what a screen that cannot contain what you came for looks like.
+     *
+     * The title is still the *second* link (asserted below), because the two ways this
+     * goes stale are different: a deleted event leaves the title, and a title that left
+     * the catalogue leaves the event.
+     */
+    comment: { kind: 'activity', eventId: 'event-1' },
+    reaction: { kind: 'activity', eventId: 'event-1' },
     watch_tag: { kind: 'title', mediaItemId: 'media-1' },
     recommendation: { kind: 'title', mediaItemId: 'media-1' },
     invite_activated: { kind: 'profile', username: 'suraj' },
@@ -109,14 +122,67 @@ describe('a target that is gone', () => {
    * same way: `my_notifications` resolves the title through a join that requires the
    * event to still exist *and* still belong to this reader, so `mediaItemId` is the
    * field that goes null.
+   *
+   * **The subject has to go with it**, and that is the part worth stating. Since the
+   * chain leads with the activity, a row whose title is gone but whose `subject_id` is
+   * still set resolves to the conversation — correctly, and asserted below. This case is
+   * the one where the notification points at nothing at all.
    */
   it.each(['comment', 'reaction'] as const)(
     'sends %s to a safe stop when the activity is gone',
     (kind) => {
-      const target = targetFor(row({ kind, mediaItemId: null }));
+      const target = targetFor(row({ kind, mediaItemId: null, subjectType: null, subjectId: null }));
       expect(target.kind).toBe('unavailable');
     },
   );
+
+  /**
+   * The chain doing its job, in the case it was extended for.
+   *
+   * A title can leave the catalogue while the activity is still there, and the
+   * conversation on it is still readable — so this must not degrade to "unavailable"
+   * merely because the *other* link is gone.
+   */
+  it.each(['comment', 'reaction'] as const)(
+    'still opens the conversation for %s when only the title has gone',
+    (kind) => {
+      expect(targetFor(row({ kind, mediaItemId: null }))).toEqual({
+        kind: 'activity',
+        eventId: 'event-1',
+      });
+    },
+  );
+
+  /**
+   * And the other way round: the event deleted, the title still in the catalogue.
+   *
+   * This is the case the title link was originally the whole answer to, and keeping it
+   * as the second link is what stops the new destination being a regression for it.
+   */
+  it.each(['comment', 'reaction'] as const)(
+    'falls %s back to the title when the activity itself is gone',
+    (kind) => {
+      expect(targetFor(row({ kind, subjectType: null, subjectId: null }))).toEqual({
+        kind: 'title',
+        mediaItemId: 'media-1',
+      });
+    },
+  );
+
+  it('routes a reply whose recipient is not the activity owner', () => {
+    /**
+     * The case that would have been silently broken by resolving the conversation from
+     * `mediaItemId` instead of from `subject_id`.
+     *
+     * `my_notifications` resolves the title through `fe.actor_id = auth.uid()` — the
+     * reader's *own* activity. A reply notification's recipient is another commenter, so
+     * that join yields null for them and the title link is empty. `subject_id` has no
+     * such restriction, which is why the chain reads it.
+     */
+    expect(
+      targetFor(row({ kind: 'comment', mediaItemId: null, mediaTitle: null })),
+    ).toEqual({ kind: 'activity', eventId: 'event-1' });
+  });
 
   it('does not fall back to the actor for a comment, which would leak nothing but help nobody', () => {
     // The parent of a comment is the activity, not the person who wrote it. Sending a
@@ -176,7 +242,9 @@ describe('a target that is gone', () => {
   });
 
   it('says why, so the screen can tell the reader rather than absorbing the tap', () => {
-    const target = targetFor(row({ kind: 'comment', mediaItemId: null }));
+    const target = targetFor(
+      row({ kind: 'comment', mediaItemId: null, subjectType: null, subjectId: null }),
+    );
     expect(target.kind === 'unavailable' && target.reason.length).toBeGreaterThan(0);
   });
 });
@@ -185,6 +253,7 @@ describe('the href', () => {
   it('addresses a profile by handle and a title by id', () => {
     expect(hrefFor({ kind: 'profile', username: 'suraj' })).toBe('/u/suraj');
     expect(hrefFor({ kind: 'title', mediaItemId: 'abc' })).toBe('/title/abc');
+    expect(hrefFor({ kind: 'activity', eventId: 'e1' })).toBe('/activity/e1');
   });
 
   it('opens the awards sheet by parameter, because it is not a route', () => {
@@ -206,13 +275,15 @@ describe('what the row promises before it is tapped', () => {
    * a comment row that opens a title, and announced it over a dead row too.
    */
   it('matches where the tap will actually go', () => {
-    expect(hintFor(row({ kind: 'comment' }))).toBe('Opens the title');
+    expect(hintFor(row({ kind: 'comment' }))).toBe('Opens the conversation');
     expect(hintFor(row({ kind: 'follow' }))).toBe('Opens their profile');
     expect(hintFor(row({ kind: 'award_earned' }))).toBe('Opens your awards');
   });
 
   it('does not promise a destination that is gone', () => {
-    expect(hintFor(row({ kind: 'comment', mediaItemId: null }))).toBe('No longer available');
+    expect(
+      hintFor(row({ kind: 'comment', mediaItemId: null, subjectType: null, subjectId: null })),
+    ).toBe('No longer available');
     expect(hintFor(row({ kind: 'follow', actorUsername: null }))).toBe('No longer available');
   });
 });

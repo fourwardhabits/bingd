@@ -24,3 +24,5 @@ export {
 export { applyInitialVisibility, createProfile, usernameAvailability } from './create-profile';
 
 export { AuthStatusOverlay } from './status-overlay';
+
+export { RouteErrorBoundary } from './RouteErrorBoundary';

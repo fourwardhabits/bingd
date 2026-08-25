@@ -155,4 +155,18 @@ The built-in sender also carries a rate limit low enough that a handful of peopl
 
 Until it exists, **Google is the working method on Android and Apple on iOS**, both verified. Email is the one that is configured in code and unusable in the dashboard.
 
+#### It reached a tester, which is what a written-down risk is for
+
+Everything above was known and written here on 2026-08-21, and a friend-beta tester still hit it on 2026-08-25: *"When I open the app and put in email it sends me a link to confirm and no code. And the confirm link just opens in the email browser."*
+
+Note "a link to **confirm**". `/auth/v1/settings` on `abheeqyjzekiowkztfxv` reports `mailer_autoconfirm: false`, so a brand-new address is routed through **Confirm signup** rather than **Magic Link** — she was the new-user half of the paragraph above, arriving before anyone had been able to fix either template.
+
+What this section was missing is that a paragraph is not a check. The client was never wrong and its tests always passed; there was simply nothing in the repository stating what the *project* should send, so there was nothing for the deployed configuration to be compared against. Three things now exist:
+
+- [`supabase/auth-templates/`](../../supabase/auth-templates/) — both templates, as files, carrying `{{ .Token }}` and no link of any kind, plus `templates.json` naming the Management API keys they belong in.
+- [`config/auth-templates.test.mjs`](../../config/auth-templates.test.mjs) — the static shape check, in `npm run test:config`, so CI refuses a template that grows a `{{ .ConfirmationURL }}` or an `href`, refuses a manifest that drops back to one template, and asserts that `mailer_otp_length` still agrees with `verify.tsx`'s `/^\d{6}$/`. It also asserts `sendEmailCode` passes no `emailRedirectTo`, which is the one way this could be undone from inside the repo rather than from a dashboard.
+- [`scripts/check-auth-config.mjs`](../../scripts/check-auth-config.mjs) — the live half. Read-only by default; `--apply` writes the canonical values as a partial `PATCH`, for the reason recorded two paragraphs up. With no `SUPABASE_ACCESS_TOKEN` it reports what the anon key *can* see and exits 2 with the dashboard path, rather than exiting 0 on a check that did not happen.
+
+None of that is in a pull request's diff of the running project, and none of it travels with a deploy: **auth email configuration is console state**. The guard is that a new project now fails a check instead of failing a person.
+
 **The OAuth redirects must be registered**, which they are, as `bingd://**`, `bingd-dev://**`, `bingd-preview://**` and `https://bingd.app/**` alongside the three exact callbacks. Google returns to `Linking.createURL('auth/callback')`, which resolves per variant, and an unregistered value is refused by Supabase before the provider is ever contacted — so the symptom names the redirect and not the provider.
