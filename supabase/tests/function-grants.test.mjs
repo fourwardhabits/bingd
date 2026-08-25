@@ -272,6 +272,19 @@ const ALLOWED = {
   'set_notification_preferences(text[],boolean)': ['authenticated'],
   'my_notification_preferences()': ['authenticated'],
 
+  // Added 2026-08-26 with the production bootstrap. Answers `prod` or `nonprod` and
+  // nothing else.
+  //
+  // `anon` is the point of it rather than an oversight. `remote-smoke.mjs` runs against a
+  // deployed project holding nothing but the anon key, and the check it has to be able to
+  // make -- "is this release pointed at the database it says it is" -- is worthless if it
+  // needs a credential the release gate does not have. What it discloses is already in the
+  // URL compiled into every binary and in `config/backends.cjs`.
+  //
+  // `set_environment_name` is deliberately absent and is service_role only: it decides what
+  // every invite token this database mints is stamped with.
+  'environment_name()': ['anon', 'authenticated'],
+
   // Added 2026-08-16 with watch tagging (PRD §14). `set_watch_tags` replaces the
   // whole companion list for one of the caller's own watches; `hide_watch_tag` is
   // the tagged person's side of it.

@@ -35,6 +35,6 @@ verify_jwt = true
 # holding a phone at that moment.
 #
 # The anon key is itself a valid JWT, which is why `verify_jwt` is not sufficient on its
-# own here either: `isKnownCaller` resolves the token to a real user or to service_role
+# own here either: `resolveCaller` resolves the token to a real user or to service_role
 # before anything is claimed.
 verify_jwt = true

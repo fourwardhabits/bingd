@@ -34,8 +34,13 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+
+const require = createRequire(import.meta.url);
+const { supabaseProjectRef } = require('../../config/backends.cjs');
+const { environmentForRef } = require('../../config/production-lane.cjs');
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -48,7 +53,17 @@ function loadEnv(file) {
   return out;
 }
 
-const env = { ...loadEnv('.env'), ...loadEnv('.env.local') };
+/**
+ * `.env` is nonprod's and is committed-adjacent; `.env.local` is git-ignored and overrides
+ * it; the ambient environment overrides both.
+ *
+ * The last of those is new and is what makes a production run possible without writing
+ * production credentials to a file on the founder's disk at all:
+ *
+ *   SUPABASE_URL=... EXPO_PUBLIC_SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+ *     node supabase/tests/two-user-acceptance.mjs --target production
+ */
+const env = { ...loadEnv('.env'), ...loadEnv('.env.local'), ...process.env };
 const url = env.EXPO_PUBLIC_SUPABASE_URL ?? env.SUPABASE_URL;
 const anonKey = env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
@@ -58,12 +73,46 @@ if (!url || !anonKey || !serviceKey) {
   process.exit(1);
 }
 
-// The one guard rail that matters. These scripts create and delete accounts and send
-// the service-role key to whatever `url` says, so the check has to be on the *host* and
-// not on the string. Independent review 15: `url.includes(ref)` passes for
-// `https://<ref>.example.com`, which is a hostname anybody can register — and the next
-// thing that happens is the service-role key being posted to it.
-const NONPROD_HOST = 'abheeqyjzekiowkztfxv.supabase.co';
+/**
+ * The one guard rail that matters. This script creates and deletes accounts and sends the
+ * service-role key to whatever `url` says, so the check has to be on the *parsed host* and
+ * not on the string. Independent review 15: `url.includes(ref)` passes for
+ * `https://<ref>.example.com`, which is a hostname anybody can register — and the next thing
+ * that happens is the service-role key being posted to it.
+ *
+ * ---------------------------------------------------------------------------
+ * IT RUNS AGAINST PRODUCTION NOW, AND ONLY WHEN ASKED IN SO MANY WORDS
+ *
+ * This was `host !== 'abheeqyjzekiowkztfxv.supabase.co'` and nothing else, which was right
+ * while nonprod was the only deployed project. Public launch needs the same two-account
+ * proof against production — signup, the under-13 refusal, privacy, block, ranking, review,
+ * report, notification, push enqueue, deletion — and there is no other way to get it.
+ *
+ * So the target is named rather than inferred, and **three independent things have to agree**
+ * before anything is written:
+ *
+ *   1. `--target production` on the command line. Nothing defaults to production.
+ *   2. `config/production-lane.cjs` declares the project behind this URL to be production.
+ *   3. the database itself answers `prod` to `environment_name()` — checked below, after the
+ *      client is built, because a project that was replayed but never bootstrapped answers
+ *      `nonprod` and is exactly the case this whole tranche exists to catch.
+ *
+ * Any two of those agreeing is not enough. The accounts this creates are real accounts in a
+ * real database, and the teardown is `delete_account` — the same path a person's own deletion
+ * takes — so a wrong target is not recoverable by re-running it.
+ */
+const targetArg = process.argv.includes('--target')
+  ? process.argv[process.argv.indexOf('--target') + 1]
+  : 'nonprod';
+
+if (!['nonprod', 'production'].includes(targetArg)) {
+  console.error(`--target must be nonprod or production, not "${targetArg}".`);
+  process.exit(1);
+}
+
+/** What `environment_name()` has to answer. */
+const expectedEnvironment = targetArg === 'production' ? 'prod' : 'nonprod';
+
 {
   let host = null;
   let protocol = null;
@@ -74,8 +123,25 @@ const NONPROD_HOST = 'abheeqyjzekiowkztfxv.supabase.co';
   } catch {
     host = null;
   }
-  if (protocol !== 'https:' || host !== NONPROD_HOST) {
-    console.error(`Refusing to run: ${url} is not https://${NONPROD_HOST}.`);
+
+  const ref = supabaseProjectRef(url);
+  const declared = ref === null ? null : environmentForRef(ref);
+
+  if (protocol !== 'https:' || host === null || declared === null) {
+    console.error(
+      `Refusing to run: ${url} is not a Supabase project this repository declares.\n` +
+        '  REF_ENVIRONMENTS in config/production-lane.cjs is the list of projects that may\n' +
+        '  receive a service-role key.',
+    );
+    process.exit(1);
+  }
+
+  if (declared !== expectedEnvironment) {
+    console.error(
+      `Refusing to run: --target ${targetArg} means the ${expectedEnvironment} database, and ` +
+        `${ref} is declared ${declared}.\n` +
+        '  This script creates and deletes real accounts. It does not guess which database.',
+    );
     process.exit(1);
   }
 }
@@ -87,6 +153,26 @@ const NONPROD_HOST = 'abheeqyjzekiowkztfxv.supabase.co';
 let passed = 0;
 let failed = 0;
 const failures = [];
+const skipped = [];
+
+/**
+ * A check the deployed **catalogue** cannot support, as distinct from one that failed.
+ *
+ * There is exactly one legitimate use and it is worth naming, because "skip" is otherwise the
+ * word a red suite gets turned green with. `bingd-nonprod` holds 1,027 movies and **zero**
+ * `tv_season` and `tv_series` rows, so M2's season semantics cannot be exercised there at all
+ * — not because anything is broken, but because the seed run that filled that project fetched
+ * films only.
+ *
+ * Reporting that as a pass would be a lie; reporting it as a failure would leave the suite
+ * permanently red for a data condition and teach everyone to ignore the number. So it is a
+ * third outcome, printed on its own at the end, excluded from the pass count, and named in
+ * `production-acceptance.md` as something a **production** run may not have any of.
+ */
+function skip(name, reason) {
+  skipped.push(`${name} — ${reason}`);
+  console.log(`skip          ${name}\n              ${reason}`);
+}
 
 function check(name, ok, detail) {
   if (ok) {
@@ -163,6 +249,48 @@ const rankToCompletion = async (token, mediaItemId, bucket) => {
 };
 
 // ---------------------------------------------------------------------------
+// The third agreement: what the database calls itself
+//
+// The URL says which project, `config/production-lane.cjs` says what that project is meant
+// to be, and this is the project's own answer. It is the one of the three that catches the
+// bootstrap trap: a production project replayed from zero comes up calling itself `nonprod`
+// (`20260826000100`), so a run that got this far on the strength of the other two would be
+// creating accounts in a database that is still stamping every invite token `nonprod`.
+//
+// Before anything is written, because the first write is an account.
+// ---------------------------------------------------------------------------
+
+{
+  const res = await fetch(`${url}/rest/v1/rpc/environment_name`, {
+    method: 'POST',
+    headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}`, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  const text = await res.text();
+  let answered = null;
+  try {
+    const parsed = JSON.parse(text);
+    answered = typeof parsed === 'string' ? parsed : null;
+  } catch {
+    answered = null;
+  }
+
+  if (answered !== expectedEnvironment) {
+    console.error(
+      `Refusing to run: ${url} answers environment_name() = ${answered ?? `no answer (${res.status} ${text.slice(0, 160)})`}, ` +
+        `and --target ${targetArg} needs ${expectedEnvironment}.\n\n` +
+        '  A project replayed from zero calls itself nonprod until it is bootstrapped:\n' +
+        `    node scripts/bootstrap-production.mjs --target ${targetArg} --apply\n`,
+    );
+    // A beat before exiting. `process.exit` while undici still holds a keep-alive socket
+    // aborts libuv on Windows, and an assertion failure printed under a refusal reads as
+    // this script crashing rather than as it declining to run.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Two accounts, created and destroyed by this run
 // ---------------------------------------------------------------------------
 
@@ -206,18 +334,62 @@ async function attempt(what, fn) {
   }
 }
 
-/** Deletes any account still holding one of this run's emails. */
+/**
+ * Deletes any account still holding one of this run's emails.
+ *
+ * **It paginates, and it does not trust `?filter=`.**
+ *
+ * This asked GoTrue for `?filter=<email>` and read the first page. Two things were assumed
+ * there and neither is guaranteed: that the endpoint honours `filter` at all, and that a
+ * match would be on the page it returned. Against nonprod, with four accounts, both held.
+ * Against **production**, where this is the last thing standing between an interrupted run
+ * and a disposable account left in a real database, a silent miss reports success — and this
+ * path only runs at all when the id sweep could not, because a creation response was
+ * unparseable.
+ *
+ * So `filter` is still sent as a hint, and the answer is checked rather than believed: pages
+ * are walked to the end, and every row is matched on the full address. A page that comes back
+ * short is the last one.
+ */
 async function sweepByEmail(email) {
-  const res = await fetch(`${url}/auth/v1/admin/users?filter=${encodeURIComponent(email)}`, {
-    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
-  });
-  if (!res.ok) throw new Error(`could not look up ${email}: ${res.status}`);
-  const { users = [] } = await res.json();
+  const PER_PAGE = 200;
+  const MAX_PAGES = 500;
+  const seen = [];
+  let exhausted = false;
 
-  for (const user of users) {
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const res = await fetch(
+      `${url}/auth/v1/admin/users?page=${page}&per_page=${PER_PAGE}&filter=${encodeURIComponent(email)}`,
+      { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } },
+    );
+    if (!res.ok) throw new Error(`could not look up ${email}: ${res.status}`);
+    const { users = [] } = await res.json();
+
     // Matched exactly rather than on the partial filter, so this can never delete an
     // account that merely shares a prefix with a test address.
-    if (user.email !== email) continue;
+    for (const user of users) {
+      if (user.email === email) seen.push(user);
+    }
+
+    if (users.length < PER_PAGE) {
+      exhausted = true;
+      break;
+    }
+  }
+
+  // **The cap throws rather than returning quietly**, which is the difference between a
+  // bound and a silent truncation. Reaching it means the listing was still going, so
+  // "nothing found" would be a claim this function has no basis for — and this is the last
+  // thing standing between an interrupted run and a disposable account left in a real
+  // database. 100,000 accounts is far past the point where the founder would rather be told.
+  if (!exhausted) {
+    throw new Error(
+      `stopped listing users after ${MAX_PAGES} pages while looking for ${email}. ` +
+        'The account may still exist; delete it by hand and raise MAX_PAGES.',
+    );
+  }
+
+  for (const user of seen) {
     const del = await fetch(`${url}/auth/v1/admin/users/${user.id}`, {
       method: 'DELETE',
       headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
@@ -722,6 +894,375 @@ try {
   check('A deletes their own comment', mine.status === 200);
 
   // -------------------------------------------------------------------------
+  console.log('\n— the age gate —');
+  //
+  // Added 2026-08-26 for the public-launch acceptance. **The under-13 refusal is a legal
+  // property, not a product one**, and it is the one check in this file whose failure is
+  // an immediate stop-the-launch rather than a bug — so it is proved against the deployed
+  // database with a real session rather than left to the local suite.
+  //
+  // A third account, created and destroyed inside this block, because it must reach the
+  // point of having a session and no profile. `created`/`emails` carry it into the same
+  // teardown as A and B either way.
+  // -------------------------------------------------------------------------
+  {
+    /**
+     * Two accounts, not one, and the reason is a real property of the refusal.
+     *
+     * **`create_profile` deletes the `auth.users` row when it refuses an under-13 date.**
+     * (`20260813002200`; `20260815030000` §avatars and `20260817000600` both reference the
+     * same mechanism.) So the session that was refused no longer has an account behind it,
+     * and re-using it for the over-13 control fails with a foreign-key violation rather than
+     * with anything about age — which is what the first version of this block did, and it
+     * looked exactly like a broken age gate.
+     */
+    const signUp = async (suffix) => {
+      const email = `bingd-acceptance-${suffix}-${stamp}@example.invalid`;
+      const password = `Acc!${stamp}${Math.random().toString(36).slice(2, 10)}`;
+
+      const response = await fetch(`${url}/auth/v1/admin/users`, {
+        method: 'POST',
+        headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, email_confirm: true }),
+      });
+      if (!response.ok) throw new Error(`could not create ${suffix}: ${await response.text()}`);
+      emails.push(email);
+      created.push((await response.json()).id);
+
+      const session = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { apikey: anonKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      return (await session.json()).access_token;
+    };
+
+    /** Ages computed rather than hardcoded, or this quietly tests a fifteen-year-old in 2028. */
+    const birthday = (years, months = 0) => {
+      const d = new Date();
+      d.setUTCFullYear(d.getUTCFullYear() - years);
+      d.setUTCMonth(d.getUTCMonth() - months);
+      return d.toISOString().slice(0, 10);
+    };
+
+    const tooYoung = await rpc(await signUp('young'), 'create_profile', {
+      p_username: `acc_y_${stamp}`.toLowerCase().slice(0, 24),
+      p_display_name: 'Acceptance Young',
+      p_date_of_birth: birthday(12, 11), // twelve years and eleven months
+    });
+    check(
+      'an account under 13 is refused a profile',
+      tooYoung.status >= 400 || tooYoung.body?.ok !== true,
+      JSON.stringify(tooYoung.body)?.slice(0, 160),
+    );
+
+    // The control. Without it the refusal above passes just as well against a create_profile
+    // that refuses everything.
+    const oldEnoughToken = await signUp('old');
+    const oldEnoughHandle = `acc_o_${stamp}`.toLowerCase().slice(0, 24);
+    const oldEnough = await rpc(oldEnoughToken, 'create_profile', {
+      p_username: oldEnoughHandle,
+      p_display_name: 'Acceptance Old Enough',
+      p_date_of_birth: birthday(13),
+    });
+    check(
+      'and exactly 13 today is not',
+      oldEnough.status === 200 && oldEnough.body?.ok === true,
+      JSON.stringify(oldEnough.body)?.slice(0, 160),
+    );
+
+    // DOB-1: the date is retained privately and reaches no social surface. Read from another
+    // account's position, which is the one that matters.
+    const publicRow = await get(a.token, `public_profiles?username=eq.${oldEnoughHandle}&select=*`);
+    const columns = Object.keys((publicRow.body ?? [])[0] ?? {});
+    check(
+      'and the date of birth is on no public column',
+      columns.length > 0 && !columns.some((c) => /dob|birth/i.test(c)),
+      columns.join(', ') || 'the profile was not readable — fixture problem, not a pass',
+    );
+
+    const gone = await rpc(oldEnoughToken, 'delete_account', { p_confirmation: oldEnoughHandle });
+    check('and the age-gate account cleans itself up', gone.status === 200);
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\n— ranking again, and a season —');
+  //
+  // M2 and M3, proved against the deployed database. `rank_again` is one RPC rather than
+  // `rank_unrank` + `rank_start`, which is the whole point of `20260825000200`: the pair
+  // could leave a title logged, in its bucket, with no position.
+  // -------------------------------------------------------------------------
+  {
+    const mine = await get(a.token, 'user_media?select=media_item_id,bucket&bucket=not.is.null&limit=1');
+    const first = (mine.body ?? [])[0];
+    check('A has something ranked to rank again', Boolean(first));
+
+    if (first) {
+      const again = await rpc(a.token, 'rank_again', {
+        p_media_item_id: first.media_item_id,
+        p_bucket: first.bucket,
+        p_operation_id: uuid(),
+      });
+      check(
+        'Rank Again opens a session in one call',
+        again.status === 200 && (again.body?.session_id || again.body?.done === true),
+        JSON.stringify(again.body)?.slice(0, 160),
+      );
+
+      // And it converges, so the title is never left without a position.
+      let state = again.body;
+      for (let i = 0; state && !state.done && i < 64; i += 1) {
+        const answer = await rpc(a.token, 'rank_answer', {
+          p_session_id: state.session_id,
+          p_winner: first.media_item_id,
+          p_operation_id: uuid(),
+        });
+        state = answer.body;
+      }
+      check('and it converges rather than stranding the title', state?.done === true);
+
+      // `position` is on `rankings`, not on `user_media` — the split between the two
+      // tables is deliberate, and reading the wrong one turns "it still has a position"
+      // into a check that cannot fail.
+      const after = await get(
+        a.token,
+        `rankings?select=position,bucket&media_item_id=eq.${first.media_item_id}`,
+      );
+      const placed = (after.body ?? [])[0];
+      check(
+        'the title still has a position and the same bucket',
+        typeof placed?.position === 'number' && placed.bucket === first.bucket,
+        JSON.stringify(placed),
+      );
+    }
+
+    // A season is rankable; a whole series is not (AD-1). The negative half is the one
+    // worth having — the catalogue may hold no season at all, which is a skip rather than
+    // a pass, so both are reported honestly.
+    const seasons = await get(a.token, 'media_items?kind=eq.tv_season&select=id,title&limit=1');
+    const season = (seasons.body ?? [])[0];
+    if (!season) {
+      skip(
+        'a season can be ranked',
+        'this project holds no tv_season rows. `npm run seed:fetch` fetches series and ' +
+          'seasons, and the run that filled bingd-nonprod fetched films only — so M2 has ' +
+          'never been exercised against a deployed database. A production catalogue with ' +
+          'no television is a launch decision, not a test condition.',
+      );
+    } else {
+      const started = await rpc(a.token, 'rank_start', {
+        p_media_item_id: season.id,
+        p_bucket: 'liked',
+        p_operation_id: uuid(),
+      });
+      check(
+        'a season can be ranked',
+        started.status === 200,
+        JSON.stringify(started.body)?.slice(0, 160),
+      );
+    }
+
+    const series = await get(a.token, 'media_items?kind=eq.tv_series&select=id&limit=1');
+    const show = (series.body ?? [])[0];
+    if (!show) {
+      skip('but a whole series is refused', 'this project holds no tv_series rows either');
+    } else {
+      const refused = await rpc(a.token, 'rank_start', {
+        p_media_item_id: show.id,
+        p_bucket: 'liked',
+        p_operation_id: uuid(),
+      });
+      check('but a whole series is refused', refused.status >= 400, JSON.stringify(refused.body)?.slice(0, 120));
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\n— a review, a private note, and reporting both —');
+  //
+  // M1, end to end on the deployed database: the two writing surfaces a stranger can see,
+  // and the report path that is the whole reason `20260825000100` exists. NR-1 is checked
+  // beside it — new unspecified text defaults private **server-side**, not in the client.
+  // -------------------------------------------------------------------------
+  {
+    const mine = await get(a.token, 'user_media?select=media_item_id&limit=1');
+    const titleId = (mine.body ?? [])[0]?.media_item_id;
+    check('A has a logged title to write about', Boolean(titleId));
+
+    if (titleId) {
+      // No visibility given at all. NR-1: the server decides, and it decides private.
+      const unspecified = await rpc(a.token, 'save_note', {
+        p_operation_id: uuid(),
+        p_media_item_id: titleId,
+        p_note: 'Acceptance run: an unspecified note.',
+        p_base_updated_at: null,
+        p_note_visibility: null,
+        p_note_spoilers: null,
+      });
+      check('an unspecified note is accepted', unspecified.status === 200, JSON.stringify(unspecified.body)?.slice(0, 160));
+
+      const stored = await get(a.token, `user_media?select=note_visibility&media_item_id=eq.${titleId}`);
+      check(
+        'and the server defaults it to private, not the client',
+        (stored.body ?? [])[0]?.note_visibility === 'private',
+        JSON.stringify((stored.body ?? [])[0]),
+      );
+
+      // B must not be able to read it, which is the property the default exists for.
+      const bSees = await rpc(b.token, 'public_notes', {
+        p_user_ids: [a.id],
+        p_media_item_ids: [titleId],
+        p_limit: 10,
+      });
+      check(
+        'and nobody else can read a private note',
+        bSees.status === 200 && (bSees.body ?? []).length === 0,
+        JSON.stringify(bSees.body)?.slice(0, 160),
+      );
+
+      // Then a real Review — a note somebody chose to publish — and the report on it.
+      const published = await rpc(a.token, 'save_note', {
+        p_operation_id: uuid(),
+        p_media_item_id: titleId,
+        p_note: 'Acceptance run: a published review.',
+        p_base_updated_at: null,
+        p_note_visibility: 'public',
+        p_note_spoilers: false,
+      });
+      check('a note can be published as a Review', published.status === 200, JSON.stringify(published.body)?.slice(0, 160));
+
+      const reviewRow = await get(a.token, `user_media?select=id&media_item_id=eq.${titleId}`);
+      const reviewId = (reviewRow.body ?? [])[0]?.id;
+
+      const reported = await rpc(b.token, 'report', {
+        p_subject_type: 'review',
+        p_subject_id: reviewId,
+        p_reason: 'other',
+      });
+      check(
+        'and somebody else can report it',
+        reported.status === 200,
+        JSON.stringify(reported.body)?.slice(0, 160),
+      );
+
+      // Reporting your own writing is not a moderation action, and the refusal is what
+      // stops the queue filling with self-reports.
+      const own = await rpc(a.token, 'report', {
+        p_subject_type: 'review',
+        p_subject_id: reviewId,
+        p_reason: 'other',
+      });
+      check('but not their own', own.status >= 400, JSON.stringify(own.body)?.slice(0, 120));
+    }
+
+    // A comment, and the report on that. B's activity is readable by A at this point in
+    // the run, which is why the comment goes this direction.
+    // `feed_events` read directly, the way the rest of this file does it. There is no
+    // `following_activity` RPC to reach for, and an RPC name that does not resolve answers
+    // 404 — which reads here as "no events" and turns the checks below into nothing.
+    const bEvents = await get(
+      a.token,
+      `feed_events?actor_id=eq.${b.id}&select=id&order=created_at.desc&limit=1`,
+    );
+    const event = (bEvents.body ?? [])[0];
+    check('there is an event of B’s to comment on', Boolean(event?.id), JSON.stringify(bEvents.body)?.slice(0, 120));
+
+    if (event?.id) {
+      const commented = await rpc(a.token, 'add_comment', {
+        p_operation_id: uuid(),
+        p_feed_event_id: event.id,
+        p_body: 'Acceptance run: a reportable comment.',
+        p_has_spoilers: false,
+      });
+      const commentId = commented.body?.comment_id;
+      check('a comment can be written', commented.status === 200, JSON.stringify(commented.body)?.slice(0, 160));
+
+      if (commentId) {
+        const reported = await rpc(b.token, 'report', {
+          p_subject_type: 'comment',
+          p_subject_id: commentId,
+          p_reason: 'other',
+        });
+        check('and reported', reported.status === 200, JSON.stringify(reported.body)?.slice(0, 160));
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  console.log('\n— a notification becomes a queued push —');
+  //
+  // The half of T3 no client-side check can see. `push_outbox` has no client surface at
+  // all — no policy, no grant — so this reads it as `service_role`, which is the only
+  // position from which the enqueue is observable.
+  //
+  // The point is the *coupling*: a notification of an eligible type, for a recipient with
+  // a live device, produces a row; and the preference gate suppresses the push by
+  // suppressing the notification rather than by a second check.
+  // -------------------------------------------------------------------------
+  {
+    const asService = async (path) => {
+      const res = await fetch(`${url}/rest/v1/${path}`, {
+        headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+      });
+      const text = await res.text();
+      return { status: res.status, body: text ? JSON.parse(text) : null };
+    };
+
+    const token = `ExponentPushToken[acceptance-${stamp}]`;
+    const registered = await rpc(a.token, 'register_device_token', {
+      p_operation_id: uuid(),
+      p_token: token,
+      p_platform: 'ios',
+    });
+    check('a device can be registered for push', registered.status === 200, JSON.stringify(registered.body)?.slice(0, 160));
+
+    // B follows A back by this point, so B's `following_activity` is A's events — which is
+    // how a comment *from B on A's activity* is arranged, and `comment` is an eligible push
+    // type. There is no `my_activity` RPC; reaching for one is how this check first came to
+    // silently not run at all.
+    const before = await asService(`push_outbox?select=notification_id&recipient_id=eq.${a.id}`);
+    const aEvents = await get(
+      b.token,
+      `feed_events?actor_id=eq.${a.id}&select=id&order=created_at.desc&limit=1`,
+    );
+    const aEvent = (aEvents.body ?? [])[0];
+
+    check(
+      'B can see an event of A’s to comment on',
+      Boolean(aEvent?.id),
+      `${aEvents.status} ${JSON.stringify(aEvents.body)?.slice(0, 160)}`,
+    );
+
+    if (aEvent?.id) {
+      const commented = await rpc(b.token, 'add_comment', {
+        p_operation_id: uuid(),
+        p_feed_event_id: aEvent.id,
+        p_body: 'Acceptance run: a comment that should buzz a phone.',
+        p_has_spoilers: false,
+      });
+      check('and comment on it', commented.status === 200, JSON.stringify(commented.body)?.slice(0, 160));
+
+      const after = await asService(`push_outbox?select=notification_id&recipient_id=eq.${a.id}`);
+      check(
+        'and a notification for them lands in the push outbox',
+        (after.body ?? []).length > (before.body ?? []).length,
+        `${(before.body ?? []).length} → ${(after.body ?? []).length} queued for A`,
+      );
+    }
+
+    // The outbox is not a client surface, asserted rather than assumed — a grant added by
+    // accident would be a table of other people's device addresses.
+    const asA = await get(a.token, 'push_outbox?select=notification_id&limit=1');
+    check(
+      'and the outbox is unreadable by the account it is about',
+      asA.status >= 400 || (asA.body ?? []).length === 0,
+      `${asA.status} ${JSON.stringify(asA.body)?.slice(0, 120)}`,
+    );
+
+    const released = await rpc(a.token, 'revoke_device_token', { p_operation_id: uuid(), p_token: token });
+    check('and the device can be released again', released.status === 200);
+  }
+
+  // -------------------------------------------------------------------------
   console.log('\n— B goes private —');
   // -------------------------------------------------------------------------
 
@@ -1049,9 +1590,19 @@ try {
   }
 }
 
-console.log(`\n${passed}/${passed + failed} passed, ${failed} failed`);
+console.log(
+  `\n${passed}/${passed + failed} passed, ${failed} failed` +
+    (skipped.length ? `, ${skipped.length} skipped` : ''),
+);
 if (failures.length) {
   console.log('\nFailures:');
   for (const line of failures) console.log(`  · ${line}`);
+}
+if (skipped.length) {
+  // Printed after the failures and never folded into the pass count. A production
+  // acceptance run is not complete while this list has anything in it — see
+  // docs/release/production-acceptance.md.
+  console.log('\nSkipped, because this project has no data to exercise them:');
+  for (const line of skipped) console.log(`  · ${line}`);
 }
 process.exit(failed ? 1 : 0);

@@ -103,7 +103,12 @@ const NONPROD_HOST = 'abheeqyjzekiowkztfxv.supabase.co';
 function shippedFollowsSelect() {
   const file = join(root, 'src', 'features', 'awards', 'use-awards.ts');
   const source = readFileSync(file, 'utf8');
-  const match = /export const FOLLOWS_SELECT\s*=\s*([\s\S]*?);\n/.exec(source);
+  // `\r?\n`, and the `\r` is not cosmetic. On a Windows checkout every line ends `;\r\n`,
+  // the anchor never matched, and this script threw "the parser needs updating" before it
+  // probed anything — so the one acceptance check that guards the award privacy boundary
+  // had never run on the founder's own machine. It passes in CI, which is Linux, which is
+  // exactly how a platform-specific break stays invisible.
+  const match = /export const FOLLOWS_SELECT\s*=\s*([\s\S]*?);\r?\n/.exec(source);
   if (!match) {
     throw new Error(`could not find FOLLOWS_SELECT in ${file} — the parser needs updating`);
   }

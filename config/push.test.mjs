@@ -215,6 +215,10 @@ function resolveConfig(lane, { variant, env = {} } = {}) {
       // Cleared unless a case sets it, so a developer machine that happens to export one
       // cannot quietly change what this suite is asserting.
       [GOOGLE_SERVICES_ENV]: '',
+      // Present for the same reason, in the other direction. `config/production-lane.cjs`
+      // refuses a production build with no anon key, and this suite is about push — a case
+      // failing over a missing Supabase variable would be asserting the wrong thing.
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: 'ci',
       ...env,
     },
   });
@@ -262,13 +266,37 @@ describe('the resolved config, per lane', () => {
     assert.deepEqual(opted.plugin, { color: '#773744' });
   });
 
-  it('production takes production APNs and the FCM file', () => {
+  /**
+   * **These two used to be a success and a failure; they are now two failures that differ,
+   * and that is a sharper test rather than a weaker one.**
+   *
+   * A production config cannot resolve successfully at all today, by design:
+   * `config/production-lane.cjs` refuses the lane because `LANE_BACKENDS.production` is empty
+   * and there is no production Supabase project. Asserting `failed === false` here would mean
+   * either inventing a project ref or adding an escape hatch, and this file's whole subject is
+   * a rule that must not have one.
+   *
+   * What survives is the property that actually mattered — **that `config/push.cjs` is reached
+   * and satisfied by a production resolution.** With the FCM file present the refusal must be
+   * the *backend*; without it, the refusal must be the *credential*. A production lane that
+   * silently stopped demanding `google-services.json` would flip the second message to the
+   * first, and this notices.
+   *
+   * The values themselves — `mode: 'production'`, the file path — are asserted directly
+   * against `notificationPluginProps` and `googleServicesFileFor` above, where no config
+   * resolver is involved.
+   */
+  it('production gets past the FCM file and stops at the backend', () => {
     const secret = placeholderSecret();
     const config = resolveConfig('production', { env: { [GOOGLE_SERVICES_ENV]: secret } });
 
-    assert.equal(config.failed, false, config.message);
-    assert.deepEqual(config.plugin, { color: '#773744', mode: 'production' });
-    assert.equal(config.googleServicesFile, secret);
+    assert.equal(config.failed, true, 'a production config resolved with no production backend');
+    assert.match(config.message, /must be built against a Supabase project/);
+    assert.doesNotMatch(
+      config.message,
+      /google-services\.json/,
+      'the FCM file was present and production still refused over it',
+    );
   });
 
   it('production refuses to resolve at all without Android push configuration', () => {

@@ -30,8 +30,13 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+
+const require = createRequire(import.meta.url);
+const { supabaseProjectRef } = require('../../config/backends.cjs');
+const { environmentForRef } = require('../../config/production-lane.cjs');
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -149,6 +154,64 @@ function expectAllowed(name, res) {
 }
 
 console.log(`\nProbing ${url} as an unauthenticated client\n`);
+
+// ---------------------------------------------------------------------------
+// Which database is this, and does it agree?
+//
+// **The first probe, because every result below it is about whichever project the URL
+// happens to name.** Until now this file would have run happily against production, against
+// nonprod, or against a project belonging to somebody else, reporting the same passes.
+//
+// Two independent facts have to line up and neither is sufficient alone:
+//
+//   · `config/production-lane.cjs` maps the project ref — parsed from the URL, so it is what
+//     a binary would actually talk to — onto the environment that project is supposed to be;
+//   · `environment_name()` is what the database itself says (20260826000100).
+//
+// The map can be wrong: a ref is twenty characters and two of them transposed in a review is
+// invisible. The database can be wrong: a production project replayed from zero comes up
+// calling itself `nonprod`, which is the bootstrap trap this tranche exists to close. Only
+// checking both catches either.
+//
+// An unrecognised project is a **failure and not a skip**. A smoke run against a project
+// nothing in this repository has heard of is a run whose passes mean nothing.
+// ---------------------------------------------------------------------------
+{
+  const ref = supabaseProjectRef(url);
+  const expected = ref === null ? null : environmentForRef(ref);
+
+  if (expected === null) {
+    report(
+      'the project this is pointed at is one this repository knows',
+      'fail',
+      `${url} resolves to ${ref ?? 'no Supabase project'}, which is not in REF_ENVIRONMENTS ` +
+        '(config/production-lane.cjs). Every result below would be about a database nobody ' +
+        'declared.',
+    );
+  } else {
+    const res = await rpc('environment_name', {});
+    let actual = null;
+    try {
+      const parsed = JSON.parse(res.body);
+      // A PostgREST error document parses too. Only a bare string is an answer.
+      actual = typeof parsed === 'string' ? parsed : null;
+    } catch {
+      actual = null;
+    }
+
+    report(
+      `${ref} says it is the ${expected} database`,
+      actual === expected ? 'pass' : 'fail',
+      actual === null
+        ? `environment_name() did not answer — ${res.status} ${res.body.slice(0, 200)}\n` +
+          '              The function arrives with 20260826000100. If this project has not ' +
+          'taken it: supabase db push'
+        : `expected ${expected}, got ${actual}.\n` +
+          '              Either the ref is in the wrong lane in config/backends.cjs, or this ' +
+          'database was never bootstrapped: node scripts/bootstrap-production.mjs',
+    );
+  }
+}
 
 // A wiring check, not a security one: a 401 here would mean the anon key is
 // wrong and every result below is noise.
