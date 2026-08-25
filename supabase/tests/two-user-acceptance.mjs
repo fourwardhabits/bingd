@@ -488,10 +488,11 @@ try {
   const profileOfB = await get(a.token, `public_profiles?username=eq.${b.username}&select=id,username`);
   check('A can open B’s public profile', (profileOfB.body ?? []).length === 1);
 
-  // A recommendation needs a mutual follow, and right now they are strangers. Refusals
-  // come back as a 200 with a body, deliberately: `recommend_title` returns them so that
-  // a refused attempt still costs a slot against the hourly ceiling, which a raise would
-  // roll back along with the operation claim (independent review 18).
+  // A recommendation needs the caller to follow the recipient (20260826000400), and
+  // right now they are strangers. Refusals come back as a 200 with a body, deliberately:
+  // `recommend_title` returns them so that a refused attempt still costs a slot against
+  // the hourly ceiling, which a raise would roll back along with the operation claim
+  // (independent review 18).
   const strangerSend = await rpc(a.token, 'recommend_title', {
     p_operation_id: uuid(),
     p_recipient_id: b.id,
@@ -501,7 +502,7 @@ try {
     'a stranger cannot be recommended to',
     strangerSend.status === 200 &&
       strangerSend.body?.status === 'refused' &&
-      strangerSend.body?.reason === 'not_mutual',
+      strangerSend.body?.reason === 'not_following',
     JSON.stringify(strangerSend.body),
   );
 
@@ -1381,7 +1382,7 @@ try {
   check(
     'and cannot recommend their way back in either',
     recommendWhileBlocked.body?.status === 'refused' &&
-      recommendWhileBlocked.body?.reason === 'not_mutual',
+      recommendWhileBlocked.body?.reason === 'not_following',
     JSON.stringify(recommendWhileBlocked.body),
   );
   check(
