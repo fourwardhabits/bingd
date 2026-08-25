@@ -1,3 +1,5 @@
+import * as Crypto from 'expo-crypto';
+
 import { supabase } from '@/lib/supabase';
 import { classifyWrite } from '@/lib/write-outcome';
 
@@ -80,6 +82,40 @@ export async function createProfile(input: {
   }
 
   return { outcome: 'created' };
+}
+
+/**
+ * The visibility a brand-new account asked for, applied straight after it exists.
+ *
+ * **Why this is a second call and not a third argument to `create_profile`.** The
+ * column has a default and the RPC does not take a visibility, and giving it one is a
+ * migration — which this change is deliberately not. `set_profile_visibility` is the
+ * same function Settings › Privacy has always called and the same one that owns the
+ * side effects of the switch, so a private account created here is private by exactly
+ * the mechanism that makes an account private later. No new path, no new rule.
+ *
+ * **Only ever called for `private`.** `public` is the column default, so sending it
+ * would spend one of the twenty daily `profile.max_edits_per_day` slots on a write
+ * whose only effect is to set a value to what it already is — and the function itself
+ * short-circuits that case anyway.
+ *
+ * **Failure is not fatal, and the caller is told rather than blocked.** The account
+ * exists by this point; refusing to continue would strand somebody on a signup form
+ * for an account they already have, which is the exact dead end `already_exists`
+ * exists to avoid. The screen carries them into the app and says the setting did not
+ * take, with Settings › Privacy as the way to finish it.
+ */
+export async function applyInitialVisibility(
+  visibility: 'public' | 'private',
+): Promise<{ ok: boolean }> {
+  if (visibility === 'public') return { ok: true };
+
+  const { error } = await supabase.rpc('set_profile_visibility', {
+    p_operation_id: Crypto.randomUUID(),
+    p_visibility: 'private',
+  });
+
+  return { ok: !error };
 }
 
 /**

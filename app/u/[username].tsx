@@ -12,6 +12,8 @@ import { useActorActivity } from '@/features/feed/use-feed';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
 import { FollowControl } from '@/features/profile/FollowControl';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
+import { ProfileActions } from '@/features/profile/ProfileActions';
+import { ProfileMenu } from '@/features/profile/ProfileMenu';
 import { ProfileWatchlist } from '@/features/profile/ProfileWatchlist';
 import { TopRanked } from '@/features/profile/TopRanked';
 import {
@@ -19,13 +21,17 @@ import {
   useProfileNotes,
   usePublicProfile,
 } from '@/features/profile/use-public-profile';
-import { useMyBlocks, useRelationships, useSocialWrites } from '@/features/profile/use-social';
+import {
+  noRelationship,
+  useMyBlocks,
+  useRelationships,
+  useSocialWrites,
+} from '@/features/profile/use-social';
 import { tasteMatchBadge, useTasteMatch } from '@/features/profile/use-taste-match';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
   ActivityRow,
-  Button,
   EmptyState,
   LoadingScreen,
   Screen,
@@ -108,6 +114,39 @@ export default function PublicProfileScreen() {
   const { unblock, busy: unblocking } = useSocialWrites(viewer.id, 'profile');
 
   const isSelf = profile.data?.id === viewer.id;
+
+  /**
+   * Who the header's menu is about, which is **not** always `subjectId`.
+   *
+   * Blocking closes the door behind itself: `can_view_profile` goes false in both
+   * directions, so a blocked account is absent from `public_profiles` *and* from
+   * `profile_identity` — and `subjectId` is built from those two, so it is empty on
+   * exactly the profile where the moderation menu matters most. The one read that can
+   * still name them is the viewer's own block list, which is why the blocked branch
+   * below already reaches for `blockedMatch`.
+   *
+   * Review 41's third Major: without this fallback, Report was unreachable the moment
+   * you blocked somebody. That is the inversion the database deliberately refuses to
+   * have — `report()` checks that a subject exists and deliberately not that the caller
+   * can still see it, so that blocking cannot become a way to suppress the complaint
+   * (20260813002000 §4) — reintroduced in the client.
+   *
+   * Kept out of `subjectId` itself rather than folded into it: that value feeds Top
+   * Ranked, the Awards sheet and the taste match, none of which should start a read
+   * about an account the viewer has made invisible.
+   */
+  const menuUserId = subjectId || blockedMatch?.id || '';
+  const menuName = profile.data?.name ?? identity.data?.name ?? `@${username}`;
+  /**
+   * `follow_state_with` answers for a blocked pair too, but only if it was asked — and
+   * it is asked about `subjectId`, which is empty here. `blockedMatch` is the viewer's
+   * own list, so its presence *is* the block; saying so directly is what makes the menu
+   * offer Unblock rather than Block on the one profile where getting that backwards
+   * would be worst.
+   */
+  const menuRelationship =
+    relationships.data?.get(menuUserId) ??
+    (blockedMatch ? { ...noRelationship(), blocked: true } : undefined);
   // Asked about this actor directly. Filtering the viewer's own feed would have
   // shown nothing for any public account they had not followed, because that query
   // spans the follow set — the authorisation comes from feed_events_read either way.
@@ -145,11 +184,36 @@ export default function PublicProfileScreen() {
 
   return (
     <Screen includeBottomInset edges={[]}>
+      {/**
+        * **The corner the owner's profile uses for its gear and bell.**
+        *
+        * Report and Block live behind this rather than as permanent buttons in the
+        * action area — the founder's note, and the reasoning is in `ProfileMenu`. What
+        * matters here is only that it is the *same corner*: a reader who has learned
+        * that the controls for a profile are top right is right on both screens.
+        *
+        * `menuUserId` rather than `profile.data.id`, so it is present on the
+        * discoverable-but-unreadable branch and on the *blocked* one — a private account
+        * somebody wants to report, and an account they have already blocked, are the two
+        * cases where the control matters most and the two where the readable row is
+        * absent. Absent on the viewer's own profile, which this screen can be, and
+        * absent when the handle resolved to nothing at all: there is nobody to report.
+        */}
       <Stack.Screen
         options={{
           headerShown: true,
           title: profile.data?.name ?? '',
           headerBackTitle: 'Back',
+          headerRight: () =>
+            menuUserId && !isSelf ? (
+              <ProfileMenu
+                userId={menuUserId}
+                name={menuName}
+                viewerId={viewer.id}
+                relationship={menuRelationship}
+                surface="profile"
+              />
+            ) : null,
         }}
       />
 
@@ -266,21 +330,34 @@ export default function PublicProfileScreen() {
             }
             controls={
               /**
-               * Follow, then Share Profile and Bingd Awards — the same pair, in the
-               * same order and the same row shape as the own profile.
+               * **The same stack as the owner's profile, position for position.**
                *
-               * The founder found them missing here. They are not own-profile controls:
-               * a profile is a thing you hand to somebody, and the person most likely to
-               * hand somebody else’s profile on is the one reading it. Awards is the
-               * same reading of the same public collection, taken about whoever is being
-               * looked at.
+               *     [ Share Profile ]  [ bingd. Awards ]
+               *     [        Follow / Following        ]
                *
-               * **Both outlined here, where the own profile fills Awards.** The fill is
-               * spent on the one control that depends on who is looking, and on this
-               * screen that is Follow. Three filled buttons in a stack is three primary
-               * actions, which is none.
+               * The founder's rule for this pass: looking at somebody else should feel
+               * like looking at your own profile, so the pair sits where the pair sits
+               * and the full-width slot underneath — Invite friends on your own — holds
+               * the one control that depends on who is looking. It was the other way
+               * round here, which put a different thing in the top row on each screen
+               * and made the two read as two designs again.
+               *
+               * **The pair is `ProfileActions`, which the owner's profile draws too.**
+               * It was two `Button`s written out here, and they had drifted: Awards was
+               * `secondary` on this screen and filled Maroon on the owner's, so the same
+               * object wore two treatments one tap apart. The founder's device pass also
+               * found the label wrapping to two lines at iPhone width. Both are fixed in
+               * the component rather than here, because a rule two call sites keep by
+               * agreement is a rule that will be broken again.
+               *
+               * Follow does not lose by Awards taking the fill — it is full-width Maroon
+               * on its own row underneath, which is the louder of the two positions.
                */
               <View style={styles.controls}>
+                <ProfileActions
+                  onShare={() => void shareProfile()}
+                  onOpenAwards={() => setAwardsOpen(true)}
+                />
                 <FollowControl
                   userId={subjectId}
                   name={profile.data.name}
@@ -289,22 +366,6 @@ export default function PublicProfileScreen() {
                   isSelf={isSelf}
                   surface="profile"
                 />
-                <View style={styles.actions}>
-                  <View style={styles.action}>
-                    <Button
-                      label="Share Profile"
-                      kind="secondary"
-                      onPress={() => void shareProfile()}
-                    />
-                  </View>
-                  <View style={styles.action}>
-                    <Button
-                      label="bingd. Awards"
-                      kind="secondary"
-                      onPress={() => setAwardsOpen(true)}
-                    />
-                  </View>
-                </View>
               </View>
             }
           />
@@ -488,13 +549,10 @@ const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   // Centred under the photo, tight: two short lines about the person in it.
   taste: { alignItems: 'center', gap: 0 },
-  // Follow on its own line, the two actions under it. The gap is the one between two
-  // rows of controls; `ProfileIdentity` owns the space above and the gutter beside.
-  controls: { gap: theme.space[3] },
-  // Two equal halves, as on the own profile — equal weight is what stops either
-  // reading as the only real control.
-  actions: { flexDirection: 'row', gap: theme.space[2] },
-  action: { flex: 1 },
+  // The pair, then the relationship action under it — the owner's profile keeps the
+  // same rhythm between its pair and Invite friends. `ProfileIdentity` owns the space
+  // above and the gutter beside.
+  controls: { gap: theme.space[2] },
   section: { paddingTop: theme.space[5], gap: theme.space[2] },
   note: { paddingBottom: theme.space[2] },
   noteBody: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[1] },

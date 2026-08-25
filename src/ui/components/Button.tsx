@@ -3,7 +3,22 @@ import { Pressable, StyleSheet, View, type PressableProps } from 'react-native';
 import { theme } from '../tokens';
 import { Text } from './Text';
 
-type Kind = 'primary' | 'secondary' | 'tertiary';
+/**
+ * `outline` is the fourth, and it is the *filled* button's own state after the act.
+ *
+ * Follow is Maroon and filled; once you follow somebody it becomes Following, which is
+ * a statement of where you stand rather than the thing to do on the page. `secondary`
+ * was the obvious answer and it is wrong here for one reason: it is grey, so the
+ * control the reader just used appears to have been replaced by a different, unrelated
+ * one. `outline` keeps the identity — the same Maroon, as a border and as ink, on the
+ * raised surface — while giving up the fill, so the change reads as the same button
+ * having changed state.
+ *
+ * It is not `primary` with a modifier, because the two differ in more than fill: the
+ * label is Maroon here and inverse there, and a "primary but hollow" prop would make
+ * every caller responsible for remembering that.
+ */
+type Kind = 'primary' | 'secondary' | 'tertiary' | 'outline';
 
 /**
  * `md` is the screen's own action. `sm` is one that belongs to a row.
@@ -42,6 +57,37 @@ export type ButtonProps = Omit<PressableProps, 'children' | 'style'> & {
    * is announced to screen readers rather than left to be inferred.
    */
   disabledReason?: string;
+  /**
+   * "This one is in a narrow column, and its label may not wrap."
+   *
+   * **The founder's iPhone screenshot is what this is for.** `bingd. Awards` sits in
+   * one half of a two-up row inside the page gutter. At 375pt that half is 167pt and
+   * the label plus `md`'s 40pt of side padding is about 162 — it fits by five points.
+   * At 320pt, which is a width this app supports, the half is 140pt and the same label
+   * needs 162, so it wrapped to two lines and the button grew to 68pt tall next to a
+   * 48pt Share Profile. Dynamic Type at any size above default does the same thing to
+   * the 375pt case.
+   *
+   * Three things together, because each alone fails:
+   *
+   *   - `numberOfLines={1}` stops the wrap, and on its own it *clips*;
+   *   - `adjustsFontSizeToFit` shrinks instead of clipping, and needs the line cap to
+   *     do anything at all;
+   *   - the side padding drops from `space[5]` to `space[3]`, which is what keeps the
+   *     shrink imperceptible — 24pt of padding rather than 40 leaves the label its
+   *     natural size at every width down to about 330, so the scale only engages on
+   *     the narrowest devices and the largest type settings.
+   *
+   * `minimumFontScale` is 0.85 rather than lower on purpose: below that the label is
+   * visibly smaller than the button beside it, and a pair that no longer matches is the
+   * defect this is fixing rather than a smaller version of it. A label that cannot fit
+   * at 85% is a label that is too long for this slot, which is a copy decision and not
+   * one a component should make silently.
+   *
+   * Not the default. Every other button in the app is either full-width or hugging a
+   * short label, and shrinking type is a thing to do deliberately.
+   */
+  fit?: boolean;
 };
 
 export function Button({
@@ -51,6 +97,7 @@ export function Button({
   tone = 'default',
   disabled,
   disabledReason,
+  fit = false,
   ...rest
 }: ButtonProps) {
   if (disabled && !disabledReason && __DEV__) {
@@ -67,6 +114,7 @@ export function Button({
         styles.base,
         styles[size],
         styles[kind],
+        fit && styles.fit,
         pressed && !disabled && styles.pressed,
         disabled && styles.disabled,
       ]}
@@ -74,9 +122,18 @@ export function Button({
     >
       <View pointerEvents="none">
         <Text
+          numberOfLines={fit ? 1 : undefined}
+          adjustsFontSizeToFit={fit}
+          minimumFontScale={fit ? 0.85 : undefined}
           variant={size === 'sm' ? 'callout' : 'headline'}
           tone={
-            kind === 'primary' ? 'inverse' : tone === 'secondary' ? 'secondary' : 'primary'
+            kind === 'primary'
+              ? 'inverse'
+              : kind === 'outline'
+                ? 'action'
+                : tone === 'secondary'
+                  ? 'secondary'
+                  : 'primary'
           }
         >
           {label}
@@ -101,6 +158,16 @@ const styles = StyleSheet.create({
     borderColor: theme.border.strong,
   },
   tertiary: { backgroundColor: 'transparent', paddingHorizontal: theme.space[2] },
+  // Two points of Maroon rather than a hairline: this has to read as the same weight
+  // of control as the filled Maroon it replaces, and a hairline outline reads lighter
+  // than a fill at any width.
+  outline: {
+    backgroundColor: theme.surface.raised,
+    borderWidth: 2,
+    borderColor: theme.semantic.action,
+  },
+  // Applied after the size, so it overrides whichever one is in play.
+  fit: { paddingHorizontal: theme.space[3] },
   pressed: { opacity: 0.85 },
   disabled: { opacity: 0.4 },
 });

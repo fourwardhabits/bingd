@@ -24,7 +24,7 @@ import { initAnalytics } from '@/lib/analytics';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
 import { createQueryClient, startQueryFocusTracking } from '@/lib/query';
 import { startUpdateChecks } from '@/lib/updates';
-import { theme } from '@/ui/tokens';
+import { ROOT_SCREEN_TITLES, rootStackScreenOptions } from '@/ui/navigation';
 
 // Before the first render, so a crash during startup is still reported. Both
 // calls are no-ops when their keys are absent, which is how the project runs
@@ -132,29 +132,44 @@ function Navigation() {
 
   return (
     <>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: theme.surface.base },
-          headerStyle: { backgroundColor: theme.surface.base },
-          headerTintColor: theme.text.primary,
-        }}
-      >
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="title/[id]" options={{ headerShown: true, title: 'Title' }} />
-        <Stack.Screen name="u/[username]" options={{ headerShown: true, title: 'Profile' }} />
+      {/* `headerBackTitle` is in `rootStackScreenOptions`, and the reason it had to
+          move there is the `‹ (tabs)` the founder photographed on a title page — see
+          `ui/navigation.ts`. The titles come from `ROOT_SCREEN_TITLES` for the same
+          reason: on iOS a route's title is the back label of whatever is pushed on top
+          of it, so they are an invariant worth asserting rather than seven strings
+          spread down a JSX tree. */}
+      <Stack screenOptions={rootStackScreenOptions}>
+        <Stack.Screen name="(tabs)" options={{ title: ROOT_SCREEN_TITLES['(tabs)'] }} />
+        <Stack.Screen name="(auth)" options={{ title: ROOT_SCREEN_TITLES['(auth)'] }} />
+        <Stack.Screen
+          name="title/[id]"
+          options={{ headerShown: true, title: ROOT_SCREEN_TITLES['title/[id]'] }}
+        />
+        <Stack.Screen
+          name="u/[username]"
+          options={{ headerShown: true, title: ROOT_SCREEN_TITLES['u/[username]'] }}
+        />
         {/* Reached from a cast strip. The header title is set by the screen once
             the person resolves, so it is empty here rather than "Person". */}
-        <Stack.Screen name="person/[id]" options={{ headerShown: true, title: '' }} />
-        <Stack.Screen name="lists/[id]" options={{ headerShown: true, title: 'List' }} />
+        <Stack.Screen
+          name="person/[id]"
+          options={{ headerShown: true, title: ROOT_SCREEN_TITLES['person/[id]'] }}
+        />
+        <Stack.Screen
+          name="lists/[id]"
+          options={{ headerShown: true, title: ROOT_SCREEN_TITLES['lists/[id]'] }}
+        />
         {/* No header and no back: it is the first thing a new account sees, and there
             is nowhere behind it to return to. Leaving is an explicit choice made on
             the screen itself. */}
         <Stack.Screen name="onboarding/taste" options={{ headerShown: false }} />
         <Stack.Screen
           name="settings"
-          options={{ presentation: 'modal', headerShown: true, title: 'Settings' }}
+          options={{
+            presentation: 'modal',
+            headerShown: true,
+            title: ROOT_SCREEN_TITLES.settings,
+          }}
         />
       </Stack>
       <AuthStatusOverlay />

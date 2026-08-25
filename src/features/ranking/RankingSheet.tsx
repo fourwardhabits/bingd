@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -57,6 +58,26 @@ export type RankingSheetProps = {
   /** "Rank another" — closes this and sends the user back to search. */
   onRankAnother?: () => void;
   /**
+   * "Finish your log" — closes this and hands the reader back to `LogSheet` in its
+   * post-rank state, carrying the score the session just produced.
+   *
+   * **This is the seam the founder's central complaint was about.** Ranking used to end
+   * here: a number, Rank another, Done, and the review you might have written or the
+   * people you watched it with were behind a second, unprompted visit to a sheet you
+   * had just been thrown out of. Ranking is a subflow of logging, so it returns to the
+   * log — and it returns to the *same* `LogSheet`, not a Finish screen of its own, so
+   * there is exactly one implementation of "the rest of your log" in the app.
+   *
+   * The placement travels with the call. The session already had all three from the
+   * server's reply, and making the log sheet re-query for a number this screen is
+   * holding would put a spinner in the middle of a finished act.
+   *
+   * Optional because the caller has to have a log sheet to return to. Every screen that
+   * mounts this one does; the prop is optional so that adding a fourth cannot silently
+   * break, and the reveal falls back to the two controls it has always had.
+   */
+  onFinishLog?: (placement: { score: number; position: number; category: string }) => void;
+  /**
    * Which screen opened this, for `ranking_completed` alone.
    *
    * Passed in rather than inferred from the route: the sheet is mounted by three
@@ -78,7 +99,13 @@ export type RankingSheetProps = {
  * of the mechanic. Decided by the founder, 2026-08-13. The position is visible everywhere
  * else in the app, which is why this component fetches only titles.
  */
-export function RankingSheet({ subject, onClose, onRankAnother, surface }: RankingSheetProps) {
+export function RankingSheet({
+  subject,
+  onClose,
+  onRankAnother,
+  onFinishLog,
+  surface,
+}: RankingSheetProps) {
   if (!subject) return null;
 
   // Keyed by the title, so moving to a different one starts a genuinely new component
@@ -89,6 +116,7 @@ export function RankingSheet({ subject, onClose, onRankAnother, surface }: Ranki
       subject={subject}
       onClose={onClose}
       onRankAnother={onRankAnother}
+      onFinishLog={onFinishLog}
       surface={surface}
     />
   );
@@ -98,6 +126,7 @@ function Session({
   subject,
   onClose,
   onRankAnother,
+  onFinishLog,
   surface,
 }: RankingSheetProps & { subject: NonNullable<RankingSheetProps['subject']> }) {
   const queryClient = useQueryClient();
@@ -350,6 +379,22 @@ function Session({
               void close();
               onRankAnother?.();
             }}
+            onFinishLog={
+              onFinishLog
+                ? () => {
+                    // `close` is a no-op against the server at this point — `apply` cleared
+                    // `openSession` the moment the placement landed, because the server
+                    // deletes a session it has finished. It is still the way out, so the
+                    // sheet unmounts through the same path every other exit uses.
+                    void close();
+                    onFinishLog({
+                      score: step.score,
+                      position: step.position,
+                      category: step.category,
+                    });
+                  }
+                : undefined
+            }
           />
         ) : step?.state === 'comparing' ? (
           <Comparison
@@ -604,14 +649,28 @@ function Comparison({
       </View>
 
       {/**
-       * One row, and subordinate.
+       * One row, and subordinate — but a row of *controls*.
        *
-       * `sm` and a secondary tone, which is the founder's note: at `md` these were 48pt
-       * tall, `headline` weight and full ink — the same physical control the app uses
-       * for the primary act of a screen, sitting directly under the two posters that
-       * *are* the act. They read as the question. Compact and quieter puts them back
-       * where they belong without making them hard to hit: 36pt plus `hitSlop` clears
-       * the 44pt target, which is the rule `Button`'s own `sm` note states.
+       * `sm` and a secondary tone, which is the founder's first note: at `md` these were
+       * 48pt tall, `headline` weight and full ink — the same physical control the app
+       * uses for the primary act of a screen, sitting directly under the two posters
+       * that *are* the act. They read as the question. Compact and quieter puts them
+       * back where they belong without making them hard to hit: 36pt plus `hitSlop`
+       * clears the 44pt target, which is the rule `Button`'s own `sm` note states.
+       *
+       * **`secondary` rather than `tertiary`, which is the founder's second note.**
+       * Quiet went one step too far: `tertiary` is a transparent box with no border, so
+       * on the device these two words sat under the posters as loose text with nothing
+       * to say they could be pressed. The reference the founder gave is the compact
+       * Follow back in the notification inbox — `secondary`, `sm`, with `hitSlop` for
+       * the target — and this is that control, so it is drawn as that control: a raised
+       * fill and a hairline border, which is exactly what makes a button look like one.
+       *
+       * The tone stays `secondary`, so the pair gains a container without gaining the
+       * ink weight that made them compete with the posters in the first place. Equal
+       * halves of the row rather than hugging their labels, so "Undo" and "Skip" are
+       * the same physical size — two controls of the same rank should not differ in
+       * width because one word is longer than the other.
        */}
       <View style={styles.controls}>
         {/**
@@ -629,20 +688,24 @@ function Comparison({
          * reader did was start ranking, and this undoes it. The title keeps its bucket
          * and stays Logged.
          */}
-        <Button
-          label="Undo"
-          kind="tertiary"
-          size="sm"
-          tone="secondary"
-          // 36pt plus 4 either side is the 44 design-system.md §8 requires. `sm` is
-          // deliberately shorter than that on its own and says so — slop is the right
-          // tool for a compact control, and a taller box is not — but the slop has to
-          // be passed, which is the half review 36 found missing.
-          hitSlop={theme.space[1]}
-          onPress={onBack}
-          disabled={busy}
-          disabledReason="Waiting for the last answer to save."
-        />
+        <View style={styles.control}>
+          <Button
+            label="Undo"
+            accessibilityLabel="Undo the last comparison"
+            accessibilityHint="Puts the previous pair back."
+            kind="secondary"
+            size="sm"
+            tone="secondary"
+            // 36pt plus 4 either side is the 44 design-system.md §8 requires. `sm` is
+            // deliberately shorter than that on its own and says so — slop is the right
+            // tool for a compact control, and a taller box is not — but the slop has to
+            // be passed, which is the half review 36 found missing.
+            hitSlop={theme.space[1]}
+            onPress={onBack}
+            disabled={busy}
+            disabledReason="Waiting for the last answer to save."
+          />
+        </View>
         {/**
          * `Skip`, which is one control for two reasons.
          *
@@ -662,18 +725,20 @@ function Comparison({
          * and both call the same thing; two buttons with one effect is a decision the
          * reader has to make for no reason.
          */}
-        <Button
-          label="Skip"
-          accessibilityLabel="Skip this comparison"
-          accessibilityHint="Compares against a different title instead."
-          kind="tertiary"
-          size="sm"
-          tone="secondary"
-          hitSlop={theme.space[1]}
-          onPress={onSkip}
-          disabled={busy}
-          disabledReason="Waiting for the last answer to save."
-        />
+        <View style={styles.control}>
+          <Button
+            label="Skip"
+            accessibilityLabel="Skip this comparison"
+            accessibilityHint="Compares against a different title instead."
+            kind="secondary"
+            size="sm"
+            tone="secondary"
+            hitSlop={theme.space[1]}
+            onPress={onSkip}
+            disabled={busy}
+            disabledReason="Waiting for the last answer to save."
+          />
+        </View>
       </View>
 
       {/**
@@ -759,15 +824,37 @@ function Card({
        * its own label — small, under the poster it belongs to, and out of the way of
        * the two cards that are the actual question.
        */}
+      {/**
+       * **The word is `Details`, and it used to be "What is this?".**
+       *
+       * Founder feedback from physical testing. A question under both posters reads as
+       * the screen being unsure rather than as an offer, and at 375pt three words wrap
+       * to two lines under one title and one line under the other — so the pair stops
+       * being symmetrical at the exact moment symmetry *is* the question. `Details` is
+       * one word, cannot wrap, and names what is behind it.
+       *
+       * The glyph is what keeps it reading as a control at caption size; a bare word in
+       * tertiary ink under a poster is the same "loose text" the founder objected to in
+       * the row below. It is hidden from screen readers because the label on the
+       * Pressable already says the whole sentence.
+       */}
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Remind me about ${title}`}
+        accessibilityLabel={`Details about ${title}`}
+        accessibilityHint="Shows the year, the runtime, the cast, and what it is about."
         hitSlop={theme.layout.minTapTarget / 2}
         onPress={onRecall}
         style={({ pressed }) => [styles.recall, pressed && styles.pressed]}
       >
+        <Ionicons
+          name="information-circle-outline"
+          size={theme.layout.icon.sm}
+          color={theme.text.tertiary}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        />
         <Text variant="caption" tone="tertiary">
-          What is this?
+          Details
         </Text>
       </Pressable>
     </View>
@@ -808,6 +895,7 @@ function Reveal({
   title,
   onDone,
   onRankAnother,
+  onFinishLog,
 }: {
   score: number;
   position: number;
@@ -818,6 +906,7 @@ function Reveal({
   title: string;
   onDone: () => void;
   onRankAnother: () => void;
+  onFinishLog?: () => void;
 }) {
   const profile = useCurrentProfile();
   const readableCategory = category === 'tv_seasons' ? 'TV seasons' : 'Movies';
@@ -870,10 +959,40 @@ function Reveal({
         </Text>
       ) : null}
 
-      <View style={styles.revealControls}>
-        <Button label="Rank another" onPress={onRankAnother} />
-        <Button label="Done" kind="secondary" onPress={onDone} />
-      </View>
+      {/**
+       * **Where the reveal stopped being the end.**
+       *
+       * It offered Rank another and Done, which are both ways out — so a reader who had
+       * just formed an opinion strong enough to place a film had nowhere to put it. The
+       * founder's report is that the writing and the watch date were effectively
+       * unreachable at the one moment somebody wants them, and that later tapping Ranked
+       * gave no obvious way back either.
+       *
+       * So the primary control now continues the log rather than leaving it, and the two
+       * exits move into a row beneath. That row is the density decision: two `md`
+       * buttons side by side occupy the height one of them used to, so the flow gains a
+       * step without the screen gaining any.
+       *
+       * Done is still one tap and still writes nothing. Nothing here is required.
+       */}
+      {onFinishLog ? (
+        <View style={styles.revealControls}>
+          <Button label="Finish your log" onPress={onFinishLog} />
+          <View style={styles.revealExits}>
+            <View style={styles.revealExit}>
+              <Button label="Rank another" kind="secondary" onPress={onRankAnother} />
+            </View>
+            <View style={styles.revealExit}>
+              <Button label="Done" kind="secondary" onPress={onDone} />
+            </View>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.revealControls}>
+          <Button label="Rank another" onPress={onRankAnother} />
+          <Button label="Done" kind="secondary" onPress={onDone} />
+        </View>
+      )}
     </View>
   );
 }
@@ -961,7 +1080,15 @@ const styles = StyleSheet.create({
   cardPress: { alignSelf: 'stretch', alignItems: 'center', gap: theme.space[2] },
   // Caption, tertiary, no border, no background. It has to be reachable and it must
   // not compete: the two things that look like buttons on this screen are the posters.
-  recall: { paddingVertical: theme.space[1] },
+  // A row, so the glyph and the word read as one control rather than as an icon that
+  // happens to sit above a caption.
+  recall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.space[1],
+    paddingVertical: theme.space[1],
+  },
   or: {
     width: 32,
     height: 32,
@@ -987,11 +1114,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: theme.space[4],
+    gap: theme.space[3],
+    paddingHorizontal: theme.layout.gutter,
   },
+  // Equal halves. Two controls of the same rank should be the same size, and letting
+  // each hug its own label makes "Skip" visibly smaller than "Undo" for no reason.
+  control: { flex: 1 },
   // The reveal is an airy surface (PRD §5) and its two actions are the only thing to
   // do on it, so they stack full-width rather than sharing a row.
   revealControls: { gap: theme.space[3], alignSelf: 'stretch' },
+  // The two ways out, side by side under the one way on. Equal halves, so neither
+  // reads as the recommended exit.
+  revealExits: { flexDirection: 'row', gap: theme.space[2] },
+  revealExit: { flex: 1 },
   centre: { textAlign: 'center' },
   centredBox: {
     alignItems: 'center',

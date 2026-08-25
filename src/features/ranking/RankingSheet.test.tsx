@@ -246,13 +246,18 @@ describe('the comparison', () => {
    * became `Skip` because the founder's case for it is "I do not remember this one",
    * which the old wording excluded and the same `rank_skip` has always served. These
    * assert the pairing so a future rename cannot quietly point a word at a new call.
+   *
+   * **They are addressed by accessible label now, and so is Skip.** On 2026-08-25 Undo
+   * gained "Undo the last comparison" for the same reason Skip has always carried
+   * "Skip this comparison": on a screen whose other exit is a Close, a bare "Undo" is
+   * ambiguous about what it undoes. The visible words are asserted separately, below.
    */
   it('undoes the last comparison through rank_back', async () => {
     answering(comparison(), comparison({ pivot: 'film-q' }));
     const sheet = await openSheet();
 
     await sheet.ready('Film P');
-    await fireEvent.press(sheet.getByRole('button', { name: 'Undo' }));
+    await fireEvent.press(sheet.getByLabelText('Undo the last comparison'));
 
     await waitFor(() => expect(callsTo('rank_back')).toHaveLength(1));
     expect(callsTo('rank_back')[0][1]).toMatchObject({ p_session_id: SESSION });
@@ -376,7 +381,7 @@ describe('the comparison', () => {
       const sheet = await openSheet();
 
       await sheet.ready('Film P');
-      await fireEvent.press(sheet.getByLabelText('Remind me about Film P'));
+      await fireEvent.press(sheet.getByLabelText('Details about Film P'));
 
       await waitFor(() =>
         expect(sheet.getByText('A courier misplaces a briefcase.')).toBeTruthy(),
@@ -487,11 +492,12 @@ describe('closing', () => {
 
   it('does not cancel a session that Undo already ended', async () => {
     // rank_back at the first comparison deletes the session itself.
+    //
     answering(comparison(), { data: { done: false, cancelled: true }, error: null });
     const sheet = await openSheet();
 
     await sheet.ready('Film P');
-    await fireEvent.press(sheet.getByRole('button', { name: 'Undo' }));
+    await fireEvent.press(sheet.getByLabelText('Undo the last comparison'));
     await waitFor(() => expect(sheet.getByText('Still in your collection')).toBeTruthy());
 
     await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));

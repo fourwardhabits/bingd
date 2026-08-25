@@ -49,6 +49,11 @@ export { ScorePanel, type ScorePanelProps } from './ScorePanel';
 export { ScoresSection, type ScoresSectionProps } from './ScoresSection';
 export { SearchField, type SearchFieldProps } from './SearchField';
 export { SectionHeader, type SectionHeaderProps } from './SectionHeader';
+export {
+  SegmentedControl,
+  type SegmentedControlOption,
+  type SegmentedControlProps,
+} from './SegmentedControl';
 export { SegmentedTabs, type SegmentOption } from './SegmentedTabs';
 export { SkeletonRow, type SkeletonRowProps } from './SkeletonRow';
 export { SpoilerNote, type SpoilerNoteProps } from './SpoilerNote';

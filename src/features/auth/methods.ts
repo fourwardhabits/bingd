@@ -174,6 +174,73 @@ export async function signInWithApple(): Promise<SignInOutcome> {
  */
 export const oauthRedirectUrl = () => Linking.createURL('auth/callback');
 
+/**
+ * How the iOS web sign-in session is opened, and why it is opened that way.
+ *
+ * ---------------------------------------------------------------------------
+ * THE DIALOG THE FOUNDER PHOTOGRAPHED
+ *
+ *     "bingd" Wants to Use "abheeqyjzekiowkztfxv.supabase.co" to Sign In
+ *
+ * That is iOS asking permission before an `ASWebAuthenticationSession` is allowed to
+ * read the Safari cookie jar for a domain, and it names the domain in the prompt. The
+ * domain is the Supabase project host, because that is where the OAuth handshake
+ * starts — so the first thing a new user is shown is a random-looking hostname they
+ * have never heard of, attached to a permission request. It is the single worst
+ * sentence in the sign-in flow and none of it is about Google.
+ *
+ * **Only one code path in this app can produce it.** `signInWithGoogle` below is the
+ * only caller of `openAuthSessionAsync`; Apple goes through
+ * `AppleAuthentication.signInAsync`, which is native and shows no browser at all, and
+ * the two email methods are direct API calls. So this is scoped to Google on iOS.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT EPHEMERAL CHANGES
+ *
+ * `preferEphemeralSession` sets `prefersEphemeralWebBrowserSession` on the session.
+ * The browser then runs with its own empty cookie store rather than Safari's — and
+ * because there is no shared state to ask about, iOS does not ask. The prompt is not
+ * suppressed; it becomes inapplicable.
+ *
+ * Nothing about the security of the flow moves. This is still PKCE: the callback
+ * carries a code, the exchange below is bound to a verifier held only by this client,
+ * and the redirect is the same registered URL either way. The callback still arrives
+ * as `result.url`, and a dismissed sheet still returns a non-`success` type, so
+ * cancellation is unchanged.
+ *
+ * **The trade, stated plainly: the user signs in to Google every time.** With the
+ * shared jar, somebody already signed in to Google in Safari would often be through in
+ * one tap. Ephemeral gives that up — each sign-in is a full provider interaction, and
+ * on a second sign-in on the same device it will not be remembered.
+ *
+ * That trade is worth taking *here* and would not be everywhere. Sign-in happens once
+ * per install in practice: the Supabase session persists in `SecureStore` and is
+ * refreshed, so the browser is not part of returning to the app. Weighing one extra
+ * Google password entry per install against every new user's first impression being a
+ * permission dialog about `abheeqyjzekiowkztfxv.supabase.co` is not a close call. It
+ * also means the app stops leaving a signed-in Google session in the user's Safari,
+ * which is a small privacy improvement on a shared device.
+ *
+ * **iOS only, and explicitly rather than incidentally.** The option is iOS-only in
+ * `expo-web-browser` and Android would ignore it — but "ignored today" is a fact about
+ * a library version, and Android's Custom Tabs flow is working and is not what the
+ * founder reported. The platform check says the scope out loud so a future version
+ * that starts honouring it cannot change Android's behaviour by accident.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THIS IS NOT
+ *
+ * It is not the real fix, and it should not be mistaken for one. The reason the prompt
+ * named a hostname nobody recognises is that the hostname *is* a hostname nobody
+ * recognises. A Supabase custom domain — `auth.bingd.app` — is what makes every
+ * remaining surface that shows the OAuth origin say the right thing: the address bar
+ * inside the sheet, Google's own consent screen, and this dialog if it ever returns.
+ * That is a DNS and Supabase-project change rather than a client one, so it is out of
+ * scope for an OTA UI tranche, and it is recommended for production regardless of this.
+ */
+const authSessionOptions =
+  Platform.OS === 'ios' ? { preferEphemeralSession: true } : undefined;
+
 export async function signInWithGoogle(): Promise<SignInOutcome> {
   const redirectTo = oauthRedirectUrl();
 
@@ -191,7 +258,7 @@ export async function signInWithGoogle(): Promise<SignInOutcome> {
     return { ok: false, cancelled: false, message: error?.message ?? 'No authorization URL.' };
   }
 
-  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo, authSessionOptions);
   if (result.type !== 'success') return cancelled;
 
   // PKCE: the callback carries a short-lived code, not a token. The exchange is

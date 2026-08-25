@@ -1,10 +1,7 @@
-import { useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 
-import { ReportSheet } from '@/features/moderation/ReportSheet';
 import type { Surface } from '@/lib/analytics';
 import { Button } from '@/ui/components';
-import { theme } from '@/ui/tokens';
 
 import { noRelationship, useSocialWrites, type Relationship } from './use-social';
 
@@ -13,17 +10,17 @@ export type FollowControlProps = {
   name: string;
   viewerId: string;
   relationship: Relationship | undefined;
-  /** Hidden entirely on your own profile — you cannot follow or block yourself. */
+  /** Hidden entirely on your own profile — you cannot follow yourself. */
   isSelf: boolean;
   /** Where this control is being shown, for `follow_created` alone. */
   surface: Surface;
 };
 
 /**
- * Follow, unfollow, withdraw a request — and block.
+ * The relationship, as one full-width control.
  *
  * ---------------------------------------------------------------------------
- * WHY THE SAME BUTTON DOES FOUR THINGS
+ * WHY THE SAME BUTTON DOES THREE THINGS
  *
  * `follows` has three states from the viewer's side — absent, pending, approved — and
  * a control per state would mean three controls, two of which are always wrong. One
@@ -34,13 +31,28 @@ export type FollowControlProps = {
  * already select. Nothing here infers a relationship from anything else on the page.
  *
  * ---------------------------------------------------------------------------
- * WHY THE DESTRUCTIVE ONES CONFIRM AND THE OTHERS DO NOT
+ * WHERE BLOCK AND REPORT WENT
+ *
+ * Into the menu behind the header's hamburger — `ProfileMenu`, on this same screen.
+ * They were here, as two tertiary buttons in a row beside Follow, and the founder's
+ * device pass is that the profile's primary action area then read as a moderation
+ * console: the three things offered about a person you had just looked up were follow
+ * them, block them, and report them, all at the same altitude.
+ *
+ * That is a hierarchy problem rather than an availability one. Both are still one tap
+ * from every profile and both still confirm; what they no longer do is sit permanently
+ * beside the one control the page is actually for. `report()`'s rule that a block must
+ * never suppress the complaint about somebody is unchanged and is asserted where it
+ * now lives.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY UNFOLLOWING CONFIRMS AND FOLLOWING DOES NOT
  *
  * Following is one tap and undone by one tap. Unfollowing a private account is not:
  * withdrawing an approved follow means the next one is a *request*, which somebody
- * else has to answer, so it is worth a sentence. Blocking is confirmed always — it
- * severs the relationship in both directions, and `unblock` deliberately does not
- * restore what it removed (api.md §3).
+ * else has to answer, so it is worth a sentence. The founder's rule for this pass is
+ * the same one — an accidental tap on Following must not silently sever the
+ * relationship — and the confirmation this control already had is what keeps it.
  */
 export function FollowControl({
   userId,
@@ -50,9 +62,8 @@ export function FollowControl({
   isSelf,
   surface,
 }: FollowControlProps) {
-  const { follow, unfollow, block, unblock, busy } = useSocialWrites(viewerId, surface);
+  const { follow, unfollow, unblock, busy } = useSocialWrites(viewerId, surface);
   const state = relationship ?? noRelationship();
-  const [reporting, setReporting] = useState(false);
 
   if (isSelf) return null;
 
@@ -60,46 +71,13 @@ export function FollowControl({
     if (!result.ok && result.message) Alert.alert(failed, result.message);
   };
 
-  // A blocked account is not a profile to follow. The only control it offers is the
-  // way back — and the page around it is already empty, because `can_view_profile` is
-  // false in both directions, so this is the whole of what a blocked profile shows.
-  /**
-   * Report, wherever the profile is.
-   *
-   * Present on the blocked branch too, and that is the client half of a rule the
-   * database already states: `report()` checks that a subject exists and deliberately
-   * not that the caller can still see it, so that blocking somebody cannot become a
-   * way to suppress the complaint about them (20260813002000 §4). Hiding the control
-   * the moment you block would reintroduce, in the UI, exactly the inversion the
-   * server refuses to have.
-   *
-   * It is a tertiary control beside Block rather than a red button, and it is not
-   * bundled with Block: the two are different acts. A block is between two people and
-   * takes effect immediately; a report is a message to whoever runs Bingd, and
-   * neither one implies the other.
-   */
-  const reportControl = (
-    <Button
-      label="Report"
-      kind="tertiary"
-      onPress={() => setReporting(true)}
-      accessibilityHint={`Tells whoever runs bingd. about ${name}`}
-    />
-  );
-
-  const reportSheet = (
-    <ReportSheet
-      visible={reporting}
-      onClose={() => setReporting(false)}
-      subject="profile"
-      subjectId={userId}
-      noun="profile"
-    />
-  );
-
+  // A blocked account is not a profile to follow, so the one control it offers is the
+  // way back. Report is not lost with it — the menu keeps offering it, which is the
+  // client half of the rule `report()` states server-side (20260813002000 §4): blocking
+  // somebody may not become a way to suppress the complaint about them.
   if (state.blocked) {
     return (
-      <View style={styles.row}>
+      <View style={styles.control}>
         <Button
           label="Unblock"
           kind="secondary"
@@ -111,8 +89,6 @@ export function FollowControl({
             })()
           }
         />
-        {reportControl}
-        {reportSheet}
       </View>
     );
   }
@@ -139,26 +115,32 @@ export function FollowControl({
       ],
     );
 
-  const confirmBlock = () =>
-    Alert.alert(`Block ${name}?`, 'You will not see each other on bingd. Any follow between you is removed, and unblocking does not bring it back.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Block',
-        style: 'destructive',
-        onPress: () =>
-          void (async () => {
-            report(await block({ userId }), 'Could not block');
-          })(),
-      },
-    ]);
-
   return (
-    <View style={styles.row}>
+    <View style={styles.control}>
       <Button
         label={following ? 'Following' : requested ? 'Requested' : 'Follow'}
-        // Secondary once there is a relationship: the button stops being the thing to
-        // do on this page and becomes a statement of where you stand.
-        kind={following || requested ? 'secondary' : 'primary'}
+        /**
+         * Filled Maroon to create the relationship, Maroon outline once it exists.
+         *
+         * It was `secondary` — grey — for both of the latter two, which made the
+         * control the reader had just pressed look as though it had been swapped for a
+         * different one. Outline keeps the colour and gives up the fill, so the same
+         * button visibly changes state.
+         *
+         * **`Requested` shares the outline and keeps its own word.** The two states are
+         * not the same thing and the label is what says so: a pending request is not a
+         * follow, and collapsing it into "Following" would tell somebody they have
+         * access they have not been granted. What they share is that the act is done
+         * and the button is now reporting rather than offering.
+         */
+        kind={following || requested ? 'outline' : 'primary'}
+        accessibilityHint={
+          following
+            ? `Unfollow ${name}`
+            : requested
+              ? `Withdraw your request to follow ${name}`
+              : `Follow ${name}`
+        }
         disabled={busy}
         disabledReason="Saving your last change."
         onPress={() => {
@@ -185,18 +167,12 @@ export function FollowControl({
           })();
         }}
       />
-      <Button label="Block" kind="tertiary" disabled={busy} disabledReason="Saving your last change." onPress={confirmBlock} />
-      {reportControl}
-      {reportSheet}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.space[3],
-  },
+  // Full width, which is the shape of the slot it sits in: on the owner's profile that
+  // slot holds Invite friends, and the two screens are meant to be the same screen.
+  control: { alignSelf: 'stretch' },
 });
