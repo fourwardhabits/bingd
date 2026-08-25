@@ -837,12 +837,22 @@ begin
 
   v_pivot_item := _rank_pivot_at(v_user, v_s.category, v_s.band_lo + v_s.pivot, v_exclude);
 
-  -- `is distinct from` rather than `<>` on the pivot side. If the pivot cannot be
-  -- resolved -- the band emptied under the session between the clamp above and this
-  -- lookup -- `<>` yields null, the whole condition yields null, and the function walks
-  -- on to insert a comparison with a null loser against a not-null column. One refusal
-  -- naming the real problem beats a constraint violation two statements later.
-  if p_winner <> v_s.media_item_id and p_winner is distinct from v_pivot_item then
+  -- An unresolvable pivot is refused before the winner is checked, rather than being
+  -- allowed to fall through it.
+  --
+  -- It should not be reachable: `_rank_session_state` clamps `pivot` into `[lo, hi)` and
+  -- `hi` into the live band, so `band_lo + pivot` addresses a member of the band that
+  -- exists now. What made it worth stating is the *old* shape of this test --
+  -- `p_winner <> v_pivot_item` against a null yields null, the whole condition yields
+  -- null, and the function walked on to insert a comparison with a null loser against a
+  -- not-null column. One refusal naming the real problem beats a constraint violation
+  -- two statements later, and the client already reads P0002 as "that session is gone".
+  if v_pivot_item is null then
+    raise exception 'the title being compared against is no longer ranked'
+      using errcode = 'P0002';
+  end if;
+
+  if p_winner <> v_s.media_item_id and p_winner <> v_pivot_item then
     raise exception 'winner must be one of the two titles being compared'
       using errcode = '22023';
   end if;

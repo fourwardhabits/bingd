@@ -51,8 +51,6 @@ const KEYS = [
   ['recommend-recipients', 'viewer'],
   ['recommendation-requests', 'viewer'],
   ['sent-to-you', 'viewer'],
-  ['people-mutuals', 'viewer'],
-  ['people-taste-matches', 'viewer'],
   ['feed', 'viewer'],
 ];
 
@@ -79,6 +77,7 @@ describe('a follow', () => {
     });
 
     return {
+      client,
       invalidated: (key: unknown[]) => client.getQueryState(key)?.isInvalidated ?? false,
     };
   };
@@ -103,8 +102,7 @@ describe('a follow', () => {
 
   /**
    * The held recommendations a follow releases server-side, in the same transaction
-   * (`20260826000400`), and the two People lists that both exclude accounts the caller
-   * already follows.
+   * (`20260826000400`), along with the relationship itself and the feed's population.
    */
   it('makes every surface a follow moves stale', async () => {
     const { invalidated } = await followAnna();
@@ -113,5 +111,31 @@ describe('a follow', () => {
     for (const key of KEYS) {
       expect(invalidated(key)).toBe(true);
     }
+  });
+
+  /**
+   * **And leaves the People suggestion lists alone, deliberately.**
+   *
+   * Following somebody does make the row they came from stale — both lists exclude
+   * accounts the caller already follows — so invalidating would be defensible on
+   * correctness and is wrong on use: the row would vanish from under the thumb that
+   * pressed it and the mutual counts would reshuffle the rest, while the reader is
+   * partway down the list.
+   *
+   * The founder reported that exact failure once already, on the For You wall, where a
+   * bookmark invalidated the slate and saving one title discarded the whole thing. The
+   * rule that settled it — the list is not a function of the relationship — is the one
+   * asserted here, and the control still answers immediately because `relationships` is
+   * a different query and *is* invalidated.
+   */
+  it('leaves the People suggestion lists where they were', async () => {
+    const { client, invalidated } = await followAnna();
+    for (const key of [['people-mutuals', 'viewer'], ['people-taste-matches', 'viewer']]) {
+      client.setQueryData(key, 'seeded');
+    }
+
+    await waitFor(() => expect(invalidated(['relationships', 'viewer'])).toBe(true));
+    expect(invalidated(['people-mutuals', 'viewer'])).toBe(false);
+    expect(invalidated(['people-taste-matches', 'viewer'])).toBe(false);
   });
 });

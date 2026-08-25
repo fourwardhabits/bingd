@@ -196,20 +196,27 @@ export function useSocialWrites(viewerId: string, surface: Surface) {
          */
         ['recommend-recipients'],
         /**
-         * **People discovery, which a follow moves twice over.**
+         * **People discovery is deliberately absent from this list**, and it is the one
+         * entry where the obvious answer is the wrong one.
          *
-         * Both suggestion lists exclude accounts the caller already follows or has asked
-         * to follow, so a Follow performed *from the list itself* makes that row wrong —
-         * and mutual counts across the rest of the list move with it, because the person
-         * just followed becomes a new path to their own followees.
+         * Both suggestion lists exclude accounts the caller already follows, so a follow
+         * *does* make the row it came from stale, and invalidating would be defensible on
+         * correctness. What it would look like is a row disappearing from under the thumb
+         * that pressed it, and the rest of the list reshuffling as the mutual counts move
+         * — while the reader is halfway through working down it.
          *
-         * The row does not vanish under the thumb that pressed it: `FollowControl` draws
-         * `Following` from `follow_state_with`, which is a different query, and this
-         * refetch settles the list behind it. Unkeyed by account like everything else
-         * here.
+         * The founder has already reported that failure once, on the For You wall: a
+         * bookmark used to invalidate the slate, so saving one title discarded the whole
+         * wall and put the reader back at the top of a list they were partway down.
+         * `recommendations.tsx` carries that reasoning at `toggleSaveById`, and the rule
+         * it settled on is the one applied here — **the list is not a function of the
+         * relationship.**
+         *
+         * The row still answers: `FollowControl` reads `follow_state_with` through
+         * `['relationships', …]`, which *is* invalidated above, so the button becomes
+         * Following immediately. The suggestion itself simply stops being offered the
+         * next time the section is opened, which is a minute of `staleTime` away.
          */
-        ['people-mutuals'],
-        ['people-taste-matches'],
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     );
     // Mutual Mania is an intersection of the follow graph, so following back somebody
