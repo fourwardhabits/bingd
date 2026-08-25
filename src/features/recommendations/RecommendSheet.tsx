@@ -45,9 +45,11 @@ const SEARCH_THRESHOLD = 8;
  * one recipient there is nothing for a second step to confirm, and a two-tap flow with
  * a disabled button at the bottom is the pattern this sheet exists instead of.
  *
- * The people offered are mutual follows, which is what the server accepts. If somebody
- * is refused anyway the relationship changed while the sheet was open, and the message
- * says so rather than reporting a code.
+ * The people offered are everybody the sender follows, which is what the server accepts.
+ * Whether they follow back decides only whether it lands in their list or waits as a
+ * request, and the sender is deliberately not told which — "Sent" either way. If
+ * somebody is refused anyway the relationship changed while the sheet was open, and the
+ * message says so rather than reporting a code.
  */
 export function RecommendSheet({
   viewerId,
@@ -129,7 +131,7 @@ export function RecommendSheet({
      * `recommendation_sent`, and only from `ok`.
      *
      * `ok` here means the row is stored: the mutation has already separated the two
-     * things a 200 can mean, since `recommend_title` returns `not_mutual` and its
+     * things a 200 can mean, since `recommend_title` returns `not_following` and its
      * siblings inside the body rather than raising them (`use-recommend.ts`). A refusal
      * and an unknown outcome both return early above and emit nothing — the unknown one
      * deliberately, because that is the send whose id is being *held* for a retry, and a
@@ -233,7 +235,11 @@ export function RecommendSheet({
             kind="nothingYet"
             compact
             title="Nobody to recommend to yet"
-            body="You can recommend to anyone who follows you back. Send a friend the link below to get started."
+            // The rule, in the words it is now true in: follow people to send
+            // recommendations. It no longer depends on anybody following back — that
+            // decides where the recommendation lands, not whether it can be sent, and
+            // the sender is deliberately not told which (`20260826000400`).
+            body="Follow people to send recommendations. Send a friend the link below to get started."
           />
         </View>
       ) : (

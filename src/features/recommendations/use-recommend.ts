@@ -11,13 +11,21 @@ import { supabase } from '@/lib/supabase';
 import { classifyWrite } from '@/lib/write-outcome';
 
 /**
- * The send half of friend recommendations (20260817001300).
+ * The send half of friend recommendations (20260817001300, 20260826000400).
  *
- * The recipient rule is **mutual follow**, and it lives in the database. What lives
- * here is the same rule expressed as a query, so that the sheet offers only people the
- * server will accept — a picker that lets you choose somebody and then refuses is
- * worse than one that never offered them. The duplication is deliberate and the
- * server's copy is the one that decides; this one is a courtesy.
+ * The recipient rule is **the people the sender approvedly follows**, and it lives in
+ * the database. What lives here is the same rule expressed as a query, so that the
+ * sheet offers only people the server will accept — a picker that lets you choose
+ * somebody and then refuses is worse than one that never offered them. The duplication
+ * is deliberate and the server's copy is the one that decides; this one is a courtesy.
+ *
+ * **It was an intersection of both directions until 2026-08-26, and that was the bug.**
+ * A mutual follow was required to send, so somebody who followed twenty accounts and
+ * was followed back by three could recommend to three — and the other seventeen were
+ * not refused with a reason, they were *absent from the picker*, which reads as the
+ * feature not working. Following somebody is now enough. Whether they follow back
+ * decides only whether it arrives directly or waits as a request, and the sender is
+ * deliberately not told which (§17 of the tranche brief).
  */
 
 export type Recipient = {
@@ -39,15 +47,25 @@ const one = <T>(value: T | T[] | null): T | null =>
   (Array.isArray(value) ? value[0] : value) ?? null;
 
 /**
- * Everybody the viewer and the other person follow, both ways, both approved.
+ * Everybody the viewer approvedly follows.
  *
- * Two selects intersected rather than one join, because `follows_read` admits a row
- * only where the caller is a party to it — which is exactly what makes this safe to
- * run from the client at all. Neither query can see anybody else's graph.
+ * **The viewer's own outgoing edges and nothing else** (20260826000400). It used to be
+ * the intersection of both directions, which is the picker half of the mutual-follow
+ * bug: it silently removed everybody who had not followed back, and there was no
+ * message anywhere saying why they were missing.
  *
- * Blocks are not filtered here and do not need to be: `block` deletes both follow
- * rows, so a blocked person has no edges left to intersect. Suspension is filtered,
- * because a suspended account keeps its edges and should stop being offered.
+ * A `follower_id.eq` filter rather than a read of the whole directory narrowed on the
+ * client, and that matters for more than efficiency: `follows_read` admits a row only
+ * where the caller is a party to it, so this query *cannot* see anybody else's graph —
+ * which is what makes it safe to run from a client at all. The server's authorisation
+ * (`_may_recommend_to`) tests exactly this edge, so the picker and the rule agree.
+ *
+ * Blocks are not filtered here and do not need to be: `block` deletes both follow rows,
+ * so a blocked person has no edge left to find. Suspension is filtered, because a
+ * suspended account keeps its edges and should stop being offered.
+ *
+ * A **pending** follow request is deliberately excluded — `state = 'approved'` — which
+ * is the server's rule too. Asking to follow somebody is not following them.
  */
 export function useRecommendRecipients(viewerId: string) {
   return useQuery({
@@ -55,51 +73,40 @@ export function useRecommendRecipients(viewerId: string) {
     staleTime: 5 * 60_000,
     queryFn: async (): Promise<Recipient[]> => {
       /**
-       * Every edge the viewer is an end of, in one request per page (`lib/read-all.ts`).
-       *
-       * Two things changed here at once and each is worth naming.
+       * Every outgoing edge, in one request per page (`lib/read-all.ts`).
        *
        * **It is read to exhaustion.** PostgREST caps an unbounded select at 1,000 rows,
-       * and this is an intersection: a short read does not shorten the list, it *removes
-       * people from it*, so a mutual the reader has followed for a year would simply not
-       * appear in the picker.
+       * and somebody who follows more than that would simply not see the rest of their
+       * own following list in the picker. Kept from the intersection this replaced,
+       * where a short read was worse still: it *removed* people rather than truncating.
        *
-       * **And it is one request rather than two.** It used to be a select per direction,
-       * intersected. That is not a snapshot: read the outgoing side, have `me → A`
-       * deleted, have `A → me` approved, then read the incoming side, and the picker
-       * offers a mutual that never existed. `recommend_title` refuses it — the server's
-       * copy of the rule is the one that decides — but the founder's brief is that a
-       * picker offering somebody it will then refuse is the failure to avoid.
-       * Independent review 21c; `use-awards.ts` carries the same predicate for the same
-       * reason.
+       * **And it no longer has to be a snapshot.** The intersection this replaced was
+       * one request for a reason: read the outgoing side, have `me → A` deleted, have
+       * `A → me` approved, then read the incoming side, and the picker offered a mutual
+       * that never existed. One direction has no such seam — a row either is the
+       * viewer's approved follow or it is not — so the paging here is ordinary rather
+       * than load-bearing. Independent review 21c is what put it in one request;
+       * `use-awards.ts` still carries the two-direction predicate, because Mutual Mania
+       * genuinely is about both.
        */
       type Edge = {
         follower_id: string;
         followee_id: string;
-        follower: ProfileShape | ProfileShape[] | null;
         followee: ProfileShape | ProfileShape[] | null;
       };
 
       const edges = await readAllByKey<Edge>(
         (cursor, limit) => {
-          const mine = `follower_id.eq.${viewerId},followee_id.eq.${viewerId}`;
           const request = supabase
             .from('follows')
             .select(
               'follower_id, followee_id, ' +
-                'follower:follower_id(id, username, display_name, avatar_path, status), ' +
                 'followee:followee_id(id, username, display_name, avatar_path, status)',
             )
-            .eq('state', 'approved');
+            .eq('state', 'approved')
+            .eq('follower_id', viewerId);
 
-          return (
-            cursor === null
-              ? request.or(mine)
-              : request.or(
-                  `and(follower_id.gt.${cursor[0]},or(${mine})),` +
-                    `and(follower_id.eq.${cursor[0]},followee_id.gt.${cursor[1]},or(${mine}))`,
-                )
-          )
+          return (cursor === null ? request : request.gt('followee_id', cursor[1]))
             .order('follower_id', { ascending: true })
             .order('followee_id', { ascending: true })
             .limit(limit);
@@ -109,25 +116,16 @@ export function useRecommendRecipients(viewerId: string) {
 
       if (edges.error) throw edges.error;
 
-      // The intersection, which is the whole rule: somebody on one side and not the other
-      // is a one-way follow.
-      const outgoing = new Map<string, ProfileShape>();
-      const incoming = new Set<string>();
+      // One direction, which is now the whole rule: whether they follow back decides
+      // where the recommendation lands, not whether it may be sent.
+      const following: Recipient[] = [];
       for (const row of edges.data ?? []) {
-        if (row.follower_id === viewerId) {
-          const profile = one(row.followee);
-          if (profile) outgoing.set(profile.id, profile);
-        }
-        if (row.followee_id === viewerId) incoming.add(row.follower_id);
-      }
-
-      const mutuals: Recipient[] = [];
-      for (const [id, profile] of outgoing) {
-        if (!incoming.has(id)) continue;
+        const profile = one(row.followee);
+        if (!profile) continue;
         // A suspended account keeps its edges and should stop being offered. A block does
-        // not need filtering: `block` deletes both rows, so there is nothing to intersect.
+        // not need filtering: `block` deletes both rows, so there is no edge left to find.
         if (profile.status !== 'active') continue;
-        mutuals.push({
+        following.push({
           id: profile.id,
           username: profile.username,
           name: profile.display_name || profile.username,
@@ -135,12 +133,20 @@ export function useRecommendRecipients(viewerId: string) {
         });
       }
 
-      return mutuals.sort((a, b) => a.name.localeCompare(b.name));
+      return following.sort((a, b) => a.name.localeCompare(b.name));
     },
   });
 }
 
-/** A simple contains match over name and handle, for a list that has outgrown reading. */
+/**
+ * A simple contains match over name and handle, for a list that has outgrown reading.
+ *
+ * Over the *following* list and never over the directory. Searching everybody and
+ * filtering the results on the client would make the picker a people-search that
+ * happens to refuse most of what it finds, and would put accounts the sender has no
+ * relationship with in front of them. §16 of the tranche brief, and the server agrees:
+ * `_may_recommend_to` tests the same edge this list is built from.
+ */
 export function filterRecipients(people: Recipient[], query: string): Recipient[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return people;
@@ -168,13 +174,23 @@ export type SendResult = { ok: true } | { ok: false; message: string; changed?: 
  * `20260817001300`. The consequence here is that **a 200 is not a success**, and the
  * body has to be read.
  *
- * `not_mutual` covers a stranger, a one-way follow, a block in either direction and a
- * suspended account, all as one answer. The wording is about the relationship rather
- * than about the person, which is both the honest reading and the one that does not
- * tell somebody they have been blocked.
+ * `not_following` covers a stranger, somebody who follows the sender without being
+ * followed back, a block in either direction and a suspended account, all as one
+ * answer. The wording is about the relationship rather than about the person, which is
+ * both the honest reading and the one that does not tell somebody they have been
+ * blocked. It replaced `not_mutual` on 2026-08-26, and the old key is kept below for
+ * the window in which a friend-beta build that has not taken the update is still
+ * calling a server that has: the message it produced was *wrong* under the new rule, so
+ * mapping it to the new sentence is the closest thing to right.
+ *
+ * `too_many_pending` says how many are waiting and nothing at all about what the
+ * recipient has done with the others — see §22. "They dismissed four of yours" is the
+ * oracle the whole state model is arranged to avoid, said out loud.
  */
 const REFUSALS: Record<string, string> = {
-  not_mutual: 'You can only recommend to people who follow you back.',
+  not_following: 'You can recommend titles to people you follow.',
+  not_mutual: 'You can recommend titles to people you follow.',
+  too_many_pending: 'They already have several recommendations from you waiting.',
   yourself: 'You cannot recommend a title to yourself.',
   not_recommendable: 'You can recommend a film or a season, not a whole series.',
 };
@@ -256,7 +272,7 @@ export function useRecommendTitle(viewerId: string) {
     },
     /**
      * `recommend_title` returns its refusals in the body, so a 200 that says
-     * `not_mutual` must not move anything — that one is a genuine "nothing happened".
+     * `not_following` must not move anything — that one is a genuine "nothing happened".
      *
      * **But a failure whose outcome is unknown must.** The row may be in
      * `title_recommendations`, in which case the recipient's list, the picker's

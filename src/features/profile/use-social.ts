@@ -145,6 +145,29 @@ export function useSocialWrites(viewerId: string, surface: Surface) {
         ['following-score', viewerId],
         ['user-search'],
         ['notifications'],
+        /**
+         * **The two recommendation surfaces a follow moves** (20260826000400).
+         *
+         * Following somebody releases every recommendation they were holding for the
+         * caller, in the same transaction, on the server. That is what makes a follow
+         * started on a profile page behave exactly like one started in the Requests
+         * sheet — neither client replays anything, so neither can get it wrong.
+         *
+         * What the client does have to do is stop believing its old answer. Without
+         * these two keys the compact requests row keeps its count and the released
+         * titles do not appear until something else happens to refetch, which reads as
+         * the release having failed.
+         *
+         * The other three writers earn them too: unfollowing sends that person's *next*
+         * recommendation back to Requests, blocking deletes their pending ones
+         * outright, and approving a follow request releases what the caller was holding
+         * for the requester.
+         *
+         * Unkeyed by account, like every other entry in this list — the accounts on
+         * both sides of a follow have surfaces that move.
+         */
+        ['recommendation-requests'],
+        ['sent-to-you'],
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     );
     // Mutual Mania is an intersection of the follow graph, so following back somebody

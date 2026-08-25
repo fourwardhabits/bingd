@@ -4,16 +4,19 @@ import { after, before, describe, it } from 'node:test';
 import { createTestDb } from './harness.mjs';
 
 /**
- * Recommending a title to a friend (20260817001300).
+ * Recommending a title to somebody you follow (20260817001300, 20260826000400).
  *
- * The whole feature is one authorization rule and one duplicate rule, so nearly every
- * test here is about a refusal. The rule is **mutual follow**: both edges, both
- * approved, neither party blocked, the recipient active.
+ * The send rule is **one-way and outbound**: the caller approvedly follows the
+ * recipient, neither has blocked the other, the recipient is active. Being followed by
+ * somebody grants nothing. What the *second* edge decides is not permission but
+ * delivery — mutual goes straight through, one-way is held as a request — and that
+ * half lives in `recommendation-requests.test.mjs`.
  *
  * `recommendations_to_me` is `security invoker`, which means an owner-run query would
- * bypass the policy it depends on for its entire safety argument. Every read below
- * therefore goes through `viewAs`, and the two tests that assert somebody *cannot* see
- * a recommendation would pass against a broken policy if they did not.
+ * bypass the policies it depends on for its entire safety argument — and since
+ * 20260826000400 that includes the one which hides a *pending* request from it. Every
+ * read below therefore goes through `viewAs`, and the tests that assert somebody
+ * cannot see a recommendation would pass against a broken policy if they did not.
  */
 
 let t;
@@ -130,19 +133,23 @@ describe('who may be recommended to', () => {
     assert.equal(rows[0].sender_username, 'alice_rec');
   });
 
-  it('refuses a one-way follow in either direction', async () => {
-    const carol = await t.createUser({ username: 'carol_rec' });
-    await follow(alice, carol); // alice follows carol, who does not follow back
-    assert.equal(await refusal(carol, await movie('rec_outbound')), 'not_mutual');
-
+  /**
+   * The direction that changed on 2026-08-26 (`20260826000400`).
+   *
+   * Following somebody is enough to send to them; being followed *by* them is not, and
+   * never should have been — that is the direction an unwanted sender controls. The
+   * outbound half of the old test is no longer a refusal at all: it is a pending
+   * request, and it has its own describe block below.
+   */
+  it('refuses somebody who follows the sender without being followed back', async () => {
     const carla = await t.createUser({ username: 'carla_rec' });
     await follow(carla, alice); // carla follows alice, who does not follow back
-    assert.equal(await refusal(carla, await movie('rec_inbound')), 'not_mutual');
+    assert.equal(await refusal(carla, await movie('rec_inbound')), 'not_following');
   });
 
   it('refuses a stranger', async () => {
     const dave = await t.createUser({ username: 'dave_rec' });
-    assert.equal(await refusal(dave, await movie('rec_stranger')), 'not_mutual');
+    assert.equal(await refusal(dave, await movie('rec_stranger')), 'not_following');
   });
 
   it('refuses a pending request, which is not a follow', async () => {
@@ -152,7 +159,7 @@ describe('who may be recommended to', () => {
       alice,
       erin,
     ]);
-    assert.equal(await refusal(erin, await movie('rec_pending')), 'not_mutual');
+    assert.equal(await refusal(erin, await movie('rec_pending')), 'not_following');
   });
 
   it('refuses across a block, and says the same thing as a missing account', async () => {
@@ -168,8 +175,8 @@ describe('who may be recommended to', () => {
 
     // One reason for both, and for a suspension and a stranger besides: a caller who
     // could tell them apart could tell that they had been blocked.
-    assert.equal(blocked, 'not_mutual');
-    assert.equal(missing, 'not_mutual');
+    assert.equal(blocked, 'not_following');
+    assert.equal(missing, 'not_following');
   });
 
   it('refuses a suspended recipient', async () => {
@@ -177,7 +184,7 @@ describe('who may be recommended to', () => {
     await mutual(alice, hank);
     await t.sql(`update profiles set status = 'suspended' where id = $1`, [hank]);
 
-    assert.equal(await refusal(hank, await movie('rec_suspended')), 'not_mutual');
+    assert.equal(await refusal(hank, await movie('rec_suspended')), 'not_following');
   });
 
   it('refuses a suspended sender', async () => {
@@ -326,7 +333,7 @@ describe('the rate limit', () => {
     await t.actAs(script);
 
     try {
-      assert.equal(await refusal(nobody, await movie('rate_refused_a')), 'not_mutual');
+      assert.equal(await refusal(nobody, await movie('rate_refused_a')), 'not_following');
 
       const error = await recommendError(nobody, await movie('rate_refused_b'));
       assert.equal(error?.code, '53400', 'the refused attempt was counted against the ceiling');
