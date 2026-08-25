@@ -140,6 +140,21 @@ same mismatch, but with something to read.
 
 `development` and `preview` were re-measured across this change and did not move.
 
+### What the old beta binary loses, stated exactly
+
+It keeps every update already published for `eace5f82…` / `e216bbac…` and keeps being
+served them. It gets no new ones. `npm run update:beta` resolves this config, so from here
+everything it publishes carries the new fingerprint, and there is no supported command that
+publishes to the old runtime version.
+
+**So there is no over-the-air route to a tester who has not installed the replacement**,
+including for a JavaScript-only fix. The remedy is the new build, not an update. That is a
+real cost and it is accepted deliberately: the alternative is a beta population that can
+never receive a notification, which is the thing this whole tranche exists to fix. Anyone
+tempted to publish to the old runtime by hand should note that it would reach only testers
+who have *not* upgraded, which is a second, diverging JavaScript build to maintain for as
+long as anybody sits on it.
+
 ### Where the secret lives
 
 `eas.json`'s beta profile names the **`preview`** EAS environment, not `production`, so
@@ -386,7 +401,7 @@ throwing, because that code path is a cold start from a tap.
 |---|---|
 | OTA candidate | **No.** The client half would ship over the air, but it cannot work without the native entitlement and FCM configuration. |
 | New native RC build required | **Yes.** `aps-environment` and `googleServicesFile` are native inputs. |
-| Can the current friend-beta binary receive this | **No.** Its fingerprint was left unchanged so it kept receiving everything else — until §2a, which moves it deliberately. A tester on the old binary keeps taking updates published to the old runtime version, and gets push only once they install the new build. |
+| Can the current friend-beta binary receive this | **No.** Its fingerprint was left unchanged so it kept receiving everything else — until §2a, which moves it deliberately. A tester on the old binary keeps the updates already published for its runtime version, but no *new* one can be published to it; see §2a. |
 | Migration deploy required | Yes — `supabase db push`. |
 | Edge Function deploy required | Yes — `supabase functions deploy push-sender`. |
 | Credentials required | APNs `.p8` + Key ID + Team ID; Firebase Android app `app.bingd` + `google-services.json` + FCM V1 service account. |

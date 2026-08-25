@@ -119,10 +119,10 @@ moves things. None of this requires the engineering branch to build or test.
    APNs*. EAS can also create the key for you if you let it sign in to Apple, which avoids
    the download-once problem entirely.
 
-   An APNs key is held per **App ID**, not per build profile, so doing this once for
-   `app.bingd` covers the beta lane and the eventual production lane together. Repeat it
-   under the production profile only if that profile ever names a different bundle
-   identifier, which today it does not.
+   A token-based APNs key belongs to the **Apple team**, not to a build profile and not to
+   one bundle identifier — one key can sign for several. Beta and production share the team
+   *and* the identifier `app.bingd`, so doing this once covers both lanes and there is no
+   second key to create for the public release.
 4. **Do not paste the `.p8` contents anywhere** — not a chat, not a ticket, not a
    screenshot. If it has been pasted, revoke it in the Keys list and make a new one.
 5. **Expect the provisioning profile to be regenerated** on the next beta build, and on the

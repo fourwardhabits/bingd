@@ -369,8 +369,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
      * Beta's does move, and that is the point of it rather than a cost to be minimised:
      * TestFlight delivers through production APNs, so the beta binary in testers' hands
      * is entitled to the wrong service and `device_tokens` is empty. The new entitlement
-     * needs a new build; testers on the old one keep receiving over-the-air updates until
-     * they install it, because the old runtime version is still published to.
+     * needs a new build.
+     *
+     * **What that costs the old binary is worth stating exactly, because it is easy to
+     * overstate in the reassuring direction.** Testers still on it keep whatever updates
+     * were already published for their runtime version, and keep receiving them. They do
+     * not get new ones: `npm run update:beta` resolves *this* config, so everything it
+     * publishes from now on carries the new fingerprint. Shipping a JavaScript-only fix
+     * to somebody who has not installed the replacement is therefore not a thing the
+     * supported command can do — the fix is the new build.
      * Icon and sound assets are still deferred to the brand asset pass (PRD §5).
      */
     ['expo-notifications', push.plugin],
