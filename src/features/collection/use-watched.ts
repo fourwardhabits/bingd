@@ -25,6 +25,21 @@ import { supabase } from '@/lib/supabase';
 export function useWatched(userId: string) {
   return useQuery({
     queryKey: ['watched', userId],
+    /**
+     * Not before there is somebody to ask about.
+     *
+     * Every caller but one holds a resolved profile, so this is true the moment the hook
+     * runs and nothing changes for them. The exception is `app/activity/[id].tsx`, which
+     * is reached from a notification tap and can render while the session is still
+     * loading — it passes `''`, and without this that becomes a `user_id = ''` select
+     * that the database refuses as a malformed uuid, once per cold start, for an answer
+     * the screen is not going to use yet.
+     *
+     * It fails safe either way: `data` stays undefined and `shouldMask` masks, which is
+     * the direction `use-watched`'s own header argues for. This removes the request
+     * rather than the protection.
+     */
+    enabled: Boolean(userId),
     // The set changes only when this user logs something, and every log invalidates
     // the collection key. A minute of staleness costs a spoiler being masked for a
     // viewer who has just this moment watched the thing.

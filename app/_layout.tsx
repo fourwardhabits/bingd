@@ -2,11 +2,7 @@ import {
   DMSerifDisplay_400Regular,
   DMSerifDisplay_400Regular_Italic,
 } from '@expo-google-fonts/dm-serif-display';
-import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-} from '@expo-google-fonts/inter';
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
 import * as Sentry from '@sentry/react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
@@ -135,24 +131,38 @@ function Navigation() {
    * belongs, and gating it would leave the router with nowhere to send them.
    *
    * ---------------------------------------------------------------------------
-   * **`!== 'signed-out'`, AND NOT `=== 'ready'`**
+   * **THE GUARD IS NOT THE WHOLE ANSWER, AND `resolved` IS THE REST OF IT**
    *
-   * The obvious guard is "ready", and it is wrong in a way independent review 43 caught:
-   * `loading` is *not knowing yet*, not *signed out*. A cold start always passes through
-   * it, so a guard on `ready` removes every protected route from the navigator for the
-   * first few hundred milliseconds of every launch — and a launch that carries a URL
-   * (`bingd://activity/…`, a shared `/u/` link) has that URL arrive while the route it
-   * names does not exist. The navigator resolves it somewhere else, and nothing brings it
-   * back when the guard later flips: the deep link is silently lost.
+   * A guard alone has to choose between two wrong things while the session is still
+   * loading, which independent reviews 43 and 43b found in turn.
    *
-   * Only `signed-out` is a state where a protected screen is genuinely wrong to mount.
-   * `loading`, `onboarding` and `error` are all covered by `AuthStatusOverlay`, which
-   * draws over the whole navigator until the session resolves, so nothing half-rendered
-   * is visible underneath — and `RouteErrorBoundary` catches a screen that renders early
-   * and clears itself when the status moves on.
+   * Guard on `ready` and the protected routes are absent for the first few hundred
+   * milliseconds of *every* launch — so a launch carrying a URL (`bingd://activity/…`, a
+   * shared `/u/` link) has that URL arrive while the route it names does not exist. The
+   * navigator resolves it somewhere else and nothing brings it back.
+   *
+   * Guard on `!== 'signed-out'` instead and the routes are present, but they render with
+   * no profile: `useCurrentProfile` throws, `RouteErrorBoundary` catches, and recovering
+   * unmounts and remounts the navigator underneath the deep link. Better than the blank
+   * screen it replaced, and still not a mechanism anybody should rely on.
+   *
+   * The mistake in both is the same: trying to answer "which routes exist" while the
+   * question "who is this" has no answer yet. So the navigator is not mounted at all
+   * until it does. **This file already does exactly that one screen up** — `RootLayout`
+   * returns null until the fonts resolve — and deep links have always survived it,
+   * because the URL lives in the router's store rather than in the navigator's state.
+   *
+   * Once mounted, `signedIn` is a settled fact and the guard is simple.
    */
   const auth = useAuth();
-  const signedIn = auth.status !== 'signed-out';
+  /**
+   * `loading` is not knowing; `error` is knowing that we could not find out. Neither is a
+   * state any route below can be drawn in, and `AuthStatusOverlay` renders both — a
+   * loading screen and a retry — over the space the navigator would occupy, so the person
+   * sees the same thing they saw before.
+   */
+  const resolved = auth.status !== 'loading' && auth.status !== 'error';
+  const signedIn = auth.status === 'ready';
   /**
    * An invitation opened before there was an account to attribute it to.
    *
@@ -183,55 +193,62 @@ function Navigation() {
           reason: on iOS a route's title is the back label of whatever is pushed on top
           of it, so they are an invariant worth asserting rather than seven strings
           spread down a JSX tree. */}
-      <RouteErrorBoundary resetKey={auth.status}>
-        <Stack screenOptions={rootStackScreenOptions}>
-          {/* Always available, and the only group that is: it is where a signed-out
+      {/* Not mounted until the session has resolved. See `resolved` above: this is the
+          same withholding `RootLayout` already does for the fonts, and for the same
+          reason — a tree that cannot be drawn correctly yet should not be drawn. The
+          URL survives it, because the router's store holds the destination and the
+          navigator derives its state from that store when it mounts. */}
+      {resolved ? (
+        <RouteErrorBoundary resetKey={auth.status}>
+          <Stack screenOptions={rootStackScreenOptions}>
+            {/* Always available, and the only group that is: it is where a signed-out
               person belongs, and it is also what `onboarding` status routes to. */}
-          <Stack.Screen name="(auth)" options={{ title: ROOT_SCREEN_TITLES['(auth)'] }} />
+            <Stack.Screen name="(auth)" options={{ title: ROOT_SCREEN_TITLES['(auth)'] }} />
 
-          <Stack.Protected guard={signedIn}>
-            <Stack.Screen name="(tabs)" options={{ title: ROOT_SCREEN_TITLES['(tabs)'] }} />
-            <Stack.Screen
-              name="title/[id]"
-              options={{ headerShown: true, title: ROOT_SCREEN_TITLES['title/[id]'] }}
-            />
-            <Stack.Screen
-              name="u/[username]"
-              options={{ headerShown: true, title: ROOT_SCREEN_TITLES['u/[username]'] }}
-            />
-            {/* Reached from a cast strip. The header title is set by the screen once
+            <Stack.Protected guard={signedIn}>
+              <Stack.Screen name="(tabs)" options={{ title: ROOT_SCREEN_TITLES['(tabs)'] }} />
+              <Stack.Screen
+                name="title/[id]"
+                options={{ headerShown: true, title: ROOT_SCREEN_TITLES['title/[id]'] }}
+              />
+              <Stack.Screen
+                name="u/[username]"
+                options={{ headerShown: true, title: ROOT_SCREEN_TITLES['u/[username]'] }}
+              />
+              {/* Reached from a cast strip. The header title is set by the screen once
                 the person resolves, so it is empty here rather than "Person". */}
-            <Stack.Screen
-              name="person/[id]"
-              options={{ headerShown: true, title: ROOT_SCREEN_TITLES['person/[id]'] }}
-            />
-            <Stack.Screen
-              name="lists/[id]"
-              options={{ headerShown: true, title: ROOT_SCREEN_TITLES['lists/[id]'] }}
-            />
-            {/* Where a comment or reply notification lands. Declared here rather than
+              <Stack.Screen
+                name="person/[id]"
+                options={{ headerShown: true, title: ROOT_SCREEN_TITLES['person/[id]'] }}
+              />
+              <Stack.Screen
+                name="lists/[id]"
+                options={{ headerShown: true, title: ROOT_SCREEN_TITLES['lists/[id]'] }}
+              />
+              {/* Where a comment or reply notification lands. Declared here rather than
                 left to the file tree so it carries `ROOT_SCREEN_TITLES` like its
                 neighbours — on iOS a route's title is the back label of whatever is
                 pushed on top of it, and an undeclared route's is its directory name. */}
-            <Stack.Screen
-              name="activity/[id]"
-              options={{ headerShown: true, title: ROOT_SCREEN_TITLES['activity/[id]'] }}
-            />
-            {/* No header and no back: it is the first thing a new account sees, and
+              <Stack.Screen
+                name="activity/[id]"
+                options={{ headerShown: true, title: ROOT_SCREEN_TITLES['activity/[id]'] }}
+              />
+              {/* No header and no back: it is the first thing a new account sees, and
                 there is nowhere behind it to return to. Leaving is an explicit choice
                 made on the screen itself. */}
-            <Stack.Screen name="onboarding/taste" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="settings"
-              options={{
-                presentation: 'modal',
-                headerShown: true,
-                title: ROOT_SCREEN_TITLES.settings,
-              }}
-            />
-          </Stack.Protected>
-        </Stack>
-      </RouteErrorBoundary>
+              <Stack.Screen name="onboarding/taste" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="settings"
+                options={{
+                  presentation: 'modal',
+                  headerShown: true,
+                  title: ROOT_SCREEN_TITLES.settings,
+                }}
+              />
+            </Stack.Protected>
+          </Stack>
+        </RouteErrorBoundary>
+      ) : null}
       {/* Outside the boundary, so the two states that are not a place in the app are
           still explained even if the navigator underneath them stopped. */}
       <AuthStatusOverlay />
