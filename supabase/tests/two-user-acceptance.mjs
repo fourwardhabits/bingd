@@ -353,9 +353,11 @@ async function attempt(what, fn) {
  */
 async function sweepByEmail(email) {
   const PER_PAGE = 200;
+  const MAX_PAGES = 500;
   const seen = [];
+  let exhausted = false;
 
-  for (let page = 1; page <= 50; page += 1) {
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
     const res = await fetch(
       `${url}/auth/v1/admin/users?page=${page}&per_page=${PER_PAGE}&filter=${encodeURIComponent(email)}`,
       { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } },
@@ -369,7 +371,22 @@ async function sweepByEmail(email) {
       if (user.email === email) seen.push(user);
     }
 
-    if (users.length < PER_PAGE) break;
+    if (users.length < PER_PAGE) {
+      exhausted = true;
+      break;
+    }
+  }
+
+  // **The cap throws rather than returning quietly**, which is the difference between a
+  // bound and a silent truncation. Reaching it means the listing was still going, so
+  // "nothing found" would be a claim this function has no basis for — and this is the last
+  // thing standing between an interrupted run and a disposable account left in a real
+  // database. 100,000 accounts is far past the point where the founder would rather be told.
+  if (!exhausted) {
+    throw new Error(
+      `stopped listing users after ${MAX_PAGES} pages while looking for ${email}. ` +
+        'The account may still exist; delete it by hand and raise MAX_PAGES.',
+    );
   }
 
   for (const user of seen) {

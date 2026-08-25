@@ -264,13 +264,18 @@ begin
   -- was `delivered`, which is the at-least-once guarantee behaving exactly as documented,
   -- and strictly better than deleting a row another sender is mid-send on.
   --
-  -- **A result with no `attempt` is accepted**, matching on the lease alone. That is the
-  -- deploy window and nothing else: migrations land before functions (backend first, then
-  -- the function — the convention this repository already follows), so for a few minutes a
-  -- sender built before this change is talking to a database built after it. Refusing those
-  -- would mean every push in that window failing to settle and being retried to the ceiling,
-  -- which is duplicate notifications to real people. The concession is bounded by the lease
-  -- predicate above, which the old sender still satisfies or does not.
+  -- **A result with no `attempt` is accepted only on the first claim**, and the qualifier is
+  -- the whole point. Migrations land before functions (backend first, then the function — the
+  -- convention this repository already follows), so for a few minutes a sender built before
+  -- this change is talking to a database built after it; refusing its results would mean every
+  -- push in that window failing to settle and being retried to the ceiling, which is duplicate
+  -- notifications to real people.
+  --
+  -- But "accept any result with no generation" is not a deploy window, it is a permanent hole:
+  -- a legacy sender could stall, lose its row, and still settle the replacement's. `attempts =
+  -- 1` closes it, because the race requires a **second** claim to exist. A legacy sender whose
+  -- row has been reclaimed simply fails to settle, and the row retries — bounded, self-healing,
+  -- and confined to the same few minutes.
   -- ---------------------------------------------------------------------------
 
   -- Delivered, or failed for the third time. Either way there is nothing further to do
@@ -281,7 +286,8 @@ begin
      where o.notification_id = (r.value ->> 'notification_id')::uuid
        and o.state = 'claimed'
        and o.claimed_at > now() - interval '5 minutes'
-       and (r.value ->> 'attempt' is null or o.attempts = (r.value ->> 'attempt')::integer)
+       and (o.attempts = (r.value ->> 'attempt')::integer
+              or (r.value ->> 'attempt' is null and o.attempts = 1))
        and (coalesce((r.value ->> 'delivered')::boolean, false) or o.failures + 1 >= 3)
     returning 1
   )
@@ -299,7 +305,8 @@ begin
      where o.notification_id = (r.value ->> 'notification_id')::uuid
        and o.state = 'claimed'
        and o.claimed_at > now() - interval '5 minutes'
-       and (r.value ->> 'attempt' is null or o.attempts = (r.value ->> 'attempt')::integer)
+       and (o.attempts = (r.value ->> 'attempt')::integer
+              or (r.value ->> 'attempt' is null and o.attempts = 1))
        and not coalesce((r.value ->> 'delivered')::boolean, false)
     returning 1
   )

@@ -593,9 +593,16 @@ describe('settle_push_batch', () => {
     const id = await notify(reader, 'follow');
 
     for (const attempt of [1, 2]) {
-      await claim();
+      const jobs = await claim();
       const result = await settle([
-        { notification_id: id, delivered: false, error: 'provider timed out' },
+        {
+          notification_id: id,
+          // The generation this claim was given. Only a first claim may omit it — see
+          // 'refuses a result with no generation once the row has been reclaimed'.
+          attempt: jobs[0].attempt,
+          delivered: false,
+          error: 'provider timed out',
+        },
       ]);
       assert.equal(result.retry, 1, `attempt ${attempt} should have been retried`);
 
@@ -606,8 +613,10 @@ describe('settle_push_batch', () => {
       assert.equal(row.last_error, 'provider timed out');
     }
 
-    await claim();
-    const final = await settle([{ notification_id: id, delivered: false, error: 'again' }]);
+    const third = await claim();
+    const final = await settle([
+      { notification_id: id, attempt: third[0].attempt, delivered: false, error: 'again' },
+    ]);
     assert.equal(final.settled, 1, 'the third failure should have been given up on');
     assert.equal(await outboxFor(id), null);
   });
@@ -659,7 +668,9 @@ describe('settle_push_batch', () => {
     const recovered = await claim();
     assert.equal(recovered.length, 1, 'a row was stranded by a crash rather than by a failure');
 
-    const settled = await settle([{ notification_id: id, delivered: true }]);
+    const settled = await settle([
+      { notification_id: id, attempt: recovered[0].attempt, delivered: true },
+    ]);
     assert.equal(settled.settled, 1);
     assert.equal(await outboxFor(id), null);
   });
@@ -754,7 +765,7 @@ describe('settle_push_batch', () => {
    * talking to a database built after it. Refusing its results would mean every push in that
    * window retried to the ceiling, which is duplicate notifications to real people.
    */
-  it('still settles a result with no generation at all, while the lease is live', async () => {
+  it('still settles a result with no generation at all, on a first claim', async () => {
     await register(reader, TOKEN(52));
     const id = await notify(reader, 'follow');
 
@@ -762,6 +773,31 @@ describe('settle_push_batch', () => {
     const settled = await settle([{ notification_id: id, delivered: true }]);
     assert.equal(settled.settled, 1);
     assert.equal(await outboxFor(id), null);
+  });
+
+  /**
+   * And not past the first, because "accept any result with no generation" is not a deploy
+   * window — it is a permanent hole with the original race still in it. The race needs a
+   * *second* claim to exist, so `attempts = 1` is exactly the line between the two.
+   */
+  it('refuses a result with no generation once the row has been reclaimed', async () => {
+    await register(reader, TOKEN(53));
+    const id = await notify(reader, 'follow');
+
+    await claim();
+    await t.sql(
+      `update push_outbox set claimed_at = now() - interval '6 minutes' where notification_id = $1`,
+      [id],
+    );
+    const second = await claim();
+    assert.equal(second[0].attempt, 2);
+
+    const legacy = await settle([{ notification_id: id, delivered: false, error: 'no generation' }]);
+    assert.equal(legacy.stale, 1, 'a generation-less result settled a reclaimed row');
+
+    const after = await outboxFor(id);
+    assert.equal(after.state, 'claimed');
+    assert.equal(after.failures, 0);
   });
 
   it('does not reap a row a sender is still holding', async () => {
