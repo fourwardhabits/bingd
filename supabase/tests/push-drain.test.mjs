@@ -181,13 +181,37 @@ describe('push_drain_status fails closed', () => {
     assert.equal(without.healthy, false);
 
     await t.sql(`create schema if not exists net`);
-    await t.sql(`create function net.http_post(url text) returns bigint language sql as $fn$ select 1::bigint $fn$`);
+
+    /**
+     * A function of the right name and the wrong shape is not the transport — review 46c.
+     * `_drain_push_outbox()` binds to pg_net's five-argument overload; a stray
+     * `net.http_post(text)` left behind by anything at all satisfied the first version of
+     * this check while the drain still could not post.
+     */
+    await t.sql(
+      `create function net.http_post(url text) returns bigint language sql as $fn$ select 1::bigint $fn$`,
+    );
+    const wrongShape = await status();
+    assert.equal(wrongShape.pg_net_available, false, 'a different overload is not the one we call');
+    assert.ok(wrongShape.problems.includes('pg_net_unavailable'));
+
+    // pg_net's real signature, which is the one the tick's named-argument call resolves to.
+    await t.sql(
+      `create function net.http_post(
+         url text,
+         body jsonb default '{}'::jsonb,
+         params jsonb default '{}'::jsonb,
+         headers jsonb default '{}'::jsonb,
+         timeout_milliseconds integer default 5000
+       ) returns bigint language sql as $fn$ select 1::bigint $fn$`,
+    );
     try {
       const withNet = await status();
       assert.equal(withNet.pg_net_available, true);
       assert.ok(!withNet.problems.includes('pg_net_unavailable'));
     } finally {
       await t.sql(`drop function if exists net.http_post(text)`);
+      await t.sql(`drop function if exists net.http_post(text, jsonb, jsonb, jsonb, integer)`);
       await t.sql(`drop schema if exists net`);
     }
   });

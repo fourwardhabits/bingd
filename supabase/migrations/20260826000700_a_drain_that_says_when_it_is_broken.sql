@@ -162,6 +162,7 @@ declare
   v_secret   boolean := false;
   v_vault    boolean := false;
   v_net      boolean := false;
+  v_proc     regprocedure;
   v_problems text[] := array[]::text[];
 begin
   select count(*) into v_queued from push_outbox;
@@ -214,15 +215,20 @@ begin
    * surfaced later, as an undefined-function error on the first tick that had work. That is
    * the same "healthy until somebody needs it" shape as the incident above.
    *
-   * Asked of the catalogue rather than through `to_regproc`, which returns null for an
-   * ambiguous name and would read as absent the day pg_net adds an overload.
+   * **The exact signature the tick binds to, and executable by this function's owner** —
+   * review 46c, which caught the first attempt matching on the name alone. A stray
+   * `net.http_post(text)` left behind by anything at all would have satisfied that, and so
+   * would a `net.http_post` whose EXECUTE had been revoked; in both cases the drain still
+   * cannot post and the summary still said it could.
+   *
+   * `to_regprocedure` resolves the one overload `perform net.http_post(url := …, headers :=
+   * …, body := …, timeout_milliseconds := …)` actually binds to, and returns null rather
+   * than raising when the schema, the function or that signature is absent. Pinning the
+   * signature means this check goes red on the same day the drain does if pg_net ever
+   * changes it, which is the correct coupling: they have to agree or one of them is lying.
    */
-  select exists (
-    select 1
-      from pg_proc p
-      join pg_namespace n on n.oid = p.pronamespace
-     where n.nspname = 'net' and p.proname = 'http_post'
-  ) into v_net;
+  v_proc := to_regprocedure('net.http_post(text, jsonb, jsonb, jsonb, integer)');
+  v_net := v_proc is not null and has_function_privilege(v_proc, 'execute');
 
   if to_regclass('cron.job') is not null then
     execute $q$

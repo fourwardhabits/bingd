@@ -114,7 +114,14 @@ report('push_drain_status() answers', true, `environment=${s.environment}`);
  * has not had the migration applied is precisely the shape of the bug being fixed.
  */
 const hasNewShape =
-  'healthy' in s && 'vault_secret_set' in s && 'problems' in s && 'vault_available' in s;
+  'healthy' in s &&
+  'vault_secret_set' in s &&
+  'problems' in s &&
+  'vault_available' in s &&
+  // Review 46c: without this, a project running an earlier build of the status function
+  // satisfied the gate and then passed an acceptance run that never asked about the
+  // transport at all.
+  'pg_net_available' in s;
 report(
   'the project has 20260826000700 (healthy / vault_secret_set / problems)',
   hasNewShape,
@@ -125,6 +132,9 @@ report('scheduler is installed and active', Boolean(s.job?.active), JSON.stringi
 report('functions.base_url is set', s.base_url_set === true);
 
 if (hasNewShape) {
+  // The transport. `_drain_push_outbox()` ends in `net.http_post`, so a project with
+  // pg_net disabled cannot send whatever else is in place — review 46c.
+  report('pg_net can be called by the drain', s.pg_net_available === true);
   report('the Vault extension is available', s.vault_available === true);
   // Boolean only. Never a length, never a prefix: both are fingerprints of which key it is.
   report('the Vault holds service_role_key', s.vault_secret_set === true);
