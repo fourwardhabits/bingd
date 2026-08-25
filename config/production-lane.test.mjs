@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -257,11 +258,22 @@ describe('a production build, resolved the way EAS resolves it', () => {
   /**
    * The control. Without it the two refusals above pass just as well against an
    * `app.config.ts` that throws for every input.
+   *
+   * The FCM file is supplied because beta is a store-distributed lane now and
+   * `config/push.cjs` requires one — the control has to fail for the *backend* reason or
+   * not at all, so beta's own credential is held constant rather than left missing. It is
+   * named explicitly rather than inherited from `process.env`, so a machine that happens
+   * to export `GOOGLE_SERVICES_JSON` cannot change what this asserts.
    */
   it('still resolves the beta lane against nonprod', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bingd-lane-'));
+    const googleServices = join(dir, 'google-services.json');
+    writeFileSync(googleServices, JSON.stringify({ project_info: { project_id: 'placeholder' } }));
+
     const out = resolve({
       BINGD_LANE: 'beta',
       EXPO_PUBLIC_SUPABASE_URL: 'https://abheeqyjzekiowkztfxv.supabase.co',
+      GOOGLE_SERVICES_JSON: googleServices,
     });
     const config = JSON.parse(out);
     assert.equal(config.extra.lane, 'beta');

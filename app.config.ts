@@ -55,7 +55,7 @@ const NOTIFICATION_COLOR = '#773744';
  * included. A lane that never takes the branch never loads the module and never sees it
  * in its hash. `config/push.cjs` records the measurements.
  *
- * The two comparisons below are `declaresPushNatively` restated, and they have to be:
+ * The three comparisons below are `declaresPushNatively` restated, and they have to be:
  * answering "does this lane configure push" is what decides whether the module may be
  * loaded at all, so it cannot come from the module. `config/push.test.mjs` asserts the
  * two agree for every lane, which is the seam this arrangement creates.
@@ -65,7 +65,9 @@ const NOTIFICATION_COLOR = '#773744';
  */
 function pushNative(): { plugin: { color: string; mode?: string }; googleServicesFile: string | null } {
   const declared =
-    lane === 'production' || (lane === 'development' && Boolean(process.env.GOOGLE_SERVICES_JSON));
+    lane === 'production' ||
+    lane === 'beta' ||
+    (lane === 'development' && Boolean(process.env.GOOGLE_SERVICES_JSON));
 
   if (!declared) {
     // Byte-identical to what every lane produced before push was configured.
@@ -360,8 +362,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
      * native entitlement and cannot be changed over the air, which is why this lands
      * before the release candidate.
      *
-     * `notificationPluginProps` adds `mode` for the production lane and returns exactly
-     * `{ color }` for every other, so the beta and preview fingerprints do not move.
+     * `notificationPluginProps` adds `mode` for the two store-distributed lanes —
+     * production and **beta** — and returns exactly `{ color }` for development and
+     * preview, whose fingerprints therefore do not move.
+     *
+     * Beta's does move, and that is the point of it rather than a cost to be minimised:
+     * TestFlight delivers through production APNs, so the beta binary in testers' hands
+     * is entitled to the wrong service and `device_tokens` is empty. The new entitlement
+     * needs a new build; testers on the old one keep receiving over-the-air updates until
+     * they install it, because the old runtime version is still published to.
      * Icon and sound assets are still deferred to the brand asset pass (PRD §5).
      */
     ['expo-notifications', push.plugin],
