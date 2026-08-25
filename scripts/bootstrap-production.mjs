@@ -292,11 +292,29 @@ if (replayed) {
      * service-role key is a script that has to be trusted with where it puts it.
      */
     if ('healthy' in s) {
-      if (s.healthy !== true) {
-        const named = Array.isArray(s.problems) ? s.problems.join(', ') : 'unknown';
+      const named = Array.isArray(s.problems) ? s.problems : [];
+
+      /**
+       * The one problem this script is allowed to downgrade, because it is the only caller
+       * that knows the job was scheduled seconds ago.
+       *
+       * `push_drain_status()` calls a job with no run record unhealthy — review 46, and it
+       * is right: a scheduler that has never executed has demonstrated nothing, and a
+       * permanently null `last_run` means pg_cron is installed in the wrong database. But
+       * for the first minute after `schedule_push_drain()` it is simply true and about to
+       * stop being true, and failing the bootstrap on it would teach whoever runs this to
+       * ignore its exit code.
+       */
+      const justScheduled = named.length === 1 && named[0] === 'last_run_missing';
+      if (justScheduled) {
+        note(
+          'the drain has not run yet — pg_cron fires at the top of the next minute.\n' +
+            '          Confirm with: node supabase/tests/push-drain-acceptance.mjs',
+        );
+      } else if (s.healthy !== true) {
         problems.push(
-          `the push drain cannot send: ${named}.\n` +
-            (Array.isArray(s.problems) && s.problems.includes('vault_service_role_key_missing')
+          `the push drain cannot send: ${named.join(', ') || 'unknown'}.\n` +
+            (named.includes('vault_service_role_key_missing')
               ? "    Store the key in the SQL editor: select vault.create_secret('<service-role key>', 'service_role_key');\n"
               : '') +
             '    See docs/release/push-operations.md. Verify with' +

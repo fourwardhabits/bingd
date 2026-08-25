@@ -133,10 +133,14 @@ if (hasNewShape) {
     Number(s.older_than_15m) === 0,
     `older_than_15m=${s.older_than_15m}, queued=${s.queued}`,
   );
+  // A job that has never run has demonstrated nothing, so `null` is a failure here and not
+  // a pass — review 46. On a project where the job was scheduled seconds ago, wait a minute
+  // and run this again; `bootstrap-production.mjs` is the only caller that gets to treat
+  // this as a note, because it is the only one that knows it just installed the job.
   report(
     'the last scheduled run succeeded',
-    !s.last_run || s.last_run.status === 'succeeded',
-    JSON.stringify(s.last_run),
+    Boolean(s.last_run) && s.last_run.status === 'succeeded',
+    s.last_run ? JSON.stringify(s.last_run) : 'no run recorded — the job has never executed',
   );
   report(
     'healthy',

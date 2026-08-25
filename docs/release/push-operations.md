@@ -121,7 +121,7 @@ included — because a check that cannot confirm has to say no. That is the less
 | **`healthy`** | **`true`** | **the only field to branch on.** False ⇒ read `problems` |
 | **`problems`** | `[]` | each string is one reason nothing can be sent — see below |
 | `job` | present, `active: true` | `null` ⇒ nothing is draining. `schedule_push_drain()` |
-| `last_run.status` | `succeeded` | `failed` ⇒ read `message` |
+| `last_run.status` | `succeeded` | `failed` ⇒ read `message`. **`null` is also unhealthy** — a job that has never run has proved nothing |
 | `queued` | small, moving | — |
 | `older_than_15m` | **0** | rows arriving and nothing taking them |
 | `base_url_set` | `true` | `false` ⇒ re-run the bootstrap script |
@@ -131,7 +131,15 @@ included — because a check that cannot confirm has to say no. That is the less
 `problems` uses stable strings, and they are matched on by
 `supabase/tests/push-drain-acceptance.mjs`: `scheduler_not_installed`,
 `scheduler_inactive`, `base_url_missing`, `vault_unavailable`,
-`vault_service_role_key_missing`, `last_run_not_succeeded`, `outbox_stalled`.
+`vault_service_role_key_missing`, `last_run_missing`, `last_run_not_succeeded`,
+`outbox_stalled`.
+
+`last_run_missing` is the one that clears itself: for up to a minute after
+`schedule_push_drain()` the job genuinely has not run yet. `bootstrap-production.mjs` is the
+only caller that downgrades it to a note, because it is the only one that knows it just
+installed the job. Everywhere else it is a failure — a `last_run` that stays `null` past two
+minutes means pg_cron is enabled in the wrong database, and a health check that shrugged at
+"no evidence" is the same mistake as one that reads `succeeded` as "delivered".
 
 > **`vault_secret_set` is a boolean and never a length or a prefix.** Both are fingerprints
 > of which key is stored. Nothing in this pipeline returns the value to anybody.

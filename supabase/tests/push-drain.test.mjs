@@ -203,6 +203,38 @@ describe('push_drain_status fails closed', () => {
   });
 
   /**
+   * A scheduled job that has never executed has demonstrated nothing — independent review
+   * 46. `last_run: null` on a job that has been active for more than a minute is a real and
+   * documented failure (pg_cron enabled in the wrong database), and calling it healthy is
+   * the same mistake as calling `succeeded` delivered, one layer up.
+   *
+   * PGlite has no `cron.job`, so the job is faked to the shape `push_drain_status()` reads:
+   * a jobid, a schedule, `active`, and no matching `job_run_details` row.
+   */
+  it('is unhealthy when the scheduler exists and has never run', async () => {
+    await installFakeVault('service_role_key');
+    await t.sql(`create schema if not exists cron`);
+    await t.sql(
+      `create table cron.job (jobid bigint, jobname text, schedule text, active boolean)`,
+    );
+    await t.sql(
+      `insert into cron.job values (2, 'bingd-push-drain', '* * * * *', true)`,
+    );
+    try {
+      const s = await status();
+
+      assert.equal(s.job.active, true);
+      assert.equal(s.last_run, null);
+      assert.ok(s.problems.includes('last_run_missing'));
+      assert.ok(!s.problems.includes('last_run_not_succeeded'), 'the two are different facts');
+      assert.equal(s.healthy, false);
+    } finally {
+      await t.sql(`drop table if exists cron.job`);
+      await t.sql(`drop schema if exists cron`);
+    }
+  });
+
+  /**
    * Everything the harness *can* satisfy, satisfied — so the failures above are failures
    * of the thing being tested rather than of a function that can only ever say no. The
    * scheduler is the one dependency PGlite cannot provide, so it is the one problem left.

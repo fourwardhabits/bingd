@@ -240,8 +240,25 @@ begin
     v_problems := v_problems || 'vault_service_role_key_missing'::text;
   end if;
 
-  -- A run that ended any way other than `succeeded`, including the new raise above.
-  if v_last is not null and coalesce(v_last ->> 'status', '') <> 'succeeded' then
+  /**
+   * A run that ended any way other than `succeeded`, including the new raise above — and,
+   * separately, **no run at all**.
+   *
+   * Independent review 46 was right that the second one is not a detail. A scheduled job
+   * that has never executed has demonstrated nothing, and `last_run = null` on a job that
+   * has been active for more than a minute is a real and already-documented failure:
+   * pg_cron installed but not running jobs, which is what happens when the extension was
+   * enabled in the wrong database. Treating "no evidence" as "fine" is the same mistake as
+   * treating `succeeded` as "delivered", one layer up.
+   *
+   * It self-clears within a minute of a genuine install, and
+   * `scripts/bootstrap-production.mjs` — the one caller that knows it has *just* scheduled
+   * the job — downgrades this single problem to a note for exactly that reason. Nothing
+   * else does.
+   */
+  if v_job is not null and v_last is null then
+    v_problems := v_problems || 'last_run_missing'::text;
+  elsif v_last is not null and coalesce(v_last ->> 'status', '') <> 'succeeded' then
     v_problems := v_problems || 'last_run_not_succeeded'::text;
   end if;
 
