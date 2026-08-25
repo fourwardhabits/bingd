@@ -21,7 +21,12 @@ import {
   useProfileNotes,
   usePublicProfile,
 } from '@/features/profile/use-public-profile';
-import { useMyBlocks, useRelationships, useSocialWrites } from '@/features/profile/use-social';
+import {
+  noRelationship,
+  useMyBlocks,
+  useRelationships,
+  useSocialWrites,
+} from '@/features/profile/use-social';
 import { tasteMatchBadge, useTasteMatch } from '@/features/profile/use-taste-match';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
@@ -109,6 +114,39 @@ export default function PublicProfileScreen() {
   const { unblock, busy: unblocking } = useSocialWrites(viewer.id, 'profile');
 
   const isSelf = profile.data?.id === viewer.id;
+
+  /**
+   * Who the header's menu is about, which is **not** always `subjectId`.
+   *
+   * Blocking closes the door behind itself: `can_view_profile` goes false in both
+   * directions, so a blocked account is absent from `public_profiles` *and* from
+   * `profile_identity` — and `subjectId` is built from those two, so it is empty on
+   * exactly the profile where the moderation menu matters most. The one read that can
+   * still name them is the viewer's own block list, which is why the blocked branch
+   * below already reaches for `blockedMatch`.
+   *
+   * Review 41's third Major: without this fallback, Report was unreachable the moment
+   * you blocked somebody. That is the inversion the database deliberately refuses to
+   * have — `report()` checks that a subject exists and deliberately not that the caller
+   * can still see it, so that blocking cannot become a way to suppress the complaint
+   * (20260813002000 §4) — reintroduced in the client.
+   *
+   * Kept out of `subjectId` itself rather than folded into it: that value feeds Top
+   * Ranked, the Awards sheet and the taste match, none of which should start a read
+   * about an account the viewer has made invisible.
+   */
+  const menuUserId = subjectId || blockedMatch?.id || '';
+  const menuName = profile.data?.name ?? identity.data?.name ?? `@${username}`;
+  /**
+   * `follow_state_with` answers for a blocked pair too, but only if it was asked — and
+   * it is asked about `subjectId`, which is empty here. `blockedMatch` is the viewer's
+   * own list, so its presence *is* the block; saying so directly is what makes the menu
+   * offer Unblock rather than Block on the one profile where getting that backwards
+   * would be worst.
+   */
+  const menuRelationship =
+    relationships.data?.get(menuUserId) ??
+    (blockedMatch ? { ...noRelationship(), blocked: true } : undefined);
   // Asked about this actor directly. Filtering the viewer's own feed would have
   // shown nothing for any public account they had not followed, because that query
   // spans the follow set — the authorisation comes from feed_events_read either way.
@@ -154,11 +192,12 @@ export default function PublicProfileScreen() {
         * matters here is only that it is the *same corner*: a reader who has learned
         * that the controls for a profile are top right is right on both screens.
         *
-        * `subjectId` rather than `profile.data.id`, so it is present on the
-        * discoverable-but-unreadable branch too — a private account somebody wants to
-        * report is exactly a case where the control has to exist. Absent on the
-        * viewer's own profile, which this screen can be, and absent when the handle
-        * resolved to nothing at all: there is nobody to report.
+        * `menuUserId` rather than `profile.data.id`, so it is present on the
+        * discoverable-but-unreadable branch and on the *blocked* one — a private account
+        * somebody wants to report, and an account they have already blocked, are the two
+        * cases where the control matters most and the two where the readable row is
+        * absent. Absent on the viewer's own profile, which this screen can be, and
+        * absent when the handle resolved to nothing at all: there is nobody to report.
         */}
       <Stack.Screen
         options={{
@@ -166,12 +205,12 @@ export default function PublicProfileScreen() {
           title: profile.data?.name ?? '',
           headerBackTitle: 'Back',
           headerRight: () =>
-            subjectId && !isSelf ? (
+            menuUserId && !isSelf ? (
               <ProfileMenu
-                userId={subjectId}
-                name={profile.data?.name ?? identity.data?.name ?? `@${username}`}
+                userId={menuUserId}
+                name={menuName}
                 viewerId={viewer.id}
-                relationship={relationships.data?.get(subjectId)}
+                relationship={menuRelationship}
                 surface="profile"
               />
             ) : null,

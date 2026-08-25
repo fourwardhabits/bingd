@@ -197,3 +197,127 @@ describe('persisting the choice', () => {
     expect(mockApplyInitialVisibility).toHaveBeenCalledWith('public');
   });
 });
+
+/**
+ * **Three ways a chosen Private could still have landed on a public account.**
+ *
+ * Review 41 found two of them and they share a shape: the account exists, the router
+ * gate is opened, and the visibility write either has not happened or has not finished.
+ * Whoever signed up is then inside the app, ranking things, on a profile that is public
+ * — and nothing ever told them so.
+ *
+ * The rule these hold is one sentence: **the gate is not opened until the visibility
+ * this person chose has been sent.** Not "succeeded" — a refusal is survivable and is
+ * reported — but sent, and waited for.
+ */
+describe('a private account is private before the app opens', () => {
+  const fillIn = async (view: Awaited<ReturnType<typeof open>>) => {
+    await fireEvent.changeText(view.getByLabelText('Username'), 'rosalind');
+    await fireEvent.changeText(view.getByLabelText('Month'), '04');
+    await fireEvent.changeText(view.getByLabelText('Day'), '11');
+    await fireEvent.changeText(view.getByLabelText('Year'), '1994');
+    await fireEvent.press(view.getByRole('radio', { name: 'Private' }));
+    await waitFor(() =>
+      expect(
+        view.getByRole('button', { name: 'Create my account' }).props.accessibilityState.disabled,
+      ).toBe(false),
+    );
+    return view;
+  };
+
+  it('keeps the button dead until the visibility write is done, not until the insert is', async () => {
+    // The first Major: `busy` was cleared the moment `create_profile` answered, so a
+    // second tap could land while the visibility request was still in flight, earn
+    // `already_exists`, and open the gate underneath it.
+    let release: () => void = () => {};
+    mockApplyInitialVisibility.mockReturnValue(
+      new Promise((resolve) => {
+        release = () => resolve({ ok: true });
+      }),
+    );
+
+    const view = await fillIn(await open());
+    // Deliberately not awaited: the submission is being held open on purpose, and
+    // awaiting the press would wait for the very thing this test is inspecting.
+    void fireEvent.press(view.getByRole('button', { name: 'Create my account' }));
+
+    await waitFor(() => expect(mockApplyInitialVisibility).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        view.getByRole('button', { name: 'Creating…' }).props.accessibilityState.disabled,
+      ).toBe(true),
+    );
+
+    release();
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Create my account' })).toBeTruthy(),
+    );
+  });
+
+  it('applies the choice when the insert committed and lost its reply', async () => {
+    // The second Major. `changed` means the profile may exist, so this branch opens the
+    // gate — and it opened it without ever sending the visibility. The person is shown
+    // an error, carried into the app anyway, and never told their choice was dropped.
+    mockCreateProfile.mockResolvedValue({
+      outcome: 'failed',
+      message: 'The network went away.',
+      changed: true,
+    });
+
+    const view = await fillIn(await open());
+    await fireEvent.press(view.getByRole('button', { name: 'Create my account' }));
+
+    await waitFor(() => expect(mockApplyInitialVisibility).toHaveBeenCalledWith('private'));
+  });
+
+  it('applies the choice on a retry that answers already_exists', async () => {
+    // On a screen only reachable *without* a profile, `already_exists` is almost always
+    // this signup's own first attempt having committed. The retry is the same person
+    // making the same choice.
+    mockCreateProfile.mockResolvedValue({ outcome: 'already_exists' });
+
+    const view = await fillIn(await open());
+    await fireEvent.press(view.getByRole('button', { name: 'Create my account' }));
+
+    await waitFor(() => expect(mockApplyInitialVisibility).toHaveBeenCalledWith('private'));
+  });
+
+  it('does not hold somebody on the form when the visibility write is refused', async () => {
+    mockApplyInitialVisibility.mockResolvedValue({ ok: false });
+
+    const view = await fillIn(await open());
+    await fireEvent.press(view.getByRole('button', { name: 'Create my account' }));
+
+    // The account exists by then. Refusing to continue would strand somebody on a
+    // signup form for an account they already have — the dead end `already_exists`
+    // exists to prevent. They are told, and pointed at the screen that finishes it.
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'Your account is ready',
+        expect.stringContaining('Settings › Privacy'),
+      ),
+    );
+  });
+
+  it('never makes an account more visible than its owner left it', async () => {
+    // The safety property behind calling this on two *uncertain* outcomes. Public is the
+    // column default and the writer short-circuits it, so the only account this path can
+    // change is one whose owner asked for more privacy than they were about to get.
+    mockCreateProfile.mockResolvedValue({ outcome: 'already_exists' });
+    const view = await open();
+    await fireEvent.changeText(view.getByLabelText('Username'), 'rosalind');
+    await fireEvent.changeText(view.getByLabelText('Month'), '04');
+    await fireEvent.changeText(view.getByLabelText('Day'), '11');
+    await fireEvent.changeText(view.getByLabelText('Year'), '1994');
+    await waitFor(() =>
+      expect(
+        view.getByRole('button', { name: 'Create my account' }).props.accessibilityState.disabled,
+      ).toBe(false),
+    );
+
+    await fireEvent.press(view.getByRole('button', { name: 'Create my account' }));
+
+    await waitFor(() => expect(mockApplyInitialVisibility).toHaveBeenCalledWith('public'));
+    expect(mockApplyInitialVisibility).not.toHaveBeenCalledWith('private');
+  });
+});

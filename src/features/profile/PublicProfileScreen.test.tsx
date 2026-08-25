@@ -775,6 +775,64 @@ describe('the relationship controls', () => {
     expect(view.queryByText('This profile is not available.')).toBeNull();
   });
 
+  /**
+   * **Blocking must not become a way to suppress the complaint.**
+   *
+   * The database states the rule and states it deliberately: `report()` checks that a
+   * subject exists and *not* that the caller can still see it (20260813002000 §4). The
+   * client half of it was lost when Report moved into the header menu — review 41's
+   * third Major. `subjectId` is built from `public_profiles` and `profile_identity`,
+   * and blocking empties both, so the menu was rendering `null` on exactly the profile
+   * where moderation matters most.
+   *
+   * The viewer's own block list is the one read that can still name them, which is why
+   * the blocked branch already reaches for it. The header now does too.
+   */
+  it('still offers Report on somebody the viewer has blocked', async () => {
+    tableRows.public_profiles = [];
+    mockRpcResults.my_blocks = [
+      { user_id: 'anna-id', username: 'anna', display_name: 'Anna', avatar_path: null },
+    ];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('You blocked @anna')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('More options for @anna'));
+
+    await waitFor(() => expect(view.getByLabelText('Report')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Report'));
+    await fireEvent.press(view.getByText('Harassment or bullying'));
+
+    // Reported by the id the block list gave, which is the only one still available.
+    await waitFor(() =>
+      expect(mockRpcCalls.filter((call) => call.name === 'report')).toHaveLength(1),
+    );
+    expect(mockRpcCalls.find((call) => call.name === 'report')?.args).toEqual({
+      p_subject_type: 'profile',
+      p_subject_id: 'anna-id',
+      p_reason: 'harassment',
+    });
+  });
+
+  it('offers Unblock rather than Block in that menu, since the block already exists', async () => {
+    tableRows.public_profiles = [];
+    mockRpcResults.my_blocks = [
+      { user_id: 'anna-id', username: 'anna', display_name: 'Anna', avatar_path: null },
+    ];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('You blocked @anna')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('More options for @anna'));
+
+    // `follow_state_with` is asked about `subjectId`, which is empty here — so the block
+    // is read from the viewer's own list instead. Getting this backwards would offer to
+    // block somebody who is already blocked, on the one screen where that is most
+    // obviously wrong.
+    await waitFor(() => expect(view.getByLabelText('Unblock')).toBeTruthy());
+    expect(view.queryByLabelText('Block')).toBeNull();
+  });
+
   it('still says nothing about an account the viewer has not blocked', async () => {
     // The other half: `my_blocks` returning nothing must leave the private/nonexistent
     // answer exactly as it was, or the new branch becomes a disclosure of its own.

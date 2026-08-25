@@ -143,52 +143,93 @@ export default function CreateProfileScreen() {
 
     setBusy(true);
     setError(null);
+    try {
+      await create();
+    } finally {
+      // **Cleared in a `finally`, after everything the submission does.**
+      //
+      // It used to be cleared the moment `create_profile` answered, which left the
+      // button live while the visibility write was still in flight — so a second tap
+      // could earn `already_exists`, invalidate the profile query, and let the router
+      // gate admit somebody into the app before the account they asked to be private
+      // was private. Review 41's first Major. The flag has to cover the whole act, not
+      // the first call in it.
+      setBusy(false);
+    }
+  };
+
+  /**
+   * The privacy choice, applied to whatever account this submission left behind.
+   *
+   * After `create_profile` rather than inside it: the RPC takes no visibility and giving
+   * it one is a migration. `set_profile_visibility` is the same function the Privacy
+   * screen calls, so this is the existing path rather than a second one.
+   *
+   * **Awaited before the gate is opened**, so that a private account is private before
+   * the app lets anyone in — a beat spent public is a beat during which somebody's first
+   * ranking is readable.
+   *
+   * **Not blocking.** A refusal leaves a real account with the default setting, and
+   * holding somebody on a signup form for an account they already have is exactly the
+   * dead end `already_exists` exists to prevent. They are told instead, and pointed at
+   * the screen that finishes the job.
+   *
+   * A no-op for Public, which is the column default — so the only account this can ever
+   * change is one whose owner asked for *more* privacy than they were about to get.
+   * That is what makes it safe to call on the two uncertain outcomes below as well as on
+   * the certain one.
+   */
+  const applyVisibility = async () => {
+    const applied = await applyInitialVisibility(visibility);
+    if (!applied.ok) {
+      Alert.alert(
+        'Your account is ready',
+        'We could not set your profile to private just now. You can turn it on in Settings › Privacy.',
+      );
+    }
+  };
+
+  /** The gate re-reads the profile and moves the user. Navigating here would race it. */
+  const openTheGate = () =>
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.myProfile(auth.status === 'onboarding' ? auth.userId : 'none'),
+    });
+
+  const create = async () => {
     const result = await createProfile({
       username: normalised,
       displayName: displayName.trim() || null,
-      dateOfBirth,
+      dateOfBirth: dateOfBirth as string,
     });
-    setBusy(false);
 
     switch (result.outcome) {
-      case 'created': {
+      case 'created':
         // `created` only. `already_exists` below is a replay of an account that was
         // already there, and counting it would report a second signup for one person.
         track({ name: 'signup_completed' });
         await clearPendingDisplayName();
-        /**
-         * The privacy choice, applied to the account that now exists.
-         *
-         * After `create_profile` rather than inside it: the RPC takes no visibility and
-         * giving it one is a migration. `set_profile_visibility` is the same function the
-         * Privacy screen calls, so this is the existing path rather than a second one.
-         *
-         * Awaited, so that a private account is private before the gate below lets the
-         * app in — a beat spent public is a beat during which somebody's first ranking is
-         * readable. Not blocking: a refusal here leaves a real account with the default
-         * setting, and holding somebody on a signup form for an account they already have
-         * is the dead end `already_exists` exists to prevent. They are told instead, and
-         * pointed at the screen that finishes the job.
-         */
-        const applied = await applyInitialVisibility(visibility);
-        if (!applied.ok) {
-          Alert.alert(
-            'Your account is ready',
-            'We could not set your profile to private just now. You can turn it on in Settings › Privacy.',
-          );
-        }
-        // The gate re-reads the profile and moves the user. Navigating from here as
-        // well would race it.
-        await queryClient.invalidateQueries({
-          queryKey: queryKeys.myProfile(auth.status === 'onboarding' ? auth.userId : 'none'),
-        });
+        await applyVisibility();
+        await openTheGate();
         return;
-      }
 
+      /**
+       * A profile that exists already — which, on a screen only reachable without one,
+       * is almost always this signup's own first attempt committing and losing its
+       * reply.
+       *
+       * **So the visibility still has to be applied here**, and review 41's first Major
+       * is the reason: the retry that lands on this branch is the same person making the
+       * same choice, and skipping it admits them to an account that is public because
+       * their first attempt is the one that won.
+       *
+       * The remaining case — a genuinely pre-existing account, created on another device
+       * between the gate's read and this call — is safe for the same reason the helper
+       * above is: Public writes nothing, so nothing can be made *more* visible than its
+       * owner left it.
+       */
       case 'already_exists':
-        await queryClient.invalidateQueries({
-          queryKey: queryKeys.myProfile(auth.status === 'onboarding' ? auth.userId : 'none'),
-        });
+        await applyVisibility();
+        await openTheGate();
         return;
 
       case 'under_13':
@@ -207,10 +248,17 @@ export default function CreateProfileScreen() {
         // what lets the gate move somebody who already has an account instead of
         // leaving them on a form that will only ever answer `already_exists`
         // (`lib/write-outcome.ts`). Independent review 21e's invariant.
+        //
+        // **And the visibility goes with it** — review 41's second Major. This branch
+        // is the one that admits a user on an *unproven* account, so it is the branch
+        // where an unapplied Private is most likely to go unnoticed: the person is
+        // shown an error, carried into the app by the gate anyway, and never told their
+        // choice was dropped. `set_profile_visibility` raises 42704 when there is no
+        // profile, which `applyInitialVisibility` reports as a failure rather than
+        // throwing, so calling it on a maybe-account costs one refused request.
         if (result.outcome === 'failed' && result.changed) {
-          await queryClient.invalidateQueries({
-            queryKey: queryKeys.myProfile(auth.status === 'onboarding' ? auth.userId : 'none'),
-          });
+          await applyVisibility();
+          await openTheGate();
         }
         setError(result.message);
     }
