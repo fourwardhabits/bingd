@@ -544,6 +544,67 @@ const results = [];
   await db.close();
 }
 
+// --- Mutant 8: _release_recommendations with its state guard dropped. A dismissal
+//     stops being final.
+//
+//     This is the mutant whose damage is *invisible in the schema*: every row still
+//     holds a legal state and the counts still look plausible. What has changed is that
+//     a recommendation the reader threw away is back on their list, because they later
+//     followed the person who sent it — which is the one thing Dismiss is for.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+  const sender = await fx.createUser();
+  const recipient = await fx.createUser();
+  await db.sql(
+    `insert into follows (follower_id, followee_id, state, approved_at)
+     values ($1, $2, 'approved', now())`,
+    [sender, recipient],
+  );
+  const dropped = await fx.createMovie('Mutant 8 dismissed');
+  const kept = await fx.createMovie('Mutant 8 kept');
+
+  const s = await db.session('sender');
+  await s.actAs(sender);
+  for (const film of [dropped, kept]) {
+    await s.q(`select recommend_title($1, $2, $3)`, [crypto.randomUUID(), recipient, film]);
+  }
+  await s.end();
+
+  const held = await db.rows(
+    `select id from title_recommendations where recipient_id = $1 and media_item_id = $2`,
+    [recipient, dropped],
+  );
+
+  const r = await db.session('recipient');
+  await r.actAs(recipient);
+  await r.q(`select dismiss_recommendation($1)`, [held[0].id]);
+
+  await db.sql(`
+    create or replace function _release_recommendations(p_sender uuid, p_recipient uuid)
+    returns integer language plpgsql security definer set search_path = public as $fn$
+    declare v_released integer;
+    begin
+      if p_sender is null or p_recipient is null or p_sender = p_recipient then return 0; end if;
+      if blocked_between(p_sender, p_recipient) then return 0; end if;
+      update title_recommendations set state = 'delivered'
+       where sender_id = p_sender and recipient_id = p_recipient;
+      get diagnostics v_released = row_count;
+      return v_released;
+    end; $fn$;`);
+
+  await r.q(`select follow($1, $2)`, [crypto.randomUUID(), sender]);
+  const { rows: list } = await r.q(`select media_item_id from recommendations_to_me(100)`);
+  await r.end();
+
+  results.push([
+    'release guard dropped -> a dismissed recommendation comes back on a later follow',
+    list.some((row) => row.media_item_id === dropped),
+  ]);
+
+  await db.close();
+}
+
 await stopCluster();
 let ok = true;
 for (const [name, passed] of results) {

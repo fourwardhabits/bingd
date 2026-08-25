@@ -511,10 +511,17 @@ describe('the guard is wired in, not merely present', () => {
     // suspended account would leave it unanswerable if the suspension is lifted.
     'my_notifications',
     // 20260817001300. security invoker, so it can only ever return rows
-    // title_recommendations_read already admits — which is the caller's own inbox.
-    // Suspension is about what an account may do to other people; it does not make
-    // somebody unable to read what was sent to them.
+    // title_recommendations_recipient already admits — which is the caller's own
+    // delivered inbox. Suspension is about what an account may do to other people; it
+    // does not make somebody unable to read what was sent to them.
     'recommendations_to_me',
+    // 20260826000400. The same read, one state along: the caller's own pending
+    // requests, filtered on recipient_id = auth.uid() which is not a parameter. Its
+    // three writers — add_recommendation, dismiss_recommendation and
+    // dismiss_all_recommendation_requests — all call the guard, and this being a read
+    // is what makes that the right split: a suspended account should still be able to
+    // *see* what is waiting for it without being able to act on it.
+    'recommendation_requests',
     // 20260817000800. A stable read of public notes on one title, filtered through
     // can_view_profile from the caller's own side. A suspended *author* is already
     // absent from it, which is the direction that matters.

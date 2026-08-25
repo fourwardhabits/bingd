@@ -51,17 +51,22 @@ jest.mock('@/lib/supabase', () => ({
         gt: () => chain,
         then: (resolve: (value: unknown) => unknown) => {
           if (table !== 'follows') return resolve({ data: [], error: null });
-          void filters;
           /**
-           * **One request, both directions**, which is what the read does now.
+           * **The direction filter is honoured, and that is the whole point of this
+           * stand-in** (20260826000400).
            *
-           * It was a select per direction, intersected. Independent review 21c killed
-           * that: two snapshots can produce a pair that never coexisted, so the picker
-           * could offer a mutual that the server would then refuse. The fixture answers
-           * the way the single request does — every edge the viewer is an end of.
+           * The read asks for `follower_id = viewer`: the people the viewer follows, and
+           * nobody else. A fixture that answered with every edge regardless would pass
+           * whether the query filtered or not — and the defect this tranche exists to fix
+           * was a picker assembled from the wrong direction, so the fixture has to be
+           * able to tell them apart.
+           *
+           * Incoming edges are therefore still offered here and are simply never asked
+           * for, which is what lets the test below assert that somebody who follows the
+           * viewer without being followed back does not appear.
            */
           const VIEWER = { id: 'user-1', username: 'me', display_name: 'Me', avatar_path: null, status: 'active' };
-          const data = [
+          const edges = [
             ...mockOutgoing.map((profile) => ({
               follower_id: 'user-1',
               followee_id: (profile as { id: string }).id,
@@ -75,6 +80,12 @@ jest.mock('@/lib/supabase', () => ({
               followee: VIEWER,
             })),
           ];
+
+          const data = edges.filter(
+            (row) =>
+              (filters.follower_id === undefined || row.follower_id === filters.follower_id) &&
+              (filters.followee_id === undefined || row.followee_id === filters.followee_id),
+          );
           return resolve({ data, error: null });
         },
       };
@@ -129,22 +140,27 @@ afterEach(() => {
 });
 
 describe('who the sheet offers', () => {
-  it('offers only mutual follows', async () => {
+  /**
+   * The direction, and the bug it replaced (20260826000400).
+   *
+   * Bo is followed by the viewer and does not follow back — under the old mutual rule
+   * Bo was silently missing from this list, which is the founder-reported defect. Cy
+   * follows the viewer and is not followed back, which grants nothing: that is the
+   * direction an unwanted sender controls.
+   */
+  it('offers everybody the viewer follows, and nobody who merely follows them', async () => {
     mockOutgoing = [person('user-2', 'ada', 'Ada'), person('user-3', 'bo', 'Bo')];
     mockIncoming = [person('user-2', 'ada', 'Ada'), person('user-4', 'cy', 'Cy')];
 
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
-    // Ada is in both directions. Bo is only followed *by* the viewer and Cy only
-    // follows them, so neither has agreed to be recommended to.
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
-    expect(view.queryByText('Bo')).toBeNull();
+    expect(view.getByText('Bo')).toBeTruthy();
     expect(view.queryByText('Cy')).toBeNull();
   });
 
   it('leaves out a suspended account that still holds its edges', async () => {
     mockOutgoing = [person('user-2', 'ada', 'Ada', 'suspended')];
-    mockIncoming = [person('user-2', 'ada', 'Ada', 'suspended')];
 
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
@@ -203,17 +219,59 @@ describe('sending', () => {
     // A refusal comes back in the body with a 200, not as an error — the server
     // returns it so that a refused attempt still costs a slot against the hourly
     // ceiling. Which means a 200 is not a success here, and the body has to be read.
-    mockRpcResults.recommend_title = { status: 'refused', reason: 'not_mutual' };
+    mockRpcResults.recommend_title = { status: 'refused', reason: 'not_following' };
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
     await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
 
     await waitFor(() =>
-      expect(view.getByText('You can only recommend to people who follow you back.')).toBeTruthy(),
+      expect(view.getByText('You can recommend titles to people you follow.')).toBeTruthy(),
     );
     expect(props.onSent).not.toHaveBeenCalled();
     expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The ceiling, said without telling the sender what the recipient did.
+   *
+   * The refusal names how many are waiting and stops there — "they dismissed four of
+   * yours" would be the behavioural oracle the whole state model is arranged to avoid
+   * (§22, and §2 of `20260826000400`).
+   */
+  it('reports a full pending queue neutrally', async () => {
+    mockRpcResults.recommend_title = { status: 'refused', reason: 'too_many_pending' };
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+
+    await waitFor(() =>
+      expect(
+        view.getByText('They already have several recommendations from you waiting.'),
+      ).toBeTruthy(),
+    );
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  /**
+   * §17: the sender is not told where it landed.
+   *
+   * A recommendation held as a request is a plain `ok` on this side, and the sheet must
+   * treat it exactly like a direct delivery — no "waiting for them to follow you", no
+   * second state to explain.
+   */
+  it('says nothing about whether a send was delivered or is waiting', async () => {
+    mockRpcResults.recommend_title = { status: 'ok', created: true, delivered: false };
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+
+    await waitFor(() => expect(props.onSent).toHaveBeenCalledWith('Ada'));
+    expect(props.onClose).toHaveBeenCalled();
+    expect(view.queryByText(/waiting/i)).toBeNull();
+    expect(view.queryByText(/follow you/i)).toBeNull();
   });
 
   it('names the ceiling rather than the SQLSTATE when the rate limit bites', async () => {

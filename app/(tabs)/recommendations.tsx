@@ -16,6 +16,9 @@ import {
 import { useLoggedCollection, useWatchlist } from '@/features/collection/use-collection';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { headlineFor } from '@/features/recommendations/rank';
+import { RecommendationRequestsSheet } from '@/features/recommendations/RecommendationRequestsSheet';
+import { RequestAlertRow } from '@/features/recommendations/RequestAlertRow';
+import { useRecommendationRequests } from '@/features/recommendations/use-recommendation-requests';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
 import { refreshRecommendations } from '@/features/recommendations/session-seed';
 import { useForYou, type ForYouItem, type Medium } from '@/features/recommendations/use-for-you';
@@ -83,10 +86,18 @@ export default function RecommendationsScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [filters, setFilters] = useState<CollectionFilters>(emptyFilters());
   const [filtering, setFiltering] = useState(false);
+  /** The Requests sheet. Nothing else on this screen knows it exists. */
+  const [reviewingRequests, setReviewingRequests] = useState(false);
 
   const slate = useForYou(profile.id, medium, filters);
   const logged = useLoggedCollection(profile.id);
   const sent = useSentToYou(profile.id);
+  /**
+   * The held half. Read here rather than inside the sheet, because the compact row
+   * above the filters has to know whether there is anything to say **before** anybody
+   * opens anything — and the count it draws must be the same object the sheet lists.
+   */
+  const requests = useRecommendationRequests(profile.id);
   const watchlist = useWatchlist(profile.id);
   const markOpened = useMarkRecommendationOpened(profile.id);
 
@@ -206,6 +217,9 @@ export default function RecommendationsScreen() {
   // rather than presenting a cap as a total. Independent review 21c.
   const atLeast = unopenedIsAtLeast(sentRows);
   const activeCount = activeFilterCount(filters);
+  // Items, not senders, and the server's own count rather than the length of a capped
+  // list — see `useRecommendationRequests`.
+  const requestCount = requests.data?.total ?? 0;
 
   return (
     <Screen>
@@ -225,6 +239,16 @@ export default function RecommendationsScreen() {
         labels={{ tv_seasons: 'TV shows' }}
       />
       <HeaderBoundary />
+
+      {/* Above the filters, and only when something is waiting.
+
+          It sits here rather than in the filter row because it is not a filter: the
+          chips narrow what is on screen, and this says that there is something *not*
+          on screen yet which needs a decision. Absent at zero, with no placeholder and
+          no empty state — a row that is always there stops being a signal. */}
+      {requestCount > 0 ? (
+        <RequestAlertRow count={requestCount} onPress={() => setReviewingRequests(true)} />
+      ) : null}
 
       {/* One row, wrapping. Sent to you leads because it is the only chip that changes
           what kind of thing is on screen; the rest narrow whatever is. Clear all appears
@@ -362,6 +386,19 @@ export default function RecommendationsScreen() {
             setFiltering(false);
           }}
           onClose={() => setFiltering(false)}
+        />
+      ) : null}
+
+      {/* The held recommendations, and the three decisions each one carries.
+
+          Mounted only while open, so the sheet's queries are not kept warm behind a
+          screen most visits never open — the compact row above already knows the count
+          from a query this screen owns. */}
+      {reviewingRequests ? (
+        <RecommendationRequestsSheet
+          viewerId={profile.id}
+          onClose={() => setReviewingRequests(false)}
+          onPressProfile={(username) => router.push(`/u/${username}`)}
         />
       ) : null}
     </Screen>

@@ -225,13 +225,13 @@ const ALLOWED = {
   //
   // `recommend_title` names a recipient, which is the reason to look hard at it — and
   // the reason it is safe is that it decides nothing from what the caller sends. The
-  // recipient must be a mutual follow, which is a fact about the caller's own edges,
-  // and every disqualifying case raises through `_assert_reachable` with one message.
+  // recipient must be somebody the caller approvedly follows, which is a fact about the
+  // caller's own edges, and every disqualifying case comes back as one `not_following`.
   //
   // `recommendations_to_me` and `mark_recommendation_opened` take no recipient at all:
   // both filter on `recipient_id = auth.uid()`, and the filter is not a parameter.
   // `recommendations_to_me` is additionally `security invoker`, so it can return only
-  // rows `title_recommendations_read` already admits.
+  // rows `title_recommendations_recipient` already admits.
   //
   // `create_invite_link` returns the caller's own reusable personal link (PRD §17) and
   // records that it was created. It exposes no count and no other account.
@@ -243,6 +243,32 @@ const ALLOWED = {
   'recommendations_to_me(integer)': ['authenticated'],
   'mark_recommendation_opened(uuid)': ['authenticated'],
   'create_invite_link(uuid,uuid)': ['authenticated'],
+
+  // Added 2026-08-26 with recommendation requests (20260826000400).
+  //
+  // All four are the recipient's own side of the feature and none of them takes an
+  // account. `recommendation_requests` filters on `recipient_id = auth.uid()` and
+  // `dismiss_all_recommendation_requests` writes on the same filter — neither is a
+  // parameter and neither can be made one. The two single-row writers take a
+  // recommendation id and check `recipient_id = auth.uid()` in the `where`, so a
+  // stolen id from somebody else's screen updates nothing and reports the same
+  // `false` as an id that was already decided: "that exists but is not yours" is a
+  // fact about another inbox.
+  //
+  // `recommendation_requests` is `security definer`, which is the one thing here worth
+  // arguing. It must be: a *private* sender who follows the caller without being
+  // followed back fails `can_view_profile`, so an invoker query would return a request
+  // with nobody attached to it and the screen that exists to decide about that person
+  // could not draw them. Same shape and same justification as `my_notifications`.
+  //
+  // `_may_recommend_to`, `_delivers_directly_to` and `_release_recommendations` are
+  // deliberately absent, for the reason `_is_mutual_follow` is. The third would be the
+  // worst of the three to expose: it takes *two* accounts and writes into one of their
+  // lists.
+  'recommendation_requests(integer)': ['authenticated'],
+  'add_recommendation(uuid)': ['authenticated'],
+  'dismiss_recommendation(uuid)': ['authenticated'],
+  'dismiss_all_recommendation_requests(uuid)': ['authenticated'],
 
   // Added 2026-08-17 with Bingd Reviews (20260817000800). Definer, and it reuses
   // `public_notes`' own visibility predicate rather than a second copy of it — getting

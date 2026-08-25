@@ -183,7 +183,7 @@ export default function suite() {
       await t1.commit();
 
       assert.equal(sent.status, 'refused');
-      assert.equal(sent.reason, 'not_mutual', 'a block reports the same way a stranger does');
+      assert.equal(sent.reason, 'not_following', 'a block reports the same way a stranger does');
       assert.equal(
         (await db.rows(`select 1 from title_recommendations where sender_id = $1 and recipient_id = $2`, [sender, recipient])).length,
         0,
