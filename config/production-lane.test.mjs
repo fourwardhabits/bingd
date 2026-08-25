@@ -17,6 +17,9 @@ const {
   assertProductionBackend,
 } = require('./production-lane.cjs');
 
+/** A present anon key, so a test about the URL is about the URL. */
+const KEY = 'sb_publishable_test';
+
 const throws = (fn) => {
   try {
     fn();
@@ -40,9 +43,24 @@ describe('assertProductionBackend', () => {
    */
   it('refuses a production build with no Supabase URL at all', () => {
     for (const missing of [undefined, '', null]) {
-      const error = throws(() => assertProductionBackend(missing));
+      const error = throws(() => assertProductionBackend(missing, KEY));
       assert.ok(error, `${JSON.stringify(missing)} produced a buildable production config`);
       assert.match(error.message, /must be built against a Supabase project/);
+    }
+  });
+
+  /**
+   * And the same bug one field along, which the first version of this rule had. Two variables,
+   * set in the same dashboard in the same sitting, forgotten the same way — and a URL with no
+   * key is a build that resolves, signs, submits, and throws `Invalid app configuration` from
+   * `src/lib/env.ts` on somebody's phone.
+   */
+  it('refuses a production build with no anon key', () => {
+    const url = 'https://abheeqyjzekiowkztfxv.supabase.co';
+    for (const missing of [undefined, '', '   ', null, 42]) {
+      const error = throws(() => assertProductionBackend(url, missing));
+      assert.ok(error, `${JSON.stringify(missing)} was accepted as an anon key`);
+      assert.match(error.message, /EXPO_PUBLIC_SUPABASE_ANON_KEY/);
     }
   });
 
@@ -55,7 +73,7 @@ describe('assertProductionBackend', () => {
       // the two files cannot drift on it.
       'https://abheeqyjzekiowkztfxv.supabase.co@evil.example',
     ]) {
-      assert.ok(throws(() => assertProductionBackend(bad)), `${bad} was accepted`);
+      assert.ok(throws(() => assertProductionBackend(bad, KEY)), `${bad} was accepted`);
     }
   });
 
@@ -65,7 +83,7 @@ describe('assertProductionBackend', () => {
    * reason once a production ref exists, which is what the second half asserts.
    */
   it('refuses the nonproduction project', () => {
-    const error = throws(() => assertProductionBackend('https://abheeqyjzekiowkztfxv.supabase.co'));
+    const error = throws(() => assertProductionBackend('https://abheeqyjzekiowkztfxv.supabase.co', KEY));
     assert.ok(error, 'a production build resolved against bingd-nonprod');
     assert.match(error.message, /bingd-nonprod/);
   });
@@ -74,7 +92,7 @@ describe('assertProductionBackend', () => {
     for (const ref of Object.keys(REF_ENVIRONMENTS)) {
       if (LANE_BACKENDS.production.includes(ref)) continue;
       assert.ok(
-        throws(() => assertProductionBackend(`https://${ref}.supabase.co`)),
+        throws(() => assertProductionBackend(`https://${ref}.supabase.co`, KEY)),
         `${ref} was accepted by the production lane`,
       );
     }
@@ -91,7 +109,7 @@ describe('assertProductionBackend', () => {
       t.skip('no production Supabase project yet — LANE_BACKENDS.production is empty');
       return;
     }
-    assert.equal(throws(() => assertProductionBackend(`https://${ref}.supabase.co`)), null);
+    assert.equal(throws(() => assertProductionBackend(`https://${ref}.supabase.co`, KEY)), null);
   });
 });
 

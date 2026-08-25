@@ -53,8 +53,8 @@
 -- WHAT DOES NOT CHANGE
 --
 -- The lease is still five minutes, the claim is still `for update skip locked`, delivery is
--- still at-least-once, and the sender still chooses nothing. `push-sender/index.ts` needs no
--- edit: it calls the same two functions with the same arguments and reads the same shapes.
+-- still at-least-once, and the sender still chooses nothing — it takes no recipient and no
+-- batch size, and `attempt` is a number it echoes back rather than one it picks.
 -- ---------------------------------------------------------------------------
 
 alter table push_outbox
@@ -135,6 +135,10 @@ begin
     jsonb_agg(
       jsonb_build_object(
         'notification_id', j.id,
+        -- The claim generation. `attempts` is incremented by the update above, so this is
+        -- the number that identifies **this** claim, and `settle_push_batch` refuses a
+        -- result that echoes any other. Costs one integer and no new column.
+        'attempt',         j.attempt,
         'type',            j.type,
         'actor_username',  j.actor_username,
         'actor_name',      j.actor_name,
@@ -151,6 +155,7 @@ begin
   into v_jobs
   from (
     select n.id,
+           o.attempts                              as attempt,
            n.type,
            n.created_at,
            p.username::text                        as actor_username,
@@ -166,6 +171,7 @@ begin
                 and d.revoked_at is null
            )                                       as tokens
       from notifications n
+      join push_outbox o on o.notification_id = n.id
       -- Left, because an actorless system notice must not be dropped by the join that
       -- exists to name a person. None of the eligible types has a null actor today.
       left join profiles p
@@ -224,10 +230,48 @@ declare
   v_settled integer := 0;
   v_retry   integer := 0;
   v_revoked integer := 0;
+  v_given   integer := 0;
 begin
   if p_results is null or jsonb_typeof(p_results) <> 'array' then
     raise exception 'results must be a json array' using errcode = '22023';
   end if;
+
+  select jsonb_array_length(p_results) into v_given;
+
+  -- ---------------------------------------------------------------------------
+  -- ONLY THE SENDER THAT STILL HOLDS **THIS** CLAIM MAY SETTLE IT
+  --
+  -- Both statements below matched on `notification_id` alone, and that is one identifier
+  -- short. A sender that stalls past its five-minute lease has already had the row taken
+  -- from it by the next drain — and its late reply then lands on **somebody else's
+  -- in-flight row**: `state` back to `pending`, `claimed_at` cleared, a failure charged to
+  -- a delivery that has not finished. A third drain claims it immediately and sends the
+  -- same notification alongside the sender that never lost it.
+  --
+  -- Two predicates, and the first is not sufficient on its own:
+  --
+  --   · **the lease is live** — `state = 'claimed'` and inside the five minutes. This alone
+  --     rejects a reply to a row that has since been settled or returned to `pending`, but
+  --     it cannot tell the stalled sender from the one that replaced it: both see a live
+  --     lease, because the *replacement's* lease is live.
+  --   · **the claim is this one** — `attempts` is incremented on every claim, so it is
+  --     already a monotonic generation counter and needs no new column. `claim_push_batch`
+  --     hands it back as `attempt`; a sender that echoes a number the row has moved past
+  --     matches nothing.
+  --
+  -- A late reply therefore does nothing at all, which is the correct outcome — the row is
+  -- not that sender's any more. The cost is a possible duplicate send when the late reply
+  -- was `delivered`, which is the at-least-once guarantee behaving exactly as documented,
+  -- and strictly better than deleting a row another sender is mid-send on.
+  --
+  -- **A result with no `attempt` is accepted**, matching on the lease alone. That is the
+  -- deploy window and nothing else: migrations land before functions (backend first, then
+  -- the function — the convention this repository already follows), so for a few minutes a
+  -- sender built before this change is talking to a database built after it. Refusing those
+  -- would mean every push in that window failing to settle and being retried to the ceiling,
+  -- which is duplicate notifications to real people. The concession is bounded by the lease
+  -- predicate above, which the old sender still satisfies or does not.
+  -- ---------------------------------------------------------------------------
 
   -- Delivered, or failed for the third time. Either way there is nothing further to do
   -- with the row, and the notification itself is untouched and still in the inbox.
@@ -235,6 +279,9 @@ begin
     delete from push_outbox o
      using jsonb_array_elements(p_results) as r
      where o.notification_id = (r.value ->> 'notification_id')::uuid
+       and o.state = 'claimed'
+       and o.claimed_at > now() - interval '5 minutes'
+       and (r.value ->> 'attempt' is null or o.attempts = (r.value ->> 'attempt')::integer)
        and (coalesce((r.value ->> 'delivered')::boolean, false) or o.failures + 1 >= 3)
     returning 1
   )
@@ -250,6 +297,9 @@ begin
            last_error = left(r.value ->> 'error', 500)
       from jsonb_array_elements(p_results) as r
      where o.notification_id = (r.value ->> 'notification_id')::uuid
+       and o.state = 'claimed'
+       and o.claimed_at > now() - interval '5 minutes'
+       and (r.value ->> 'attempt' is null or o.attempts = (r.value ->> 'attempt')::integer)
        and not coalesce((r.value ->> 'delivered')::boolean, false)
     returning 1
   )
@@ -271,13 +321,17 @@ begin
     'status',  'ok',
     'settled', v_settled,
     'retry',   v_retry,
-    'revoked', v_revoked
+    'revoked', v_revoked,
+    -- Results that matched no live lease: this sender took longer than five minutes and the
+    -- row has moved on. Reported rather than swallowed, because a non-zero `stale` is the
+    -- one number that says the sender is slower than its own lease.
+    'stale',   greatest(v_given - v_settled - v_retry, 0)
   );
 end;
 $$;
 
 comment on function settle_push_batch(jsonb, text[]) is
-  'Records the outcome of one send. Delivered rows and rows that have now failed three times are deleted; the rest go back to pending with the error and one more failure. Counts FAILURES rather than claims, so a sender that died mid-flight does not spend a life it never used. Tokens the provider reported as unregistered are revoked, not deleted, so a reinstall can bring one back. service_role only.';
+  'Records the outcome of one send, for the rows this sender still holds the lease on -- a reply that arrives after the lease expired lands on nothing, because the row belongs to whoever claimed it next. Delivered rows and rows that have now failed three times are deleted; the rest go back to pending with the error and one more failure. Counts FAILURES rather than claims, so a sender that died mid-flight does not spend a life it never used. Tokens the provider reported as unregistered are revoked, not deleted, so a reinstall can bring one back. service_role only.';
 
 -- Re-issued because `create or replace function` does not carry privileges over from a
 -- dropped signature and it costs nothing to be sure. Both signatures are unchanged.

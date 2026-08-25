@@ -110,6 +110,7 @@ if (lane === 'production') {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('./config/production-lane.cjs').assertProductionBackend(
     process.env.EXPO_PUBLIC_SUPABASE_URL,
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
   );
 }
 
@@ -272,9 +273,31 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Uploads source maps at build time, using SENTRY_AUTH_TOKEN from the EAS
     // secret. Without it a crash report shows minified output instead of a
     // filename and a line number, which is most of the value gone.
+    /**
+     * **The project is a variable now, and hard-coding it would have sent production's
+     * source maps to the friend beta's Sentry project.**
+     *
+     * `docs/release/production-environment.md` asks for a separate production Sentry project
+     * and a `SENTRY_AUTH_TOKEN` scoped to it. This entry named `bingd-react-native`
+     * unconditionally, so a production build would have done one of two things, and both are
+     * bad in the way that is invisible until somebody needs a stack trace: uploaded its maps
+     * into the Beta project, or failed the upload because the production token has no access
+     * to a project that is not its own. Either way the events arriving through the production
+     * DSN would be unsymbolicated — minified output, which is most of a crash reporter's
+     * value gone.
+     *
+     * The defaults are the current values, so **development, preview and beta resolve to
+     * exactly what they resolved to before** — which matters here specifically, because
+     * `plugins` is part of the resolved config and therefore part of the fingerprint. Only a
+     * lane whose EAS environment sets these sees anything different, and only `production`
+     * will.
+     */
     [
       '@sentry/react-native/expo',
-      { organization: 'fourward-habits', project: 'bingd-react-native' },
+      {
+        organization: process.env.SENTRY_ORG ?? 'fourward-habits',
+        project: process.env.SENTRY_PROJECT ?? 'bingd-react-native',
+      },
     ],
     'expo-apple-authentication',
     'expo-secure-store',

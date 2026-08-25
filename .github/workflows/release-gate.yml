@@ -208,6 +208,18 @@ jobs:
           fi
           echo "production + no backend: refused, as it must be"
 
+          # And the same bug one field along. A URL with no anon key builds, signs, submits,
+          # and throws "Invalid app configuration" from src/lib/env.ts on a phone — the exact
+          # failure the URL check exists to prevent. The two variables live in the same
+          # dashboard and are forgotten together.
+          if EAS_BUILD=true BINGD_LANE=production APP_VARIANT=production \
+             EXPO_PUBLIC_SUPABASE_URL=https://someotherproject.supabase.co \
+             npx expo config --type public --json > /dev/null 2>&1; then
+            echo "The production lane resolved with no anon key. The guard is inert."
+            exit 1
+          fi
+          echo "production + no anon key: refused, as it must be"
+
           # The control. Without it the three refusals above pass just as well against an
           # app.config.ts that throws for everything.
           if ! EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \

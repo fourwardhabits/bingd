@@ -215,6 +215,10 @@ function resolveConfig(lane, { variant, env = {} } = {}) {
       // Cleared unless a case sets it, so a developer machine that happens to export one
       // cannot quietly change what this suite is asserting.
       [GOOGLE_SERVICES_ENV]: '',
+      // Present for the same reason, in the other direction. `config/production-lane.cjs`
+      // refuses a production build with no anon key, and this suite is about push — a case
+      // failing over a missing Supabase variable would be asserting the wrong thing.
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: 'ci',
       ...env,
     },
   });

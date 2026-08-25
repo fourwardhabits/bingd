@@ -29,6 +29,16 @@
 /** One job as `claim_push_batch` returns it. */
 export type PushJob = {
   notification_id: string;
+  /**
+   * The claim generation, echoed back to `settle_push_batch` and used for nothing else.
+   *
+   * `push_outbox.attempts` is incremented on every claim, so it identifies **this** claim.
+   * A sender that stalls past its five-minute lease has already had the row taken by the
+   * next drain; without this its late reply would land on the replacement's in-flight row —
+   * back to `pending`, a failure charged to a delivery still running, and a third drain
+   * sending the same notification alongside the sender that never lost it.
+   */
+  attempt: number;
   type: string;
   actor_username: string | null;
   actor_name: string | null;

@@ -14,7 +14,13 @@ import { contentFor, type PushJob } from './copy.ts';
 import type { ExpoMessage } from './expo.ts';
 
 /** One message, and the notification and token it belongs to, so tickets can be mapped back. */
-export type Addressed = { notificationId: string; token: string; message: ExpoMessage };
+export type Addressed = {
+  notificationId: string;
+  /** Carried through so `summarise` can hand it back. See `PushJob.attempt`. */
+  attempt: number;
+  token: string;
+  message: ExpoMessage;
+};
 
 export function messagesFor(jobs: PushJob[]): Addressed[] {
   const out: Addressed[] = [];
@@ -28,6 +34,7 @@ export function messagesFor(jobs: PushJob[]): Addressed[] {
     for (const device of job.tokens ?? []) {
       out.push({
         notificationId: job.notification_id,
+        attempt: job.attempt,
         token: device.token,
         message: {
           to: device.token,
@@ -86,7 +93,7 @@ export function summarise(
 ) {
   const byNotification = new Map<
     string,
-    { accepted: boolean; retryable: boolean; error: string | null }
+    { attempt: number; accepted: boolean; retryable: boolean; error: string | null }
   >();
   const deadTokens = new Set<string>();
 
@@ -96,12 +103,14 @@ export function summarise(
 
     const accepted = !outcome.retryable && !outcome.dead;
     const current = byNotification.get(entry.notificationId) ?? {
+      attempt: entry.attempt,
       accepted: false,
       retryable: false,
       error: null,
     };
 
     byNotification.set(entry.notificationId, {
+      attempt: current.attempt,
       accepted: current.accepted || accepted,
       retryable: current.retryable || outcome.retryable,
       error: current.error ?? (outcome.retryable ? outcome.message : null),
@@ -110,6 +119,7 @@ export function summarise(
 
   const results = [...byNotification].map(([notification_id, outcome]) => ({
     notification_id,
+    attempt: outcome.attempt,
     delivered: outcome.accepted || !outcome.retryable,
     // Kept even on a delivered-because-partial row: it is why one device did not get it,
     // and `settle_push_batch` ignores the field for a row it is deleting.

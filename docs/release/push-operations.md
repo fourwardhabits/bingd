@@ -179,8 +179,29 @@ Six is three deliveries' worth of failure plus three senders dying. The reaper o
 nothing is holding — `pending`, or `claimed` with an expired lease — so a sender is never
 reaped out from under itself.
 
-Delivery is still **at least once**, bounded, and `push-sender/index.ts` needed no edit: same
-two functions, same arguments, same shapes.
+### A late reply lands on nothing
+
+`settle_push_batch` matched on `notification_id` alone, which is one identifier short. A sender
+that stalls past its five-minute lease has already had the row taken by the next drain, and its
+late reply would then land on the **replacement's** in-flight row: back to `pending`,
+`claimed_at` cleared, a failure charged to a delivery still running — and a third drain claims
+it immediately and sends the same notification alongside the sender that never lost it.
+
+Two predicates now, and the first is not enough on its own. The lease must be live *and* the
+result must echo the claim generation — `attempts`, which is incremented on every claim and so
+already is one, handed back by `claim_push_batch` as `attempt`. The lease alone cannot tell the
+stalled sender from its replacement, because the replacement's lease is live too.
+
+A result with **no** `attempt` is still accepted, on the lease alone. That is the deploy window
+and nothing else: migrations land before functions, so for a few minutes a sender built before
+this change talks to a database built after it, and refusing those results would mean every push
+in that window retried to the ceiling — duplicate notifications to real people.
+
+`settle_push_batch` returns `stale`: results that matched no live claim. Non-zero is the one
+number that says a sender is slower than its own lease.
+
+Delivery is still **at least once**, bounded, and `push-sender` gained one field it echoes back
+and chooses nothing about.
 
 ## 8. Accepted, not fixed
 

@@ -51,6 +51,8 @@ Currently: **zero variables.** `eas env:list production` confirms it.
 | `EXPO_PUBLIC_POSTHOG_KEY` | **production** PostHog project key | analytics silently off |
 | `EXPO_PUBLIC_POSTHOG_HOST` | inherited from `eas.json` `base` | — |
 | `SENTRY_AUTH_TOKEN` | secret; source-map upload | production stacks stay minified |
+| `SENTRY_PROJECT` | the **production** Sentry project slug | maps upload into the Beta project, or the upload fails and production events arrive unsymbolicated |
+| `SENTRY_ORG` | only if the organisation differs from `fourward-habits` | — |
 | `GOOGLE_SERVICES_JSON` | **file** secret | Android build **fails** — `config/push.cjs` demands it for the production lane |
 
 ```
@@ -59,6 +61,7 @@ eas env:create --environment production --name EXPO_PUBLIC_SUPABASE_ANON_KEY --v
 eas env:create --environment production --name EXPO_PUBLIC_SENTRY_DSN --value <production dsn>
 eas env:create --environment production --name EXPO_PUBLIC_POSTHOG_KEY --value <production key>
 eas env:create --environment production --name SENTRY_AUTH_TOKEN --value <token> --type sensitive
+eas env:create --environment production --name SENTRY_PROJECT --value <production sentry project slug>
 eas env:create --environment production --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json
 ```
 
@@ -145,8 +148,14 @@ crash reports `beta` and a public crash reports `production` even if the same DS
 but alert rules, quotas and release health are per project, and a public launch sharing a
 project with a friend beta cannot be alerted on sensibly.
 
-Source maps upload at build time via the Sentry Expo plugin using `SENTRY_AUTH_TOKEN` from the
-production EAS environment. `SENTRY_DISABLE_AUTO_UPLOAD` is set for development, preview and
+Source maps upload at build time via the Sentry Expo plugin. The plugin's `organization` and
+`project` used to be hard-coded to `fourward-habits` / `bingd-react-native` — the friend beta's
+project — so a production build would either have uploaded its maps there or failed the upload
+because a production-scoped token has no access to it. Either way production events would have
+arrived unsymbolicated, which is most of a crash reporter's value gone and is invisible until
+somebody needs a stack trace. They read `SENTRY_ORG` and `SENTRY_PROJECT` now, defaulting to
+the current values so no other lane's resolved config moves. `SENTRY_AUTH_TOKEN` comes from the
+production EAS environment alongside them. `SENTRY_DISABLE_AUTO_UPLOAD` is set for development, preview and
 beta and is **deliberately absent from the production profile** in `eas.json` — production is
 the lane whose stacks have to be readable.
 

@@ -695,6 +695,75 @@ describe('settle_push_batch', () => {
     );
   });
 
+  /**
+   * A sender that stalls past its lease has already lost the row, and its late reply must
+   * land on nothing.
+   *
+   * Both statements in `settle_push_batch` matched on `notification_id` alone, which is one
+   * identifier short: the stalled sender's failure would reset the row the *next* sender is
+   * actively working on — `pending`, `claimed_at` cleared, a failure charged to a delivery
+   * still in flight — and a third drain would claim it and send the same notification
+   * alongside the sender that never lost it.
+   */
+  it('ignores a settle from a sender whose lease has expired', async () => {
+    await register(reader, TOKEN(51));
+    const id = await notify(reader, 'follow');
+
+    // Sender A claims, then stalls past its lease.
+    const aJobs = await claim();
+    const aAttempt = aJobs[0].attempt;
+    assert.equal(aAttempt, 1, 'the claim did not hand back its generation');
+    await t.sql(
+      `update push_outbox set claimed_at = now() - interval '6 minutes' where notification_id = $1`,
+      [id],
+    );
+
+    // Sender B takes it. A live lease again — which is why the lease predicate alone cannot
+    // tell the two apart, and why the generation is the thing that does.
+    const bJobs = await claim();
+    assert.equal(bJobs.length, 1, 'the expired lease was not reclaimed');
+    assert.equal(bJobs[0].attempt, 2, 'the generation did not move with the reclaim');
+    const held = await outboxFor(id);
+    assert.equal(held.state, 'claimed');
+
+    // A finally answers, having failed, echoing the generation it was given.
+    const late = await settle([
+      { notification_id: id, attempt: aAttempt, delivered: false, error: 'A was slow' },
+    ]);
+    assert.equal(late.settled, 0);
+    assert.equal(late.retry, 0);
+    assert.equal(late.stale, 1, 'a late reply was not reported as stale');
+
+    const after = await outboxFor(id);
+    assert.equal(after.state, 'claimed', 'a late reply released a row B is still sending');
+    assert.equal(after.failures, 0, 'a late reply charged a failure to B’s delivery');
+    assert.equal(after.attempts, 2, 'a late reply moved the generation');
+
+    // And B's own settle still works, which is what stops this being a test of a
+    // settle_push_batch that has simply stopped settling.
+    const onTime = await settle([
+      { notification_id: id, attempt: bJobs[0].attempt, delivered: true },
+    ]);
+    assert.equal(onTime.settled, 1);
+    assert.equal(await outboxFor(id), null);
+  });
+
+  /**
+   * The deploy window, asserted so that it is a decision rather than an accident. Migrations
+   * land before functions, so for a few minutes a sender built before `20260826000200` is
+   * talking to a database built after it. Refusing its results would mean every push in that
+   * window retried to the ceiling, which is duplicate notifications to real people.
+   */
+  it('still settles a result with no generation at all, while the lease is live', async () => {
+    await register(reader, TOKEN(52));
+    const id = await notify(reader, 'follow');
+
+    await claim();
+    const settled = await settle([{ notification_id: id, delivered: true }]);
+    assert.equal(settled.settled, 1);
+    assert.equal(await outboxFor(id), null);
+  });
+
   it('does not reap a row a sender is still holding', async () => {
     await register(reader, TOKEN(49));
     const id = await notify(reader, 'follow');

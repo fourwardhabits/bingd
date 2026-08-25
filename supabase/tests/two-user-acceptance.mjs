@@ -334,18 +334,45 @@ async function attempt(what, fn) {
   }
 }
 
-/** Deletes any account still holding one of this run's emails. */
+/**
+ * Deletes any account still holding one of this run's emails.
+ *
+ * **It paginates, and it does not trust `?filter=`.**
+ *
+ * This asked GoTrue for `?filter=<email>` and read the first page. Two things were assumed
+ * there and neither is guaranteed: that the endpoint honours `filter` at all, and that a
+ * match would be on the page it returned. Against nonprod, with four accounts, both held.
+ * Against **production**, where this is the last thing standing between an interrupted run
+ * and a disposable account left in a real database, a silent miss reports success — and this
+ * path only runs at all when the id sweep could not, because a creation response was
+ * unparseable.
+ *
+ * So `filter` is still sent as a hint, and the answer is checked rather than believed: pages
+ * are walked to the end, and every row is matched on the full address. A page that comes back
+ * short is the last one.
+ */
 async function sweepByEmail(email) {
-  const res = await fetch(`${url}/auth/v1/admin/users?filter=${encodeURIComponent(email)}`, {
-    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
-  });
-  if (!res.ok) throw new Error(`could not look up ${email}: ${res.status}`);
-  const { users = [] } = await res.json();
+  const PER_PAGE = 200;
+  const seen = [];
 
-  for (const user of users) {
+  for (let page = 1; page <= 50; page += 1) {
+    const res = await fetch(
+      `${url}/auth/v1/admin/users?page=${page}&per_page=${PER_PAGE}&filter=${encodeURIComponent(email)}`,
+      { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } },
+    );
+    if (!res.ok) throw new Error(`could not look up ${email}: ${res.status}`);
+    const { users = [] } = await res.json();
+
     // Matched exactly rather than on the partial filter, so this can never delete an
     // account that merely shares a prefix with a test address.
-    if (user.email !== email) continue;
+    for (const user of users) {
+      if (user.email === email) seen.push(user);
+    }
+
+    if (users.length < PER_PAGE) break;
+  }
+
+  for (const user of seen) {
     const del = await fetch(`${url}/auth/v1/admin/users/${user.id}`, {
       method: 'DELETE',
       headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },

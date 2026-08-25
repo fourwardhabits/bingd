@@ -90,8 +90,31 @@ function environmentForRef(ref) {
  * — so the failure mode being fixed is a broken binary rather than a leaked database. It is
  * still a binary that should never have been produced.
  */
-function assertProductionBackend(url) {
+function assertProductionBackend(url, anonKey) {
   const ref = supabaseProjectRef(url);
+
+  /**
+   * **The anon key too, and leaving it out was the same bug one field along.**
+   *
+   * A URL with no key is a build that resolves, signs, submits and then throws
+   * `Invalid app configuration` from `src/lib/env.ts` on somebody's phone — which is exactly
+   * the failure the URL check exists to prevent. The two variables are set in the same
+   * dashboard, in the same sitting, and are forgotten the same way.
+   *
+   * Not validated beyond being present. Whether a key is *the right project's* key is not
+   * answerable here — it is an opaque string, and `remote-smoke.mjs` asking the database
+   * what it calls itself is what actually checks that.
+   */
+  if (typeof anonKey !== 'string' || anonKey.trim() === '') {
+    throw new Error(
+      'The production lane must be built with EXPO_PUBLIC_SUPABASE_ANON_KEY set, and it is ' +
+        'not.\n\n' +
+        '  eas env:create --environment production --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value <key>\n\n' +
+        '  Without it the build succeeds and the installed app throws "Invalid app\n' +
+        '  configuration" at startup. docs/release/production-environment.md lists every\n' +
+        '  variable a production build needs.',
+    );
+  }
 
   if (ref === null) {
     throw new Error(
