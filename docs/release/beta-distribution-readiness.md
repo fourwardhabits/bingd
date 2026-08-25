@@ -119,7 +119,7 @@ not; external testers and the public link do. Budget a day or two for the first 
 | Feedback email | `hello@bingd.app` — **FOUNDER: confirm the mailbox** |
 | Marketing URL | leave blank |
 | Privacy policy URL | `https://bingd.app/privacy` |
-| Sign-in required? | **Yes.** Provide a demo account, or App Review cannot get past the sign-in screen. **FOUNDER: create one on nonprod and put the credentials in App Review notes.** |
+| Sign-in required? | **Yes**, and Bingd signs people in with an emailed code, which a reviewer cannot receive. Provide the password-enabled demo account and **say where the password screen is**: *More sign-in options → Sign in with password*. **FOUNDER: create it on nonprod and put the credentials in App Review notes** — full runbook in [`store-review-access.md`](./store-review-access.md). |
 | Review notes | Mention that the app is on a test backend, that notifications are in-app only with no push, and that the TMDB catalogue is third-party metadata. |
 
 ### The submission, when it is time — not now
@@ -245,7 +245,9 @@ the founder's own builds, which is exactly where they get tested.
    [iOS](./ios-preview-acceptance.md). Nothing below starts until this passes on **both**
    platforms.
 3. ~~TMDB logo added (`store-privacy-inventory.md` §5).~~ Done 2026-08-21.
-4. `hello@bingd.app` confirmed. Demo account created for App Review.
+4. `hello@bingd.app` confirmed. Demo account created for App Review —
+   [`store-review-access.md`](./store-review-access.md), including the seeded activity,
+   without which review sees an empty app.
 5. Release gate green (`safe-update-runbook.md` §6).
 6. `beta` builds made — both platforms, first iOS one interactive.
 7. App Store Connect and Play Console records created; privacy forms completed.

@@ -2,56 +2,44 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import {
-  resendSignUpCode,
-  sendEmailCode,
-  verifyEmailCode,
-  verifySignUpCode,
-  type VerifyMode,
-} from '@/features/auth';
+import { sendEmailCode, verifyEmailCode } from '@/features/auth';
 import { Button, Field, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
- * The code screen, which both email flows end at.
+ * The code screen, and the only one. Six digits, typed into Bingd, never a browser.
  *
  * ---------------------------------------------------------------------------
- * ONE SCREEN, TWO MODES, AND THE MODE IS LOAD-BEARING
+ * ONE MODE, WHICH IS THE POINT
  *
- * A code from **Confirm signup** and a code from **Magic Link** look identical — six
- * digits in an email — and are verified against different columns. `verifyOtp` takes a
- * `type` for exactly that reason, and getting it wrong does not produce an error that
- * says so: GoTrue answers `otp_expired`, which this screen would report as "that code did
- * not work". The person would be looking at a correct code being told it is wrong.
+ * This screen briefly carried a `mode` parameter — `signup` or `passwordless` — because
+ * the password-first amendment had two email flows verified with two different
+ * `EmailOtpType`s. Both are gone. `verifyOtp({ type: 'email' })` is documented by
+ * `@supabase/auth-js` as the type for a code "sent to the user's email during sign-up or
+ * sign-in", and GoTrue resolves it against whichever column holds the token. `signup` and
+ * `magiclink` are deprecated types and this app sends neither.
  *
- * So the mode travels in the route rather than being inferred. It also decides what
- * *resend* means — `resend({ type: 'signup' })` for a new account, another
- * `signInWithOtp` for a returning one — which are different endpoints with different
- * rate limits, and neither works for the other flow.
- *
- * Defaulting to `passwordless` is deliberate: it is the mode reachable without a
- * password, so a link or a restored route that has lost its parameter degrades to the
- * flow that cannot leave somebody holding an unusable account.
+ * So this screen does not know, and does not need to know, whether the person in front of
+ * it just created an account or is coming back to one. Neither does the copy — which is
+ * also what stops the screen from disclosing it. What happens after a successful verify is
+ * the router's job either way: a session with no profile goes to `create-profile`, a
+ * session with one goes to the feed, and that is the same rule Apple and Google land on.
  */
 export default function VerifyScreen() {
   const router = useRouter();
-  const { email, mode } = useLocalSearchParams<{ email?: string; mode?: string }>();
+  const { email } = useLocalSearchParams<{ email?: string }>();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [resent, setResent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const address = typeof email === 'string' ? email : '';
-  const flow: VerifyMode = mode === 'signup' ? 'signup' : 'passwordless';
   const complete = /^\d{6}$/.test(code.trim());
 
   const submit = async () => {
     setBusy(true);
     setError(null);
-    const result =
-      flow === 'signup'
-        ? await verifySignUpCode(address, code)
-        : await verifyEmailCode(address, code);
+    const result = await verifyEmailCode(address, code);
     setBusy(false);
     if (!result.ok) {
       setError(
@@ -63,16 +51,15 @@ export default function VerifyScreen() {
       return;
     }
     // Routing is the gate's job — this session may need onboarding, and only the
-    // profile check knows that. A verified sign-up lands on `create-profile` because
-    // `nextRoute` sees a session with no profile, which is the same path every other
-    // new account takes.
+    // profile check knows that. A newly verified address lands on `create-profile`
+    // because `nextRoute` sees a session with no profile, which is the same path every
+    // other new account takes.
   };
 
   const resend = async () => {
     setBusy(true);
     setError(null);
-    const result =
-      flow === 'signup' ? await resendSignUpCode(address) : await sendEmailCode(address);
+    const result = await sendEmailCode(address);
     setBusy(false);
     setResent(result.ok);
     if (!result.ok) setError(result.message ?? 'Could not send another code.');
@@ -93,21 +80,22 @@ export default function VerifyScreen() {
   return (
     <Screen airy includeBottomInset>
       <View style={styles.intro}>
-        <Text variant="title1">
-          {flow === 'signup' ? 'Verify your email' : 'Check your email'}
-        </Text>
+        <Text variant="title1">Check your email</Text>
         {/* The address is named, because the commonest reason a code never arrives is
             that it went somewhere else — and somebody who can see the typo can fix it
             with the control at the bottom of this screen rather than by force-quitting.
 
-            "code" and never "link". Bingd's email methods are `verifyOtp` from end to
-            end: nothing in this product completes a sign-in in a browser, and copy that
-            hedged towards one would be teaching people to go looking for it. */}
+            "code" and never "link". Bingd's email method is `verifyOtp` from end to end:
+            nothing in this product completes a sign-in in a browser, and copy that
+            hedged towards one would be teaching people to go looking for it.
+
+            One sentence for a new account and a returning one alike. Saying "finish
+            creating your account" to one and "sign in" to the other would tell whoever
+            typed the address which of the two they were — from a flow whose whole
+            anti-enumeration property is that it does not. */}
         <Text variant="body" tone="secondary">
-          {flow === 'signup'
-            ? `We sent a six-digit code to ${address}. Enter it to finish creating your account.`
-            : `We sent a six-digit code to ${address}.`}{' '}
-          It expires in 10 minutes.
+          We sent a six-digit code to {address}. Enter it to continue. It expires in 10
+          minutes.
         </Text>
       </View>
 
@@ -130,7 +118,7 @@ export default function VerifyScreen() {
           hint={resent ? 'Sent again. It can take a moment to arrive.' : undefined}
         />
         <Button
-          label={busy ? 'Checking…' : flow === 'signup' ? 'Verify email' : 'Sign in'}
+          label={busy ? 'Checking…' : 'Continue'}
           onPress={submit}
           disabled={!complete || busy}
           disabledReason={complete ? 'Checking your code.' : 'Enter all six digits.'}
@@ -154,26 +142,6 @@ export default function VerifyScreen() {
           disabled={busy}
           disabledReason="One moment."
         />
-        {/**
-         * The escape hatch that keeps sign-up from having to say whether an address is
-         * taken.
-         *
-         * Supabase obfuscates that deliberately, so `signUpWithEmailPassword` reports
-         * "we sent a code" for an address that already has a confirmed account and sends
-         * nothing. Without a visible way to the sign-in screen that person waits for a
-         * code that is not coming; with one they leave under their own steam and the app
-         * has still confirmed nothing about the address. Only on the sign-up flow — on
-         * the passwordless one they are already signing in.
-         */}
-        {flow === 'signup' ? (
-          <Button
-            label="Already have an account? Sign in"
-            kind="tertiary"
-            onPress={() => router.replace('/(auth)/sign-in')}
-            disabled={busy}
-            disabledReason="One moment."
-          />
-        ) : null}
       </View>
     </Screen>
   );

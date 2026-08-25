@@ -3,11 +3,11 @@
  *
  * This is the check that did not exist, and its absence is the whole of why a
  * friend-beta tester spent a week unable to sign in while every test in this repository
- * was green. `methods.password.test.ts` asserts that `sendEmailCode` calls
- * `signInWithOtp` and that `verifyEmailCode` calls `verifyOtp({ type: 'email' })` — and
- * both of those assertions passed, and were correct, and always had been. **The client
- * was never wrong.** What nobody had written down was what the *project* should send
- * back, so there was nothing for the deployed configuration to have drifted from.
+ * was green. `methods.email.test.ts` asserts that `sendEmailCode` calls `signInWithOtp`
+ * and that `verifyEmailCode` calls `verifyOtp({ type: 'email' })` — and both of those
+ * assertions passed, and were correct, and always had been. **The client was never
+ * wrong.** What nobody had written down was what the *project* should send back, so there
+ * was nothing for the deployed configuration to have drifted from.
  *
  * So this asserts the shape of `supabase/auth-templates/`, which is now that written-down
  * thing. It is deliberately a *static* test:
@@ -44,13 +44,14 @@ describe('the canonical auth email templates', () => {
   /**
    * Two, and the count is the assertion.
    *
-   * Since the password-first amendment the two are reached by two *different calls*
-   * rather than by one call meeting two kinds of address: `signUp` triggers **Confirm
-   * signup**, and `signInWithOtp` triggers **Magic Link**. That makes fixing only one of
-   * them even easier than before, and the consequence is unchanged — an app where one
-   * population can get in and the other cannot, invisible to whoever is testing.
+   * **One call reaches both.** `sendEmailCode` passes `shouldCreateUser: true`, and
+   * Supabase picks by the address: no account yet gets **Confirm signup**, an existing
+   * account gets **Magic Link**. Fixing only one produces an app where one population can
+   * get in and the other cannot, invisible to whoever is testing — and since a new
+   * address is the one routed through Confirm signup, the invisible half is every new
+   * user.
    */
-  it('covers both templates the two email flows can reach', () => {
+  it('covers both templates the one email flow can reach', () => {
     const keys = manifest.templates.map((t) => t.bodyKey).sort();
     assert.deepEqual(keys, [
       'mailer_templates_confirmation_content',
@@ -59,19 +60,22 @@ describe('the canonical auth email templates', () => {
   });
 
   /**
-   * Each template names the `EmailOtpType` its code is verified with, and the pair has to
-   * match what `methods.ts` actually passes.
+   * Both codes are verified with the same `EmailOtpType`, and that sameness is the
+   * assertion.
    *
-   * A signup token and a magic-link token look identical in an inbox and are stored in
-   * different columns, so verifying one as the other answers `otp_expired` — reported by
-   * every screen as "that code did not work". A correct code called wrong, with nothing
-   * anywhere saying why. This is the one place both halves are visible together.
+   * `@supabase/auth-js` documents `'email'` as the type for a code "sent to the user's
+   * email during sign-up or sign-in" and marks `signup` and `magiclink` **deprecated**.
+   * GoTrue resolves `'email'` against whichever column holds the token, which is what
+   * lets one client call and one screen serve a new address and a returning one. A
+   * manifest that gave the two templates different types would be describing a client
+   * that has to know which kind of address it is holding — and no such client exists here
+   * any more.
    */
-  it('verifies each template’s code with the type the client actually sends', () => {
+  it('verifies both templates with the single type the client sends', () => {
     assert.deepEqual(
       Object.fromEntries(manifest.templates.map((t) => [t.bodyKey, t.verifiedAs])),
       {
-        mailer_templates_confirmation_content: 'signup',
+        mailer_templates_confirmation_content: 'email',
         mailer_templates_magic_link_content: 'email',
       },
     );
@@ -79,14 +83,12 @@ describe('the canonical auth email templates', () => {
     const methods = readFileSync(join(here, '..', 'src', 'features', 'auth', 'methods.ts'), 'utf8');
     assert.match(
       methods,
-      /signup:\s*'signup'/,
-      'methods.ts must verify a Confirm-signup token as type signup',
+      /EMAIL_OTP_TYPE = 'email'/,
+      "methods.ts must verify every emailed code as type 'email'",
     );
-    assert.match(
-      methods,
-      /passwordless:\s*'email'/,
-      'methods.ts must verify a passwordless token as type email',
-    );
+    // The deprecated pair, refused by name. Reintroducing either means reintroducing the
+    // question "is this address new?", which the sign-in screen no longer asks.
+    assert.doesNotMatch(methods, /type:\s*'signup'/, "'signup' is the deprecated type");
   });
 
   for (const entry of manifest.templates) {
@@ -128,11 +130,9 @@ describe('the canonical auth email templates', () => {
       it('is branded and says what to do with the code', () => {
         const body = bodyOf(entry);
         assert.match(body, /bingd\./, 'the brand is "bingd." — lowercase, with the period');
-        // "verification code" for a new account, "sign-in code" for a returning one.
-        // They are different acts and the two emails stopped being identical when
-        // password became the default; a template that says the wrong one is a person
-        // told they are signing in when they are finishing a signup.
-        assert.match(body, /(verification|sign-in) code/i);
+        // "sign-in code" in both, because a new address and a returning one get the same
+        // sentence — see the indistinguishability assertion below.
+        assert.match(body, /sign-in code/i);
         // The copy promises ten minutes; `settings.mailer_otp_exp` has to agree, and the
         // pair is asserted below rather than left to whoever edits one of them.
         assert.match(body, /expires in 10 minutes/i);
@@ -145,6 +145,31 @@ describe('the canonical auth email templates', () => {
       });
     });
   }
+
+  /**
+   * The two emails must be indistinguishable, and that is a product requirement rather
+   * than tidiness.
+   *
+   * Which template arrived is the one fact this flow is careful never to disclose: the
+   * code screen says the same thing to a new address and a returning one, and
+   * `signInWithOtp` answers both identically. An email that opened "welcome to bingd."
+   * would give it away in the one place the app cannot see, to the one person who cannot
+   * be told it does not matter.
+   */
+  it('says the same thing to a new address and a returning one', () => {
+    const rendered = manifest.templates.map((t) => ({
+      subject: t.subject,
+      // Comments differ by design — each names the population its template reaches — and
+      // Supabase strips nothing, but a comment is not what anybody reads. Line endings
+      // are normalised because this repository checks out CRLF on Windows and LF in CI,
+      // and a guard that failed on one of those would be turned off rather than fixed.
+      body: bodyOf(t).replace(/<!--[\s\S]*?-->/g, '').replace(/\r\n/g, '\n').trim(),
+    }));
+    for (const other of rendered.slice(1)) {
+      assert.equal(other.subject, rendered[0].subject, 'both subjects must read identically');
+      assert.equal(other.body, rendered[0].body, 'both rendered bodies must read identically');
+    }
+  });
 
   /**
    * The two halves of "six digits" have to agree, and they live in three files.
@@ -175,9 +200,11 @@ describe('the canonical auth email templates', () => {
  * repository rather than from a dashboard.
  */
 describe('the client never asks for a link', () => {
+  const methodsSource = () =>
+    readFileSync(join(here, '..', 'src', 'features', 'auth', 'methods.ts'), 'utf8');
+
   it('sends no emailRedirectTo with the code request', () => {
-    const methods = readFileSync(join(here, '..', 'src', 'features', 'auth', 'methods.ts'), 'utf8');
-    const call = /signInWithOtp\(\{[\s\S]*?\n\s*\}\);/.exec(methods);
+    const call = /signInWithOtp\(\{[\s\S]*?\n\s*\}\);/.exec(methodsSource());
     assert.ok(call, 'sendEmailCode must still call signInWithOtp');
     assert.doesNotMatch(
       call[0],
@@ -186,19 +213,8 @@ describe('the client never asks for a link', () => {
     );
   });
 
-  it('sends no emailRedirectTo with the sign-up request either', () => {
-    const methods = readFileSync(join(here, '..', 'src', 'features', 'auth', 'methods.ts'), 'utf8');
-    const call = /supabase\.auth\.signUp\(\{[\s\S]*?\}\);/.exec(methods);
-    assert.ok(call, 'signUpWithEmailPassword must still call signUp');
-    assert.doesNotMatch(
-      call[0],
-      /emailRedirectTo/,
-      'emailRedirectTo puts a link back in the Confirm signup email',
-    );
-  });
-
   it('verifies as an OTP rather than as a link token', () => {
-    const methods = readFileSync(join(here, '..', 'src', 'features', 'auth', 'methods.ts'), 'utf8');
+    const methods = methodsSource();
     assert.doesNotMatch(
       methods,
       /type:\s*'magiclink'/,
@@ -210,17 +226,39 @@ describe('the client never asks for a link', () => {
   });
 
   /**
-   * Passwordless sign-in must not be a second registration route.
+   * The email flow must be able to create an account, and this is where that is pinned.
    *
-   * It was `shouldCreateUser: true` while the code flow was the door. As a secondary
-   * sign-in that would mint a permanent account for every mistyped address, from a
-   * screen whose sibling is the one that sets a password — and nothing else in the app
-   * would ever say it had happened.
+   * It ran briefly with `shouldCreateUser: false`, when a password was the way in. With
+   * the password path gone that setting would be a locked door: a new person types their
+   * address, is refused, and has nothing else on the screen to try. It is also what
+   * restores anti-enumeration — `false` answers a known address and an unknown one
+   * differently, and `true` answers both with a send.
    */
-  it('does not let a passwordless sign-in create an account', () => {
-    const methods = readFileSync(join(here, '..', 'src', 'features', 'auth', 'methods.ts'), 'utf8');
-    const call = /signInWithOtp\(\{[\s\S]*?\n\s*\}\);/.exec(methods);
+  it('lets the one email flow create the account it is the only door to', () => {
+    const call = /signInWithOtp\(\{[\s\S]*?\n\s*\}\);/.exec(methodsSource());
     assert.ok(call);
-    assert.match(call[0], /shouldCreateUser:\s*false/);
+    assert.match(call[0], /shouldCreateUser:\s*true/);
+  });
+
+  /**
+   * Ordinary account creation must not involve a password, and the durable form of that
+   * rule is that this module never calls `signUp` at all.
+   *
+   * `signInWithPassword` stays — it is how a store reviewer gets in
+   * (`docs/release/store-review-access.md`) — but the call that *mints* an account from
+   * an email and a password is gone, and a screen cannot offer what the module cannot do.
+   */
+  it('offers no way to create an account with a password', () => {
+    const methods = methodsSource();
+    assert.doesNotMatch(
+      methods,
+      /supabase\.auth\.signUp\(/,
+      'ordinary users do not create passwords in v1; the code flow is the only door',
+    );
+    assert.match(
+      methods,
+      /supabase\.auth\.signInWithPassword\(/,
+      'password sign-in is retained for store review',
+    );
   });
 });

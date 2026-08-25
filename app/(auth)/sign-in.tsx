@@ -1,12 +1,11 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View, type TextInput } from 'react-native';
+import { useEffect, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import {
   isAppleSignInAvailable,
   sendEmailCode,
   signInWithApple,
-  signInWithEmailPassword,
   signInWithGoogle,
 } from '@/features/auth';
 import { BrandLockup, Button, Divider, Field, Screen, Text } from '@/ui/components';
@@ -17,48 +16,37 @@ import { theme } from '@/ui/tokens';
  * person who signs in a different way next time is the same account.
  *
  * ---------------------------------------------------------------------------
- * PASSWORD IS THE DEFAULT, SINCE THE FOUNDER'S 2026-08-26 DECISION
+ * THREE WAYS IN, AND A PASSWORD IS NOT ONE OF THEM
  *
- * This screen used to lead with an email field that sent a one-time code, and password
- * was a mode you had to find. The order is now reversed, and the reason is not taste:
- * **a password is the only email method that sends no mail.** Every returning sign-in
- * through it costs zero transactional email, which is what makes the product usable
- * while the project is still on Supabase's built-in sender and its rate limit.
+ * The founder's final decision of 2026-08-26. Email, Apple, Google — and email means a
+ * six-digit code, which is the only credential Bingd owns rather than borrows. Ordinary
+ * users neither create nor manage a password in v1, so there is nothing here to forget,
+ * reset, reuse, or leak.
  *
- * Passwordless survives as one clearly secondary action, because two populations still
- * need it: everybody who created an account before this change and has no password, and
- * anybody who has forgotten theirs. It is the same screen and the same code flow it
- * always was — see `verify.tsx` — with `shouldCreateUser: false`, so it can no longer
- * quietly become a second registration route.
+ * A brief amendment made email-and-password the default and gave this screen two fields
+ * and two submits. It is reverted. What it left behind, deliberately, is
+ * `password-sign-in` — one quiet line at the bottom of this screen, for the account a
+ * store reviewer is handed. See `docs/release/store-review-access.md`.
  *
  * ---------------------------------------------------------------------------
- * NO MODE SWITCH
+ * ONE FIELD, AND NO "ARE YOU NEW?"
  *
- * The old screen toggled one form between "code" and "password" with a tertiary button,
- * which meant the fields on screen depended on a state nothing on screen named. Both
- * fields are simply present now: the form is what it looks like, autofill can see a
- * complete credential pair, and "Sign in without a password" navigates rather than
- * mutating what is in front of you.
+ * There is no sign-up screen and no sign-up/sign-in choice, because `sendEmailCode`
+ * passes `shouldCreateUser: true` and GoTrue decides: an address with an account is sent
+ * a sign-in code, an address without one is created and sent a confirmation code, and
+ * both are six digits typed into the same next screen. Somebody who cannot remember
+ * whether they ever signed up does not have to.
+ *
+ * That is also what keeps the screen from answering the question. Both cases return the
+ * same success, so nothing here can be used to find out whether an address has a Bingd
+ * account.
  */
 export default function SignInScreen() {
   const router = useRouter();
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState<'password' | 'code' | 'apple' | 'google' | null>(null);
-  /**
-   * The message, and **which field it belongs under**.
-   *
-   * One string bound to the password field was wrong the moment this screen gained a
-   * second submit: 'we could not send a code to that address' is about the email, and
-   * printing it under Password sends somebody to correct the one thing that was not the
-   * problem. The field is part of the error because the error is only useful next to
-   * what it is about.
-   */
-  const [error, setError] = useState<{ field: 'email' | 'password'; message: string } | null>(
-    null,
-  );
+  const [busy, setBusy] = useState<'email' | 'apple' | 'google' | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [appleAvailable, setAppleAvailable] = useState(false);
-  const passwordField = useRef<TextInput>(null);
 
   // Asked rather than assumed from the platform: the entitlement can be missing
   // from a build, and a button that always fails is worse than no button.
@@ -68,52 +56,21 @@ export default function SignInScreen() {
 
   const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
-  const submitPassword = async () => {
-    setBusy('password');
-    setError(null);
-    const result = await signInWithEmailPassword(email, password);
-    setBusy(null);
-
-    if (result.ok) return; // useAuthRouting moves them, same as OAuth.
-
-    /**
-     * The account exists, the password was right, and the email was never verified.
-     *
-     * Somebody who created an account and closed Bingd before typing the code. Reporting
-     * this as "that email and password do not match" would tell them something false
-     * about a password they just typed correctly, and would keep telling them for ever —
-     * the founder's §7. They go back to the code screen instead, which can resend.
-     */
-    if (result.unverified) {
-      router.push({
-        pathname: '/(auth)/verify',
-        params: { email: email.trim(), mode: 'signup' },
-      });
-      return;
-    }
-
-    setError({ field: 'password', message: result.message ?? 'That did not work. Try again.' });
-  };
-
   /**
-   * The secondary method, and the one an account with no password needs.
-   *
-   * It sends before navigating, so a refusal — an unknown address, a rate limit — is
-   * shown here beside the field somebody would fix, rather than on a code screen for a
-   * code that was never sent.
+   * Sends before navigating, so a refusal — a rate limit, signups closed — is shown
+   * beside the field somebody would fix, rather than on a code screen for a code that was
+   * never sent. It is not a disclosure: neither of those answers depends on whether the
+   * address has an account.
    */
-  const submitCode = async () => {
-    setBusy('code');
+  const submitEmail = async () => {
+    setBusy('email');
     setError(null);
     const result = await sendEmailCode(email);
     setBusy(null);
     if (result.ok) {
-      router.push({
-        pathname: '/(auth)/verify',
-        params: { email: email.trim(), mode: 'passwordless' },
-      });
+      router.push({ pathname: '/(auth)/verify', params: { email: email.trim() } });
     } else {
-      setError({ field: 'email', message: result.message ?? 'That did not work. Try again.' });
+      setError(result.message ?? 'That did not work. Try again.');
     }
   };
 
@@ -127,9 +84,7 @@ export default function SignInScreen() {
     setBusy(null);
     // A dismissed sheet is not a failure and must not leave a message on screen.
     if (!result.ok && !result.cancelled) {
-      // A provider failure belongs to neither field; the password field is where this
-      // screen's messages live and is directly above the provider buttons.
-      setError({ field: 'password', message: result.message ?? 'That did not work. Try again.' });
+      setError(result.message ?? 'That did not work. Try again.');
     }
     // No navigation on success: the router moves the user once the session and the
     // profile check agree on where they belong (useAuthRouting).
@@ -157,51 +112,20 @@ export default function SignInScreen() {
           keyboardType="email-address"
           inputMode="email"
           textContentType="emailAddress"
-          returnKeyType="next"
-          editable={busy === null}
-          onSubmitEditing={() => passwordField.current?.focus()}
-          error={error?.field === 'email' ? error.message : undefined}
-        />
-        <Field
-          ref={passwordField}
-          label="Password"
-          value={password}
-          onChangeText={setPassword}
-          autoCapitalize="none"
-          // `current-password`, not `new-password`: this is the field a manager should
-          // fill from what it already holds, and the create-account screen is the one
-          // that should be offered a generated one.
-          autoComplete="current-password"
-          autoCorrect={false}
-          secureTextEntry
-          textContentType="password"
           returnKeyType="go"
           editable={busy === null}
-          onSubmitEditing={looksLikeEmail && password ? submitPassword : undefined}
-          error={error?.field === 'password' ? error.message : undefined}
+          onSubmitEditing={looksLikeEmail ? submitEmail : undefined}
+          error={error ?? undefined}
+          // Says what happens next, and says it before the tap rather than after: no
+          // password is the reassurance, and "code" is the word the next screen uses.
+          hint={error ? undefined : 'We will send a six-digit code. No password to remember.'}
         />
-
         <Button
-          label={busy === 'password' ? 'Signing in…' : 'Sign in'}
-          onPress={submitPassword}
-          disabled={!looksLikeEmail || !password || busy !== null}
-          disabledReason={
-            busy !== null ? 'Signing in, one moment.' : 'Enter your email and password first.'
-          }
-        />
-
-        {/* Secondary, and it is also the answer to "forgot password": it signs somebody
-            in without one. A reset that mailed a link would put the browser back in a
-            flow this whole amendment exists to take it out of, and this needs no third
-            email template to configure. Setting a *new* password afterwards is not built
-            — recorded in the PRD rather than half-done here. */}
-        <Button
-          label={busy === 'code' ? 'Sending…' : 'Sign in without a password'}
-          kind="tertiary"
-          onPress={submitCode}
+          label={busy === 'email' ? 'Sending…' : 'Continue with email'}
+          onPress={submitEmail}
           disabled={!looksLikeEmail || busy !== null}
           disabledReason={
-            busy !== null ? 'One moment.' : 'Enter your email address first.'
+            looksLikeEmail ? 'Signing in, one moment.' : 'Enter your email address first.'
           }
         />
       </View>
@@ -226,14 +150,27 @@ export default function SignInScreen() {
         />
       </View>
 
-      <View style={styles.footer}>
-        <Text variant="footnote" tone="secondary">
-          New to bingd.?
+      {/**
+       * More sign-in options, which is one option, and it is not for you.
+       *
+       * A password signs in exactly one kind of account: one somebody deliberately gave a
+       * password to, in the Supabase dashboard, so that App Review and Play review can
+       * get past this screen without a mailbox. No ordinary Bingd account has one and
+       * nothing in the app will ever offer to set one, so this is deliberately quiet —
+       * `tertiary`, `sm`, and the secondary tone — rather than a fourth peer of the three
+       * above. Making it look equivalent would invite people to hunt for a password they
+       * do not have, and the failure would be silent and total.
+       */}
+      <View style={styles.more}>
+        <Text variant="footnote" tone="tertiary">
+          More sign-in options
         </Text>
         <Button
-          label="Create account"
+          label="Sign in with password"
           kind="tertiary"
-          onPress={() => router.push('/(auth)/create-account')}
+          size="sm"
+          tone="secondary"
+          onPress={() => router.push('/(auth)/password-sign-in')}
           disabled={busy !== null}
           disabledReason="One moment."
         />
@@ -246,5 +183,5 @@ const styles = StyleSheet.create({
   intro: { gap: theme.space[3], alignItems: 'flex-start' },
   form: { gap: theme.space[4] },
   providers: { gap: theme.space[3] },
-  footer: { alignItems: 'center', gap: theme.space[1] },
+  more: { alignItems: 'center', gap: theme.space[1] },
 });

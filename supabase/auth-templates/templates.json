@@ -7,19 +7,21 @@
     "mailer_otp_exp": 600
   },
 
+  "//flow": "ONE client call reaches BOTH of these. sendEmailCode calls signInWithOtp with shouldCreateUser: true, and GoTrue picks the template by the address: no account yet -> Confirm signup, account already -> Magic Link. Both are exercised in ordinary use, both must be right, and both codes are verified with the same EmailOtpType ('email') -- which is why verifiedAs is identical below and is not a per-template choice any more.",
+
   "templates": [
     {
       "name": "Confirm signup",
-      "reaches": "an address with no account yet -- everybody who creates one with a password",
-      "verifiedAs": "signup",
+      "reaches": "an address with no account yet -- everybody signing in to Bingd for the first time",
+      "verifiedAs": "email",
       "subjectKey": "mailer_subjects_confirmation",
-      "subject": "Verify your bingd. email",
+      "subject": "Your bingd. sign-in code",
       "bodyKey": "mailer_templates_confirmation_content",
       "bodyFile": "confirm-signup.html"
     },
     {
       "name": "Magic Link",
-      "reaches": "an address that already has an account -- 'Sign in without a password'",
+      "reaches": "an address that already has an account -- everybody coming back",
       "verifiedAs": "email",
       "subjectKey": "mailer_subjects_magic_link",
       "subject": "Your bingd. sign-in code",

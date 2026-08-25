@@ -1844,32 +1844,35 @@ A user-initiated deletion path that removes personal data, invalidates tokens, r
 
 ### Authentication — Required
 
-**Email and password**, **Sign in with Apple**, and Google. Every account resolves to one stable internal user UUID that is independent of the sign-in method.
+**Email one-time code**, **Sign in with Apple**, and Google. Every account resolves to one stable internal user UUID that is independent of the sign-in method.
 
 > **Sign in with Apple is required on iOS, not optional.** Apple's guidelines require it wherever a third-party social login is offered, and Google sign-in is in scope. v0.5 listed it as "recommended"; that is corrected.
 
 #### The final email contract — founder decision, 2026-08-26
 
-Earlier versions of this document made a one-time code the primary email method. That is reversed, and the reason is delivery rather than taste: **a password is the only email method that sends no mail.** A returning user signing in with one generates zero transactional email, which is what makes the product usable while the project is on Supabase's built-in sender and its rate limit.
+An amendment earlier the same day made email-and-password the primary method, on the reasoning that a password is the only email method that sends no mail. It is reverted. Ordinary users do not create or manage passwords in v1, and the sign-in screen is three peers and nothing else.
 
 | | |
 | --- | --- |
-| **Default email method** | Email and password. `signUp` to create, `signInWithPassword` to return. |
-| **Secondary sign-in** | "Sign in without a password" — a numeric code, `signInWithOtp`. |
-| **Social** | Apple and Google, unchanged, on both the sign-in and create-account screens. |
-| **New-account verification** | **In app, with a numeric code.** `signUp` → Confirm signup email → the code screen inside Bingd → `verifyOtp({ type: 'signup' })`. Never a browser. |
-| **Email confirmation** | Stays **on**. `mailer_autoconfirm` is `false` and must remain so: an address is verified before an account is finished. |
-| **Passwordless does not create accounts** | `shouldCreateUser: false`. Account creation has exactly one door, and it is the one that sets a password. |
-| **Forgotten password** | Answered by the passwordless code, which signs the person in without one. *Setting a new password is not built* — see below. |
+| **Primary** | *Continue with email* · *Continue with Apple* · *Continue with Google* |
+| **Email method** | One field, then a six-digit code typed into Bingd. `signInWithOtp` with `shouldCreateUser: true`, verified with `verifyOtp({ type: 'email' })`. |
+| **Account creation** | **The same flow.** No sign-up screen, and nobody is asked to declare whether they are new before typing an address. A verified address with no profile lands on profile creation, exactly as Apple and Google do. |
+| **Passwords, ordinary users** | **None.** Not created, not set, not changed, not reset, and never asked for. |
+| **Passwords, retained** | `signInWithPassword`, behind *More sign-in options → Sign in with password*, for the store-review account. It cannot create an account. |
+| **Email confirmation** | Stays **on**. `mailer_autoconfirm` is `false` and must remain so: possession of the code is the verification. |
+| **Never a browser** | Both email templates carry `{{ .Token }}` and no link of any kind. A confirmation URL completes the sign-in in Safari and produces a session the app never sees — the friend-beta bug of 2026-08-25. |
 
-**Two populations depend on the secondary method and must not be locked out:** every account created before this decision has no password at all, and anybody who has forgotten theirs. Both are served by the same code flow, and neither is ever asked for a password they never chose.
+**One flow for both populations.** GoTrue chooses the email by the address — **Confirm signup** for one it has never seen, **Magic Link** for one it has — and both arrive as six digits for the same screen. The app never learns which was sent, which is also the anti-enumeration property: the same success, the same copy, and two templates whose rendered bodies are asserted identical.
 
-**No account linking is implied.** An address that signed up with Google keeps signing in with Google; nothing here merges identities, and nothing asks somebody to.
+**Nobody is locked out by this.** Every account that exists today is passwordless and *Continue with email* is exactly its path; Google accounts keep using Google and Apple accounts keep using Apple. No user is ever required to invent a password.
 
-**Deferred, deliberately: setting or changing a password.** There is no reset flow and no password field in Settings. A reset that mailed a link would put the browser back into a flow this decision exists to take it out of, and the fully in-app version — a `recovery` code, then `updateUser({ password })` — needs a third email template configured on the project and a screen to host it. Recorded here rather than half-built. The consequence to accept knowingly: somebody who forgets their password gets in with a code every time, and never gets the chance to set a new one.
+**No account linking is implied.** Nothing here merges identities, and nothing asks somebody to.
 
-**Custom SMTP is a launch prerequisite, and password-first does not remove it.** It reduces the volume — most sessions send nothing — but every one of first-account verification, passwordless sign-in, a forgotten password, and any future email change still needs mail to arrive. `docs/release/production-bootstrap.md` carries it as a gate.
+**No password reset is required, because no ordinary user has a password.** There is no forgot-password screen and no password field in Settings, and their absence is the design rather than a deferral. The review account's password is set in the Supabase dashboard by whoever provisions it.
 
+**A dedicated store-review account is a release requirement.** App Review and Play review cannot receive a one-time code, so they are given an account with a fixed password, a completed profile, and enough seeded activity to demonstrate the product. No credential for it lives in this repository. See `docs/release/store-review-access.md`.
+
+**Custom SMTP is a launch prerequisite.** Every sign-in that is not Apple or Google sends mail, so it is a gate rather than a polish step; `docs/release/production-bootstrap.md` carries it as one.
 ### Core entities
 
 `users` · `profiles` (including `status`) · `username_history` · `follows` (including request state) · `blocks` · `reports` · `moderation_actions` · `titles` · `seasons` · `title_cache` · `user_titles` (watched, bucket, state, dates, notes) · `rankings` (per user, per category, ordinal) · `comparisons` · `watch_tags` · `lists` · `list_items` (with `source: imported | in_app`) · `feed_events` · `reactions` · `notifications` · `notification_preferences` · `device_tokens` · `recommendations` · `recommendation_impressions` · `recommendation_feedback` · `match_scores` · `share_tokens` · `invite_tokens` · `invite_attributions` · `import_jobs` · `import_rows` · `capabilities` · `capability_grants` · `outbox_operations` · `analytics_events`

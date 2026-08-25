@@ -20,32 +20,35 @@ the deployed ones were wrong. That is the gap these files close.
 
 ## The two templates, and why there are two
 
-**Since the founder's 2026-08-26 password-first amendment, each template belongs to a
-different call.** It used to be one call meeting two kinds of address; it is now two
-deliberate flows:
+**One client call reaches both.** `sendEmailCode` calls `signInWithOtp` with
+`shouldCreateUser: true`, and Supabase picks the template by the *address*, not by the
+call:
 
-| Flow | Client call | Template | Management API key | Verified as |
-| --- | --- | --- | --- | --- |
-| Create an account | `signUp({ email, password })` | **Confirm signup** | `mailer_templates_confirmation_content` | `'signup'` |
-| Sign in without a password | `signInWithOtp` | **Magic Link** | `mailer_templates_magic_link_content` | `'email'` |
+| The address | Template | Management API key | Verified as |
+| --- | --- | --- | --- |
+| has no account yet | **Confirm signup** | `mailer_templates_confirmation_content` | `'email'` |
+| already has one | **Magic Link** | `mailer_templates_magic_link_content` | `'email'` |
 
-`mailer_autoconfirm` is `false` on the project and stays that way: a real address is
-verified before an account is finished, and the founder's §3 rules out solving the
-template problem by turning that off.
+That is the whole of Bingd's email auth since the founder's final 2026-08-26 decision:
+ordinary users have no password, nobody declares whether they are new, and one six-digit
+code screen serves both rows. `mailer_autoconfirm` is `false` on the project and stays
+that way — a real address is verified before an account is usable.
 
 **Fixing only one produces the worst possible bug.** Get Magic Link right and Confirm
 signup wrong and sign-in works for everybody who already has an account and fails for
 everybody new — invisible to whoever is testing it, total for whoever is arriving. That
 is the bug the tester hit: she was new.
 
-Both files carry `{{ .Token }}` and neither carries a link. They no longer say the *same*
-thing, and that is deliberate — one finishes creating an account and the other signs
-somebody in, which are different sentences to read at seven in the morning.
+Both files carry `{{ .Token }}`, neither carries a link, and both say the same sentence.
+The sameness is deliberate: the client cannot tell which template was sent, the code
+screen therefore cannot say, and two emails that read differently would leak the one thing
+the flow is careful not to disclose.
 
-**The `verifiedAs` column is in `templates.json` and is checked.** A signup token and a
-magic-link token look identical in an inbox and live in different columns, so verifying
-one as the other answers `otp_expired` — which every screen reports as "that code did not
-work", while the person is looking at the correct code.
+**The `verifiedAs` column is in `templates.json` and is checked.** It reads `'email'` for
+both, because `@supabase/auth-js` documents `'email'` as the type for a code "sent to the
+user's email during sign-up or sign-in" and marks `signup` and `magiclink` **deprecated**.
+A client that picked between two types would have to know which kind of address it was
+holding before it could verify — the question this flow exists in order not to ask.
 
 ## `{{ .Token }}` and `{{ .ConfirmationURL }}`
 
@@ -93,20 +96,21 @@ The built-in sender's rate limit is also low enough that a handful of people sig
 within a few minutes will hit it — which is the shape of a movie night, and the exact
 population this app is for.
 
-### Password-first reduces the bill; it does not remove the requirement
 
-Worth stating because it is the obvious wrong conclusion to draw from the amendment.
-Making password the default means **a returning user generates no authentication email
-at all** — which is most sessions, and it is why the change helps.
+### There is no password path to reduce the bill
 
-Email is still required for every one of these, and each of them is somebody's first or
-worst moment with the product:
+Worth stating because a short-lived amendment made email-and-password the default email
+method on the reasoning that a password sends no mail. That is reverted. The only account
+in Bingd with a password is the one provisioned for App Store and Play review
+(`../../docs/release/store-review-access.md`), and it is one account signing in a handful
+of times a year.
 
-- verifying a brand-new account;
-- signing in without a password, which is the only way in for every account created
-  before the amendment;
-- a forgotten password, which today routes through that same code;
-- any future email change or transactional auth message.
+So every one of these needs mail to arrive, and each is somebody's first or worst moment
+with the product:
 
-`docs/release/production-bootstrap.md` carries it as a launch prerequisite rather than a
+- a new person's first sign-in, which is also how their account is created;
+- every returning sign-in that is not Apple or Google;
+- *Send a new code*, which is what somebody taps when the first one did not arrive.
+
+`docs/release/production-bootstrap.md` carries SMTP as a launch prerequisite rather than a
 nice-to-have.

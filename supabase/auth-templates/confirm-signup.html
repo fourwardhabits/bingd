@@ -1,18 +1,19 @@
 <!--
-  Confirm signup. The template Supabase sends to an address with no account yet.
+  Confirm signup. The template Supabase sends to an address that has no account yet.
 
-  Since the founder's 2026-08-26 password-first amendment this is the **account
-  verification** email rather than a sign-in one: it arrives because somebody chose an
-  email and a password on the Create account screen, and the code finishes creating the
-  account rather than logging anybody in. The wording follows, which is why it is no
-  longer identical to magic-link.html — that one is still a sign-in code.
+  Under the founder's final 2026-08-26 decision Bingd has ONE email flow: `sendEmailCode`
+  calls `signInWithOtp` with `shouldCreateUser: true`, and GoTrue chooses between this
+  template and magic-link.html by the address alone. A first-time user therefore receives
+  this one — so this is the first thing anybody new ever sees from Bingd, and it is a
+  sign-in code rather than a confirmation errand. The two bodies are deliberately the
+  same sentence: the app cannot tell which of them was sent and neither should the reader
+  have to care.
 
-  What has not changed is the mechanic. There is deliberately no link of any kind in this
-  email: `verifySignUpCode` calls `verifyOtp({ type: 'signup' })` and the session is
-  established inside Bingd. A confirmation URL here would complete the sign-in in a
-  browser and produce a session the app never sees, which is exactly what a friend-beta
-  tester reported. The shape check forbids one by name, so this comment cannot spell it.
-  See ./README.md.
+  There is deliberately no link of any kind in this email. `verifyEmailCode` calls
+  `verifyOtp({ type: 'email' })` and the session is established inside Bingd; a
+  confirmation URL here would complete the sign-in in a browser and produce a session the
+  app never sees, which is exactly what a friend-beta tester reported. The shape check
+  forbids one by name, so this comment cannot spell it. See ./README.md.
 -->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf8f6;padding:32px 0;">
   <tr>
@@ -23,7 +24,7 @@
         </tr>
         <tr>
           <td style="font-size:15px;line-height:22px;color:#4a4a4a;padding-bottom:20px;">
-            Your verification code is:
+            Your sign-in code is:
           </td>
         </tr>
         <tr>
@@ -33,9 +34,9 @@
         </tr>
         <tr>
           <td style="font-size:14px;line-height:20px;color:#767676;">
-            Enter this code in the app to finish creating your account. It expires in 10 minutes.
+            Enter it in the app. It expires in 10 minutes.
             <br /><br />
-            If you didn't create a bingd. account, you can ignore this email.
+            If you didn't ask for this code, you can ignore this email.
           </td>
         </tr>
       </table>

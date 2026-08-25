@@ -67,7 +67,7 @@ Confirmed by the founder on 2026-08-13. Recorded in [`../product/decision-log.md
 
 Four steps. Each is skippable except account creation, and each states why it is asking.
 
-**Welcome and sign-in.** Wordmark on Parchment, one line of positioning, three buttons: Continue with Apple, Continue with Google, Continue with email. Apple is required on iOS (PRD §7). The email path is a one-time code, never a password — no password field exists anywhere in the app, which removes a whole category of screen and a whole category of support request.
+**Welcome and sign-in.** Wordmark on Parchment, one line of positioning, three buttons: Continue with Apple, Continue with Google, Continue with email. Apple is required on iOS (PRD §7). The email path is a one-time code, never a password — no user ever creates or manages one, which removes a whole category of screen and a whole category of support request. One exception, and it is deliberately quiet: a *More sign-in options → Sign in with password* line below the three buttons, leading to a separate screen for the App Store / Play review account, which cannot receive an emailed code. It is `tertiary`, `sm`, secondary-toned, and offers no way to create an account — see [`../release/store-review-access.md`](../release/store-review-access.md).
 
 **Name, username, photo.** One field per screen. Username availability resolves live with the taken state written plainly rather than as a red error. Photo is genuinely optional and the skip is a visible button, not a small link.
 

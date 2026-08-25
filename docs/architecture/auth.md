@@ -21,7 +21,9 @@ Three methods in v1:
 | Sign in with Apple | Both, **required on iOS** | Apple's guidelines require it wherever a third-party social login is offered |
 | Google | Both | |
 
-No passwords anywhere. That removes password storage, strength rules, reset flows, credential-stuffing exposure, and the single largest category of account-security incident, at the cost of an email round trip.
+No passwords for users. That removes password storage, strength rules, reset flows, credential-stuffing exposure, and the single largest category of account-security incident, at the cost of an email round trip.
+
+> **One exception, and it is not a user-facing method.** Supabase's password capability is retained so that a dedicated App Store / Play review account can have deterministic credentials — a reviewer has no mailbox to receive a code in. It sits behind *More sign-in options* and cannot create an account. See §8, *The final email contract*, and [`../release/store-review-access.md`](../release/store-review-access.md).
 
 ---
 
@@ -86,7 +88,7 @@ Rules for that state:
 
 ## 6. What is deliberately absent in v1
 
-- No passwords, so no reset flow.
+- No passwords for users, so no reset flow, no "set a password" in Settings, and no forgot-password screen. The store-review account's password is set in the Supabase dashboard by whoever provisions it (§8).
 - No two-factor authentication. Both social providers already carry their own, and email OTP is single-factor by design. Revisit when the product holds anything worth stealing beyond a ranking.
 - No account recovery beyond re-authenticating with a linked method. A user who loses access to every linked method loses the account, and that risk is what §2's Settings link flow reduces. Worth prompting for a second method during onboarding once the alpha shows how many users have only one.
 - No email change flow. Changing the address on an identity is a credential change and gets the same treatment as adding one, from an authenticated session — deferred to early traction.
@@ -155,72 +157,126 @@ The built-in sender also carries a rate limit low enough that a handful of peopl
 
 Until it exists, **Google is the working method on Android and Apple on iOS**, both verified. Email is the one that is configured in code and unusable in the dashboard.
 
-#### The method order reversed — founder decision, 2026-08-26
+#### The final email contract — founder decision, 2026-08-26
 
-Everything below this heading was written when a one-time code was the primary email
-method. It is now the secondary one, and the reason is the paragraph above about the
-built-in sender's rate limit: **a password is the only email method that sends no mail.**
-A returning user signing in with one costs nothing, which is most sessions.
+There was a brief amendment, on the same day, that made **email and password** the primary
+method on the reasoning that a password is the only email method sending no mail. It is
+reverted, and this section replaces it. What ships is:
 
 | | |
 | --- | --- |
-| Default | `signUp` / `signInWithPassword` |
-| Secondary sign-in | `signInWithOtp`, `shouldCreateUser: **false**` |
-| New-account verification | `verifyOtp({ type: 'signup' })`, **in app**, from the Confirm signup email |
-| Passwordless verification | `verifyOtp({ type: 'email' })`, unchanged |
+| Primary | **Continue with email** — one field, a six-digit code · **Continue with Apple** · **Continue with Google** |
+| Email call | `signInWithOtp({ email, options: { shouldCreateUser: true } })` |
+| Verification | `verifyOtp({ email, token, type: 'email' })`, in app, one screen, one type |
+| Account creation | The same call. There is no sign-up screen and no sign-up/sign-in choice |
+| Passwords, ordinary users | **None.** Not created, not set, not reset, not asked for |
+| Passwords, retained | `signInWithPassword`, behind *More sign-in options → Sign in with password*, for the store-review account only |
 
-Three consequences worth keeping in view.
+**One flow serves a new address and a returning one, and that is a decision rather than a
+convenience.** `shouldCreateUser: true` makes GoTrue do the branching: an address with an
+account is sent a **Magic Link** email, an address without one is created and sent a
+**Confirm signup** email, and both arrive as six digits typed into the same screen.
+Somebody who cannot remember whether they ever signed up does not have to.
 
-**`shouldCreateUser: false` is what stops a second registration route.** It was `true`
-while the code was the door, correctly; leaving it true would mint a permanent
-`auth.users` row for every mistyped address on a screen whose sibling is the one that
-sets a password.
+##### One `EmailOtpType`, and why there is not one per template
 
-**The two OTP types are not interchangeable.** A signup token and a magic-link token look
-identical in an inbox and live in different columns, so verifying one as the other answers
-`otp_expired` — which every screen reports as "that code did not work", while the person
-is looking at the correct code. `EMAIL_OTP_TYPES` in `methods.ts` is the single place both
-are named, and `config/auth-templates.test.mjs` checks each template against the type its
-code is verified with.
+`'email'` for both, and this is the correction that made a single flow possible. The
+amendment used `'signup'` for a Confirm-signup token and `'email'` for a magic-link one,
+on the belief that they are not interchangeable. The installed `@supabase/auth-js@2.112.3`
+documents otherwise, on `verifyOtp` itself:
 
-**An unconfirmed account is a third sign-in outcome, not an error message.** Somebody who
-closed Bingd before typing the code has a correct password and an unusable account;
-GoTrue answers `email_not_confirmed`, and folding that into "that email and password do
-not match" tells them something false about the password they just typed — for ever,
-since nothing else would correct it. `signInWithEmailPassword` returns `unverified` and
-the screen routes them back to the code.
+> note: `signup` and `magiclink` types are deprecated
+> `email` – Used when verifying an OTP sent to the user's email **during sign-up or
+> sign-in**.
 
-Still true and unchanged: **`shouldCreateUser` means abandoned rows accumulate** for
-addresses that never verify — the note further down about pruning them applies to
-`signUp` now rather than to the code flow, and the job still does not exist.
+GoTrue resolves `'email'` against whichever column holds the token, so the client never
+has to know which email it is about to receive — which matters because *it cannot know*.
+Asking would mean asking the person, and asking the person is the choice this decision
+removes. `EMAIL_OTP_TYPES` in `methods.ts` holds the single value and
+`config/auth-templates.test.mjs` refuses the deprecated ones by name.
 
-##### Accepted: passwordless sign-in distinguishes a known address from an unknown one
+##### Anti-enumeration is restored, not merely preserved
 
-Independent review 44, classified **accepted beta risk** rather than fixed.
+Independent review 44 recorded an accepted risk against the amendment: with
+`shouldCreateUser: false`, GoTrue answered a known address with a send and an unknown one
+with `otp_disabled`, so repeated attempts revealed whether an address had a Bingd account.
+**There is nothing left to accept.** With `true`, both answers are a send; the screen shows
+the same copy; the code screen says the same sentence to both; and the two email templates
+are asserted to be byte-identical after their comments are stripped, so the inbox does not
+leak it either.
 
-With `shouldCreateUser: false`, GoTrue answers a known address with a send and an unknown
-one with `otp_disabled`. Repeated attempts therefore tell somebody whether an address has
-a Bingd account. The distinction is GoTrue's own response, not something the client
-computes, and the app extracts nothing further from it — the message says *"We could not
-send a code to that address. Check it, or create an account"* and never *"no account
-exists"*.
+The remaining refusals are shown beside the field, which is safe as well as useful. A rate
+limit does not depend on the address at all.
 
-Removing it means picking one of two worse things:
+###### Accepted, review 45: `signup_disabled` would distinguish addresses, on a setting Bingd does not use
 
-- **Navigate to the code screen regardless.** Now a mistyped address sends somebody to
-  wait for a code that will never arrive, with a Resend button aimed at the same wrong
-  place. That is the exact dead end the send-before-navigate ordering exists to prevent,
-  and it would be paid by every ordinary typo to deny a prober one bit.
-- **Set `shouldCreateUser: true`.** That is the second registration route the amendment
-  removed.
+Independent review 45 raised the one branch that is address-dependent, correctly.
+`signup_disabled` is returned only where GoTrue would have had to create a row, so with
+signups turned off an unknown address is refused and a known one proceeds — an
+enumeration signal, and a difference in navigation as well as in copy.
 
-Note the two paths that do **not** leak: `signInWithPassword` returns the same
-`invalid_credentials` for a wrong password and a nonexistent account, and `signUp` returns
-the same "check your email" for a free address and a taken one. Enumeration resistance is
-kept where it is free and spent only where the alternative is a dead end for real people.
+Classified **accepted** rather than fixed, for two reasons. It is unreachable in the
+configuration this product ships: signups are enabled on `bingd-nonprod` and will be on
+production, and a Bingd with signups disabled has no new users to enumerate *for*.
+And removing it means choosing one of two worse things — saying nothing useful to a
+real person who genuinely cannot sign up, or navigating them to a code screen for a code
+that was never sent, which is the dead end the send-before-navigate ordering exists to
+prevent.
 
-If it ever needs closing, the honest fix is server-side — a GoTrue setting or a hook that
-makes the two responses identical — not a client that pretends to have sent something.
+So it is recorded here as the thing to reread the day anybody disables signups
+deliberately, which is the same treatment the abandoned-rows note gets below.
+
+##### The password that stays, and who it is for
+
+Store review is the whole of the reason. Apple's App Review and Google Play review must get
+past the sign-in screen, and a reviewer has no access to a mailbox this app can send a code
+to; an OTP-only app is an unreviewable app, and the rejection costs a submission round each
+time. So Supabase's password capability is kept and given exactly one visible use.
+
+- **Secondary, and it looks it.** *More sign-in options → Sign in with password*, a
+  `tertiary`/`sm` control below the three real methods, not a fourth peer.
+- **It cannot create an account.** `supabase.auth.signUp` is not called anywhere in the
+  client any more, and `config/auth-templates.test.mjs` asserts its absence.
+- **One error sentence for every refusal.** *"We could not sign you in with that email and
+  password."* `invalid_credentials`, `user_not_found` and `email_not_confirmed` are folded
+  together deliberately: an ordinary Bingd account has no password, so distinguishing them
+  would describe the state of an address to anybody who asked, from the one screen a
+  stranger has no reason to be on.
+- **No password reset, and no gap where one should be.** Forgetting a password is not a
+  state an ordinary user can be in, because they never had one. The review account's
+  password is set in the dashboard by whoever provisions it.
+
+The runbook, including the fact that no credential belongs in this repository, is
+[`../release/store-review-access.md`](../release/store-review-access.md).
+
+##### What the amendment introduced and this removes
+
+Listed because each was a real assumption that would otherwise have outlived its reason: a
+create-account-with-password screen, a `mode` parameter on the verify screen, a
+`resend({ type: 'signup' })` endpoint, an `unverified` third sign-in outcome routing
+somebody back to a code screen, `new-password` autofill semantics, a six-character
+client-side password rule, and a deferred "set a new password" item in the PRD. None of
+them has an ordinary user any more.
+
+Still true and unchanged: **`shouldCreateUser: true` means abandoned rows accumulate.** A
+mistyped address mints a permanent, profile-less `auth.users` row and nothing prunes them.
+That is the same open item recorded further down and it is not new.
+
+##### Fixed alongside, review 45: sign-out could reject and leave somebody signed in
+
+Not part of this decision and found while reviewing it. `signOut` awaited the pending-name
+Keychain delete between the push-token release and the session teardown, unguarded — and
+`SecureStore` rejects rather than returning when the store is locked or unavailable. All
+four callers write `await signOut()` and then navigate, and none catches, so a rejection
+there is a person who tapped **Sign out**, saw nothing happen, and is still signed in. The
+worst of the four is `app/settings/account.tsx`, where the account has already been deleted
+server-side and the session is the last thing pointing at it.
+
+Both steps after the release now report and continue rather than throwing, so the function
+settles for its callers whatever happens. `methods.signout.test.ts` pins the ordering and
+both failure paths. This is distinct from the earlier sign-out blank-screen defect, which
+was `useCurrentProfile` throwing during render and is still fixed by `RouteErrorBoundary`
+and `Stack.Protected` (`sign-out-safety.test.tsx`).
 
 #### It reached a tester, which is what a written-down risk is for
 

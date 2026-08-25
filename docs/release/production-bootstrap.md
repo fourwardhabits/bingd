@@ -162,16 +162,20 @@ Production Auth is configured per project and shares nothing with nonprod. Regis
   not inferred: *"Email template modification is not available for free tier projects
   using the default email provider."*
 
-  **Password-first reduced the volume and did not remove the requirement.** Since the
-  2026-08-26 amendment a returning user signing in with a password generates no email at
-  all, which is most sessions. Mail still has to arrive for all of:
+  **There is no password path that would reduce the volume.** A short-lived 2026-08-26
+  amendment made email-and-password the default on exactly that reasoning; it is reverted,
+  and ordinary users have no password at all. So mail has to arrive for:
 
   | | Why it is not optional |
   | --- | --- |
-  | New-account verification | The first thing a new person does. No email, no account. |
-  | Passwordless sign-in | The **only** way in for every account created before the amendment, which is all of them today. |
-  | A forgotten password | Answered by that same code. |
+  | A new person's first sign-in | It is also how their account is created. No email, no account, no user. |
+  | Every returning email sign-in | The **only** way in for anybody who is not on Apple or Google. |
+  | *Send a new code* | What somebody taps when the first one did not arrive — into the same rate limit. |
   | Future email changes | Not built yet; will need it. |
+
+  The one account with a password is the store-review account
+  ([`store-review-access.md`](./store-review-access.md)), which signs in a handful of times
+  a year and is not a volume argument.
 
   What the founder has to supply, on **`bingd-nonprod` first** so the friend beta can be
   accepted at all, and again on production:
@@ -217,27 +221,29 @@ Production Auth is configured per project and shares nothing with nonprod. Regis
   whole `[auth]` block and reverts every field it does not mention, including the Apple and
   Google client secrets.
 
-- **A real email, to a real inbox, before RC acceptance.** Nothing above proves delivery,
-  and since the password-first amendment there are more paths to walk than there were.
+- **A real email, to a real inbox, before RC acceptance.** Nothing above proves delivery.
   Run it against `bingd-nonprod` before the friend beta and against production before RC:
 
   | Case | Expected |
   | --- | --- |
-  | **Create account**, address with no account | email arrives, contains a six-digit code, **contains no link**, code verifies in the app, profile creation follows |
-  | **Sign in**, correct password | straight into the app, and **no email is sent at all** |
-  | **Sign in**, wrong password | "That email and password do not match", and nothing else claimed |
-  | **Sign in**, account created but never verified | routed to the code screen, not told the password is wrong |
-  | **Sign in without a password**, address that has an account | code arrives, code verifies, session restored |
-  | **Sign in without a password**, address that does **not** | refused, and **no new account exists afterwards** — check `auth.users` |
-  | a wrong code, either flow | refused, and the screen says so |
-  | *Send a new code*, either flow | a second usable code arrives, within the rate limit |
+  | *Continue with email*, address with **no** account | email arrives, contains a six-digit code, **contains no link**, code verifies in the app, profile creation follows |
+  | *Continue with email*, address that **has** one | same screen, same six digits, code verifies, straight into the app |
+  | The two emails, side by side | **They read identically.** Different wording would tell the recipient which of the two they are, which is the one thing the flow does not disclose |
+  | A wrong code | refused, and the screen says so, without saying whether it was wrong or expired |
+  | *Send a new code* | a second usable code arrives, within the rate limit |
+  | *More sign-in options → Sign in with password*, review account | signs in ([`store-review-access.md`](./store-review-access.md)) |
+  | The same screen, an **ordinary** passwordless address | refused with the one generic sentence, and **no account is created or changed** — check `auth.users` |
 
-  The sixth row is the one to actually verify in the table rather than in the UI: the
-  refusal is visible, but "no account was created" is only observable in the database, and
-  it is the row that silently regresses if `shouldCreateUser` ever flips back.
+  The last row is the one to verify in the database rather than in the UI: the refusal is
+  visible, but "nothing was created" is not, and it is what silently regresses if a
+  `signUp` call ever finds its way back into the client.
 
   Sign-off is *seeing the email*. A green `check-auth-config.mjs` says the project is
   configured; it does not say SMTP is delivering, and those fail independently.
+
+- **The store-review account, created on this project.** Production starts with no users,
+  and App Review cannot receive a one-time code. Full runbook:
+  [`store-review-access.md`](./store-review-access.md). Do not put its password here.
 
 ### 2.5 Deploy the two Edge Functions
 
