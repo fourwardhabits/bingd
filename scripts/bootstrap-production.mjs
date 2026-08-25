@@ -273,17 +273,40 @@ if (replayed) {
     const s = status.parsed;
     note(
       `status: environment=${s.environment} job=${s.job ? `#${s.job.jobid} ${s.job.schedule}` : 'none'} ` +
-        `queued=${s.queued} base_url_set=${s.base_url_set}`,
+        `queued=${s.queued} base_url_set=${s.base_url_set}` +
+        ('vault_secret_set' in s ? ` vault_secret_set=${s.vault_secret_set}` : '') +
+        ('healthy' in s ? ` healthy=${s.healthy}` : ''),
     );
 
-    // The Vault secret cannot be read from here and is deliberately not writable from here
-    // either — it is a service-role key, and a script that could install one is a script
-    // that has to be trusted with where it puts it. This is the reminder, not the check.
-    if (apply && s.job && !s.last_run) {
-      note(
-        'the drain has not run yet. If push_outbox fills and nothing leaves it, the Vault\n' +
-          "          secret is the usual reason: select vault.create_secret('<service-role key>',\n" +
-          "          'service_role_key'); in the SQL editor. See docs/release/push-operations.md.",
+    /**
+     * **The Vault secret is now visible from here, as a boolean, and it is a problem
+     * rather than a reminder.**
+     *
+     * It used to be neither: this block printed a hint if the drain had not run yet, and
+     * `push_drain_status()` had no field for the secret at all. On 2026-08-26 that combination
+     * let the drain sit dead for twenty hours behind 1,221 `succeeded` cron runs. Since
+     * `20260826000700` the status function answers `healthy` and names what is wrong, so a
+     * bootstrap that leaves the pipeline unable to send says so in the exit code.
+     *
+     * Still not *writable* from here, deliberately: a script that could install a
+     * service-role key is a script that has to be trusted with where it puts it.
+     */
+    if ('healthy' in s) {
+      if (s.healthy !== true) {
+        const named = Array.isArray(s.problems) ? s.problems.join(', ') : 'unknown';
+        problems.push(
+          `the push drain cannot send: ${named}.\n` +
+            (Array.isArray(s.problems) && s.problems.includes('vault_service_role_key_missing')
+              ? "    Store the key in the SQL editor: select vault.create_secret('<service-role key>', 'service_role_key');\n"
+              : '') +
+            '    See docs/release/push-operations.md. Verify with' +
+            ' node supabase/tests/push-drain-acceptance.mjs',
+        );
+      }
+    } else {
+      problems.push(
+        'push_drain_status() predates 20260826000700 and cannot report the Vault secret,' +
+          ' so it cannot tell you whether push works. Replay migrations before trusting it.',
       );
     }
   }

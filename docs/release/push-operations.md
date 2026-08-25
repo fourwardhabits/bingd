@@ -99,31 +99,68 @@ select push_drain_status();
   "last_run": { "status": "succeeded", "ended": "…" },
   "queued": 0,
   "older_than_15m": 0,
-  "base_url_set": true
+  "base_url_set": true,
+  "vault_available": true,
+  "vault_secret_set": true,
+  "problems": [],
+  "healthy": true
 }
 ```
 
-*Verified on `bingd-nonprod`, 2026-08-25 02:09 UTC: job #2, `last_run.status = "succeeded"`.*
+**`healthy` is the field to read.** Everything else is there to say *why* when it is false;
+see §4. It is `false` on any database where the drain is not fully installed — the harness
+included — because a check that cannot confirm has to say no. That is the lesson of §11.
+
+*Verified on `bingd-nonprod`, 2026-08-25 02:09 UTC: job #2, `last_run.status = "succeeded"`
+— and see §11 for why that verification was not worth what it looked like.*
 
 ## 4. Reading the status
 
 | Field | Healthy | What it means otherwise |
 |---|---|---|
+| **`healthy`** | **`true`** | **the only field to branch on.** False ⇒ read `problems` |
+| **`problems`** | `[]` | each string is one reason nothing can be sent — see below |
 | `job` | present, `active: true` | `null` ⇒ nothing is draining. `schedule_push_drain()` |
-| `last_run.status` | `succeeded` | `failed` ⇒ read `message`; usually the Vault secret or the URL |
+| `last_run.status` | `succeeded` | `failed` ⇒ read `message` |
 | `queued` | small, moving | — |
-| `older_than_15m` | **0** | **the number to alert on.** Rows arriving and nothing taking them |
+| `older_than_15m` | **0** | rows arriving and nothing taking them |
 | `base_url_set` | `true` | `false` ⇒ re-run the bootstrap script |
+| **`vault_available`** | `true` | `false` ⇒ the Vault extension is not enabled on this project |
+| **`vault_secret_set`** | `true` | `false` ⇒ store the key. **This is the one that was missing** |
 
-`older_than_15m` above zero for more than a drain interval is the symptom of every failure
-mode below. Nothing else needs watching.
+`problems` uses stable strings, and they are matched on by
+`supabase/tests/push-drain-acceptance.mjs`: `scheduler_not_installed`,
+`scheduler_inactive`, `base_url_missing`, `vault_unavailable`,
+`vault_service_role_key_missing`, `last_run_not_succeeded`, `outbox_stalled`.
+
+> **`vault_secret_set` is a boolean and never a length or a prefix.** Both are fingerprints
+> of which key is stored. Nothing in this pipeline returns the value to anybody.
+
+### The live check
+
+```
+node supabase/tests/push-drain-acceptance.mjs            # health only, read-only
+node supabase/tests/push-drain-acceptance.mjs --probe    # also enqueues one real push
+```
+
+Not an `npm run` script on purpose: `package.json`'s `scripts` block is an
+`@expo/fingerprint` input, and adding a line to it moves the beta lane's runtime version
+and strands the published friend beta. It **fails** on a project that predates
+`20260826000700`, rather than falling back to the older, weaker check.
+
+`--probe` creates two throwaway accounts, registers a deliberately invalid Expo token,
+triggers one follow, and watches the row without ever calling `push-sender` itself. It
+tears both accounts down afterwards. A revoked token and `sent: 1` is a pass: the claim is
+what is being proved, not delivery to a real handset.
 
 ## 5. Failure modes
 
-**Nothing is being delivered, `last_run` says `succeeded`, `older_than_15m` climbing.**
-The tick is running and returning `unconfigured` — it raises a warning naming which of the two
-inputs is missing and returns without posting. Check the Postgres logs for `push drain: not
-configured`, then the Vault secret and `functions.base_url`.
+**Nothing is delivered while `last_run` says `succeeded`.** *This was possible until
+`20260826000700` and is not any more* — it is the incident in §11. A tick that has work and
+cannot send now **raises**, so `last_run.status` reads `failed` and its `message` names
+which input is missing. If you are looking at a project where this still happens, that
+project has not had `20260826000700` applied, and
+`push_drain_status().healthy` will be absent rather than `false`.
 
 **`last_run` is `null` and the job exists.** `pg_cron` has not fired yet; it runs at the top of
 the next minute. If it stays null past two minutes, `pg_cron` is installed but not running
@@ -324,3 +361,68 @@ Ruled out, so nobody spends a day on them:
 Until step 2 ships, the onboarding notification step says so rather than claiming success —
 see `features/onboarding/NotificationStep.tsx`, which reports what `registerThisDevice`
 actually managed rather than what was asked for.
+
+---
+
+## 11. The drain was dead for a day and every observable said otherwise — 2026-08-26
+
+The §10 diagnosis ended on two founder actions and one suspicion: that the Vault secret was
+*stale*. Measured properly, it was worse and simpler.
+
+### What was measured
+
+| | |
+|---|---|
+| `vault.secrets` | **0 rows.** Queried as `postgres` with `select` privilege confirmed. The secret had never existed |
+| `net._http_response` | **empty**, and the first row ever written to it has `id = 1` — see below |
+| `cron.job` #2 | active, `* * * * *`, owner `postgres` |
+| `cron.job_run_details` | **1,221 runs over twenty hours, every one `succeeded`**, `return_message` always the string `1 row` |
+| `functions.base_url` | correct |
+| `POST /functions/v1/push-sender` with the service key | `200 {"claimed":0,...}` |
+
+### Classification: **A — the Vault secret was missing**, not stale
+
+`_drain_push_outbox()` reads two inputs. The URL was right; the key was absent, so the
+function took its `unconfigured` branch, raised a `warning` into a Postgres log nobody was
+reading, and **returned normally**. pg_cron can only conclude "failed" from a function that
+raises, so it wrote `succeeded` — 1,221 times, over a pipeline that had never made one
+outbound request.
+
+Nothing was wrong with pg_cron, pg_net, the base URL, the sender, its authentication, or the
+outbox's claim semantics. Each of those was checked and each was fine.
+
+### The fix, and the proof
+
+The key was stored with `vault.create_secret(...)` under the name `service_role_key`. Then,
+without anything invoking the sender by hand:
+
+```
+net._http_response  id=1  status_code=200  created=22:33:00.107+00
+                    content={"claimed":1,"sent":1,"failed":0,"revoked":1}
+```
+
+`id = 1` is the whole story: that is pg_net's first-ever request from this database. The row
+enqueued at 22:32 was claimed and gone by the 22:33 tick. `revoked: 1` is the probe's
+deliberately invalid Expo token being retired, which is correct behaviour.
+
+### What was actually the defect
+
+**The missing secret was an operator action. A health check that could not see it is a code
+defect**, and it is fixed in `20260826000700`:
+
+- `_drain_push_outbox()` **raises** when it has work and cannot send, so the cron run
+  records `failed` and `last_run` stops lying. It stays silent on an empty queue, so an
+  un-bootstrapped project does not manufacture an alarm out of an idle scheduler.
+- `push_drain_status()` gained `vault_available`, `vault_secret_set`, `problems[]` and one
+  `healthy` boolean that is false if any dependency is missing — including on a database
+  where the drain is not installed at all. Fail-closed means a check that cannot confirm
+  says no.
+- `supabase/tests/push-drain.test.mjs` runs in CI and asserts each of those failures.
+- `supabase/tests/push-drain-acceptance.mjs` asks the same questions of a real project.
+
+### The order to diagnose in, next time
+
+1. `node supabase/tests/push-drain-acceptance.mjs` — one command, and `healthy` is the answer.
+2. If it will not run: count `device_tokens` first. Zero means no phone is addressable and
+   nothing below it can matter (§10).
+3. Only then look at the drain.
