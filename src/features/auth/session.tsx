@@ -5,10 +5,11 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 
 import { useTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
 import { identify } from '@/lib/analytics';
+import { withGrace } from '@/lib/grace';
 import { avatarUri } from '@/lib/images';
 import { identifyForMonitoring } from '@/lib/monitoring';
 import { queryKeys } from '@/lib/query';
-import { startSessionRefresh, supabase } from '@/lib/supabase';
+import { onLocalSignOut, startSessionRefresh, supabase } from '@/lib/supabase';
 
 export type Profile = {
   id: string;
@@ -59,9 +60,41 @@ export function useCurrentProfile(): Profile {
   return auth.profile;
 }
 
+/**
+ * How long the first read of the stored session may hold the whole app.
+ *
+ * **Independent review 49's second major finding, and it is the one lane the request
+ * deadline cannot reach.** Hydration is `storage.getItem` and nothing else — no fetch has
+ * started, so no network budget applies — and `SecureStore.getItemAsync` is a promise iOS
+ * does not promise to settle. One that does not leaves `sessionLoaded` false for the life
+ * of the process: the navigator is never mounted, the loading overlay never leaves, and
+ * every later storage operation on that key queues behind the same unresolved read.
+ *
+ * Eight seconds because a Keychain read is measured in milliseconds when it works at all,
+ * so this is not a budget anybody meets by being slow. Past it the answer is not "signed
+ * out" — that would be a wrong claim about an account, and it would send somebody with a
+ * perfectly good session to the sign-in screen — it is *we could not find out*, which is a
+ * state this provider already has and `AuthStatusOverlay` already draws with a retry.
+ */
+const SESSION_HYDRATION_GRACE_MS = 8000;
+
+/**
+ * Distinguishes "asked, and there is no session" from "could not ask".
+ *
+ * A wrapper rather than a `null` return, because `null` is already the first of those and
+ * conflating them is what would send somebody with a working session to the sign-in
+ * screen — the same distinction `AuthState`'s own `error` case exists to preserve.
+ */
+type Hydration = { ok: true; session: Session | null } | { ok: false };
+
+const UNREADABLE: Hydration = { ok: false };
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [unreadable, setUnreadable] = useState(false);
+  /** Bumped by the retry on the error state, which is the only thing that re-reads. */
+  const [attempt, setAttempt] = useState(0);
   const queryClient = useQueryClient();
 
   useEffect(() => startSessionRefresh(), []);
@@ -69,13 +102,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    void withGrace<Hydration, Hydration>(
+      supabase.auth.getSession().then(
+        ({ data }): Hydration => ({ ok: true, session: data.session }),
+        // A rejection is the same class of answer as silence: the store could not be
+        // read. Without this the `.then` below simply never runs, which is the hang.
+        (): Hydration => UNREADABLE,
+      ),
+      SESSION_HYDRATION_GRACE_MS,
+      UNREADABLE,
+    ).then((result) => {
       if (!active) return;
-      setSession(data.session);
+      if (!result.ok) {
+        setUnreadable(true);
+        return;
+      }
+      setSession(result.session);
       setSessionLoaded(true);
     });
 
     const { data } = supabase.auth.onAuthStateChange((_event, next) => {
+      // A late answer from a slow store arrives here as `INITIAL_SESSION`, so a launch
+      // that gave up above still recovers on its own rather than needing the retry.
+      setUnreadable(false);
       setSession(next);
       setSessionLoaded(true);
       // Everything cached was read under the previous identity. Keeping any of it
@@ -85,11 +134,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!next) queryClient.clear();
     });
 
+    /**
+     * The app's own sign-out signal, for the exit that could not wait for Supabase's.
+     *
+     * `SIGNED_OUT` is emitted only after `_removeSession` has awaited three storage
+     * operations, and a device whose storage has stopped answering is exactly the device
+     * somebody is trying to leave. `signOut` says it here instead, once the credential is
+     * gone — and this branch does the same three things the null case above does, because
+     * it means the same thing.
+     */
+    const stopListeningForLocalSignOut = onLocalSignOut(() => {
+      if (!active) return;
+      setUnreadable(false);
+      setSession(null);
+      setSessionLoaded(true);
+      queryClient.clear();
+    });
+
     return () => {
       active = false;
       data.subscription.unsubscribe();
+      stopListeningForLocalSignOut();
     };
-  }, [queryClient]);
+  }, [queryClient, attempt]);
 
   const userId = session?.user?.id ?? null;
 
@@ -144,15 +211,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const value = useMemo<AuthState>(() => {
+    // Before the loading branch, because it is a *stronger* statement than "not yet":
+    // the read was attempted and could not be completed, and the overlay's retry is the
+    // only thing that will ask again.
+    if (unreadable && !sessionLoaded) {
+      return { status: 'error', retry: () => setAttempt((n) => n + 1) };
+    }
     if (!sessionLoaded) return { status: 'loading' };
     if (!userId) return { status: 'signed-out' };
     if (profileQuery.isPending) return { status: 'loading' };
-    if (profileQuery.isError) return { status: 'error', retry: () => void profileQuery.refetch() };
+    if (profileQuery.isError)
+      return { status: 'error', retry: () => void profileQuery.refetch() };
     if (!profileQuery.data) {
       return { status: 'onboarding', userId, email: session?.user?.email ?? null };
     }
     return { status: 'ready', userId, profile: profileQuery.data };
-  }, [sessionLoaded, userId, profileQuery, session?.user?.email]);
+  }, [sessionLoaded, unreadable, userId, profileQuery, session?.user?.email]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

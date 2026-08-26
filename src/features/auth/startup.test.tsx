@@ -41,6 +41,9 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('@/lib/supabase', () => ({
+  // `AuthProvider` also listens for the app's own sign-out signal, for the exit that
+  // cannot wait for Supabase's. Unused here; present so the provider can subscribe.
+  onLocalSignOut: () => () => {},
   startSessionRefresh: () => () => {},
   supabase: {
     auth: {
@@ -76,8 +79,10 @@ jest.mock('@/lib/supabase', () => ({
         chain[method] = () => chain;
       }
       chain.maybeSingle = run;
-      chain.then = (resolve: (value: unknown) => unknown, reject?: (error: unknown) => unknown) =>
-        run().then(resolve, reject);
+      chain.then = (
+        resolve: (value: unknown) => unknown,
+        reject?: (error: unknown) => unknown,
+      ) => run().then(resolve, reject);
       return chain;
     },
   },
