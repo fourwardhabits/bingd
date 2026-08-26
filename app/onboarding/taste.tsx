@@ -2,7 +2,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { useCurrentProfile } from '@/features/auth';
+import { useCurrentProfile, UseDifferentAccountButton } from '@/features/auth';
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
 import {
   NotificationStep,
@@ -154,19 +154,55 @@ export default function TasteOnboardingScreen() {
    * the two would make a flag about the collection mean something about a permission.
    */
   const finish = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
-    await complete({ skipped });
+    try {
+      await complete({ skipped });
+    } catch {
+      // `complete` records the decision in memory and in the query cache before anything
+      // that can fail, and already swallows its own disk write — so a throw here is
+      // exceptional. Whatever it was, the person asked to leave a flow they have
+      // finished, and the founder's build-4 session is what an exit gated on a failable
+      // await looks like: a button that does nothing, forever. Leaving wins.
+    }
     router.replace(to);
   };
 
-  const leave = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
-    // Resolved now rather than on mount: the OS state can change while somebody is
-    // ranking five films — they may have granted it from a system prompt elsewhere — and
-    // an answer cached at the start of the flow would ask a question already settled.
-    if (await shouldShowNotificationStep(await pushAlreadyOffered())) {
-      setLeaving({ skipped, to });
-      return;
+  /**
+   * Whether to put the notification question on the way out — and `false` whenever the
+   * answer cannot be established. The build-4 stranding taught the rule: every await on
+   * this path runs between a button press and the navigation it promised, so none of
+   * them may reject upward (the press would die silently) and none may hold the exit.
+   * Not being able to read a preference is not a reason to keep somebody out of the
+   * app; the contextual primer remains for anyone the offer never reached.
+   */
+  const shouldOfferNotifications = async () => {
+    try {
+      return await shouldShowNotificationStep(await pushAlreadyOffered());
+    } catch {
+      return false;
     }
-    await finish({ skipped, to });
+  };
+
+  // A ref, not state: it exists to make a second press during the checks a no-op, and
+  // nothing renders from it. The summary's two buttons stay visually live — the checks
+  // are quick — but two presses must not race two navigations.
+  const departing = useRef(false);
+
+  const leave = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
+    if (departing.current) return;
+    departing.current = true;
+    try {
+      // Resolved now rather than on mount: the OS state can change while somebody is
+      // ranking five films — they may have granted it from a system prompt elsewhere —
+      // and an answer cached at the start of the flow would ask a question already
+      // settled.
+      if (await shouldOfferNotifications()) {
+        setLeaving({ skipped, to });
+        return;
+      }
+      await finish({ skipped, to });
+    } finally {
+      departing.current = false;
+    }
   };
 
   // Nothing until the answer arrives. Rendering the flow first and then deciding shows
@@ -296,6 +332,10 @@ export default function TasteOnboardingScreen() {
               kind="tertiary"
               onPress={() => void leave({ skipped: true, to: TAB_ROUTES.feed })}
             />
+            {/* This screen has no header and Settings is unreachable from it, so for
+                the wrong account signed in on this phone it would otherwise be a locked
+                room — see `UseDifferentAccountButton`. */}
+            <UseDifferentAccountButton />
           </View>
         </>
       )}
@@ -438,6 +478,10 @@ function Summary({
       <View style={styles.summaryActions}>
         <Button label="Explore For You" onPress={onExplore} />
         <Button label="See my collection" kind="secondary" onPress={onCollection} />
+        {/* The summary is as far from Settings as the flow above it, and the build-4
+            stranding happened exactly here — so the way out for a wrong account is
+            offered on this branch too, under the real actions rather than beside them. */}
+        <UseDifferentAccountButton />
       </View>
     </View>
   );

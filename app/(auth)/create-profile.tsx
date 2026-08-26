@@ -9,6 +9,7 @@ import {
   createProfile,
   signOut,
   takePendingDisplayName,
+  UseDifferentAccountButton,
   usernameAvailability,
   useAuth,
 } from '@/features/auth';
@@ -548,6 +549,13 @@ export default function CreateProfileScreen() {
             </Text>
             .
           </Text>
+
+          {/* **The way out of the wrong account.** This screen is reached signed in but
+              before Settings exists to sign out from, and on iOS a Keychain session can
+              survive a reinstall — so without this, an account somebody did not mean to
+              enter holds the phone. Quiet and last, because it is an exit rather than a
+              step. See `UseDifferentAccountButton` for the semantics. */}
+          <UseDifferentAccountButton />
         </View>
       </KeyboardScreen>
     </Screen>

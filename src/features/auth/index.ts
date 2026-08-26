@@ -26,4 +26,6 @@ export { applyInitialVisibility, createProfile, usernameAvailability } from './c
 
 export { AuthStatusOverlay } from './status-overlay';
 
+export { UseDifferentAccountButton } from './UseDifferentAccount';
+
 export { RouteErrorBoundary } from './RouteErrorBoundary';
