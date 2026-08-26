@@ -48,6 +48,12 @@ export const queryKeys = {
   providerSearch: (query: string) => ['search', 'provider', query] as const,
   seasons: (seriesId: string) => ['seasons', seriesId] as const,
   profile: (username: string) => ['profile', username] as const,
+  // The four counts the own-profile header draws. Named here rather than left inline in
+  // `useProfileStats`, where it was: an inline key is one nothing else can refer to, and
+  // these counts are moved by writes that happen elsewhere — following somebody changes
+  // two accounts' numbers, and completing a ranking changes a third. Nothing invalidates
+  // this yet; a key that can be named is the precondition for anything ever doing so.
+  profileStats: (userId: string) => ['profile-stats', userId] as const,
   // Targets and progress for one year. Keyed by the account for the reason `logState`
   // records above — a goal is own-read only, so an entry holding one must not be
   // reachable from a second account signed in on the same device.

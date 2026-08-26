@@ -599,5 +599,46 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
     noteSlateOnScreen(wallKey, items.map((item) => item.mediaItemId));
   }, [wallKey, items]);
 
-  return slate;
+  /**
+   * The three reads above are inputs to this query, so their failures are its failures.
+   *
+   * **This is the founder's never-ending skeleton on For You.** `enabled` gates on all three being
+   * `isSuccess`, which is correct — the slate is scored *from* them and a slate built from
+   * `undefined` would be a wall of popularity pretending to be personalisation. What it
+   * did not account for is that `isSuccess` is not merely "not yet": once any of the three
+   * settles to `error` it stays false, so the slate is never enabled, never fetched, and
+   * never leaves `pending` — and `pending` is what the screen draws a skeleton for. Six
+   * skeleton rows, for the life of the process, describing a request that was never going
+   * to be made. Nothing retried, because nothing had failed; the query had simply not been
+   * allowed to start.
+   *
+   * So a source failure is reported as this query's failure. The screen already has the
+   * right branch for that — "Could not load recommendations", with a Try again — and it is
+   * checked before `isPending`, so surfacing the error here is all that was missing.
+   *
+   * `isPending` is suppressed in that state for the same reason: a query that will not be
+   * started is not loading, and saying so is what produced the skeleton that never ended.
+   */
+  const sourceError = movies.error ?? seasons.error ?? watched.error ?? null;
+
+  return {
+    data: slate.data,
+    isError: slate.isError || sourceError !== null,
+    isPending: sourceError === null && slate.isPending,
+    /**
+     * Retry re-runs **the request that actually failed**, which for a source failure is
+     * not this query at all. Refetching the slate would re-run a `queryFn` whose inputs
+     * are still missing; refetching the sources flips `enabled` and the slate follows on
+     * its own, which is the same path a first successful launch takes.
+     */
+    refetch: () => {
+      if (sourceError) {
+        void movies.refetch();
+        void seasons.refetch();
+        void watched.refetch();
+        return;
+      }
+      void slate.refetch();
+    },
+  };
 }

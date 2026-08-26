@@ -32,8 +32,9 @@ import {
  *
  * **A mode of For You**, which is what it actually is. For You is the screen that
  * answers "what next" — and the honest answer is sometimes a film and sometimes a
- * person. `Titles` keeps everything For You already was, including recommendation
- * requests; `People` is this.
+ * person. It is a third option in the category selector that screen already had, beside
+ * Movies and TV shows: `Movies` and `TV shows` keep everything For You already was,
+ * including recommendation requests; `People` is this.
  *
  * ---------------------------------------------------------------------------
  * TWO SECTIONS AND NO THIRD

@@ -23,6 +23,54 @@ import { supabase } from '@/lib/supabase';
 export const FIRST_FIVE = 5;
 
 /**
+ * How long the first-run check may hold the whole app before it is answered for.
+ *
+ * Four seconds because this is a *local* decision about one account, not a page of
+ * content: two indexed counts and a Keychain lookup. Anything past this is not slow, it
+ * is stuck — and the cost of it being stuck is the entire app, not this one question.
+ */
+const FIRST_RUN_GRACE_MS = 4000;
+
+/**
+ * What the app assumes about an account it could not ask about in time.
+ *
+ * The same answer a failure already routes to, for the reason `useTasteOnboarding`
+ * records: a genuinely new account loses a suggestion, and the alternative is every
+ * account losing the app.
+ */
+const UNKNOWN: TasteOnboarding = { ranked: 0, needed: false };
+
+/**
+ * The read, with a deadline — and **a rejection is still a rejection**.
+ *
+ * Deliberately not `withGrace`, which is the house helper for this shape and is wrong
+ * here by exactly one case: it resolves a *failure* to the fallback as well as a hang.
+ * That would quietly convert "could not find out" into "found out: not needed", and this
+ * query is pinned for the session (`staleTime: Infinity`), so the lie would last as long
+ * as the process. Routing already handles the error state correctly — an undefined
+ * `needed` is falsy and sends the person to the feed — so there is nothing to gain by
+ * hiding it, and an error is the only signal anything upstream has that the backend is
+ * unreachable.
+ *
+ * Only the *silence* is answered for, which is the case nothing else can recover from.
+ */
+function withDeadline(work: Promise<TasteOnboarding>): Promise<TasteOnboarding> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(UNKNOWN), FIRST_RUN_GRACE_MS);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
  * Which phase of the first-run flow this device believes the account is in.
  *
  * This exists because "is this account new" stops being true the moment the flow does
@@ -119,6 +167,20 @@ async function readState(userId: string): Promise<TasteOnboarding> {
  * A failure resolves to "not needed". Not knowing whether somebody is new is not a
  * reason to put them through a five-step flow, and an account that genuinely is new
  * loses nothing but a suggestion.
+ *
+ * **And so now does a wait that has stopped being a wait**, which is half of the
+ * founder's blank startup. `nextRoute` deliberately moves nobody while this is pending —
+ * `if (tastePending) return null` — so until it settles the only route the navigator has
+ * is `/`. That is right when the check costs the ~170ms it costs against a healthy
+ * backend, and unrecoverable when it costs forever: `readState` awaits two PostgREST
+ * counts and a Keychain read, none of which the platform promises to ever settle, and
+ * `retry: false` means nothing asks again. One hung Keychain call and the app never
+ * routes anywhere for the life of the process.
+ *
+ * The bound is `withDeadline` rather than the house `withGrace`, because a failure must
+ * stay a failure — see there. Nothing is cancelled at the deadline either; a late answer
+ * simply finds nobody waiting on it, and the only thing given up is holding the navigator
+ * hostage to it.
  */
 export function useTasteOnboarding(userId: string | null, enabled = true) {
   return useQuery({
@@ -126,7 +188,7 @@ export function useTasteOnboarding(userId: string | null, enabled = true) {
     enabled: Boolean(userId) && enabled,
     staleTime: Infinity,
     retry: false,
-    queryFn: () => readState(userId!),
+    queryFn: () => withDeadline(readState(userId!)),
   });
 }
 

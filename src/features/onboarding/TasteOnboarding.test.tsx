@@ -14,6 +14,8 @@ const mockRpc = jest.fn();
 const mockReplace = jest.fn();
 const mockPrefs = new Map<string, unknown>();
 let mockWriteFails = false;
+/** A preference write that never settles — the Keychain lane of review 47's hang. */
+let mockWriteHangs = false;
 /** Preference names whose *read* rejects — the SecureStore lane of the build-4 pin. */
 const mockReadFails = new Set<string>();
 /** Preference names whose read never settles — review 47's first blocker, pinned. */
@@ -60,6 +62,7 @@ jest.mock('@/lib/prefs', () => ({
     return Promise.resolve(mockPrefs.get(name) ?? null);
   },
   writePref: (name: string, value: unknown) => {
+    if (mockWriteHangs) return new Promise(() => {});
     if (mockWriteFails) return Promise.reject(new Error('secure store unavailable'));
     mockPrefs.set(name, value);
     return Promise.resolve();
@@ -149,6 +152,7 @@ beforeEach(() => {
   // anyone else to the feed — so a test that wants the screen has to say which it is.
   mockPrefs.set('user-1.onboarding.taste.phase', 'active');
   mockWriteFails = false;
+  mockWriteHangs = false;
   mockReadFails.clear();
   mockReadHangs.clear();
   mockPushEnv.permission = 'unavailable';
@@ -678,5 +682,135 @@ describe('recovery after a crash during the notification step', () => {
     const view = await reopened();
     await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
     expect(view.getByText('Use a different account')).toBeTruthy();
+  });
+});
+
+/**
+ * **The screen the founder photographed on TestFlight build 4, and why it was not the
+ * contradiction it looked like.**
+ *
+ * Pressing "Explore For You" on the summary appeared to send the app *backwards* into
+ * "Build your taste", showing `5 of 5` above the copy for the very first film — "Start
+ * with one you love", "The first one needs no comparison." — before finally landing on
+ * Collection rather than For You. Read as state, those three facts cannot all be true at
+ * once, which is what made it look like corruption.
+ *
+ * They were three separate things, and only the first one was a bug about onboarding:
+ *
+ *   1. `done` was `state.data?.needed === true && ranked >= FIRST_FIVE`, and
+ *      `useCompleteTasteOnboarding` sets `needed: false` **synchronously**, before its
+ *      first await — deliberately, because routing has to see the decision immediately.
+ *      So the press itself disqualified the summary, and the ranking step rendered in its
+ *      place while the exit was still in flight.
+ *   2. `ranked` is preserved at five across that write, so the progress bar under the
+ *      wrong branch read `5 of 5` — correctly.
+ *   3. The "first one" copy was never gated on the count at all. Its only condition is an
+ *      empty search box, which is exactly what the end of the flow leaves behind.
+ *
+ * And it was held there: `finish` awaited a SecureStore write bounded at three seconds,
+ * on top of the three the notification-offer decision may already have spent. Six seconds
+ * of a screen visibly disagreeing with the button just pressed.
+ *
+ * These assert the *frames between the press and the navigation*, which every existing
+ * test in this file skips — they wait for `mockReplace` and never look at what was on
+ * screen in between.
+ */
+describe('the frames between the press and the navigation', () => {
+  const atSummary = async () => {
+    mockCounts.rankings = 5;
+    mockCounts.user_media = 5;
+    const view = await renderWithProviders(<TasteScreen />);
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+    return view;
+  };
+
+  it('never puts the summary back into the ranking step on the way out', async () => {
+    const view = await atSummary();
+
+    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
+
+    // The whole defect, stated as the thing that must never be on screen.
+    expect(view.queryByText('Build your taste')).toBeNull();
+    expect(view.queryByText('Start with one you love')).toBeNull();
+    expect(view.queryByLabelText('5 of 5 films ranked')).toBeNull();
+    expect(view.getByText('That is a start')).toBeTruthy();
+  });
+
+  it('holds the summary through the notification-offer decision, not the ranking step', async () => {
+    jest.useFakeTimers();
+    try {
+      mockReadHangs.add('push.offered');
+      const view = await atSummary();
+
+      await fireEvent.press(view.getByRole('button', { name: 'See my collection' }));
+      await act(async () => {});
+
+      // Mid-exit, with the offer decision still hanging: still the summary.
+      expect(view.getByText('That is a start')).toBeTruthy();
+      expect(view.queryByText('Build your taste')).toBeNull();
+
+      await act(async () => {
+        // The offer-decision grace in `app/onboarding/taste.tsx`.
+        jest.advanceTimersByTime(3000);
+      });
+      expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.collection);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  /**
+   * The disk write is no longer between the person and the door.
+   *
+   * `complete()` records the decision in memory and in the query cache before its first
+   * await, so there is nothing left to wait for — and waiting anyway is what spent up to
+   * three seconds per exit on a device whose Keychain was slow.
+   */
+  it('navigates without waiting for the completion write', async () => {
+    // The Keychain write that never comes back — review 47's shape, and the one this
+    // path used to sit behind for three seconds before giving up on it.
+    mockWriteHangs = true;
+
+    const view = await atSummary();
+    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
+    expect(view.getByText('That is a start')).toBeTruthy();
+  });
+
+  /**
+   * The copy follows the count, not the search box.
+   *
+   * Somebody three films in who clears the field was being told to start, and at the end
+   * of the flow the same sentence promised a comparison-free first pick under a full
+   * progress bar. Nothing in this suite asserted the pairing was impossible, which is how
+   * it reached a physical build.
+   */
+  it('does not offer first-film copy to somebody who has already ranked films', async () => {
+    mockCounts.rankings = 3;
+    mockCounts.user_media = 3;
+    const view = await renderWithProviders(<TasteScreen />);
+    await waitFor(() => expect(view.getByText('Build your taste')).toBeTruthy());
+
+    expect(view.getByLabelText('3 of 5 films ranked')).toBeTruthy();
+    expect(view.queryByText('Start with one you love')).toBeNull();
+    expect(view.queryByText(/first one needs no comparison/)).toBeNull();
+  });
+
+  /**
+   * A force-quit on the summary reopens on the summary, with buttons that work — the
+   * resume requirement, asserted as *pressable* rather than merely present. Build 4's
+   * trap was a summary whose buttons were on screen and did nothing.
+   */
+  it('recovers to a summary whose buttons still leave, after a restart', async () => {
+    const first = await atSummary();
+    first.unmount();
+    resetTasteIntent();
+
+    const view = await atSummary();
+    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
   });
 });

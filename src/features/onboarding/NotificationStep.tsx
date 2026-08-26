@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -162,11 +162,34 @@ export function NotificationStep({ onDone }: NotificationStepProps) {
    * is actually readable — particularly the `undelivered` one, which is the only place
    * the app admits something did not work.
    */
+  /**
+   * The hand-off is armed by the **answer**, and by nothing else.
+   *
+   * `onDone` is an inline arrow at the call site — `onDone={() => void finish(leaving)}` —
+   * so it is a different function on every render of the screen above. With it in the
+   * dependency array this effect tore down and re-armed the timer on each of those
+   * renders, which is two failures rather than one: a parent re-rendering faster than the
+   * pause would restart the countdown forever and never hand off at all, and once it
+   * *did* fire, `finish` writes to the query cache, the parent re-renders, and a fresh
+   * `onDone` arms it again — a second exit for a person who has already left.
+   *
+   * A ref rather than asking the caller for a stable callback, because the fix has to
+   * hold whoever writes the next call site too.
+   */
+  const done = useRef(onDone);
+  // Kept current in an effect rather than during render, which the React Compiler rules
+  // forbid outright — and rightly: a ref written mid-render is a value two concurrent
+  // renders can disagree about. The assignment lands before any timer below can fire,
+  // because effects run in order and this one has no condition to skip it.
+  useEffect(() => {
+    done.current = onDone;
+  }, [onDone]);
+
   useEffect(() => {
     if (state === 'asking' || state === 'working') return;
-    const timer = setTimeout(onDone, state === 'granted' ? 900 : 1400);
+    const timer = setTimeout(() => done.current(), state === 'granted' ? 900 : 1400);
     return () => clearTimeout(timer);
-  }, [state, onDone]);
+  }, [state]);
 
   return (
     <Screen airy includeBottomInset>

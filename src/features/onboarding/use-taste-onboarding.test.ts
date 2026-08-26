@@ -1,4 +1,4 @@
-import { waitFor } from '@testing-library/react-native';
+import { act, waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
@@ -11,9 +11,13 @@ import {
 const mockPrefs = new Map<string, unknown>();
 const mockCounts: Record<string, number | null> = {};
 const mockErrors: Record<string, unknown> = {};
+/** Preference names whose read never settles, and tables whose select never does. */
+const mockReadHangs = new Set<string>();
+const mockTableHangs = new Set<string>();
 
 jest.mock('@/lib/prefs', () => ({
-  readPref: (name: string) => Promise.resolve(mockPrefs.get(name) ?? null),
+  readPref: (name: string) =>
+    mockReadHangs.has(name) ? new Promise(() => {}) : Promise.resolve(mockPrefs.get(name) ?? null),
   writePref: () => Promise.resolve(),
 }));
 
@@ -25,11 +29,13 @@ jest.mock('@/lib/supabase', () => ({
         select: () => chain,
         eq: () => chain,
         then: (resolve: (value: unknown) => unknown) =>
-          resolve({
-            data: null,
-            error: mockErrors[table] ?? null,
-            count: mockCounts[table] ?? 0,
-          }),
+          mockTableHangs.has(table)
+            ? new Promise(() => {})
+            : resolve({
+                data: null,
+                error: mockErrors[table] ?? null,
+                count: mockCounts[table] ?? 0,
+              }),
       });
       return chain;
     },
@@ -43,6 +49,8 @@ beforeEach(() => {
   for (const key of Object.keys(mockErrors)) delete mockErrors[key];
   mockCounts.rankings = 0;
   mockCounts.user_media = 0;
+  mockReadHangs.clear();
+  mockTableHangs.clear();
   resetTasteIntent();
 });
 
@@ -188,5 +196,75 @@ describe('useTasteOnboarding', () => {
 
     expect(result.current.data?.needed).toBeUndefined();
     expect(result.current.isError).toBe(true);
+  });
+});
+
+/**
+ * **The first-run check is on the critical path of every launch, so it is bounded.**
+ *
+ * `nextRoute` deliberately moves nobody while this query is pending — `if (tastePending)
+ * return null` — which is right, because routing somebody to the feed and then yanking
+ * them into a five-step flow is worse than waiting the ~170ms the check costs. What that
+ * makes it, though, is the one query in the app that can hold the *navigator* shut, and
+ * it awaits two PostgREST counts and a Keychain read with `retry: false` behind them.
+ * None of those is a promise the platform guarantees to settle.
+ *
+ * That is the second half of the founder's ~20 second blank startup on build 4: not a
+ * frozen app, an app with nothing to route to and no reason yet to route there. A hang
+ * now resolves the way a failure already did — "not needed" — and the read is left to
+ * finish on its own if it ever does.
+ */
+describe('when the first-run check cannot answer in time', () => {
+  const hung = async () => {
+    const { result } = await renderHookWithProviders(() => useTasteOnboarding('user-1'));
+    return result;
+  };
+
+  it('gives up on a hung preference read rather than holding the app', async () => {
+    jest.useFakeTimers();
+    try {
+      mockReadHangs.add('user-1.onboarding.taste.phase');
+      const result = await hung();
+      expect(result.current.isPending).toBe(true);
+
+      await act(async () => {
+        jest.advanceTimersByTime(4000);
+      });
+
+      await waitFor(() => expect(result.current.isPending).toBe(false));
+      // Not knowing is not a reason to put somebody through the flow — the same answer a
+      // failure produces, for the same reason.
+      expect(result.current.data).toEqual({ ranked: 0, needed: false });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('gives up on a count that never comes back', async () => {
+    jest.useFakeTimers();
+    try {
+      mockTableHangs.add('rankings');
+      const result = await hung();
+
+      await act(async () => {
+        jest.advanceTimersByTime(4000);
+      });
+
+      await waitFor(() => expect(result.current.isPending).toBe(false));
+      expect(result.current.data?.needed).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('still answers properly when the platform is healthy, and is not merely fast', async () => {
+    mockCounts.rankings = 0;
+    mockCounts.user_media = 0;
+    const result = await hung();
+
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+    // An account with nothing in it is still offered the flow — the bound must not have
+    // turned every launch into "not needed".
+    expect(result.current.data).toEqual({ ranked: 0, needed: true });
   });
 });

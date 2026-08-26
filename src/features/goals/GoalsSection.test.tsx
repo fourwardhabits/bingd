@@ -22,6 +22,10 @@ const mockRpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 const mockTables: Record<string, unknown[]> = {};
 /** When set, reads never settle — the state the screen is in on a cold open. */
 let mockNeverSettles = false;
+/** When set, reads come back as a Postgres error — the state a flaky network leaves. */
+let mockFails = false;
+/** Reads served, so a retry can be shown to have re-issued a real request. */
+let mockReads = 0;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -30,10 +34,13 @@ jest.mock('@/lib/supabase', () => ({
       return Promise.resolve({ data: null, error: null });
     },
     from: (table: string) => {
-      const answer = (): Promise<unknown> =>
-        mockNeverSettles
-          ? new Promise(() => {})
+      const answer = (): Promise<unknown> => {
+        mockReads += 1;
+        if (mockNeverSettles) return new Promise(() => {});
+        return mockFails
+          ? Promise.resolve({ data: null, error: { code: '08006', message: 'connection failure' } })
           : Promise.resolve({ data: mockTables[table] ?? [], error: null });
+      };
       const chain = {
         select: () => chain,
         eq: () => chain,
@@ -55,6 +62,8 @@ beforeEach(() => {
   mockRpcCalls.length = 0;
   for (const key of Object.keys(mockTables)) delete mockTables[key];
   mockNeverSettles = false;
+  mockFails = false;
+  mockReads = 0;
 });
 
 describe('editing a goal that arrived after the first render', () => {
@@ -201,6 +210,52 @@ describe('before the goals have arrived', () => {
   });
 });
 
+/**
+ * The founder's TestFlight report: Your 2026 stayed a skeleton indefinitely.
+ *
+ * The section already told the truth about a failed read — it was the one surface on the
+ * profile that did — but it told it and then offered nothing to do about it. "Try again"
+ * with nothing to try it with means leaving the tab and coming back, which is not an
+ * instruction anybody reads off a sentence.
+ */
+describe('when the goals cannot be read', () => {
+  beforeEach(() => {
+    mockTables.watch_goals = [{ category: 'movies', target: 52 }];
+    mockTables.user_media = [];
+  });
+
+  it('says so, and offers something to do about it', async () => {
+    mockFails = true;
+
+    await renderWithProviders(<GoalsSection userId="user-1" year={2026} />);
+
+    await waitFor(() => expect(screen.getByText('Could not load your goals')).toBeTruthy());
+    expect(screen.getByText('Try again')).toBeTruthy();
+    // Not a skeleton and not the invitation: the reader has a goal, and this section
+    // failing to read it is a different sentence from their not having set one.
+    expect(screen.queryByText('Set a goal')).toBeNull();
+    // The server's own words stay off the screen.
+    expect(screen.queryByText(/08006|connection failure/)).toBeNull();
+  });
+
+  it('re-issues the read when the reader tries again', async () => {
+    mockFails = true;
+
+    await renderWithProviders(<GoalsSection userId="user-1" year={2026} />);
+    await waitFor(() => expect(screen.getByText('Try again')).toBeTruthy());
+    const before = mockReads;
+
+    mockFails = false;
+    await fireEvent.press(screen.getByText('Try again'));
+
+    // The goal that was there all along. A retry that re-rendered the cached failure
+    // would leave this waiting forever, which is what makes the read count worth taking.
+    await waitFor(() => expect(screen.getByText('0 of 52 movies')).toBeTruthy());
+    expect(mockReads).toBeGreaterThan(before);
+    expect(screen.queryByText('Could not load your goals')).toBeNull();
+  });
+});
+
 describe('with no goal set', () => {
   it('offers to take one', async () => {
     mockTables.watch_goals = [];
@@ -210,6 +265,8 @@ describe('with no goal set', () => {
 
     await waitFor(() => expect(screen.getByText('Set a goal')).toBeTruthy());
     expect(screen.queryByText('Edit')).toBeNull();
+    // An offer, not an apology — the read landed and said there is nothing set.
+    expect(screen.queryByText('Could not load your goals')).toBeNull();
   });
 });
 

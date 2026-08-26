@@ -98,6 +98,10 @@ export function GoalsSection({
             compact
             title="Could not load your goals"
             body="Check your connection and try again."
+            // The sentence told the reader to try again and gave them nothing to try it
+            // with: the only way back was to leave the tab and come back, and a section
+            // that names an action it does not offer is worse than one that stays quiet.
+            action={{ label: 'Try again', onPress: () => void goals.refetch() }}
           />
         </View>
       ) : statuses.length === 0 ? (

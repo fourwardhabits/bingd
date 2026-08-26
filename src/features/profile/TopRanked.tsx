@@ -79,6 +79,18 @@ export function TopRanked({ userId, otherName, onPressTitle }: TopRankedProps) {
   }, [filter, movies.data, seasons.data]);
 
   const loading = movies.isPending || seasons.isPending;
+  /**
+   * Either half failing is the whole wall failing.
+   *
+   * `tiles` is built from `data ?? []`, so a read that came back an error produced an
+   * empty wall and the empty wall said "Nothing ranked yet" — a sentence about how much
+   * this person has ranked, printed because a request did not come back. On the founder's
+   * own profile that was a wall of six titles reported as none.
+   *
+   * Not `&&`: half a wall is a ranking that silently omits somebody's best films, which
+   * is the one thing a top-six cannot get wrong.
+   */
+  const failed = movies.isError || seasons.isError;
   const hasBoth = (movies.data?.length ?? 0) > 0 && (seasons.data?.length ?? 0) > 0;
 
   return (
@@ -102,7 +114,25 @@ export function TopRanked({ userId, otherName, onPressTitle }: TopRankedProps) {
         </View>
       ) : null}
 
-      {loading ? (
+      {/* Error before loading, so one half failing while the other never settles cannot
+          leave a skeleton on the screen for the rest of the session. */}
+      {failed ? (
+        <EmptyState
+          kind="couldNotLoad"
+          compact
+          title="Could not load these rankings"
+          body="Check your connection and try again."
+          // Both, whichever one failed. They are one wall to the reader, and a retry that
+          // repaired only the half that broke would redraw it against a stale other half.
+          action={{
+            label: 'Try again',
+            onPress: () => {
+              void movies.refetch();
+              void seasons.refetch();
+            },
+          }}
+        />
+      ) : loading ? (
         <SkeletonRow count={3} />
       ) : tiles.length === 0 ? (
         <EmptyState

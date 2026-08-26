@@ -45,11 +45,12 @@ import {
   FilterChip,
   HeaderBoundary,
   MediumSelector,
+  MEDIUM_OPTIONS,
   PosterGrid,
   Screen,
-  SegmentedControl,
   SkeletonRow,
   type Medium as CollectionMedium,
+  type MediumSelectorOption,
 } from '@/ui/components';
 
 /**
@@ -86,15 +87,28 @@ export default function RecommendationsScreen() {
   const notifications = useNotifications(profile.id);
 
   /**
-   * Titles or People, and it is state rather than a route.
+   * What the reader is looking at, and it is state rather than a route.
    *
    * A route would put People in the back stack and make the tab bar's own "go back to
    * the top of For You" gesture land somewhere the reader did not leave. It is a mode of
-   * one screen — the segmented control is the whole navigation — and every filter,
-   * medium and scroll position on the Titles side survives a look at People and back,
-   * which is the behaviour a control that sits *inside* a screen implies.
+   * one screen — the category selector is the whole navigation — and every filter and
+   * scroll position on the title side survives a look at People and back, which is the
+   * behaviour a control that sits *inside* a screen implies.
+   *
+   * Deliberately not persisted. Collection remembers its side because a TV-heavy reader
+   * opens the same list every day; For You is a question asked fresh each visit, and an
+   * app that reopened it on People because somebody once looked there would be answering
+   * a question nobody asked twice.
    */
-  const [lane, setLane] = useState<'titles' | 'people'>('titles');
+  const [category, setCategory] = useState<ForYouCategory>('movies');
+  /**
+   * The title side the reader was last on, held separately from the category.
+   *
+   * People is not a medium, so there is no honest value for this while it is showing —
+   * and deriving one would silently move the slate query to Movies the moment somebody
+   * glanced at People from TV shows, throwing away a wall they had scrolled. Keeping the
+   * last title category means the visit to People costs the slate nothing at all.
+   */
   const [medium, setMedium] = useState<Medium>('movies');
   /** The first chip. Not a tab: see the header. */
   const [sentOnly, setSentOnly] = useState(false);
@@ -117,6 +131,11 @@ export default function RecommendationsScreen() {
    * reasoning, including why the in-flight guard has to live here too.
    */
   const sweepIntent = useSweepIntent();
+
+  const changeCategory = (next: ForYouCategory) => {
+    setCategory(next);
+    if (next !== 'people') setMedium(SELECTOR_TO_MEDIUM[next]);
+  };
 
   const slate = useForYou(profile.id, medium, filters);
   const logged = useLoggedCollection(profile.id);
@@ -260,51 +279,36 @@ export default function RecommendationsScreen() {
       />
 
       {/**
-       * **Titles or People**, and the founder's answer to Bingd having no way to find
-       * anybody (tranche 2026-08-26 §10).
+       * **Movies, TV shows, People** — one selector, and the founder's answer to Bingd
+       * having no way to find anybody (tranche 2026-08-26 §10, revised).
        *
        * For You is the screen that answers "what next", and the honest answer is
-       * sometimes a film and sometimes a person. Everything this screen already was —
-       * the wall, the filters, Sent to you, and the recommendation requests alert —
-       * lives under Titles, unchanged and in the same order. People is a second mode of
-       * the same question, not a social network bolted to the side of it.
+       * sometimes a film and sometimes a person. People was first built as a segmented
+       * control *above* this one, which gave the screen two selectors stacked in its
+       * header: a reader had to work out that the top one chose a kind of thing and the
+       * bottom one chose a category of the thing the top one had chosen. It is one
+       * question — what am I looking at — so it is one control, and People is a third
+       * option in the control that was already asking it.
        *
-       * `SegmentedControl` rather than `SegmentedTabs`, which is the app's *other*
-       * two-option control and the wrong one here by its own documentation: tabs wear
-       * `tablist`/`tab` and are drawn as chrome, and what this changes is which kind of
-       * thing the screen is about rather than which page of it you are on. It is also
-       * the control the signup privacy selector uses, so a reader has met it.
-       *
-       * Above `MediumSelector` and above the requests row, because Movies/TV shows is a
-       * narrowing *of titles* and means nothing about people — putting the two selectors
-       * the other way round would offer "TV shows" over a list of humans.
+       * The same control Collection leads with, in the same place, doing the same job.
+       * "TV shows" rather than "TV seasons" because this wall holds series: TMDB answers
+       * "similar" about a show and never about one of its seasons. Collection keeps its
+       * own two options and its own label — see `MediumSelector`.
        */}
-      <View style={styles.segment}>
-        <SegmentedControl
-          label="What to look at"
-          options={[
-            { id: 'titles', label: 'Titles', hint: 'Films and seasons recommended for you' },
-            { id: 'people', label: 'People', hint: 'People you might want to follow' },
-          ]}
-          value={lane}
-          onChange={setLane}
-        />
-      </View>
+      <MediumSelector
+        value={category}
+        onChange={changeCategory}
+        options={FOR_YOU_CATEGORIES}
+        labels={{ tv_seasons: 'TV shows' }}
+      />
+      {/* Outside the branch, because the selector above it is now the screen's entire
+      header and the seam it marks is the same one whichever category is showing. */}
+      <HeaderBoundary />
 
-      {lane === 'people' ? (
+      {category === 'people' ? (
         <PeopleDiscovery viewerId={profile.id} />
       ) : (
         <>
-          {/* The same control Collection leads with, in the same place, doing the same job.
-          "TV shows" rather than "TV seasons" because this wall holds series: TMDB
-          answers "similar" about a show and never about one of its seasons. */}
-          <MediumSelector
-            value={MEDIUM_TO_SELECTOR[medium]}
-            onChange={(next) => setMedium(SELECTOR_TO_MEDIUM[next])}
-            labels={{ tv_seasons: 'TV shows' }}
-          />
-          <HeaderBoundary />
-
           {/* Above the filters, and only when something is waiting.
 
           It sits here rather than in the filter row because it is not a filter: the
@@ -484,11 +488,21 @@ export default function RecommendationsScreen() {
   );
 }
 
+/**
+ * The three things this screen can be showing.
+ *
+ * The two title categories come from the shared table rather than being restated here,
+ * so "Movies" cannot come to mean one thing on Collection and another here; People is
+ * the addition, and the only one this screen owns.
+ */
+type ForYouCategory = CollectionMedium | 'people';
+
+const FOR_YOU_CATEGORIES: readonly MediumSelectorOption<ForYouCategory>[] = [
+  ...MEDIUM_OPTIONS,
+  { id: 'people', label: 'People' },
+];
+
 /** The screen's own medium and the shared selector's, which name different units. */
-const MEDIUM_TO_SELECTOR: Record<Medium, CollectionMedium> = {
-  movies: 'movies',
-  tv: 'tv_seasons',
-};
 const SELECTOR_TO_MEDIUM: Record<CollectionMedium, Medium> = {
   movies: 'movies',
   tv_seasons: 'tv',
@@ -637,13 +651,6 @@ function Nothing({
 }
 
 const styles = StyleSheet.create({
-  // The gutter the control needs and the breathing room under the header. `MediumSelector`
-  // owns its own padding, which is why this one is stated here rather than shared.
-  segment: {
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[3],
-    paddingBottom: theme.space[2],
-  },
   content: { paddingBottom: theme.space[10], gap: theme.space[3] },
   filterRow: {
     flexDirection: 'row',
