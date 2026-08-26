@@ -155,6 +155,27 @@ Semantics are in [`ranking.md`](./ranking.md).
 
 ## 3a. Recommending a title — implemented 2026-08-17 (`20260817001300`)
 
+> **Superseded on eligibility — 2026-08-25 (`20260826000400`, PR #46).** The mutual-follow
+> rule below is no longer the send rule. **The sender may recommend to anyone they follow
+> with an approved follow** — one-way, outbound, because that is the direction an unwanted
+> sender cannot manufacture. If the recipient also follows the sender, the recommendation
+> is delivered to their *Sent to you* list; if not, it is stored as a **pending
+> recommendation request**, surfaced on For You → Titles as *Recommendation requests · N*,
+> released individually by **Add**, discarded by **Dismiss** (a tombstone, so a later
+> follow does not resurrect it), and released in bulk when the recipient follows the
+> sender — a private sender's follow releases only after approval. The sender is
+> deliberately never told which of the two happened. A block in either direction still
+> refuses the send and stores nothing; unfollowing leaves delivered recommendations in
+> place and returns future sends to requests. The refusal reason is **`not_following`**
+> (replacing `not_mutual`; a stranger, a pending follow, a block, a suspension and a
+> missing account are still one indistinguishable answer). New RPCs:
+> `add_recommendation`, `dismiss_recommendation_request`,
+> `dismiss_all_recommendation_requests`, and a `recommendation_requests` read;
+> `recommendations_to_me` returns delivered rows only. Watch-tag eligibility (`_can_tag`)
+> **remains mutual** — the two rules parted deliberately in this migration. The product
+> contract is PRD §13's As-built block; the paragraphs below stand as the record of the
+> 2026-08-17 design.
+
 | Function | Purpose | Queueable |
 |---|---|---|
 | `recommend_title(operation_id, recipient_id, media_item_id)` | Recommend one exact title to one **mutual follow** | no |

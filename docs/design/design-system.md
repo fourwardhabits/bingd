@@ -161,7 +161,7 @@ Unselected chips render as an outlined ring in the bucket color on `surface.rais
 
 **Inter** at 400, 500, and 600. Not 700; at these sizes 600 is enough, and capping the range keeps the type feeling calm.
 
-Both are bundled as local assets and never fetched at runtime — the same failure the brand SVGs currently have (PRD §5).
+Both are embedded in the binary and never fetched over the network at runtime. *(Corrected 2026-08-25: they arrive as npm packages — `@expo-google-fonts/dm-serif-display` and `@expo-google-fonts/inter`, loaded through `useFonts` in `app/_layout.tsx` — not as files under `assets/`. The property that matters, no runtime network fetch, holds either way; the earlier phrasing implied a delivery mechanism the app does not use.)*
 
 | Token | Family | Size / line | Use |
 |---|---|---|---|
@@ -276,8 +276,9 @@ A **filled circle** in the title's bucket color, with the score in `score` type 
 
 | Size | Diameter | Where |
 |---|---|---|
+| `lg` | 56 | The score panel *(added with `ScorePanel`; this table caught up 2026-08-25)* |
 | `md` | 44 | Collection rows, search results, title page |
-| `sm` | 36 | Feed items, profile poster overlays |
+| `sm` | 40 | Feed items, profile poster overlays *(was 36; bumped in `layout.ts` so the two-line feed row reads at arm's length, and this table caught up 2026-08-25)* |
 
 Filled, not outlined. Beli's badge is an outline circle whose stroke and number share a color that tracks the score, and that cannot be reproduced here: an outline in Sage measures 2.4:1 and in Stone 3.0:1, so two of the three buckets would ship a number below the body-text floor. Filling the circle inverts the problem — the fill carries the color, the ink carries the contrast, and all three pairs in §3 clear AA. It is a more assertive badge than Beli's, which suits a list that is read at arm's length.
 

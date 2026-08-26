@@ -1,6 +1,6 @@
 # Analytics — what Bingd measures before the friend beta, and what it deliberately does not
 
-**Status:** current as of 2026-08-19. Implemented in [`src/lib/analytics.ts`](../../src/lib/analytics.ts),
+**Status:** current as of 2026-08-25 — re-verified against the reviewed pre-RC tranche (PR #48 head `7179d0d`, PR #49 head `3e90661`); the event set is unchanged since 2026-08-19, and §12 records the gaps that tranche opened. Implemented in [`src/lib/analytics.ts`](../../src/lib/analytics.ts),
 [`src/lib/release.ts`](../../src/lib/release.ts) and [`src/lib/monitoring.ts`](../../src/lib/monitoring.ts).
 
 **Companion documents:** [`growth-instrumentation.md`](./growth-instrumentation.md) ·
@@ -210,7 +210,7 @@ where it comes from.
 | `media_kind` | `movie`, `tv_season` |
 | `surface` | `search`, `collection`, `feed`, `for_you`, `sent_to_you`, `profile`, `title`, `onboarding`, `awards`, `notifications` |
 | `bucket` | `loved`, `fine`, `not_for_me` |
-| `method` | `email_code`, `apple`, `google` |
+| `method` | `email_code`, `apple`, `google`, `password` *(the store-review path — see PRD §23; added to this table 2026-08-25, the code emitted it already)* |
 | `state` | `approved`, `pending` |
 | `skipped`, `rebucket`, `has_title` | booleans |
 | `titles_ranked`, `comparisons`, `position` | counts |
@@ -494,3 +494,30 @@ Named here so that nobody has to guess whether it was forgotten. Each has an ent
 - A durable client-side analytics outbox (§9)
 - Session replay — off, and it is the single largest privacy exposure PostHog offers
 - Autocapture and screen tracking (§8 above)
+
+---
+
+## 12. Gaps opened by the 2026-08-25 tranche — recorded, not instrumented
+
+The reviewed pre-RC tranche (PRs #45–#49) shipped three surfaces the thirteen-event set
+does not observe. **Nothing here is a request to instrument now** — the sizing argument
+in §1 still holds, and adding events mid-beta splits every number into before and after.
+It is written down so that when GTM cohort evaluation needs one of these answers, the gap
+is known in advance rather than discovered in a dashboard.
+
+| New surface | What is unmeasured | What exists instead |
+|---|---|---|
+| **Recommendation requests** (PR #46) | a request being created, received, viewed, **Added** or **Dismissed**; a follow releasing held requests | `recommendation_sent` counts the send whether it delivered or was held; nothing distinguishes the two, deliberately — the *sender* is never told either (PRD §13), and an event that revealed it would leak what the product hides |
+| **For You → People** (PR #48) | the Titles/People switch, a suggestion being shown or opened, a follow attributed to People — the `surface` union has no `people` value | `follow_created` fires with an existing surface, so People-driven follows are countable in total but not attributable to the surface |
+| **Comments and reactions** (feed + conversation page) | comment written, reply, comment reaction, activity reaction — the entire feed-engagement loop | comment/reaction **notifications** exist as product behaviour, but no analytics event fires anywhere in `use-comments.ts`, `CommentThread.tsx` or `use-feed.ts` |
+
+Two smaller notes for whoever builds the GTM funnel later:
+
+- **"Number of titles ranked" is not a clean count of `ranking_completed`.** Since
+  `20260826000500`, *Rank again* also completes a session and emits one — as it should,
+  it is another placement — so per-user distinct-title counts need the database
+  (`rankings` rows), not the event stream. Activation (ten ranked titles) is unaffected:
+  the server decides it.
+- **Retention beyond "the app was opened" rests on PostHog's own lifecycle events.**
+  `Application Opened` timestamps per distinct id are the only return-session signal, and
+  that is the deliberate §11 position, not an accident.

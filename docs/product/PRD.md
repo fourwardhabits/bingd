@@ -1,11 +1,12 @@
 # bingd. — Product Requirements Document
 
-**Version:** v0.6 (public-alpha final), with **as-built corrections through 2026-08-19**
+**Version:** v0.6 (public-alpha final), with **as-built corrections through 2026-08-25**
+**Last updated:** 2026-08-25 · **Product baseline:** PR #48, reviewed head `7179d0d` (merged as `2df988c`) · **Release/native push delta:** PR #49, reviewed head `3e90661` (merged as `266b38d`)
 **Status:** Build-ready for public-alpha architecture. **Product scope re-frozen 2026-08-19.**
 **Date:** 2026-08-12, corrected 2026-08-13 after independent review — see [`change-log-v0.6.md`](./change-log-v0.6.md) §7
 **Supersedes:** `Bingd_PRD_v0.5_Finalization_Draft_20260812.pdf`
 
-**Companion documents:** [`decision-log.md`](./decision-log.md) · [`open-questions.md`](./open-questions.md) · [`change-log-v0.6.md`](./change-log-v0.6.md) · [`analytics.md`](./analytics.md) · [`deferred-roadmap.md`](./deferred-roadmap.md) · [`growth-instrumentation.md`](./growth-instrumentation.md)
+**Companion documents:** [`decision-log.md`](./decision-log.md) · [`open-questions.md`](./open-questions.md) · [`change-log-v0.6.md`](./change-log-v0.6.md) · [`analytics.md`](./analytics.md) · [`deferred-roadmap.md`](./deferred-roadmap.md) · [`growth-instrumentation.md`](./growth-instrumentation.md) · [`brand.md`](./brand.md) · [`gtm-context.md`](./gtm-context.md)
 
 ---
 
@@ -182,6 +183,8 @@ Mechanically nothing diverges from what this document already specified. Compari
 ---
 
 ## 5. Brand, visual identity, and design direction
+
+> **The canonical brand guide is [`brand.md`](./brand.md)** (added 2026-08-25). It records the name rules, the exact token values as implemented in `src/ui/tokens/`, the typography, the visual grammar and the voice, and it wins over this section where they disagree — this section keeps the founding reasoning. The implementation source of truth for values is the token files themselves, which `brand.md` quotes.
 
 ### Position and name
 
@@ -1016,7 +1019,19 @@ A fixed reaction set of six on feed activity items. One reaction per user per it
 - Skin-tone variants are **not** in v1. They are a per-reactor rendering preference rather than part of the reaction, so adding one later is an additive profile column and touches no reaction data. See [`open-questions.md`](./open-questions.md) §2.
 - Rate-limited to prevent notification flooding.
 
-> **Comments are Deferred.** Comments would make Bingd a public user-generated-content platform, requiring a comment-specific report flow, hide and delete tooling, blocked-user filtering, and a stated response commitment. Reactions deliver the acknowledgment loop — which is what drives return visits — at a small fraction of the cost. Revisit when moderation capacity exists.
+> ~~**Comments are Deferred.**~~ **Shipped — see the As-built block below.** The original reasoning is kept because it named the real cost, and the cost was paid rather than waived: comments shipped **with** their report flow (subject `comment`, §22 As-built), tombstone deletion, blocked-user filtering through `comments_read`, and rate limits. DMs, discussion boards and long-form standalone reviews remain deferred.
+
+> ### As built — 2026-08-25: comments, replies, and the conversation page
+>
+> Comments live on feed activity, and the reviewed pre-RC pass (`20260826000600`) gave them the surface they were missing.
+>
+> - **From the Feed**, the comment button on an activity opens a **bottom sheet** holding the thread.
+> - **From a comment notification**, the reader lands on a **dedicated conversation page** (`app/activity/[id]`): the activity card on top, the comments under it, Back returning to where they came from. Before this, comment notifications routed to the title page — which does not render comments at all, so the remark the reader was told about was invisible. §15's routing table records the chain.
+> - **Replies nest exactly one visual level.** A comment is either a root or a reply to a root; replying to a reply stays in the same thread at the same indentation, so a conversation reads as a list of exchanges rather than a tree.
+> - **A comment can be reacted to** — a count and a per-reader toggle on each comment, separate from the six-glyph reaction set on the activity itself.
+> - **Deletion is a tombstone when replies exist.** A retracted comment keeps its row so the replies under it keep their place; the body is gone and the surface says so. A comment with no replies is simply removed.
+> - **Visibility is inherited, never widened.** A thread is readable exactly where its activity is readable; an author the reader may not see is absent from the thread, and the conversation route cannot bypass a block or a private account.
+> - **No DMs.** A comment is public conversation on a public act, within the audience the actor's account already permits. Private messaging remains deferred.
 
 ### Watch tagging — Decided for public alpha
 
@@ -1112,9 +1127,15 @@ A **Notifications** sub-page under Settings with:
 - A master **Turn all off**.
 - Honest reflection of OS-level permission state. If the operating system permission is denied or revoked, the screen must say so and offer a link to system settings rather than showing enabled toggles that do nothing.
 
-### Permission timing — Recommended
+### Permission timing — ~~Recommended~~ superseded, see the As-built block
 
-Never request push permission at first launch. Request after the user's first successful invite or first follow, when the value is concrete.
+~~Never request push permission at first launch. Request after the user's first successful invite or first follow, when the value is concrete.~~
+
+> ### As built — 2026-08-25: an onboarding step asks, and the OS is asked only on a tap
+>
+> **The rule above is superseded, not implemented.** Onboarding carries an explicit notification step — **Stay in the loop**, over *"Know when friends follow you, recommend something, or interact with what you watched."*, with **Turn on notifications** and **Not now** (`src/features/onboarding/NotificationStep.tsx`) — so the question **is** put during first launch, before any invite or follow exists. What the old rule was protecting survives in a different mechanism: the OS permission dialog appears **only after a deliberate tap on Turn on notifications**, never as a side effect of reaching the screen or launching the app, so the app's own recoverable question always precedes the OS's unrecoverable one, and a reader who taps Not now costs the product nothing it cannot recover.
+>
+> The step is skipped entirely when the OS has already answered (granted or blocked), on a platform with no push, or when Bingd has already put the question once anywhere. **The contextual primer is the fallback, not a duplicate**: both surfaces share one predicate (`shouldOfferPush`) and one offered-flag, so a reader meets the question at most once. "Not now" is recoverable in Settings; there is no immediate re-nag.
 
 ---
 
@@ -1164,15 +1185,15 @@ Each type has an ordered chain whose last link always resolves. Staleness is rea
 | `follow_request` | requester's profile | unavailable notice |
 | `follow` | follower's profile | unavailable notice |
 | `follow_approved` | approver's profile | unavailable notice |
-| `comment` | the title | unavailable notice |
-| `reaction` | the title | unavailable notice |
+| `comment` | the conversation page for the activity *(since `20260826000600`)* | the title, then unavailable notice |
+| `reaction` | the conversation page for the activity *(since `20260826000600`)* | the title, then unavailable notice |
 | `watch_tag` | the Movie or Season | unavailable notice |
 | `recommendation` | the Movie or Season | recommender's profile, then unavailable |
 | `invite_activated` | the joined user's profile | unavailable notice |
 | `invite_welcome` | the inviter's profile | unavailable notice |
 | `award_earned` | the Awards sheet | — |
 
-**Comment and reaction route to the title rather than to the exact feed event, deliberately.** There is no per-event route, and the feed tab is a paginated list of *followees'* activity — a reader's own event does not appear in it at all. Routing to a screen that cannot contain the subject is worse than routing to its parent. Deferred as [`deferred-roadmap.md`](./deferred-roadmap.md) §6.
+~~**Comment and reaction route to the title rather than to the exact feed event, deliberately.**~~ **Superseded 2026-08-25 (`20260826000600`).** Both now route to the **conversation page** for the event first — `app/activity/[id]`, which reads one event by id through `feed_events_read` and so does not care whose feed the row would have appeared in. The old argument was sound about the parent and wrong about the subject: the title page does not render comments, so a reader tapping "Ada commented on your activity" arrived somewhere the remark was invisible. The title stays as the second link in the chain because the two ways the notification goes stale are different — a deleted event still has a title, a delisted title still has its event. [`deferred-roadmap.md`](./deferred-roadmap.md) §6 records the closure.
 
 #### What is **not** built
 
@@ -2077,7 +2098,7 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
    - **The credentials** — open, and a founder task. APNs `.p8` / Key ID / Team ID on Apple; a Firebase project, `google-services.json` and an FCM V1 service account on Google. The checklist is in [`push-sender/README.md`](../../supabase/functions/push-sender/README.md).
 6. ~~Push **delivery** is disabled by a server-side flag, and no push is delivered in v1.~~ **Restated 2026-08-24.** There is no server-side delivery flag and there never was one. What gates delivery is the absence of a production binary carrying the native push configuration, and — until the founder supplies them — the absence of APNs and FCM credentials. The friend beta is on a binary that predates that configuration, deliberately, so no push is delivered there either.
 7. ~~Enabling the flag requires no new native build and no store submission.~~ **False, corrected 2026-08-24.** It requires both. The native configuration — `aps-environment: production` and `googleServicesFile` — cannot be changed over the air. See item 5 above and [`deferred-roadmap.md`](./deferred-roadmap.md) §4.
-8. Push permission is never requested at first launch; it is requested after the first invite or follow.
+8. ~~Push permission is never requested at first launch; it is requested after the first invite or follow.~~ **Superseded 2026-08-25:** an explicit onboarding step — Stay in the loop — offers notifications during first launch, and the OS dialog appears only after a deliberate tap on Turn on notifications, never automatically; the contextual primer is the mutually-exclusive fallback. See §15's As-built block.
 9. If OS permission is denied, the preferences screen states this and links to system settings.
 10. Sync-failure notices appear in the inbox and never as push.
 
@@ -2298,7 +2319,7 @@ v0.5 used two near-definitions interchangeably; this is the canonical one. See I
 | Premium messaging damages a free alpha | No prices, no purchases, no Pro badge; nothing before the first ranking reveal; growth loops permanently free |
 | Alpha users lose data when subscriptions launch | Universal over-limit rule: read-only, never destructive; all imports preserved; `founding_member` recorded from day one |
 | Early Access silently becomes permanent | Every grant carries an expiry |
-| UGC moderation obligations underestimated | Reactions carry no free text; report flow and blocking in v1; comments deferred until moderation capacity exists |
+| UGC moderation obligations underestimated | Reactions carry no free text; report flow and blocking in v1; comments shipped **with** their report subject, tombstone deletion and rate limits rather than ahead of them (§14, §22 As-built) |
 | Name or trademark conflict | HG-3 before public launch |
 | Android verification deadline missed | HG-2, deadline 2026-09-30 |
 | Agent-built code carries invisible defects | Required independent review on sensitive surfaces; automated checks on `main`; no autonomous deploy. Observed 2026-08-13: a review found four RLS defects that the test suite could not have caught, because the harness ran as the table owner and no policy was ever enforced |
