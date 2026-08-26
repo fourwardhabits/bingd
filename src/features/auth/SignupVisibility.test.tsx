@@ -54,6 +54,7 @@ jest.mock('@/features/auth', () => ({
   usernameAvailability: () => Promise.resolve(true),
   takePendingDisplayName: () => Promise.resolve(null),
   clearPendingDisplayName: jest.fn(),
+  UseDifferentAccountButton: () => null,
 }));
 
 jest.mock('@/lib/analytics', () => ({ track: jest.fn() }));

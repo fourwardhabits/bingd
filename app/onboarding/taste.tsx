@@ -2,7 +2,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { useCurrentProfile } from '@/features/auth';
+import { useCurrentProfile, UseDifferentAccountButton } from '@/features/auth';
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
 import {
   NotificationStep,
@@ -18,6 +18,7 @@ import {
 } from '@/features/onboarding/use-taste-onboarding';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
+import { withGrace } from '@/lib/grace';
 import { posterUri } from '@/lib/images';
 import { TAB_ROUTES, type TabRoute } from '@/lib/routes';
 import { theme } from '@/ui/tokens';
@@ -55,6 +56,15 @@ import {
  * Movies only. TV is ranked per season and a season is reached through its series, which
  * is two navigations deep and the wrong thing to meet in the first minute.
  */
+/**
+ * How long an exit will wait to know whether the notification question is owed, and for
+ * the completion write, before leaving anyway. Both bound local reads and writes that
+ * settle in milliseconds when the platform is healthy; the bound is only ever felt on
+ * the hangs review 47 named, where the alternative is the build-4 dead buttons.
+ */
+const OFFER_DECISION_GRACE_MS = 3000;
+const COMPLETE_GRACE_MS = 3000;
+
 export default function TasteOnboardingScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
@@ -154,19 +164,54 @@ export default function TasteOnboardingScreen() {
    * the two would make a flag about the collection mean something about a permission.
    */
   const finish = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
-    await complete({ skipped });
+    // `complete` records the flow-ending decision synchronously — memory and query cache
+    // both, before its first await — so navigating at the deadline is safe: routing
+    // already sees `needed: false`, and only the disk write may still be in flight. The
+    // bound exists because that write is SecureStore, which review 47 was right to call
+    // a promise the platform may never settle; `withGrace` also absorbs a rejection, so
+    // this cannot throw into the `void` press handler. Leaving wins, always.
+    await withGrace(complete({ skipped }), COMPLETE_GRACE_MS, undefined);
     router.replace(to);
   };
 
+  /**
+   * Whether to put the notification question on the way out — and `false` whenever the
+   * answer cannot be established *or cannot be established in time*. The build-4
+   * stranding taught the rule: every await on this path runs between a button press and
+   * the navigation it promised, so none of them may reject upward (the press would die
+   * silently) and none may hold the exit — a SecureStore read or a permissions call
+   * that never settles is the same trap as the one being fixed (review 47's first
+   * blocker). Not being able to decide is not a reason to keep somebody out of the
+   * app; the contextual primer remains for anyone the offer never reached.
+   */
+  const shouldOfferNotifications = () =>
+    withGrace(
+      (async () => shouldShowNotificationStep(await pushAlreadyOffered()))(),
+      OFFER_DECISION_GRACE_MS,
+      false,
+    );
+
+  // A ref, not state: it exists to make a second press during the checks a no-op, and
+  // nothing renders from it. The summary's two buttons stay visually live — the checks
+  // are quick — but two presses must not race two navigations.
+  const departing = useRef(false);
+
   const leave = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
-    // Resolved now rather than on mount: the OS state can change while somebody is
-    // ranking five films — they may have granted it from a system prompt elsewhere — and
-    // an answer cached at the start of the flow would ask a question already settled.
-    if (await shouldShowNotificationStep(await pushAlreadyOffered())) {
-      setLeaving({ skipped, to });
-      return;
+    if (departing.current) return;
+    departing.current = true;
+    try {
+      // Resolved now rather than on mount: the OS state can change while somebody is
+      // ranking five films — they may have granted it from a system prompt elsewhere —
+      // and an answer cached at the start of the flow would ask a question already
+      // settled.
+      if (await shouldOfferNotifications()) {
+        setLeaving({ skipped, to });
+        return;
+      }
+      await finish({ skipped, to });
+    } finally {
+      departing.current = false;
     }
-    await finish({ skipped, to });
   };
 
   // Nothing until the answer arrives. Rendering the flow first and then deciding shows
@@ -296,6 +341,10 @@ export default function TasteOnboardingScreen() {
               kind="tertiary"
               onPress={() => void leave({ skipped: true, to: TAB_ROUTES.feed })}
             />
+            {/* This screen has no header and Settings is unreachable from it, so for
+                the wrong account signed in on this phone it would otherwise be a locked
+                room — see `UseDifferentAccountButton`. */}
+            <UseDifferentAccountButton />
           </View>
         </>
       )}
@@ -438,6 +487,10 @@ function Summary({
       <View style={styles.summaryActions}>
         <Button label="Explore For You" onPress={onExplore} />
         <Button label="See my collection" kind="secondary" onPress={onCollection} />
+        {/* The summary is as far from Settings as the flow above it, and the build-4
+            stranding happened exactly here — so the way out for a wrong account is
+            offered on this branch too, under the real actions rather than beside them. */}
+        <UseDifferentAccountButton />
       </View>
     </View>
   );

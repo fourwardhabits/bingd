@@ -23,7 +23,11 @@ const mockPush = {
   permission: 'undetermined' as string,
   requested: 0,
   requestResult: 'granted' as string,
+  /** `never` leaves the promise unsettled for good — the APNs lane build 4 hit. */
   registerResult: 'registered' as string,
+  registerRejects: false,
+  requestRejects: false,
+  offeredRejects: false,
   registered: 0,
   offered: 0,
 };
@@ -32,6 +36,7 @@ jest.mock('@/features/notifications/push', () => ({
   pushPermission: () => Promise.resolve(mockPush.permission),
   requestPushPermission: () => {
     mockPush.requested += 1;
+    if (mockPush.requestRejects) return Promise.reject(new Error('permission api down'));
     return Promise.resolve(mockPush.requestResult);
   },
   noteFailure: jest.fn(),
@@ -42,10 +47,13 @@ jest.mock('@/features/notifications/push-permission', () => ({
     permission === 'undetermined' && !offered,
   markPushOffered: () => {
     mockPush.offered += 1;
+    if (mockPush.offeredRejects) return Promise.reject(new Error('secure store unavailable'));
     return Promise.resolve();
   },
   registerThisDevice: () => {
     mockPush.registered += 1;
+    if (mockPush.registerRejects) return Promise.reject(new Error('registration blew up'));
+    if (mockPush.registerResult === 'never') return new Promise(() => {});
     return Promise.resolve(mockPush.registerResult);
   },
 }));
@@ -61,6 +69,9 @@ beforeEach(() => {
   mockPush.requested = 0;
   mockPush.requestResult = 'granted';
   mockPush.registerResult = 'registered';
+  mockPush.registerRejects = false;
+  mockPush.requestRejects = false;
+  mockPush.offeredRejects = false;
   mockPush.registered = 0;
   mockPush.offered = 0;
 });
@@ -203,5 +214,122 @@ describe('the step itself', () => {
     // And it still says what does work, because the inbox genuinely does.
     expect(view.getByText(/still see everything in the app/)).toBeTruthy();
     await waitFor(() => expect(onDone).toHaveBeenCalled());
+  });
+});
+
+/**
+ * **No path may end in a permanent "One moment…".** TestFlight build 4, physical device,
+ * founder session: permission accepted, `getExpoPushTokenAsync` never settled — the
+ * platform is allowed to simply not call back — and the unbounded `await` behind the
+ * busy state held onboarding shut for good. Every test here is a way the platform can
+ * fail; every assertion is that the person still gets in.
+ */
+describe('registration never gates the exit', () => {
+  it('finishes onboarding when registration hangs forever, saying only what is true', async () => {
+    jest.useFakeTimers();
+    try {
+      mockPush.registerResult = 'never';
+      const { view, onDone } = await open();
+
+      await act(async () => {
+        fireEvent.press(view.getByText('Turn on notifications'));
+      });
+      // Still inside the grace: the screen is honestly working, not stuck.
+      expect(view.getByText('One moment…')).toBeTruthy();
+      expect(onDone).not.toHaveBeenCalled();
+
+      // The grace spends itself and the screen continues without an outcome — and
+      // without inventing one: neither the success copy nor the failure copy shows.
+      await act(async () => {
+        jest.advanceTimersByTime(5000);
+      });
+      expect(view.getByText(/Still setting up notifications in the background/)).toBeTruthy();
+      expect(view.queryByText('You are all set')).toBeNull();
+      expect(view.queryByText(/cannot send notifications/)).toBeNull();
+
+      await act(async () => {
+        jest.advanceTimersByTime(1400);
+      });
+      expect(onDone).toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('finishes onboarding when the registration promise rejects', async () => {
+    mockPush.registerRejects = true;
+    const { view, onDone } = await open();
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Turn on notifications'));
+    });
+
+    await waitFor(() => expect(view.getByText(/cannot send notifications/)).toBeTruthy());
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+  });
+
+  it('finishes onboarding when the permission request itself rejects', async () => {
+    mockPush.requestRejects = true;
+    const { view, onDone } = await open();
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Turn on notifications'));
+    });
+
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+  });
+
+  /**
+   * The pre-fix code awaited `markPushOffered` inside the same try, so a SecureStore
+   * failure skipped the operating system entirely and reported "undelivered" to
+   * somebody who was never asked. The offer note is best-effort; the question is not.
+   */
+  it('still asks the operating system when recording the offer fails', async () => {
+    mockPush.offeredRejects = true;
+    const { view, onDone } = await open();
+
+    await act(async () => {
+      fireEvent.press(view.getByText('Turn on notifications'));
+    });
+
+    expect(mockPush.requested).toBe(1);
+    await waitFor(() => expect(view.getByText('You are all set')).toBeTruthy());
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+  });
+
+  /**
+   * The escape hatch. While the OS dialog is up it is modal and this button cannot be
+   * reached; the only person who can press it mid-work is one the platform has left
+   * staring at "One moment…" — the founder's exact position on build 4.
+   */
+  it('leaves Not now pressable while working, as the way out of a hang', async () => {
+    jest.useFakeTimers();
+    try {
+      mockPush.registerResult = 'never';
+      const { view, onDone } = await open();
+
+      await act(async () => {
+        fireEvent.press(view.getByText('Turn on notifications'));
+      });
+      await act(async () => {
+        fireEvent.press(view.getByText('Not now'));
+      });
+
+      expect(view.getByText('No problem')).toBeTruthy();
+
+      // And a late outcome must not overwrite the exit the person already took.
+      await act(async () => {
+        jest.advanceTimersByTime(5000);
+      });
+      expect(view.queryByText('You are all set')).toBeNull();
+      expect(view.queryByText(/Still setting up/)).toBeNull();
+
+      await act(async () => {
+        jest.advanceTimersByTime(1400);
+      });
+      expect(onDone).toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

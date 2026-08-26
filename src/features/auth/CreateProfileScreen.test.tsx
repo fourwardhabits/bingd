@@ -53,6 +53,12 @@ jest.mock('@/features/auth', () => ({
   usernameAvailability: () => Promise.resolve({ state: 'idle' }),
   takePendingDisplayName: () => Promise.resolve(null),
   clearPendingDisplayName: jest.fn(),
+  // See `account-escape.test.tsx` for the behaviour; here only its presence matters.
+  UseDifferentAccountButton: () => {
+    const React = jest.requireActual('react');
+    const { Text } = jest.requireActual('react-native');
+    return React.createElement(Text, null, 'Use a different account');
+  },
 }));
 
 jest.mock('@/lib/analytics', () => ({ track: jest.fn() }));
@@ -189,5 +195,21 @@ describe('the terms acknowledgment at signup', () => {
     await waitFor(() => expect(view.getByText(/By creating an account/)).toBeTruthy());
     expect(view.queryByLabelText(/agree to the terms/i)).toBeNull();
     expect(view.queryByText(/^I agree$/)).toBeNull();
+  });
+});
+
+/**
+ * **The screen is no longer a locked room.** Build 4, physical device: signed in with
+ * the wrong email, landed here, and there was no way out — Settings is behind the
+ * profile gate and an iOS reinstall keeps the Keychain session. The escape's behaviour
+ * lives in `account-escape.test.tsx`; what this suite pins is that "Pick your name"
+ * actually offers it.
+ */
+describe('the way out of the wrong account', () => {
+  it('offers Use a different account beneath the form', async () => {
+    const view = await renderWithProviders(<CreateProfileScreen />);
+
+    await waitFor(() => expect(view.getByText('Pick your name')).toBeTruthy());
+    expect(view.getByText('Use a different account')).toBeTruthy();
   });
 });

@@ -2,7 +2,11 @@ import { waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { useTasteOnboarding } from './use-taste-onboarding';
+import {
+  resetTasteIntent,
+  useCompleteTasteOnboarding,
+  useTasteOnboarding,
+} from './use-taste-onboarding';
 
 const mockPrefs = new Map<string, unknown>();
 const mockCounts: Record<string, number | null> = {};
@@ -39,6 +43,7 @@ beforeEach(() => {
   for (const key of Object.keys(mockErrors)) delete mockErrors[key];
   mockCounts.rankings = 0;
   mockCounts.user_media = 0;
+  resetTasteIntent();
 });
 
 const read = async () => {
@@ -145,6 +150,30 @@ describe('useTasteOnboarding', () => {
 
     const result = await read();
     expect(result.current.data?.ranked).toBe(3);
+  });
+
+  /**
+   * **Account B does not inherit account A's onboarding.** The account-escape hotfix
+   * makes switching accounts on one device an ordinary act, so the per-account keying
+   * of both the memory intent and the disk phase stops being theoretical: A finishing
+   * the flow and signing out must leave B's first launch reading as B's, in both
+   * directions.
+   */
+  it('keeps one account’s decision away from the next account on the device', async () => {
+    const { result: complete } = await renderHookWithProviders(() =>
+      useCompleteTasteOnboarding('user-a'),
+    );
+    await complete.current({ skipped: false });
+
+    // A is finished, held in memory whatever the disk did.
+    const { result: again } = await renderHookWithProviders(() => useTasteOnboarding('user-a'));
+    await waitFor(() => expect(again.current.isPending).toBe(false));
+    expect(again.current.data?.needed).toBe(false);
+
+    // B, fresh on the same device, is offered the flow — A's `done` is not B's.
+    const { result: other } = await renderHookWithProviders(() => useTasteOnboarding('user-b'));
+    await waitFor(() => expect(other.current.isPending).toBe(false));
+    expect(other.current.data?.needed).toBe(true);
   });
 
   it('does not put anyone through the flow when it cannot tell', async () => {

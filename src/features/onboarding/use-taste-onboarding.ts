@@ -189,6 +189,25 @@ export function useCompleteTasteOnboarding(userId: string) {
        * progress bar was showing when they left, which is the number the event is about.
        */
       const ended = intent.get(userId);
+
+      // Synchronously, and before the write is awaited. `begin` checks this immediately
+      // before its own write, which is what closes the race review found: begin reads an
+      // absent phase, the user presses "Not now", complete writes `skipped`, and begin's
+      // in-flight write then puts `active` back on top of it.
+      //
+      // And before the analytics call, which is the build-4 hotfix's ordering rule: the
+      // decision that ends the flow is state the router depends on, so it is recorded
+      // before anything that can fail. An exit that died between the button and this
+      // line was an exit that never happened — the person stayed "active" and was held
+      // on the screen they had just left.
+      intent.set(userId, phase);
+
+      // The session honours the choice whether or not the disk does.
+      queryClient.setQueryData(queryKeys.tasteOnboarding(userId), (previous?: TasteOnboarding) => ({
+        ranked: previous?.ranked ?? 0,
+        needed: false,
+      }));
+
       if (ended !== 'done' && ended !== 'skipped') {
         track({
           name: 'onboarding_completed',
@@ -200,17 +219,6 @@ export function useCompleteTasteOnboarding(userId: string) {
           },
         });
       }
-      // Synchronously, and before the write is awaited. `begin` checks this immediately
-      // before its own write, which is what closes the race review found: begin reads an
-      // absent phase, the user presses "Not now", complete writes `skipped`, and begin's
-      // in-flight write then puts `active` back on top of it.
-      intent.set(userId, phase);
-
-      // The session honours the choice whether or not the disk does.
-      queryClient.setQueryData(queryKeys.tasteOnboarding(userId), (previous?: TasteOnboarding) => ({
-        ranked: previous?.ranked ?? 0,
-        needed: false,
-      }));
 
       await writePref<TastePhase>(phaseKey(userId), phase).catch(() => {});
     },

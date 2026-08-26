@@ -8,6 +8,7 @@ import {
   shouldOfferPush,
 } from '@/features/notifications/push-permission';
 import { noteFailure, pushPermission, requestPushPermission } from '@/features/notifications/push';
+import { withGrace } from '@/lib/grace';
 import { Button, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -66,7 +67,25 @@ export type NotificationStepProps = {
   onDone: () => void;
 };
 
-type State = 'asking' | 'working' | 'granted' | 'undelivered' | 'declined';
+type State = 'asking' | 'working' | 'granted' | 'pending' | 'undelivered' | 'declined';
+
+/**
+ * How long the screen will wait for an honest answer before continuing without one.
+ *
+ * **The wait is for the sentence, never for the entry.** The founder's TestFlight
+ * build 4 session proved the lane this bounds: `getExpoPushTokenAsync` is a promise the
+ * platform is allowed to never settle — APNs simply not calling back is a documented
+ * behaviour, not a crash — and an unbounded `await` on it left a person on
+ * "One moment…" for good, with five ranked films and a working account on the other
+ * side of it. Registration itself is not cancelled at the deadline; the attempt keeps
+ * running, and `usePush` re-registers on every launch where permission exists, so the
+ * only thing given up is knowing the outcome *right now* — which is what the `pending`
+ * copy says.
+ */
+const REGISTRATION_GRACE_MS = 5000;
+
+/** A preference write is local and quick; a hung one must not trap the screen. */
+const PREF_WRITE_GRACE_MS = 1500;
 
 export function NotificationStep({ onDone }: NotificationStepProps) {
   const profile = useCurrentProfile();
@@ -77,29 +96,62 @@ export function NotificationStep({ onDone }: NotificationStepProps) {
     try {
       // Written before the OS is touched, and for both answers — see `markPushOffered`.
       // A crash between the request and the write would otherwise leave somebody who has
-      // already been asked eligible to be asked again by the contextual primer.
-      await markPushOffered();
+      // already been asked eligible to be asked again by the contextual primer. Bounded
+      // and best-effort: a preference that could not be written costs one repeat of a
+      // recoverable question, which is nothing next to holding the person here.
+      await withGrace(
+        markPushOffered().catch(() => undefined),
+        PREF_WRITE_GRACE_MS,
+        undefined,
+      );
 
+      // Deliberately unbounded: this settles when the person answers the OS dialog, and
+      // while that dialog is up "One moment…" behind it is the truth. The escape from a
+      // dialog that never appears is "Not now", which stays live below.
       const granted = await requestPushPermission();
       if (granted !== 'granted') {
-        setState('declined');
+        settleFromWorking('declined');
         return;
       }
 
-      const outcome = await registerThisDevice(profile.id);
-      setState(outcome === 'registered' ? 'granted' : 'undelivered');
+      /**
+       * **Registration never gates the exit.** The race is the state model, not a
+       * shortened timeout: whichever side settles first, this function reaches a
+       * `setState` and the effect below reaches `onDone`. A slow or never-settling
+       * registration continues in the background and is retried by `usePush` on the
+       * next launch; what it can no longer do is keep somebody out of the app.
+       */
+      const outcome = await withGrace(
+        registerThisDevice(profile.id).catch((error) => {
+          noteFailure('token_registration', error, { moment: 'onboarding' });
+          return 'failed' as const;
+        }),
+        REGISTRATION_GRACE_MS,
+        'pending' as const,
+      );
+      settleFromWorking(
+        outcome === 'registered' ? 'granted' : outcome === 'pending' ? 'pending' : 'undelivered',
+      );
     } catch (error) {
       // Nothing here is worth interrupting onboarding for. The account exists, the films
       // are ranked, and this was the optional step.
       noteFailure('permission_request', error, { moment: 'onboarding' });
-      setState('undelivered');
+      settleFromWorking('undelivered');
     }
   };
+
+  /**
+   * Applies an answer only if the screen is still waiting for one. "Not now" stays live
+   * while `working` (it is the escape from an OS dialog that never appeared), so a late
+   * outcome must not overwrite an exit the person has already taken.
+   */
+  const settleFromWorking = (next: State) =>
+    setState((current) => (current === 'working' ? next : current));
 
   const notNow = () => {
     // No OS request, deliberately. But the offer is recorded, so the contextual primer
     // does not put the same question again five minutes later — see `markPushOffered`.
-    void markPushOffered();
+    void markPushOffered().catch(() => {});
     setState('declined');
   };
 
@@ -126,6 +178,20 @@ export function NotificationStep({ onDone }: NotificationStepProps) {
             </Text>
             <Text variant="body" tone="secondary" style={styles.centre}>
               We will let you know when something happens.
+            </Text>
+          </>
+        ) : state === 'pending' ? (
+          <>
+            {/* The bounded-wait branch: permission is on and the outcome is not yet
+                known. It claims neither success nor failure, because at this moment
+                neither is true — registration is still running behind this sentence,
+                and `usePush` retries it on every launch where permission exists. */}
+            <Text variant="title1" style={styles.centre}>
+              Thanks
+            </Text>
+            <Text variant="body" tone="secondary" style={styles.centre}>
+              Still setting up notifications in the background. You will see everything in
+              the app either way.
             </Text>
           </>
         ) : state === 'undelivered' ? (
@@ -171,13 +237,12 @@ export function NotificationStep({ onDone }: NotificationStepProps) {
                 disabled={state === 'working'}
                 disabledReason="Asking your phone."
               />
-              <Button
-                label="Not now"
-                kind="tertiary"
-                onPress={notNow}
-                disabled={state === 'working'}
-                disabledReason="Asking your phone."
-              />
+              {/* Live during `working`, deliberately. While the OS dialog is up it is
+                  unreachable anyway — the dialog is modal — so the only person who can
+                  press this mid-work is one the platform has left staring at
+                  "One moment…", and they must always have a way out. `settleFromWorking`
+                  keeps a late outcome from overwriting the exit. */}
+              <Button label="Not now" kind="tertiary" onPress={notNow} />
             </View>
           </>
         )}

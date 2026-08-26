@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -14,12 +14,51 @@ const mockRpc = jest.fn();
 const mockReplace = jest.fn();
 const mockPrefs = new Map<string, unknown>();
 let mockWriteFails = false;
+/** Preference names whose *read* rejects — the SecureStore lane of the build-4 pin. */
+const mockReadFails = new Set<string>();
+/** Preference names whose read never settles — review 47's first blocker, pinned. */
+const mockReadHangs = new Set<string>();
 const mockTableRows: Record<string, unknown[]> = {};
 /** Rows a `count: 'exact', head: true` select should report, keyed by table. */
 const mockCounts: Record<string, number> = {};
 
+/**
+ * The operating-system half of the notification step, controllable per test.
+ *
+ * `push-permission.ts` runs real in this suite — it is part of the path under test —
+ * and everything it touches of the platform comes through `push.ts`, so this one mock
+ * stands in for the phone. `unavailable` is the default so the many tests that are not
+ * about notifications skip the step, exactly as a simulator does.
+ */
+const mockPushEnv = {
+  permission: 'unavailable' as string,
+  requestResult: 'granted' as string,
+  registered: 0,
+};
+
+jest.mock('@/features/notifications/push', () => ({
+  pushPermission: () => Promise.resolve(mockPushEnv.permission),
+  requestPushPermission: () => Promise.resolve(mockPushEnv.requestResult),
+  noteFailure: jest.fn(),
+  pushPlatform: () => 'ios',
+  pushSessionEpoch: () => 0,
+  acquirePushToken: () => Promise.resolve('ExponentPushToken[test]'),
+  registerPushToken: () => {
+    mockPushEnv.registered += 1;
+    return Promise.resolve('ok');
+  },
+  revokePushToken: () => Promise.resolve('ok'),
+  rememberToken: jest.fn(),
+  forgetToken: jest.fn(),
+  trackDispatchedWrite: (write: Promise<unknown>) => write,
+}));
+
 jest.mock('@/lib/prefs', () => ({
-  readPref: (name: string) => Promise.resolve(mockPrefs.get(name) ?? null),
+  readPref: (name: string) => {
+    if (mockReadHangs.has(name)) return new Promise(() => {});
+    if (mockReadFails.has(name)) return Promise.reject(new Error('secure store unavailable'));
+    return Promise.resolve(mockPrefs.get(name) ?? null);
+  },
   writePref: (name: string, value: unknown) => {
     if (mockWriteFails) return Promise.reject(new Error('secure store unavailable'));
     mockPrefs.set(name, value);
@@ -58,6 +97,14 @@ jest.mock('expo-router', () => ({
 
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({ id: 'user-1', username: 'sai', display_name: 'Sai' }),
+  // A visible stand-in rather than null, so this suite can assert the escape route is
+  // offered without dragging the real sign-out stack into a screen test — the
+  // behaviour behind the label is `account-escape.test.tsx`'s job.
+  UseDifferentAccountButton: () => {
+    const React = jest.requireActual('react');
+    const { Text } = jest.requireActual('react-native');
+    return React.createElement(Text, null, 'Use a different account');
+  },
 }));
 
 let issued = 0;
@@ -102,6 +149,11 @@ beforeEach(() => {
   // anyone else to the feed — so a test that wants the screen has to say which it is.
   mockPrefs.set('user-1.onboarding.taste.phase', 'active');
   mockWriteFails = false;
+  mockReadFails.clear();
+  mockReadHangs.clear();
+  mockPushEnv.permission = 'unavailable';
+  mockPushEnv.requestResult = 'granted';
+  mockPushEnv.registered = 0;
   resetTasteIntent();
 });
 
@@ -499,5 +551,132 @@ describe('where onboarding lets go', () => {
     // recorded in prefs — an account left `active` would be held on this screen again on
     // the next launch, which is the half of `leave` that had to survive the fix.
     await waitFor(() => expect([...mockPrefs.values()]).toContain('done'));
+  });
+});
+
+/**
+ * **The destination survives the notification step.** The founder tapped "Explore For
+ * You", answered the permission question, and had to land on For You — not the Feed,
+ * and not back on the summary. The exit is captured before the step is shown and used
+ * after it, whichever answer the step gets.
+ */
+describe('the notification step on the way out', () => {
+  const finished = () => {
+    mockCounts.rankings = 5;
+    mockCounts.user_media = 5;
+    return renderWithProviders(<TasteScreen />);
+  };
+
+  it('keeps Explore For You pointed at For You through Turn on notifications', async () => {
+    mockPushEnv.permission = 'undetermined';
+    const view = await finished();
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+    await waitFor(() => expect(view.getByText('Stay in the loop')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Turn on notifications' }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
+    expect(mockReplace).not.toHaveBeenCalledWith(TAB_ROUTES.feed);
+  });
+
+  it('keeps See my collection pointed at the collection through Not now', async () => {
+    mockPushEnv.permission = 'undetermined';
+    const view = await finished();
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'See my collection' }));
+    await waitFor(() => expect(view.getByText('Stay in the loop')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.collection));
+  });
+});
+
+/**
+ * **The reopened app after the build-4 crash, as a suite.** Phase `active` on disk,
+ * five films ranked, the OS permission already granted, the offer already recorded —
+ * exactly the state the founder reopened into, where both summary buttons had died.
+ * What these pin is that every exit ends in a navigation, whatever the phone's
+ * storage or permission plumbing does on the way.
+ */
+describe('recovery after a crash during the notification step', () => {
+  const reopened = () => {
+    mockCounts.rankings = 5;
+    mockCounts.user_media = 5;
+    mockPrefs.set('push.offered', true);
+    mockPushEnv.permission = 'granted';
+    return renderWithProviders(<TasteScreen />);
+  };
+
+  it('returns to the summary and lets the buttons finish the job', async () => {
+    const view = await reopened();
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+
+    // The question is not put twice: permission exists and the offer is recorded, so
+    // the tap goes straight to the destination that was chosen.
+    expect(view.queryByText('Stay in the loop')).toBeNull();
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
+  });
+
+  /**
+   * The dead-button pin. Before the fix, `leave` awaited a SecureStore read with no
+   * catch: one rejection and the press died silently — buttons on screen, nothing
+   * behind them, which is the founder's step 11 verbatim.
+   */
+  it('still leaves when the offer preference cannot be read', async () => {
+    mockReadFails.add('push.offered');
+    const view = await reopened();
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
+  });
+
+  /**
+   * Review 47's first blocker: a rejected read was covered, a read that never settles
+   * was not — and SecureStore is allowed to simply not answer. The offer decision is
+   * now bounded, so the exit happens at the grace with the question skipped.
+   */
+  it('still leaves when the offer preference read never settles', async () => {
+    jest.useFakeTimers();
+    try {
+      mockReadHangs.add('push.offered');
+      const view = await reopened();
+      await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+      await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+      await act(async () => {});
+      expect(mockReplace).not.toHaveBeenCalled();
+
+      await act(async () => {
+        jest.advanceTimersByTime(3000);
+      });
+      expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('still leaves when the phase cannot be written', async () => {
+    mockWriteFails = true;
+    const view = await reopened();
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: 'See my collection' }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.collection));
+  });
+
+  /** The escape route reaches this screen too — see `UseDifferentAccountButton`. */
+  it('offers a way out of the account itself, from the summary and the flow', async () => {
+    const view = await reopened();
+    await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+    expect(view.getByText('Use a different account')).toBeTruthy();
   });
 });
