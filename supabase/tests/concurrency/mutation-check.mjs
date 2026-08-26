@@ -8,7 +8,7 @@
  * is why these bodies do not need to track the real ones — and the corresponding
  * assertion is required to go red.
  *
- * Five mutants:
+ * The mutants:
  *
  *   1. `add_comment` with `_lock_pair` deleted. The blocker must stop waiting, and a
  *      notification must survive the block. (Hardening blocker B.)
@@ -34,13 +34,30 @@
  *      genuine answer — a second comparison recorded, and a session narrowed twice for
  *      one judgement. This is the mutant that would otherwise pass a naive test: the
  *      *rows* still look plausible afterwards, and only the count of them is wrong.
+ *   8. `_release_recommendations` with its state guard dropped. A dismissal stops being
+ *      final.
+ *   9. `add_comment` locking the activity's actor and **not** the person being replied
+ *      to — which is what `20260826000600`'s first draft did once it had the actor's
+ *      lock back. Mutants 1 and 2 both pass against it, because both are about the
+ *      first pair. The reply target's blocker must stop waiting, and the reply notice
+ *      must survive the block.
+ *  10. `add_comment` taking both pair locks in *semantic* order — the activity's actor
+ *      first, then the person replied to — instead of ascending uuid order. This is the
+ *      mutant that looks most obviously correct: two locks, both taken, both re-checked.
+ *      What it loses is the global ordering, and with it the guarantee that a reply and
+ *      a companion save wanting the same two pairs cannot hold what the other wants.
+ *
+ * Mutants 1, 2, 9 and 10 all replace the *five*-argument `add_comment`. `20260826000600`
+ * drops the four-argument form deliberately, and a mutant declared against the old
+ * signature would create a second candidate rather than a wrong version of the real one
+ * — leaving every call ambiguous and every result meaningless.
  */
 import { createRaceDb, fixtures, startCluster, stopCluster } from './harness.mjs';
 
 const NO_LOCK = `
-create or replace function add_comment(p_operation_id uuid, p_feed_event_id uuid, p_body text, p_has_spoilers boolean default false)
+create or replace function add_comment(p_operation_id uuid, p_feed_event_id uuid, p_body text, p_has_spoilers boolean default false, p_parent_id uuid default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare v_actor uuid; v_body text := btrim(coalesce(p_body,'')); v_id uuid;
+declare v_actor uuid; v_body text := btrim(coalesce(p_body,'')); v_id uuid; v_root uuid := null; v_reply_to uuid := null;
 begin
   perform assert_can_write();
   if not _claim_operation(p_operation_id,'add_comment') then return jsonb_build_object('status','already_applied'); end if;
@@ -48,16 +65,25 @@ begin
   perform _assert_comment_length(v_body);
   select e.actor_id into v_actor from feed_events e where e.id = p_feed_event_id and can_view_profile(auth.uid(), e.actor_id);
   if v_actor is null then raise exception 'no such activity' using errcode='P0002'; end if;
-  insert into comments (feed_event_id, author_id, body, has_spoilers) values (p_feed_event_id, auth.uid(), v_body, coalesce(p_has_spoilers,false)) returning id into v_id;
+  if p_parent_id is not null then
+    v_root := _comment_root(p_parent_id, p_feed_event_id);
+    if v_root is null then raise exception 'no such comment' using errcode='P0002'; end if;
+    select c.author_id into v_reply_to from comments c where c.id = p_parent_id and c.deleted_at is null;
+  end if;
+  insert into comments (feed_event_id, author_id, body, has_spoilers, parent_id) values (p_feed_event_id, auth.uid(), v_body, coalesce(p_has_spoilers,false), v_root) returning id into v_id;
   if v_actor <> auth.uid() then
     insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
     values (v_actor,'comment',auth.uid(),'feed_event',p_feed_event_id, jsonb_build_object('comment_id', v_id));
   end if;
-  return jsonb_build_object('status','ok','comment_id',v_id);
+  if v_reply_to is not null and v_reply_to <> auth.uid() and v_reply_to <> v_actor then
+    insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
+    values (v_reply_to,'comment',auth.uid(),'feed_event',p_feed_event_id, jsonb_build_object('comment_id', v_id, 'reply_to', p_parent_id));
+  end if;
+  return jsonb_build_object('status','ok','comment_id',v_id,'parent_id',v_root);
 end; $$;`;
 
 const SPLIT_LOOKUP = `
-create or replace function add_comment(p_operation_id uuid, p_feed_event_id uuid, p_body text, p_has_spoilers boolean default false)
+create or replace function add_comment(p_operation_id uuid, p_feed_event_id uuid, p_body text, p_has_spoilers boolean default false, p_parent_id uuid default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare v_actor uuid; v_body text := btrim(coalesce(p_body,'')); v_id uuid;
 begin
@@ -75,6 +101,83 @@ begin
     values (v_actor,'comment',auth.uid(),'feed_event',p_feed_event_id, jsonb_build_object('comment_id', v_id));
   end if;
   return jsonb_build_object('status','ok','comment_id',v_id);
+end; $$;`;
+
+/**
+ * Mutant 9. The actor's pair locked and re-checked exactly as `20260819000400` left it,
+ * and the reply target's pair not locked at all. Everything mutants 1 and 2 assert still
+ * holds here — which is the point: the first pair was never the part that was missing
+ * once the rebuild was noticed.
+ */
+const ACTOR_ONLY_LOCK = `
+create or replace function add_comment(p_operation_id uuid, p_feed_event_id uuid, p_body text, p_has_spoilers boolean default false, p_parent_id uuid default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_actor uuid; v_body text := btrim(coalesce(p_body,'')); v_id uuid; v_root uuid := null; v_reply_author uuid := null; v_reply_to uuid := null; v_deleted_at timestamptz;
+begin
+  perform assert_can_write();
+  if not _claim_operation(p_operation_id,'add_comment') then return jsonb_build_object('status','already_applied'); end if;
+  perform _assert_operation_rate('add_comment','comments.max_per_day',100);
+  perform _assert_comment_length(v_body);
+  select e.actor_id into v_actor from feed_events e where e.id = p_feed_event_id and can_view_profile(auth.uid(), e.actor_id);
+  if v_actor is null then raise exception 'no such activity' using errcode='P0002'; end if;
+  if p_parent_id is not null then
+    v_root := _comment_root(p_parent_id, p_feed_event_id);
+    if v_root is null then raise exception 'no such comment' using errcode='P0002'; end if;
+    select c.author_id, c.deleted_at into v_reply_author, v_deleted_at from comments c where c.id = p_parent_id;
+    if v_reply_author is null or not can_view_profile(auth.uid(), v_reply_author) then raise exception 'no such comment' using errcode='P0002'; end if;
+    if v_deleted_at is null then v_reply_to := v_reply_author; end if;
+  end if;
+  if v_actor <> auth.uid() then perform _lock_pair(auth.uid(), v_actor); end if;
+  if not can_view_profile(auth.uid(), v_actor) then raise exception 'no such activity' using errcode='P0002'; end if;
+  insert into comments (feed_event_id, author_id, body, has_spoilers, parent_id) values (p_feed_event_id, auth.uid(), v_body, coalesce(p_has_spoilers,false), v_root) returning id into v_id;
+  if v_actor <> auth.uid() then
+    insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
+    values (v_actor,'comment',auth.uid(),'feed_event',p_feed_event_id, jsonb_build_object('comment_id', v_id));
+  end if;
+  if v_reply_to is not null and v_reply_to <> auth.uid() and v_reply_to <> v_actor then
+    insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
+    values (v_reply_to,'comment',auth.uid(),'feed_event',p_feed_event_id, jsonb_build_object('comment_id', v_id, 'reply_to', p_parent_id));
+  end if;
+  return jsonb_build_object('status','ok','comment_id',v_id,'parent_id',v_root);
+end; $$;`;
+
+/**
+ * Mutant 10. Both locks, both re-checks, and the order taken from the semantics rather
+ * than from the uuids. This is the version that passes every N1 assertion in the suite
+ * and still breaks the schema's one global lock order.
+ */
+const SEMANTIC_ORDER = `
+create or replace function add_comment(p_operation_id uuid, p_feed_event_id uuid, p_body text, p_has_spoilers boolean default false, p_parent_id uuid default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_actor uuid; v_body text := btrim(coalesce(p_body,'')); v_id uuid; v_root uuid := null; v_reply_author uuid := null; v_reply_to uuid := null; v_deleted_at timestamptz;
+begin
+  perform assert_can_write();
+  if not _claim_operation(p_operation_id,'add_comment') then return jsonb_build_object('status','already_applied'); end if;
+  perform _assert_operation_rate('add_comment','comments.max_per_day',100);
+  perform _assert_comment_length(v_body);
+  select e.actor_id into v_actor from feed_events e where e.id = p_feed_event_id and can_view_profile(auth.uid(), e.actor_id);
+  if v_actor is null then raise exception 'no such activity' using errcode='P0002'; end if;
+  if p_parent_id is not null then
+    v_root := _comment_root(p_parent_id, p_feed_event_id);
+    if v_root is null then raise exception 'no such comment' using errcode='P0002'; end if;
+    select c.author_id, c.deleted_at into v_reply_author, v_deleted_at from comments c where c.id = p_parent_id;
+    if v_reply_author is null or not can_view_profile(auth.uid(), v_reply_author) then raise exception 'no such comment' using errcode='P0002'; end if;
+    if v_deleted_at is null then v_reply_to := v_reply_author; end if;
+  end if;
+  if v_actor <> auth.uid() then perform _lock_pair(auth.uid(), v_actor); end if;
+  if v_reply_author is not null and v_reply_author <> auth.uid() and v_reply_author <> v_actor then perform _lock_pair(auth.uid(), v_reply_author); end if;
+  if not can_view_profile(auth.uid(), v_actor) then raise exception 'no such activity' using errcode='P0002'; end if;
+  if v_reply_author is not null and not can_view_profile(auth.uid(), v_reply_author) then raise exception 'no such comment' using errcode='P0002'; end if;
+  insert into comments (feed_event_id, author_id, body, has_spoilers, parent_id) values (p_feed_event_id, auth.uid(), v_body, coalesce(p_has_spoilers,false), v_root) returning id into v_id;
+  if v_actor <> auth.uid() then
+    insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
+    values (v_actor,'comment',auth.uid(),'feed_event',p_feed_event_id, jsonb_build_object('comment_id', v_id));
+  end if;
+  if v_reply_to is not null and v_reply_to <> auth.uid() and v_reply_to <> v_actor then
+    insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
+    values (v_reply_to,'comment',auth.uid(),'feed_event',p_feed_event_id, jsonb_build_object('comment_id', v_id, 'reply_to', p_parent_id));
+  end if;
+  return jsonb_build_object('status','ok','comment_id',v_id,'parent_id',v_root);
 end; $$;`;
 
 /**
@@ -602,6 +705,171 @@ const results = [];
     list.some((row) => row.media_item_id === dropped),
   ]);
 
+  await db.close();
+}
+
+// --- Mutant 9: the actor's pair locked, the reply target's not. The half of N1 that
+//     `20260826000600` created and that mutants 1 and 2 cannot see.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+  const owner = await fx.createUser();
+  const author = await fx.createUser();
+  const commenter = await fx.createUser();
+  const movie = await fx.createMovie('Mutant 9');
+  const event = await fx.feedEvent(owner, movie);
+
+  // The root comment is written by the honest function, so the fixture is the shipped
+  // behaviour and only the call under test is mutated.
+  const rootWriter = await db.session('root-author');
+  await rootWriter.actAs(author);
+  const root = (
+    await rootWriter.one(`select add_comment($1,$2,$3) as r`, [crypto.randomUUID(), event, 'root'])
+  ).r.comment_id;
+  await rootWriter.end();
+  await db.sql(`delete from notifications where actor_id = $1`, [author]);
+
+  await db.sql(ACTOR_ONLY_LOCK);
+
+  await db.armBarrier('notifications', 'm9');
+  const ctl = await db.controller();
+  await ctl.hold('m9');
+  const t1 = await db.session('replier');
+  const t2 = await db.session('reply-target');
+  await t1.actAs(commenter);
+  await t1.begin();
+  await t1.pauseAt('m9');
+  const p = t1.start(`select add_comment($1,$2,$3,$4,$5) as r`, [
+    crypto.randomUUID(),
+    event,
+    'reply',
+    false,
+    root,
+  ]);
+  await t1.awaitBlocked();
+
+  await t2.actAs(author);
+  await t2.begin();
+  const b = t2.start(`select block($1,$2) as r`, [crypto.randomUUID(), commenter]);
+
+  let blockedOnPair = true;
+  try {
+    await t2.awaitBlocked({
+      on: 'advisory',
+      advisoryKey: await db.pairKey(commenter, author),
+      timeoutMs: 1500,
+    });
+  } catch {
+    blockedOnPair = false;
+  }
+
+  await b;
+  await t2.commit();
+  await ctl.release('m9');
+  await p;
+  await t1.commit();
+
+  const rows = await db.rows(
+    `select 1 from notifications where recipient_id=$1 and actor_id=$2`,
+    [author, commenter],
+  );
+
+  results.push([
+    'reply-target pair lock removed -> the blocker no longer waits',
+    blockedOnPair === false,
+  ]);
+  results.push([
+    'reply-target pair lock removed -> the reply notice survives the block',
+    rows.length === 1,
+  ]);
+
+  await t1.end();
+  await t2.end();
+  await ctl.end();
+  await db.close();
+}
+
+// --- Mutant 10: both pairs locked, in semantic order. The one global lock order is
+//     lost, and with it the deadlock freedom `races/lock-pair.mjs` asserts.
+//
+//     Detected by observation rather than by waiting for 40P01. With the honest
+//     function the companion save is found waiting on the *lower* uuid's key, because
+//     the reply took that one first; with the mutant it is waiting on the higher one,
+//     and the correlated `awaitBlocked` times out. That is deterministic, where racing
+//     the two to an actual deadlock depends on which waiter the postmaster wakes.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+  const caller = await fx.createUser();
+  const [lo, hi] = [await fx.createUser(), await fx.createUser()].sort();
+
+  await fx.mutualFollow(caller, lo);
+  await fx.mutualFollow(caller, hi);
+
+  const movie = await fx.createMovie('Mutant 10');
+  const event = await fx.feedEvent(hi, movie);
+  const rootWriter = await db.session('root-author');
+  await rootWriter.actAs(lo);
+  const root = (
+    await rootWriter.one(`select add_comment($1,$2,$3) as r`, [crypto.randomUUID(), event, 'root'])
+  ).r.comment_id;
+  await rootWriter.end();
+
+  const tagged = await fx.createMovie('Mutant 10 watched');
+  await fx.logWatch(caller, tagged);
+
+  await db.sql(SEMANTIC_ORDER);
+
+  const ctl = await db.controller();
+  await ctl.holdPair(caller, hi);
+  const t1 = await db.session('replying');
+  const t2 = await db.session('saving-companions');
+  await t1.actAs(caller);
+  await t2.actAs(caller);
+
+  const replying = t1
+    .start(`select add_comment($1,$2,$3,$4,$5) as r`, [
+      crypto.randomUUID(),
+      event,
+      'reply',
+      false,
+      root,
+    ])
+    .then((r) => r.rows[0].r, (e) => e);
+  await t1.awaitBlocked({ on: 'advisory', advisoryKey: await db.pairKey(caller, hi) });
+
+  const saving = t2
+    .start(`select set_watch_tags($1,$2,$3) as r`, [crypto.randomUUID(), tagged, [hi, lo]])
+    .then((r) => r.rows[0].r, (e) => e);
+
+  let tookTheLowerFirst = true;
+  try {
+    await t2.awaitBlocked({
+      on: 'advisory',
+      advisoryKey: await db.pairKey(caller, lo),
+      timeoutMs: 1500,
+    });
+  } catch {
+    tookTheLowerFirst = false;
+  }
+
+  await ctl.releasePair(caller, hi);
+  const [r1, r2] = await Promise.all([replying, saving]);
+
+  results.push([
+    'semantic lock order -> the reply no longer takes the lower uuid first',
+    tookTheLowerFirst === false,
+  ]);
+  // Not required for the mutant to count as caught — which waiter PostgreSQL wakes
+  // decides whether the cycle closes — but reported when it does, because a 40P01 here
+  // is the damage itself rather than a proxy for it.
+  if (r1?.code === '40P01' || r2?.code === '40P01') {
+    console.log('         (and PostgreSQL reported the deadlock outright)');
+  }
+
+  await t1.end();
+  await t2.end();
+  await ctl.end();
   await db.close();
 }
 

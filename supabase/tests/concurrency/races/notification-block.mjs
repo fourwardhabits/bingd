@@ -233,6 +233,385 @@ export default function suite() {
 
     });
 
+    /**
+     * N1 for the *second* pair, which is what `20260826000600` added and what the first
+     * draft of that migration left unguarded.
+     *
+     * A reply writes up to two inbox rows — one to the activity's actor, one to the
+     * author being answered — and N1 is a claim about every pair, not about the pair
+     * that happened to be there first. The tests above would all still pass if
+     * `add_comment` locked the actor and left the reply target open, so these are the
+     * ones that pin the new half.
+     *
+     * Three parties throughout, and deliberately so: with the actor and the author the
+     * same person there is only one pair and the distinction cannot be observed. The
+     * same-person case is pinned separately at the end, because collapsing two locks
+     * into one is exactly the sort of thing a later `union` refactor could get wrong in
+     * the other direction.
+     */
+    describe('add_comment replies', () => {
+      /**
+       * The cast every test here uses.
+       *
+       *   owner      owns the activity, and is notified about any comment on it
+       *   author     wrote the root comment, and is notified about a reply to it
+       *   commenter  replies, and is the caller whose pair locks are under test
+       *
+       * All three are public accounts following nobody, which is all `can_view_profile`
+       * needs; the blocks are what make it interesting.
+       */
+      const cast = async () => {
+        const { db, fx } = ctx;
+        const owner = await fx.createUser();
+        const author = await fx.createUser();
+        const commenter = await fx.createUser();
+        const movie = await fx.createMovie(`Reply Race ${crypto.randomUUID().slice(0, 8)}`);
+        const event = await fx.feedEvent(owner, movie);
+
+        const s = await db.session('root-author');
+        await s.actAs(author);
+        const root = (
+          await s.one(`select add_comment($1, $2, $3) as r`, [
+            await newOp(db),
+            event,
+            'the remark being answered',
+          ])
+        ).r.comment_id;
+        await s.end();
+
+        // The root comment notified the owner. Cleared, so every count below is about
+        // the reply and not about the fixture that set it up.
+        await db.sql(`delete from notifications where actor_id = $1`, [author]);
+
+        return { owner, author, commenter, event, root };
+      };
+
+      const reply = (session, event, root) =>
+        session.start(`select add_comment($1, $2, $3, $4, $5) as r`, [
+          crypto.randomUUID(),
+          event,
+          'answering that',
+          false,
+          root,
+        ]);
+
+      /**
+       * C. WRITER FIRST, against the reply target.
+       *
+       * The reply stops at its first inbox row — the owner's — with both pair locks
+       * already taken. The person being replied to then blocks the commenter and must
+       * be found waiting on *their* key, which is a different key from the one the
+       * tests above assert and the whole point of this block.
+       */
+      it('C: a block by the person replied to waits on their own pair, then clears the reply notice', async () => {
+        const { db } = ctx;
+        const { owner, author, commenter, event, root } = await cast();
+
+        await db.armBarrier('notifications', 'reply-first');
+        const ctl = await db.controller();
+        const t1 = await db.session('replier');
+        const t2 = await db.session('reply-target-blocking');
+
+        try {
+          await ctl.hold('reply-first');
+
+          await t1.actAs(commenter);
+          await t1.begin();
+          await t1.pauseAt('reply-first');
+          const pending = reply(t1, event, root);
+          await t1.awaitBlocked();
+
+          await t2.actAs(author);
+          await t2.begin();
+          const blocked = t2.start(`select block($1, $2) as r`, [await newOp(db), commenter]);
+
+          // Correlated with the commenter/author key specifically. A lock on the
+          // commenter/owner pair — the only one the old hardening took — does not
+          // satisfy this, which is what makes it a test of the second pair.
+          await t2.awaitBlocked({
+            on: 'advisory',
+            advisoryKey: await db.pairKey(commenter, author),
+          });
+
+          await ctl.release('reply-first');
+          await pending;
+          await t1.commit();
+          await blocked;
+          await t2.commit();
+        } finally {
+          await t1.rollback().catch(() => {});
+          await t2.rollback().catch(() => {});
+          await t1.end().catch(() => {});
+          await t2.end().catch(() => {});
+          await ctl.end().catch(() => {});
+          await db.disarmBarrier('notifications').catch(() => {});
+        }
+
+        await assertNoTrace(db, author, commenter, 'reply');
+
+        // And the half that keeps this from being satisfied by refusing everything: the
+        // owner blocked nobody, so their notice is legitimate and must still be there.
+        assert.equal(
+          (await inbox(db, owner, commenter)).length,
+          1,
+          'the activity owner is a different pair, and their notice is not the block’s business',
+        );
+      });
+
+      /**
+       * D. BLOCK FIRST, and in the other direction — the commenter is the one blocking.
+       *
+       * This is the direction that proves the reply target's predicate is re-read
+       * *under* its lock rather than merely before it. The block holds the pair; the
+       * reply queues on it; the block commits; the reply must then refuse.
+       *
+       * It also pins that the refusal is whole. The owner has blocked nobody, so a
+       * function that dropped only the offending notification would still post the
+       * remark and still notify them — and `set_watch_tags`'s rule is that a writer
+       * refuses rather than partially applies.
+       */
+      it('D: a reply queued behind the commenter’s own block re-reads under it and refuses', async () => {
+        const { db } = ctx;
+        const { owner, author, commenter, event, root } = await cast();
+
+        const ctl = await db.controller();
+        const t1 = await db.session('replier');
+        const t2 = await db.session('commenter-blocking');
+        let result;
+
+        try {
+          const key = await db.pairKey(commenter, author);
+          await ctl.holdPair(commenter, author);
+
+          await t2.actAs(commenter);
+          await t2.begin();
+          const blocked = t2.start(`select block($1, $2) as r`, [await newOp(db), author]);
+          await t2.awaitBlocked({ on: 'advisory', advisoryKey: key });
+
+          await t1.actAs(commenter);
+          await t1.begin();
+          // Handled from the instant the promise exists — see the note on
+          // `blockThenWriter` above; the refusal can arrive while this test is still
+          // awaiting `t2`.
+          const pending = reply(t1, event, root).then(
+            (r) => r.rows[0].r,
+            (e) => e,
+          );
+          await t1.awaitBlocked({ on: 'advisory', advisoryKey: key });
+
+          await ctl.releasePair(commenter, author);
+          await blocked;
+          await t2.commit();
+
+          result = await pending;
+          await t1.commit().catch(() => t1.rollback());
+        } finally {
+          await t1.rollback().catch(() => {});
+          await t2.rollback().catch(() => {});
+          await t1.end().catch(() => {});
+          await t2.end().catch(() => {});
+          await ctl.end().catch(() => {});
+        }
+
+        assert.equal(
+          result.code,
+          'P0002',
+          'a parent whose author the caller may no longer see is the same missing-comment answer',
+        );
+        await assertNoTrace(db, author, commenter, 'reply');
+        assert.equal(
+          (await db.rows(`select 1 from comments where author_id = $1`, [commenter])).length,
+          0,
+          'the reply itself must not land either — the refusal rolls the whole call back',
+        );
+        assert.equal(
+          (await inbox(db, owner, commenter)).length,
+          0,
+          'and the owner is not notified about a reply that was refused',
+        );
+      });
+
+      /**
+       * F, positively. Two different people, two different pairs, two notices — the
+       * state this whole block is protecting, asserted without a race so that a failure
+       * above cannot be read as "replies do not notify anybody".
+       */
+      it('F: an ordinary reply notifies two different people through two different pairs', async () => {
+        const { db } = ctx;
+        const { owner, author, commenter, event, root } = await cast();
+
+        const s = await db.session('replier');
+        await s.actAs(commenter);
+        await s.q(`select add_comment($1, $2, $3, $4, $5)`, [
+          await newOp(db),
+          event,
+          'answering that',
+          false,
+          root,
+        ]);
+        await s.end();
+
+        assert.equal((await inbox(db, owner, commenter)).length, 1, 'the activity owner');
+        assert.equal((await inbox(db, author, commenter)).length, 1, 'the person replied to');
+      });
+
+      /**
+       * E. The ordinary case — somebody replying under a remark on the actor's own
+       * activity. One person, therefore one pair, therefore one lock and one notice.
+       *
+       * The race half matters because the `union` that deduplicates the pair is new: a
+       * version that took the same key twice would still be correct here (advisory
+       * locks are re-entrant within a transaction) but a version that took *neither*
+       * would not, and only observing the blocker proves which one shipped.
+       */
+      it('E: when the actor is also the author replied to, one pair is locked and one notice written', async () => {
+        const { db, fx } = ctx;
+        const owner = await fx.createUser();
+        const commenter = await fx.createUser();
+        const movie = await fx.createMovie('Reply Race Same Person');
+        const event = await fx.feedEvent(owner, movie);
+
+        const s = await db.session('root-author');
+        await s.actAs(owner);
+        const root = (
+          await s.one(`select add_comment($1, $2, $3) as r`, [
+            await newOp(db),
+            event,
+            'the owner remarks on their own ranking',
+          ])
+        ).r.comment_id;
+        await s.end();
+        await db.sql(`delete from notifications where actor_id = $1`, [owner]);
+
+        await db.armBarrier('notifications', 'reply-same');
+        const ctl = await db.controller();
+        const t1 = await db.session('replier');
+        const t2 = await db.session('blocker');
+
+        try {
+          await ctl.hold('reply-same');
+
+          await t1.actAs(commenter);
+          await t1.begin();
+          await t1.pauseAt('reply-same');
+          const pending = reply(t1, event, root);
+          await t1.awaitBlocked();
+
+          await t2.actAs(owner);
+          await t2.begin();
+          const blocked = t2.start(`select block($1, $2) as r`, [await newOp(db), commenter]);
+          await t2.awaitBlocked({
+            on: 'advisory',
+            advisoryKey: await db.pairKey(commenter, owner),
+          });
+
+          await ctl.release('reply-same');
+          await pending;
+          await t1.commit();
+          await blocked;
+          await t2.commit();
+        } finally {
+          await t1.rollback().catch(() => {});
+          await t2.rollback().catch(() => {});
+          await t1.end().catch(() => {});
+          await t2.end().catch(() => {});
+          await ctl.end().catch(() => {});
+          await db.disarmBarrier('notifications').catch(() => {});
+        }
+
+        await assertNoTrace(db, owner, commenter, 'reply');
+
+        // And the same fixture without a block: one event, one notice. The `<> v_actor`
+        // suppression, pinned here as well as in `comment-threads.test.mjs`, because a
+        // second lock quietly becoming a second *notification* is the way this could
+        // regress from the concurrency side.
+        const owner2 = await fx.createUser();
+        const commenter2 = await fx.createUser();
+        const event2 = await fx.feedEvent(owner2, await fx.createMovie('Reply Race Once'));
+        const s2 = await db.session('owner-2');
+        await s2.actAs(owner2);
+        const root2 = (
+          await s2.one(`select add_comment($1, $2, $3) as r`, [await newOp(db), event2, 'hers'])
+        ).r.comment_id;
+        await s2.end();
+
+        const s3 = await db.session('replier-2');
+        await s3.actAs(commenter2);
+        await s3.q(`select add_comment($1, $2, $3, $4, $5)`, [
+          await newOp(db),
+          event2,
+          'answering',
+          false,
+          root2,
+        ]);
+        await s3.end();
+
+        assert.equal(
+          (await inbox(db, owner2, commenter2)).length,
+          1,
+          'one person, one event, one notice — the actor and the author are the same here',
+        );
+      });
+
+      /**
+       * The oracle, for the parent. Review 25's MAJOR applies to the second id exactly
+       * as it does to the first: if the author's pair were locked before the caller's
+       * right to see them had been decided, the wait would answer "did X write this
+       * comment" for an account that has blocked the caller.
+       */
+      it('refuses a parent whose author blocked the caller without waiting on their pair', async () => {
+        const { db, fx } = ctx;
+        const owner = await fx.createUser();
+        const author = await fx.createUser();
+        const attacker = await fx.createUser();
+        const event = await fx.feedEvent(owner, await fx.createMovie('Reply Oracle Probe'));
+
+        const s = await db.session('root-author');
+        await s.actAs(author);
+        const root = (
+          await s.one(`select add_comment($1, $2, $3) as r`, [await newOp(db), event, 'mine'])
+        ).r.comment_id;
+        await s.end();
+
+        // The author has blocked the attacker, so the parent is real but unreachable.
+        await db.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [
+          author,
+          attacker,
+        ]);
+
+        // Held exactly as an attacker would: `unfollow` takes the pair lock with no
+        // reachability check of its own.
+        const holder = await db.session('attacker-holding-the-pair');
+        await holder.actAs(attacker);
+        await holder.begin();
+        await holder.q(`select unfollow($1, $2)`, [await newOp(db), author]);
+
+        const probe = await db.session('probe');
+        try {
+          await probe.actAs(attacker);
+          await probe.q(`set statement_timeout = '2s'`);
+          const err = await probe.errorFrom(`select add_comment($1, $2, $3, $4, $5)`, [
+            await newOp(db),
+            event,
+            'probe',
+            false,
+            root,
+          ]);
+          assert.equal(
+            err?.code,
+            'P0002',
+            err?.code === '57014'
+              ? 'the refusal waited on the reply target’s pair lock — the timing oracle is back'
+              : 'the refusal must be the ordinary missing-comment answer',
+          );
+        } finally {
+          await holder.rollback().catch(() => {});
+          await holder.end().catch(() => {});
+          await probe.end().catch(() => {});
+        }
+      });
+    });
+
     describe('set_reaction', () => {
       // Reactions default off since 20260819000300, so the recipient must opt in or
       // the preference trigger drops the row before the race can be seen at all.

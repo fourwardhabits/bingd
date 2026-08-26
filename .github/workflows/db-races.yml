@@ -1,0 +1,94 @@
+name: Database races
+
+# The gap this closes, named plainly: `test:race` was in `release-gate.yml` and nowhere
+# else, and `release-gate.yml` runs on `workflow_dispatch` and on `release/**`. So an
+# ordinary pull request could rebuild a SECURITY DEFINER function, delete a pair lock
+# with it, and go green — which is exactly what happened. PR #48 rebuilt `add_comment`
+# from its pre-hardening ancestor, `test:race` went 93/93 -> 88/94, and `ci.yml` had
+# nothing to say about it because the read-side filter keeps every functional test green.
+#
+# A concurrency invariant that is only verified at release time is verified after the
+# merge that broke it, which is the wrong end of the change.
+#
+# ---------------------------------------------------------------------------
+# Why a separate workflow rather than a job in ci.yml
+# ---------------------------------------------------------------------------
+#
+# `paths` is a workflow-level filter on `pull_request`, so putting it in `ci.yml` would
+# skip typecheck, lint and every test for a change that touched no SQL. Making it a
+# *job* filter instead needs a third-party diff action or a hand-rolled `git diff` step
+# and a job-level `if` — more machinery, and machinery that fails open. One file with
+# one native filter is the version that cannot silently stop matching.
+#
+# ---------------------------------------------------------------------------
+# Why these paths
+# ---------------------------------------------------------------------------
+#
+# `supabase/migrations/**` is the defect class: the suite exists because a function can
+# lose a lock in a rebuild that reads as new work. `supabase/tests/concurrency/**` is
+# the suite itself, including the harness that opens the connections and the mutation
+# check. `supabase/tests/harness.mjs` is shared — the concurrency harness imports its
+# shim builder, so a change there changes what the races run against. `package.json` and
+# the lockfile are here because `embedded-postgres` is what makes any of this real.
+#
+# Deliberately *not* every path. An ordinary UI pull request changes no SQL and cannot
+# move a lock, and a three-minute PostgreSQL boot in front of a copy change is how teams
+# learn to stop reading CI. That is a judgement about attention, not about cost.
+#
+# ---------------------------------------------------------------------------
+# What runs here and what does not
+# ---------------------------------------------------------------------------
+#
+# `test:race` runs. `test:race:mutants` does not: it rebuilds a disposable database per
+# mutant and is the check on the *suite* rather than on the schema, which is a
+# release-time question. `release-gate.yml` still runs both, and remains the gate.
+#
+# `test:db` is not repeated here — `ci.yml` runs it on every pull request already.
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/tests/concurrency/**'
+      - 'supabase/tests/harness.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/db-races.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/tests/concurrency/**'
+      - 'supabase/tests/harness.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/db-races.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  races:
+    name: Concurrency suite (real PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Real PostgreSQL 17, native binaries, many independent connections. PGlite is one
+      # connection and therefore one transaction, so none of these races can be
+      # constructed under it at all — see supabase/tests/concurrency/harness.mjs.
+      #
+      # Invoked through the existing npm script rather than a new one. `packageJson:scripts`
+      # is an @expo/fingerprint input: adding a script moves every lane's runtime version,
+      # including the published friend-beta binary's. See config/push.cjs.
+      - run: npm run test:race

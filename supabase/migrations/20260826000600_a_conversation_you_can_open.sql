@@ -224,7 +224,8 @@ comment on function _comment_root(uuid, uuid) is
  *
  * Everything 20260817000100 established is unchanged: `assert_can_write`, the operation
  * ledger, the per-day ceiling, the length check, and one P0002 for every way an id can
- * fail to resolve. Three things are added.
+ * fail to resolve. Everything **20260819000400** established is unchanged too, and that
+ * sentence is the whole reason the third block below exists.
  *
  * **`p_parent_id`, normalised to a root.** Defaulted, so every existing caller and every
  * test that passes four arguments still resolves to this function and still posts a
@@ -239,6 +240,112 @@ comment on function _comment_root(uuid, uuid) is
  * comment being replied to -- the ordinary case, somebody replying under a remark on
  * their own ranking -- that is one event and it rings once. Self-notification is
  * suppressed on both, as it always was.
+ *
+ * ---------------------------------------------------------------------------
+ * THE HARDENING THIS FUNCTION ALMOST LOST, AND THE TRAP THAT NEARLY TOOK IT
+ * ---------------------------------------------------------------------------
+ *
+ * The first version of this migration rebuilt `add_comment` from `20260817000100` --
+ * its true ancestor by *name*, and the wrong one by *version*. `20260819000400` had
+ * replaced that body nine days earlier to close hardening blocker B, and a rebuild from
+ * the older text silently deleted the pair lock and the second visibility check along
+ * with it. `test:race` went from 93/93 to 88/94; the read-side filter hid the damage
+ * from every functional test; the diff showed a function being written, not a guarantee
+ * being removed.
+ *
+ * That is exactly the failure `20260817001300` named and `20260819000500` recorded as
+ * the SQL rebuild trap, arriving a third time. The lesson it teaches is not "be
+ * careful": it is that the *latest* definition of a function may live under a file name
+ * that has nothing to do with the feature, and `git log -S` on the function name is the
+ * only reliable way to find it. `supabase/tests/concurrency` is the mechanism that
+ * catches it when the reading fails, and it caught this.
+ *
+ * So the hardening is restated here **whole**, and it is now wider than what it
+ * restores, because this function has grown a second counterpart:
+ *
+ *     check (no lock) -> lock every pair -> check again under the locks -> write
+ *
+ * ---------------------------------------------------------------------------
+ * WHICH PAIRS, AND WHY BOTH
+ * ---------------------------------------------------------------------------
+ *
+ * A single call can now put an inbox row in front of **two** different people:
+ *
+ *     the activity's actor      -- `v_actor`, since 20260817000100
+ *     the author replied to     -- `v_reply_to`, new here
+ *
+ * N1 says there is no `notifications` row between a blocked pair, and it says it about
+ * every pair. A lock on the actor does nothing for the second row: the commenter and
+ * the person they are answering are a different two people, and a block between *them*
+ * committing between this function's check and its insert leaves precisely the row N1
+ * forbids. So the reply path takes its own pair lock, and re-reads its own predicate
+ * under it.
+ *
+ * The predicate for the reply target is `can_view_profile(caller, author)` -- not a new
+ * rule invented so the lock would have something to guard. It is `comments_read`'s
+ * author predicate: the one `activity_comments` enforces by inner join, so that a
+ * comment whose author you cannot see is *absent* rather than anonymised, and the one
+ * `set_comment_reaction` restates verbatim for the same definer reason. `_comment_root`
+ * already claimed in its own comment that a parent "the caller cannot see" was refused
+ * here; this is the line that makes that sentence true. The refusal is the same P0002 a
+ * missing parent gets, and it refuses the call as a whole -- `set_watch_tags`'s rule,
+ * rather than posting the remark and quietly dropping one of its notifications.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE FIRST CHECKS STILL COME BEFORE THE FIRST LOCK
+ * ---------------------------------------------------------------------------
+ *
+ * Review 25's MAJOR, unchanged and now re-earned by a second id. `unfollow` has no
+ * reachability check, so any caller can hold `_lock_pair(self, X)` against anybody they
+ * can name. If this function resolved an id and *then* locked before deciding whether
+ * the caller may see it, the wait itself would answer "does this belong to X" for an
+ * account that has blocked them. Equal error codes do not close that; the observable is
+ * the wait.
+ *
+ * So the event's existence-and-visibility query and the parent's are both taken first,
+ * with no lock held, and a caller who fails either is refused immediately and cheaply.
+ * Only a caller who has already been *told* both ids resolve goes on to lock, and the
+ * second reading under the locks therefore discloses nothing new.
+ *
+ * ---------------------------------------------------------------------------
+ * THE LOCK ORDER, WHICH IS THE PART THAT CANNOT BE HAND-WAVED
+ * ---------------------------------------------------------------------------
+ *
+ * Two pair locks in one transaction is a deadlock waiting to be written. `_lock_pair`
+ * canonicalises *within* a pair -- A-blocks-B and B-follows-A take one key -- and that
+ * says nothing at all about the order two *different* pairs are taken in. Calling it
+ * twice in semantic order ("the actor first, then the person replied to") is the
+ * textbook cycle: one transaction wants actor-then-target, another wants
+ * target-then-actor, and both wait forever.
+ *
+ * The rule used here is `set_watch_tags`'s, which is this schema's existing answer to
+ * exactly this question and is therefore not a second mechanism to reason about:
+ *
+ *     derive the distinct counterparts, drop self and null, ORDER BY the uuid, and
+ *     take `_lock_pair(auth.uid(), counterpart)` in that order.
+ *
+ * **Why ordering by the counterpart is a global order and not merely a local one.**
+ * Every pair lock in this schema is `_lock_pair(auth.uid(), X)`, and the key is built
+ * from `least(a,b) || ':' || greatest(a,b)` over fixed-width uuid text. For a fixed
+ * caller `a`, the map `x -> (least(a,x), greatest(a,x))` is *monotone* in `x`:
+ *
+ *     x < y < a   ->   (x,a) < (y,a)      both below the caller
+ *     a < x < y   ->   (a,x) < (a,y)      both above it
+ *     x < a < y   ->   (x,a) < (a,y)      straddling it
+ *
+ * so ascending counterpart order is ascending canonical-pair order -- a total order on
+ * pairs that does not depend on which account is calling. Every transaction in this
+ * schema therefore acquires its pair locks along one global order, and a wait-for cycle
+ * cannot form. That argument covers cycles of any length, which is why it is written
+ * out rather than replaced by "two locks, sorted".
+ *
+ * `_assert_operation_rate` has already taken its account lock, keyed on `auth.uid()`,
+ * before any of this -- the uniform outer level 20260819000400's header describes, and
+ * the reason the two lock families cannot cycle against each other either.
+ *
+ * Asserted rather than argued: `races/notification-block.mjs` requires the blocker to be
+ * found waiting on the *named* key for each of the two pairs, and `races/lock-pair.mjs`
+ * fires overlapping two-lock comments in opposite semantic roles and fails on 40P01.
  */
 create or replace function add_comment(
   p_operation_id  uuid,
@@ -257,7 +364,15 @@ declare
   v_body         text := btrim(coalesce(p_body, ''));
   v_id           uuid;
   v_root         uuid := null;
+  -- The author of the comment that was tapped, whatever state it is in. This is the
+  -- *visibility* subject, and the second pair that has to be locked.
+  v_reply_author uuid := null;
+  -- The same person, unless they have retracted the remark being answered -- a
+  -- tombstone is somewhere to reply, not somebody to tell. This is the notification
+  -- recipient, and it is deliberately a second variable rather than the same one.
   v_reply_to     uuid := null;
+  v_deleted_at   timestamptz;
+  v_counterpart  uuid;
 begin
   perform assert_can_write();
 
@@ -269,7 +384,9 @@ begin
 
   perform _assert_comment_length(v_body);
 
-  -- Existence and visibility in one query, reported as one failure. 20260817000100.
+  -- Existence and visibility in one query, reported as one failure. 20260817000100,
+  -- and it runs **before any lock** -- 20260819000400 and review 25. Moving it after
+  -- the lock is a timing oracle, not a refactor.
   select e.actor_id into v_actor
     from feed_events e
    where e.id = p_feed_event_id
@@ -282,22 +399,65 @@ begin
   if p_parent_id is not null then
     v_root := _comment_root(p_parent_id, p_feed_event_id);
 
-    -- Covers a comment that does not exist, one on other activity, and one the caller
-    -- cannot see -- the last because `_comment_root` is invoker-stable and runs under
-    -- this definer's owner rights, so the visibility that matters is the *event's*,
-    -- already established above. A comment id from a thread the caller may not read is
-    -- therefore useless to them: they cannot reach this line without the event.
+    -- Covers a comment that does not exist, and one belonging to other activity.
     if v_root is null then
       raise exception 'no such comment' using errcode = 'P0002';
     end if;
 
-    -- Who to tell. The author of the comment that was actually tapped, not the root's,
-    -- because that is the person whose words are being answered -- and because a
-    -- reply-to-a-reply is re-pointed to the root above, without which the person
-    -- replied to would never hear about it.
-    select c.author_id into v_reply_to
+    -- Who wrote it, and whether it still says anything. One query, because these are
+    -- two facts about one row and reading it twice invites them to disagree.
+    select c.author_id, c.deleted_at
+      into v_reply_author, v_deleted_at
       from comments c
-     where c.id = p_parent_id and c.deleted_at is null;
+     where c.id = p_parent_id;
+
+    -- And the third way a parent fails to resolve: an author this caller may not see.
+    -- Before any lock, for review 25's reason -- a caller who cannot see the author is
+    -- refused without ever waiting on them, so the refusal stays untimeable.
+    if v_reply_author is null or not can_view_profile(auth.uid(), v_reply_author) then
+      raise exception 'no such comment' using errcode = 'P0002';
+    end if;
+
+    -- Tell the author of the comment that was actually tapped, not the root's, because
+    -- that is the person whose words are being answered -- and because a
+    -- reply-to-a-reply is re-pointed to the root above, without which the person
+    -- replied to would never hear about it. Nobody is told about a tombstone.
+    if v_deleted_at is null then
+      v_reply_to := v_reply_author;
+    end if;
+  end if;
+
+  -- Every pair this transaction is about to write across, in one deterministic order.
+  --
+  -- `union` deduplicates the ordinary case where the activity's actor is also the
+  -- author being answered, so that pair is locked once rather than twice; `order by`
+  -- is what makes two concurrent comments holding the same two pairs in opposite
+  -- semantic roles unable to deadlock. The header gives the argument for why ordering
+  -- by the counterpart is a global order on the keys and not merely a local one.
+  --
+  -- Self is excluded: `least(x, x) = greatest(x, x)` makes the call legal but
+  -- pointless, and no inbox row is written on that branch anyway.
+  for v_counterpart in
+    select c.u
+      from (select v_actor as u union select v_reply_author) as c
+     where c.u is not null
+       and c.u <> auth.uid()
+     order by c.u
+  loop
+    perform _lock_pair(auth.uid(), v_counterpart);
+  end loop;
+
+  -- The same predicates again, now under the locks, and this is what closes the race.
+  -- A block can no longer commit between here and the inserts: it either committed
+  -- before this line, and this new statement snapshot sees it; or it is queued behind
+  -- this transaction, and will delete the rows this one writes. Neither re-reading
+  -- discloses anything the caller was not already told above.
+  if not can_view_profile(auth.uid(), v_actor) then
+    raise exception 'no such activity' using errcode = 'P0002';
+  end if;
+
+  if v_reply_author is not null and not can_view_profile(auth.uid(), v_reply_author) then
+    raise exception 'no such comment' using errcode = 'P0002';
   end if;
 
   insert into comments (feed_event_id, author_id, body, has_spoilers, parent_id)
@@ -324,7 +484,7 @@ end;
 $$;
 
 comment on function add_comment(uuid, uuid, text, boolean, uuid) is
-  'Posts one comment, or one reply, on a feed event. A reply naming another reply is stored against their shared root, so threads are exactly one level deep and the client never has to work that out. Refuses an event or a parent the caller may not reach with the same P0002 a missing one gets. Idempotent by operation id, rate-limited per day, and writes an inbox row for the activity''s actor and for the person replied to -- never twice when they are the same person, and never to oneself.';
+  'Posts one comment, or one reply, on a feed event. A reply naming another reply is stored against their shared root, so threads are exactly one level deep and the client never has to work that out. Refuses an event or a parent the caller may not reach -- including a parent whose author they may not see -- with the same P0002 a missing one gets. Carries 20260819000400''s hardening, restated here after this migration''s first draft rebuilt the function from its pre-hardening ancestor and dropped it: both visibility checks are made before any lock, then every pair this call could notify is locked in ascending counterpart-uuid order -- one global order, so two overlapping comments cannot deadlock -- then both checks are remade under those locks. Idempotent by operation id, rate-limited per day, and writes an inbox row for the activity''s actor and for the person replied to: never twice when they are the same person, never to oneself, and never to a tombstone.';
 
 -- The four-argument form is gone: `create or replace` on a signature with a new
 -- defaulted parameter creates a *second* function, and PostgREST resolving

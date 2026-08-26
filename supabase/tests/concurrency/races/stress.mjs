@@ -197,5 +197,100 @@ export default function suite() {
       await t1.end();
       await t2.end();
     });
+
+    /**
+     * H, at natural timing, and against the pair the barrier tests reach through a
+     * three-party fixture: the person being *replied to* rather than the owner of the
+     * activity.
+     *
+     * Whichever way the serialisation falls, one of two states is legal — the block
+     * lost and the notice stands, or the block won and there is no notice. The illegal
+     * third state is a committed block with a notice behind it, and that is the only
+     * thing asserted, so this test does not depend on who won.
+     *
+     * The owner is a fourth party who blocked nobody. Their notice must survive, which
+     * is what stops a function that refuses every reply from passing this.
+     */
+    it('a reply and a block by the person replied to, fired together, never leave a notice behind the block', async () => {
+      const { db, fx } = ctx;
+      const t1 = await db.session('replier');
+      const t2 = await db.session('reply-target');
+      const setup = await db.session('root-author');
+      const failures = [];
+
+      for (let i = 0; i < ITERATIONS; i += 1) {
+        const owner = await fx.createUser();
+        const author = await fx.createUser();
+        const commenter = await fx.createUser();
+        const movie = await fx.createMovie(`Reply stress ${i}`);
+        const event = await fx.feedEvent(owner, movie);
+
+        await setup.actAs(author);
+        const root = (
+          await setup.one(`select add_comment($1, $2, $3) as r`, [await newOp(db), event, 'root'])
+        ).r.comment_id;
+
+        await t1.actAs(commenter);
+        await t2.actAs(author);
+
+        const results = await Promise.all([
+          jitter().then(async () =>
+            t1.errorFrom(`select add_comment($1, $2, $3, $4, $5)`, [
+              await newOp(db),
+              event,
+              'reply',
+              false,
+              root,
+            ]),
+          ),
+          jitter().then(async () =>
+            t2.errorFrom(`select block($1, $2)`, [await newOp(db), commenter]),
+          ),
+        ]);
+        for (const e of results) {
+          if (e?.code === '40P01') failures.push(`iteration ${i}: deadlock`);
+        }
+
+        const blocked = (
+          await db.rows(`select 1 from blocks where blocker_id = $1 and blocked_id = $2`, [
+            author,
+            commenter,
+          ])
+        ).length;
+        const notices = (
+          await db.rows(`select 1 from notifications where recipient_id = $1 and actor_id = $2`, [
+            author,
+            commenter,
+          ])
+        ).length;
+        if (blocked && notices) failures.push(`iteration ${i}: ${notices} notice(s) behind a block`);
+
+        // The reply either landed or it did not; if it landed, the owner — who is not
+        // party to the block — must have been told. A version that refused everything
+        // would satisfy the assertion above and fail this one.
+        const replied = (
+          await db.rows(`select 1 from comments where author_id = $1 and parent_id = $2`, [
+            commenter,
+            root,
+          ])
+        ).length;
+        const ownerNotices = (
+          await db.rows(`select 1 from notifications where recipient_id = $1 and actor_id = $2`, [
+            owner,
+            commenter,
+          ])
+        ).length;
+        if (replied !== ownerNotices) {
+          failures.push(
+            `iteration ${i}: ${replied} reply/replies but ${ownerNotices} notice(s) for the owner`,
+          );
+        }
+      }
+
+      assert.deepEqual(failures, []);
+      await setup.end();
+      await t1.end();
+      await t2.end();
+    });
   });
 }

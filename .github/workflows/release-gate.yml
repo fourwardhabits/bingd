@@ -74,6 +74,13 @@ jobs:
 
       # ---- And the part that only runs here ---------------------------------------
       #
+      # `test:race` is no longer *only* here: `db-races.yml` runs it on any pull request
+      # that touches `supabase/migrations/**` or the concurrency suite, because a lock
+      # deleted in a rebuild has to be caught before the merge rather than before the
+      # build. It stays in this gate as well — a release candidate is checked whole,
+      # whatever paths the branch happened to touch — and `test:race:mutants` remains
+      # exclusive to this workflow.
+      #
       # Real PostgreSQL, many connections. `embedded-postgres` downloads and starts a
       # genuine server, so these tests can interleave two transactions the way two
       # phones do — which is the only way the ranking, redemption and block-barrier
