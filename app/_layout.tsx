@@ -23,6 +23,7 @@ import { useRedeemPendingInvite } from '@/features/invite';
 import { configurePushPresentation } from '@/features/notifications/push';
 import { usePush } from '@/features/notifications/use-push';
 import { initAnalytics } from '@/lib/analytics';
+import { reportBrandFontFailure, startIconFont } from '@/lib/fonts';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
 import { createQueryClient, startQueryFocusTracking } from '@/lib/query';
 import { startUpdateChecks } from '@/lib/updates';
@@ -86,6 +87,18 @@ function RootLayout() {
       SplashScreen.hideAsync().catch(() => {});
     }
   }, [fontsLoaded, fontError]);
+
+  /**
+   * A font that would not load used to be a silence — both of them. See `lib/fonts.ts`,
+   * which holds the reasoning and the one rule that matters here: **neither of these may
+   * be awaited by the gate below.** The brand fonts already render the app on failure;
+   * the icon font must not be able to hold it back at all.
+   */
+  useEffect(() => {
+    if (fontError) reportBrandFontFailure(fontError);
+  }, [fontError]);
+
+  useEffect(() => startIconFont(), []);
 
   if (!fontsLoaded && !fontError) {
     return null;

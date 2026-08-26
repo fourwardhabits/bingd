@@ -116,9 +116,20 @@ export type TasteOnboarding = {
 const phaseKey = (userId: string) => `${userId}.${PHASE_PREF}`;
 
 async function readState(userId: string): Promise<TasteOnboarding> {
+  /**
+   * Whether *this process* has already been in the flow, which is a different question
+   * from what the disk says and the difference is load-bearing below.
+   *
+   * `begin()` puts `active` here on arrival, so it is set for the whole of a live flow and
+   * absent on every fresh launch. That is exactly the seam needed to tell "somebody is
+   * ranking films right now" from "an account was left marked as ranking films, once,
+   * some time ago".
+   */
+  const remembered = intent.get(userId);
+
   // Memory first: a decision taken in this process outranks whatever the disk holds,
   // because the write that would have updated the disk may have failed.
-  const phase = intent.get(userId) ?? (await readPref<TastePhase>(phaseKey(userId)));
+  const phase = remembered ?? (await readPref<TastePhase>(phaseKey(userId)));
 
   /**
    * **Already decided, and the decision is the whole answer — so nothing is asked.**
@@ -138,18 +149,20 @@ async function readState(userId: string): Promise<TasteOnboarding> {
    */
   if (phase === 'done' || phase === 'skipped') return { ranked: 0, needed: false };
 
-  const [{ count: rankedCount, error: rankedError }, { count: loggedCount, error: loggedError }] =
-    await Promise.all([
-      supabase
-        .from('rankings')
-        .select('media_item_id', { count: 'exact', head: true })
-        .eq('user_id', userId)
-        .eq('category', 'movies'),
-      supabase
-        .from('user_media')
-        .select('media_item_id', { count: 'exact', head: true })
-        .eq('user_id', userId),
-    ]);
+  const [
+    { count: rankedCount, error: rankedError },
+    { count: loggedCount, error: loggedError },
+  ] = await Promise.all([
+    supabase
+      .from('rankings')
+      .select('media_item_id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('category', 'movies'),
+    supabase
+      .from('user_media')
+      .select('media_item_id', { count: 'exact', head: true })
+      .eq('user_id', userId),
+  ]);
 
   if (rankedError) throw rankedError;
   if (loggedError) throw loggedError;
@@ -158,18 +171,86 @@ async function readState(userId: string): Promise<TasteOnboarding> {
   const logged = loggedCount ?? 0;
 
   /**
-   * Already in it: stay until they *leave*, which is an explicit act and not a count.
+   * **What the flow decided while these two counts were in the air.**
    *
-   * Deliberately not `ranked < FIRST_FIVE`. Tying it to the count gives the fifth
-   * placement two jobs — completing the flow and dismissing it — and the second one
-   * fires first: the screen would be sent to the feed at the moment it had a summary to
-   * show. That is the same shape as the blocker review found in routing, one layer down,
-   * and it is why leaving is `complete()` and nothing else.
+   * Independent review 50's blocker, and it is a race this function acquired the moment it
+   * gained a side effect. `phase` was captured before the awaits above; two PostgREST
+   * round trips later it may be a fact about the past. In that window somebody can press
+   * "Not now" — `complete()` records `skipped` in `intent` synchronously and dispatches its
+   * write — and this read would then resume on its stale `active`, publish `needed: true`
+   * over the `needed: false` completion just put in the cache, and dispatch a `done` that
+   * lands *after* the `skipped` and wins, because same-key storage writes are serialized in
+   * call order. The person's own answer, overwritten by a read that started before they
+   * gave it.
    *
-   * Somebody who force-quits on the summary reopens on the summary. That is the right
-   * answer rather than an oversight: they have not yet said where they wanted to go.
+   * The same window is reachable after `withDeadline` has already answered `UNKNOWN` and
+   * routing has moved on: nothing cancels this work, so it returns to a process that has
+   * gone somewhere else.
+   *
+   * So the decision is re-read here, after the awaits and before anything is written or
+   * returned. A flow that has ended since is simply ended — which is both the right answer
+   * and the one the cache already holds.
    */
-  if (phase === 'active') return { ranked, needed: true };
+  const decidedSince = intent.get(userId);
+  if (decidedSince === 'done' || decidedSince === 'skipped') {
+    return { ranked, needed: false };
+  }
+
+  if (phase === 'active') {
+    /**
+     * **In it, in this process: stay until they leave, which is an explicit act and not a
+     * count.**
+     *
+     * Deliberately not `ranked < FIRST_FIVE`. Tying it to the count gives the fifth
+     * placement two jobs — completing the flow and dismissing it — and the second one
+     * fires first: the screen would be sent to the feed at the moment it had a summary to
+     * show. That is the same shape as the blocker review found in routing, one layer down,
+     * and it is why leaving is `complete()` and nothing else.
+     */
+    if (remembered === 'active') return { ranked, needed: true };
+
+    /**
+     * **Resumed with the work already done: show the summary once more, and make sure it
+     * is the last time.**
+     *
+     * The founder's device, 2026-08-26: five films ranked, a full collection, and *every*
+     * launch landing on "That is a start". `active` is written on arrival and cleared only
+     * by one of the screen's own exits — so every other way out leaves it set, and on
+     * build 4 every other way out was the only one available: the exits hung, the account
+     * switch did not clear it, and a force-quit does not either. The account was pinned to
+     * a first-run flow it had already finished, with the one door out being a button that
+     * had already failed it once.
+     *
+     * The resume itself is not the bug and is deliberately kept. A crash during the
+     * notification step is supposed to land back on a summary whose buttons can finish the
+     * job — that is a recovery path with its own tests, and removing it would trade one
+     * stranding for another. What was missing is that the recovery had no way to *end*: if
+     * the exit fails again, or is never pressed, the next launch is identical, forever.
+     *
+     * So the phase is settled here, on arrival, rather than only by the button. This
+     * launch is unchanged — the summary draws, both buttons work, and pressing one records
+     * the same `done` it always did. The next launch opens the app. One repeat, never two,
+     * whatever happens to the press.
+     *
+     * **`intent` is set as well, and that half is not bookkeeping.** The screen refetches
+     * this query to move its progress bar, so without it the very next read would find the
+     * `done` just written, answer `needed: false`, and the summary would unmount with the
+     * ranking step drawn in its place — five of five placed, under "The first one needs no
+     * comparison". That is precisely the defect `exiting` was added to `taste.tsx` to
+     * prevent, reintroduced from underneath. Marking the flow live for the rest of the
+     * process pins this session's answer to the one it has already given, while the disk
+     * carries the decision to the next launch.
+     *
+     * The disk write is not awaited and cannot reject: a repair that does not land is a
+     * launch that repeats it, which is the state this branch already handles.
+     */
+    if (ranked >= FIRST_FIVE) {
+      intent.set(userId, 'active');
+      void writePref<TastePhase>(phaseKey(userId), 'done').catch(() => {});
+    }
+
+    return { ranked, needed: true };
+  }
 
   // Never decided. This is the only place the collection decides, and it decides once:
   // any ranking or any logged title at all means an account that has been used, and
@@ -292,10 +373,31 @@ export function useCompleteTasteOnboarding(userId: string) {
       intent.set(userId, phase);
 
       // The session honours the choice whether or not the disk does.
-      queryClient.setQueryData(queryKeys.tasteOnboarding(userId), (previous?: TasteOnboarding) => ({
-        ranked: previous?.ranked ?? 0,
-        needed: false,
-      }));
+      queryClient.setQueryData(
+        queryKeys.tasteOnboarding(userId),
+        (previous?: TasteOnboarding) => ({
+          ranked: previous?.ranked ?? 0,
+          needed: false,
+        }),
+      );
+
+      /**
+       * **The durable write is dispatched here, before the analytics call, and that
+       * ordering is the point rather than tidiness.**
+       *
+       * The rule this function already states two comments up — "the decision that ends
+       * the flow is state the router depends on, so it is recorded before anything that
+       * can fail" — was applied to the *memory* copy and not to the disk one. `track`
+       * reaches a third-party SDK, and a synchronous throw there landed between the
+       * decision and the only copy of it that survives a launch: the person exits, the
+       * exit works, and the next launch puts them back on "That is a start" because the
+       * Keychain was never told.
+       *
+       * Dispatched rather than awaited, for the reason `taste.tsx` records at `finish`:
+       * the write is handed to the platform before this returns, and awaiting it would
+       * only make the screen watch it happen while somebody waits on a button press.
+       */
+      const written = writePref<TastePhase>(phaseKey(userId), phase).catch(() => {});
 
       if (ended !== 'done' && ended !== 'skipped') {
         track({
@@ -309,7 +411,7 @@ export function useCompleteTasteOnboarding(userId: string) {
         });
       }
 
-      await writePref<TastePhase>(phaseKey(userId), phase).catch(() => {});
+      await written;
     },
     [queryClient, userId],
   );

@@ -471,7 +471,6 @@ describe('the rating sheet', () => {
   });
 });
 
-
 /**
  * **Where the last screen of onboarding actually sends people.**
  *
@@ -804,13 +803,43 @@ describe('the frames between the press and the navigation', () => {
    * trap was a summary whose buttons were on screen and did nothing.
    */
   it('recovers to a summary whose buttons still leave, after a restart', async () => {
-    const first = await atSummary();
-    first.unmount();
-    resetTasteIntent();
-
     const view = await atSummary();
     await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
 
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
+  });
+
+  /**
+   * **And the recovery ends, which is the founder's 2026-08-26 report.**
+   *
+   * Five films ranked, a full collection, and *every* launch landing on "That is a start".
+   * `active` is written on arrival and cleared only by one of this screen's own exits, so
+   * every other way out leaves it set — and on build 4 every other way out was the only
+   * one available. The account was pinned to a flow it had already finished, with the one
+   * door out being a button that had already failed it once.
+   *
+   * The resume above is kept, because a crashed exit deserves a second go at the buttons.
+   * What is new is that it terminates: arriving here with the work already done settles
+   * the phase, so a second restart opens the app. One repeat, never two, whether or not
+   * the press lands.
+   *
+   * This deliberately replaces the previous version of the test above, which asserted two
+   * consecutive restarts both reaching the summary. That was the trap, written down.
+   */
+  it('stops resuming onto the summary once it has done so', async () => {
+    const first = await atSummary();
+    first.unmount();
+    // A relaunch: the process forgets, the device does not.
+    resetTasteIntent();
+
+    const second = await renderWithProviders(<TasteScreen />);
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.feed));
+    expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('done');
+
+    // Unmounted rather than left to automatic cleanup: this screen dispatches a
+    // fire-and-forget phase write, and one still in flight when the next test's
+    // `beforeEach` has already reset the store lands on top of it.
+    second.unmount();
   });
 });
