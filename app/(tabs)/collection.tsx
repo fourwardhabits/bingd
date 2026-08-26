@@ -301,8 +301,25 @@ function Watched({
     [ranked.data, logged.data, medium],
   );
 
+  // The error said what had happened and offered nothing to do about it, on a screen with
+  // no pull-to-refresh either — so a collection that failed to load stayed failed until the
+  // app was killed. Both reads are retried, because either one can be the one that broke
+  // and the view needs both.
   if (ranked.isError || logged.isError) {
-    return <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />;
+    return (
+      <EmptyState
+        kind="couldNotLoad"
+        title="Could not load"
+        body="Check your connection and try again."
+        action={{
+          label: 'Try again',
+          onPress: () => {
+            void ranked.refetch();
+            void logged.refetch();
+          },
+        }}
+      />
+    );
   }
   if (ranked.isPending || logged.isPending) return <Loading />;
 
@@ -345,11 +362,18 @@ function Watchlist({
   onChange: (next: CollectionViewState) => void;
 }) {
   const router = useRouter();
-  const { data, isPending, isError } = useWatchlist(userId);
+  const { data, isPending, isError, refetch } = useWatchlist(userId);
   const items = useMemo(() => watchlistItems(data ?? [], medium), [data, medium]);
 
   if (isError) {
-    return <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />;
+    return (
+      <EmptyState
+        kind="couldNotLoad"
+        title="Could not load"
+        body="Check your connection and try again."
+        action={{ label: 'Try again', onPress: () => void refetch() }}
+      />
+    );
   }
   if (isPending) return <Loading />;
 
@@ -385,11 +409,18 @@ function Unranked({
   onChange: (next: CollectionViewState) => void;
 }) {
   const router = useRouter();
-  const { data, isPending, isError } = useLoggedCollection(userId);
+  const { data, isPending, isError, refetch } = useLoggedCollection(userId);
   const items = useMemo(() => watchlistItems(data?.unranked ?? [], medium), [data, medium]);
 
   if (isError) {
-    return <EmptyState kind="couldNotLoad" title="Could not load" body="Check your connection." />;
+    return (
+      <EmptyState
+        kind="couldNotLoad"
+        title="Could not load"
+        body="Check your connection and try again."
+        action={{ label: 'Try again', onPress: () => void refetch() }}
+      />
+    );
   }
   if (isPending) return <Loading />;
 
