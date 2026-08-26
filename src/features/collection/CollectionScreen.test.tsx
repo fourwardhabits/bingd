@@ -20,6 +20,9 @@ import CollectionScreen from '../../../app/(tabs)/collection';
  */
 
 const mockTables: Record<string, unknown[]> = {};
+/** Tables whose read fails, and a counter proving a retry re-issued the request. */
+const mockFailing = new Set<string>();
+const mockReads: Record<string, number> = {};
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -31,8 +34,14 @@ jest.mock('@/lib/supabase', () => ({
         in: () => chain,
         order: () => chain,
         limit: () => chain,
-        then: (resolve: (value: unknown) => unknown) =>
-          Promise.resolve({ data: mockTables[table] ?? [], error: null }).then(resolve),
+        then: (resolve: (value: unknown) => unknown) => {
+          mockReads[table] = (mockReads[table] ?? 0) + 1;
+          return Promise.resolve(
+            mockFailing.has(table)
+              ? { data: null, error: { code: '08006', message: 'connection failure' } }
+              : { data: mockTables[table] ?? [], error: null },
+          ).then(resolve);
+        },
       };
       return chain;
     },
@@ -114,6 +123,8 @@ beforeEach(() => {
   // ranked one, and an empty table is what makes every logged row unranked.
   mockTables.rankings = [];
   mockTables.watchlist = [];
+  mockFailing.clear();
+  for (const key of Object.keys(mockReads)) delete mockReads[key];
 });
 
 const open = async () => {
@@ -452,5 +463,50 @@ describe('the unranked card', () => {
     const second = await open();
     await waitFor(() => expect(tab(second, 'Unranked')).toBeTruthy());
     expect(second.queryByText('You have unranked titles')).toBeNull();
+  });
+});
+
+/**
+ * **A Collection that failed to load could not be asked again.**
+ *
+ * The three panes each render `EmptyState kind="couldNotLoad"` on error, which is the
+ * right half of the contract — the reader is told, rather than shown an empty collection
+ * that isn't theirs. What was missing was anything to press: no retry action, and this
+ * screen has no pull-to-refresh either, so a read that failed once stayed failed until the
+ * app was killed. On the founder's build 4 that is indistinguishable from the app being
+ * broken.
+ */
+describe('when a collection read fails', () => {
+  it('offers a retry rather than a dead end', async () => {
+    mockFailing.add('rankings');
+
+    const view = await renderWithProviders(<CollectionScreen />);
+
+    await waitFor(() => expect(view.getByText('Could not load')).toBeTruthy());
+    expect(view.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  it('re-issues the request that failed, and recovers', async () => {
+    mockFailing.add('rankings');
+
+    const view = await renderWithProviders(<CollectionScreen />);
+    await waitFor(() => expect(view.getByText('Could not load')).toBeTruthy());
+
+    const before = mockReads.rankings ?? 0;
+    mockFailing.clear();
+    await fireEvent.press(view.getByRole('button', { name: 'Try again' }));
+
+    await waitFor(() => expect(mockReads.rankings ?? 0).toBeGreaterThan(before));
+    await waitFor(() => expect(view.queryByText('Could not load')).toBeNull());
+  });
+
+  /**
+   * The distinction the fix must not blur: an empty collection is a fact about the
+   * account and is still drawn as one.
+   */
+  it('still tells an empty collection apart from a broken one', async () => {
+    const view = await renderWithProviders(<CollectionScreen />);
+
+    await waitFor(() => expect(view.queryByText('Could not load')).toBeNull());
   });
 });

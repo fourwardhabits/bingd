@@ -27,7 +27,12 @@ export { HeaderBoundary } from './HeaderBoundary';
 export { KeyboardScreen, type KeyboardScreenProps } from './KeyboardScreen';
 export { FeaturedCard, type FeaturedCardProps } from './FeaturedCard';
 export { LoadingScreen, type LoadingScreenProps } from './LoadingScreen';
-export { MediumSelector, type Medium } from './MediumSelector';
+export {
+  MediumSelector,
+  MEDIUM_OPTIONS,
+  type Medium,
+  type MediumSelectorOption,
+} from './MediumSelector';
 export { PersonalState, type PersonalStateProps } from './PersonalState';
 export { Poster } from './Poster';
 export {

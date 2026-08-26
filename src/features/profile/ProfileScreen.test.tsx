@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -8,6 +8,17 @@ import { renderWithProviders } from '@/test-utils/render';
 import ProfileScreen from '../../../app/(tabs)/profile';
 
 const mockTables: Record<string, unknown[]> = {};
+/**
+ * Tables whose reads come back as a Postgres error.
+ *
+ * A stand-in that can only succeed can only test half a screen, and the half it cannot
+ * test is the one the founder's TestFlight build was stuck in: every surface here holds
+ * `data ?? []`, so a failed read and an empty account are the same value by the time the
+ * render sees them.
+ */
+const mockFailing = new Set<string>();
+/** Reads served per table, so a retry can be shown to have re-issued a real request. */
+const mockReads: Record<string, number> = {};
 // Recorded, because where the gear leads is a decision this screen makes.
 const mockPush = jest.fn();
 
@@ -22,7 +33,18 @@ jest.mock('@/lib/supabase', () => ({
             ([key, value]) => (row as Record<string, unknown>)[key] === value,
           ),
         );
-      const answer = () => Promise.resolve({ data: rows(), error: null, count: rows().length });
+      const answer = () => {
+        mockReads[table] = (mockReads[table] ?? 0) + 1;
+        return mockFailing.has(table)
+          ? Promise.resolve({
+              // Shaped like PostgREST's, and never shown to anybody: what the screen may
+              // say about it is "check your connection", which is the whole point.
+              data: null,
+              error: { code: '08006', message: 'connection failure' },
+              count: null,
+            })
+          : Promise.resolve({ data: rows(), error: null, count: rows().length });
+      };
       const chain = {
         select: () => chain,
         eq: (column: string, value: unknown) => {
@@ -90,6 +112,8 @@ const rankedRow = (id: string, position: number) => ({
 
 beforeEach(() => {
   mockPush.mockReset();
+  mockFailing.clear();
+  for (const key of Object.keys(mockReads)) delete mockReads[key];
   for (const key of Object.keys(mockTables)) delete mockTables[key];
   mockTables.follows = [];
   mockTables.rankings = [];
@@ -110,6 +134,22 @@ const open = async () => {
 const stat = async (view: Awaited<ReturnType<typeof open>>, label: string) => {
   const node = await view.findByLabelText(new RegExp(`^${label}: `));
   return String(node.props.accessibilityLabel).split(': ')[1];
+};
+
+/**
+ * The Try again that belongs to one could-not-load block.
+ *
+ * Found by walking up from that block's own title rather than by asking for the only
+ * "Try again" on the page, because a screen with one failed read usually has two — the
+ * whole point of this fix is that each surface answers for itself and can be recovered
+ * on its own. The nearest ancestor holding both is the `EmptyState`, so bottom-up
+ * cannot reach past it into a neighbour's.
+ */
+const retryUnder = (view: Awaited<ReturnType<typeof open>>, title: string) => {
+  let node: ReturnType<typeof view.getByText> | null = view.getByText(title);
+  while (node && !within(node).queryByText('Try again')) node = node.parent;
+  if (!node) throw new Error(`Nothing to retry under "${title}"`);
+  return within(node).getByText('Try again');
 };
 
 /**
@@ -181,6 +221,28 @@ describe('the stat row', () => {
     expect(view.queryByLabelText(/^Watchlist: /)).toBeNull();
     expect(view.queryByLabelText(/^Watched: /)).toBeNull();
   });
+
+  it('leaves no dash behind once the counts have landed', async () => {
+    mockTables.rankings = [1, 2].map((n) => rankedRow(`film-${n}`, n));
+
+    const view = await open();
+
+    await waitFor(async () => expect(await stat(view, 'Movies')).toBe('2'));
+    // The success case has to be *visibly* different from the two states below it, or
+    // "it loaded" and "it never will" are the same screen.
+    expect(view.queryByText('—')).toBeNull();
+    expect(view.queryByText('Could not load your counts')).toBeNull();
+  });
+
+  it('says zero for an account that genuinely has none', async () => {
+    // Deliberate, and not the same answer as a failed read: nobody follows this account
+    // and it has ranked nothing, which is a fact rather than an absence of one.
+    const view = await open();
+
+    await waitFor(async () => expect(await stat(view, 'Followers')).toBe('0'));
+    expect(await stat(view, 'Movies')).toBe('0');
+    expect(view.queryByText('Could not load your counts')).toBeNull();
+  });
 });
 
 describe('recent activity', () => {
@@ -244,6 +306,132 @@ describe('top ranked', () => {
   it('invites a first ranking when there are none', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('Nothing ranked yet')).toBeTruthy());
+    // An invitation, not an apology. The distinction is the subject of the block below.
+    expect(view.queryByText('Could not load these rankings')).toBeNull();
+  });
+});
+
+/**
+ * **The founder's TestFlight report, as three assertions.** Identity drew; the counts
+ * stayed `—`, Your 2026 stayed a skeleton and Top Ranked stayed a skeleton, for as long
+ * as anybody was willing to wait.
+ *
+ * Every one of those surfaces tested `isPending` and nothing else, so a query that had
+ * *failed* — pending false, data undefined — fell through to whichever branch handled the
+ * absence of data. On the counts that was the loading dash; on Top Ranked it was "Nothing
+ * ranked yet", which turned a broken request into a claim about how much the reader had
+ * ranked. Neither could be retried without leaving the tab.
+ *
+ * The rule these hold the screen to: after a read has failed, no surface shows a skeleton
+ * or a placeholder, each says which of them failed, and each can re-run its own request.
+ */
+describe('when a read behind this screen fails', () => {
+  const failedActivity = (id: string) => ({
+    id,
+    type: 'title_ranked',
+    actor_id: 'user-1',
+    media_item_id: 'film-1',
+    created_at: '2026-08-15T00:00:00Z',
+    payload: { position: 1, category: 'movies', bucket: 'loved', score: 9.1 },
+    media_items: movie('film-1', 'Inception'),
+    profiles: { username: 'Sai', display_name: 'Sai', avatar_path: null },
+  });
+
+  it('admits the counts could not be read, rather than dashing them forever', async () => {
+    mockFailing.add('rankings');
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Could not load your counts')).toBeTruthy());
+    // `—` is a promise that a number is coming, and `?? 0` would have been worse still:
+    // "0 followers" is a claim about the account rather than a missing answer.
+    expect(view.queryByText('—')).toBeNull();
+    expect(view.queryByLabelText(/^Followers: /)).toBeNull();
+    expect(retryUnder(view, 'Could not load your counts')).toBeTruthy();
+  });
+
+  it('re-issues the counts read on Try again, and shows what comes back', async () => {
+    mockFailing.add('rankings');
+    mockTables.rankings = [rankedRow('film-1', 1)];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Could not load your counts')).toBeTruthy());
+    const before = mockReads.rankings ?? 0;
+
+    mockFailing.delete('rankings');
+    await fireEvent.press(retryUnder(view, 'Could not load your counts'));
+
+    // The read count, not just the copy: a "Try again" that re-renders the same cached
+    // failure is the same dead end with a button on it.
+    await waitFor(async () => expect(await stat(view, 'Movies')).toBe('1'));
+    expect(mockReads.rankings ?? 0).toBeGreaterThan(before);
+    expect(view.queryByText('Could not load your counts')).toBeNull();
+  });
+
+  it('does not report an unread collection as an empty one', async () => {
+    mockFailing.add('rankings');
+    mockTables.rankings = [1, 2, 3].map((n) => rankedRow(`film-${n}`, n));
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Could not load these rankings')).toBeTruthy());
+    // The lie this replaced. Three films are ranked; the request for them did not return.
+    expect(view.queryByText('Nothing ranked yet')).toBeNull();
+  });
+
+  it('repairs both halves of the wall from its one Try again', async () => {
+    mockFailing.add('rankings');
+    mockTables.rankings = [rankedRow('film-1', 1)];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Could not load these rankings')).toBeTruthy());
+    const before = mockReads.rankings ?? 0;
+
+    mockFailing.delete('rankings');
+    await fireEvent.press(retryUnder(view, 'Could not load these rankings'));
+
+    await waitFor(() => expect(view.getByLabelText(/Film film-1/)).toBeTruthy());
+    // Movies and TV seasons are two reads and one wall, so one retry owes both.
+    expect(mockReads.rankings ?? 0).toBeGreaterThanOrEqual(before + 2);
+  });
+
+  it('says the activity could not be read, rather than that there is none', async () => {
+    mockFailing.add('feed_events');
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Could not load your activity')).toBeTruthy());
+    expect(view.queryByText('Nothing here yet')).toBeNull();
+    expect(retryUnder(view, 'Could not load your activity')).toBeTruthy();
+  });
+
+  it('re-issues the activity read on Try again', async () => {
+    mockFailing.add('feed_events');
+    mockTables.feed_events = [failedActivity('e1')];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Could not load your activity')).toBeTruthy());
+    const before = mockReads.feed_events ?? 0;
+
+    mockFailing.delete('feed_events');
+    await fireEvent.press(retryUnder(view, 'Could not load your activity'));
+
+    await waitFor(() => expect(view.getAllByText(/Inception/)).toHaveLength(1));
+    expect(mockReads.feed_events ?? 0).toBeGreaterThan(before);
+    expect(view.queryByText('Could not load your activity')).toBeNull();
+  });
+
+  it('never puts the server’s own words on the screen', async () => {
+    mockFailing.add('rankings');
+    mockFailing.add('feed_events');
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Could not load your counts')).toBeTruthy());
+    // What the stand-in fails with. A reader is owed "check your connection"; a Postgres
+    // code is a developer's sentence printed at somebody who cannot act on it.
+    expect(view.queryByText(/08006/)).toBeNull();
+    expect(view.queryByText(/connection failure/)).toBeNull();
   });
 });
 

@@ -23,6 +23,54 @@ import { supabase } from '@/lib/supabase';
 export const FIRST_FIVE = 5;
 
 /**
+ * How long the first-run check may hold the whole app before it is answered for.
+ *
+ * Four seconds because this is a *local* decision about one account, not a page of
+ * content: two indexed counts and a Keychain lookup. Anything past this is not slow, it
+ * is stuck — and the cost of it being stuck is the entire app, not this one question.
+ */
+const FIRST_RUN_GRACE_MS = 4000;
+
+/**
+ * What the app assumes about an account it could not ask about in time.
+ *
+ * The same answer a failure already routes to, for the reason `useTasteOnboarding`
+ * records: a genuinely new account loses a suggestion, and the alternative is every
+ * account losing the app.
+ */
+const UNKNOWN: TasteOnboarding = { ranked: 0, needed: false };
+
+/**
+ * The read, with a deadline — and **a rejection is still a rejection**.
+ *
+ * Deliberately not `withGrace`, which is the house helper for this shape and is wrong
+ * here by exactly one case: it resolves a *failure* to the fallback as well as a hang.
+ * That would quietly convert "could not find out" into "found out: not needed", and this
+ * query is pinned for the session (`staleTime: Infinity`), so the lie would last as long
+ * as the process. Routing already handles the error state correctly — an undefined
+ * `needed` is falsy and sends the person to the feed — so there is nothing to gain by
+ * hiding it, and an error is the only signal anything upstream has that the backend is
+ * unreachable.
+ *
+ * Only the *silence* is answered for, which is the case nothing else can recover from.
+ */
+function withDeadline(work: Promise<TasteOnboarding>): Promise<TasteOnboarding> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(UNKNOWN), FIRST_RUN_GRACE_MS);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
  * Which phase of the first-run flow this device believes the account is in.
  *
  * This exists because "is this account new" stops being true the moment the flow does
@@ -52,7 +100,14 @@ const PHASE_PREF = 'onboarding.taste.phase';
 export type TastePhase = 'active' | 'done' | 'skipped';
 
 export type TasteOnboarding = {
-  /** Ranked movies, which is what the flow counts toward `FIRST_FIVE`. */
+  /**
+   * Ranked movies, which is what the flow counts toward `FIRST_FIVE`.
+   *
+   * **Only meaningful while `needed` is true.** An account that has finished or declined
+   * the flow is answered from the device without asking the server anything, so this
+   * reads zero for them — see `readState`. Nothing displays it in that state: the screen
+   * that draws the progress bar is not reachable once the flow has ended.
+   */
   ranked: number;
   /** True when this account belongs in the flow — see `PHASE_PREF`. */
   needed: boolean;
@@ -61,6 +116,28 @@ export type TasteOnboarding = {
 const phaseKey = (userId: string) => `${userId}.${PHASE_PREF}`;
 
 async function readState(userId: string): Promise<TasteOnboarding> {
+  // Memory first: a decision taken in this process outranks whatever the disk holds,
+  // because the write that would have updated the disk may have failed.
+  const phase = intent.get(userId) ?? (await readPref<TastePhase>(phaseKey(userId)));
+
+  /**
+   * **Already decided, and the decision is the whole answer — so nothing is asked.**
+   *
+   * This ordering is the fix for independent review 48's blocker, and the old order is
+   * what made it one. The counts used to be awaited *first*, unconditionally, and only
+   * then was the phase consulted — so every launch of every established account spent two
+   * PostgREST round trips proving something the Keychain already knew. `nextRoute` blocks
+   * on this query, so those two requests sat between a cold start and the first screen of
+   * the app, on the overwhelmingly common path where their answer could not change
+   * anything. Bounding that wait made it survivable; taking the network out of it is what
+   * makes it not a wait.
+   *
+   * What remains on the critical path is one local preference read, and it stays there
+   * because it is not optional: it is the answer to *which screen this person belongs
+   * on*, and there is no useful UI to show somebody until that is known.
+   */
+  if (phase === 'done' || phase === 'skipped') return { ranked: 0, needed: false };
+
   const [{ count: rankedCount, error: rankedError }, { count: loggedCount, error: loggedError }] =
     await Promise.all([
       supabase
@@ -79,11 +156,6 @@ async function readState(userId: string): Promise<TasteOnboarding> {
 
   const ranked = rankedCount ?? 0;
   const logged = loggedCount ?? 0;
-  // Memory first: a decision taken in this process outranks whatever the disk holds,
-  // because the write that would have updated the disk may have failed.
-  const phase = intent.get(userId) ?? (await readPref<TastePhase>(phaseKey(userId)));
-
-  if (phase === 'done' || phase === 'skipped') return { ranked, needed: false };
 
   /**
    * Already in it: stay until they *leave*, which is an explicit act and not a count.
@@ -116,9 +188,26 @@ async function readState(userId: string): Promise<TasteOnboarding> {
  * *in* the flow is taken once, on arrival; `ranked` is refetched deliberately by the
  * screen to move the progress bar.
  *
- * A failure resolves to "not needed". Not knowing whether somebody is new is not a
- * reason to put them through a five-step flow, and an account that genuinely is new
- * loses nothing but a suggestion.
+ * A failure stays a failure, and `nextRoute` is what turns it into "not needed": an
+ * undefined `needed` is falsy there, so a broken connection sends somebody to the feed
+ * rather than into a five-step flow they have already completed. Deliberately *not*
+ * resolved to a value here, which is what this used to say — under `staleTime: Infinity`
+ * that would pin "I asked and the answer was no" for the whole session, and an error is
+ * the only signal anything upstream has that the backend is unreachable.
+ *
+ * **A wait that has stopped being a wait is a different case**, and it is half of the
+ * founder's blank startup. `nextRoute` deliberately moves nobody while this is pending —
+ * `if (tastePending) return null` — so until it settles the only route the navigator has
+ * is `/`. That is right when the check costs the ~170ms it costs against a healthy
+ * backend, and unrecoverable when it costs forever: `readState` awaits two PostgREST
+ * counts and a Keychain read, none of which the platform promises to ever settle, and
+ * `retry: false` means nothing asks again. One hung Keychain call and the app never
+ * routes anywhere for the life of the process.
+ *
+ * The bound is `withDeadline` rather than the house `withGrace`, because a failure must
+ * stay a failure — see there. Nothing is cancelled at the deadline either; a late answer
+ * simply finds nobody waiting on it, and the only thing given up is holding the navigator
+ * hostage to it.
  */
 export function useTasteOnboarding(userId: string | null, enabled = true) {
   return useQuery({
@@ -126,7 +215,7 @@ export function useTasteOnboarding(userId: string | null, enabled = true) {
     enabled: Boolean(userId) && enabled,
     staleTime: Infinity,
     retry: false,
-    queryFn: () => readState(userId!),
+    queryFn: () => withDeadline(readState(userId!)),
   });
 }
 

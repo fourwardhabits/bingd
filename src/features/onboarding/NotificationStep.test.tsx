@@ -333,3 +333,81 @@ describe('registration never gates the exit', () => {
     }
   });
 });
+
+/**
+ * **The last screen of onboarding must never be a screen with nothing on it.**
+ *
+ * The four settled states hand off by themselves after a pause, so they carried no
+ * controls: a button in front of something already leaving looked like clutter.
+ * Independent review 48 named the cost. The hand-off is one `setTimeout` firing one
+ * navigation, and if that navigation does not take — it throws, it is ignored, the router
+ * is mid-transition — this is a terminal screen with no way off it, at the exact moment
+ * somebody has five ranked films and a working account on the other side. The summary
+ * before it has always stayed pressable for this reason; this step was the one exit
+ * without a second attempt.
+ */
+describe('the way forward when the hand-off does not take', () => {
+  const settle = async (view: Awaited<ReturnType<typeof open>>['view'], label: string) => {
+    await fireEvent.press(view.getByRole('button', { name: 'Turn on notifications' }));
+    await waitFor(() => expect(view.getByText(label)).toBeTruthy());
+  };
+
+  it('offers a control on the granted state, not only a timer', async () => {
+    const { view } = await open();
+    await settle(view, 'You are all set');
+
+    expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
+  });
+
+  it('offers one on the declined state too', async () => {
+    const { view } = await open();
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+    await waitFor(() => expect(view.getByText('No problem')).toBeTruthy());
+
+    expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
+  });
+
+  it('offers one when registration could not be confirmed', async () => {
+    mockPush.registerResult = 'failed';
+    const { view } = await open();
+    await settle(view, 'Thanks');
+
+    expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
+  });
+
+  it('hands off when it is pressed', async () => {
+    const { view, onDone } = await open();
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+    await waitFor(() => expect(view.getByText('No problem')).toBeTruthy());
+
+    onDone.mockClear();
+    await fireEvent.press(view.getByRole('button', { name: 'Continue' }));
+
+    expect(onDone).toHaveBeenCalled();
+  });
+
+  /**
+   * A hand-off that throws must not become an unhandled exception.
+   *
+   * `onDone` navigates and is called from a `setTimeout` — a callback React cannot see,
+   * so a throw inside it is neither a caught render error nor a rejected promise. It is
+   * an uncaught exception on the JS thread, which on a release build is a crash on the
+   * last screen of onboarding. The button stays, so the person still has a way forward.
+   */
+  it('survives a hand-off that throws, and still offers the button', async () => {
+    const exploding = jest.fn(() => {
+      throw new Error('navigation refused');
+    });
+    const { view } = await open(exploding);
+
+    await fireEvent.press(view.getByRole('button', { name: 'Not now' }));
+    await waitFor(() => expect(view.getByText('No problem')).toBeTruthy());
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+    });
+
+    expect(exploding).toHaveBeenCalled();
+    expect(view.getByRole('button', { name: 'Continue' })).toBeTruthy();
+  });
+});

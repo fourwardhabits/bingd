@@ -1,4 +1,5 @@
 
+import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
@@ -13,6 +14,7 @@ import { useReactions, useSetReaction, REACTION_GLYPH } from '@/features/feed/us
 import { useFeed } from '@/features/feed/use-feed';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { GoalsSection } from '@/features/goals/GoalsSection';
+import { currentYear } from '@/features/goals/use-goals';
 import { FollowListSheet } from '@/features/profile/FollowListSheet';
 import { InviteFriendsButton } from '@/features/profile/InviteFriendsButton';
 import { ProfileActions } from '@/features/profile/ProfileActions';
@@ -21,6 +23,7 @@ import { ProfileWatchlist } from '@/features/profile/ProfileWatchlist';
 import { TopRanked } from '@/features/profile/TopRanked';
 import { useProfileStats } from '@/features/profile/use-public-profile';
 import { posterUri } from '@/lib/images';
+import { queryKeys } from '@/lib/query';
 import { theme } from '@/ui/tokens';
 import {
   ActivityRow,
@@ -54,6 +57,7 @@ import {
 export default function ProfileScreen() {
   const profile = useCurrentProfile();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const feed = useFeed(profile.id);
   const watched = useWatched(profile.id);
   const stats = useProfileStats(profile.id);
@@ -104,6 +108,31 @@ export default function ProfileScreen() {
     }
   };
 
+  /**
+   * What a pull actually refreshes.
+   *
+   * It used to be the feed and the counts, which are the two queries this file holds a
+   * handle to — so a screen whose goals and rankings had failed stayed broken however
+   * many times the reader pulled it, and the gesture that exists to rescue a stuck screen
+   * rescued a third of one. Goals and Top Ranked own their reads, as they should: they
+   * are sections, not slices of this component's state.
+   *
+   * So they are reached by key instead. `refetchQueries` rather than `invalidateQueries`,
+   * because the case this exists for is a query that *failed*: invalidation marks an
+   * entry stale, and nothing is going to ask a stale errored entry for anything.
+   *
+   * The Watchlist shelf is deliberately not here. It draws nothing at all when its read
+   * comes back empty or failed — that is what makes an unviewable watchlist and an empty
+   * one indistinguishable — so there is no stuck state on this screen for a pull to clear.
+   */
+  const refreshAll = () => {
+    void feed.refetch();
+    void stats.refetch();
+    void queryClient.refetchQueries({ queryKey: queryKeys.goals(profile.id, currentYear()) });
+    void queryClient.refetchQueries({ queryKey: queryKeys.rankings(profile.id, 'movies') });
+    void queryClient.refetchQueries({ queryKey: queryKeys.rankings(profile.id, 'tv_seasons') });
+  };
+
   return (
     <Screen>
       <AppHeader
@@ -120,11 +149,12 @@ export default function ProfileScreen() {
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl
-            refreshing={feed.isRefetching}
-            onRefresh={() => {
-              void feed.refetch();
-              void stats.refetch();
-            }}
+            // Still the two queries this component observes, deliberately: the spinner
+            // has to be able to stop, and the sections refreshed by key above are ones
+            // whose fetching state nothing here can see without inventing a subscription
+            // to it. Both of these settle on their own, so the gesture always ends.
+            refreshing={feed.isRefetching || stats.isRefetching}
+            onRefresh={refreshAll}
             tintColor={theme.semantic.action}
             colors={[theme.semantic.action]}
           />
@@ -141,6 +171,27 @@ export default function ProfileScreen() {
             movies: stats.isPending ? '—' : (stats.data?.rankedMovies ?? 0),
             seasons: stats.isPending ? '—' : (stats.data?.rankedSeasons ?? 0),
           }}
+          /**
+           * `—` is a promise that a number is coming. When the read has failed it is a
+           * promise nothing is going to keep.
+           *
+           * This is what the founder met on TestFlight: four dashes that never resolved,
+           * with nothing on the screen admitting the request had failed and no way to ask
+           * again. The `?? 0` above would have been worse — zero followers is a claim
+           * about the account, not an absence of an answer — so the row steps aside for
+           * the one thing the reader can act on.
+           */
+          statsFallback={
+            stats.isError ? (
+              <EmptyState
+                kind="couldNotLoad"
+                compact
+                title="Could not load your counts"
+                body="Check your connection and try again."
+                action={{ label: 'Try again', onPress: () => void stats.refetch() }}
+              />
+            ) : undefined
+          }
           /**
            * Not while the numbers are still `—`.
            *
@@ -196,6 +247,18 @@ export default function ProfileScreen() {
           <SectionHeader title="Recent activity" />
           {feed.isPending ? (
             <SkeletonRow count={2} />
+          ) : feed.isError ? (
+            /* Before the empty branch, not after it. `recent` is derived from
+               `feed.data ?? []`, so a failed read is indistinguishable from an account
+               that has done nothing — and "Nothing here yet" is a statement about the
+               reader rather than about the request. */
+            <EmptyState
+              kind="couldNotLoad"
+              compact
+              title="Could not load your activity"
+              body="Check your connection and try again."
+              action={{ label: 'Try again', onPress: () => void feed.refetch() }}
+            />
           ) : recent.length === 0 ? (
             <EmptyState
               kind="nothingYet"

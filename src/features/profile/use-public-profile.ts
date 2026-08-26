@@ -322,7 +322,7 @@ export function useProfileWatchlist(userId: string | null, limit = PROFILE_WATCH
  */
 export function useProfileStats(userId: string) {
   return useQuery({
-    queryKey: ['profile-stats', userId],
+    queryKey: queryKeys.profileStats(userId),
     queryFn: async () => {
       const [followers, following, movies, seasons] = await Promise.all([
         supabase

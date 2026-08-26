@@ -7,9 +7,22 @@ import { Text } from './Text';
 
 export type Medium = 'movies' | 'tv_seasons';
 
-export type MediumSelectorProps = {
-  value: Medium;
-  onChange: (next: Medium) => void;
+export type MediumSelectorOption<T extends string = Medium> = { id: T; label: string };
+
+export type MediumSelectorProps<T extends string = Medium> = {
+  value: T;
+  onChange: (next: T) => void;
+  /**
+   * What this control chooses between, defaulting to the two categories a collection is
+   * made of.
+   *
+   * For You offers a third — People — because the honest answer to "what next" is
+   * sometimes a person, and a screen with one category control should not grow a second
+   * control above it to say which *kind* of category. The generic is what keeps that
+   * from leaking: a caller that passes no table is a two-option control whose `onChange`
+   * still receives `Medium`, so Collection cannot be handed an id it has no list for.
+   */
+  options?: readonly MediumSelectorOption<T>[];
   /**
    * Override what a category is called on this screen.
    *
@@ -18,16 +31,24 @@ export type MediumSelectorProps = {
    * season — so calling them seasons there would name something the wall does not
    * contain. One control, two accurate labels, rather than two controls.
    */
-  labels?: Partial<Record<Medium, string>>;
+  labels?: Partial<Record<T, string>>;
 };
 
-const OPTIONS: { id: Medium; label: string }[] = [
+/**
+ * The default table, exported so a screen that adds an option can extend the shared two
+ * rather than restate them — a second copy of "Movies" is how two screens come to
+ * disagree about what the category is called.
+ */
+export const MEDIUM_OPTIONS: readonly MediumSelectorOption[] = [
   { id: 'movies', label: 'Movies' },
   { id: 'tv_seasons', label: 'TV seasons' },
 ];
 
-const labelFor = (value: Medium, labels?: MediumSelectorProps['labels']) =>
-  labels?.[value] ?? OPTIONS.find((o) => o.id === value)?.label ?? '';
+const labelFor = <T extends string>(
+  value: T,
+  options: readonly MediumSelectorOption<T>[],
+  labels?: Partial<Record<T, string>>,
+) => labels?.[value] ?? options.find((o) => o.id === value)?.label ?? '';
 
 /**
  * The category the collection is showing, as a dropdown (screens.md §5).
@@ -36,27 +57,41 @@ const labelFor = (value: Medium, labels?: MediumSelectorProps['labels']) =>
  * press without saying what it will become cannot be read before it is used, and
  * it only worked because there happened to be exactly two options — a third
  * category would have turned it into a guessing game. It also gave no way to see
- * what else existed without changing the screen out from under yourself.
+ * what else existed without changing the screen out from under yourself. For You now
+ * has that third category, so the objection was not hypothetical.
  *
  * Set in DM Serif at `title1`, because this is the screen's actual title. Beli
  * does the same and it is why its collection header reads as a page rather than
  * as a toolbar.
  */
-export function MediumSelector({ value, onChange, labels }: MediumSelectorProps) {
+export function MediumSelector<T extends string = Medium>({
+  value,
+  onChange,
+  options,
+  labels,
+}: MediumSelectorProps<T>) {
   const [open, setOpen] = useState(false);
+  /**
+   * The cast is the seam between a concrete default and a caller that has widened `T`,
+   * and it is safe in the only direction that matters: every id in `MEDIUM_OPTIONS` is a
+   * `Medium`, and a caller who omits `options` leaves `T` inferred as `Medium` — the
+   * widened case always supplies its own table, so these two are never mixed.
+   */
+  const table = (options ?? (MEDIUM_OPTIONS as readonly MediumSelectorOption<string>[])) as
+    readonly MediumSelectorOption<T>[];
 
   return (
     <>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Showing ${labelFor(value, labels)}`}
+        accessibilityLabel={`Showing ${labelFor(value, table, labels)}`}
         accessibilityHint="Choose a category"
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen(true)}
         style={styles.button}
       >
         <View style={styles.row}>
-          <Text variant="title1">{labelFor(value, labels)}</Text>
+          <Text variant="title1">{labelFor(value, table, labels)}</Text>
           <Ionicons
             name="chevron-down"
             size={theme.layout.icon.md}
@@ -74,7 +109,7 @@ export function MediumSelector({ value, onChange, labels }: MediumSelectorProps)
         <Pressable style={styles.scrim} onPress={() => setOpen(false)} accessibilityLabel="Close">
           {/* Stops a tap inside the sheet from closing it. */}
           <Pressable style={styles.sheet} onPress={() => {}}>
-            {OPTIONS.map((option) => {
+            {table.map((option) => {
               const selected = option.id === value;
               return (
                 <Pressable
@@ -87,7 +122,7 @@ export function MediumSelector({ value, onChange, labels }: MediumSelectorProps)
                   }}
                   style={[styles.option, selected && styles.optionSelected]}
                 >
-                  <Text variant="title2">{labelFor(option.id, labels)}</Text>
+                  <Text variant="title2">{labelFor(option.id, table, labels)}</Text>
                   {selected ? (
                     <Ionicons
                       name="checkmark"

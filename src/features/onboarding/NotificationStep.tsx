@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -9,6 +9,7 @@ import {
 } from '@/features/notifications/push-permission';
 import { noteFailure, pushPermission, requestPushPermission } from '@/features/notifications/push';
 import { withGrace } from '@/lib/grace';
+import { reportHandled } from '@/lib/monitoring';
 import { Button, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -162,11 +163,55 @@ export function NotificationStep({ onDone }: NotificationStepProps) {
    * is actually readable — particularly the `undelivered` one, which is the only place
    * the app admits something did not work.
    */
+  /**
+   * The hand-off is armed by the **answer**, and by nothing else.
+   *
+   * `onDone` is an inline arrow at the call site — `onDone={() => void finish(leaving)}` —
+   * so it is a different function on every render of the screen above. With it in the
+   * dependency array this effect tore down and re-armed the timer on each of those
+   * renders, which is two failures rather than one: a parent re-rendering faster than the
+   * pause would restart the countdown forever and never hand off at all, and once it
+   * *did* fire, `finish` writes to the query cache, the parent re-renders, and a fresh
+   * `onDone` arms it again — a second exit for a person who has already left.
+   *
+   * A ref rather than asking the caller for a stable callback, because the fix has to
+   * hold whoever writes the next call site too.
+   */
+  const done = useRef(onDone);
+  // Kept current in an effect rather than during render, which the React Compiler rules
+  // forbid outright — and rightly: a ref written mid-render is a value two concurrent
+  // renders can disagree about. The assignment lands before any timer below can fire,
+  // because effects run in order and this one has no condition to skip it.
+  useEffect(() => {
+    done.current = onDone;
+  }, [onDone]);
+
+  /**
+   * The hand-off, from the timer and from the button below alike.
+   *
+   * **Guarded, because a throw here has nowhere to go.** `onDone` navigates, and this is
+   * called from a `setTimeout` — a callback React cannot see, so an exception raised
+   * inside it is not a caught render error and not a rejected promise. It is an
+   * unhandled exception on the JS thread, which on a release build is a crash on the
+   * last screen of onboarding. The failure is reported rather than swallowed, and the
+   * button below stays on screen so the person still has a way forward.
+   */
+  const handOff = useCallback(() => {
+    try {
+      done.current();
+    } catch (error) {
+      // `reportHandled` rather than `noteFailure`: this is not a push stage, and the
+      // Continue button below is precisely the "recovery path the user was shown" that
+      // this reporter exists for.
+      reportHandled(error, { stage: 'onboarding_handoff' });
+    }
+  }, []);
+
   useEffect(() => {
     if (state === 'asking' || state === 'working') return;
-    const timer = setTimeout(onDone, state === 'granted' ? 900 : 1400);
+    const timer = setTimeout(handOff, state === 'granted' ? 900 : 1400);
     return () => clearTimeout(timer);
-  }, [state, onDone]);
+  }, [state, handOff]);
 
   return (
     <Screen airy includeBottomInset>
@@ -217,8 +262,31 @@ export function NotificationStep({ onDone }: NotificationStepProps) {
               You can turn notifications on later in Settings.
             </Text>
           </>
-        ) : (
-          <>
+        ) : null}
+
+        {/**
+         * A way forward that does not depend on the timer, on every settled state.
+         *
+         * These four screens used to carry no controls at all: the pause hands off by
+         * itself, so a button looked like clutter in front of something already leaving.
+         * Independent review 48 named what that costs — if the navigation the hand-off
+         * performs does not take, this is a terminal screen with nothing on it, and the
+         * person is stranded at the end of onboarding with five ranked films on the other
+         * side. The summary before it has always stayed pressable for exactly this
+         * reason; the notification step was the one exit without a second attempt.
+         *
+         * Pressing it after the timer has already fired is harmless: the destination is
+         * the same route either way, and `complete` is idempotent on a flow that has
+         * already ended (`useCompleteTasteOnboarding` guards the second ending).
+         */}
+        {state === 'asking' || state === 'working' ? null : (
+          <View style={styles.actions}>
+            <Button label="Continue" onPress={handOff} />
+          </View>
+        )}
+
+        {state === 'asking' || state === 'working' ? (
+          <View style={styles.body}>
             <Text variant="title1" style={styles.centre}>
               Stay in the loop
             </Text>
@@ -244,8 +312,8 @@ export function NotificationStep({ onDone }: NotificationStepProps) {
                   keeps a late outcome from overwriting the exit. */}
               <Button label="Not now" kind="tertiary" onPress={notNow} />
             </View>
-          </>
-        )}
+          </View>
+        ) : null}
       </View>
     </Screen>
   );

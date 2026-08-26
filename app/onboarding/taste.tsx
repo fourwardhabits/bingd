@@ -57,13 +57,15 @@ import {
  * is two navigations deep and the wrong thing to meet in the first minute.
  */
 /**
- * How long an exit will wait to know whether the notification question is owed, and for
- * the completion write, before leaving anyway. Both bound local reads and writes that
- * settle in milliseconds when the platform is healthy; the bound is only ever felt on
- * the hangs review 47 named, where the alternative is the build-4 dead buttons.
+ * How long an exit will wait to know whether the notification question is owed, before
+ * leaving without asking it.
+ *
+ * It bounds local reads that settle in milliseconds when the platform is healthy; the
+ * bound is only ever felt on the hangs review 47 named, where the alternative is the
+ * build-4 dead buttons. There was a second grace beside this one, for the completion
+ * write — `finish` records why it is gone rather than shortened.
  */
 const OFFER_DECISION_GRACE_MS = 3000;
-const COMPLETE_GRACE_MS = 3000;
 
 export default function TasteOnboardingScreen() {
   const router = useRouter();
@@ -92,6 +94,23 @@ export default function TasteOnboardingScreen() {
    * helper decided it instead of the button. Null means no step is showing.
    */
   const [leaving, setLeaving] = useState<{ skipped: boolean; to: TabRoute } | null>(null);
+  /**
+   * That somebody has asked to leave — which the flow's own state stops being able to say.
+   *
+   * **This is the founder's build-4 "Explore For You put me back into Build your taste".**
+   * `done` below is derived from `needed`, and `complete()` sets `needed: false`
+   * *synchronously*, before its first await, deliberately — routing has to see the
+   * decision immediately or it would send the person back here. The cost, which nothing
+   * caught, is that this screen reads the same flag: the instant the button is pressed the
+   * summary stops qualifying, so it unmounts and the **ranking step renders in its place**,
+   * with `ranked` still 5 and the search box empty. That is where `5 of 5` and "The first
+   * one needs no comparison." appear together — not a navigation backwards and not
+   * contradictory state, but the wrong branch of this ternary drawn over the right one.
+   *
+   * Held for the rest of the mount, because there is no way back from an exit: the only
+   * thing after it is the navigation.
+   */
+  const [exiting, setExiting] = useState(false);
 
   const state = useTasteOnboarding(profile.id);
   const complete = useCompleteTasteOnboarding(profile.id);
@@ -104,7 +123,11 @@ export default function TasteOnboardingScreen() {
   // `needed` is true for the whole of an active flow and false for an account that does
   // not belong here, so it distinguishes "five placed just now" from "twelve placed over
   // six months" without a second flag.
-  const done = state.data?.needed === true && ranked >= FIRST_FIVE;
+  //
+  // `|| exiting` is what keeps the summary on screen from the button press until the
+  // navigation, rather than letting `complete()`'s synchronous write pull it out from
+  // under the person who pressed it. See `exiting`.
+  const done = ranked >= FIRST_FIVE && (state.data?.needed === true || exiting);
 
   /**
    * Enrol, or leave — the screen decides, because routing deliberately will not.
@@ -150,27 +173,51 @@ export default function TasteOnboardingScreen() {
    * would re-break this the next time the bar is reordered.
    */
   /**
-   * The exit, which now has one step in front of it.
+   * Finish the flow and go, in that order and without waiting in between.
    *
-   * **Both ways out pass through the notification step**, and that is deliberate rather
-   * than incidental: PRD §15 forbids asking at first launch and this is the last moment
-   * before the app opens, so it is the one place the question can be put to *everybody*
-   * exactly once. Routing it through `leave` rather than hanging it off the summary means
-   * the person who taps "Not now" on the films is offered it too — they are, if anything,
-   * the reader most worth reaching later.
+   * `complete` records the flow-ending decision **synchronously** — the intent map and
+   * the query cache both, before its first await — and everything after that first await
+   * is one best-effort SecureStore write that already swallows its own rejection. So by
+   * the time this function has a promise in its hand there is nothing left worth waiting
+   * for: routing already sees `needed: false`, and the disk is only how the decision
+   * outlives the process.
    *
-   * `complete({ skipped })` is still called with the answer the *films* got. The
-   * notification step has no bearing on whether taste onboarding was skipped, and folding
-   * the two would make a flag about the collection mean something about a permission.
+   * It used to wait anyway, bounded at three seconds. That bound was the right instinct
+   * about the wrong thing — SecureStore really can hang, which is why review 47 put a
+   * grace here — but bounding a wait nobody needs still spends up to three seconds of a
+   * person's time between pressing "Explore For You" and arriving anywhere, on top of the
+   * three the offer decision may already have spent. Six seconds of a screen that is not
+   * responding to the button they pressed is most of what "the app is slow" meant.
+   *
+   * Not awaited, therefore, and deliberately not `await`-able: there is no outcome a
+   * caller could act on.
+   *
+   * ---------------------------------------------------------------------------
+   * **THE DURABILITY QUESTION, WHICH INDEPENDENT REVIEW 48 RAISED AND THIS ANSWERS**
+   *
+   * The objection: not awaiting means the `done`/`skipped` write can be lost, and a lost
+   * `skipped` is an account offered the flow again — an onboarding loop, which is the
+   * thing this whole tranche exists to remove.
+   *
+   * It does not follow, and the reason is *when* the write is dispatched rather than when
+   * it resolves. `complete` is an async function whose body runs synchronously to its
+   * first await, and that first await **is** the `writePref` call — so the Keychain write
+   * has already been handed to the platform before `complete()` returns, which is before
+   * the line below runs. Unmounting this screen does not cancel it; a native module call
+   * is not tied to the React tree that started it.
+   *
+   * So awaiting would not make the write happen, it would only make *this screen* watch
+   * it happen. The single case the two differ on is the process being killed inside that
+   * window — and navigating is not something that kills a process. What awaiting reliably
+   * did cost was up to three seconds of a screen not responding to the button somebody
+   * had just pressed, on every exit, which is a defect the founder actually hit.
+   *
+   * The remaining exposure is a force-quit in the milliseconds between the dispatch and
+   * the Keychain returning. That account reopens on the summary with its five films
+   * intact, which is the documented resume behaviour rather than a loop.
    */
-  const finish = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
-    // `complete` records the flow-ending decision synchronously — memory and query cache
-    // both, before its first await — so navigating at the deadline is safe: routing
-    // already sees `needed: false`, and only the disk write may still be in flight. The
-    // bound exists because that write is SecureStore, which review 47 was right to call
-    // a promise the platform may never settle; `withGrace` also absorbs a rejection, so
-    // this cannot throw into the `void` press handler. Leaving wins, always.
-    await withGrace(complete({ skipped }), COMPLETE_GRACE_MS, undefined);
+  const finish = ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
+    void complete({ skipped });
     router.replace(to);
   };
 
@@ -196,9 +243,30 @@ export default function TasteOnboardingScreen() {
   // are quick — but two presses must not race two navigations.
   const departing = useRef(false);
 
+  /**
+   * The exit, which has one step in front of it.
+   *
+   * **Both ways out pass through the notification step**, and that is deliberate rather
+   * than incidental: PRD §15 forbids asking at first launch and this is the last moment
+   * before the app opens, so it is the one place the question can be put to *everybody*
+   * exactly once. Routing it through here rather than hanging it off the summary means
+   * the person who taps "Not now" on the films is offered it too — they are, if anything,
+   * the reader most worth reaching later.
+   *
+   * `complete({ skipped })` is still called with the answer the *films* got. The
+   * notification step has no bearing on whether taste onboarding was skipped, and folding
+   * the two would make a flag about the collection mean something about a permission.
+   *
+   * (This paragraph sat above `finish` until now, which is not where any of it happens —
+   * `finish` neither offers the step nor decides whether it is owed. Moved rather than
+   * rewritten.)
+   */
   const leave = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
     if (departing.current) return;
     departing.current = true;
+    // Before the first await, so the summary is still the summary for the whole of the
+    // offer decision below rather than only until `complete` writes. See `exiting`.
+    setExiting(true);
     try {
       // Resolved now rather than on mount: the OS state can change while somebody is
       // ranking five films — they may have granted it from a system prompt elsewhere —
@@ -208,7 +276,7 @@ export default function TasteOnboardingScreen() {
         setLeaving({ skipped, to });
         return;
       }
-      await finish({ skipped, to });
+      finish({ skipped, to });
     } finally {
       departing.current = false;
     }
@@ -281,11 +349,24 @@ export default function TasteOnboardingScreen() {
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
             >
+              {/* The copy follows the *count*, not the search box.
+                  Both of these say the same thing — "type something" — but the first
+                  one also says it is the first one, and this branch's only real
+                  condition is that the field is empty. Somebody who has placed three
+                  films and cleared the box was being told to start, and at five of five
+                  the app was promising a comparison-free first pick underneath a
+                  progress bar reading `5 of 5`. That pairing is what the founder
+                  photographed on build 4 and reasonably read as contradictory state; the
+                  branch was right and the sentence was a lie. */}
               <EmptyState
                 kind="nothingYet"
                 compact
-                title="Start with one you love"
-                body="Anything you have ever seen. The first one needs no comparison."
+                title={ranked === 0 ? 'Start with one you love' : 'Add another'}
+                body={
+                  ranked === 0
+                    ? 'Anything you have ever seen. The first one needs no comparison.'
+                    : 'Anything you have ever seen. bingd. will ask how it compares.'
+                }
               />
             </ScrollView>
           ) : isError ? (

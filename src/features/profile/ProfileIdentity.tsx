@@ -37,6 +37,23 @@ export type ProfileIdentityProps = {
   onPressFollowers?: () => void;
   onPressFollowing?: () => void;
   /**
+   * Drawn in the stat row's place when the counts could not be read at all.
+   *
+   * A third state was needed because the two this component already had cannot say it.
+   * Absent `stats` means "this viewer is not entitled to these numbers", which is a
+   * statement about the account rather than about the request; and the loading `—` is a
+   * promise that an answer is coming. A failed read is neither, and rendering it as
+   * either one is how the founder's TestFlight build showed four dashes for as long as
+   * anybody was willing to look at them.
+   *
+   * A slot rather than an `isError` flag, because the copy and the retry belong to the
+   * screen that owns the query — this component has no query to re-run.
+   *
+   * Takes precedence over `stats`: the counts are stale or absent whenever it is set,
+   * and a row of numbers above an apology about those numbers is worse than either.
+   */
+  statsFallback?: ReactNode;
+  /**
    * What this viewer can do here.
    *
    * Self gets Share Profile and Bingd Awards; anybody else gets the follow control. The
@@ -132,6 +149,7 @@ export function ProfileIdentity({
   bio,
   avatarUri,
   stats,
+  statsFallback,
   controls,
   badge,
   match,
@@ -173,7 +191,9 @@ export function ProfileIdentity({
         </View>
       ) : null}
 
-      {stats ? (
+      {statsFallback ? (
+        statsFallback
+      ) : stats ? (
         <StatRow
           stats={[
             {

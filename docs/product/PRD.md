@@ -354,9 +354,26 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 
 > ### As built — 2026-08-26: **For you** holds titles *and* people
 >
-> Still five tabs. What changed is inside one of them: For you leads with a
-> **`[ Titles ] [ People ]`** switch, and everything the tab already was — the wall, the
-> filters, Sent to you, the recommendation-requests alert — is Titles, unchanged.
+> Still five tabs. What changed is inside one of them: For you's category selector — the
+> dropdown that already chose between Movies and TV shows — offers a third option.
+>
+> > **Revised the same day, and this is the shipping shape.** People arrived first as a
+> > separate **`[ Titles ] [ People ]`** segmented control *above* the category selector,
+> > which left the header carrying two stacked controls: the reader had to work out that
+> > the top one chose a kind of thing and the bottom one chose a category of whatever the
+> > top one had chosen. It is one question — what am I looking at — so it is one control.
+> > The segmented control is removed; **no second selector, and no extra tab row.**
+>
+> **The For you selector, in full: `Movies` · `TV shows` · `People`.** "TV shows" rather
+> than Collection's "TV seasons" because this wall holds series — TMDB answers "similar"
+> about a show and never about one of its seasons — and it is a label override on the
+> shared control rather than a second control. Collection keeps its own two options, its
+> own label, and its own remembered preference; For You's selection is per-visit and is
+> deliberately not persisted.
+>
+> Everything the tab already was — the wall, the filters, Sent to you, the
+> recommendation-requests alert — is what Movies and TV shows show, unchanged. Those
+> controls are title-only and are not drawn under People, where they would mean nothing.
 >
 > **People is not a sixth tab and not a Feed insertion.** It is the same question the tab
 > already asks — what next — whose honest answer is sometimes a film and sometimes a
@@ -791,9 +808,11 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 
 > ### As built — 2026-08-26: **People**, the discovery surface inside For You
 >
-> For You gains a content switch at the top — **`[ Titles ] [ People ]`** — and everything
-> the screen already was lives under Titles, in the same order: the recommendation-requests
-> alert, the Movies/TV selector, the filters, Sent to you, and the wall.
+> For You's category selector gains a third option — **`Movies` · `TV shows` · `People`**,
+> one dropdown and not a second control — and everything the screen already was lives
+> under the two title categories, in the same order: the recommendation-requests alert,
+> the filters, Sent to you, and the wall. See §5 As-built for why the separate
+> `[ Titles ] [ People ]` switch this shipped with for a few hours was withdrawn.
 >
 > **People** is two sections, drawn only when they have somebody in them:
 >
@@ -825,8 +844,8 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 > tabs is the width of the bar. People is a *mode of the question For You already asks* —
 > what next — whose honest answer is sometimes a film and sometimes a person.
 >
-> **Recommendation requests stay under Titles.** A held recommendation is a title
-> recommendation; putting it in People would make one surface mean two things.
+> **Recommendation requests stay with the titles.** A held recommendation is a title
+> recommendation; drawing it under People would make one surface mean two things.
 >
 > **Contacts are deferred, not built** — see [`deferred-roadmap.md`](./deferred-roadmap.md)
 > §21. No permission is requested, no address book is read, and nothing is uploaded.
