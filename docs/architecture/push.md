@@ -88,6 +88,80 @@ lane quietly inheriting it. `config/push.test.mjs` asserts it.
 > Absolute hashes are machine-dependent (they include `node_modules` paths); the
 > before/after comparison within one checkout is the meaningful signal.
 
+### The beta row changed on purpose — see §2a
+
+The table above is the measurement taken when push was first configured, and it is left
+as it was written because §2a is a change *against* it rather than a correction of it.
+Beta is no longer unchanged, and that is the point of §2a.
+
+## 2a. Beta became a push-capable lane, and the fingerprint moved
+
+Everything above argued for leaving beta on the plugin's defaults: the published binary
+had no push credentials, no client asking for permission and no token writer, so entitling
+it would buy nothing and cost the over-the-air channel that keeps testers current. It also
+said what would have to be true to revisit that — *the next beta build, if there is one,
+should take `production` with it.*
+
+That is this change. All three premises had reversed: the client asks
+(`src/features/notifications/push-permission.ts`), writes tokens (`push.ts`), and the
+sender and its `pg_cron` scheduler are deployed. **`device_tokens` was nevertheless
+empty** — measured against `bingd-nonprod`, not inferred — because no binary in anybody's
+hands can register. TestFlight delivers through *production* APNs and the beta binary was
+entitled to the sandbox; Android had no `google-services.json` compiled in at all.
+
+`config/push.cjs` now treats beta as a store-distributed lane: `aps-environment:
+production`, and `google-services.json` required rather than ignored.
+
+### Measured result, beta only
+
+Taken with `@expo/fingerprint@0.20.7` in one checkout, with the real `preview` EAS
+environment values, and validated against reality first: the *before* hashes below are
+exactly the runtime versions EAS recorded for beta build 3, which is what makes the pair
+meaningful rather than two numbers from a laptop.
+
+| Platform | Before | After | |
+|---|---|---|---|
+| iOS | `eace5f8297f48f8d68006ca23f89ca96966c43e7` | `d3b308f74a08926ee02303180d171d38c106ca55` | **new binary required** |
+| Android | `e216bbac626a9b6247801f4e3ee31b1b6c491ae8` | depends on the FCM file | **new binary required** |
+
+**The two platforms differ in a way that matters operationally.** iOS's new hash is fixed:
+it was identical under two deliberately different `google-services.json` files, so the
+Android credential is not an iOS fingerprint input and the value above is what the build
+will carry. Android's *is* the file's contents — `@expo/fingerprint` hashes a file-typed
+secret as an external source — so it is only knowable once the real file is in hand, and
+the EAS build machine is where that happens.
+
+**The consequence is a trap with no symptom.** `npm run update:beta` resolves this config
+on the founder's own machine with `BINGD_LANE=beta`, so a laptop holding a *different*
+`google-services.json` than the build machine publishes an Android update under a runtime
+version no binary has: the publish succeeds and reaches nobody. The local file must be
+byte-for-byte the one in the EAS secret. Missing entirely, `config/push.cjs` throws — the
+same mismatch, but with something to read.
+
+`development` and `preview` were re-measured across this change and did not move.
+
+### What the old beta binary loses, stated exactly
+
+It keeps every update already published for `eace5f82…` / `e216bbac…` and keeps being
+served them. It gets no new ones. `npm run update:beta` resolves this config, so from here
+everything it publishes carries the new fingerprint, and there is no supported command that
+publishes to the old runtime version.
+
+**So there is no over-the-air route to a tester who has not installed the replacement**,
+including for a JavaScript-only fix. The remedy is the new build, not an update. That is a
+real cost and it is accepted deliberately: the alternative is a beta population that can
+never receive a notification, which is the thing this whole tranche exists to fix. Anyone
+tempted to publish to the old runtime by hand should note that it would reach only testers
+who have *not* upgraded, which is a second, diverging JavaScript build to maintain for as
+long as anybody sits on it.
+
+### Where the secret lives
+
+`eas.json`'s beta profile names the **`preview`** EAS environment, not `production`, so
+`GOOGLE_SERVICES_JSON` has to exist there for a beta build to see it. Preview builds share
+that environment and are excluded by the lane comparison in `googleServicesFileFor` alone
+— which is why `config/push.test.mjs` asserts preview's exclusion *with the secret set*.
+
 ## 3. The native surface, frozen
 
 After this merges, **no new native dependency, Expo plugin, `app.config.ts` iOS/Android/
@@ -105,6 +179,20 @@ Files and settings inside the freeze:
 - `.gitignore`
 - `assets/brand/icon.png`, `icon-adaptive.png`, `splash.png`
 - Every installed Expo config plugin, and the native modules autolinking picks up
+
+### Breaks in the freeze, and who took them
+
+The freeze is a rule about *unconsidered* native change, so a deliberate one is recorded
+here rather than treated as a violation.
+
+| When | What moved | Decision |
+|---|---|---|
+| §2a | `config/push.cjs` — beta gains `aps-environment: production` and requires `google-services.json` | Founder, as part of building push-capable friend-beta binaries. Beta's fingerprint moves on both platforms; `development` and `preview` were re-measured and did not. |
+
+Nothing in that change adds a dependency, a plugin, or a native module: it changes what
+two existing plugin inputs resolve to for one lane. The freeze's purpose — that the next
+production binary is the intentional RC — is unaffected, because the production lane's
+resolved config is untouched by it.
 
 ## 4. The preference axis — one axis, enforced structurally
 
@@ -313,7 +401,7 @@ throwing, because that code path is a cold start from a tap.
 |---|---|
 | OTA candidate | **No.** The client half would ship over the air, but it cannot work without the native entitlement and FCM configuration. |
 | New native RC build required | **Yes.** `aps-environment` and `googleServicesFile` are native inputs. |
-| Can the current friend-beta binary receive this | **No**, and its fingerprint is deliberately unchanged so it keeps receiving everything else. |
+| Can the current friend-beta binary receive this | **No.** Its fingerprint was left unchanged so it kept receiving everything else — until §2a, which moves it deliberately. A tester on the old binary keeps the updates already published for its runtime version, but no *new* one can be published to it; see §2a. |
 | Migration deploy required | Yes — `supabase db push`. |
 | Edge Function deploy required | Yes — `supabase functions deploy push-sender`. |
 | Credentials required | APNs `.p8` + Key ID + Team ID; Firebase Android app `app.bingd` + `google-services.json` + FCM V1 service account. |

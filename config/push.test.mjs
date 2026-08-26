@@ -46,9 +46,20 @@ const placeholderSecret = () => {
 const noLocalFile = () => false;
 
 describe('apnsEnvironmentFor', () => {
-  it('names production and nothing else', () => {
+  /**
+   * The two store-distributed lanes, and only those two.
+   *
+   * Beta is here because TestFlight delivers through **production** APNs: a beta binary
+   * left on the plugin's `development` default registers against the sandbox, receives
+   * nothing, and reports no error — which is the state `device_tokens` was empty because
+   * of. Preview is internally distributed and stays on the sandbox, which matters more
+   * than it looks: preview and beta share one EAS environment, so this lane comparison is
+   * the only thing separating them.
+   */
+  it('names the store-distributed lanes and nothing else', () => {
     assert.equal(apnsEnvironmentFor('production'), 'production');
-    for (const lane of ['development', 'preview', 'beta']) {
+    assert.equal(apnsEnvironmentFor('beta'), 'production');
+    for (const lane of ['development', 'preview']) {
       assert.equal(apnsEnvironmentFor(lane), null, lane);
     }
   });
@@ -70,18 +81,21 @@ describe('notificationPluginProps', () => {
    * different fingerprint, which strands every tester on their last update.
    */
   it('is exactly { color } for every lane that does not configure push', () => {
-    for (const lane of ['development', 'preview', 'beta', undefined]) {
+    for (const lane of ['development', 'preview', undefined]) {
       const props = notificationPluginProps(lane, { color: '#773744' });
       assert.deepEqual(props, { color: '#773744' }, String(lane));
       assert.equal('mode' in props, false, `${lane} must not name mode at all`);
     }
   });
 
-  it('adds production APNs for the production lane', () => {
-    assert.deepEqual(notificationPluginProps('production', { color: '#773744' }), {
-      color: '#773744',
-      mode: 'production',
-    });
+  it('adds production APNs for both store-distributed lanes', () => {
+    for (const lane of ['production', 'beta']) {
+      assert.deepEqual(
+        notificationPluginProps(lane, { color: '#773744' }),
+        { color: '#773744', mode: 'production' },
+        lane,
+      );
+    }
   });
 });
 
@@ -135,8 +149,49 @@ describe('googleServicesFileFor', () => {
     assert.equal(googleServicesFileFor('development', { env: {}, exists: () => true }), null);
   });
 
-  it('never configures preview, beta, or a lane-less resolution', () => {
-    for (const lane of ['preview', 'beta', undefined]) {
+  it('takes the EAS file secret for beta, which is the whole point of this change', () => {
+    assert.equal(
+      googleServicesFileFor('beta', { env: { [GOOGLE_SERVICES_ENV]: '/eas/secret.json' } }),
+      '/eas/secret.json',
+    );
+  });
+
+  /**
+   * `npm run update:beta` resolves this config on the founder's laptop, where there is no
+   * EAS secret. Without the fallback an over-the-air update to the friend beta would be
+   * impossible; with it, the file on disk has to be the same one, because
+   * `@expo/fingerprint` hashes its contents.
+   */
+  it('falls back to the git-ignored local file for beta as well', () => {
+    assert.equal(
+      googleServicesFileFor('beta', { env: {}, exists: () => true }),
+      './google-services.json',
+    );
+  });
+
+  /**
+   * The refusal, for the lane that now actually has testers behind it. Resolving to
+   * `null` instead would be the same silent mismatch the throw exists to prevent — a
+   * build that cannot register, or an update published under a runtime version no binary
+   * has.
+   */
+  it('refuses a beta build with no Android push configuration, naming its own environment', () => {
+    assert.throws(
+      () => googleServicesFileFor('beta', { env: {}, exists: noLocalFile }),
+      (e) => {
+        assert.match(e.message, /A beta build needs Android push configuration/);
+        // `eas.json` points the beta profile at the *preview* EAS environment. A message
+        // naming `production` sends somebody to create a secret the build cannot see.
+        assert.match(e.message, /--environment preview/);
+        assert.doesNotMatch(e.message, /--environment production/);
+        assert.match(e.message, /silently cannot receive a notification/);
+        return true;
+      },
+    );
+  });
+
+  it('never configures preview or a lane-less resolution', () => {
+    for (const lane of ['preview', undefined]) {
       assert.equal(
         googleServicesFileFor(lane, {
           env: { [GOOGLE_SERVICES_ENV]: '/eas/secret.json' },
@@ -167,10 +222,11 @@ describe('declaresPushNatively agrees with what the module actually produces', (
         const declared = declaresPushNatively(lane, env);
 
         if (declared) {
-          // Production with no credential throws rather than returning, which is still
+          // A store lane with no credential throws rather than returning, which is still
           // "this lane declares push" — the declaration is what makes the absence fatal.
           const file = () => googleServicesFileFor(lane, { env, exists: noLocalFile });
-          if (lane === 'production' && !withSecret) assert.throws(file);
+          const storeLane = lane === 'production' || lane === 'beta';
+          if (storeLane && !withSecret) assert.throws(file);
           else assert.ok(file() || apnsEnvironmentFor(lane));
           return;
         }
@@ -229,27 +285,59 @@ function resolveConfig(lane, { variant, env = {} } = {}) {
 
 describe('the resolved config, per lane', () => {
   /**
-   * The load-bearing assertion of this whole tranche.
+   * Preview is now the lane this guards, and the guard got sharper rather than weaker.
    *
-   * The friend beta runs on a published binary whose runtime version is a fingerprint of
-   * the resolved config. If either of these two values appears on the beta lane, that
-   * binary stops being offered updates — silently, with no symptom until somebody asks
-   * why a fix never arrived, and no fix short of redistributing a build.
+   * It used to cover preview and beta together, on the argument that a fingerprint moving
+   * on either strands a published binary. Beta's has now moved deliberately — that is
+   * what makes the next TestFlight build able to register at all — and preview is left
+   * holding the property alone.
    *
-   * Asserted **with the secret set**, because the realistic accident is not somebody
-   * editing this rule: it is the founder configuring `GOOGLE_SERVICES_JSON` for the
-   * production build and every other lane quietly inheriting it.
+   * **The realistic accident it catches is more likely than before, not less.**
+   * `GOOGLE_SERVICES_JSON` lives in the `preview` EAS *environment*, because that is the
+   * one `eas.json`'s beta profile names. So the secret is genuinely present in a preview
+   * build's environment, and the lane comparison in `googleServicesFileFor` is the only
+   * thing keeping it out of a preview binary. Asserted with the secret set for exactly
+   * that reason.
    */
-  for (const lane of ['preview', 'beta']) {
-    it(`${lane} declares no push configuration, even with the secret set`, () => {
-      const secret = placeholderSecret();
-      const config = resolveConfig(lane, { env: { [GOOGLE_SERVICES_ENV]: secret } });
+  it('preview declares no push configuration, even with the secret set', () => {
+    const secret = placeholderSecret();
+    const config = resolveConfig('preview', { env: { [GOOGLE_SERVICES_ENV]: secret } });
 
-      assert.equal(config.failed, false, config.message);
-      assert.deepEqual(config.plugin, { color: '#773744' });
-      assert.equal(config.googleServicesFile, null);
-    });
-  }
+    assert.equal(config.failed, false, config.message);
+    assert.deepEqual(config.plugin, { color: '#773744' });
+    assert.equal(config.googleServicesFile, null);
+  });
+
+  /**
+   * Beta, resolved for real, which is the artefact the next TestFlight and closed-test
+   * builds are made from.
+   *
+   * Both halves are asserted together because a binary needs both and gets neither by
+   * default: `mode` decides which APNs environment the iOS entitlement names, and
+   * `googleServicesFile` is the only thing that puts FCM into the Android build. Either
+   * one missing is a binary that installs and cannot register, on that platform, silently.
+   */
+  it('beta configures both halves of push, from the EAS file secret', () => {
+    const secret = placeholderSecret();
+    const config = resolveConfig('beta', { env: { [GOOGLE_SERVICES_ENV]: secret } });
+
+    assert.equal(config.failed, false, config.message);
+    assert.deepEqual(config.plugin, { color: '#773744', mode: 'production' });
+    assert.equal(config.googleServicesFile, secret);
+  });
+
+  /**
+   * The same refusal production has, reached through the real resolver rather than
+   * through the exported function — so a future edit that keeps `googleServicesFileFor`
+   * strict but drops beta out of `app.config.ts`'s inline predicate is caught here. That
+   * predicate is a duplicate by necessity (see `push.cjs` on the fingerprint), and this
+   * is the case where the duplicate silently disagreeing costs a store submission.
+   */
+  it('beta refuses to resolve at all without Android push configuration', () => {
+    const config = resolveConfig('beta');
+    assert.equal(config.failed, true, 'a beta config resolved with no FCM file');
+    assert.match(config.message, /A beta build needs Android push configuration/);
+  });
 
   it('development is untouched until it opts in, and then takes only FCM', () => {
     const bare = resolveConfig('development');

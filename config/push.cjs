@@ -94,7 +94,8 @@ const GOOGLE_SERVICES_LOCAL = './google-services.json';
  * `expo start` must keep working on a machine that has never seen Firebase.
  */
 function declaresPushNatively(lane, env = process.env) {
-  if (lane === 'production') return true;
+  // Beta joins production because both are store-distributed. See apnsEnvironmentFor.
+  if (lane === 'production' || lane === 'beta') return true;
   // Development opts in, and opting in is explicit. See googleServicesFileFor.
   if (lane === 'development') return Boolean(env[GOOGLE_SERVICES_ENV]);
   return false;
@@ -104,20 +105,32 @@ function declaresPushNatively(lane, env = process.env) {
  * The APNs environment a lane's binary should be entitled to, or null to leave the
  * plugin's own default in place.
  *
- * Only `production` is named. The other three keep `aps-environment: development`, which
- * is not a compromise — it is correct for them:
+ * `production` and `beta` are named. The other two keep `aps-environment: development`,
+ * which is not a compromise — it is correct for them:
  *
  *   - a **development** or **preview** build is signed for internal distribution and
  *     talks to the APNs sandbox, which is exactly what `development` means. One APNs
  *     `.p8` auth key serves both environments, so iOS push can be exercised end to end on
  *     a development build with no native change at all;
- *   - **beta** is the interesting one, and it is left alone deliberately rather than by
- *     oversight. It is store-distributed (TestFlight), so its binary *should* eventually
- *     carry `production` — but the beta binary that exists today has no push credentials,
- *     no client that asks for permission and no token writer, so configuring it would buy
- *     nothing and cost the fingerprint that keeps every tester on over-the-air updates.
- *     The next beta build, if there is one, should take `production` with it. That is a
- *     founder decision with a redistribution attached, not a line to slip in here.
+ *   - **beta** is store-distributed. A TestFlight build is signed with an App Store
+ *     distribution profile and its notifications come from the **production** APNs
+ *     environment, so a beta binary entitled to the sandbox registers against a service
+ *     nothing will ever send to. It receives no notification and reports no error.
+ *
+ * **Beta was deliberately left on the sandbox until now, and the reason it changes here is
+ * the reason it was left.** The argument recorded against configuring it was that the
+ * published beta binary had no push credentials, no client asking for permission and no
+ * token writer, so entitling it would buy nothing and cost the fingerprint that keeps
+ * every tester on over-the-air updates — and that the next beta build should take
+ * `production` with it, as a founder decision with a redistribution attached.
+ *
+ * All three of those premises have since gone the other way. The client asks for
+ * permission (`src/features/notifications/push-permission.ts`), writes tokens
+ * (`push.ts`), and the sender and its scheduler are deployed. `device_tokens` is
+ * nevertheless **empty**, because no binary in anybody's hands can register — which is
+ * that argument's own prediction, observed. The redistribution is the decision being
+ * taken: this lands with a new TestFlight build and a new closed-test build, not as an
+ * over-the-air update, because an entitlement cannot ship over the air.
  *
  * `expo-application`'s `getIosPushNotificationServiceEnvironmentAsync()` reads this same
  * entitlement at runtime, and `getExpoPushTokenAsync` defaults its `development` flag from
@@ -125,7 +138,7 @@ function declaresPushNatively(lane, env = process.env) {
  * second place to keep in step.
  */
 function apnsEnvironmentFor(lane) {
-  return lane === 'production' ? 'production' : null;
+  return lane === 'production' || lane === 'beta' ? 'production' : null;
 }
 
 /**
@@ -149,8 +162,27 @@ function apnsEnvironmentFor(lane) {
  * triggers on a file somebody happened to download is not an opt-in, and the lane's
  * fingerprint would then depend on the contents of a directory rather than on a decision.
  *
- * **Preview and beta never take it.** Those are the two lanes with binaries in other
- * people's hands.
+ * **Beta requires it, on the same terms as production and for the same reason.** A
+ * TestFlight or closed-test binary with no FCM configuration installs, signs in, asks for
+ * notification permission, is granted it, and then cannot obtain a token at all — the
+ * exact state `device_tokens` is in today. The beta profile in `eas.json` names the
+ * `preview` EAS environment, so the file secret has to exist **there**, not under
+ * `production`.
+ *
+ * **The local fallback matters more for beta than for production, and it is a trap worth
+ * naming.** `eas update --branch beta` resolves this config on the founder's own machine
+ * (`scripts/release.mjs` supplies `BINGD_LANE=beta` for updates as well as builds), and
+ * `@expo/fingerprint` hashes the file's *contents*. So a laptop holding a **different**
+ * `google-services.json` than the build machine publishes an update under a runtime
+ * version no binary has, which is silent: the update succeeds and reaches nobody. The
+ * file on disk must be byte-for-byte the one in the EAS secret. Absent entirely, this
+ * throws rather than resolving to `null` — resolving to `null` is the same silent
+ * mismatch with nothing to read.
+ *
+ * **Preview never takes it**, and that is now the load-bearing exclusion rather than a
+ * pair of them: preview shares the `preview` EAS environment with beta, so
+ * `GOOGLE_SERVICES_JSON` is present in its build environment and only the lane gate keeps
+ * it out. Preview is internally distributed and belongs on the sandbox.
  *
  * `env` and `exists` are injected so the rule is testable without a filesystem. The
  * defaults are the real ones.
@@ -171,7 +203,7 @@ function googleServicesFileFor(
   const fromSecret = env[GOOGLE_SERVICES_ENV];
 
   if (lane === 'development') return fromSecret || null;
-  if (lane !== 'production') return null;
+  if (lane !== 'production' && lane !== 'beta') return null;
 
   if (fromSecret) return fromSecret;
 
@@ -184,22 +216,30 @@ function googleServicesFileFor(
     return GOOGLE_SERVICES_LOCAL;
   }
 
+  // The EAS *environment* a lane's build profile names, which is not the lane's own name
+  // for beta — `eas.json` points the beta profile at `preview`. Naming the wrong one here
+  // sends somebody to create a secret the build will not see.
+  const environment = lane === 'beta' ? 'preview' : 'production';
+
   throw new Error(
-    'A production build needs Android push configuration and there is none.\n' +
+    `A ${lane} build needs Android push configuration and there is none.\n` +
       '\n' +
       'Supply google-services.json one of two ways:\n' +
       '\n' +
       '  · as an EAS file secret, which is how a build machine should get it:\n' +
       '      npx eas env:create --scope project --name GOOGLE_SERVICES_JSON \\\n' +
-      '        --type file --value ./google-services.json --environment production\n' +
+      `        --type file --value ./google-services.json --environment ${environment}\n` +
       '\n' +
-      '  · or as ./google-services.json in the project root, for a local build.\n' +
-      '    It is git-ignored and must stay that way.\n' +
+      '  · or as ./google-services.json in the project root, for a local build and for\n' +
+      `    \`npm run update:${lane}\`, which resolves this config on your own machine.\n` +
+      '    It is git-ignored and must stay that way, and it must be byte-for-byte the\n' +
+      '    file in the EAS secret — @expo/fingerprint hashes its contents, so a\n' +
+      '    different copy publishes an update under a runtime version no binary has.\n' +
       '\n' +
       'Download it from the Firebase console for the Android app app.bingd.\n' +
       'The whole credential checklist is in supabase/functions/push-sender/README.md.\n' +
       '\n' +
-      'This refuses rather than building, because a production binary with no FCM\n' +
+      `This refuses rather than building, because a ${lane} binary with no FCM\n` +
       'configuration installs, signs in and silently cannot receive a notification —\n' +
       'and fixing that costs another store submission.',
   );

@@ -114,15 +114,29 @@ moves things. None of this requires the engineering branch to build or test.
    ```powershell
    npx eas credentials --platform ios
    ```
-   Choose the **production** profile, then *Push Notifications: Manage your Apple Push
-   Notifications Key* → *Set up your project to use APNs*. EAS can also create the key for
-   you if you let it sign in to Apple, which avoids the download-once problem entirely.
+   Choose the **beta** profile — that is the one being built now — then *Push
+   Notifications: Manage your Apple Push Notifications Key* → *Set up your project to use
+   APNs*. EAS can also create the key for you if you let it sign in to Apple, which avoids
+   the download-once problem entirely.
+
+   A token-based APNs key belongs to the **Apple team**, not to a build profile and not to
+   one bundle identifier — one key can sign for several. Beta and production share the team
+   *and* the identifier `app.bingd`, so doing this once covers both lanes and there is no
+   second key to create for the public release.
 4. **Do not paste the `.p8` contents anywhere** — not a chat, not a ticket, not a
    screenshot. If it has been pasted, revoke it in the Keys list and make a new one.
-5. **Expect the provisioning profile to be regenerated** on the next production build. The
-   `aps-environment` entitlement changed from `development` to `production` in this branch,
-   and a profile that does not grant it fails code signing. EAS handles this during the
-   build; it is listed here so an unexpected credentials prompt is not a surprise.
+5. **Expect the provisioning profile to be regenerated** on the next beta build, and on the
+   next production build. The `aps-environment` entitlement changed from `development` to
+   `production` — for the production lane when push was first configured, and for the
+   **beta** lane in the change that made TestFlight able to register at all — and a profile
+   that does not grant it fails code signing. EAS handles this during the build; it is
+   listed here so an unexpected credentials prompt is not a surprise.
+
+   Step 1 is the one that gates this. If the `app.bingd` App ID does not have the Push
+   Notifications capability enabled, EAS regenerates a profile that still grants no
+   `aps-environment`, and the build fails at signing rather than producing a binary that
+   cannot register — which is the better of the two outcomes, but only if the capability
+   is added rather than the entitlement reverted.
 
 ## Founder checklist — Google
 
@@ -132,23 +146,44 @@ moves things. None of this requires the engineering branch to build or test.
    generated **`google-services.json`**.
    - No SHA-1 fingerprint is needed for FCM. (It is needed for Google Sign-In, which this
      app does through Supabase rather than through Firebase.)
-3. **Give the file to EAS**, as a file secret rather than a commit:
+3. **Give the file to EAS**, as a file secret rather than a commit. **The environment name
+   is the part to get right**: `eas.json`'s `beta` profile names the **`preview`**
+   environment, so a secret created under `production` is invisible to the beta build.
+
    ```powershell
+   # for the friend-beta builds (TestFlight + closed test)
+   npx eas env:create --scope project --name GOOGLE_SERVICES_JSON `
+     --type file --value ./google-services.json --environment preview
+
+   # and again for the eventual public release
    npx eas env:create --scope project --name GOOGLE_SERVICES_JSON `
      --type file --value ./google-services.json --environment production
    ```
-   `app.config.ts` reads `GOOGLE_SERVICES_JSON` for the production lane and **refuses to
-   resolve** without it, so a production build cannot be made that silently cannot receive
-   a notification. `.gitignore` already names `google-services.json`; keep it that way.
+
+   `app.config.ts` reads `GOOGLE_SERVICES_JSON` for the beta and production lanes and
+   **refuses to resolve** without it, so neither build can be made that silently cannot
+   receive a notification. `.gitignore` already names `google-services.json`; keep it that
+   way.
+
+   **Keep the file on the machine that publishes updates, too.** `npm run update:beta`
+   resolves the config locally, and `@expo/fingerprint` hashes the file's *contents* — so a
+   different copy publishes an Android update under a runtime version no binary has, with
+   no error anywhere. `docs/architecture/push.md` §2a has the measurements.
 4. **FCM V1 service account key.** Firebase → Project settings → **Service accounts** →
    *Generate new private key*. This downloads a JSON file. Then:
    ```powershell
    npx eas credentials --platform android
    ```
-   → production → *Google Service Account* → *Manage your Google Service Account Key for
+   → **beta** → *Google Service Account* → *Manage your Google Service Account Key for
    Push Notifications (FCM V1)* → upload the JSON.
    - The legacy FCM server key is deprecated and no longer accepted; it must be the V1
      service account.
+   - Like the APNs key, this is held against the Android **package name** rather than the
+     build profile, so uploading it once for `app.bingd` serves beta and production alike.
+   - Without it Expo has nothing to send *with*: the device registers, a token lands in
+     `device_tokens`, `push-sender` posts to Expo, and Expo answers with an error per
+     message instead of delivering. That failure is visible in `push_outbox` rather than
+     silent, which is the one mercy in this list.
 5. **Separate registrations for other lanes: only if you want push there.** A Firebase
    Android app is per package name, so `app.bingd.dev` would need its own app entry and its
    own `google-services.json`. **Production push does not need it.** It is worth doing once,

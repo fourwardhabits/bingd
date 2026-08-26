@@ -55,7 +55,7 @@ const NOTIFICATION_COLOR = '#773744';
  * included. A lane that never takes the branch never loads the module and never sees it
  * in its hash. `config/push.cjs` records the measurements.
  *
- * The two comparisons below are `declaresPushNatively` restated, and they have to be:
+ * The three comparisons below are `declaresPushNatively` restated, and they have to be:
  * answering "does this lane configure push" is what decides whether the module may be
  * loaded at all, so it cannot come from the module. `config/push.test.mjs` asserts the
  * two agree for every lane, which is the seam this arrangement creates.
@@ -65,7 +65,9 @@ const NOTIFICATION_COLOR = '#773744';
  */
 function pushNative(): { plugin: { color: string; mode?: string }; googleServicesFile: string | null } {
   const declared =
-    lane === 'production' || (lane === 'development' && Boolean(process.env.GOOGLE_SERVICES_JSON));
+    lane === 'production' ||
+    lane === 'beta' ||
+    (lane === 'development' && Boolean(process.env.GOOGLE_SERVICES_JSON));
 
   if (!declared) {
     // Byte-identical to what every lane produced before push was configured.
@@ -360,8 +362,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
      * native entitlement and cannot be changed over the air, which is why this lands
      * before the release candidate.
      *
-     * `notificationPluginProps` adds `mode` for the production lane and returns exactly
-     * `{ color }` for every other, so the beta and preview fingerprints do not move.
+     * `notificationPluginProps` adds `mode` for the two store-distributed lanes —
+     * production and **beta** — and returns exactly `{ color }` for development and
+     * preview, whose fingerprints therefore do not move.
+     *
+     * Beta's does move, and that is the point of it rather than a cost to be minimised:
+     * TestFlight delivers through production APNs, so the beta binary in testers' hands
+     * is entitled to the wrong service and `device_tokens` is empty. The new entitlement
+     * needs a new build.
+     *
+     * **What that costs the old binary is worth stating exactly, because it is easy to
+     * overstate in the reassuring direction.** Testers still on it keep whatever updates
+     * were already published for their runtime version, and keep receiving them. They do
+     * not get new ones: `npm run update:beta` resolves *this* config, so everything it
+     * publishes from now on carries the new fingerprint. Shipping a JavaScript-only fix
+     * to somebody who has not installed the replacement is therefore not a thing the
+     * supported command can do — the fix is the new build.
      * Icon and sound assets are still deferred to the brand asset pass (PRD §5).
      */
     ['expo-notifications', push.plugin],

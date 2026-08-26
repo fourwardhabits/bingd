@@ -125,6 +125,25 @@ jobs:
       # "every lane" while skipping production in a `continue`; the negative steps below are
       # what cover a lane with no backend, and saying so is the difference between a skip and
       # a silent gap.
+      # A placeholder `google-services.json`, for the two steps below that resolve the
+      # **beta** lane and expect it to succeed.
+      #
+      # Beta is a store-distributed lane now: `config/push.cjs` requires FCM configuration
+      # for it, exactly as it does for production, because a TestFlight or closed-test
+      # binary without it registers for nothing. So a beta resolution with no file refuses —
+      # which is the intended behaviour and would otherwise turn this gate red for the right
+      # reason at the wrong moment.
+      #
+      # The contents are irrelevant and must stay irrelevant. Nothing here asserts anything
+      # about FCM; these steps are about `extra.lane`, `extra.variant` and the backend
+      # allowlist, and the file is held constant so that a failure is about the thing the
+      # step is named after. The real file is an EAS file secret and never reaches CI.
+      - name: A placeholder FCM file, so a beta resolution is about the backend
+        run: |
+          set -e
+          echo '{"project_info":{"project_id":"ci-placeholder"}}' > "$RUNNER_TEMP/google-services.json"
+          echo "GOOGLE_SERVICES_JSON=$RUNNER_TEMP/google-services.json" >> "$GITHUB_ENV"
+
       - name: Every lane with a backend resolves against it
         run: |
           set -e
@@ -211,6 +230,13 @@ jobs:
           # configured passed every check and would have failed as "Invalid app configuration"
           # on a phone, after a signed store build. config/production-lane.cjs closes it and
           # this is the proof the closure is wired in rather than merely written.
+          #
+          # **It only became that proof when the placeholder FCM file above was added.**
+          # `pushNative()` runs before the production-backend rule, and the production lane
+          # has always required `google-services.json`, so with no file in CI this case was
+          # refusing at the FCM guard and never reaching `assertProductionBackend` at all. It
+          # passed, for a reason it does not name. Holding the FCM file constant is what lets
+          # the refusal below be about the backend.
           if EAS_BUILD=true BINGD_LANE=production APP_VARIANT=production \
              EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
              npx expo config --type public --json > /dev/null 2>&1; then
@@ -233,6 +259,11 @@ jobs:
 
           # The control. Without it the three refusals above pass just as well against an
           # app.config.ts that throws for everything.
+          #
+          # It inherits `GOOGLE_SERVICES_JSON` from the placeholder step, which beta now
+          # needs to resolve at all. The refusals above deliberately do not depend on that:
+          # `assertBackendIsAllowed` runs before `pushNative()`, so each of them still fails
+          # for the backend reason it is named after, with or without the file.
           if ! EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
              EXPO_PUBLIC_SUPABASE_URL=https://abheeqyjzekiowkztfxv.supabase.co \
              EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
