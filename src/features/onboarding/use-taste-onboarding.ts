@@ -100,7 +100,14 @@ const PHASE_PREF = 'onboarding.taste.phase';
 export type TastePhase = 'active' | 'done' | 'skipped';
 
 export type TasteOnboarding = {
-  /** Ranked movies, which is what the flow counts toward `FIRST_FIVE`. */
+  /**
+   * Ranked movies, which is what the flow counts toward `FIRST_FIVE`.
+   *
+   * **Only meaningful while `needed` is true.** An account that has finished or declined
+   * the flow is answered from the device without asking the server anything, so this
+   * reads zero for them — see `readState`. Nothing displays it in that state: the screen
+   * that draws the progress bar is not reachable once the flow has ended.
+   */
   ranked: number;
   /** True when this account belongs in the flow — see `PHASE_PREF`. */
   needed: boolean;
@@ -109,6 +116,28 @@ export type TasteOnboarding = {
 const phaseKey = (userId: string) => `${userId}.${PHASE_PREF}`;
 
 async function readState(userId: string): Promise<TasteOnboarding> {
+  // Memory first: a decision taken in this process outranks whatever the disk holds,
+  // because the write that would have updated the disk may have failed.
+  const phase = intent.get(userId) ?? (await readPref<TastePhase>(phaseKey(userId)));
+
+  /**
+   * **Already decided, and the decision is the whole answer — so nothing is asked.**
+   *
+   * This ordering is the fix for independent review 48's blocker, and the old order is
+   * what made it one. The counts used to be awaited *first*, unconditionally, and only
+   * then was the phase consulted — so every launch of every established account spent two
+   * PostgREST round trips proving something the Keychain already knew. `nextRoute` blocks
+   * on this query, so those two requests sat between a cold start and the first screen of
+   * the app, on the overwhelmingly common path where their answer could not change
+   * anything. Bounding that wait made it survivable; taking the network out of it is what
+   * makes it not a wait.
+   *
+   * What remains on the critical path is one local preference read, and it stays there
+   * because it is not optional: it is the answer to *which screen this person belongs
+   * on*, and there is no useful UI to show somebody until that is known.
+   */
+  if (phase === 'done' || phase === 'skipped') return { ranked: 0, needed: false };
+
   const [{ count: rankedCount, error: rankedError }, { count: loggedCount, error: loggedError }] =
     await Promise.all([
       supabase
@@ -127,11 +156,6 @@ async function readState(userId: string): Promise<TasteOnboarding> {
 
   const ranked = rankedCount ?? 0;
   const logged = loggedCount ?? 0;
-  // Memory first: a decision taken in this process outranks whatever the disk holds,
-  // because the write that would have updated the disk may have failed.
-  const phase = intent.get(userId) ?? (await readPref<TastePhase>(phaseKey(userId)));
-
-  if (phase === 'done' || phase === 'skipped') return { ranked, needed: false };
 
   /**
    * Already in it: stay until they *leave*, which is an explicit act and not a count.
@@ -164,11 +188,14 @@ async function readState(userId: string): Promise<TasteOnboarding> {
  * *in* the flow is taken once, on arrival; `ranked` is refetched deliberately by the
  * screen to move the progress bar.
  *
- * A failure resolves to "not needed". Not knowing whether somebody is new is not a
- * reason to put them through a five-step flow, and an account that genuinely is new
- * loses nothing but a suggestion.
+ * A failure stays a failure, and `nextRoute` is what turns it into "not needed": an
+ * undefined `needed` is falsy there, so a broken connection sends somebody to the feed
+ * rather than into a five-step flow they have already completed. Deliberately *not*
+ * resolved to a value here, which is what this used to say — under `staleTime: Infinity`
+ * that would pin "I asked and the answer was no" for the whole session, and an error is
+ * the only signal anything upstream has that the backend is unreachable.
  *
- * **And so now does a wait that has stopped being a wait**, which is half of the
+ * **A wait that has stopped being a wait is a different case**, and it is half of the
  * founder's blank startup. `nextRoute` deliberately moves nobody while this is pending —
  * `if (tastePending) return null` — so until it settles the only route the navigator has
  * is `/`. That is right when the check costs the ~170ms it costs against a healthy

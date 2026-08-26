@@ -205,6 +205,30 @@ export default function TasteOnboardingScreen() {
    *
    * Not awaited, therefore, and deliberately not `await`-able: there is no outcome a
    * caller could act on.
+   *
+   * ---------------------------------------------------------------------------
+   * **THE DURABILITY QUESTION, WHICH INDEPENDENT REVIEW 48 RAISED AND THIS ANSWERS**
+   *
+   * The objection: not awaiting means the `done`/`skipped` write can be lost, and a lost
+   * `skipped` is an account offered the flow again — an onboarding loop, which is the
+   * thing this whole tranche exists to remove.
+   *
+   * It does not follow, and the reason is *when* the write is dispatched rather than when
+   * it resolves. `complete` is an async function whose body runs synchronously to its
+   * first await, and that first await **is** the `writePref` call — so the Keychain write
+   * has already been handed to the platform before `complete()` returns, which is before
+   * the line below runs. Unmounting this screen does not cancel it; a native module call
+   * is not tied to the React tree that started it.
+   *
+   * So awaiting would not make the write happen, it would only make *this screen* watch
+   * it happen. The single case the two differ on is the process being killed inside that
+   * window — and navigating is not something that kills a process. What awaiting reliably
+   * did cost was up to three seconds of a screen not responding to the button somebody
+   * had just pressed, on every exit, which is a defect the founder actually hit.
+   *
+   * The remaining exposure is a force-quit in the milliseconds between the dispatch and
+   * the Keychain returning. That account reopens on the summary with its five films
+   * intact, which is the documented resume behaviour rather than a loop.
    */
   const finish = ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
     void complete({ skipped });

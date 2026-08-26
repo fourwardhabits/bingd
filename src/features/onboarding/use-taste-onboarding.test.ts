@@ -14,6 +14,8 @@ const mockErrors: Record<string, unknown> = {};
 /** Preference names whose read never settles, and tables whose select never does. */
 const mockReadHangs = new Set<string>();
 const mockTableHangs = new Set<string>();
+/** How many PostgREST reads this check issued — the cold-start cost, counted. */
+const mockRequests: Record<string, number> = {};
 
 jest.mock('@/lib/prefs', () => ({
   readPref: (name: string) =>
@@ -24,6 +26,7 @@ jest.mock('@/lib/prefs', () => ({
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     from: (table: string) => {
+      mockRequests[table] = (mockRequests[table] ?? 0) + 1;
       const chain: Record<string, unknown> = {};
       Object.assign(chain, {
         select: () => chain,
@@ -51,6 +54,7 @@ beforeEach(() => {
   mockCounts.user_media = 0;
   mockReadHangs.clear();
   mockTableHangs.clear();
+  for (const key of Object.keys(mockRequests)) delete mockRequests[key];
   resetTasteIntent();
 });
 
@@ -266,5 +270,64 @@ describe('when the first-run check cannot answer in time', () => {
     // An account with nothing in it is still offered the flow — the bound must not have
     // turned every launch into "not needed".
     expect(result.current.data).toEqual({ ranked: 0, needed: true });
+  });
+});
+
+/**
+ * **What a cold start actually spends on this question, counted.**
+ *
+ * `nextRoute` blocks on this query, so whatever it costs sits between opening the app and
+ * seeing any part of it. Bounding that wait made a hang survivable and left the ordinary
+ * case untouched — independent review 48 was right that capping an unnecessary wait at
+ * four seconds is not the same as not having it.
+ *
+ * The decision is already on the device for anyone who has finished or declined, which is
+ * every account after its first session. So it is read first, and the counts are asked for
+ * only when they can still change the answer.
+ */
+describe('what the check costs a cold start', () => {
+  it('asks the server nothing at all once the flow has been finished', async () => {
+    mockPrefs.set('user-1.onboarding.taste.phase', 'done');
+
+    const result = await read();
+
+    expect(result.current.data?.needed).toBe(false);
+    // The whole point: two PostgREST round trips are no longer in front of the app for
+    // an account whose answer the Keychain already held.
+    expect(mockRequests.rankings ?? 0).toBe(0);
+    expect(mockRequests.user_media ?? 0).toBe(0);
+  });
+
+  it('asks the server nothing once the flow has been declined either', async () => {
+    mockPrefs.set('user-1.onboarding.taste.phase', 'skipped');
+
+    const result = await read();
+
+    expect(result.current.data?.needed).toBe(false);
+    expect(mockRequests.rankings ?? 0).toBe(0);
+    expect(mockRequests.user_media ?? 0).toBe(0);
+  });
+
+  /**
+   * And it still asks where the answer is genuinely unknown — the fix must not have
+   * turned "never decided" into "not needed" by skipping the read that decides it.
+   */
+  it('still asks when nothing has been decided yet', async () => {
+    const result = await read();
+
+    expect(result.current.data?.needed).toBe(true);
+    expect(mockRequests.rankings ?? 0).toBeGreaterThan(0);
+    expect(mockRequests.user_media ?? 0).toBeGreaterThan(0);
+  });
+
+  it('still asks mid-flow, because the progress bar is the count', async () => {
+    mockPrefs.set('user-1.onboarding.taste.phase', 'active');
+    mockCounts.rankings = 3;
+    mockCounts.user_media = 3;
+
+    const result = await read();
+
+    expect(result.current.data).toEqual({ ranked: 3, needed: true });
+    expect(mockRequests.rankings ?? 0).toBeGreaterThan(0);
   });
 });
