@@ -173,20 +173,6 @@ export default function TasteOnboardingScreen() {
    * would re-break this the next time the bar is reordered.
    */
   /**
-   * The exit, which now has one step in front of it.
-   *
-   * **Both ways out pass through the notification step**, and that is deliberate rather
-   * than incidental: PRD §15 forbids asking at first launch and this is the last moment
-   * before the app opens, so it is the one place the question can be put to *everybody*
-   * exactly once. Routing it through `leave` rather than hanging it off the summary means
-   * the person who taps "Not now" on the films is offered it too — they are, if anything,
-   * the reader most worth reaching later.
-   *
-   * `complete({ skipped })` is still called with the answer the *films* got. The
-   * notification step has no bearing on whether taste onboarding was skipped, and folding
-   * the two would make a flag about the collection mean something about a permission.
-   */
-  /**
    * Finish the flow and go, in that order and without waiting in between.
    *
    * `complete` records the flow-ending decision **synchronously** — the intent map and
@@ -257,6 +243,24 @@ export default function TasteOnboardingScreen() {
   // are quick — but two presses must not race two navigations.
   const departing = useRef(false);
 
+  /**
+   * The exit, which has one step in front of it.
+   *
+   * **Both ways out pass through the notification step**, and that is deliberate rather
+   * than incidental: PRD §15 forbids asking at first launch and this is the last moment
+   * before the app opens, so it is the one place the question can be put to *everybody*
+   * exactly once. Routing it through here rather than hanging it off the summary means
+   * the person who taps "Not now" on the films is offered it too — they are, if anything,
+   * the reader most worth reaching later.
+   *
+   * `complete({ skipped })` is still called with the answer the *films* got. The
+   * notification step has no bearing on whether taste onboarding was skipped, and folding
+   * the two would make a flag about the collection mean something about a permission.
+   *
+   * (This paragraph sat above `finish` until now, which is not where any of it happens —
+   * `finish` neither offers the step nor decides whether it is owed. Moved rather than
+   * rewritten.)
+   */
   const leave = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
     if (departing.current) return;
     departing.current = true;
