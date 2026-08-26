@@ -263,7 +263,7 @@ comment on function _comment_root(uuid, uuid) is
  * So the hardening is restated here **whole**, and it is now wider than what it
  * restores, because this function has grown a second counterpart:
  *
- *     check (no lock) -> lock every pair -> check again under the locks -> write
+ *     check (no lock) -> lock every pair -> pin the parent -> check again -> write
  *
  * ---------------------------------------------------------------------------
  * WHICH PAIRS, AND WHY BOTH
@@ -342,6 +342,46 @@ comment on function _comment_root(uuid, uuid) is
  * `_assert_operation_rate` has already taken its account lock, keyed on `auth.uid()`,
  * before any of this -- the uniform outer level 20260819000400's header describes, and
  * the reason the two lock families cannot cycle against each other either.
+ *
+ * ---------------------------------------------------------------------------
+ * AND ONE LOCK THAT IS NOT A PAIR LOCK
+ * ---------------------------------------------------------------------------
+ *
+ * A block is not the only thing that can commit inside this function's window.
+ * `delete_comment` takes `for update` on the row it is retracting and takes no pair lock
+ * at all, so nothing above constrains it, and the parent was read before the locks.
+ *
+ * **What that does not break, so the fix is not sold as more than it is.** The insert
+ * cannot reach the foreign key with a dangling `parent_id`: `_comments_are_one_deep`
+ * runs BEFORE INSERT, re-reads the parent, and raises the ordinary P0002 when the row is
+ * gone -- before any constraint fires. And a root with a live reply is *tombstoned*
+ * rather than removed, so the row a reply-to-a-reply points at does not disappear either.
+ * Two mechanisms already written down, both still doing their job.
+ *
+ * **What it does break is who gets told.** `v_reply_to` and `v_deleted_at` were read
+ * before the locks and are then used after them, and a retraction inside that window
+ * makes both stale:
+ *
+ *   a root tombstoned in the window   -> this call still writes the reply notification,
+ *                                        so the author is told somebody answered a
+ *                                        remark they have just withdrawn
+ *   a reply removed in the window     -> the notification lands with `reply_to` naming a
+ *                                        comment that no longer exists, and the reply
+ *                                        itself is stored under a root the reader never
+ *                                        chose to answer
+ *
+ * Reproduced both ways, and mutant 11 in `mutation-check.mjs` is the version without the
+ * pin required to do exactly that.
+ *
+ * So the parent is pinned with `for share` under the pair locks and re-resolved from the
+ * pin, which puts this ordering under the same rule as the others: the retraction either
+ * committed before this transaction reached the row, and is seen, or it waits behind it.
+ * `v_root` and `v_reply_to` are then recomputed rather than carried.
+ *
+ * It adds no new lock order to reason about. `delete_comment` holds only comments rows
+ * and never a pair, so it cannot be waiting on anything this transaction holds; and this
+ * transaction takes its one comments row lock last and goes straight to the insert, so it
+ * is never the party waiting while holding one.
  *
  * Asserted rather than argued: `races/notification-block.mjs` requires the blocker to be
  * found waiting on the *named* key for each of the two pairs, and `races/lock-pair.mjs`
@@ -456,8 +496,51 @@ begin
     raise exception 'no such activity' using errcode = 'P0002';
   end if;
 
-  if v_reply_author is not null and not can_view_profile(auth.uid(), v_reply_author) then
-    raise exception 'no such comment' using errcode = 'P0002';
+  -- And the parent, re-resolved from a pin rather than from what was read above.
+  --
+  -- `delete_comment` takes `for update` on the row it retracts and takes no pair lock, so
+  -- the locks above say nothing about it. What that costs is not the insert -- the
+  -- BEFORE INSERT trigger re-reads the parent and answers the ordinary P0002 for a row
+  -- that is gone -- it is *who gets told*: `v_reply_to` and `v_deleted_at` were read
+  -- before the locks, so a retraction inside the window announces a reply to a remark its
+  -- author has just withdrawn, or names a `reply_to` that no longer exists. See the
+  -- header, and mutant 11.
+  --
+  -- `for share` is what decides that ordering here rather than leaving it to whichever
+  -- statement reached the row first. Pinning the *tapped* comment pins the whole thread:
+  -- if it is the root, the share lock is on the row the reply's foreign key names; if it
+  -- is a reply, then its root has a live reply — this one — so `delete_comment` tombstones
+  -- that root rather than removing it, and its "delete the tombstone whose last reply just
+  -- went" branch finds this row still there.
+  --
+  -- No new lock order to reason about. `delete_comment` holds only comments rows, never
+  -- a pair, so it cannot be waiting on anything this transaction holds; and this
+  -- transaction takes its one comments row lock last and then goes straight to the
+  -- insert, so it is never the party waiting while holding one.
+  if p_parent_id is not null then
+    perform 1 from comments c where c.id = p_parent_id for share;
+
+    -- Re-asked rather than re-derived, so the cross-post rule and the "a tombstoned root
+    -- is still a thread" rule stay written once, in `_comment_root`. A new statement
+    -- snapshot, so a retraction that committed while this transaction waited above is
+    -- seen here — and answered with the same P0002 a parent that never existed gets.
+    v_root := _comment_root(p_parent_id, p_feed_event_id);
+
+    select c.author_id, c.deleted_at
+      into v_reply_author, v_deleted_at
+      from comments c
+     where c.id = p_parent_id;
+
+    if v_root is null
+       or v_reply_author is null
+       or not can_view_profile(auth.uid(), v_reply_author) then
+      raise exception 'no such comment' using errcode = 'P0002';
+    end if;
+
+    -- Recomputed, not carried: a parent tombstoned inside the window is somewhere to
+    -- reply and nobody to tell, and `delete_comment` has already taken away the rows
+    -- that announced it.
+    v_reply_to := case when v_deleted_at is null then v_reply_author end;
   end if;
 
   insert into comments (feed_event_id, author_id, body, has_spoilers, parent_id)
@@ -484,7 +567,7 @@ end;
 $$;
 
 comment on function add_comment(uuid, uuid, text, boolean, uuid) is
-  'Posts one comment, or one reply, on a feed event. A reply naming another reply is stored against their shared root, so threads are exactly one level deep and the client never has to work that out. Refuses an event or a parent the caller may not reach -- including a parent whose author they may not see -- with the same P0002 a missing one gets. Carries 20260819000400''s hardening, restated here after this migration''s first draft rebuilt the function from its pre-hardening ancestor and dropped it: both visibility checks are made before any lock, then every pair this call could notify is locked in ascending counterpart-uuid order -- one global order, so two overlapping comments cannot deadlock -- then both checks are remade under those locks. Idempotent by operation id, rate-limited per day, and writes an inbox row for the activity''s actor and for the person replied to: never twice when they are the same person, never to oneself, and never to a tombstone.';
+  'Posts one comment, or one reply, on a feed event. A reply naming another reply is stored against their shared root, so threads are exactly one level deep and the client never has to work that out. Refuses an event or a parent the caller may not reach -- including a parent whose author they may not see -- with the same P0002 a missing one gets. Carries 20260819000400''s hardening, restated here after this migration''s first draft rebuilt the function from its pre-hardening ancestor and dropped it: both visibility checks are made before any lock, then every pair this call could notify is locked in ascending counterpart-uuid order -- one global order, so two overlapping comments cannot deadlock -- then the parent is pinned with `for share` against a concurrent retraction and every check is remade under those locks. Idempotent by operation id, rate-limited per day, and writes an inbox row for the activity''s actor and for the person replied to: never twice when they are the same person, never to oneself, and never to a tombstone.';
 
 -- The four-argument form is gone: `create or replace` on a signature with a new
 -- defaulted parameter creates a *second* function, and PostgREST resolving

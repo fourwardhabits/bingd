@@ -36,12 +36,29 @@ name: Database races
 # learn to stop reading CI. That is a judgement about attention, not about cost.
 #
 # ---------------------------------------------------------------------------
-# What runs here and what does not
+# What runs here, and why the mutation check is one of them
 # ---------------------------------------------------------------------------
 #
-# `test:race` runs. `test:race:mutants` does not: it rebuilds a disposable database per
-# mutant and is the check on the *suite* rather than on the schema, which is a
-# release-time question. `release-gate.yml` still runs both, and remains the gate.
+# Both `test:race` and `test:race:mutants`.
+#
+# The first draft of this file ran only `test:race`, on the reasoning that the mutation
+# check is the check on the *suite* rather than on the schema and is therefore a
+# release-time question. Review named the hole in that, and it is the same hole this
+# whole workflow exists to close: one change can delete a lock **and** weaken the
+# assertion that would have caught it, and `test:race` alone stays green through that.
+# The mutation check is precisely what refuses it — it reintroduces each defect and
+# requires the suite to go red — so leaving it at release time would mean the guarantee
+# is verified after the merge that removed it.
+#
+# The cost objection does not survive the path filter. "Do not run expensive mutation
+# tests on every ordinary UI pull request" is a rule about attention, and this workflow
+# never fires on an ordinary UI pull request: it fires on a change to the migrations, to
+# the concurrency suite, or to the harness underneath both — which is exactly the set of
+# changes the mutation check is about. On those, it is not an extra check, it is the
+# check.
+#
+# `release-gate.yml` still runs both as well. A release candidate is checked whole,
+# whatever paths its branch happened to touch.
 #
 # `test:db` is not repeated here — `ci.yml` runs it on every pull request already.
 
@@ -72,7 +89,7 @@ jobs:
   races:
     name: Concurrency suite (real PostgreSQL)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -92,3 +109,9 @@ jobs:
       # is an @expo/fingerprint input: adding a script moves every lane's runtime version,
       # including the published friend-beta binary's. See config/push.cjs.
       - run: npm run test:race
+
+      # And the check on that check. Each invariant above is deliberately broken in a
+      # disposable database and the suite is required to notice — which is what stops a
+      # change removing a lock and its assertion together and still going green. See the
+      # header for why this is here rather than only in release-gate.yml.
+      - run: npm run test:race:mutants
