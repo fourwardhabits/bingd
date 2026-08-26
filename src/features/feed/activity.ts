@@ -185,3 +185,56 @@ function lengthOf(
  */
 const positive = (value: number | null | undefined): boolean =>
   typeof value === 'number' && Number.isFinite(value) && value > 0;
+
+// ---------------------------------------------------------------------------
+// The two adapters every activity surface needs
+//
+// Both were private helpers at the bottom of `app/(tabs)/feed.tsx`, copied into
+// `CommentThread` and about to be copied a third time into the activity page. `metadataFor`
+// even carried a comment saying the rules live in this file "so that the three surfaces
+// rendering an activity cannot drift apart on them" — while the adapter that calls those
+// rules sat in one of the three. Moving them is that comment finished.
+//
+// `relativeTime` is the sharper case. Three copies of the same arithmetic had already
+// been written, and they agreed only because they were copied carefully; the first one
+// somebody rounds differently is two surfaces describing one instant two ways, on the
+// same screen, since the thread page draws the card and the comments together.
+// ---------------------------------------------------------------------------
+
+/**
+ * `PG-13 · 148m · Science Fiction · Adventure`, from an item the feed has already
+ * resolved.
+ *
+ * The adapter and not the rule: a `FeedItem` has already inherited a season's genres and
+ * certification from its parent series (`lib/media-metadata.ts`), so this only reshapes
+ * what that produced for `activityMetadata` above.
+ */
+export function metadataFor(item: {
+  kind: 'movie' | 'season' | 'series' | null;
+  genres?: readonly string[] | null;
+  certification?: string | null;
+  runtimeMinutes?: number | null;
+  episodeCount?: number | null;
+}): string | null {
+  return activityMetadata({
+    kind: item.kind,
+    genres: item.genres,
+    certification: item.certification,
+    runtimeMinutes: item.runtimeMinutes,
+    episodeCount: item.episodeCount,
+  });
+}
+
+/**
+ * How long ago, in the words every activity surface uses.
+ *
+ * Minutes under an hour, hours under a day, days after that — and never "just now" or a
+ * date. A floor of one minute rather than "0m ago", which reads as a bug.
+ */
+export function relativeTime(value: string): string {
+  const mins = Math.max(1, Math.round((Date.now() - new Date(value).getTime()) / 60000));
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}

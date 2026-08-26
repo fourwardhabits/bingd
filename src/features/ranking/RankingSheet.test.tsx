@@ -631,47 +631,60 @@ describe('moving a title to another band', () => {
     return { ...view, invalidated };
   };
 
-  it('refreshes the collection and the awards as soon as the write lands', async () => {
+  /**
+   * **The assertion here is the reverse of what it was**, and the reversal is the
+   * founder's device finding answered at this layer.
+   *
+   * It used to read `refreshes the collection and the awards as soon as the write
+   * lands`, and it was correct for the server it was written against: `rank_rebucket`
+   * unranked the title and moved its bucket *before* it opened a session, both
+   * committed, so a reader who arrived on this screen and changed their mind had
+   * already changed their collection. Reviews 21c and 21d put the invalidation here for
+   * that reason and made it fire on failures too.
+   *
+   * `20260826000500` removed the write. Opening a re-ranking session now writes one
+   * `ranking_sessions` row and nothing the collection reads, so there is nothing to
+   * reconcile — and invalidating anyway would refetch the ranked list behind the
+   * comparison the reader is looking at, taking down the very score this tranche exists
+   * to keep on screen.
+   */
+  it('changes nothing in the collection merely by opening a rebucket', async () => {
     answering(comparison());
     // The session is open and nothing has been answered — exactly the state a reader is
     // in when they change their mind and close the sheet.
     const { invalidated } = await mount({ subject: rebucket });
 
     await waitFor(() => expect(callsTo('rank_rebucket')).toHaveLength(1));
-    await waitFor(() => expect(invalidated(['awards', 'user-1'])).toBe(true));
-    expect(invalidated(['collection', 'user-1'])).toBe(true);
-    // Both categories, because a rebucket can move a title between them and nothing here
-    // knows which one this was.
-    expect(invalidated(['rankings', 'user-1', 'movies'])).toBe(true);
-    expect(invalidated(['rankings', 'user-1', 'tv_seasons'])).toBe(true);
+    expect(invalidated(['awards', 'user-1'])).toBe(false);
+    expect(invalidated(['collection', 'user-1'])).toBe(false);
+    expect(invalidated(['rankings', 'user-1', 'movies'])).toBe(false);
+    expect(invalidated(['rankings', 'user-1', 'tv_seasons'])).toBe(false);
   });
 
   /**
-   * **Including when it reports a failure**, which is the correction review 21d made.
+   * And nothing to compensate for when it fails either.
    *
-   * A Postgres exception does roll the whole `rank_rebucket` transaction back — but a
-   * transaction can commit and its HTTP response can then be lost, and the client maps
-   * that to `failed` too. Nothing on this side distinguishes "refused" from "committed,
-   * reply dropped", so the only safe reading is that it may have landed. A definite
-   * rollback costs one redundant refetch; the other way costs a screen describing a
-   * ranking that is gone.
+   * The old version refreshed on a failure as well, because a commit whose reply is
+   * lost is indistinguishable from a refusal and the committed case had destroyed
+   * something. Neither case destroys anything now: a `rank_rebucket` that commits opens
+   * a session, and a session is not a collection change.
    */
-  it('refreshes even when the rebucket reports a failure, which may still have committed', async () => {
+  it('changes nothing when the rebucket reports a failure', async () => {
     answering({ data: null, error: { code: '22023', message: 'title is already in that bucket' } });
     const { invalidated } = await mount({ subject: rebucket });
 
     await waitFor(() => expect(callsTo('rank_rebucket')).toHaveLength(1));
-    await waitFor(() => expect(invalidated(['awards', 'user-1'])).toBe(true));
-    expect(invalidated(['collection', 'user-1'])).toBe(true);
+    expect(invalidated(['awards', 'user-1'])).toBe(false);
+    expect(invalidated(['collection', 'user-1'])).toBe(false);
   });
 
   /**
    * The founder's device finding, at the layer that answers it.
    *
    * A ranked title re-ranked *inside* its own band cannot go through `rank_rebucket`,
-   * which raises 22023 on a bucket that is not moving. `rerank` drops the position and
-   * re-opens in the same band instead, and everything downstream — the comparisons, the
-   * reveal, the refresh — is the same session.
+   * which raises 22023 on a bucket that is not moving. `rerank` re-opens in the same
+   * band instead, and everything downstream — the comparisons, the reveal, the refresh
+   * — is the same session.
    *
    * **This was two calls from here until `20260825000200`**, `rank_unrank` then
    * `rank_start`, and this test asserted that both were made in that order. It is now
@@ -679,7 +692,7 @@ describe('moving a title to another band', () => {
    * made, because there is no longer a moment between them for a dropped connection to
    * land in.
    */
-  it('re-ranks inside the same band in one call', async () => {
+  it('re-ranks inside the same band in one call, and takes nothing away to do it', async () => {
     answering(comparison());
     const { invalidated } = await mount({ subject: { ...subject, mode: 'rerank' as const } });
 
@@ -693,9 +706,31 @@ describe('moving a title to another band', () => {
     expect(callsTo('rank_rebucket')).toHaveLength(0);
     // The bucket the session opens in is the bucket it already had.
     expect(callsTo('rank_again')[0][1]).toMatchObject({ p_bucket: 'loved' });
-    // The old position is gone before a single comparison, exactly as a rebucket is.
-    await waitFor(() => expect(invalidated(['awards', 'user-1'])).toBe(true));
-    expect(invalidated(['collection', 'user-1'])).toBe(true);
+    // The founder's disappearing score: the old position is still there, so nothing
+    // that draws it is thrown away.
+    expect(invalidated(['awards', 'user-1'])).toBe(false);
+    expect(invalidated(['collection', 'user-1'])).toBe(false);
+  });
+
+  /**
+   * The one bit of state that is *not* the same between the two callers of
+   * `rank_again`, and the reason the founder saw four War Dogs in one feed.
+   *
+   * Change your rating re-choosing its own band is a correction: `p_new_watch` false,
+   * and the server writes no activity. Rank again from the Ranked menu is a second
+   * viewing: `p_new_watch` true, and it writes exactly one.
+   */
+  it('declares Rank again a watch and Change your rating a correction', async () => {
+    answering(comparison());
+    await mount({ subject: { ...subject, mode: 'again' as const } });
+    await waitFor(() => expect(callsTo('rank_again')).toHaveLength(1));
+    expect(callsTo('rank_again')[0][1]).toMatchObject({ p_new_watch: true });
+
+    mockRpc.mockClear();
+    answering(comparison());
+    await mount({ subject: { ...subject, mode: 'rerank' as const } });
+    await waitFor(() => expect(callsTo('rank_again')).toHaveLength(1));
+    expect(callsTo('rank_again')[0][1]).toMatchObject({ p_new_watch: false });
   });
 
   it('makes no second call when the re-rank was refused', async () => {

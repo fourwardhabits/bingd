@@ -9,6 +9,7 @@ export {
 
 export {
   clearPendingDisplayName,
+  EMAIL_OTP_TYPES,
   isAppleSignInAvailable,
   oauthRedirectUrl,
   sendEmailCode,
@@ -24,3 +25,5 @@ export {
 export { applyInitialVisibility, createProfile, usernameAvailability } from './create-profile';
 
 export { AuthStatusOverlay } from './status-overlay';
+
+export { RouteErrorBoundary } from './RouteErrorBoundary';

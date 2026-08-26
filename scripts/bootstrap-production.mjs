@@ -245,12 +245,23 @@ if (!replayed) {
 // reported rather than noticed in a migration log.
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether *this* invocation put the cron job there.
+ *
+ * It is the only thing that entitles the status block below to forgive a job that has never
+ * run. Review 46b: reading the problem list alone meant a read-only run against a
+ * permanently dead scheduler downgraded its one problem to a note and exited zero — which is
+ * the same shape of "reassuring answer over a broken pipeline" this whole tranche is about.
+ */
+let justScheduledTheJob = false;
+
 if (!replayed) {
   note('push drain: skipped, the schema has not been replayed');
 } else if (!apply) {
   note('push drain: would call schedule_push_drain()');
 } else {
   const scheduled = await rpc('schedule_push_drain', {});
+  justScheduledTheJob = scheduled.ok;
   if (!scheduled.ok) {
     problems.push(
       `schedule_push_drain: ${scheduled.status} ${scheduled.body.slice(0, 300)}\n` +
@@ -273,17 +284,64 @@ if (replayed) {
     const s = status.parsed;
     note(
       `status: environment=${s.environment} job=${s.job ? `#${s.job.jobid} ${s.job.schedule}` : 'none'} ` +
-        `queued=${s.queued} base_url_set=${s.base_url_set}`,
+        `queued=${s.queued} base_url_set=${s.base_url_set}` +
+        ('vault_secret_set' in s ? ` vault_secret_set=${s.vault_secret_set}` : '') +
+        ('healthy' in s ? ` healthy=${s.healthy}` : ''),
     );
 
-    // The Vault secret cannot be read from here and is deliberately not writable from here
-    // either — it is a service-role key, and a script that could install one is a script
-    // that has to be trusted with where it puts it. This is the reminder, not the check.
-    if (apply && s.job && !s.last_run) {
-      note(
-        'the drain has not run yet. If push_outbox fills and nothing leaves it, the Vault\n' +
-          "          secret is the usual reason: select vault.create_secret('<service-role key>',\n" +
-          "          'service_role_key'); in the SQL editor. See docs/release/push-operations.md.",
+    /**
+     * **The Vault secret is now visible from here, as a boolean, and it is a problem
+     * rather than a reminder.**
+     *
+     * It used to be neither: this block printed a hint if the drain had not run yet, and
+     * `push_drain_status()` had no field for the secret at all. On 2026-08-26 that combination
+     * let the drain sit dead for twenty hours behind 1,221 `succeeded` cron runs. Since
+     * `20260826000700` the status function answers `healthy` and names what is wrong, so a
+     * bootstrap that leaves the pipeline unable to send says so in the exit code.
+     *
+     * Still not *writable* from here, deliberately: a script that could install a
+     * service-role key is a script that has to be trusted with where it puts it.
+     */
+    if ('healthy' in s) {
+      const named = Array.isArray(s.problems) ? s.problems : [];
+
+      /**
+       * The one problem this script is allowed to downgrade, and only under both halves of
+       * the reason it is allowed to.
+       *
+       * `push_drain_status()` calls a job with no run record unhealthy — review 46, and it
+       * is right: a scheduler that has never executed has demonstrated nothing, and a
+       * permanently null `last_run` means pg_cron is enabled in the wrong database. For the
+       * first minute after `schedule_push_drain()` it is simply true and about to stop being
+       * true, and failing the bootstrap on that would teach whoever runs it to ignore the
+       * exit code.
+       *
+       * **`justScheduledTheJob` is the half review 46b found missing.** Without it a
+       * read-only run against a scheduler that had never fired in its life forgave the one
+       * problem and exited zero. The downgrade now requires that this process scheduled the
+       * job seconds ago *and* that nothing else is wrong.
+       */
+      const forgivable =
+        justScheduledTheJob && named.length === 1 && named[0] === 'last_run_missing';
+      if (forgivable) {
+        note(
+          'the drain has not run yet — pg_cron fires at the top of the next minute.\n' +
+            '          Confirm with: node supabase/tests/push-drain-acceptance.mjs',
+        );
+      } else if (s.healthy !== true) {
+        problems.push(
+          `the push drain cannot send: ${named.join(', ') || 'unknown'}.\n` +
+            (named.includes('vault_service_role_key_missing')
+              ? "    Store the key in the SQL editor: select vault.create_secret('<service-role key>', 'service_role_key');\n"
+              : '') +
+            '    See docs/release/push-operations.md. Verify with' +
+            ' node supabase/tests/push-drain-acceptance.mjs',
+        );
+      }
+    } else {
+      problems.push(
+        'push_drain_status() predates 20260826000700 and cannot report the Vault secret,' +
+          ' so it cannot tell you whether push works. Replay migrations before trusting it.',
       );
     }
   }

@@ -21,7 +21,22 @@ import PrivacyScreen from '../../../app/settings/privacy';
  * is a promise, and the promise is the part that was wrong.
  */
 
-const mockAccount = { visibility: 'public' as 'public' | 'private' };
+const mockAccount = {
+  visibility: 'public' as 'public' | 'private',
+  /**
+   * Holds the visibility read open, for the one test that is *about* the read being in
+   * flight.
+   *
+   * That test used to rely on the query simply not having resolved yet by the time
+   * `render` returned, which is a race rather than an assertion: on a quiet machine the
+   * promise was still pending and it passed, and under a full parallel run it had already
+   * settled and the test failed on copy that was correct. Exactly the class of flake
+   * `jest.setup.js` records for the Log screen.
+   *
+   * A gate makes "still loading" a state the test *creates* instead of one it hopes for.
+   */
+  gate: null as Promise<void> | null,
+};
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -30,8 +45,10 @@ jest.mock('@/lib/supabase', () => ({
       const chain: Record<string, unknown> = {
         select: () => chain,
         eq: () => chain,
-        single: () =>
-          Promise.resolve({ data: { visibility: mockAccount.visibility }, error: null }),
+        single: async () => {
+          if (mockAccount.gate) await mockAccount.gate;
+          return { data: { visibility: mockAccount.visibility }, error: null };
+        },
         then: (resolve: (value: unknown) => unknown) => resolve({ data: [], error: null }),
       };
       return chain;
@@ -68,6 +85,7 @@ jest.mock('@/features/invite', () => ({ revokeInviteLink: jest.fn() }));
 
 beforeEach(() => {
   mockAccount.visibility = 'public';
+  mockAccount.gate = null;
 });
 
 const open = async () => {
@@ -131,6 +149,9 @@ describe('what the privacy screen promises', () => {
    * switch already refuses to guess; the copy has to refuse too.
    */
   it('describes neither setting until it knows which one is on', async () => {
+    // Held open for the whole test, so "still loading" is a state this creates rather
+    // than one it hopes the scheduler leaves it in. See `mockAccount.gate`.
+    mockAccount.gate = new Promise<void>(() => {});
     const view = await renderWithProviders(<PrivacyScreen />);
 
     expect(view.queryByText(/Anyone on bingd. can see your ranked titles/)).toBeNull();

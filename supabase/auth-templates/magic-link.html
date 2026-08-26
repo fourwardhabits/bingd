@@ -1,0 +1,41 @@
+<!--
+  Magic Link. Despite the name, this is the template Supabase sends to an address that
+  ALREADY has an account, whatever the call was — and Bingd's call is signInWithOtp, so
+  what belongs here is a code and not a link. The name is Supabase's, not ours.
+
+  Under the founder's final 2026-08-26 decision Bingd has ONE email flow, and this is the
+  half of it that reaches everybody coming back. Its twin is confirm-signup.html, which
+  reaches everybody arriving for the first time; the choice is GoTrue's, made on the
+  address, and the client never learns which was sent. Both bodies say the same sentence
+  for that reason.
+
+  There is deliberately no link of any kind in this email. See ./README.md.
+-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf8f6;padding:32px 0;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:420px;background:#ffffff;border-radius:14px;padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+        <tr>
+          <td style="font-size:22px;font-weight:600;color:#1a1a1a;padding-bottom:20px;">bingd.</td>
+        </tr>
+        <tr>
+          <td style="font-size:15px;line-height:22px;color:#4a4a4a;padding-bottom:20px;">
+            Your sign-in code is:
+          </td>
+        </tr>
+        <tr>
+          <td style="font-size:32px;font-weight:600;letter-spacing:6px;color:#773744;padding-bottom:20px;">
+            {{ .Token }}
+          </td>
+        </tr>
+        <tr>
+          <td style="font-size:14px;line-height:20px;color:#767676;">
+            Enter it in the app. It expires in 10 minutes.
+            <br /><br />
+            If you didn't ask for this code, you can ignore this email.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>

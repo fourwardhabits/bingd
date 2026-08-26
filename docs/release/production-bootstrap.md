@@ -155,12 +155,95 @@ Production Auth is configured per project and shares nothing with nonprod. Regis
   sign-in against.
 - **Apple** and **Google** providers, with **production** client credentials. Do not paste the
   nonprod ones: a shared OAuth client means one revocation takes both environments down.
-- **Custom SMTP.** Email one-time codes need it. Supabase refuses template edits entirely on
-  the free tier with the default sender, and the built-in template sends
-  `{{ .ConfirmationURL }}` — a magic link — while `verifyEmailCode` calls `verifyOtp` and needs
-  `{{ .Token }}`. Verified against the project, not inferred: *"Email template modification is
-  not available for free tier projects using the default email provider."*
-  See [`../architecture/auth.md`](../architecture/auth.md) §SMTP.
+- **Custom SMTP — a prerequisite, on nonprod as well as production.** Supabase refuses
+  template edits entirely on the free tier with the default sender, and the built-in
+  template sends `{{ .ConfirmationURL }}` — a magic link — while every verification path
+  in this app calls `verifyOtp` and needs `{{ .Token }}`. Verified against the project,
+  not inferred: *"Email template modification is not available for free tier projects
+  using the default email provider."*
+
+  **There is no password path that would reduce the volume.** A short-lived 2026-08-26
+  amendment made email-and-password the default on exactly that reasoning; it is reverted,
+  and ordinary users have no password at all. So mail has to arrive for:
+
+  | | Why it is not optional |
+  | --- | --- |
+  | A new person's first sign-in | It is also how their account is created. No email, no account, no user. |
+  | Every returning email sign-in | The **only** way in for anybody who is not on Apple or Google. |
+  | *Send a new code* | What somebody taps when the first one did not arrive — into the same rate limit. |
+  | Future email changes | Not built yet; will need it. |
+
+  The one account with a password is the store-review account
+  ([`store-review-access.md`](./store-review-access.md)), which signs in a handful of times
+  a year and is not a volume argument.
+
+  What the founder has to supply, on **`bingd-nonprod` first** so the friend beta can be
+  accepted at all, and again on production:
+
+  | Setting | Notes |
+  | --- | --- |
+  | Host, port | The provider's SMTP endpoint |
+  | Username | Usually an API key id |
+  | Password / API credential | **Never committed.** Dashboard only. |
+  | Sender address | See below — *not chosen here* |
+  | Sender name | `bingd.` — lowercase, with the period, as everywhere else |
+
+  > **The sender address is deliberately left open.** It should be on a `bingd.app`
+  > domain, and it should almost certainly be the same mailbox the stores publish — but
+  > **SUPPORT-1 is still open** (`store-privacy-inventory.md`): the repository currently
+  > names `hello@bingd.app` and the founder's Play listing names `support@bingd.app`, and
+  > which of those is a mailbox somebody reads has not been established. Picking one here
+  > would settle a question this document is not entitled to settle. Resolve SUPPORT-1,
+  > then use that address.
+
+  No provider is named and no credential belongs in this repository. See
+  [`../architecture/auth.md`](../architecture/auth.md) §SMTP and
+  [`../../supabase/auth-templates/README.md`](../../supabase/auth-templates/README.md).
+
+- **Both email templates, applied and verified.** This is a **hard gate**, not a checklist
+  line, because it has already cost a friend-beta tester a week of not being able to sign in
+  — and it did so on a project where the risk was written down. A production project starts
+  from Supabase's defaults, which are magic links, so *production will arrive broken in
+  exactly the same way unless this step happens before anybody is invited.*
+
+  ```powershell
+  $env:SUPABASE_ACCESS_TOKEN = "<personal access token>"
+  node scripts/check-auth-config.mjs           # read it back first
+  node scripts/check-auth-config.mjs --apply   # write supabase/auth-templates/
+  ```
+
+  It applies **Confirm signup** and **Magic Link** together. Supabase picks between them by
+  whether the address already has an account, so applying one leaves sign-in working for
+  everybody who has used the app before and broken for everybody new — which is invisible to
+  whoever is testing and total for whoever is arriving.
+
+  The script sends a partial `PATCH`. Do not reach for `supabase config push`: it sends a
+  whole `[auth]` block and reverts every field it does not mention, including the Apple and
+  Google client secrets.
+
+- **A real email, to a real inbox, before RC acceptance.** Nothing above proves delivery.
+  Run it against `bingd-nonprod` before the friend beta and against production before RC:
+
+  | Case | Expected |
+  | --- | --- |
+  | *Continue with email*, address with **no** account | email arrives, contains a six-digit code, **contains no link**, code verifies in the app, profile creation follows |
+  | *Continue with email*, address that **has** one | same screen, same six digits, code verifies, straight into the app |
+  | The two emails, side by side | **They read identically.** Different wording would tell the recipient which of the two they are, which is the one thing the flow does not disclose |
+  | A wrong code | refused, and the screen says so, without saying whether it was wrong or expired |
+  | *Send a new code* | a second usable code arrives, within the rate limit |
+  | *More sign-in options → Sign in with password*, review account | signs in ([`store-review-access.md`](./store-review-access.md)) |
+  | The same screen, an **ordinary** passwordless address | refused with the one generic sentence, and **no account is created or changed** — check `auth.users` |
+
+  The last row is the one to verify in the database rather than in the UI: the refusal is
+  visible, but "nothing was created" is not, and it is what silently regresses if a
+  `signUp` call ever finds its way back into the client.
+
+  Sign-off is *seeing the email*. A green `check-auth-config.mjs` says the project is
+  configured; it does not say SMTP is delivering, and those fail independently.
+
+- **The store-review account, created on this project.** Production starts with no users,
+  and App Review cannot receive a one-time code. Full runbook:
+  [`store-review-access.md`](./store-review-access.md). Do not put its password here.
 
 ### 2.5 Deploy the two Edge Functions
 

@@ -352,6 +352,22 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 >
 > **People and actor search is deferred** — see [`deferred-roadmap.md`](./deferred-roadmap.md) §1. The person detail page exists and is reached only from a cast strip.
 
+> ### As built — 2026-08-26: **For you** holds titles *and* people
+>
+> Still five tabs. What changed is inside one of them: For you leads with a
+> **`[ Titles ] [ People ]`** switch, and everything the tab already was — the wall, the
+> filters, Sent to you, the recommendation-requests alert — is Titles, unchanged.
+>
+> **People is not a sixth tab and not a Feed insertion.** It is the same question the tab
+> already asks — what next — whose honest answer is sometimes a film and sometimes a
+> person. Five tabs is the width of the bar, and a "people you may know" card interleaved
+> with real activity turns the Feed into a place where the app talks about strangers.
+>
+> This is also where member discovery finally has somewhere to *lead*. Search finds a
+> member you can already name; People is for the ones you cannot. The specification is
+> PRD §13 As-built; the row is an avatar, a name, a handle, one line of context and a
+> Follow control, and nothing else.
+
 ---
 
 ## 8. Scope by product stage
@@ -536,12 +552,47 @@ Three properties this is required to keep:
 >
 > **History.** Public alpha was specified as ordinal-only, and this section forbade a 0–10 score outright. Reversed by the founder on 2026-08-15; the reasoning is in §4.
 
+> ### As built — 2026-08-26: **Rank again** is another watch; **Change your rating** is a correction
+>
+> The Ranked menu offers two controls that both re-open comparisons, and until this pass
+> the product had never said what distinguishes them. It does now, and the distinction is
+> load-bearing rather than editorial: one of them is a viewing and the other is not.
+>
+> | | What the reader is saying | Feed activity |
+> |---|---|---|
+> | **Rank again** | I watched it again and I am placing it again | **one new** `title_ranked`, at completion |
+> | **Change your rating** | the opinion I recorded was wrong | **none** — the original activity stands |
+>
+> A **band change** — loved to fine — is a Change your rating and writes no activity
+> either. Moving a title between bands is a correction to a rating, not a second viewing.
+>
+> **Starting either one changes nothing anybody can see.** This is the founder's device
+> finding and the contract that replaces the behaviour it found: until the new placement
+> completes, the title keeps its score, its position, its band, its collection row, its
+> review and its private note. Closing the sheet, navigating away, cancelling, losing the
+> connection or killing the app leaves the ranking exactly as it was, and no temporary
+> unranked state is ever visible in Collection, on a profile or on a title page.
+>
+> Before `20260826000500` both controls destroyed the old position the instant the sheet
+> opened — the server unranked and then opened a session, in one committed transaction —
+> so a reader who opened Rank again and changed their mind lost the ranking they had.
+>
+> **What a second watch does not create, in v1.** One current review and one current
+> private note per title, for good. Ranking a title again does not clear either and does
+> not create a second review object; the post-rank *Finish your log* offers **Edit
+> review** and **Edit private note** where writing already exists. Historical review
+> objects — a review per watch — are deferred, not built.
+>
+> **Retries cannot duplicate.** Every ranking RPC carries an operation id
+> (`20260825000200`), so a completion whose reply is lost and is pressed again is
+> answered from the ledger: the same position, the same score, and no second activity.
+
 ### Open and provisional
 
 | Status | Item |
 |---|---|
 | Provisional | Whether the three bucket labels read correctly to real users |
-| Open | How rewatches and changed opinions trigger recalibration |
+| **Decided 2026-08-26** | ~~How rewatches and changed opinions trigger recalibration~~ — Rank again re-runs comparisons and counts as a watch; Change your rating re-runs them and does not. See the As-built block above. |
 | Provisional | Anchor-selection strategy within a bucket |
 | Deferred | Offline ranking edits and multi-device ranking conflict resolution |
 
@@ -696,6 +747,112 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 > **A Followers score is deferred** — see [`deferred-roadmap.md`](./deferred-roadmap.md) §3. In a cohort where almost every follow is mutual, the two numbers would be nearly identical.
 >
 > **An absent score is not a zero.** A title nobody has ranked, a Following mean with no followee who has seen it, and a read that failed are three different states, and the badge distinguishes them.
+
+> ### As built — 2026-08-26: where Match appears, and what it says when it cannot
+>
+> **Match sits directly under the handle**, in the identity block of every profile that is
+> not the reader's own:
+>
+> ```
+> [avatar]   Anna
+>            @anna
+>            87% Match
+> ```
+>
+> It was under the avatar, in a column about sixty points wide — room for a figure and a
+> word, and none for a sentence. So the states *without* a figure had to render as nothing
+> at all, and on a friend beta, where the minimum is five titles **both** accounts have
+> ranked, that is almost every profile. The founder's report was simply that Match is
+> missing. It was wired, authorised and tested, and had nowhere to explain itself.
+>
+> Four states, and the two that are not a number are the ones the placement bought:
+>
+> | State | What the profile shows |
+> |---|---|
+> | A score | `87% Match` |
+> | The **viewer** has ranked too little, and the other account has not | `Rank more to see Match` |
+> | The **other account** has too little, or both have plenty and simply have not overlapped | `Not enough shared taste yet` |
+> | The reader's own profile, or an answer still in flight | nothing |
+>
+> **The nudge is only shown where it is true.** Telling somebody to rank more when the
+> shortfall is on the other side would be advice that cannot work, so the two insufficient
+> states are separated by comparing each account's ranked total against the minimum. And
+> **no count is invented**: "rank 3 more titles" would be a lie in every branch, because
+> the gap is in *shared* titles and three arbitrary films may share none of them.
+>
+> **`TBD` and `0%` appear nowhere.** An absence of evidence is not a low score, and a
+> placeholder percentage is worse than either.
+>
+> **Privacy is unchanged.** Match is computed server-side by `taste_match`, which refuses
+> any pair `can_view_profile` does not admit — so a private account the reader has not been
+> approved for shows no Match at all, and neither the shared titles nor any comparison
+> input is ever returned. Whether a private profile should carry a Match while its
+> collection stays hidden is **not widened here**; the existing aggregate contract stands.
+
+> ### As built — 2026-08-26: **People**, the discovery surface inside For You
+>
+> For You gains a content switch at the top — **`[ Titles ] [ People ]`** — and everything
+> the screen already was lives under Titles, in the same order: the recommendation-requests
+> alert, the Movies/TV selector, the filters, Sent to you, and the wall.
+>
+> **People** is two sections, drawn only when they have somebody in them:
+>
+> | Section | Candidate | Shown as |
+> |---|---|---|
+> | **Mutuals** | people followed by people the reader follows | `3 mutuals` |
+> | **Taste matches** | people whose rankings agree, scored by `taste_match` itself | `87% Match` |
+>
+> Mutuals lead when there are any; with none, taste matches lead rather than sitting under
+> an empty heading. Nobody appears in both. A row is an avatar, a name, a handle, one line
+> of context and one Follow control — not a second profile page.
+>
+> **There is one taste algorithm.** The suggestion rows call `taste_match`, the same
+> function the profile calls, so a suggestion showing 87% and a profile showing 87% cannot
+> disagree. Below the shared-title minimum there is no score and therefore no row.
+>
+> **Mutuals are counted, never named.** Every edge counted is one the reader could already
+> select individually — both parties must pass `can_view_profile` — so the count discloses
+> nothing new, and "Followed by Sarah and 2 others" was declined rather than built: it puts
+> a specific person's following list on somebody else's screen as a claim. The consequence
+> is that a private account the reader cannot view is not suggested here even though it is
+> *findable* by name; surfacing it would mean disclosing who follows it.
+>
+> **Suggestions exclude** the reader, anyone already followed, anyone already **asked**,
+> blocks in either direction, and suspended accounts.
+>
+> **Not in Feed, and not a sixth tab.** A "people you may know" card interleaved with real
+> activity turns the timeline into a place where the app talks about strangers, and five
+> tabs is the width of the bar. People is a *mode of the question For You already asks* —
+> what next — whose honest answer is sometimes a film and sometimes a person.
+>
+> **Recommendation requests stay under Titles.** A held recommendation is a title
+> recommendation; putting it in People would make one surface mean two things.
+>
+> **Contacts are deferred, not built** — see [`deferred-roadmap.md`](./deferred-roadmap.md)
+> §21. No permission is requested, no address book is read, and nothing is uploaded.
+
+> ### As built — 2026-08-26: who a recommendation may be sent to
+>
+> **Following somebody is enough to recommend a title to them.** The rule is one-way and
+> outbound: `sender → recipient, approved` authorises the send. Being followed *by*
+> somebody grants nothing, because that is the direction an unwanted sender controls.
+>
+> | Relationship | Outcome |
+> |---|---|
+> | The sender follows the recipient, who follows back | delivered to their list |
+> | The sender follows the recipient, who does not follow back | held as a **pending request** — never lost |
+> | The recipient's follow is still pending (a private account) | not eligible until approved |
+> | A block in either direction | refused, and nothing is stored |
+>
+> The sender is deliberately not told which of the first two happened, and never learns
+> whether a request was added or thrown away.
+>
+> **A new follow is recommendable immediately.** The founder followed a public account on
+> the device and the person was absent from *Send to* — the server would have accepted them
+> and the picker was answering from a list it had assembled before the follow existed. The
+> recipient list is now invalidated by every follow, unfollow, block, unblock and request
+> response, so it is current by the time the sheet next opens. Caching is unchanged
+> otherwise; nothing was globally disabled to fix it.
 
 ### Recommendation engine — public-alpha design
 
@@ -1687,10 +1844,35 @@ A user-initiated deletion path that removes personal data, invalidates tokens, r
 
 ### Authentication — Required
 
-Email one-time code, **Sign in with Apple**, and Google. Every account resolves to one stable internal user UUID that is independent of the sign-in method.
+**Email one-time code**, **Sign in with Apple**, and Google. Every account resolves to one stable internal user UUID that is independent of the sign-in method.
 
 > **Sign in with Apple is required on iOS, not optional.** Apple's guidelines require it wherever a third-party social login is offered, and Google sign-in is in scope. v0.5 listed it as "recommended"; that is corrected.
 
+#### The final email contract — founder decision, 2026-08-26
+
+An amendment earlier the same day made email-and-password the primary method, on the reasoning that a password is the only email method that sends no mail. It is reverted. Ordinary users do not create or manage passwords in v1, and the sign-in screen is three peers and nothing else.
+
+| | |
+| --- | --- |
+| **Primary** | *Continue with email* · *Continue with Apple* · *Continue with Google* |
+| **Email method** | One field, then a six-digit code typed into Bingd. `signInWithOtp` with `shouldCreateUser: true`, verified with `verifyOtp({ type: 'email' })`. |
+| **Account creation** | **The same flow.** No sign-up screen, and nobody is asked to declare whether they are new before typing an address. A verified address with no profile lands on profile creation, exactly as Apple and Google do. |
+| **Passwords, ordinary users** | **None.** Not created, not set, not changed, not reset, and never asked for. |
+| **Passwords, retained** | `signInWithPassword`, behind *More sign-in options → Sign in with password*, for the store-review account. It cannot create an account. |
+| **Email confirmation** | Stays **on**. `mailer_autoconfirm` is `false` and must remain so: possession of the code is the verification. |
+| **Never a browser** | Both email templates carry `{{ .Token }}` and no link of any kind. A confirmation URL completes the sign-in in Safari and produces a session the app never sees — the friend-beta bug of 2026-08-25. |
+
+**One flow for both populations.** GoTrue chooses the email by the address — **Confirm signup** for one it has never seen, **Magic Link** for one it has — and both arrive as six digits for the same screen. The app never learns which was sent, which is also the anti-enumeration property: the same success, the same copy, and two templates whose rendered bodies are asserted identical.
+
+**Nobody is locked out by this.** Every account that exists today is passwordless and *Continue with email* is exactly its path; Google accounts keep using Google and Apple accounts keep using Apple. No user is ever required to invent a password.
+
+**No account linking is implied.** Nothing here merges identities, and nothing asks somebody to.
+
+**No password reset is required, because no ordinary user has a password.** There is no forgot-password screen and no password field in Settings, and their absence is the design rather than a deferral. The review account's password is set in the Supabase dashboard by whoever provisions it.
+
+**A dedicated store-review account is a release requirement.** App Review and Play review cannot receive a one-time code, so they are given an account with a fixed password, a completed profile, and enough seeded activity to demonstrate the product. No credential for it lives in this repository. See `docs/release/store-review-access.md`.
+
+**Custom SMTP is a launch prerequisite.** Every sign-in that is not Apple or Google sends mail, so it is a gate rather than a polish step; `docs/release/production-bootstrap.md` carries it as one.
 ### Core entities
 
 `users` · `profiles` (including `status`) · `username_history` · `follows` (including request state) · `blocks` · `reports` · `moderation_actions` · `titles` · `seasons` · `title_cache` · `user_titles` (watched, bucket, state, dates, notes) · `rankings` (per user, per category, ordinal) · `comparisons` · `watch_tags` · `lists` · `list_items` (with `source: imported | in_app`) · `feed_events` · `reactions` · `notifications` · `notification_preferences` · `device_tokens` · `recommendations` · `recommendation_impressions` · `recommendation_feedback` · `match_scores` · `share_tokens` · `invite_tokens` · `invite_attributions` · `import_jobs` · `import_rows` · `capabilities` · `capability_grants` · `outbox_operations` · `analytics_events`

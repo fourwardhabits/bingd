@@ -847,46 +847,111 @@ describe('the relationship controls', () => {
 });
 
 /**
- * Taste Match, which moved under the avatar in the founder's final layout.
+ * Taste Match, which moved **under the handle** in the founder's final pass — and which
+ * the founder reported as missing before it did.
  *
- * It used to sit in the name column as a headline and a detail line — "84% Taste Match"
- * over "12 titles in common" — where it was a third thing stacked against the identity
- * and pushed the bio down the page. It is now the avatar's own subheading, which is a
- * column about sixty points wide: a figure and a word, and no room for a sentence.
+ * It was under the avatar, which is a column about sixty points wide: a figure and a
+ * word, and no room for a sentence. So every state without a figure rendered as nothing
+ * at all, and on a friend beta — where `taste.min_common` is five *exactly shared*
+ * rankings — that is nearly every profile. The feature was wired, authorised, tested,
+ * and invisible.
+ *
+ * Under the handle it has a line's width, so it says what it knows in all four states.
  */
 describe('Taste Match', () => {
-  it('shows the percentage under the avatar', async () => {
+  /** Gives the subject enough rankings for the shortfall to be the viewer's. */
+  const subjectHasRanked = (n: number) => {
+    tableRows.rankings = Array.from({ length: n }, (_, i) =>
+      ranking(`anna-film-${i}`, `Anna film ${i}`, i + 1),
+    );
+  };
+
+  /** Gives the viewer `n` ranked titles of their own. */
+  const viewerHasRanked = (n: number) => {
+    const mine = Array.from({ length: n }, (_, i) => ({
+      user_id: 'viewer',
+      media_item_id: `mine-${i}`,
+      category: 'movies',
+      bucket: 'loved',
+      position: i + 1,
+      media_items: { title: `Mine ${i}`, kind: 'movie', parent: null },
+    }));
+    tableRows.rankings = [...(tableRows.rankings ?? []), ...mine];
+    tableRows.user_media = mine.map((row) => ({
+      user_id: 'viewer',
+      media_item_id: row.media_item_id,
+      bucket: 'loved',
+      created_at: '2026-01-01T00:00:00Z',
+      media_items: { title: 'Mine', kind: 'movie', parent: null },
+    }));
+  };
+
+  it('shows the percentage under the handle', async () => {
     mockRpcResults.taste_match = [{ score: 84, common_count: 12, min_common: 5 }];
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('84%')).toBeTruthy());
-    expect(view.getByText('Match')).toBeTruthy();
-    // The long form is gone from this surface. It reads badly under a photo and the
-    // count was never the thing anybody came for.
+    await waitFor(() => expect(view.getByText('84% Match')).toBeTruthy());
+    // The long form is gone from this surface. The count was never the thing anybody
+    // came for, and a second line here competes with the handle above it.
     expect(view.queryByText(/Taste Match/)).toBeNull();
     expect(view.queryByText(/titles in common/)).toBeNull();
   });
 
-  it('shows no badge at all rather than a low number, when there is not enough overlap', async () => {
-    // An absence of evidence is not a low score. "0%" over three shared films would be
-    // the feature's first lie, and the badge is a number or it is nothing.
+  /**
+   * The founder's incentive case, and the one where the advice is actually true: the
+   * subject has plenty ranked, so the shortfall is the reader's and ranking more can
+   * genuinely close it.
+   */
+  it('tells the viewer to rank more only when that is what is missing', async () => {
+    subjectHasRanked(12);
+    viewerHasRanked(1);
+    mockRpcResults.taste_match = [{ score: null, common_count: 1, min_common: 5 }];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Rank more to see Match')).toBeTruthy());
+    expect(view.queryByText(/%/)).toBeNull();
+  });
+
+  /**
+   * And the case it must not blame the reader for. Anna has ranked three films; nothing
+   * the viewer ranks can produce five shared titles with somebody who has three.
+   */
+  it('does not blame the viewer when the other account is the one with too little', async () => {
+    subjectHasRanked(3);
+    viewerHasRanked(40);
+    mockRpcResults.taste_match = [{ score: null, common_count: 2, min_common: 5 }];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Not enough shared taste yet')).toBeTruthy());
+    expect(view.queryByText(/Rank more/)).toBeNull();
+  });
+
+  it('says the overlap is short when both have ranked plenty', async () => {
+    subjectHasRanked(30);
+    viewerHasRanked(30);
+    mockRpcResults.taste_match = [{ score: null, common_count: 2, min_common: 5 }];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Not enough shared taste yet')).toBeTruthy());
+    expect(view.queryByText(/Rank more/)).toBeNull();
+  });
+
+  /**
+   * The one thing the founder ruled out by name. An absence of evidence is not a low
+   * score, and a placeholder percentage is worse than either.
+   */
+  it('never prints a number it does not have', async () => {
     mockRpcResults.taste_match = [{ score: null, common_count: 3, min_common: 5 }];
 
     const view = await open();
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
 
-    expect(view.queryByText('Match')).toBeNull();
-    expect(view.queryByText(/%$/)).toBeNull();
-  });
-
-  it('says nothing when they have nothing in common at all', async () => {
-    mockRpcResults.taste_match = [{ score: null, common_count: 0, min_common: 5 }];
-
-    const view = await open();
-    await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
-
-    expect(view.queryByText('Match')).toBeNull();
+    expect(view.queryByText(/TBD/)).toBeNull();
+    expect(view.queryByText(/%/)).toBeNull();
   });
 
   it('is absent on the viewer’s own profile', async () => {
@@ -898,20 +963,50 @@ describe('Taste Match', () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
 
-    expect(view.queryByText('Match')).toBeNull();
+    expect(view.queryByText(/Match/)).toBeNull();
     expect(view.queryByText('100%')).toBeNull();
     expect(mockRpcCalls.some((call) => call.name === 'taste_match')).toBe(false);
   });
 
-  it('shows nothing at all while the answer is still unknown', async () => {
-    // No placeholder number that then changes. A match percentage that moves after
-    // the reader has seen it is worse than one that arrives a moment later.
+  /**
+   * An empty answer is not a zero. `taste_match` returning no row at all — which is what
+   * a refusal looks like from the client's side, since the function declines rather than
+   * raises — must not produce a percentage of any kind.
+   *
+   * The genuinely-still-loading case, where the line is absent rather than provisional,
+   * is `tasteMatchState`'s own and is pinned in `use-taste-match.test.ts`: this mock
+   * resolves in the same tick, so there is no pending moment here to observe.
+   */
+  it('prints no percentage when the server answers with nothing', async () => {
     mockRpcResults.taste_match = undefined;
 
     const view = await open();
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
 
-    expect(view.queryByText('Match')).toBeNull();
+    expect(view.queryByText(/%/)).toBeNull();
+    expect(view.queryByText(/TBD/)).toBeNull();
+  });
+
+  /**
+   * A private account the viewer has not been approved for is drawn from
+   * `profile_identity` alone — no stats, no rankings, no aggregate — and `taste_match`
+   * refuses it through `can_view_profile` for the same reason. The limitation is the
+   * existing privacy contract rather than a decision this screen makes, and this pins
+   * that nothing here widened it.
+   */
+  it('says nothing about Match on a private account the viewer cannot read', async () => {
+    tableRows.public_profiles = [];
+    mockRpcResults.profile_identity = [
+      { id: 'anna-id', username: 'anna', display_name: 'Anna', avatar_path: null, visibility: 'private' },
+    ];
+    mockRpcResults.my_blocks = [];
+    mockRpcResults.taste_match = [{ score: null, common_count: 0, min_common: 5 }];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('This account is private')).toBeTruthy());
+
+    expect(view.queryByText(/Match/)).toBeNull();
+    expect(view.queryByText(/Not enough shared taste/)).toBeNull();
   });
 });
 

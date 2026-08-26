@@ -238,5 +238,152 @@ export default function suite() {
       await t1.end();
       await t2.end();
     });
+
+    /**
+     * L2, for the writer that acquired a *second* pair on 2026-08-26.
+     *
+     * ---------------------------------------------------------------------------
+     * Why `add_comment` cannot deadlock against another `add_comment`
+     * ---------------------------------------------------------------------------
+     *
+     * Every pair lock in this schema is `_lock_pair(auth.uid(), X)`, so two callers
+     * with *different* uids can share at most one key: `{a,x} = {b,p}` with `a <> b`
+     * forces `p = a` and `x = b`, and asking for a second shared key forces `p = q`,
+     * which contradicts the two counterparts being distinct. One shared key cannot be
+     * a cycle. Two transactions with the *same* uid serialise on
+     * `_assert_operation_rate`'s account lock, which is keyed on `(uid, 'add_comment')`
+     * and taken before either of them reaches a pair.
+     *
+     * So a same-function deadlock is not constructible, and a test that fired two
+     * replies at each other would prove nothing about the ordering — it would pass with
+     * the locks in any order at all.
+     *
+     * ---------------------------------------------------------------------------
+     * What *is* constructible, and is what this test does
+     * ---------------------------------------------------------------------------
+     *
+     * `set_watch_tags` is the other multi-pair writer, it takes a *different* account
+     * key (`'set_watch_tags'`), and one account can be doing both at once — a reply
+     * being posted from the phone while the companion picker is saved on the tablet.
+     * Those two transactions can want the same two pairs, and they are the pair of
+     * calls whose relative lock order actually decides whether 40P01 fires.
+     *
+     * The cast is chosen so that `add_comment`'s *semantic* order is the reverse of its
+     * uuid order: the activity's actor is the higher uuid and the author replied to is
+     * the lower one. A version that took "the actor, then the person replied to" would
+     * therefore take `hi` then `lo` while `set_watch_tags` takes `lo` then `hi`, and
+     * the two would hold what the other wants.
+     *
+     * The interleaving is forced rather than hoped for. `lo`'s key is left free and
+     * `hi`'s is held by the controller, so:
+     *
+     *   - the reply must take `lo` and then queue on `hi`  — asserted by the key it
+     *     is found waiting on;
+     *   - the tag save must then queue on `lo`             — which it can only do if
+     *     the reply already holds `lo`, i.e. if the reply took the *lower* uuid first.
+     *
+     * That second assertion is the ordering test. With the locks taken in semantic
+     * order the tag save would be found waiting on `hi` instead and the correlated
+     * `awaitBlocked` throws; release the controller's key after that and PostgreSQL
+     * reports the deadlock outright.
+     */
+    it('L2: a reply and a companion save wanting the same two pairs take them in one order', async () => {
+      const { db, fx } = ctx;
+      const caller = await fx.createUser();
+      const one = await fx.createUser();
+      const two = await fx.createUser();
+
+      // Sorted the way `_lock_pair`'s key is: uuid text, which for a uuid is the same
+      // order as the uuid itself. Nothing here depends on which of the two generated
+      // ids happened to come out larger.
+      const [lo, hi] = [one, two].sort();
+
+      await fx.mutualFollow(caller, lo);
+      await fx.mutualFollow(caller, hi);
+
+      // The activity belongs to `hi` and the remark being answered belongs to `lo`, so
+      // "actor first" and "lowest uuid first" disagree.
+      const movie = await fx.createMovie('Two Pairs, Two Writers');
+      const event = await fx.feedEvent(hi, movie);
+
+      const rootWriter = await db.session('root-author');
+      await rootWriter.actAs(lo);
+      const root = (
+        await rootWriter.one(`select add_comment($1, $2, $3) as r`, [
+          await newOp(db),
+          event,
+          'the remark being answered',
+        ])
+      ).r.comment_id;
+      await rootWriter.end();
+
+      const tagged = await fx.createMovie('Two Pairs, Watched Together');
+      await fx.logWatch(caller, tagged);
+
+      const ctl = await db.controller();
+      const t1 = await db.session('replying');
+      const t2 = await db.session('saving-companions');
+      await t1.actAs(caller);
+      await t2.actAs(caller);
+
+      const loKey = await db.pairKey(caller, lo);
+      const hiKey = await db.pairKey(caller, hi);
+
+      try {
+        await ctl.holdPair(caller, hi);
+
+        // Handlers attached at start: either call may settle — including with the 40P01
+        // this test exists to rule out — while the test is still awaiting a release.
+        const replying = t1
+          .start(`select add_comment($1, $2, $3, $4, $5) as r`, [
+            await newOp(db),
+            event,
+            'answering that',
+            false,
+            root,
+          ])
+          .then((r) => r.rows[0].r, (e) => e);
+        await t1.awaitBlocked({ on: 'advisory', advisoryKey: hiKey });
+
+        const saving = t2
+          .start(`select set_watch_tags($1, $2, $3) as r`, [await newOp(db), tagged, [hi, lo]])
+          .then((r) => r.rows[0].r, (e) => e);
+        // The ordering assertion. Waiting on `lo` means the reply is holding `lo`,
+        // which it can only be if it took the lower uuid before the higher one.
+        await t2.awaitBlocked({ on: 'advisory', advisoryKey: loKey });
+
+        await ctl.releasePair(caller, hi);
+
+        const [r1, r2] = await Promise.all([replying, saving]);
+        for (const r of [r1, r2]) {
+          assert.notEqual(r?.code, '40P01', `deadlock detected: ${r?.message}`);
+        }
+        assert.equal(r1?.status, 'ok', `the reply must succeed, got ${r1?.message ?? r1?.status}`);
+        assert.equal(r2?.status, 'ok', `the save must succeed, got ${r2?.message ?? r2?.status}`);
+      } finally {
+        await t1.rollback().catch(() => {});
+        await t2.rollback().catch(() => {});
+        await t1.end().catch(() => {});
+        await t2.end().catch(() => {});
+        await ctl.end().catch(() => {});
+      }
+
+      assert.equal(
+        (await db.rows(
+          `select 1 from watch_tags where tagger_id = $1 and media_item_id = $2 and not removed_by_tagger`,
+          [caller, tagged],
+        )).length,
+        2,
+        'both companions saved',
+      );
+      assert.equal(
+        (await db.rows(`select 1 from comments where author_id = $1 and parent_id = $2`, [
+          caller,
+          root,
+        ])).length,
+        1,
+        'and the reply landed',
+      );
+    });
   });
 }

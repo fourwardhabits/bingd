@@ -168,6 +168,55 @@ export function useSocialWrites(viewerId: string, surface: Surface) {
          */
         ['recommendation-requests'],
         ['sent-to-you'],
+        /**
+         * **The picker, and the founder's silkyy report.**
+         *
+         * They followed a public account on the device, opened Recommend on a title,
+         * and the person was not in the list. Nothing was refused and no message said
+         * why — the row simply was not there, which reads as the feature not working.
+         *
+         * `20260826000400` had already made following somebody sufficient to send to
+         * them, on the server and in `useRecommendRecipients`' query. What neither
+         * touched is that the query holds a five-minute `staleTime` and **nothing
+         * invalidated it when the follow graph moved**. So the picker kept answering
+         * from a list assembled before the follow existed, and the only cures were
+         * waiting out the cache or restarting the app.
+         *
+         * Every writer here earns it, not just `follow`: an unfollow removes somebody
+         * from the picker, a block removes them, an unblock does not put them back
+         * (`block` deleted the edge) but the list must stop being stale either way, and
+         * approving a request changes nothing about the *caller's* outgoing edges —
+         * which is exactly the case where being wrong is cheapest to get right by
+         * refetching anyway.
+         *
+         * Unkeyed by account, like every other entry in this list. The alternative —
+         * disabling or shortening the cache — would refetch the whole following list on
+         * every open of the sheet, which is the cost this key avoids paying except at
+         * the one moment the answer can have changed.
+         */
+        ['recommend-recipients'],
+        /**
+         * **People discovery is deliberately absent from this list**, and it is the one
+         * entry where the obvious answer is the wrong one.
+         *
+         * Both suggestion lists exclude accounts the caller already follows, so a follow
+         * *does* make the row it came from stale, and invalidating would be defensible on
+         * correctness. What it would look like is a row disappearing from under the thumb
+         * that pressed it, and the rest of the list reshuffling as the mutual counts move
+         * — while the reader is halfway through working down it.
+         *
+         * The founder has already reported that failure once, on the For You wall: a
+         * bookmark used to invalidate the slate, so saving one title discarded the whole
+         * wall and put the reader back at the top of a list they were partway down.
+         * `recommendations.tsx` carries that reasoning at `toggleSaveById`, and the rule
+         * it settled on is the one applied here — **the list is not a function of the
+         * relationship.**
+         *
+         * The row still answers: `FollowControl` reads `follow_state_with` through
+         * `['relationships', …]`, which *is* invalidated above, so the button becomes
+         * Following immediately. The suggestion itself simply stops being offered the
+         * next time the section is opened, which is a minute of `staleTime` away.
+         */
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     );
     // Mutual Mania is an intersection of the follow graph, so following back somebody

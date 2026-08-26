@@ -420,9 +420,18 @@ describe('a title this user has ranked', () => {
   });
 
   /**
-   * The two are not synonyms and the menu has to say which is which. Rank again redoes
-   * the pairwise placement inside a band; Change your rating changes the band. They sat
-   * one row apart with nothing between them but a verb.
+   * The two are not synonyms and the menu has to say which is which. Rank again is
+   * another watch; Change your rating corrects a rating already given.
+   *
+   * **The subtext under each of them is gone, and this test now says so.** It asserted
+   * both sentences were present, and the founder's device pass is the reason it does the
+   * opposite: `SheetRow` puts the label and its secondary sentence on one line, so at
+   * the width of a phone every explanation in this menu truncated. Five rows of clipped
+   * grey text under five clear labels is worse than no explanation, because the reader
+   * can see something was meant to be said and cannot read it. The distinction the
+   * sentences were drawing is now drawn by the flow itself — Rank again opens
+   * comparisons, Change your rating opens the bucket chooser — and is stated in the
+   * PRD.
    */
   it('keeps Change your rating as the band control, distinct from Rank again', async () => {
     const view = await open();
@@ -432,8 +441,47 @@ describe('a title this user has ranked', () => {
     await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
 
     await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
-    expect(view.getByText('Pick a different loved, fine or not for me')).toBeTruthy();
-    expect(view.getByText('Compare it again in the same rating')).toBeTruthy();
+    expect(view.getByLabelText('Rank again')).toBeTruthy();
+    expect(view.queryByText('Pick a different loved, fine or not for me')).toBeNull();
+    expect(view.queryByText('Compare it again in the same rating')).toBeNull();
+  });
+
+  /**
+   * Every row in this menu, and not one secondary sentence between them.
+   *
+   * Asserted as a sweep rather than row by row, because the failure mode is *a row
+   * somebody adds later with a `value` on it* — which is how the menu accumulated five
+   * of them in the first place.
+   */
+  it('draws the whole ranked menu without a line of truncating subtext', async () => {
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
+
+    await waitFor(() => expect(view.getByLabelText('Rank again')).toBeTruthy());
+    // This fixture holds a private note, so the log group reads Edit private note over
+    // Share as a review — the other pair of the two states one `user_media.note` can be
+    // in. The three headings and the last three rows are the same whichever it is.
+    for (const label of [
+      'Share as a review',
+      'Edit private note',
+      'Rank again',
+      'Change your rating',
+      'Remove from collection',
+    ]) {
+      expect(view.getByLabelText(label)).toBeTruthy();
+    }
+    for (const subtext of [
+      'Anyone who can see your profile',
+      'Only you can read this',
+      'Compare it again in the same rating',
+      'Pick a different loved, fine or not for me',
+      'Rating, date and anything you wrote',
+    ]) {
+      expect(view.queryByText(subtext)).toBeNull();
+    }
   });
 
   /**
@@ -1242,8 +1290,22 @@ describe('the following score with nothing to say', () => {
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
+    /**
+     * Anchored on the **community** score, not on the "Following" heading.
+     *
+     * The heading is drawn before either number arrives, so waiting on it proves only
+     * that the section exists. This assertion needs more than that: it says "Not enough
+     * ratings" appears *once*, which is only true after the community row has resolved to
+     * its 7.4 — before that both rows are empty and both say it, and `getByText` fails
+     * with "found multiple elements".
+     *
+     * It passed locally and failed on CI (run 32876993932), which is the signature of a
+     * wait that gates on the wrong thing rather than of a real defect. Same class as the
+     * one `PrivacyScreen.test.tsx` records.
+     */
+    await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
     expect(view.getByText('Not enough ratings')).toBeTruthy();
+    expect(view.getByText('Following')).toBeTruthy();
     // The old copy named the reader's following list back to them. It is gone.
     expect(view.queryByText('Nobody you follow has ranked this')).toBeNull();
   });
@@ -1257,8 +1319,13 @@ describe('the following score with nothing to say', () => {
     // The row used to be absent in this case. Two silences told apart was a real
     // distinction and the founder collapsed it: the reader can act on neither, and a
     // row that materialises when the data arrives moves the page under them.
-    await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
+    //
+    // Anchored on the community score for the reason the test above records: the
+    // "Following" heading is drawn before either number arrives, so a single match for
+    // "Not enough ratings" is only a fact once the other row has resolved.
+    await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
     expect(view.getByText('Not enough ratings')).toBeTruthy();
+    expect(view.getByText('Following')).toBeTruthy();
   });
 
   it('draws the grey circle rather than a faded number', async () => {

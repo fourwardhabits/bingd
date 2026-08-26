@@ -425,6 +425,95 @@ export default function suite() {
       await canceller.end();
     });
 
+    /**
+     * **The window `20260826000500` opened, and the lock that closes it.**
+     *
+     * A re-ranking used to destroy the old position when the session *opened* — in its
+     * own transaction, minutes before the placement. Since the founder's device pass it
+     * does not: `_rank_finalize` now drops the old row and inserts the new one in one
+     * transaction, so there is a moment inside that function where the title has no
+     * position and the band is one shorter than it will be.
+     *
+     * That moment is inside the category advisory lock, which `_rank_finalize` takes as
+     * its first act and which `_rank_unrank_impl` re-enters — advisory transaction locks
+     * being re-entrant for one session, so the nested take is a hash lookup rather than
+     * a self-deadlock. Anything else placing into the same band has to wait for the
+     * whole drop-and-place, which is what makes the intermediate shape unobservable.
+     *
+     * Remove that lock and this test fails in the shape that matters: the second
+     * finalise reads a band count taken while the subject was gone, shifts against it,
+     * and `assert_ranking_valid` refuses the result. The assertion is therefore both —
+     * the second writer blocked *on that key*, and I1–I3 survived.
+     */
+    it('a re-ranking finalise holds the band while it drops and replaces', async () => {
+      const { db, fx } = ctx;
+      const user = await fx.createUser();
+      const subject = await fx.createMovie('Reranked under load');
+      const anchor = await fx.createMovie('Rerank band anchor');
+
+      const solo = await db.session('setup');
+      await solo.actAs(user);
+      await solo.q(`select rank_start($1, 'loved')`, [anchor]);
+      // Two in the band, so the subject genuinely holds a position to be replaced.
+      const placing = (await solo.one(`select rank_start($1, 'loved') as r`, [subject])).r;
+      await solo.q(`select rank_answer($1, $2)`, [placing.session_id, subject]);
+      // The re-ranking session: opened, and the old position deliberately still there.
+      const again = (
+        await solo.one(`select rank_again($1, 'loved', $2, true) as r`, [subject, await newOp(db)])
+      ).r;
+      await solo.end();
+      assert.equal(again.done, false, 'the fixture must leave a provisional session open');
+      assert.ok(
+        await rankingOf(db, user, subject),
+        'and the title must still be ranked while it is open',
+      );
+
+      await db.armBarrier('rankings', 'rerank-vs-reorder');
+      const ctl = await db.controller();
+      await ctl.hold('rerank-vs-reorder');
+
+      const reranker = await db.session('reranker');
+      const reorderer = await db.session('reorderer');
+      await reranker.actAs(user);
+      await reorderer.actAs(user);
+
+      // The answer finalises the provisional session, so it reaches the `rankings`
+      // insert — which is *after* the old row has been dropped. That is the window.
+      await reranker.begin();
+      await reranker.pauseAt('rerank-vs-reorder');
+      const reranking = fire(reranker, `rank_answer($1, $2)`, [again.session_id, subject]);
+      await reranker.awaitBlocked();
+
+      /**
+       * A drag on the *other* title in the band, so the media lock cannot be what
+       * serialises these two — `_lock_media` is keyed on (user, title) and these are two
+       * different titles. Only the category lock can, which is the whole point of
+       * correlating the wait on its key rather than merely observing a wait.
+       */
+      await reorderer.begin();
+      const reordering = fire(reorderer, `rank_reorder($1, 1, $2)`, [anchor, await newOp(db)]);
+      await reorderer.awaitBlocked({
+        on: 'advisory',
+        advisoryKey: await db.categoryKey(user, 'movies'),
+      });
+
+      await ctl.release('rerank-vs-reorder');
+      await reranking;
+      await reranker.commit();
+      await reordering;
+      await reorderer.commit();
+      await ctl.end();
+
+      const after = await rankingOf(db, user, subject);
+      assert.ok(after, 'the subject came out of it with a position');
+      assert.equal(after.bucket, 'loved', 'in the band it never left');
+      assert.equal((await rankingOf(db, user, anchor)).position, 1, 'and the drag landed');
+      await assertValid(db, user);
+
+      await reranker.end();
+      await reorderer.end();
+    });
+
     it('two different titles do not contend', async () => {
       // The negative case, which is what keeps the three above honest. A lock that
       // serialised every write for an account would satisfy all of them and would turn

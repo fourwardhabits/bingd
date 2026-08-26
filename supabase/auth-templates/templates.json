@@ -1,0 +1,32 @@
+{
+  "//": "The canonical auth email configuration, as one source of truth for the CI shape test (config/auth-templates.test.mjs) and the live check (scripts/check-auth-config.mjs). Keys are Supabase Management API auth-config keys, verbatim, so the check can PATCH exactly these and nothing else -- see ./README.md on why a partial PATCH matters.",
+
+  "settings": {
+    "//": "Six digits because app/(auth)/verify.tsx enables its button on /^\\d{6}$/ and nothing else. The project was issuing eight at one point, which would have produced a code that arrives and cannot be typed. Ten minutes because both bodies say 'expires in 10 minutes', and copy that disagrees with configuration is a support ticket.",
+    "mailer_otp_length": 6,
+    "mailer_otp_exp": 600
+  },
+
+  "//flow": "ONE client call reaches BOTH of these. sendEmailCode calls signInWithOtp with shouldCreateUser: true, and GoTrue picks the template by the address: no account yet -> Confirm signup, account already -> Magic Link. Both are exercised in ordinary use, both must be right, and both codes are verified with the same EmailOtpType ('email') -- which is why verifiedAs is identical below and is not a per-template choice any more.",
+
+  "templates": [
+    {
+      "name": "Confirm signup",
+      "reaches": "an address with no account yet -- everybody signing in to Bingd for the first time",
+      "verifiedAs": "email",
+      "subjectKey": "mailer_subjects_confirmation",
+      "subject": "Your bingd. sign-in code",
+      "bodyKey": "mailer_templates_confirmation_content",
+      "bodyFile": "confirm-signup.html"
+    },
+    {
+      "name": "Magic Link",
+      "reaches": "an address that already has an account -- everybody coming back",
+      "verifiedAs": "email",
+      "subjectKey": "mailer_subjects_magic_link",
+      "subject": "Your bingd. sign-in code",
+      "bodyKey": "mailer_templates_magic_link_content",
+      "bodyFile": "magic-link.html"
+    }
+  ]
+}

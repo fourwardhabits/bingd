@@ -1,0 +1,45 @@
+<!--
+  Confirm signup. The template Supabase sends to an address that has no account yet.
+
+  Under the founder's final 2026-08-26 decision Bingd has ONE email flow: `sendEmailCode`
+  calls `signInWithOtp` with `shouldCreateUser: true`, and GoTrue chooses between this
+  template and magic-link.html by the address alone. A first-time user therefore receives
+  this one — so this is the first thing anybody new ever sees from Bingd, and it is a
+  sign-in code rather than a confirmation errand. The two bodies are deliberately the
+  same sentence: the app cannot tell which of them was sent and neither should the reader
+  have to care.
+
+  There is deliberately no link of any kind in this email. `verifyEmailCode` calls
+  `verifyOtp({ type: 'email' })` and the session is established inside Bingd; a
+  confirmation URL here would complete the sign-in in a browser and produce a session the
+  app never sees, which is exactly what a friend-beta tester reported. The shape check
+  forbids one by name, so this comment cannot spell it. See ./README.md.
+-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf8f6;padding:32px 0;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:420px;background:#ffffff;border-radius:14px;padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+        <tr>
+          <td style="font-size:22px;font-weight:600;color:#1a1a1a;padding-bottom:20px;">bingd.</td>
+        </tr>
+        <tr>
+          <td style="font-size:15px;line-height:22px;color:#4a4a4a;padding-bottom:20px;">
+            Your sign-in code is:
+          </td>
+        </tr>
+        <tr>
+          <td style="font-size:32px;font-weight:600;letter-spacing:6px;color:#773744;padding-bottom:20px;">
+            {{ .Token }}
+          </td>
+        </tr>
+        <tr>
+          <td style="font-size:14px;line-height:20px;color:#767676;">
+            Enter it in the app. It expires in 10 minutes.
+            <br /><br />
+            If you didn't ask for this code, you can ignore this email.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>

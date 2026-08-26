@@ -88,6 +88,28 @@ export function invalidateAfterCollectionChange(
    */
   invalidate(['community-score', userId, mediaItemId]);
 
+  /**
+   * Taste Match, on every profile this session has looked at, and the People suggestions
+   * that are scored by the same function.
+   *
+   * Both are computed over the *viewer's* rankings as one half of the pair, so ranking
+   * anything moves every one of them at once — an 84% that does not move after the
+   * reader ranks five more films is a number that looks stuck, and the People list is
+   * ordered by exactly that number.
+   *
+   * Keyed by prefix on the viewer, which is the whole cached set: `['taste-match',
+   * viewerId, subjectId]` and `['people-taste-matches', viewerId]`. The *other* half of
+   * each pair moving — the subject ranking something — cannot be invalidated from here
+   * and does not need to be: `useTasteMatch` holds no `staleTime`, so it refetches the
+   * next time the profile is opened.
+   *
+   * `people-mutuals` is deliberately absent. It is a fact about the follow graph and
+   * nothing about ranking a film changes it; `useSocialWrites` invalidates it where it
+   * genuinely moves.
+   */
+  invalidate(['taste-match', userId]);
+  invalidate(['people-taste-matches', userId]);
+
   // Yearly goal progress. Keyed by prefix rather than by `queryKeys.goals(userId,
   // year)`, because the year the user just logged is not necessarily the year on
   // screen: logging a film watched last December has to move *that* year's bar, and

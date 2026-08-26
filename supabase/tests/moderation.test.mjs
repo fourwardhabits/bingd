@@ -526,6 +526,24 @@ describe('the guard is wired in, not merely present', () => {
     // can_view_profile from the caller's own side. A suspended *author* is already
     // absent from it, which is the direction that matters.
     'title_reviews',
+    // 20260826000600. The two comment reads, and they are the same shape as
+    // `title_reviews` above: stable, definer, taking no viewer, and applying
+    // can_view_profile from the caller's own side to the event's actor and to each
+    // author. A suspended *author* is already absent from both, which is the direction
+    // that matters — and a suspended *caller* reading a conversation changes nothing and
+    // learns nothing they could not have read while active. The four writers beside them
+    // (add_comment, edit_comment, delete_comment, set_comment_reaction) all call the
+    // guard, which is the split that matters: suspension stops you saying things, not
+    // reading them.
+    'activity_comments',
+    'activity_comment_counts',
+    // 20260826000600. security invoker, so these can only ever return rows follows_read
+    // already admits — the caller's own visible slice of one person's follow graph.
+    // Exactly `follow_state_with`'s reasoning: suspension does not hide a follow list
+    // from the person looking at it, and a suspended *subject* is already excluded by
+    // can_view_profile, which is the direction that matters.
+    'followers_of',
+    'following_of',
     // 20260817000800. The caller's own two switches, defaulted on. Suspension does not
     // hide somebody's own settings from them.
     'my_notification_preferences',
@@ -563,6 +581,15 @@ describe('the guard is wired in, not merely present', () => {
     // reach anybody. `register_device_token` — the half that *grants* one — does call
     // the guard, and that asymmetry is the point.
     'revoke_device_token',
+    // 20260826000500, both of them. Suggestion lists for the People segment of For You:
+    // pure reads, no argument but a limit, and every row filtered through
+    // `can_discover_profile` and `can_view_profile` from the caller's own side. A
+    // suspended *subject* is already absent from both — `can_discover_profile` requires
+    // `status = 'active'` — which is the direction that matters, and a suspended
+    // *caller* being able to look at a list of people is not a way to reach anybody:
+    // `follow`, which is the act these rows lead to, calls the guard.
+    'people_mutuals',
+    'people_taste_matches',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

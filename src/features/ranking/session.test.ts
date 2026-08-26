@@ -258,7 +258,7 @@ describe('arguments', () => {
    */
   it.each([
     ['rankStart', () => rankStart(subject, 'loved', op)],
-    ['rankAgain', () => rankAgain(subject, 'loved', op)],
+    ['rankAgain', () => rankAgain(subject, 'loved', op, true)],
     ['rankRebucket', () => rankRebucket(subject, 'loved', op)],
     ['rankAnswer', () => rankAnswer(session, pivot, subject, op)],
     ['rankSkip', () => rankSkip(session, subject, op)],
@@ -340,7 +340,7 @@ describe('ranking a title again in the same bucket', () => {
       error: null,
     });
 
-    expect(await rankAgain(subject, 'loved', op)).toEqual({
+    expect(await rankAgain(subject, 'loved', op, true)).toEqual({
       state: 'comparing',
       sessionId: session,
       subjectId: subject,
@@ -362,7 +362,7 @@ describe('ranking a title again in the same bucket', () => {
       error: null,
     });
 
-    expect(await rankAgain(subject, 'loved', op)).toMatchObject({
+    expect(await rankAgain(subject, 'loved', op, true)).toMatchObject({
       state: 'placed',
       position: 1,
       bucket: 'loved',
@@ -371,7 +371,7 @@ describe('ranking a title again in the same bucket', () => {
 
   it('carries a not-for-me bucket through unchanged', async () => {
     mockRpc.mockResolvedValue({ data: { done: false, session_id: session, pivot }, error: null });
-    await rankAgain(subject, 'notForMe', op);
+    await rankAgain(subject, 'notForMe', op, true);
 
     // The client's own vocabulary is camelCase and the database's is snake_case, and the
     // one place that mapping can go wrong is a bucket that is two words.
@@ -379,7 +379,25 @@ describe('ranking a title again in the same bucket', () => {
       p_media_item_id: subject,
       p_bucket: 'not_for_me',
       p_operation_id: op,
+      p_new_watch: true,
     });
+  });
+
+  /**
+   * The two callers of one RPC, and the only thing that separates them on the wire.
+   *
+   * Rank again is another viewing and earns one feed activity; Change your rating
+   * re-choosing the band it already has is a correction and earns none. The founder saw
+   * the second one post a duplicate every time, which is what this flag is for.
+   */
+  it('says whether the placement is another watch or a correction', async () => {
+    mockRpc.mockResolvedValue({ data: { done: false, session_id: session, pivot }, error: null });
+
+    await rankAgain(subject, 'loved', op, false);
+    expect(mockRpc).toHaveBeenCalledWith(
+      'rank_again',
+      expect.objectContaining({ p_new_watch: false }),
+    );
   });
 
   it('reports a refusal without claiming anything moved', async () => {
@@ -390,7 +408,7 @@ describe('ranking a title again in the same bucket', () => {
       error: { code: '42501', message: 'account is suspended' },
     });
 
-    const result = await rankAgain(subject, 'loved', op);
+    const result = await rankAgain(subject, 'loved', op, true);
 
     expect(result).toMatchObject({ state: 'failed', restart: false });
     expect(result).not.toHaveProperty('changed');
@@ -406,7 +424,7 @@ describe('ranking a title again in the same bucket', () => {
     // unranking a second time.
     mockRpc.mockResolvedValue({ data: null, error: { code: '', message: 'TypeError: fail' } });
 
-    expect(await rankAgain(subject, 'loved', op)).toMatchObject({
+    expect(await rankAgain(subject, 'loved', op, true)).toMatchObject({
       state: 'failed',
       changed: true,
     });
@@ -418,7 +436,7 @@ describe('ranking a title again in the same bucket', () => {
     // now, so an unranked title simply opens a session and there is nothing to absorb.
     mockRpc.mockResolvedValue({ data: { done: false, session_id: session, pivot }, error: null });
 
-    expect(await rankAgain(subject, 'loved', op)).toMatchObject({ state: 'comparing' });
+    expect(await rankAgain(subject, 'loved', op, true)).toMatchObject({ state: 'comparing' });
     expect(mockRpc.mock.calls.map(([name]) => name)).toEqual(['rank_again']);
   });
 });

@@ -135,6 +135,10 @@ Messages · Gameplay Content · Customer Support.
   personalisation.** Only App Functionality and Analytics.
 - **Account deletion:** in-app, Settings › Account & Data. Guideline 5.1.1(v) is met; there
   is no "email us" path.
+- **Sign-in for review:** Apple's *App Review Information* and Play's *App access* both need
+  the demo account **and the path to the password screen** — Bingd's three primary methods
+  are an emailed code, Apple and Google, none of which a reviewer can complete. See
+  [`store-review-access.md`](./store-review-access.md). No credential goes in this file.
 - **Age rating:** 13+ enforced at sign-up. The catalogue is film and television metadata
   from TMDB and can describe adult themes; user-generated notes and comments exist, and
   there is a report/moderation path. Expect the questionnaire to land at 12+ or 17+

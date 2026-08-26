@@ -22,6 +22,7 @@ import {
   useRecommendationRequests,
   useSweepIntent,
 } from '@/features/recommendations/use-recommendation-requests';
+import { PeopleDiscovery } from '@/features/people/PeopleDiscovery';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
 import { refreshRecommendations } from '@/features/recommendations/session-seed';
 import { useForYou, type ForYouItem, type Medium } from '@/features/recommendations/use-for-you';
@@ -46,6 +47,7 @@ import {
   MediumSelector,
   PosterGrid,
   Screen,
+  SegmentedControl,
   SkeletonRow,
   type Medium as CollectionMedium,
 } from '@/ui/components';
@@ -83,6 +85,16 @@ export default function RecommendationsScreen() {
   const queryClient = useQueryClient();
   const notifications = useNotifications(profile.id);
 
+  /**
+   * Titles or People, and it is state rather than a route.
+   *
+   * A route would put People in the back stack and make the tab bar's own "go back to
+   * the top of For You" gesture land somewhere the reader did not leave. It is a mode of
+   * one screen — the segmented control is the whole navigation — and every filter,
+   * medium and scroll position on the Titles side survives a look at People and back,
+   * which is the behaviour a control that sits *inside* a screen implies.
+   */
+  const [lane, setLane] = useState<'titles' | 'people'>('titles');
   const [medium, setMedium] = useState<Medium>('movies');
   /** The first chip. Not a tab: see the header. */
   const [sentOnly, setSentOnly] = useState(false);
@@ -247,53 +259,91 @@ export default function RecommendationsScreen() {
         }}
       />
 
-      {/* The same control Collection leads with, in the same place, doing the same job.
+      {/**
+       * **Titles or People**, and the founder's answer to Bingd having no way to find
+       * anybody (tranche 2026-08-26 §10).
+       *
+       * For You is the screen that answers "what next", and the honest answer is
+       * sometimes a film and sometimes a person. Everything this screen already was —
+       * the wall, the filters, Sent to you, and the recommendation requests alert —
+       * lives under Titles, unchanged and in the same order. People is a second mode of
+       * the same question, not a social network bolted to the side of it.
+       *
+       * `SegmentedControl` rather than `SegmentedTabs`, which is the app's *other*
+       * two-option control and the wrong one here by its own documentation: tabs wear
+       * `tablist`/`tab` and are drawn as chrome, and what this changes is which kind of
+       * thing the screen is about rather than which page of it you are on. It is also
+       * the control the signup privacy selector uses, so a reader has met it.
+       *
+       * Above `MediumSelector` and above the requests row, because Movies/TV shows is a
+       * narrowing *of titles* and means nothing about people — putting the two selectors
+       * the other way round would offer "TV shows" over a list of humans.
+       */}
+      <View style={styles.segment}>
+        <SegmentedControl
+          label="What to look at"
+          options={[
+            { id: 'titles', label: 'Titles', hint: 'Films and seasons recommended for you' },
+            { id: 'people', label: 'People', hint: 'People you might want to follow' },
+          ]}
+          value={lane}
+          onChange={setLane}
+        />
+      </View>
+
+      {lane === 'people' ? (
+        <PeopleDiscovery viewerId={profile.id} />
+      ) : (
+        <>
+          {/* The same control Collection leads with, in the same place, doing the same job.
           "TV shows" rather than "TV seasons" because this wall holds series: TMDB
           answers "similar" about a show and never about one of its seasons. */}
-      <MediumSelector
-        value={MEDIUM_TO_SELECTOR[medium]}
-        onChange={(next) => setMedium(SELECTOR_TO_MEDIUM[next])}
-        labels={{ tv_seasons: 'TV shows' }}
-      />
-      <HeaderBoundary />
+          <MediumSelector
+            value={MEDIUM_TO_SELECTOR[medium]}
+            onChange={(next) => setMedium(SELECTOR_TO_MEDIUM[next])}
+            labels={{ tv_seasons: 'TV shows' }}
+          />
+          <HeaderBoundary />
 
-      {/* Above the filters, and only when something is waiting.
+          {/* Above the filters, and only when something is waiting.
 
           It sits here rather than in the filter row because it is not a filter: the
           chips narrow what is on screen, and this says that there is something *not*
           on screen yet which needs a decision. Absent at zero, with no placeholder and
           no empty state — a row that is always there stops being a signal. */}
-      {requestCount > 0 ? (
-        <RequestAlertRow count={requestCount} onPress={() => setReviewingRequests(true)} />
-      ) : null}
+          {requestCount > 0 ? (
+            <RequestAlertRow count={requestCount} onPress={() => setReviewingRequests(true)} />
+          ) : null}
 
-      {/* One row, wrapping. Sent to you leads because it is the only chip that changes
+          {/* One row, wrapping. Sent to you leads because it is the only chip that changes
           what kind of thing is on screen; the rest narrow whatever is. Clear all appears
           only when there is something to clear, and clears the *filters*: turning off
           Sent to you as well would make one control mean two things. */}
-      <View style={styles.filterRow}>
-        <FilterChip
-          icon={sentOnly ? 'mail-open' : 'mail-outline'}
-          label={unopened > 0 ? `Sent to you · ${unopened}${atLeast ? '+' : ''}` : 'Sent to you'}
-          accessibilityLabel={
-            unopened > 0
-              ? `Sent to you, ${atLeast ? 'at least ' : ''}${unopened} unopened`
-              : 'Sent to you'
-          }
-          selected={sentOnly}
-          onPress={() => setSentOnly((on) => !on)}
-        />
-        {/* The collection's own sheet, which its header always intended this screen to
+          <View style={styles.filterRow}>
+            <FilterChip
+              icon={sentOnly ? 'mail-open' : 'mail-outline'}
+              label={
+                unopened > 0 ? `Sent to you · ${unopened}${atLeast ? '+' : ''}` : 'Sent to you'
+              }
+              accessibilityLabel={
+                unopened > 0
+                  ? `Sent to you, ${atLeast ? 'at least ' : ''}${unopened} unopened`
+                  : 'Sent to you'
+              }
+              selected={sentOnly}
+              onPress={() => setSentOnly((on) => !on)}
+            />
+            {/* The collection's own sheet, which its header always intended this screen to
             reuse rather than growing a second one. Genre, Language, Decade and Anime
             come with it. Rating filters are off: nothing on either list has been ranked
             by this reader. */}
-        <FilterChip
-          icon="options-outline"
-          label={activeCount ? `Filters · ${activeCount}` : 'Filters'}
-          selected={activeCount > 0}
-          onPress={() => setFiltering(true)}
-        />
-        {/* **Refresh rearranges; it does not reload.**
+            <FilterChip
+              icon="options-outline"
+              label={activeCount ? `Filters · ${activeCount}` : 'Filters'}
+              selected={activeCount > 0}
+              onPress={() => setFiltering(true)}
+            />
+            {/* **Refresh rearranges; it does not reload.**
             The founder's report was that For You showed essentially the same titles
             every visit, and it did: the slate is a pure function of the rankings and the
             provider cache, so with neither moving there was one answer and the app kept
@@ -316,109 +366,120 @@ export default function RecommendationsScreen() {
             Not shown over Sent to you. That list is other people's recommendations in
             the order the server sent them, so there is no arrangement to sample — a
             control that could never do anything is worse than an absent one. */}
-        {!sentOnly ? (
-          <FilterChip
-            icon="refresh"
-            label="Refresh"
-            accessibilityLabel="Refresh recommendations"
-            // No telemetry. `ANALYTICS_EVENTS` is a closed union with a privacy
-            // boundary asserted around it, and this Preview pass has no reason to widen
-            // it — whether Refresh gets used is a question for the tranche that decides
-            // whether freshness worked, not for founder acceptance.
-            onPress={refreshRecommendations}
-          />
-        ) : null}
-        {isFiltered(filters) ? (
-          <FilterChip icon="close" label="Clear all" onPress={() => setFilters(emptyFilters())} />
-        ) : null}
-      </View>
+            {!sentOnly ? (
+              <FilterChip
+                icon="refresh"
+                label="Refresh"
+                accessibilityLabel="Refresh recommendations"
+                // No telemetry. `ANALYTICS_EVENTS` is a closed union with a privacy
+                // boundary asserted around it, and this Preview pass has no reason to widen
+                // it — whether Refresh gets used is a question for the tranche that decides
+                // whether freshness worked, not for founder acceptance.
+                onPress={refreshRecommendations}
+              />
+            ) : null}
+            {isFiltered(filters) ? (
+              <FilterChip
+                icon="close"
+                label="Clear all"
+                onPress={() => setFilters(emptyFilters())}
+              />
+            ) : null}
+          </View>
 
-      {sentOnly ? (
-        <SentList
-          query={sent}
-          rows={sentVisible}
-          total={sentRows.length}
-          saved={savedIds}
-          busyId={busy}
-          onOpen={openRecommendation}
-          onToggleSave={(row) =>
-            void toggleSaveById(row.mediaItemId, !savedIds.has(row.mediaItemId))
-          }
-        />
-      ) : slate.isError ? (
-        <EmptyState
-          kind="couldNotLoad"
-          title="Could not load recommendations"
-          body="Check your connection and try again."
-          action={{ label: 'Try again', onPress: () => void slate.refetch() }}
-        />
-      ) : slate.isPending ? (
-        <SkeletonRow count={6} />
-      ) : items.length === 0 ? (
-        <Nothing
-          medium={medium}
-          ranked={logged.data?.rankedCount ?? 0}
-          filtered={isFiltered(filters)}
-          onRank={() => router.push('/log')}
-          onClearFilters={() => setFilters(emptyFilters())}
-        />
-      ) : (
-        <ScrollView contentContainerStyle={styles.content}>
-          <PosterGrid
-            tiles={items.map((item) => ({
-              id: item.mediaItemId,
-              title: item.title,
-              year: item.year,
-              posterUri: posterUri(item.posterPath, 'card'),
-              // Read live from the watchlist query, not carried on the slate. That is
-              // what lets a bookmark redraw one icon instead of replacing the wall —
-              // see `toggleSaveById`.
-              saved: savedIds.has(item.mediaItemId),
-              // Deliberately no score. Nothing here has been watched, so a score would
-              // have to be somebody else's, and a rating filter over unseen titles is
-              // the thing the collection filter sheet already refuses.
-            }))}
-            onPressTile={(tile) => router.push(`/title/${tile.id}`)}
-            onToggleSave={(tile) => {
-              const item = items.find((candidate) => candidate.mediaItemId === tile.id);
-              if (item) void toggleSaveById(item.mediaItemId, !savedIds.has(item.mediaItemId));
-            }}
-            onLongPressTile={(tile) => {
-              const item = items.find((candidate) => candidate.mediaItemId === tile.id);
-              if (item) explain(item);
-            }}
-          />
-        </ScrollView>
-      )}
+          {sentOnly ? (
+            <SentList
+              query={sent}
+              rows={sentVisible}
+              total={sentRows.length}
+              saved={savedIds}
+              busyId={busy}
+              onOpen={openRecommendation}
+              onToggleSave={(row) =>
+                void toggleSaveById(row.mediaItemId, !savedIds.has(row.mediaItemId))
+              }
+            />
+          ) : slate.isError ? (
+            <EmptyState
+              kind="couldNotLoad"
+              title="Could not load recommendations"
+              body="Check your connection and try again."
+              action={{ label: 'Try again', onPress: () => void slate.refetch() }}
+            />
+          ) : slate.isPending ? (
+            <SkeletonRow count={6} />
+          ) : items.length === 0 ? (
+            <Nothing
+              medium={medium}
+              ranked={logged.data?.rankedCount ?? 0}
+              filtered={isFiltered(filters)}
+              onRank={() => router.push('/log')}
+              onClearFilters={() => setFilters(emptyFilters())}
+            />
+          ) : (
+            <ScrollView contentContainerStyle={styles.content}>
+              <PosterGrid
+                tiles={items.map((item) => ({
+                  id: item.mediaItemId,
+                  title: item.title,
+                  year: item.year,
+                  posterUri: posterUri(item.posterPath, 'card'),
+                  // Read live from the watchlist query, not carried on the slate. That is
+                  // what lets a bookmark redraw one icon instead of replacing the wall —
+                  // see `toggleSaveById`.
+                  saved: savedIds.has(item.mediaItemId),
+                  // Deliberately no score. Nothing here has been watched, so a score would
+                  // have to be somebody else's, and a rating filter over unseen titles is
+                  // the thing the collection filter sheet already refuses.
+                }))}
+                onPressTile={(tile) => router.push(`/title/${tile.id}`)}
+                onToggleSave={(tile) => {
+                  const item = items.find((candidate) => candidate.mediaItemId === tile.id);
+                  if (item)
+                    void toggleSaveById(item.mediaItemId, !savedIds.has(item.mediaItemId));
+                }}
+                onLongPressTile={(tile) => {
+                  const item = items.find((candidate) => candidate.mediaItemId === tile.id);
+                  if (item) explain(item);
+                }}
+              />
+            </ScrollView>
+          )}
 
-      {filtering ? (
-        <CollectionFilterSheet
-          // The options describe whatever is in front of the reader, so a Sent to you
-          // list of four films does not offer twenty genres none of them are.
-          items={sentOnly ? sentRows.map(recommendationAsItem) : (slate.data?.candidatePool ?? [])}
-          value={filters}
-          showBuckets={false}
-          onApply={(next) => {
-            setFilters(next);
-            setFiltering(false);
-          }}
-          onClose={() => setFiltering(false)}
-        />
-      ) : null}
+          {filtering ? (
+            <CollectionFilterSheet
+              // The options describe whatever is in front of the reader, so a Sent to you
+              // list of four films does not offer twenty genres none of them are.
+              items={
+                sentOnly
+                  ? sentRows.map(recommendationAsItem)
+                  : (slate.data?.candidatePool ?? [])
+              }
+              value={filters}
+              showBuckets={false}
+              onApply={(next) => {
+                setFilters(next);
+                setFiltering(false);
+              }}
+              onClose={() => setFiltering(false)}
+            />
+          ) : null}
 
-      {/* The held recommendations, and the three decisions each one carries.
+          {/* The held recommendations, and the three decisions each one carries.
 
           Mounted only while open, so the sheet's queries are not kept warm behind a
           screen most visits never open — the compact row above already knows the count
           from a query this screen owns. */}
-      {reviewingRequests ? (
-        <RecommendationRequestsSheet
-          viewerId={profile.id}
-          onClose={() => setReviewingRequests(false)}
-          onPressProfile={(username) => router.push(`/u/${username}`)}
-          sweepIntent={sweepIntent}
-        />
-      ) : null}
+          {reviewingRequests ? (
+            <RecommendationRequestsSheet
+              viewerId={profile.id}
+              onClose={() => setReviewingRequests(false)}
+              onPressProfile={(username) => router.push(`/u/${username}`)}
+              sweepIntent={sweepIntent}
+            />
+          ) : null}
+        </>
+      )}
     </Screen>
   );
 }
@@ -576,6 +637,13 @@ function Nothing({
 }
 
 const styles = StyleSheet.create({
+  // The gutter the control needs and the breathing room under the header. `MediumSelector`
+  // owns its own padding, which is why this one is stated here rather than shared.
+  segment: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[2],
+  },
   content: { paddingBottom: theme.space[10], gap: theme.space[3] },
   filterRow: {
     flexDirection: 'row',

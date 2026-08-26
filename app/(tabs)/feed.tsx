@@ -8,7 +8,7 @@ import { unreadCount, useNotifications } from '@/features/notifications/use-noti
 import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
-import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
+import { metadataFor, relativeTime, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
@@ -413,30 +413,7 @@ const styles = StyleSheet.create({
   },
 });
 
-/**
- * `PG-13 · 148m · Science Fiction · Adventure`.
- *
- * The rules live in `features/feed/activity.ts` so that the three surfaces rendering
- * an activity cannot drift apart on them. This is the adapter from a `FeedItem`,
- * which has already resolved a season's inherited genres and rating.
- */
-function metadataFor(event: FeedItem) {
-  return activityMetadata({
-    kind: event.kind,
-    genres: event.genres,
-    certification: event.certification,
-    runtimeMinutes: event.runtimeMinutes,
-    episodeCount: event.episodeCount,
-  });
-}
-
-function relativeTime(value: string) {
-  const now = Date.now();
-  const then = new Date(value).getTime();
-  const mins = Math.max(1, Math.round((now - then) / (1000 * 60)));
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return `${days}d ago`;
-}
+// `metadataFor` and `relativeTime` used to be defined here. Both now live in
+// `features/feed/activity.ts`, beside the rules they apply — which is where the first
+// one's own comment always said they belonged, and which stopped being optional when the
+// activity page became the third surface drawing one of these rows.

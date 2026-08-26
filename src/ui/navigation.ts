@@ -76,5 +76,14 @@ export const ROOT_SCREEN_TITLES = {
   /** Reached from a cast strip. The screen sets the person's name once it resolves. */
   'person/[id]': '',
   'lists/[id]': 'List',
+  /**
+   * Where a comment or reply notification lands (`app/activity/[id].tsx`).
+   *
+   * "Comments" rather than "Activity", which is what the route is called: the reader
+   * arrived because somebody said something to them, and the screen's subject is the
+   * conversation. It is also the back label of anything pushed on top — a profile opened
+   * from a comment's author — where "‹ Comments" is the right thing to promise.
+   */
+  'activity/[id]': 'Comments',
   settings: 'Settings',
 } as const;

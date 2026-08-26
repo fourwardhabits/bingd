@@ -13,6 +13,7 @@ import { useReactions, useSetReaction, REACTION_GLYPH } from '@/features/feed/us
 import { useFeed } from '@/features/feed/use-feed';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { GoalsSection } from '@/features/goals/GoalsSection';
+import { FollowListSheet } from '@/features/profile/FollowListSheet';
 import { InviteFriendsButton } from '@/features/profile/InviteFriendsButton';
 import { ProfileActions } from '@/features/profile/ProfileActions';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
@@ -58,6 +59,14 @@ export default function ProfileScreen() {
   const stats = useProfileStats(profile.id);
   const notifications = useNotifications(profile.id);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  /**
+   * Which of the two people lists is open, if either.
+   *
+   * One piece of state rather than two booleans, because they are mutually exclusive by
+   * construction — a sheet is one sheet — and two booleans is a state where both are
+   * true that somebody has to remember to prevent.
+   */
+  const [followList, setFollowList] = useState<'followers' | 'following' | null>(null);
   // Mounted only while open, like every other sheet in the app: it reads nine things
   // when it mounts, and one that stayed mounted would read them on every profile visit
   // for a screen nobody had asked for.
@@ -132,6 +141,15 @@ export default function ProfileScreen() {
             movies: stats.isPending ? '—' : (stats.data?.rankedMovies ?? 0),
             seasons: stats.isPending ? '—' : (stats.data?.rankedSeasons ?? 0),
           }}
+          /**
+           * Not while the numbers are still `—`.
+           *
+           * The sheet would open and work — its own query does not depend on this one —
+           * but a button under a dash is a button whose label says nothing about what is
+           * behind it, and the wait is one round trip.
+           */
+          onPressFollowers={stats.isPending ? undefined : () => setFollowList('followers')}
+          onPressFollowing={stats.isPending ? undefined : () => setFollowList('following')}
           controls={
             /**
              * Share Profile and Bingd Awards in that order, then Invite friends.
@@ -270,6 +288,18 @@ export default function ProfileScreen() {
           onClose={() => setAwardsOpen(false)}
         />
       ) : null}
+
+      {/* Mounted only while open, like every other sheet here: it runs a paged read and
+          a relationship lookup on mount, and one that stayed mounted would run them on
+          every visit to this tab for a list nobody asked for. */}
+      <FollowListSheet
+        kind={followList}
+        userId={profile.id}
+        name={profile.display_name || profile.username}
+        viewerId={profile.id}
+        isSelf
+        onClose={() => setFollowList(null)}
+      />
     </Screen>
   );
 }

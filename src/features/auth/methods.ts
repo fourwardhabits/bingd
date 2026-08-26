@@ -6,6 +6,7 @@ import { Platform } from 'react-native';
 
 import { releaseDeviceOnSignOut } from '@/features/notifications/push';
 import { track } from '@/lib/analytics';
+import { reportHandled } from '@/lib/monitoring';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -47,57 +48,139 @@ export async function clearPendingDisplayName() {
 }
 
 // ---------------------------------------------------------------------------
-// Email one-time code
+// Email one-time code — the canonical Bingd-owned method
+//
+// One call, one screen, one `EmailOtpType`, for somebody who has an account and for
+// somebody who does not. That is the founder's 2026-08-26 final decision and it is also
+// what `@supabase/auth-js` documents: `signup` and `magiclink` are **deprecated** verify
+// types, and `'email'` is the one "used when verifying an OTP sent to the user's email
+// during sign-up or sign-in" — both, deliberately, in one type.
+//
+// The short-lived password-first amendment is gone from the ordinary path. What survives
+// of it is `signInWithEmailPassword` below, which is now reachable only from a secondary
+// screen and exists for store-review access. Nobody creates a password in v1.
 // ---------------------------------------------------------------------------
 
 /**
- * Sends the code. Possession of it is the verification, which is why email OTP is
- * the one method that can never present the unverified-address problem in
- * auth.md §2.
+ * The one `EmailOtpType` this app sends, named where it is decided.
+ *
+ * Read off the installed `@supabase/auth-js@2.112.3` union rather than guessed, and
+ * pinned as a literal in `methods.email.test.ts`. Its own documentation is the reason
+ * there is one value here and not two:
+ *
+ *   > note: `signup` and `magiclink` types are deprecated
+ *   > `email` – Used when verifying an OTP sent to the user's email during sign-up or
+ *   > sign-in.
+ *
+ * GoTrue resolves it against whichever column holds the token — the signup confirmation
+ * for an address that had no account, the magic-link one for an address that did — so
+ * the client never has to know which of the two it is about to receive. That is what
+ * makes a single unified flow possible, and a client that *did* have to know would have
+ * to ask "do you already have an account?" before it could send anything.
+ */
+const EMAIL_OTP_TYPE = 'email' as const;
+
+/**
+ * Sends a six-digit code, to an address that may or may not already have an account.
+ *
+ * ---------------------------------------------------------------------------
+ * `shouldCreateUser: true`, AND IT IS WHAT MAKES THIS ONE FLOW
+ *
+ * With it, GoTrue does the branching Bingd would otherwise have to: an unknown address
+ * gets an `auth.users` row and a **Confirm signup** email, a known one gets a **Magic
+ * Link** email, and both arrive as six digits that `verifyEmailCode` accepts. Nobody is
+ * asked to declare whether they are signing up or signing in before typing their address,
+ * which is the whole of §2 of the decision.
+ *
+ * ---------------------------------------------------------------------------
+ * IT IS ALSO WHAT RESTORES ANTI-ENUMERATION
+ *
+ * This briefly ran with `shouldCreateUser: false`, and independent review 44 recorded the
+ * consequence as an accepted risk: GoTrue answered a known address with a send and an
+ * unknown one with `otp_disabled`, so repeated attempts told somebody whether an address
+ * had a Bingd account. With `true` the two answers are identical — a send, either way —
+ * and there is nothing left to probe. The risk is closed rather than accepted.
+ *
+ * The cost, stated plainly and unchanged since the first version of this function: a
+ * mistyped address mints a permanent, profile-less `auth.users` row that nothing prunes
+ * (`docs/architecture/auth.md` §8, still open).
  */
 export async function sendEmailCode(email: string): Promise<SignInOutcome> {
   const { error } = await supabase.auth.signInWithOtp({
     email: email.trim(),
     options: { shouldCreateUser: true },
   });
-  return error ? { ok: false, cancelled: false, message: error.message } : { ok: true };
+  if (error) {
+    const message =
+      error.code === 'over_email_send_rate_limit'
+        ? 'Too many emails just now. Wait a minute and try again.'
+        : error.code === 'signup_disabled'
+          ? 'New accounts are not being accepted right now.'
+          : error.message;
+    return { ok: false, cancelled: false, message };
+  }
+  return { ok: true };
 }
 
+/**
+ * Turns the code into a session, whichever email carried it.
+ *
+ * A returning user is signed in. A new address is confirmed, which is the moment its
+ * `auth.users` row becomes usable — and `useAuthRouting` sends it to `create-profile`,
+ * because a session with no profile is the same state on this path as on Apple's and
+ * Google's. There is no separate "finish signing up" step in this app and there does not
+ * need to be one.
+ */
 export async function verifyEmailCode(email: string, code: string): Promise<SignInOutcome> {
   const { error } = await supabase.auth.verifyOtp({
     email: email.trim(),
     token: code.trim(),
-    type: 'email',
+    type: EMAIL_OTP_TYPE,
   });
   if (error) return { ok: false, cancelled: false, message: error.message };
   track({ name: 'sign_in_completed', props: { method: 'email_code' } });
   return { ok: true };
 }
 
+/** Test seam and single source of truth for the `EmailOtpType` in use. */
+export const EMAIL_OTP_TYPES = { code: EMAIL_OTP_TYPE } as const;
+
 // ---------------------------------------------------------------------------
-// Email + password
+// Password — retained, and reachable only from "Sign in with password"
+//
+// Supabase's password capability stays; the *product* affordance for it does not. There
+// is no create-account-with-a-password screen and no password field in Settings, so in
+// ordinary use nothing in Bingd ever sets one and this function has nothing to sign in.
+//
+// It exists for the account an App Store or Play reviewer is given: a store reviewer has
+// no access to a mailbox, so an OTP-only app is an app whose sign-in screen review cannot
+// get past. A password on one deliberately provisioned account is the smallest thing that
+// solves it. See docs/release/store-review-access.md.
 // ---------------------------------------------------------------------------
 
-/**
- * Sign-in only, never sign-up: `signInWithPassword` cannot create an account, so
- * this adds no second registration flow. It exists because store review requires
- * reusable credentials that work without a one-time code — the email method above
- * delivers its code to an inbox a reviewer at Google or Apple does not have.
- * Ordinary accounts are created by code or OAuth and have no password set, so
- * this path simply fails for them; nothing about their flow changes.
- */
 export async function signInWithEmailPassword(
   email: string,
   password: string,
 ): Promise<SignInOutcome> {
   const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
   if (error) {
-    // Supabase's "Invalid login credentials" reads like a system fault; say what
-    // it means. Every other error keeps its own message.
+    /**
+     * One sentence for every way this can fail to be a session, and that is deliberate.
+     *
+     * `invalid_credentials` already covers "no such account" and "wrong password" with
+     * one answer — GoTrue's own anti-enumeration, kept. `email_not_confirmed` and
+     * `user_not_found` are folded into it here rather than reported separately: an
+     * ordinary Bingd account has no password at all, so a distinct message for each of
+     * these would describe the *state of an address* to whoever asked, from a screen
+     * that is meant to be a back door for one provisioned account.
+     *
+     * The person this screen is actually for has correct credentials handed to them in a
+     * review note, so the copy is not carrying anybody's recovery.
+     */
     const message =
-      error.code === 'invalid_credentials'
-        ? 'That email and password do not match.'
-        : error.message;
+      error.code === 'over_request_rate_limit' || error.code === 'over_email_send_rate_limit'
+        ? 'Too many attempts just now. Wait a minute and try again.'
+        : 'We could not sign you in with that email and password.';
     return { ok: false, cancelled: false, message };
   }
   track({ name: 'sign_in_completed', props: { method: 'password' } });
@@ -301,8 +384,43 @@ export async function signInWithGoogle(): Promise<SignInOutcome> {
  */
 export async function signOut() {
   await releaseDeviceOnSignOut();
-  await clearPendingDisplayName();
-  await supabase.auth.signOut();
+
+  /**
+   * **Nothing between here and the session teardown may prevent it, and this is the line
+   * that was one rejection away from not being true.** Independent review 45.
+   *
+   * `clearPendingDisplayName` is a Keychain/Keystore delete, and `SecureStore` rejects
+   * rather than returning on a locked or unavailable store. An unguarded `await` there
+   * meant the next line never ran: the person taps *Sign out*, sees nothing happen, and
+   * is still signed in — with a rejected promise nobody catches, because all four callers
+   * write `await signOut()` and then navigate.
+   *
+   * The worst caller is `app/settings/account.tsx`, where the account has **already been
+   * deleted server-side** and this session is the last thing pointing at it.
+   *
+   * A stale pending name is a cosmetic problem; a session that outlives the tap is not.
+   */
+  try {
+    await clearPendingDisplayName();
+  } catch (e) {
+    reportHandled(e, { scope: 'signOut.clearPendingDisplayName' });
+  }
+
+  /**
+   * And the teardown itself cannot be the thing that throws either.
+   *
+   * `supabase.auth.signOut()` returns `{ error }` rather than rejecting for a server-side
+   * failure — it clears the local session regardless, which is the behaviour that matters
+   * here — but it reads storage on the way, and this function's contract to its callers is
+   * that it settles. Where it genuinely could not end the session, the router sees a live
+   * session and keeps the user where they are, which is the same outcome as today minus an
+   * unhandled rejection.
+   */
+  try {
+    await supabase.auth.signOut();
+  } catch (e) {
+    reportHandled(e, { scope: 'signOut.supabase' });
+  }
 }
 
 function isCancellation(e: unknown) {

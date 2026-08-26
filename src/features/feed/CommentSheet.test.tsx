@@ -23,6 +23,8 @@ const SEASON_2 = 'season-2';
 let mockCommentRows: Record<string, unknown>[] = [];
 const mockRpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 let mockRpcError: unknown = null;
+/** The list read's own failure, kept apart from the writers' so one cannot mask the other. */
+let mockReadError: unknown = null;
 /** Held open to keep a write in flight while the sheet moves on. */
 let mockRpcGate: Promise<void> | null = null;
 
@@ -33,7 +35,20 @@ jest.mock('@/lib/supabase', () => ({
     // it; the stub is here so the nudge is exercised rather than swallowed by its own
     // guard.
     functions: { invoke: () => Promise.resolve({ data: null, error: null }) },
+    /**
+     * The list is an RPC now, not a `from('comments')` select with a profile embed.
+     *
+     * `20260826000600` replaced the two round trips with `activity_comments`, which
+     * resolves the visibility oracle once per event and once per distinct author instead
+     * of once per row — a measured 11.35ms across two requests down to 2.22ms in one.
+     * The read is mocked here rather than in `from` because that is where it now lives;
+     * the reads are separated from the writes below so a write assertion still cannot
+     * accidentally match a read.
+     */
     rpc: async (name: string, args: Record<string, unknown>) => {
+      if (name === 'activity_comments') {
+        return { data: mockCommentRows, error: mockReadError };
+      }
       if (mockRpcGate) await mockRpcGate;
       mockRpcCalls.push({ name, args });
       return { data: null, error: mockRpcError };
@@ -56,15 +71,29 @@ jest.mock('@/lib/supabase', () => ({
 let issued = 0;
 jest.mock('expo-crypto', () => ({ randomUUID: () => `operation-${(issued += 1)}` }));
 
+/**
+ * One row as `activity_comments` returns it.
+ *
+ * Flat, because the function joins the author itself rather than leaving PostgREST to
+ * resolve a `profiles:author_id(...)` embed in a second statement. A row whose author
+ * the reader may not see never arrives at all now — the join is inner — which is why
+ * the "author did not resolve" case below constructs its absence differently than it
+ * used to.
+ */
 const comment = (over: Record<string, unknown> = {}) => ({
   id: 'c1',
-  feed_event_id: 'e1',
+  parent_id: null,
   author_id: AUTHOR,
+  username: 'anna',
+  display_name: 'Anna',
+  avatar_path: null,
   body: 'The ending recontextualises everything.',
   has_spoilers: false,
   created_at: new Date().toISOString(),
   edited_at: null,
-  profiles: { username: 'anna', display_name: 'Anna', avatar_path: null },
+  deleted_at: null,
+  reaction_count: 0,
+  reacted_by_me: false,
   ...over,
 });
 
@@ -221,19 +250,77 @@ describe('spoilers', () => {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * The Feed's comments icon still opens a **sheet**, which is the founder's explicit
+ * instruction for this pass: a comment *notification* opens the dedicated thread page,
+ * and the comments *button* on a feed card goes on doing what it always did.
+ *
+ * Worth asserting rather than assuming, because `20260826000600` moved the entire body of
+ * this component into `CommentThread` so the page could share it. The obvious way for
+ * that refactor to go wrong is for the sheet to stop being a sheet — everything else in
+ * this file would still pass.
+ */
+describe('the Feed interaction, unchanged', () => {
+  it('opens as a sheet rather than as a screen', async () => {
+    mockCommentRows = [comment()];
+    const view = await open({ watched: new Set([FILM]) });
+
+    // `Sheet` announces itself by its label and is the app's one modal pattern
+    // (design-system.md §8). A page would have neither.
+    expect(view.getByLabelText('Comments')).toBeTruthy();
+    expect(view.getByText(/recontextualises/)).toBeTruthy();
+  });
+
+  it('draws nothing at all when no activity is open', async () => {
+    const view = await renderWithProviders(
+      <CommentSheet
+        eventId={null}
+        mediaItemId={FILM}
+        title="Sinners"
+        viewerId={VIEWER}
+        watched={new Set()}
+        onClose={jest.fn()}
+        onPressPerson={jest.fn()}
+      />,
+    );
+
+    // Closing the sheet is `eventId: null`, and a visible sheet with nothing in it would
+    // animate an empty panel up every time the feed closed one.
+    expect(view.queryByLabelText('Comments')).toBeNull();
+  });
+});
+
 describe('the list', () => {
   it('says so when there is nothing yet', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('No comments yet')).toBeTruthy());
   });
 
-  it('drops a comment whose author did not resolve rather than crediting nobody', async () => {
-    mockCommentRows = [comment(), comment({ id: 'c2', body: 'orphaned', profiles: null })];
+  /**
+   * **The "drop an unnameable author" rule moved to the server, and this is what is
+   * left of it here.**
+   *
+   * This used to send a row with `profiles: null` and assert the client dropped it —
+   * `use-feed.ts`'s rule, applied to comments: a remark attributed to nobody is worse
+   * than one fewer remark. The rule has not been relaxed; it has moved somewhere
+   * stronger. `activity_comments` joins authors with an *inner* join, so a comment whose
+   * author this reader may not see never leaves the database, and there is no shape the
+   * client can receive that would need filtering. That half is asserted where it now
+   * lives — `supabase/tests/comment-threads.test.mjs`, "omits a comment whose author the
+   * caller cannot see, rather than anonymising it".
+   *
+   * What remains client-side is the *naming* fallback, and it is worth keeping: a
+   * profile with no display name is ordinary rather than exceptional, and the handle is
+   * the right thing to print for it. "Someone" must never appear.
+   */
+  it('names an author by handle when they have set no display name', async () => {
+    mockCommentRows = [comment({ display_name: null, username: 'anna' })];
 
     const view = await open({ watched: new Set([FILM]) });
 
     await waitFor(() => expect(view.getByText(/recontextualises/)).toBeTruthy());
-    expect(view.queryByText('orphaned')).toBeNull();
+    expect(view.getByText('anna')).toBeTruthy();
+    expect(view.queryByText('Someone')).toBeNull();
   });
 
   it('marks an edited comment as edited', async () => {

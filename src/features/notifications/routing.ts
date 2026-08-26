@@ -48,6 +48,20 @@ import type { Notification, NotificationKind } from './use-notifications';
 export type NotificationTarget =
   | { kind: 'profile'; username: string }
   | { kind: 'title'; mediaItemId: string }
+  /**
+   * One feed event, and the conversation on it.
+   *
+   * The destination this file previously said the architecture could not support: "there
+   * is no per-event route, and the feed tab is a paginated list of the people this reader
+   * *follows* — a notification is about the reader's own activity, which does not appear
+   * there at all."
+   *
+   * Both halves of that were true and only the second was permanent. There is a route
+   * now (`app/activity/[id].tsx`) and it reads one event by id through
+   * `feed_events_read`, so it does not care whose feed the row would have appeared in.
+   * The deferral in `.agent-workflow/continuation.md` is closed.
+   */
+  | { kind: 'activity'; eventId: string }
   | { kind: 'awards' }
   /**
    * Stay on the inbox and say why. Reached when every better link is gone.
@@ -81,6 +95,23 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
   const title: NotificationTarget[] = row.mediaItemId
     ? [{ kind: 'title', mediaItemId: row.mediaItemId }]
     : [];
+  /**
+   * The conversation, when the row points at one.
+   *
+   * Read from `subject_type`/`subject_id`, which `my_notifications` returns unchanged
+   * from the `notifications` row — **not** from `mediaItemId`. That distinction is the
+   * whole reason a reply notification works: `mediaItemId` arrives through a join on
+   * `fe.actor_id = auth.uid()`, so it is null for a recipient who is another commenter
+   * rather than the activity's owner, and a chain that started from it would send
+   * exactly the people being replied to nowhere.
+   *
+   * No id is invented from display state, and none needs to be: `subject_id` **is** the
+   * feed event id, recorded by `add_comment` when the notification was written.
+   */
+  const activity: NotificationTarget[] =
+    row.subjectType === 'feed_event' && row.subjectId
+      ? [{ kind: 'activity', eventId: row.subjectId }]
+      : [];
 
   switch (row.kind) {
     /**
@@ -98,22 +129,37 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
       return [...profile, unavailable('This account is no longer available.')];
 
     /**
-     * The exact title the activity was about.
+     * The conversation, and then the title.
      *
-     * **Not the feed event, and deliberately.** The brief asks for the event and for
-     * the comment to be focused within it, and the architecture does not support
-     * either: there is no per-event route, and the feed tab is a paginated list of
-     * the people this reader *follows* — a notification is about the reader's own
-     * activity, which does not appear there at all. Routing to a screen that cannot
-     * contain the subject is worse than routing to its parent.
+     * **This is the change the founder asked for, and the reason is what a comment
+     * notification is *about*.** It used to resolve to the title page, which this file
+     * argued for at length as "the nearest surviving parent". That argument was sound
+     * about the parent and wrong about the subject: the title page does not render
+     * comments at all, so somebody tapping "Ada commented on your activity" arrived
+     * somewhere the remark they were told about is *invisible*. A friend reported it as
+     * the app freezing, which is what a screen that cannot contain what you came for
+     * looks like from the outside.
      *
-     * So the title is the nearest surviving parent, and it is a real one: it is
-     * where this reader's own ranking, note and companions for that title live.
-     * `.agent-workflow/continuation.md` carries the deferral.
+     * So the activity comes first. It is a real screen with the post at the top and the
+     * conversation under it, and the comment that caused the notification is in it.
+     *
+     * **The title stays as the second link** rather than being replaced, because the two
+     * ways a comment notification goes stale are different. If the event was deleted —
+     * its ranking removed — `subject_id` still points at a row that is gone, the page
+     * finds nothing, and the reader gets a clean unavailable state. If the *title* left
+     * the catalogue, `mediaItemId` is the null one and the event is still there. Keeping
+     * both means a chain rather than a single point of failure, which is what this file
+     * exists to guarantee.
+     *
+     * `reaction` follows it for the same reason — a reaction is on the activity, and the
+     * activity page shows the activity — and because two kinds that mean "somebody
+     * responded to what you posted" arriving at two different screens is the
+     * inconsistency the founder named.
      */
     case 'comment':
     case 'reaction':
       return [
+        ...activity,
         ...title,
         unavailable('That activity is no longer available.'),
       ];
@@ -179,6 +225,8 @@ export function hrefFor(target: NotificationTarget): Href | null {
       return `/u/${target.username}`;
     case 'title':
       return `/title/${target.mediaItemId}`;
+    case 'activity':
+      return `/activity/${target.eventId}`;
     /**
      * The Awards sheet is a component on the profile tab rather than a route, so it
      * is opened by a parameter the tab reads once. The object form rather than a
@@ -206,6 +254,8 @@ export function hintFor(row: Notification): string {
       return 'Opens their profile';
     case 'title':
       return 'Opens the title';
+    case 'activity':
+      return 'Opens the conversation';
     case 'awards':
       return 'Opens your awards';
     case 'unavailable':
@@ -239,6 +289,21 @@ export type PushTapPayload = {
   kind?: unknown;
   actorUsername?: unknown;
   mediaItemId?: unknown;
+  /**
+   * The conversation, added with the thread page (`20260826000600` §6).
+   *
+   * **A tapped push must land where a tapped inbox row lands**, and before this field
+   * existed it could not: the payload carried the title and not the event, so a comment
+   * push would have gone on opening the title page while the same notification in the
+   * inbox opened the thread. Two destinations for one event is the inconsistency this
+   * pass is closing, and it would have been the invisible half of it — the inbox is what
+   * anybody testing looks at.
+   *
+   * Optional, because it arrives from outside the app: a notification composed by the
+   * sender that shipped before this field is a payload without it, and that must resolve
+   * to the title rather than to nothing.
+   */
+  feedEventId?: unknown;
 };
 
 /** The inbox. Reached when nothing better survived, and a real destination either way. */
@@ -262,10 +327,23 @@ export function hrefForPush(payload: PushTapPayload | null | undefined): Href {
   const kind = readString(payload.kind);
   if (!kind || !ROUTED_KINDS.includes(kind as NotificationKind)) return PUSH_FALLBACK_HREF;
 
+  /**
+   * The event id is reconstituted into the shape `targetChainFor` reads.
+   *
+   * `subjectType` is *derived* rather than sent, and that is deliberate: the sender has
+   * one way of naming this — a `feed_event_id` key that is present or absent — and
+   * transmitting a second field whose only legal value is `'feed_event'` would be a
+   * field that can disagree with the first. The resolver's contract stays "subject_type
+   * says what subject_id is"; this is where a push is translated into it.
+   */
+  const eventId = readString(payload.feedEventId);
+
   const target = targetFor({
     kind: kind as NotificationKind,
     actorUsername: readString(payload.actorUsername),
     mediaItemId: readString(payload.mediaItemId),
+    subjectType: eventId ? 'feed_event' : null,
+    subjectId: eventId,
   } as Notification);
 
   return hrefFor(target) ?? PUSH_FALLBACK_HREF;
