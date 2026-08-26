@@ -18,6 +18,7 @@ import {
 } from '@/features/onboarding/use-taste-onboarding';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
+import { withGrace } from '@/lib/grace';
 import { posterUri } from '@/lib/images';
 import { TAB_ROUTES, type TabRoute } from '@/lib/routes';
 import { theme } from '@/ui/tokens';
@@ -55,6 +56,15 @@ import {
  * Movies only. TV is ranked per season and a season is reached through its series, which
  * is two navigations deep and the wrong thing to meet in the first minute.
  */
+/**
+ * How long an exit will wait to know whether the notification question is owed, and for
+ * the completion write, before leaving anyway. Both bound local reads and writes that
+ * settle in milliseconds when the platform is healthy; the bound is only ever felt on
+ * the hangs review 47 named, where the alternative is the build-4 dead buttons.
+ */
+const OFFER_DECISION_GRACE_MS = 3000;
+const COMPLETE_GRACE_MS = 3000;
+
 export default function TasteOnboardingScreen() {
   const router = useRouter();
   const profile = useCurrentProfile();
@@ -154,33 +164,32 @@ export default function TasteOnboardingScreen() {
    * the two would make a flag about the collection mean something about a permission.
    */
   const finish = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
-    try {
-      await complete({ skipped });
-    } catch {
-      // `complete` records the decision in memory and in the query cache before anything
-      // that can fail, and already swallows its own disk write — so a throw here is
-      // exceptional. Whatever it was, the person asked to leave a flow they have
-      // finished, and the founder's build-4 session is what an exit gated on a failable
-      // await looks like: a button that does nothing, forever. Leaving wins.
-    }
+    // `complete` records the flow-ending decision synchronously — memory and query cache
+    // both, before its first await — so navigating at the deadline is safe: routing
+    // already sees `needed: false`, and only the disk write may still be in flight. The
+    // bound exists because that write is SecureStore, which review 47 was right to call
+    // a promise the platform may never settle; `withGrace` also absorbs a rejection, so
+    // this cannot throw into the `void` press handler. Leaving wins, always.
+    await withGrace(complete({ skipped }), COMPLETE_GRACE_MS, undefined);
     router.replace(to);
   };
 
   /**
    * Whether to put the notification question on the way out — and `false` whenever the
-   * answer cannot be established. The build-4 stranding taught the rule: every await on
-   * this path runs between a button press and the navigation it promised, so none of
-   * them may reject upward (the press would die silently) and none may hold the exit.
-   * Not being able to read a preference is not a reason to keep somebody out of the
+   * answer cannot be established *or cannot be established in time*. The build-4
+   * stranding taught the rule: every await on this path runs between a button press and
+   * the navigation it promised, so none of them may reject upward (the press would die
+   * silently) and none may hold the exit — a SecureStore read or a permissions call
+   * that never settles is the same trap as the one being fixed (review 47's first
+   * blocker). Not being able to decide is not a reason to keep somebody out of the
    * app; the contextual primer remains for anyone the offer never reached.
    */
-  const shouldOfferNotifications = async () => {
-    try {
-      return await shouldShowNotificationStep(await pushAlreadyOffered());
-    } catch {
-      return false;
-    }
-  };
+  const shouldOfferNotifications = () =>
+    withGrace(
+      (async () => shouldShowNotificationStep(await pushAlreadyOffered()))(),
+      OFFER_DECISION_GRACE_MS,
+      false,
+    );
 
   // A ref, not state: it exists to make a second press during the checks a no-op, and
   // nothing renders from it. The summary's two buttons stay visually live — the checks

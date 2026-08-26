@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -16,6 +16,8 @@ const mockPrefs = new Map<string, unknown>();
 let mockWriteFails = false;
 /** Preference names whose *read* rejects — the SecureStore lane of the build-4 pin. */
 const mockReadFails = new Set<string>();
+/** Preference names whose read never settles — review 47's first blocker, pinned. */
+const mockReadHangs = new Set<string>();
 const mockTableRows: Record<string, unknown[]> = {};
 /** Rows a `count: 'exact', head: true` select should report, keyed by table. */
 const mockCounts: Record<string, number> = {};
@@ -53,6 +55,7 @@ jest.mock('@/features/notifications/push', () => ({
 
 jest.mock('@/lib/prefs', () => ({
   readPref: (name: string) => {
+    if (mockReadHangs.has(name)) return new Promise(() => {});
     if (mockReadFails.has(name)) return Promise.reject(new Error('secure store unavailable'));
     return Promise.resolve(mockPrefs.get(name) ?? null);
   },
@@ -147,6 +150,7 @@ beforeEach(() => {
   mockPrefs.set('user-1.onboarding.taste.phase', 'active');
   mockWriteFails = false;
   mockReadFails.clear();
+  mockReadHangs.clear();
   mockPushEnv.permission = 'unavailable';
   mockPushEnv.requestResult = 'granted';
   mockPushEnv.registered = 0;
@@ -632,6 +636,31 @@ describe('recovery after a crash during the notification step', () => {
     await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
 
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou));
+  });
+
+  /**
+   * Review 47's first blocker: a rejected read was covered, a read that never settles
+   * was not — and SecureStore is allowed to simply not answer. The offer decision is
+   * now bounded, so the exit happens at the grace with the question skipped.
+   */
+  it('still leaves when the offer preference read never settles', async () => {
+    jest.useFakeTimers();
+    try {
+      mockReadHangs.add('push.offered');
+      const view = await reopened();
+      await waitFor(() => expect(view.getByText('That is a start')).toBeTruthy());
+
+      await fireEvent.press(view.getByRole('button', { name: 'Explore For You' }));
+      await act(async () => {});
+      expect(mockReplace).not.toHaveBeenCalled();
+
+      await act(async () => {
+        jest.advanceTimersByTime(3000);
+      });
+      expect(mockReplace).toHaveBeenCalledWith(TAB_ROUTES.forYou);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('still leaves when the phase cannot be written', async () => {

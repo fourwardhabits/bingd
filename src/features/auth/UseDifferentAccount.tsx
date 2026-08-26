@@ -2,9 +2,24 @@ import { useRouter } from 'expo-router';
 import { useRef, useState } from 'react';
 import { Alert } from 'react-native';
 
+import { withGrace } from '@/lib/grace';
 import { Button } from '@/ui/components';
 
 import { signOut } from './methods';
+
+/**
+ * How long the escape waits for the teardown before navigating anyway.
+ *
+ * Generous, because `signOut` has real sequential work — the device-token release is
+ * itself internally bounded at three seconds, then a Keychain delete, then the session
+ * teardown — and cutting it short on a healthy phone would skip revocations for
+ * nothing. But bounded, because every one of those steps can hang (review 47's second
+ * blocker), and a person escaping a stuck account must not be stranded by the escape.
+ * The teardown keeps running in the background past the deadline; if it genuinely
+ * could not end the session, routing returns them to the onboarding screen with the
+ * button fresh — a visible, retryable failure rather than a permanent "Signing out…".
+ */
+const SIGN_OUT_GRACE_MS = 8000;
 
 /**
  * The escape route out of onboarding, for the account that is the wrong one.
@@ -40,17 +55,15 @@ export function UseDifferentAccountButton() {
     if (signingOut.current) return;
     signingOut.current = true;
     setBusy(true);
-    try {
-      // Settles always — see `signOut`. A sign-out that could not finish server-side
-      // still ends the local session, which is what "use a different account" needs.
-      await signOut();
-    } catch {
-      // Unreachable while `signOut` keeps its settle-don't-throw contract (review 45),
-      // and swallowed so that contract is not load-bearing here: this call site is a
-      // `void` press handler, and a rejection would die silently exactly the way the
-      // build-4 buttons did.
-    }
-    // Navigate whatever happened above: this button's one promise is a way out.
+    // Settles always — see `signOut` — and is *bounded* here besides: its contract is
+    // "does not throw", not "does not hang", and the awaits inside it are storage and
+    // network. `withGrace` also absorbs a rejection, so the settle-don't-throw contract
+    // is not load-bearing at this call site — a rejection here is a `void` press
+    // handler's, and would die silently exactly the way the build-4 buttons did.
+    await withGrace(signOut(), SIGN_OUT_GRACE_MS, undefined);
+    // Navigate whatever happened above: this button's one promise is a way out. If the
+    // session genuinely survived a hung teardown, routing brings the person back to the
+    // onboarding surface with this button reset — retryable, never trapped.
     router.replace('/(auth)/sign-in');
   };
 

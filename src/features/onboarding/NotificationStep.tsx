@@ -8,6 +8,7 @@ import {
   shouldOfferPush,
 } from '@/features/notifications/push-permission';
 import { noteFailure, pushPermission, requestPushPermission } from '@/features/notifications/push';
+import { withGrace } from '@/lib/grace';
 import { Button, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -85,22 +86,6 @@ const REGISTRATION_GRACE_MS = 5000;
 
 /** A preference write is local and quick; a hung one must not trap the screen. */
 const PREF_WRITE_GRACE_MS = 1500;
-
-/**
- * Resolves with the work's value, or with `fallback` once the grace is spent — and with
- * `fallback` on rejection too, so no lane out of this helper can throw. The work is not
- * cancelled; it finishes in the background and its side effects stand.
- */
-function withGrace<T, F>(work: Promise<T>, graceMs: number, fallback: F): Promise<T | F> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(fallback), graceMs);
-    const settle = (value: T | F) => {
-      clearTimeout(timer);
-      resolve(value);
-    };
-    work.then(settle, () => settle(fallback));
-  });
-}
 
 export function NotificationStep({ onDone }: NotificationStepProps) {
   const profile = useCurrentProfile();

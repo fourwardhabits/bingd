@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
@@ -104,6 +104,33 @@ describe('Use a different account', () => {
       .onPress!();
 
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/(auth)/sign-in'));
+  });
+
+  /**
+   * Review 47's second blocker. `signOut`'s contract is "does not throw", not "does not
+   * hang" — its awaits are storage and network. The escape bounds the wait and
+   * navigates anyway; the teardown keeps running behind the navigation.
+   */
+  it('still reaches the auth entry if the sign-out never settles', async () => {
+    jest.useFakeTimers();
+    try {
+      mockSignOut.mockImplementation(() => new Promise(() => {}));
+      const view = await renderWithProviders(<UseDifferentAccountButton />);
+
+      await fireEvent.press(view.getByRole('button', { name: 'Use a different account' }));
+      alertButtons()
+        .find((b) => b.text === 'Sign out')!
+        .onPress!();
+      await act(async () => {});
+      expect(mockReplace).not.toHaveBeenCalled();
+
+      await act(async () => {
+        jest.advanceTimersByTime(8000);
+      });
+      expect(mockReplace).toHaveBeenCalledWith('/(auth)/sign-in');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('starts one sign-out however many times the confirmation fires', async () => {
