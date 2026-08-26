@@ -1,6 +1,8 @@
 # Deferred roadmap — product capability that is specified, wanted, and not being built yet
 
-**Status:** current as of 2026-08-26, at the final pre-RC product pass.
+**Status:** current as of 2026-08-25, reconciled after the final pre-RC product pass.
+
+**Last updated:** 2026-08-25 · **Product baseline:** PR #48, reviewed head `7179d0d` · **Release/native push delta:** PR #49, reviewed head `3e90661`
 
 **Companion documents:** [`PRD.md`](./PRD.md) · [`analytics.md`](./analytics.md) ·
 [`growth-instrumentation.md`](./growth-instrumentation.md) · [`backlog.md`](./backlog.md) ·
@@ -33,6 +35,14 @@ always release-phase work and belongs here without qualification.
 
 Each entry states: **what it is · why it is wanted · why it is not being built now · what
 should bring it back · what it depends on.**
+
+**And the converse, for anybody reading this for GTM (added 2026-08-25):** an operational
+launch gate is not a future product idea and is not listed here. The push credential
+steps and the new beta binary (PR #49's "still required"), the production Supabase
+bootstrap, custom SMTP, store-listing work and the legal pack are all **release and
+operations TODO**, tracked in `docs/release/` and the risk register — not deferred
+product. If something reads like "the product cannot launch without it", it does not
+belong in this file and should not be looked for in it.
 
 ---
 
@@ -156,11 +166,19 @@ types that already exist.
 
 **Why it is wanted.** PRD §15 specifies it, and the whole notification layer was built
 with it in mind: `expo-notifications` and its config plugin are in every build from the
-first one, precisely so that enabling push is a server flag and an OTA update rather than
-a new native build and a store submission.
+first one, ~~precisely so that enabling push is a server flag and an OTA update rather than
+a new native build and a store submission~~ — *a premise corrected on 2026-08-24: what the
+module's presence actually bought was no new native dependency, and enabling push **does**
+take a new binary and a store submission. See the correction block at the end of this
+entry.*
 
-**Why it is deferred.** It has never been built. `device_tokens` is written by nothing, no
-client imports `expo-notifications` beyond the config plugin, and delivery is dark (AD-10).
+~~**Why it is deferred.** It has never been built. `device_tokens` is written by nothing, no
+client imports `expo-notifications` beyond the config plugin, and delivery is dark (AD-10).~~
+*(True when written; false since 2026-08-24 — registration, the outbox, the sender and the
+routing all exist, per the note at the top of this entry. What keeps delivery dark now is
+that no distributed binary can register a token: the push-capable beta binary and the
+founder credential steps are release work, not this entry. Kept struck rather than deleted
+because the paragraphs below reason from it.)*
 
 **The decision push has to make when it arrives**, recorded here because it is not
 obvious: **notification preferences currently gate *creation*, not delivery.** The gate is
@@ -315,6 +333,21 @@ facts that move a tier · exactly-once semantics on that write.
 ---
 
 ## 6. Comment notifications that deep-link to the exact event
+
+> **Built on 2026-08-25 (`20260826000600`), in the final pre-RC product pass.** The
+> per-event route exists — `app/activity/[id]`, the conversation page: the activity card
+> on top, the comments under it — and it reads one event by id through `feed_events_read`,
+> which is what dissolves the "a reader's own event does not appear in the feed"
+> objection below: the page never asks whose feed the row would have been in. Comment
+> **and** reaction notifications now route there first, with the title kept as the second
+> link in the chain (the two go stale differently — a deleted event still has a title, a
+> delisted title still has its event), and a tapped push lands where a tapped inbox row
+> lands. PRD §15's routing table is the record.
+>
+> The entry below stays as the record of why it was deferred and of the prediction it
+> made — that the route would arrive as a by-product of a per-event surface — which is
+> roughly what happened, prompted by a tester reading "tap lands somewhere the comment is
+> invisible" as the app freezing.
 
 **What it is.** Tapping "somebody commented on your ranking" landing on *that comment*,
 rather than on the title the ranking is about.

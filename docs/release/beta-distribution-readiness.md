@@ -93,6 +93,14 @@ Deferred-install attribution needs an SDK and is deliberately not built.
 
 ### State today
 
+> **Stale — overtaken by events and kept as the pre-launch record (marked 2026-08-25).**
+> Every bullet below described the state *before* the beta shipped. The TestFlight beta
+> is live behind a public join link — `web/distribution.config.json` holds it, filled in
+> at #32 and verified live 2026-08-23 (§1) — so the ASC record, the credentials and the
+> uploaded builds all exist now. §1 and `distribution.config.json` are authoritative for
+> current state; the same applies to §3's "State today" for Android, whose closed-test
+> opt-in URL is likewise live.
+
 - **No App Store Connect app record exists for `app.bingd`.** It is created by the first
   submission, or by hand in App Store Connect. **FOUNDER.**
 - **No iOS credentials exist for `app.bingd`.** The first `beta` build creates the App ID,
