@@ -10,14 +10,18 @@ import { signOut } from './methods';
 /**
  * How long the escape waits for the teardown before navigating anyway.
  *
- * Generous, because `signOut` has real sequential work — the device-token release is
- * itself internally bounded at three seconds, then a Keychain delete, then the session
- * teardown — and cutting it short on a healthy phone would skip revocations for
- * nothing. But bounded, because every one of those steps can hang (review 47's second
- * blocker), and a person escaping a stuck account must not be stranded by the escape.
- * The teardown keeps running in the background past the deadline; if it genuinely
- * could not end the session, routing returns them to the onboarding screen with the
- * button fresh — a visible, retryable failure rather than a permanent "Signing out…".
+ * **A backstop now rather than the bound**, and that inversion is the build-4 fix.
+ * `signOut` used to await four unbounded operations, so this timer was the only thing
+ * standing between a tap and forever — and reaching it meant navigating with the session
+ * *still alive*, which routing correctly reads as "still signed in" and answers by
+ * sending the person straight back to the screen they were trying to leave. A bound that
+ * only the caller holds hands the caller a live session.
+ *
+ * `signOut` now bounds each of its own steps and ends the local session whether or not
+ * any of them answered (`methods.ts`), and its budgets add up to less than this on
+ * purpose. So by the time this fires, the ordinary case has already happened; what it
+ * still covers is the JavaScript thread itself being too busy to run those timers on
+ * time, which is precisely the condition under which a person is most stuck.
  */
 const SIGN_OUT_GRACE_MS = 8000;
 

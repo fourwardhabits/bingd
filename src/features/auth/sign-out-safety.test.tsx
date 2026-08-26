@@ -32,6 +32,9 @@ const mockAuth: {
 } = { listener: null, session: { user: { id: 'user-1', email: 'a@b.c' } } };
 
 jest.mock('@/lib/supabase', () => ({
+  // `AuthProvider` also listens for the app's own sign-out signal, for the exit that
+  // cannot wait for Supabase's. Unused here; present so the provider can subscribe.
+  onLocalSignOut: () => () => {},
   supabase: {
     auth: {
       getSession: () => Promise.resolve({ data: { session: mockAuth.session } }),

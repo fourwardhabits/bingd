@@ -6,8 +6,10 @@ import { Platform } from 'react-native';
 
 import { releaseDeviceOnSignOut } from '@/features/notifications/push';
 import { track } from '@/lib/analytics';
+import { withGrace } from '@/lib/grace';
 import { reportHandled } from '@/lib/monitoring';
-import { supabase } from '@/lib/supabase';
+import { sessionStorage } from '@/lib/session-storage';
+import { announceLocalSignOut, authStorageKey, supabase } from '@/lib/supabase';
 
 /**
  * The three sign-in methods from docs/architecture/auth.md §1. Each one ends with
@@ -321,8 +323,7 @@ export const oauthRedirectUrl = () => Linking.createURL('auth/callback');
  * That is a DNS and Supabase-project change rather than a client one, so it is out of
  * scope for an OTA UI tranche, and it is recommended for production regardless of this.
  */
-const authSessionOptions =
-  Platform.OS === 'ios' ? { preferEphemeralSession: true } : undefined;
+const authSessionOptions = Platform.OS === 'ios' ? { preferEphemeralSession: true } : undefined;
 
 export async function signInWithGoogle(): Promise<SignInOutcome> {
   const redirectTo = oauthRedirectUrl();
@@ -341,7 +342,11 @@ export async function signInWithGoogle(): Promise<SignInOutcome> {
     return { ok: false, cancelled: false, message: error?.message ?? 'No authorization URL.' };
   }
 
-  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo, authSessionOptions);
+  const result = await WebBrowser.openAuthSessionAsync(
+    data.url,
+    redirectTo,
+    authSessionOptions,
+  );
   if (result.type !== 'success') return cancelled;
 
   // PKCE: the callback carries a short-lived code, not a token. The exchange is
@@ -362,7 +367,129 @@ export async function signInWithGoogle(): Promise<SignInOutcome> {
 
 // ---------------------------------------------------------------------------
 // Sign out
+//
+// THE BUDGETS BELOW, AND WHY EACH OF THEM IS SHORT
+//
+// **Every step below is a promise the platform is allowed to never settle**, which is
+// what the founder's build-4 device demonstrated: `Signing out…` sat for twenty seconds
+// and did not arrive anywhere. Two of these are network calls and two are Keychain
+// calls, and the previous version of this function awaited all four unbounded — so a
+// single lost reply held the exit open for the life of the process, and the 8-second
+// grace at the button was reached with the session still alive, which routing correctly
+// read as "still signed in" and sent the person back where they came from.
+//
+// They add up to less than that grace on purpose. A bound that only the caller holds is
+// a bound that hands the caller a live session; these end the session *within* the
+// caller's patience so that the navigation which follows lands somewhere.
 // ---------------------------------------------------------------------------
+
+/**
+ * Enough for the revoke `releaseDeviceOnSignOut` makes, including the three seconds it
+ * already spends waiting for a registration that is still in flight. Cutting it shorter
+ * would mean routinely leaving a live push token on a device somebody just left, and the
+ * next account's follows and recommendations arriving on their lock screen.
+ */
+const DEVICE_RELEASE_GRACE_MS = 3500;
+/** A Keychain delete of a parked Apple name. Cosmetic, so it gets the smallest budget. */
+const PENDING_NAME_GRACE_MS = 800;
+/** One round trip to end the session server-side, and no more than one. */
+const REMOTE_SIGN_OUT_GRACE_MS = 2000;
+/** Two Keychain operations that do not go anywhere near the network. */
+const LOCAL_EXIT_GRACE_MS = 600;
+
+/**
+ * Runs one step of the teardown, bounded, and reports rather than throwing.
+ *
+ * Returns whether it actually finished, because for one of the four steps the answer
+ * changes what happens next — see `signOut`.
+ */
+async function bounded(
+  scope: string,
+  work: Promise<unknown>,
+  graceMs: number,
+): Promise<boolean> {
+  const settled = Symbol('settled');
+  const failed = Symbol('failed');
+
+  const outcome = await withGrace(
+    work.then(
+      () => settled,
+      (error: unknown) => {
+        reportHandled(error, { scope });
+        return failed;
+      },
+    ),
+    graceMs,
+    // Distinct from `failed`: a step that has not answered yet is still running, and
+    // the difference matters to whoever reads the report.
+    'timeout' as const,
+  );
+
+  if (outcome === 'timeout')
+    reportHandled(new Error(`${scope} did not answer in ${graceMs}ms`), { scope });
+  return outcome === settled;
+}
+
+/**
+ * Ends the session on the server, for **this device only**.
+ *
+ * `scope: 'local'` is explicit and is a correction rather than a tidy-up. The default is
+ * `'global'`, which revokes every refresh token the account holds — so "Use a different
+ * account" on one phone signed the same person out of their iPad and of any other
+ * install, silently. Nothing in this product asks for that, and the one surface that
+ * legitimately might (a stolen-device control) does not exist.
+ */
+async function endRemoteSession(): Promise<boolean> {
+  const { error } = await supabase.auth.signOut({ scope: 'local' });
+  if (error) {
+    reportHandled(error, { scope: 'signOut.supabase' });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Makes the credential on this device unusable without asking the network for permission.
+ *
+ * The Supabase session lives in one Keychain entry and `@supabase/auth-js` re-reads it on
+ * every call — it holds no copy in memory — so deleting that entry is what "signed out on
+ * this device" actually means. Doing it directly is the difference between an exit that
+ * depends on a reply and one that does not.
+ *
+ * The second call is the tidy version of the same thing: with storage empty it finds no
+ * access token, skips the server entirely, and emits `SIGNED_OUT`, which is what
+ * `AuthProvider` normally listens for.
+ *
+ * **But it is not allowed to be the only way the app finds out, and that was independent
+ * review 49's first blocker.** `_removeSession` awaits three storage operations before it
+ * notifies — one of them a read of a PKCE key the mirror has never seen — and on the device
+ * this hotfix is about, storage calls that do not answer are the whole problem. So the
+ * event that tells the app it is signed out sat behind the thing that was stuck, routing
+ * went on seeing a `ready` session, and the escaping user was sent back to the screen they
+ * were leaving. `announceLocalSignOut` is the app saying it itself, unconditionally, once
+ * the credential is gone from this device.
+ *
+ * **What this does not do, stated plainly: it does not revoke the refresh token
+ * server-side.** That is `endRemoteSession`'s job and it is tried first. Where it could
+ * not be reached, the token remains valid until it expires on its own — the same
+ * residual as any sign-out taken offline, and a much smaller problem than a person who
+ * cannot leave an account.
+ */
+async function forgetLocalSession(): Promise<void> {
+  await bounded(
+    'signOut.forgetLocal',
+    sessionStorage.removeItem(authStorageKey),
+    LOCAL_EXIT_GRACE_MS,
+  );
+  await bounded(
+    'signOut.localTeardown',
+    supabase.auth.signOut({ scope: 'local' }),
+    LOCAL_EXIT_GRACE_MS,
+  );
+  // Last, and whatever the two above managed. Neither is allowed to be the reason the
+  // app still believes it has a session.
+  announceLocalSignOut();
+}
 
 /**
  * auth.md §5 also requires the outbox and the SQLite cache to be cleared here.
@@ -370,57 +497,69 @@ export async function signInWithGoogle(): Promise<SignInOutcome> {
  * a note is better than leaving a silent omission — another account's queued
  * writes on a shared device are both a privacy leak and a correctness bug.
  *
- * **The push token is now one of those things, and it is the one with a name attached.**
+ * **The push token is one of those things, and it is the one with a name attached.**
  * A device registered to this account and left registered would deliver their follows,
  * comments and recommendations — with the sender's name and the film's title on the lock
- * screen — to whoever signs in next. So the release happens **here**, before the session
- * ends, because revoking needs a JWT and there is none a line later.
+ * screen — to whoever signs in next. So the release happens **first**, while the session
+ * still exists, because revoking needs a JWT and there is none afterwards.
  *
- * It cannot fail loudly. `releaseDeviceOnSignOut` reports and returns rather than
- * throwing: a rejection here would leave somebody signed in, which is a worse outcome
- * than a stale token — and a stale token is not the last line of defence anyway.
- * `register_device_token` moves a device to whoever registers it next, so the account
- * that signs in after this takes the device whether or not this succeeded.
+ * ---------------------------------------------------------------------------
+ * THE ORDER IS THE CONTRACT, AND IT IS: REMOTE FIRST, BRIEFLY; LOCAL ALWAYS.
+ *
+ * Everything that needs the network is attempted, each on its own short budget, and
+ * none of it may hold the person. Then the local session is ended whether or not any of
+ * it worked. That inversion is the fix for what the founder observed: previously the
+ * *only* thing that ended the session was a round trip, so an unanswered request was an
+ * account nobody could leave.
+ *
+ * It cannot fail loudly. Every step reports and returns; a rejection here would leave
+ * somebody signed in, which is worse than a stale token — and a stale token is not the
+ * last line of defence anyway, since `register_device_token` moves a device to whoever
+ * registers it next.
  */
 export async function signOut() {
-  await releaseDeviceOnSignOut();
+  await bounded('signOut.releaseDevice', releaseDeviceOnSignOut(), DEVICE_RELEASE_GRACE_MS);
 
   /**
-   * **Nothing between here and the session teardown may prevent it, and this is the line
-   * that was one rejection away from not being true.** Independent review 45.
-   *
-   * `clearPendingDisplayName` is a Keychain/Keystore delete, and `SecureStore` rejects
-   * rather than returning on a locked or unavailable store. An unguarded `await` there
-   * meant the next line never ran: the person taps *Sign out*, sees nothing happen, and
-   * is still signed in — with a rejected promise nobody catches, because all four callers
-   * write `await signOut()` and then navigate.
-   *
-   * The worst caller is `app/settings/account.tsx`, where the account has **already been
-   * deleted server-side** and this session is the last thing pointing at it.
-   *
-   * A stale pending name is a cosmetic problem; a session that outlives the tap is not.
+   * A stale pending name is cosmetic — it pre-fills a signup form — so it is bounded
+   * like the rest and never allowed to be the reason a session survives a tap. That was
+   * review 45's defect in its first form: an unguarded Keychain delete here meant the
+   * teardown below never ran at all.
    */
-  try {
-    await clearPendingDisplayName();
-  } catch (e) {
-    reportHandled(e, { scope: 'signOut.clearPendingDisplayName' });
-  }
+  await bounded(
+    'signOut.clearPendingDisplayName',
+    clearPendingDisplayName(),
+    PENDING_NAME_GRACE_MS,
+  );
+
+  const teardown = endRemoteSession();
+  const ended = await bounded('signOut.supabase', teardown, REMOTE_SIGN_OUT_GRACE_MS);
+
+  // Only when the server did not already do it. A successful `signOut` has removed the
+  // stored session itself, so repeating the work would be two more Keychain calls and a
+  // second `SIGNED_OUT` for no benefit.
+  if (ended) return;
+
+  await forgetLocalSession();
 
   /**
-   * And the teardown itself cannot be the thing that throws either.
+   * **One sweep after the teardown we stopped waiting for finally settles.**
    *
-   * `supabase.auth.signOut()` returns `{ error }` rather than rejecting for a server-side
-   * failure — it clears the local session regardless, which is the behaviour that matters
-   * here — but it reads storage on the way, and this function's contract to its callers is
-   * that it settles. Where it genuinely could not end the session, the router sees a live
-   * session and keeps the user where they are, which is the same outcome as today minus an
-   * unhandled rejection.
+   * Independent review 49's second blocker. The abandoned `signOut` is still out there,
+   * and inside it may be a token refresh that was already in flight when the Keychain
+   * entry was deleted. `@supabase/auth-js` guards against writing a rotated session over a
+   * removal *it* performed, but the direct deletion above is not one of those — so a
+   * refresh that lands in the window between its own storage check and its write can put
+   * a working session back on the device somebody just left. On the next launch they are
+   * signed in to the account they escaped.
+   *
+   * Not awaited: the person has already gone, and the request deadline is what guarantees
+   * this ever runs at all. Failures are swallowed because there is nobody left to tell.
    */
-  try {
-    await supabase.auth.signOut();
-  } catch (e) {
-    reportHandled(e, { scope: 'signOut.supabase' });
-  }
+  void teardown
+    .catch(() => {})
+    .then(() => sessionStorage.removeItem(authStorageKey))
+    .catch(() => {});
 }
 
 function isCancellation(e: unknown) {
