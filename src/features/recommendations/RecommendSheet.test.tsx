@@ -724,6 +724,33 @@ describe('the footer at different widths', () => {
   });
 
   /**
+   * The case a fixed floor plus a font-scale ceiling would have missed.
+   *
+   * Independent review of this tranche found it: at 360pt the pair fits at scale 1, and
+   * a separate "stack above 1.3" rule leaves 360-at-1.3 side by side — each half still
+   * nominally wide enough while the label inside it no longer is. `fit` stops shrinking
+   * at 85%, so past that it clips, which is the crushed CTA arrived at from the other
+   * direction. The floor scales with the type instead, so this stacks.
+   */
+  it('stacks a narrow phone whose type is only somewhat larger', async () => {
+    setViewport(360, 1.3);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    expect(layout(view).flexDirection).toBe('column');
+  });
+
+  it('still pairs a large phone at a slightly larger type size', async () => {
+    // 412 at 1.15 has room for both at their scaled width, so the pair survives — the
+    // rule is a measurement, not a blanket refusal above default type.
+    setViewport(412, 1.15);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    expect(layout(view).flexDirection).toBe('row');
+  });
+
+  /**
    * Recommend first in both layouts, so stacking is not also a reordering — the primary
    * act must not end up underneath the way out of the sheet.
    */

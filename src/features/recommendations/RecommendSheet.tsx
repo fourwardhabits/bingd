@@ -57,12 +57,6 @@ const SEARCH_THRESHOLD = 0;
  */
 const ACTION_MIN_WIDTH = 150;
 
-/**
- * Past this, type is large enough that two columns cannot hold their labels whatever
- * the screen is. `ScoresSection` draws its own two-up line at the same figure.
- */
-const SIDE_BY_SIDE_MAX_FONT_SCALE = 1.3;
-
 /** "Ada", "Ada and Bo", "Ada, Bo and Cy" — names the way a sentence holds them. */
 const listNames = (names: string[]): string =>
   names.length <= 1
@@ -126,11 +120,18 @@ export function RecommendSheet({
    * succeeded first.
    *
    * So the decision is made here, from a width, and it is one boolean a test can pin.
+   *
+   * **The requirement scales with the type, rather than being gated by a second rule.**
+   * A label at a 1.3 font scale needs about a third more room than the same label at 1,
+   * so a fixed floor plus a "stack above 1.3" ceiling leaves exactly one bad case in the
+   * middle: a 360pt phone at 1.3, where each half is still nominally wide enough and the
+   * label no longer is. `fit` stops shrinking at 85%, so what it does past that is clip —
+   * the crushed CTA again, arrived at from the other direction. Multiplying the floor by
+   * `fontScale` covers the whole range with one rule, and the ceiling is then implied.
    */
   const { width, fontScale } = useWindowDimensions();
   const sideBySide =
-    width - theme.layout.gutter * 2 >= ACTION_MIN_WIDTH * 2 + theme.space[3] &&
-    fontScale <= SIDE_BY_SIDE_MAX_FONT_SCALE;
+    width - theme.layout.gutter * 2 >= ACTION_MIN_WIDTH * fontScale * 2 + theme.space[3];
 
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());

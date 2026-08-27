@@ -245,7 +245,16 @@ returns table (
   reacted_by_me  boolean,
   -- The distinct meanings present, most common first — the order `useReactions` sorts
   -- an activity's into, computed here because the client is handed a summary rather
-  -- than the rows. Ties break on the value so the array is stable between reads.
+  -- than the rows.
+  --
+  -- **Ties break on the value, and that is a deliberate difference from the feed.**
+  -- `useReactions` sorts by count alone, so two equally common meanings come out in
+  -- whatever order their rows happened to arrive in — which is not a contract, it is an
+  -- accident of paging, and it can differ between two reads of the same data. Reproducing
+  -- an undefined order is not possible; what is possible is being stable, so a comment's
+  -- cluster does not reshuffle under the reader between refetches. The alternative —
+  -- making the feed deterministic too — would change feed behaviour, which this tranche
+  -- is explicitly not allowed to do.
   reaction_kinds text[],
   -- The caller's own, or null. `reacted_by_me` says *whether*; this says *which*, and
   -- the control needs the second to draw a mind that has changed.

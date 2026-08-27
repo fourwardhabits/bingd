@@ -1008,3 +1008,78 @@ describe('reacting to a comment', () => {
     expect(view.getAllByLabelText(/^React to/)).toHaveLength(1);
   });
 });
+
+/**
+ * The operation id, held while the outcome is unknown — the feed's rule, here too.
+ *
+ * `set_comment_reaction` is rate-limited, so a replay is not free even though the row
+ * converges: a write that commits and loses its reply is reported as a failure, the
+ * reader taps the same control again, and a fresh id spends a second slot for one
+ * intent. That is the defect `lib/operation-intent.ts` exists to close, and the id was
+ * minted per call here until independent review of this tranche pointed at it.
+ */
+describe('a comment reaction whose answer was lost', () => {
+  const reactionIds = () =>
+    mockRpcCalls
+      .filter((call) => call.name === 'set_comment_reaction')
+      .map((call) => call.args.p_operation_id);
+
+  const control = (view: Awaited<ReturnType<typeof open>>) =>
+    view.getByLabelText(/^(React to|You reacted to)/);
+
+  it('replays under the id the first attempt used', async () => {
+    mockCommentRows = [comment()];
+    // No code at all is what a dropped socket looks like through postgrest-js, and
+    // `classifyWrite` calls that 'unknown' — the one outcome that holds the id.
+    mockRpcError = { message: 'network request failed' };
+    const view = await open();
+
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(1));
+
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(2));
+
+    expect(reactionIds()[0]).toBeDefined();
+    expect(reactionIds()[1]).toBe(reactionIds()[0]);
+  });
+
+  it('takes a fresh id once the server has answered', async () => {
+    mockCommentRows = [comment()];
+    mockRpcError = { message: 'network request failed' };
+    const view = await open();
+
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(1));
+
+    // The server answers this time, which spends the claim — so the next intent must not
+    // reuse it, or it would be met with `already_applied` and store nothing.
+    mockRpcError = null;
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(2));
+    expect(reactionIds()[1]).toBe(reactionIds()[0]);
+
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(3));
+    expect(reactionIds()[2]).not.toBe(reactionIds()[0]);
+  });
+
+  /**
+   * A different meaning is a different thing to say, so it is a different intent — the
+   * key carries the kind for the reason `useSetReaction`'s does.
+   */
+  it('gives a different meaning an id of its own', async () => {
+    mockCommentRows = [comment()];
+    mockRpcError = { message: 'network request failed' };
+    const view = await open();
+
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(1));
+
+    await act(async () => fireEvent(control(view), 'longPress'));
+    await fireEvent.press(view.getByLabelText('Funny'));
+    await waitFor(() => expect(reactionIds()).toHaveLength(2));
+
+    expect(reactionIds()[1]).not.toBe(reactionIds()[0]);
+  });
+});

@@ -6,6 +6,7 @@ import { nudgePushDelivery } from '@/features/notifications/push';
 import { REACTIONS, type ReactionKind } from '@/features/feed/use-reactions';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
+import { answerWasLost, useOperationIntent } from '@/lib/operation-intent';
 import { supabase } from '@/lib/supabase';
 import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
 
@@ -269,6 +270,7 @@ export type CommentWriteResult = { ok: true } | { ok: false; message: string };
  */
 export function useCommentWrites(viewerId: string) {
   const queryClient = useQueryClient();
+  const withIntent = useOperationIntent();
 
   const refresh = async () => {
     await Promise.all([
@@ -404,23 +406,42 @@ export function useCommentWrites(viewerId: string) {
    * operation ledger stops a replay spending a second rate slot; neither of those helps
    * if the *intent* is relative, which is why all three exist.
    *
-   * The id is minted per call rather than held across retries, and that is the one place
-   * this differs from `add`: a like is not lost work. If the reply is lost the list is
-   * reconciled below and the next tap is a fresh intent against a state the reader can
-   * now see.
+   * **The id is held across retries, through the same hook the feed's reaction uses.**
+   *
+   * It was minted per call, on the reasoning that a like is not lost work — the row
+   * converges, so a replay cannot duplicate anything. That is the test
+   * `lib/operation-intent.ts` calls the wrong one. The sharper question is whether a
+   * replay changes *any* observable, and `set_comment_reaction` is rate-limited
+   * (`comment_reactions.max_per_day`), so it does: a write that commits and loses its
+   * reply is reported as a failure, the reader taps again, and the second attempt spends
+   * a second slot for one intent. That is the defect reviews 21h–21j closed one writer at
+   * a time, and parity with the feed means carrying it here too rather than only the
+   * glyphs.
+   *
+   * The key is the arguments, exactly as `useSetReaction`'s is: the kind is in it because
+   * changing your mind from a heart to a laugh is a different thing to say, and replaying
+   * the first id would have the server answer `already_applied` to a reaction nobody has
+   * stored. `answerWasLost` is what holds it only while the outcome is unknown — an id
+   * the server has already answered is released, because holding a spent one is the
+   * dangerous direction.
    */
   const react = useMutation({
     mutationFn: ({ commentId, kind }: { commentId: string; kind: ReactionKind | null }) =>
       run(() =>
-        supabase.rpc('set_comment_reaction', {
-          p_operation_id: newOperationId(),
-          p_comment_id: commentId,
-          // `p_kind` and not `p_on`, which is the argument name the signature published
-          // before 20260827000500 takes. PostgREST resolves an overload by the names in
-          // the body, so the two never collide — and the old one stays callable for a
-          // phone that has not yet taken this bundle.
-          p_kind: kind,
-        }),
+        withIntent(
+          `set_comment_reaction:${commentId}:${kind ?? 'none'}`,
+          (operationId) =>
+            supabase.rpc('set_comment_reaction', {
+              p_operation_id: operationId,
+              p_comment_id: commentId,
+              // `p_kind` and not `p_on`, which is the argument name the signature
+              // published before 20260827000500 takes. PostgREST resolves an overload by
+              // the names in the body, so the two never collide — and the old one stays
+              // callable for a phone that has not yet taken this bundle.
+              p_kind: kind,
+            }),
+          answerWasLost,
+        ),
       ),
   });
 
