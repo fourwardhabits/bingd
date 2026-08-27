@@ -102,6 +102,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    /**
+     * Whether the auth callback has already spoken, which decides who wins a race.
+     *
+     * **The reorder in the founder's blocker, closed.** Two independent things answer the
+     * question "is there a session": the hydration read below, which is one `getSession()`
+     * taken at mount, and `onAuthStateChange`, which fires whenever one is created. They
+     * are not ordered with respect to each other, and the hydration read is the *older*
+     * question — it asks what was on the device before anything happened.
+     *
+     * So a hydration read that comes back slowly, after a sign-in has already succeeded,
+     * used to call `setSession(null)` on top of a live session: the state machine went
+     * `ready` → `signed-out`, `Stack.Protected` tore the tabs out from under the person,
+     * and routing sent them back to the sign-in screen they had just left. A force-quit
+     * fixed it, because the next launch's hydration read finds the session that is really
+     * there — which is exactly the shape the founder described.
+     *
+     * The rule is one line and it is not a timing guess: **the callback is newer than the
+     * read, whenever both have happened.** A late read is simply stale and is dropped.
+     */
+    let heardFromCallback = false;
 
     const hydrationBegan = Date.now();
     void withGrace<Hydration, Hydration>(
@@ -121,6 +141,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         Date.now() - hydrationBegan,
       );
       if (!active) return;
+      // See `heardFromCallback`: a read that started before a sign-in must not answer
+      // after it. Recorded rather than silent, because "the hydration read was ignored"
+      // is a fact worth having in a report about a sign-in that did not settle.
+      if (heardFromCallback) {
+        note('auth', 'hydrate', 'superseded');
+        return;
+      }
       if (!result.ok) {
         setUnreadable(true);
         return;
@@ -130,6 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const { data } = supabase.auth.onAuthStateChange((event, next) => {
+      heardFromCallback = true;
       // Counted as well as listed: a callback storm is a number, not a story.
       tally('auth.callbacks');
       note('auth', event, next ? 'session' : 'none');
@@ -238,6 +266,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     return { status: 'ready', userId, profile: profileQuery.data };
   }, [sessionLoaded, unreadable, userId, profileQuery, session?.user?.email]);
+
+  /**
+   * Every transition of the state machine, in the order it happened.
+   *
+   * **This is the post-auth boundary, written down.** The founder's report — "Signing in…"
+   * forever, force-quit, and the app opens signed in — has nine candidate stages between a
+   * credential and a screen, and from outside the app no two of them look different. Six
+   * of the nine already say their own name into the recorder: the sign-in stages
+   * (`methods.ts`), the auth callback and hydration above, the profile query through
+   * `flight-queries.ts`, and the routing decision in `useAuthRouting`. This is the seventh
+   * and the one that joins them — the moment the provider's own answer changes.
+   *
+   * So a healthy sign-in reads as a sequence in the report, with the gap between any two
+   * lines visible:
+   *
+   *     auth  signin:apple  commit  620ms
+   *     auth  SIGNED_IN     session
+   *     auth  state         loading
+   *     query my-profile    begin
+   *     query my-profile    success
+   *     auth  state         ready
+   *     route (auth)/sign-in  /(tabs)/feed
+   *
+   * and a stall is the line the sequence stops at. Status only — never the account, never
+   * the email, never the token — and `status` is one of five words this file defines.
+   */
+  useEffect(() => {
+    note('auth', 'state', value.status);
+  }, [value.status]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -357,6 +414,15 @@ export function useAuthRouting() {
      * here is a path with an id in it.
      */
     rememberRoute(`${group ?? '(root)'}/${screen ?? ''}`);
+    /**
+     * Counted as well as recorded, because the events ring holds eighty entries and a
+     * routing effect that re-runs on every render would fill it in a second and evict
+     * everything else in the report. `route.effect` against `route.replace` is the
+     * distinction that matters for the thermal question: the first is how often this
+     * decided, the second is how often it moved anybody. A large first with a zero second
+     * is a re-render loop; both large together is a navigation loop.
+     */
+    tally('route.effect');
     note('route', `${group ?? '(root)'}/${screen ?? ''}`, destination ?? `stay:${auth.status}`);
     if (destination) {
       tally('route.replace');

@@ -252,3 +252,32 @@ describe('the sheet reading its own evidence', () => {
     expect(snapshot().network.length).toBe(1);
   });
 });
+
+/**
+ * **The lane the title-search blocker needed and did not have.**
+ *
+ * The founder's wider search failed and the report could not say a word about it: the
+ * `tmdb-adapter` Edge Function is the only call in the app that is not PostgREST, and it
+ * fell through `logicalName` to `other`. So a report showed the catalogue read succeeding
+ * beside an anonymous entry, and the question — did the request leave the client, how long
+ * did it take, what came back — had no answer anywhere.
+ */
+describe('the Edge Function lane', () => {
+  it('names the function it called', () => {
+    expect(logicalName('https://x.supabase.co/functions/v1/tmdb-adapter')).toBe(
+      'fn:tmdb-adapter',
+    );
+  });
+
+  it('keeps a query string out of the name, like every other lane', () => {
+    // A function URL can carry `forceFunctionRegion`, and a future one could carry more.
+    // The rule is the same rule: everything after `?` is dropped before anything else.
+    expect(
+      logicalName('https://x.supabase.co/functions/v1/tmdb-adapter?forceFunctionRegion=us-east-1'),
+    ).toBe('fn:tmdb-adapter');
+  });
+
+  it('still falls back to `other` for a URL that is none of the four lanes', () => {
+    expect(logicalName('https://x.supabase.co/something-else')).toBe('other');
+  });
+});

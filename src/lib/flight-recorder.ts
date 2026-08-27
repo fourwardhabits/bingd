@@ -64,8 +64,14 @@ import { isRelease } from './env';
 /** Beta and below. A store build records nothing and offers no way in. */
 const ENABLED = !isRelease;
 
-/** How many network operations are kept. The last 30 covers a screen's worth of mounting. */
-const NETWORK_LIMIT = 30;
+/**
+ * How many network operations are kept. The last 30 covers a screen's worth of mounting.
+ *
+ * Exported because the report has to say when the ring is *full*: thirty records spanning
+ * four seconds and thirty spanning four minutes are opposite findings, and only the span
+ * distinguishes them. See `quiescence` in `flight-report.ts`.
+ */
+export const NETWORK_LIMIT = 30;
 
 /** And how many of everything else — routing, auth, onboarding, sign-out stages. */
 const EVENT_LIMIT = 80;
@@ -154,6 +160,22 @@ export function logicalName(url: string): string {
   }
   if (path.includes('/rest/v1/')) {
     return `rest:${path.split('/rest/v1/')[1]?.split('/')[0] ?? 'unknown'}`;
+  }
+  /**
+   * Edge Functions, named — and their absence here is why the founder's title-search
+   * blocker could not be answered from a report.
+   *
+   * The wider search is `tmdb-adapter`, and it is the only lane in the app that is not
+   * PostgREST. It fell through to `other`, so a report could say that the local catalogue
+   * had been read and could not say whether the request that failed had left the client,
+   * how long it took, or what status came back — which is the entire question when the
+   * screen says "the wider search did not answer".
+   *
+   * A function name is schema, exactly like a table or an RPC name: it is the same string
+   * for every user of the app and says nothing about what anybody searched for.
+   */
+  if (path.includes('/functions/v1/')) {
+    return `fn:${path.split('/functions/v1/')[1]?.split('/')[0] ?? 'unknown'}`;
   }
   return 'other';
 }

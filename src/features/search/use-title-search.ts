@@ -269,12 +269,22 @@ export function useTitleSearch(input: string) {
     /** The provider pass is supplementary, so it reports separately: local results are
      *  already on screen and must not be replaced by its spinner or its failure. */
     providerSearching: provider.isFetching,
-    providerRateLimited: provider.error instanceof AdapterError && provider.error.isRateLimit,
-    /** Any provider failure, rate limit included. An empty screen means two different
-     *  things — the catalogue does not have it, or the lookup broke — and only this
-     *  tells them apart. Without it a missing TMDB key looks exactly like a title
-     *  that does not exist. */
-    providerFailed: Boolean(provider.error),
+    providerRateLimited:
+      providerEnabled && provider.error instanceof AdapterError && provider.error.isRateLimit,
+    /**
+     * Any provider failure, rate limit included. An empty screen means two different
+     * things — the catalogue does not have it, or the lookup broke — and only this tells
+     * them apart. Without it a missing TMDB key looks exactly like a title that does not
+     * exist.
+     *
+     * **Gated on `providerEnabled`, like `providerExhausted` beside it already was**, and
+     * that asymmetry was a real defect. The observer keeps its key until the debounced
+     * provider query catches up, so between two keystrokes it still holds the *previous*
+     * query's failure — and the screen would draw "the wider search did not answer" over
+     * a list of results for a query the provider had not yet been asked about. It is
+     * exactly the founder's report in miniature: a true sentence about the wrong search.
+     */
+    providerFailed: providerEnabled && Boolean(provider.error),
     /** True once the provider has been asked and had nothing to add, which is the only
      *  state in which "nothing matches" is the whole truth. A failed request is not an
      *  answer: it used to set this, so an adapter that was down reported the catalogue

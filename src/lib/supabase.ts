@@ -42,10 +42,23 @@ export const UPLOAD_DEADLINE_MS = 60_000;
  * stopped answering* — which is the question the founder's device actually poses — while
  * carrying nothing about who, or about what they were looking for.
  */
-type RequestLane = 'auth' | 'storage' | 'rest';
+type RequestLane = 'auth' | 'storage' | 'functions' | 'rest';
 
+/**
+ * `functions` is its own lane, and it was folded into `rest` until the founder's title
+ * search failed. The two are different infrastructure — PostgREST against the database
+ * versus a Deno isolate that may be cold and that calls a third party — and an expiry
+ * reported as `rest` when the Edge Function was the thing that stopped answering points
+ * an investigation at the wrong layer. The deadline they share is unchanged.
+ */
 const laneOf = (url: string): RequestLane =>
-  url.includes('/auth/v1/') ? 'auth' : url.includes('/storage/v1/') ? 'storage' : 'rest';
+  url.includes('/auth/v1/')
+    ? 'auth'
+    : url.includes('/storage/v1/')
+      ? 'storage'
+      : url.includes('/functions/v1/')
+        ? 'functions'
+        : 'rest';
 
 const deadlineFor = (lane: RequestLane) =>
   lane === 'storage' ? UPLOAD_DEADLINE_MS : REQUEST_DEADLINE_MS;
