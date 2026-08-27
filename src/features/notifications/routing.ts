@@ -158,11 +158,7 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
      */
     case 'comment':
     case 'reaction':
-      return [
-        ...activity,
-        ...title,
-        unavailable('That activity is no longer available.'),
-      ];
+      return [...activity, ...title, unavailable('That activity is no longer available.')];
 
     /** The exact Movie or Season the tag was on, never the parent series. */
     case 'watch_tag':
@@ -174,11 +170,7 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
      * person is the context for it.
      */
     case 'recommendation':
-      return [
-        ...title,
-        ...profile,
-        unavailable('That recommendation is no longer available.'),
-      ];
+      return [...title, ...profile, unavailable('That recommendation is no longer available.')];
 
     /** The person who joined, filed by `_maybe_activate_invite` at their tenth ranking. */
     case 'invite_activated':

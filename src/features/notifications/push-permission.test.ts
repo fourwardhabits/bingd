@@ -15,6 +15,7 @@ import {
   offerPushPermission,
   PUSH_OFFERED_PREF,
   registerThisDevice,
+  resetInFlightRegistration,
   shouldOfferPush,
 } from './push-permission';
 
@@ -36,6 +37,9 @@ jest.mock('./push', () => ({
   registerPushToken: jest.fn(),
   revokePushToken: jest.fn(),
   rememberToken: jest.fn(),
+  // Null: these tests predate the same-token short-circuit and assert the RPC itself,
+  // so nothing here is “already registered”.
+  heldToken: jest.fn(() => null),
   pushPlatform: jest.fn(() => 'ios'),
   pushSessionEpoch: jest.fn(() => 0),
   // Passes the write straight through: the *waiting* half is asserted in push.test.ts,
@@ -76,6 +80,7 @@ const press = (label: string) =>
   });
 
 beforeEach(() => {
+  resetInFlightRegistration();
   jest.clearAllMocks();
   mockPrefs = {};
   mockSession = { user: { id: 'user-1' } };
@@ -139,17 +144,20 @@ describe('what the priming alert says', () => {
     return { title, body, buttons };
   };
 
-  it.each(['follow', 'invite'] as const)('is the same one question after a %s', async (moment) => {
-    const { title, body, buttons } = await shown(moment);
+  it.each(['follow', 'invite'] as const)(
+    'is the same one question after a %s',
+    async (moment) => {
+      const { title, body, buttons } = await shown(moment);
 
-    expect(title).toBe('Turn on notifications?');
-    expect(body).toBe(
-      'Get notified when someone follows you, recommends something, or comments on what you watched.',
-    );
-    // "Not now" first and cancel-styled: the safe answer is the easy one.
-    expect(buttons.map((b) => b.text)).toEqual(['Not now', 'Turn on']);
-    expect(buttons[0]?.style).toBe('cancel');
-  });
+      expect(title).toBe('Turn on notifications?');
+      expect(body).toBe(
+        'Get notified when someone follows you, recommends something, or comments on what you watched.',
+      );
+      // "Not now" first and cancel-styled: the safe answer is the easy one.
+      expect(buttons.map((b) => b.text)).toEqual(['Not now', 'Turn on']);
+      expect(buttons[0]?.style).toBe('cancel');
+    },
+  );
 
   it('has retired both of the moment-specific questions', async () => {
     for (const moment of ['follow', 'invite'] as const) {

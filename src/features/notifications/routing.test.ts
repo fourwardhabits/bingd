@@ -131,7 +131,9 @@ describe('a target that is gone', () => {
   it.each(['comment', 'reaction'] as const)(
     'sends %s to a safe stop when the activity is gone',
     (kind) => {
-      const target = targetFor(row({ kind, mediaItemId: null, subjectType: null, subjectId: null }));
+      const target = targetFor(
+        row({ kind, mediaItemId: null, subjectType: null, subjectId: null }),
+      );
       expect(target.kind).toBe('unavailable');
     },
   );
@@ -179,9 +181,10 @@ describe('a target that is gone', () => {
      * that join yields null for them and the title link is empty. `subject_id` has no
      * such restriction, which is why the chain reads it.
      */
-    expect(
-      targetFor(row({ kind: 'comment', mediaItemId: null, mediaTitle: null })),
-    ).toEqual({ kind: 'activity', eventId: 'event-1' });
+    expect(targetFor(row({ kind: 'comment', mediaItemId: null, mediaTitle: null }))).toEqual({
+      kind: 'activity',
+      eventId: 'event-1',
+    });
   });
 
   it('does not fall back to the actor for a comment, which would leak nothing but help nobody', () => {

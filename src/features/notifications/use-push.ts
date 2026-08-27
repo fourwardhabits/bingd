@@ -9,6 +9,7 @@ import { useAuth } from '@/features/auth';
 import { registerThisDevice } from './push-permission';
 import {
   canReceivePush,
+  deviceTokenRolled,
   forgetToken,
   nudgePushDelivery,
   pushPermission,
@@ -111,14 +112,25 @@ export function usePush() {
    * working at that moment. Without this the account keeps a dead token until the next
    * cold start, and every notification in between is delivered to nothing.
    *
-   * The listener carries the **device** token, not the Expo one, so the new Expo token is
-   * fetched rather than read out of the event — `registerThisDevice` is the same path the
-   * first registration takes, which is what stops the two disagreeing.
+   * **Guarded by `deviceTokenRolled`, and the guard is the fix for the registration
+   * storm** (2026-08-27 physical reports: repeat 118 by ten seconds of uptime).
+   * expo-notifications fires this listener on *every* delivery of the device token, not
+   * only on change — and the delivery it most often reports is the one caused by our own
+   * registration a moment earlier, because acquiring the Expo token re-registers with the
+   * OS. The old body called `registerThisDevice` unconditionally, which acquired, which
+   * delivered, which fired this listener, which called `registerThisDevice`… one RPC per
+   * ~50ms for the life of the foreground. The guard makes the event mean what this effect
+   * always claimed it meant: *the token actually changed*.
+   *
+   * On a real roll the new Expo token is still fetched rather than read out of the event
+   * — `registerThisDevice` is the same path the first registration takes, which is what
+   * stops the two disagreeing.
    */
   useEffect(() => {
     if (!userId || !canReceivePush()) return;
 
-    const subscription = Notifications.addPushTokenListener(() => {
+    const subscription = Notifications.addPushTokenListener((delivered) => {
+      if (!deviceTokenRolled(delivered?.data)) return;
       void registerThisDevice(userId);
     });
 
