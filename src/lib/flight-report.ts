@@ -1,6 +1,6 @@
 import type { Query } from '@tanstack/react-query';
 
-import type { FlightSnapshot, LastSession, NetworkRecord } from './flight-recorder';
+import { NETWORK_LIMIT, type FlightSnapshot, type LastSession, type NetworkRecord } from './flight-recorder';
 
 /**
  * The copyable report, and the one place its contents are decided.
@@ -44,6 +44,21 @@ export type AuthFacts = {
   expiresInSeconds?: number;
   hydrationMs?: number;
   authCallbacks: number;
+  /**
+   * Which provider this session was actually created by — `apple`, `google` or `email`.
+   *
+   * **The one fact that settles a provider-routing report from the device itself.** The
+   * founder reported that Continue with Apple "just picks the last Google account", and
+   * the backend says otherwise: accounts carry a single `apple` identity or a single
+   * `google` one and never both. But that is an answer read from a database by somebody
+   * else, and the person who can reproduce it in one tap could not see it at all — so the
+   * session now names its own provider, and one Apple sign-in followed by opening this
+   * sheet is the whole experiment.
+   *
+   * A provider name is a closed set of three words. It is not a credential, not an
+   * address, and not an account.
+   */
+  provider?: string;
 };
 
 export type ReleaseFacts = {
@@ -114,6 +129,70 @@ export function phaseOf(record: NetworkRecord): string {
 const ms = (value: number | undefined) =>
   value === undefined ? '—' : `${Math.round(value)}ms`;
 
+export type Quiescence = {
+  /** Requests started within the last ten seconds of the recorded window. */
+  last10s: number;
+  /** And within the last minute. Both are capped by the ring — see `saturated`. */
+  last60s: number;
+  /** How long the whole ring covers, in ms. Thirty records over 4s is not thirty over 4m. */
+  spanMs: number;
+  /**
+   * True when the ring is full — which is a fact about the buffer, not about either count.
+   *
+   * **Review 52's correction.** A full ring only makes a window's count a *floor* when the
+   * ring cannot see the whole window: thirty records spanning four seconds hides an unknown
+   * number more, while thirty spanning four minutes contains every request of the last
+   * minute exactly. Marking both counts `+` on saturation alone told a quiet app it might
+   * be busy, which is the opposite of what this section is read for. `spanMs` beside this
+   * is what decides it — see `formatReport`.
+   */
+  saturated: boolean;
+  /** The operation with the most records in the ring, and how many. */
+  busiest?: { name: string; count: number };
+};
+
+/**
+ * **Whether the app goes quiet once a screen has settled**, which is the founder's second
+ * blocker stated as something measurable.
+ *
+ * The phone gets hot and the app dies every few minutes, and three tranches have now
+ * guessed at why. This does not guess. It reads the thirty-record network ring the app
+ * already keeps and reduces it to the one question that separates a thermal *cause* inside
+ * Bingd from an app that is merely present while something else runs hot: **after the
+ * screen stops changing, does the client keep making requests?**
+ *
+ * How to use it, which matters as much as the numbers: open a screen, put the phone down
+ * for thirty seconds, then open Diagnostics. A settled app shows `requests /10s` at or near
+ * zero. Anything else is a loop, and `busiest` names it.
+ *
+ * `spanMs` and `saturated` exist because the ring is short. Thirty records covering four
+ * minutes is an app doing nothing much; thirty covering four seconds is a storm whose true
+ * size this cannot see, and reporting the same "30" for both would be the report hiding the
+ * finding.
+ */
+export function quiescence(flight: FlightSnapshot): Quiescence {
+  const records = flight.network;
+  const now = flight.uptimeMs;
+  const within = (windowMs: number) =>
+    records.filter((record) => now - record.startedAt <= windowMs).length;
+
+  const counts = new Map<string, number>();
+  for (const record of records) counts.set(record.name, (counts.get(record.name) ?? 0) + 1);
+  let busiest: Quiescence['busiest'];
+  for (const [name, count] of counts) {
+    if (!busiest || count > busiest.count) busiest = { name, count };
+  }
+
+  const oldest = records[0]?.startedAt ?? now;
+  return {
+    last10s: within(10_000),
+    last60s: within(60_000),
+    spanMs: Math.max(0, now - oldest),
+    saturated: records.length >= NETWORK_LIMIT,
+    busiest,
+  };
+}
+
 const pad = (value: string, width: number) => value.padEnd(width).slice(0, width);
 
 /**
@@ -156,6 +235,7 @@ export function formatReport(input: ReportInput): string {
   );
   lines.push(`  hydration    ${ms(auth.hydrationMs)}`);
   lines.push(`  callbacks    ${auth.authCallbacks}`);
+  lines.push(`  provider     ${auth.provider ?? '—'}`);
 
   lines.push('');
   lines.push('ONBOARDING');
@@ -168,6 +248,24 @@ export function formatReport(input: ReportInput): string {
   lines.push('APP');
   lines.push(`  route        ${input.route}`);
   lines.push(`  app state    ${input.appState}`);
+
+  const quiet = quiescence(flight);
+  /**
+   * A count is a floor only where the ring is full **and** does not reach back past the
+   * window. A full ring spanning four minutes holds every request of the last ten seconds
+   * exactly; a full ring spanning four seconds is hiding an unknown number more.
+   */
+  const floor = (windowMs: number) => (quiet.saturated && quiet.spanMs <= windowMs ? '+' : '');
+  lines.push('');
+  lines.push('QUIESCENCE (put the phone down for 30s, then open this)');
+  lines.push(`  requests /10s  ${quiet.last10s}${floor(10_000)}`);
+  lines.push(`  requests /60s  ${quiet.last60s}${floor(60_000)}`);
+  lines.push(
+    `  window         ${Math.round(quiet.spanMs / 1000)}s for ${flight.network.length} records${quiet.saturated ? ' (ring full)' : ''}`,
+  );
+  lines.push(
+    `  busiest op     ${quiet.busiest ? `${quiet.busiest.name} ×${quiet.busiest.count}` : '—'}`,
+  );
 
   lines.push('');
   lines.push(`NETWORK (last ${flight.network.length})`);

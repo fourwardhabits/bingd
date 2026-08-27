@@ -9,7 +9,12 @@ import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collecti
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
 import { useRecentSearches } from '@/features/search/use-recent-searches';
-import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
+import {
+  useDebounced,
+  useTitleSearch,
+  yearOf,
+  type SearchResult,
+} from '@/features/search/use-title-search';
 import { meaningfulMatch, useUserSearch, type UserResult } from '@/features/search/use-user-search';
 import { followLabel, noRelationship, useRelationships } from '@/features/profile/use-social';
 import { track } from '@/lib/analytics';
@@ -110,10 +115,30 @@ export default function LogScreen() {
     );
   }, [results, filter]);
 
+  /**
+   * **The member half runs on the same debounced value the title half does, and it did
+   * not, which is a request-cadence defect rather than a style one.**
+   *
+   * `useUserSearch` says in its own doc that it "does not debounce … it runs on the same
+   * already-debounced input" — and this call site handed it the *raw* field. Every
+   * keystroke was therefore a new query key, so typing `the lizzie mcguire movie` spent
+   * twenty-four `search_users` round trips, and `useRelationships` below follows the
+   * result set, so it spent roughly twenty-four more. Forty-eight authenticated requests
+   * for one search, each of which also awaits `getSession()` on its way out
+   * (`lib/supabase.ts`), against two for the titles.
+   *
+   * That is the largest measured request multiplier in the app and it is on the screen
+   * the founder reported a search failure from. Sharing `useTitleSearch`'s 180ms debounce
+   * makes the two halves of this screen ask once per settled query rather than once per
+   * letter; nothing about what is displayed changes, because `keepPreviousData` was
+   * already holding the previous prefix's rows on screen through exactly that window.
+   */
+  const settled = useDebounced(input.trim());
+
   // Always the server's ceiling. The cap that matters is a display one, applied below,
   // and asking for ten and then for thirty when See all is pressed would make the
   // expansion a second round trip that can fail.
-  const users = useUserSearch(input, profile.id, 30);
+  const users = useUserSearch(settled, profile.id, 30);
   const userResults = useMemo(() => users.data ?? [], [users.data]);
   const relationships = useRelationships(
     useMemo(() => userResults.map((user) => user.id), [userResults]),
@@ -138,8 +163,10 @@ export default function LogScreen() {
    * about a title.
    */
   const matchedMembers = useMemo(
-    () => userResults.filter((user) => meaningfulMatch(user, input)),
-    [userResults, input],
+    // The debounced value, so the gate is applied to the query the rows were fetched for
+    // rather than to a prefix typed since — the same alignment the two queries now share.
+    () => userResults.filter((user) => meaningfulMatch(user, settled)),
+    [userResults, settled],
   );
 
   // Members are not titles, so a Movies or TV narrowing has nothing to say about them.

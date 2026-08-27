@@ -681,3 +681,76 @@ describe('finding people', () => {
     expect(mockPush).toHaveBeenCalledWith('/u/anna');
   });
 });
+
+/**
+ * **How many requests one search costs, which is the founder's thermal blocker measured on
+ * the screen that spends the most of them.**
+ *
+ * The title half of this screen has debounced since it was written. The member half did
+ * not: `useUserSearch` says in its own doc that it "does not debounce … it runs on the same
+ * already-debounced input", and this screen handed it the raw text field. So every keystroke
+ * minted a new query key and spent a `search_users` round trip, and `useRelationships`
+ * follows the result set, so it spent roughly one more. Typing a twenty-four character title
+ * was therefore some forty-eight authenticated PostgREST requests — each of which also awaits
+ * `getSession()` on its way out — against two for the titles.
+ *
+ * Nothing visible changes: `keepPreviousData` was already holding the previous prefix's rows
+ * on screen across exactly this window.
+ */
+describe('request cadence while typing', () => {
+  const typeOut = async (view: Awaited<ReturnType<typeof renderWithProviders>>, text: string) => {
+    for (let index = 1; index <= text.length; index += 1) {
+      await fireEvent.changeText(view.getByLabelText('Search'), text.slice(0, index));
+    }
+  };
+
+  it('asks about members once for a settled query, not once per letter', async () => {
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn === 'search_titles') return Promise.resolve({ data: [], error: null });
+      if (fn === 'search_users') return Promise.resolve({ data: [], error: null });
+      return Promise.resolve({ data: { status: 'ok' }, error: null });
+    });
+
+    const view = await renderWithProviders(<LogScreen />);
+    await typeOut(view, 'lizzie mcguire');
+
+    // The debounce is 180ms and the whole burst above happens well inside it.
+    await waitFor(() => expect(callsTo('search_users').length).toBeGreaterThan(0));
+    // One settled query. Fourteen letters used to be fourteen.
+    expect(callsTo('search_users').length).toBeLessThanOrEqual(2);
+    expect(callsTo('search_users').at(-1)?.[1]).toEqual({
+      p_query: 'lizzie mcguire',
+      p_limit: 30,
+    });
+  });
+
+  it('does not spend a relationship read per letter either', async () => {
+    /**
+     * A different person per prefix, deliberately. `useRelationships` is keyed on the sorted
+     * ids the member search returned, so a mock that answers every prefix with the same
+     * person would collapse nine keys into one and hide the very multiplier this asserts.
+     */
+    mockRpc.mockImplementation((fn: string, args: { p_query?: string } = {}) => {
+      if (fn === 'search_titles') return Promise.resolve({ data: [], error: null });
+      if (fn === 'search_users') {
+        const id = `user-${args.p_query ?? ''}`;
+        return Promise.resolve({
+          data: [
+            { id, username: id, display_name: 'Anna Rivers', avatar_path: null, visibility: 'public' },
+          ],
+          error: null,
+        });
+      }
+      if (fn === 'follow_state_with') return Promise.resolve({ data: [], error: null });
+      return Promise.resolve({ data: { status: 'ok' }, error: null });
+    });
+
+    const view = await renderWithProviders(<LogScreen />);
+    await typeOut(view, 'annabelle');
+
+    await waitFor(() => expect(callsTo('search_users').length).toBeGreaterThan(0));
+    // `useRelationships` is keyed on the ids the member search returned, so it inherits
+    // whatever cadence that query has. Nine letters used to be nine of these too.
+    expect(callsTo('follow_state_with').length).toBeLessThanOrEqual(2);
+  });
+});

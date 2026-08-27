@@ -8,6 +8,7 @@ import {
   signInWithApple,
   signInWithGoogle,
 } from '@/features/auth';
+import { reportHandled } from '@/lib/monitoring';
 import { BrandLockup, Button, Divider, Field, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -57,38 +58,59 @@ export default function SignInScreen() {
   const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   /**
+   * **`finally`, and it is the whole of the founder's stuck button.**
+   *
+   * `setBusy(null)` used to sit on the line after the `await`. That line is not reached
+   * when the awaited promise *rejects* — so any throw out of a sign-in method left `busy`
+   * set for the life of the screen: the label stayed "Signing in…", every button on the
+   * screen stayed disabled, and there was no message and nothing to press. The session
+   * behind it could be perfectly good, which is precisely what the founder saw when
+   * force-quitting and reopening put them straight into the app.
+   *
+   * `methods.ts` has been made non-rejecting on every lane as well, and both halves are
+   * kept deliberately: that file is where a future contributor adds the fourth provider,
+   * and this is where the screen guarantees it cannot be trapped by one.
+   */
+  const attempt = async (
+    which: 'email' | 'apple' | 'google',
+    run: () => Promise<{ ok: boolean; cancelled?: boolean; message?: string }>,
+    onSuccess?: () => void,
+  ) => {
+    setBusy(which);
+    setError(null);
+    try {
+      const result = await run();
+      if (result.ok) {
+        onSuccess?.();
+        return;
+      }
+      // A dismissed sheet is not a failure and must not leave a message on screen.
+      if (!result.cancelled) setError(result.message ?? 'That did not work. Try again.');
+    } catch (error) {
+      reportHandled(error, { scope: `signIn.screen.${which}` });
+      setError('That did not work. Try again.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /**
    * Sends before navigating, so a refusal — a rate limit, signups closed — is shown
    * beside the field somebody would fix, rather than on a code screen for a code that was
    * never sent. It is not a disclosure: neither of those answers depends on whether the
    * address has an account.
    */
-  const submitEmail = async () => {
-    setBusy('email');
-    setError(null);
-    const result = await sendEmailCode(email);
-    setBusy(null);
-    if (result.ok) {
-      router.push({ pathname: '/(auth)/verify', params: { email: email.trim() } });
-    } else {
-      setError(result.message ?? 'That did not work. Try again.');
-    }
-  };
+  const submitEmail = () =>
+    attempt('email', () => sendEmailCode(email), () =>
+      router.push({ pathname: '/(auth)/verify', params: { email: email.trim() } }),
+    );
 
-  const submitProvider = async (
+  // No navigation on success: the router moves the user once the session and the
+  // profile check agree on where they belong (useAuthRouting).
+  const submitProvider = (
     provider: 'apple' | 'google',
     run: () => Promise<{ ok: boolean; cancelled?: boolean; message?: string }>,
-  ) => {
-    setBusy(provider);
-    setError(null);
-    const result = await run();
-    setBusy(null);
-    // A dismissed sheet is not a failure and must not leave a message on screen.
-    if (!result.ok && !result.cancelled) {
-      setError(result.message ?? 'That did not work. Try again.');
-    }
-    // No navigation on success: the router moves the user once the session and the
-    // profile check agree on where they belong (useAuthRouting).
-  };
+  ) => attempt(provider, run);
 
   return (
     <Screen airy includeBottomInset>

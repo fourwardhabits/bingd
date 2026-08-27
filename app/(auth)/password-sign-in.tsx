@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import { StyleSheet, View, type TextInput } from 'react-native';
 
 import { signInWithEmailPassword } from '@/features/auth';
+import { reportHandled } from '@/lib/monitoring';
 import { Button, Field, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -53,11 +54,18 @@ export default function PasswordSignInScreen() {
   const submit = async () => {
     setBusy(true);
     setError(null);
-    const result = await signInWithEmailPassword(email, password);
-    setBusy(false);
-    // No navigation on success: `useAuthRouting` owns where a session belongs, exactly as
-    // it does for the code flow and for OAuth. A push from here would race it.
-    if (!result.ok) setError(result.message ?? 'That did not work. Try again.');
+    // `finally`, for the reason `sign-in.tsx` records at its own `attempt`.
+    try {
+      const result = await signInWithEmailPassword(email, password);
+      // No navigation on success: `useAuthRouting` owns where a session belongs, exactly as
+      // it does for the code flow and for OAuth. A push from here would race it.
+      if (!result.ok) setError(result.message ?? 'That did not work. Try again.');
+    } catch (error) {
+      reportHandled(error, { scope: 'signIn.screen.password' });
+      setError('That did not work. Try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (

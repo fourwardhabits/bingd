@@ -1,5 +1,6 @@
 import { FunctionsHttpError } from '@supabase/supabase-js';
 
+import { note } from './flight-recorder';
 import { supabase } from './supabase';
 
 /**
@@ -34,6 +35,18 @@ export class AdapterError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    /**
+     * The class of the underlying failure, where the function never spoke at all.
+     *
+     * **The distinction blocker 3 turns on.** `BG500` means the function answered and said
+     * something went wrong inside it. A `FunctionsFetchError` or a `RequestDeadlineError`
+     * means there was no answer — the same shape as the build-4 stall, and a different
+     * investigation entirely. Both used to be reported as `BG500`, because there was no
+     * code in the vocabulary for "no reply" and inventing one would have been a lie about
+     * what the server said. So the transport class travels beside the code instead, and
+     * the recorder prefers it when it is there.
+     */
+    readonly transport?: string,
   ) {
     super(message);
     this.name = 'AdapterError';
@@ -45,7 +58,49 @@ export class AdapterError extends Error {
   }
 }
 
+/**
+ * One adapter call, and its outcome as a **code**.
+ *
+ * The founder's title search failed with "the wider search did not answer" while the same
+ * query, run against the same deployed function with the same user, returned
+ * *The Lizzie McGuire Movie* in under a second. So the failure is on the device and the
+ * only useful question is which one of these it was — and until this existed, every one of
+ * them arrived at the screen as the same sentence:
+ *
+ *   · `BG401` — the function did not recognise the caller. An auth problem wearing a
+ *     search problem's clothes, and the one the local pass succeeding makes surprising.
+ *   · `BG429` — the hourly TMDB allowance is spent. Already has its own copy on screen.
+ *   · `BG502` — TMDB itself was unavailable.
+ *   · `BG500` — everything else the function knows about.
+ *   · `FunctionsFetchError` / `RequestDeadlineError` — it never got an answer at all,
+ *     which is the same shape as the build-4 stall and belongs beside the network log.
+ *
+ * The code is a constant from `api.md` §8 and the class name is a class name. Neither is
+ * anybody's data, and the query string — which is what somebody typed — is nowhere near
+ * this.
+ */
 async function invoke<T>(body: Record<string, unknown>): Promise<T> {
+  const action = typeof body.action === 'string' ? body.action : 'unknown';
+  const began = Date.now();
+  const record = (outcome: string) =>
+    note('query', `adapter:${action}`, outcome, Date.now() - began);
+
+  try {
+    const value = await invoked<T>(body);
+    record('ok');
+    return value;
+  } catch (error) {
+    record(
+      error instanceof AdapterError
+        ? (error.transport ?? error.code)
+        : classNameOf(error),
+    );
+    throw error;
+  }
+}
+
+/** The call itself. Split out so the recording above wraps every lane out of it. */
+async function invoked<T>(body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('tmdb-adapter', { body });
 
   if (!error) return data as T;
@@ -65,7 +120,18 @@ async function invoke<T>(body: Record<string, unknown>): Promise<T> {
     }
   }
 
-  throw new AdapterError('BG500', error.message);
+  // Not a structured refusal from the function, so the transport class comes with it —
+  // see `AdapterError.transport`. `FunctionsFetchError` here means no answer arrived.
+  throw new AdapterError('BG500', error.message, classNameOf(error));
+}
+
+/** The class name and never the message: a relayed error can echo what was sent. */
+function classNameOf(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const named = error as { name?: unknown };
+    if (typeof named.name === 'string' && named.name) return named.name;
+  }
+  return typeof error;
 }
 
 /**

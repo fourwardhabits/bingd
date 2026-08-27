@@ -2,7 +2,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { sendEmailCode, verifyEmailCode } from '@/features/auth';
+import { COMMIT_TIMEOUT_MESSAGE, sendEmailCode, verifyEmailCode } from '@/features/auth';
+import { reportHandled } from '@/lib/monitoring';
 import { Button, Field, Screen, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -36,33 +37,53 @@ export default function VerifyScreen() {
   const address = typeof email === 'string' ? email : '';
   const complete = /^\d{6}$/.test(code.trim());
 
+  /**
+   * `finally`, for the reason `sign-in.tsx` records at its own `attempt`: `setBusy(false)`
+   * on the line after an `await` is not reached when that await rejects, and the cost of
+   * missing it is a screen whose every control is disabled with nothing to press.
+   */
   const submit = async () => {
     setBusy(true);
     setError(null);
-    const result = await verifyEmailCode(address, code);
-    setBusy(false);
-    if (!result.ok) {
+    try {
+      const result = await verifyEmailCode(address, code);
+      if (result.ok) {
+        // Routing is the gate's job — this session may need onboarding, and only the
+        // profile check knows that. A newly verified address lands on `create-profile`
+        // because `nextRoute` sees a session with no profile, which is the same path every
+        // other new account takes.
+        return;
+      }
       setError(
         // Deliberately vague about which it was: an expired code and a wrong code
         // are the same next action, and distinguishing them tells an attacker
-        // whether a guess was close.
-        'That code did not work. Check it, or send a new one.',
+        // whether a guess was close. The one exception is a commit that never answered,
+        // which is not a statement about the code at all and must not be dressed as one.
+        result.message === COMMIT_TIMEOUT_MESSAGE
+          ? result.message
+          : 'That code did not work. Check it, or send a new one.',
       );
-      return;
+    } catch (error) {
+      reportHandled(error, { scope: 'signIn.screen.verify' });
+      setError('That code did not work. Check it, or send a new one.');
+    } finally {
+      setBusy(false);
     }
-    // Routing is the gate's job — this session may need onboarding, and only the
-    // profile check knows that. A newly verified address lands on `create-profile`
-    // because `nextRoute` sees a session with no profile, which is the same path every
-    // other new account takes.
   };
 
   const resend = async () => {
     setBusy(true);
     setError(null);
-    const result = await sendEmailCode(address);
-    setBusy(false);
-    setResent(result.ok);
-    if (!result.ok) setError(result.message ?? 'Could not send another code.');
+    try {
+      const result = await sendEmailCode(address);
+      setResent(result.ok);
+      if (!result.ok) setError(result.message ?? 'Could not send another code.');
+    } catch (error) {
+      reportHandled(error, { scope: 'signIn.screen.resend' });
+      setError('Could not send another code.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!address) {

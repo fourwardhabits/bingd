@@ -80,6 +80,18 @@ export async function liveFacts(): Promise<LiveFacts> {
   );
   const session = asked.known ? asked.session : null;
 
+  /**
+   * The provider that created this session, from `app_metadata`.
+   *
+   * GoTrue writes it there and it is one of three words — `apple`, `google`, `email`. It
+   * is the answer to the founder's fourth blocker as the device itself can state it: sign
+   * in with Apple, open this sheet, and read which flow actually ran. Narrowed by hand
+   * because `app_metadata` is typed as an open record; anything that is not a string is
+   * simply not reported.
+   */
+  const claimed = (session?.user?.app_metadata as { provider?: unknown } | undefined)?.provider;
+  const provider = typeof claimed === 'string' ? claimed : undefined;
+
   const auth: AuthFacts = session
     ? {
         sessionExists: true,
@@ -89,6 +101,7 @@ export async function liveFacts(): Promise<LiveFacts> {
           : undefined,
         hydrationMs,
         authCallbacks,
+        provider,
       }
     : { sessionExists: false, sessionKnown: asked.known, hydrationMs, authCallbacks };
 
