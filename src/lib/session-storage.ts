@@ -1,6 +1,8 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
+import { note } from './flight-recorder';
+
 /**
  * Session storage for the Supabase client.
  *
@@ -230,8 +232,12 @@ const native = {
     if (held !== undefined) return Promise.resolve(held);
 
     const startedAt = revision.get(key) ?? 0;
+    // The Keychain lane, timed. A read that does not answer is one of the two shapes that
+    // can stall every authenticated request at once, and it leaves no other trace.
+    const began = Date.now();
 
     return disk.getItem(key).then((value) => {
+      note('store', 'read', value === null ? 'absent' : 'present', Date.now() - began);
       // Only when nothing was written or removed while this read was out. Otherwise the
       // newer value stands and this answer is simply old — see `revision`.
       if ((revision.get(key) ?? 0) === startedAt) mirror.set(key, value);
@@ -246,15 +252,20 @@ const native = {
     // written, which is also what queueing behind the write would have returned.
     const at = bumpRevision(key);
     mirror.set(key, value);
+    const began = Date.now();
 
-    return disk.setItem(key, value).catch((error: unknown) => {
-      // The disk did not take it, so this process no longer knows what the disk holds.
-      // Forgetting sends the next read back to the store that does — but only if this is
-      // still the newest claim, because a later write's value must not be dropped
-      // because an earlier one failed.
-      if (revision.get(key) === at) mirror.delete(key);
-      throw error;
-    });
+    return disk
+      .setItem(key, value)
+      .then(() => note('store', 'write', 'ok', Date.now() - began))
+      .catch((error: unknown) => {
+        note('store', 'write', 'failed', Date.now() - began);
+        // The disk did not take it, so this process no longer knows what the disk holds.
+        // Forgetting sends the next read back to the store that does — but only if this is
+        // still the newest claim, because a later write's value must not be dropped
+        // because an earlier one failed.
+        if (revision.get(key) === at) mirror.delete(key);
+        throw error;
+      });
   },
 
   removeItem(key: string): Promise<void> {

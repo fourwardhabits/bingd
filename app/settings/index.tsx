@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { openDiagnostics } from '@/features/diagnostics/open';
 import * as Application from 'expo-application';
 import { Image } from 'expo-image';
 import Constants from 'expo-constants';
@@ -49,7 +50,9 @@ export default function SettingsScreen() {
         options={{
           headerShown: true,
           title: 'Settings',
-          headerRight: () => <Button label="Close" kind="tertiary" onPress={() => router.back()} />,
+          headerRight: () => (
+            <Button label="Close" kind="tertiary" onPress={() => router.back()} />
+          ),
         }}
       />
       <ScrollView contentContainerStyle={styles.page}>
@@ -178,7 +181,11 @@ function Row({
       accessibilityLabel={detail ? `${label}, ${detail}` : label}
       accessibilityHint={external ? 'Opens in your browser' : undefined}
       onPress={onPress}
-      style={({ pressed }) => [styles.row, !last && styles.rowDivided, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        styles.row,
+        !last && styles.rowDivided,
+        pressed && styles.pressed,
+      ]}
     >
       <Ionicons name={icon} size={theme.layout.icon.md} color={theme.semantic.action} />
       <Text variant="body" style={styles.rowLabel}>
@@ -338,6 +345,20 @@ function BuildDetails() {
             <Text variant="caption" tone="tertiary">
               backend {backendRef(env.supabaseUrl)}
             </Text>
+            {/* The ordinary way in to Diagnostics. The onboarding summary has its own,
+                by long press, because Settings is unreachable from there — see
+                `features/diagnostics/open.ts`. Both are hidden in a release build. */}
+            <Text
+              variant="caption"
+              tone="action"
+              accessibilityRole="button"
+              accessibilityLabel="Diagnostics"
+              accessibilityHint="Shows a copyable report of what the app is doing"
+              onPress={openDiagnostics}
+              style={styles.diagnostics}
+            >
+              Diagnostics
+            </Text>
           </>
         ) : null}
       </View>
@@ -361,6 +382,9 @@ function short(value: string | null | undefined) {
 }
 
 const styles = StyleSheet.create({
+  // A 44pt target on a caption-sized label, so the one control on this block that is a
+  // control can actually be pressed.
+  diagnostics: { paddingTop: theme.space[2], minHeight: theme.layout.minTapTarget },
   page: { paddingBottom: theme.space[10] },
   group: {
     marginTop: theme.space[3],

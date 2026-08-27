@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { AppState } from 'react-native';
 
 import { env } from './env';
+import { recordRequest } from './flight-recorder';
 import { reportHandled } from './monitoring';
 import { sessionStorage } from './session-storage';
 
@@ -116,6 +117,17 @@ export const requestWithDeadline: typeof fetch = (input, init) => {
   const lane = laneOf(url);
   const deadlineMs = deadlineFor(lane);
 
+  /**
+   * Opened **before** the token wait rather than after it, which is the whole reason the
+   * recorder can answer the question three tranches have argued about.
+   *
+   * `fetchWithAuth` awaits `auth.getSession()` before it calls this function's `fetch`
+   * below — so a request stalled on a session refresh never reaches the network and, without
+   * a record opened here, would leave no trace at all. It would look identical to a query
+   * that was never made. With one, the report shows it as `BLOCKED`: started, never sent.
+   */
+  const record = recordRequest(url);
+
   const controller = new AbortController();
   const timer = setTimeout(() => {
     reportExpiry(lane, deadlineMs);
@@ -136,12 +148,29 @@ export const requestWithDeadline: typeof fetch = (input, init) => {
     }
   }
 
+  // Only when a request is genuinely about to go out. An already-aborted caller signal
+  // aborts the controller above and `fetch` rejects without dispatching anything — review
+  // 51's finding, and reporting that as `reachedFetch` would put a lie in the one column
+  // the whole report is read for.
+  if (!controller.signal.aborted) record.sent();
+
   // Cleared on settle, or a device keeps a timer alive per request for the length of the
   // budget after the answer already arrived.
-  return fetch(input, { ...init, signal: controller.signal }).finally(() => {
-    clearTimeout(timer);
-    detach();
-  });
+  return fetch(input, { ...init, signal: controller.signal })
+    .then(
+      (response) => {
+        record.settled({ status: response.status });
+        return response;
+      },
+      (error: unknown) => {
+        record.settled({ error });
+        throw error;
+      },
+    )
+    .finally(() => {
+      clearTimeout(timer);
+      detach();
+    });
 };
 
 /**
