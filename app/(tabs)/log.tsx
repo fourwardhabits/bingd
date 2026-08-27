@@ -34,13 +34,15 @@ import {
  * All first, because the filter is a narrowing of a search the user has already made
  * and the unnarrowed state is the one they arrive in.
  *
- * **People is a chip again, and it is not the `users` chip that was removed.** That one
- * sat among three title filters while members were interleaved into the same list, so
- * one control meant two things. Now the People section is structurally separate and the
- * chip does exactly one thing: shows that section alone, with the relevance gate lifted
- * — choosing People *is* the statement of intent the gate exists to infer, so every
- * name and @handle match shows. The placeholder promises "@someone"; this is the filter
- * that promise was missing. All still interleaves as before: people above titles.
+ * **One list, four chips.** The founder's contract for this page is: query → one
+ * continuous list → chips narrow it. There is no "People" heading and no "Movies"
+ * heading — sectioning People while leaving titles unsectioned was the inconsistency
+ * this replaced. Each chip is the same surface narrowed: Movies and TV filter the
+ * title results, People shows every member match with the relevance gate lifted —
+ * choosing People *is* the statement of intent the gate exists to infer. All keeps
+ * the existing order of each source: people above titles, each in its own relevance
+ * order. A row says what kind of thing it is (round avatar and @handle for a person,
+ * poster and metadata for a title) rather than a heading saying it for a block.
  */
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -108,8 +110,8 @@ export default function LogScreen() {
 
   const filtered = useMemo(() => {
     if (filter === 'all') return results;
-    // People is not a narrowing of titles — it swaps the page over to the People
-    // section, so the title list is simply absent rather than "filtered to nothing".
+    // People is not a narrowing of titles — the list holds member rows alone, so the
+    // title results are simply absent rather than "filtered to nothing".
     if (filter === 'people') return [];
     return results.filter((result) =>
       filter === 'movies' ? result.kind === 'movie' : result.kind !== 'movie',
@@ -130,7 +132,7 @@ export default function LogScreen() {
    * Which members appear, and how many.
    *
    * Titles stay dominant, which the founder asked for and which the gate enforces:
-   * `meaningfulMatch` keeps the section to people whose handle or name the query
+   * `meaningfulMatch` keeps the person rows to people whose handle or name the query
    * actually *starts*, because `search_users` matches substrings and without it typing
    * "the" would put three strangers above a page of films.
    *
@@ -160,7 +162,12 @@ export default function LogScreen() {
         ? matchedMembers
         : matchedMembers.slice(0, MEMBER_PREVIEW)
       : [];
-  const moreMembers = membersApply && !allMembers && matchedMembers.length > MEMBER_PREVIEW;
+  // How many people the See-all row promises — the *total* matched, because the row
+  // names what pressing it reveals, not what is currently hidden. Zero means no row.
+  const morePeopleCount =
+    membersApply && !allMembers && matchedMembers.length > MEMBER_PREVIEW
+      ? matchedMembers.length
+      : 0;
 
   /**
    * History is written on commitment, never on typing.
@@ -258,36 +265,35 @@ export default function LogScreen() {
 
   return (
     <Screen>
-      {/* The field lives in the header row beside the brand — the founder's
-          compaction: a full-width bar under a full-width header spent two rows
-          on chrome above every result. The row is the one thing you act on. */}
-      <AppHeader
-        right={
-          <View style={styles.headerSearch}>
-            <SearchField
-              accessibilityLabel="Search"
-              // Names both halves, because the second was invisible while it sat behind
-              // a chip. "@handle" rather than "a member" so the sigil is discoverable.
-              placeholder="A film, a series, or @someone"
-              value={input}
-              onChangeText={(next) => {
-                setInput(next);
-                setAllMembers(false);
-              }}
-              onClear={() => {
-                setInput('');
-                setAllMembers(false);
-              }}
-              autoFocus
-              autoCorrect={false}
-              autoCapitalize="none"
-              returnKeyType="search"
-              onSubmitEditing={() => remember(input)}
-              accessibilityHint="Results appear as you type"
-            />
-          </View>
-        }
-      />
+      {/* Brand row, then the field on a row of its own — the same second-row
+          position the category selector holds on For You and Collection. The
+          previous compaction put the field beside the lockup, which crowded the
+          brand row; the founder's correction is the cross-tab header rhythm:
+          row one is who you are looking at, row two is what you do here. */}
+      <AppHeader />
+      <View style={styles.searchRow}>
+        <SearchField
+          accessibilityLabel="Search"
+          // Names both halves, because the second was invisible while it sat behind
+          // a chip. "@handle" rather than "a member" so the sigil is discoverable.
+          placeholder="A film, a series, or @someone"
+          value={input}
+          onChangeText={(next) => {
+            setInput(next);
+            setAllMembers(false);
+          }}
+          onClear={() => {
+            setInput('');
+            setAllMembers(false);
+          }}
+          autoFocus
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
+          onSubmitEditing={() => remember(input)}
+          accessibilityHint="Results appear as you type"
+        />
+      </View>
       <HeaderBoundary />
 
       {/* Hidden while idle. A filter over nothing is three buttons that do
@@ -311,7 +317,7 @@ export default function LogScreen() {
         users={shownUsers}
         usersLoading={users.isPending && !idle}
         usersError={users.isError}
-        moreMembers={moreMembers}
+        morePeopleCount={morePeopleCount}
         onSeeAllMembers={() => setAllMembers(true)}
         relationshipLabel={relationshipLabel}
         onOpenUser={openUser}
@@ -409,7 +415,7 @@ function Results({
   users,
   usersLoading,
   usersError,
-  moreMembers,
+  morePeopleCount,
   onSeeAllMembers,
   relationshipLabel,
   onOpenUser,
@@ -434,7 +440,7 @@ function Results({
   users: UserResult[];
   usersLoading: boolean;
   usersError: boolean;
-  moreMembers: boolean;
+  morePeopleCount: number;
   onSeeAllMembers: () => void;
   relationshipLabel: (user: UserResult) => string | null;
   onOpenUser: (user: UserResult) => void;
@@ -502,57 +508,12 @@ function Results({
   }
 
   /**
-   * People, in a labelled section of their own and visibly not among the titles.
-   *
-   * A profile row is never mistaken for a result in the title ranking — the founder's
-   * rule, which the round avatar against a rectangular poster already signals before
-   * the label is read.
-   *
-   * **"People", the founder's word for members everywhere** — it is already the For
-   * You category. This section called them "Members" to keep People for a future
-   * actor-and-director search, but the app has since spent the word on accounts and
-   * one surface using it differently would be the inconsistency. If cast search ever
-   * ships it will need its own name (deferred-roadmap §1).
-   *
-   * Renders nothing at all when nobody matched, so a plain title search looks exactly
-   * as it did.
+   * The People chip: the list is member rows alone. Title-search states — its error,
+   * its loading, its footers — have nothing to say here, so the empty branches come
+   * before them and speak only about the member read. When somebody *did* match, the
+   * chip falls through to the same list every other chip renders.
    */
-  const members =
-    users.length > 0 ? (
-      <View style={styles.people}>
-        <SectionHeader
-          title="People"
-          // Not a route. Everything it reveals is already in hand, so the expansion
-          // cannot fail and cannot land anybody on a second empty state.
-          actionLabel={moreMembers ? 'See all' : undefined}
-          onPressAction={moreMembers ? onSeeAllMembers : undefined}
-        />
-        {users.map((user) => (
-          <UserRow
-            key={user.id}
-            name={user.name}
-            username={user.username}
-            avatarUri={user.avatarUri}
-            relationship={relationshipLabel(user)}
-            onPress={() => onOpenUser(user)}
-          />
-        ))}
-      </View>
-    ) : null;
-
-  /**
-   * The People chip: this page is the People section alone. Title-search states —
-   * its error, its loading, its footers — have nothing to say here, so the branch
-   * comes before them and speaks only about the member read.
-   */
-  if (peopleOnly) {
-    if (users.length > 0) {
-      return (
-        <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-          {members}
-        </ScrollView>
-      );
-    }
+  if (peopleOnly && users.length === 0) {
     if (usersLoading) return <SkeletonRow count={6} />;
     if (usersError) {
       return (
@@ -572,7 +533,11 @@ function Results({
     );
   }
 
-  if (error) {
+  // A title error owns the page only when there is nothing else on it. With people
+  // in hand the list stays — dropping rows the reader can act on because a *different*
+  // query failed is the review-61 finding — and the failure becomes a footer below
+  // them, in the same place the wider-search failure already reports.
+  if (!peopleOnly && error && users.length === 0) {
     return (
       <EmptyState
         kind="couldNotLoad"
@@ -583,26 +548,9 @@ function Results({
     );
   }
 
-  if (loading && users.length === 0) return <SkeletonRow count={6} />;
+  if (!peopleOnly && loading && users.length === 0) return <SkeletonRow count={6} />;
 
-  if (results.length === 0) {
-    // Somebody matched and no title did. The title empty states below would all be
-    // saying "nothing matches that" over a list that plainly has somebody in it.
-    if (members) {
-      return (
-        <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-          {members}
-          {loading ? <SkeletonRow count={4} /> : null}
-          <EmptyState
-            kind="nothingMatches"
-            compact
-            title="No titles match that"
-            body="Nothing in the catalogue by that name."
-          />
-        </ScrollView>
-      );
-    }
-
+  if (!peopleOnly && results.length === 0 && users.length === 0) {
     // Nobody matched either, and the member read is still in flight. Saying "nothing
     // matches that" now would be a claim about a question still being asked.
     if (usersLoading) return <SkeletonRow count={6} />;
@@ -658,126 +606,212 @@ function Results({
     );
   }
 
+  /**
+   * One continuous list — the founder's contract, stated structurally: query → one
+   * list → chips narrow it. People first, in the server's own order, then titles in
+   * theirs — the smallest deterministic merge, and the order the old sectioned layout
+   * already produced. No heading introduces either kind; the rows themselves say what
+   * they are (round avatar and @handle against poster and metadata), which is what
+   * keeps a profile from ever being misread as an entry in the title ranking. The gate
+   * in `meaningfulMatch` is what keeps person rows out entirely when the query was
+   * plainly about a title; an `@` query lifts that gate rather than reordering.
+   */
+  const rows: ResultRow[] = [
+    ...users.map((user) => ({ type: 'person' as const, user })),
+    // Not a route. Everything the See-all row reveals is already in hand, so the
+    // expansion cannot fail and cannot land anybody on a second empty state.
+    ...(morePeopleCount > 0 ? [{ type: 'more-people' as const, count: morePeopleCount }] : []),
+    ...results.map((result) => ({ type: 'title' as const, result })),
+  ];
+
+  // Somebody matched and the titles failed or came back empty. The list plainly has
+  // people in it, so what happened to the titles is a footer under them rather than a
+  // page-level state — and an error is named as one, never as "no titles match".
+  const titlesError = !peopleOnly && error;
+  const titlesEmpty = !peopleOnly && !error && results.length === 0;
+
   return (
-    // The People section is a *sibling* of the list, not its header. That is the
-    // founder's "never intermix profile rows into the title ranking" expressed
-    // structurally: a header row inside a FlashList is still an item in the list that
-    // ranks titles, and the next person to add sticky headers or a section index would
-    // find people in it.
     <View style={styles.list}>
-      {/* Above the titles, always. A section under a page of films is a section nobody
-          reaches, and the gate in `meaningfulMatch` is what keeps it from appearing at
-          all when the query was plainly about a title. An `@` query lifts that gate
-          rather than reordering anything — Members are already first. */}
-      {members}
       <FlashList
-        data={results}
-      // The wider search runs after the local one and adds to it, so its progress is
-      // a footer rather than a state: the rows already found stay put and usable.
-      ListFooterComponent={
-        searchingWider ? (
-          <View style={styles.status}>
-            <Text variant="footnote" tone="tertiary">
-              Looking further afield…
-            </Text>
-          </View>
-        ) : providerFailed ? (
-          /**
-           * A partial list has to say it is partial.
-           *
-           * This message used to appear only when the list was *empty*, which meant
-           * the one case it most needed to cover was the one it missed: rows found
-           * locally, wider search refused, and a user reading a short list as the
-           * whole answer. That is the founder's `spiderman` failure wearing a
-           * different hat — the catalogue looking complete when it is not — so
-           * fixing the gate without fixing this would have left the same silence
-           * one step further along.
-           */
-          <View style={styles.status}>
-            <Text variant="footnote" tone="secondary">
-              {rateLimited
-                ? 'Too many searches to look wider just now. These are from your catalogue only.'
-                : 'The wider search did not answer, so this may not be everything.'}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Search wider again"
-              onPress={onRetry}
-              hitSlop={theme.space[2]}
-            >
-              <Text variant="callout" tone="action">
-                Try again
-              </Text>
-            </Pressable>
-          </View>
-        ) : null
-      }
-      // Stale results stay legible rather than disappearing: a list that blinks on every
-      // keystroke reads as slower than one that lags a beat behind.
-      style={stale ? styles.stale : undefined}
-      keyExtractor={(item) => item.id}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="on-drag"
-      contentContainerStyle={styles.results}
-      renderItem={({ item }) => (
-        <TitleRow
-          title={item.title}
-          year={yearOf(item.release_date)}
-          posterUri={posterUri(item.poster_path)}
-          secondary={
-            item.kind === 'series' ? (
-              // No count for a series the catalogue has only just met: its seasons
-              // are fetched when the picker opens, and "0 seasons" would be the app
-              // stating as fact something it has not looked up yet.
-              item.season_count ? (
-                `Series · ${item.season_count} seasons`
-              ) : (
-                'Series'
-              )
-            ) : (
-              <TitleMetadata
-                runtimeMinutes={item.runtime_minutes}
-                genres={item.genres}
-                showYear={false}
+        data={rows}
+        getItemType={(item) => item.type}
+        // The wider search runs after the local one and adds to it, so its progress is
+        // a footer rather than a state: the rows already found stay put and usable.
+        ListFooterComponent={
+          titlesError ? (
+            <EmptyState
+              kind="couldNotLoad"
+              compact
+              title="Could not search titles"
+              body="Search needs a connection. Your own collection works offline."
+              action={{ label: 'Try again', onPress: onRetry }}
+            />
+          ) : titlesEmpty ? (
+            <>
+              {loading ? <SkeletonRow count={4} /> : null}
+              <EmptyState
+                kind="nothingMatches"
+                compact
+                title="No titles match that"
+                body="Nothing in the catalogue by that name."
               />
-            )
+            </>
+          ) : !peopleOnly && searchingWider ? (
+            <View style={styles.status}>
+              <Text variant="footnote" tone="tertiary">
+                Looking further afield…
+              </Text>
+            </View>
+          ) : !peopleOnly && providerFailed ? (
+            /**
+             * A partial list has to say it is partial.
+             *
+             * This message used to appear only when the list was *empty*, which meant
+             * the one case it most needed to cover was the one it missed: rows found
+             * locally, wider search refused, and a user reading a short list as the
+             * whole answer. That is the founder's `spiderman` failure wearing a
+             * different hat — the catalogue looking complete when it is not — so
+             * fixing the gate without fixing this would have left the same silence
+             * one step further along.
+             */
+            <View style={styles.status}>
+              <Text variant="footnote" tone="secondary">
+                {rateLimited
+                  ? 'Too many searches to look wider just now. These are from your catalogue only.'
+                  : 'The wider search did not answer, so this may not be everything.'}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Search wider again"
+                onPress={onRetry}
+                hitSlop={theme.space[2]}
+              >
+                <Text variant="callout" tone="action">
+                  Try again
+                </Text>
+              </Pressable>
+            </View>
+          ) : null
+        }
+        keyExtractor={(item) =>
+          item.type === 'person'
+            ? `person:${item.user.id}`
+            : item.type === 'title'
+              ? `title:${item.result.id}`
+              : 'more-people'
+        }
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        contentContainerStyle={styles.results}
+        renderItem={({ item }) => {
+          if (item.type === 'person') {
+            return (
+              <UserRow
+                name={item.user.name}
+                username={item.user.username}
+                avatarUri={item.user.avatarUri}
+                relationship={relationshipLabel(item.user)}
+                onPress={() => onOpenUser(item.user)}
+              />
+            );
           }
-          trailing={
-            <Pressable
-              accessibilityLabel={`Log ${item.title}`}
-              onPress={() => onOpenLog(item)}
-              hitSlop={theme.space[2]}
-            >
-              <Ionicons name="add-circle" size={theme.layout.icon.lg} color={theme.semantic.action} />
-            </Pressable>
+          if (item.type === 'more-people') {
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`See all ${item.count} people`}
+                onPress={onSeeAllMembers}
+                style={({ pressed }) => [styles.seeAllRow, pressed && styles.pressed]}
+              >
+                <Text variant="callout" tone="action">
+                  See all {item.count} people
+                </Text>
+              </Pressable>
+            );
           }
-            onPress={() => onOpenTitle(item)}
-          />
-        )}
+          const title = item.result;
+          return (
+            // Stale dims only what is stale — the title results lagging a beat behind
+            // the keystroke, kept legible rather than blinking away. The person rows
+            // come from their own query and stay at full strength.
+            <View style={stale ? styles.stale : undefined}>
+              <TitleRow
+                title={title.title}
+                year={yearOf(title.release_date)}
+                posterUri={posterUri(title.poster_path)}
+                secondary={
+                  title.kind === 'series' ? (
+                    // No count for a series the catalogue has only just met: its seasons
+                    // are fetched when the picker opens, and "0 seasons" would be the app
+                    // stating as fact something it has not looked up yet.
+                    title.season_count ? (
+                      `Series · ${title.season_count} seasons`
+                    ) : (
+                      'Series'
+                    )
+                  ) : (
+                    <TitleMetadata
+                      runtimeMinutes={title.runtime_minutes}
+                      genres={title.genres}
+                      showYear={false}
+                    />
+                  )
+                }
+                trailing={
+                  <Pressable
+                    accessibilityLabel={`Log ${title.title}`}
+                    onPress={() => onOpenLog(title)}
+                    hitSlop={theme.space[2]}
+                  >
+                    <Ionicons
+                      name="add-circle"
+                      size={theme.layout.icon.lg}
+                      color={theme.semantic.action}
+                    />
+                  </Pressable>
+                }
+                onPress={() => onOpenTitle(title)}
+              />
+            </View>
+          );
+        }}
       />
     </View>
   );
 }
 
+/**
+ * A row in the one list. Three kinds, one surface: the discriminant is what
+ * `getItemType` hands FlashList for recycling and what `renderItem` switches on.
+ */
+type ResultRow =
+  | { type: 'person'; user: UserResult }
+  | { type: 'more-people'; count: number }
+  | { type: 'title'; result: SearchResult };
+
 const styles = StyleSheet.create({
-  headerSearch: { flex: 1 },
+  // The field's own row under the brand row — the cross-tab second-row position the
+  // category selector holds elsewhere. Gutter-aligned with the content below it.
+  searchRow: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingBottom: theme.space[2],
+  },
   filters: {
     flexDirection: 'row',
     gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
-    // Top as well as bottom now that the row sits directly under the header seam —
-    // the search field that used to hold this gap lives in the header itself.
+    // Top as well as bottom because the row sits directly under the header seam.
     paddingTop: theme.space[2],
     paddingBottom: theme.space[2],
   },
-  // A rule under the section, so the boundary between people and titles is drawn
-  // rather than implied by spacing alone.
-  people: {
-    paddingBottom: theme.space[2],
-    borderBottomWidth: StyleSheet.hairlineWidth * 2,
-    borderBottomColor: theme.border.hairline,
-  },
   list: { flex: 1 },
+  // Row-shaped like its neighbours, so the expansion reads as part of the list
+  // rather than as a control floating between two kinds of row.
+  seeAllRow: {
+    minHeight: theme.layout.minTapTarget,
+    justifyContent: 'center',
+    paddingHorizontal: theme.layout.gutter,
+  },
   status: { padding: theme.layout.gutter, gap: theme.space[2], alignItems: 'flex-start' },
   stale: { opacity: 0.6 },
   idle: { paddingTop: theme.space[2], paddingBottom: theme.space[8] },

@@ -413,7 +413,7 @@ export default function TitleScreen() {
   /** The band this title is already in, in the chips' spelling. Null until the read lands. */
   const rankedBucket = data.ranked?.bucket ? (BUCKET_IDS[data.ranked.bucket] ?? null) : null;
 
-  const rankCategoryLabel = data.ranked?.category === 'tv_seasons' ? 'TV seasons' : 'Movies';
+  const rankCategoryLabel = data.ranked?.category === 'tv_seasons' ? 'TV' : 'Movies';
   // One line only, chosen by the founder's rule: top ten overall, else the
   // strongest category placement. Derived from rows already cached.
   const heroRank = data.ranked

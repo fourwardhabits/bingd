@@ -48,8 +48,10 @@ export function RankedTitlesSheet({
 
   if (!category) return null;
 
-  const what = category === 'movies' ? 'Movies' : 'TV seasons';
-  const whose = isSelf ? `Your ${what.toLowerCase()}` : `${name} · ${what}`;
+  // "TV" keeps its capitals in the possessive form — lowercasing the label works for
+  // "Your movies" and produces "Your tv", so the self heading is spelt out per case.
+  const what = category === 'movies' ? 'Movies' : 'TV';
+  const whose = isSelf ? (category === 'movies' ? 'Your movies' : 'Your TV') : `${name} · ${what}`;
 
   return (
     <Sheet visible onClose={onClose} label={`${whose}, newest first`}>
@@ -78,7 +80,8 @@ export function RankedTitlesSheet({
             <EmptyState
               kind="nothingYet"
               compact
-              title={`No ${what.toLowerCase()} ranked yet`}
+              // "TV" keeps its capitals mid-sentence; only "Movies" lowers.
+              title={`No ${category === 'movies' ? 'movies' : 'TV'} ranked yet`}
               body={
                 isSelf
                   ? 'Log and rank a title and it will appear here.'

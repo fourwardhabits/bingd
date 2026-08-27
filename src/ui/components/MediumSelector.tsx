@@ -26,10 +26,10 @@ export type MediumSelectorProps<T extends string = Medium> = {
   /**
    * Override what a category is called on this screen.
    *
-   * The rankable unit is the season, so Collection genuinely lists TV *seasons*. For
-   * You recommends shows — TMDB answers "similar" about a series and never about a
-   * season — so calling them seasons there would name something the wall does not
-   * contain. One control, two accurate labels, rather than two controls.
+   * The visible category is "TV" (external-beta polish) even though the rankable unit
+   * underneath remains the individual season. For You still overrides to "TV shows" —
+   * TMDB answers "similar" about a series and never about a season, so its wall holds
+   * shows and says so. One control, two accurate labels, rather than two controls.
    */
   labels?: Partial<Record<T, string>>;
 };
@@ -41,7 +41,7 @@ export type MediumSelectorProps<T extends string = Medium> = {
  */
 export const MEDIUM_OPTIONS: readonly MediumSelectorOption[] = [
   { id: 'movies', label: 'Movies' },
-  { id: 'tv_seasons', label: 'TV seasons' },
+  { id: 'tv_seasons', label: 'TV' },
 ];
 
 const labelFor = <T extends string>(

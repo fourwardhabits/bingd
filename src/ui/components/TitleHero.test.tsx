@@ -137,6 +137,24 @@ describe('the hero fade', () => {
     expect(frameOf(inset).style.height).toBe(frameOf(bare).style.height);
   });
 
+  /**
+   * The polish-tranche height: 1.5, up from 1.62 — the smallest step that
+   * noticeably deepens the visible artwork before the fade (the founder's
+   * pulled-down composition). Pinned so a future "small tweak" moves this
+   * number knowingly rather than by accident.
+   */
+  it('gives the frame the tranche’s taller aspect, and no more', async () => {
+    const { Dimensions } = jest.requireActual('react-native');
+    const { width } = Dimensions.get('window');
+
+    const nodes = await treeOf(<TitleHero uri={BACKDROP} />);
+    const frame = nodes.find(
+      (node) => typeof node.style.height === 'number' && !node.props.source,
+    )!;
+
+    expect(frame.style.height).toBe(width / 1.5);
+  });
+
   it('draws a warm band and no artwork when there is none', async () => {
     // The seed catalogue ships without backdrops. A short band is not a failure state
     // and must not pretend to be an image.

@@ -13,10 +13,11 @@ export type HeroRank = {
   basis: 'overall' | 'genre' | 'language';
 };
 
-/** How the two ranked lists are named in a sentence. */
+/** How the two ranked lists are named in a sentence. "TV" is the visible category
+ *  everywhere; the ranked objects behind `#2 in TV` are still individual seasons. */
 const CATEGORY_LABEL: Record<RankingCategory, string> = {
   movies: 'Movies',
-  tv_seasons: 'TV seasons',
+  tv_seasons: 'TV',
 };
 
 /**

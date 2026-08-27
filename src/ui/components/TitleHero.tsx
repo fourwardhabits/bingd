@@ -117,19 +117,25 @@ const POSTER_BLUR = 28;
 /**
  * The hero's aspect. Taller than the artwork's own 16:9, but only just.
  *
- * It was 1.4, and that is what the founder’s second look called "too cropped". The
- * arithmetic is the reason. `cover` scales an image until it fills both dimensions, so
- * a 16:9 backdrop in a frame narrower than 16:9 is scaled by height and loses the
- * *sides*: at 1.4 on a 412pt screen the image is drawn 523pt wide, and 111pt of what
- * somebody composed never reaches the screen. Nothing is lost from the top, which is
- * why anchoring the crop there never fixed it.
+ * It was 1.4, which the founder’s second look called "too cropped" — a frame narrower
+ * than 16:9 makes `cover` scale by height and lose the *sides* (27% of the width at
+ * 1.4). 1.62 fixed the sides but the founder's third look still wanted more of the
+ * artwork: the pulled-down composition, where the visible picture runs deeper before
+ * the fade. So: 1.5, the smallest step that noticeably deepens it — about twenty
+ * points of height on a 393pt screen.
  *
- * 1.62 costs about forty points of height and takes the horizontal loss from 27% to
- * 10%, which is the difference between a backdrop and a detail of one. It is still
- * taller than 16:9, so the poster still rises into artwork rather than into Paper, and
- * the fade below moves with it.
+ * The arithmetic changed when `topInset` arrived, which is why 1.5 does not reopen
+ * the side-crop that 1.4 had. With the image starting `topInset` down, its visible
+ * box is *wider* than 16:9 on any real device, so `cover` scales by width: the full
+ * width and the top edge of the backdrop are on screen at either ratio, and extra
+ * frame height converts one-for-one into artwork that was previously cropped under
+ * the fade — at 1.62 about 37 points of a 393pt-wide backdrop never showed, at 1.5
+ * about 17. Only the inset-less case (tests, edge devices) is height-scaled, where
+ * 1.5 costs ~16% of the sides against ~10% at 1.62 — the founder's authorized trade.
+ * The poster still rises into artwork rather than into Paper, and the fade, drawn in
+ * percentages, moves with the frame.
  */
-const HERO_RATIO = 1.62;
+const HERO_RATIO = 1.5;
 
 /**
  * One continuous gradient, drawn by the platform.

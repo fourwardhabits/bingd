@@ -930,7 +930,7 @@ function Reveal({
   onFinishLog?: () => void;
 }) {
   const profile = useCurrentProfile();
-  const readableCategory = category === 'tv_seasons' ? 'TV seasons' : 'Movies';
+  const readableCategory = category === 'tv_seasons' ? 'TV' : 'Movies';
   const shown = useCountUp(score, bucket);
 
   // The ranked list for this category, which the collection already caches under the

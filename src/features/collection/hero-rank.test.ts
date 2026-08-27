@@ -30,7 +30,7 @@ describe('top ten overall', () => {
 
   it('names the TV list correctly', () => {
     const rows = [row('a', 1, [])];
-    expect(heroRankFor('a', rows, 'tv_seasons')?.label).toBe('#1 in TV seasons');
+    expect(heroRankFor('a', rows, 'tv_seasons')?.label).toBe('#1 in TV');
   });
 
   it('stops at ten', () => {

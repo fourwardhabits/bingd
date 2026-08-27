@@ -90,7 +90,7 @@ export function AwardBreakdownSheet({
    * Sections are kept rather than flattened because Two-Screen Life's two halves are the
    * explanation of its arithmetic — losing the headings would cost the one thing that
    * sheet exists to show. A section past the budget draws nothing at all, including its
-   * heading: a bare "TV seasons" label with no rows under it reads as "you have none",
+   * heading: a bare "TV" label with no rows under it reads as "you have none",
    * which is a different and false claim.
    */
   const visible = useMemo(

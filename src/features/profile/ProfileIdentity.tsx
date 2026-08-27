@@ -113,7 +113,7 @@ export type ProfileIdentityProps = {
  *
  *     Bio, across the full width
  *
- *     Followers   Following   Movies   TV seasons
+ *     Followers   Following   Movies   TV
  *
  *     [ Share Profile ]  [ Bingd Awards ]
  *
@@ -222,7 +222,7 @@ export function ProfileIdentity({
             // Ranked below shows six, and these counts claim the rest. The tap opens
             // the full list, newest first.
             { label: 'Movies', value: stats.movies, onPress: onPressMovies, hint: 'Opens the list' },
-            { label: 'TV seasons', value: stats.seasons, onPress: onPressSeasons, hint: 'Opens the list' },
+            { label: 'TV', value: stats.seasons, onPress: onPressSeasons, hint: 'Opens the list' },
           ]}
         />
       ) : null}

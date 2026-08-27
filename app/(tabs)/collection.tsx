@@ -341,7 +341,7 @@ function Watched({
         ) : (
           <View style={styles.padded}>
             <Text variant="body" tone="tertiary">
-              Nothing here in {medium === 'movies' ? 'movies' : 'TV seasons'} yet.
+              Nothing here in {medium === 'movies' ? 'movies' : 'TV'} yet.
             </Text>
           </View>
         )

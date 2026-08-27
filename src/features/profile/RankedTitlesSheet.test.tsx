@@ -106,7 +106,9 @@ it('opens the tapped title', async () => {
 it('says the category is empty rather than showing a blank sheet', async () => {
   const view = await open({ category: 'tv_seasons' });
 
-  await waitFor(() => expect(view.getByText('No tv seasons ranked yet')).toBeTruthy());
+  // "TV", capitals intact — the lowercased template that once produced
+  // "No tv seasons ranked yet" is exactly what the per-case copy replaced.
+  await waitFor(() => expect(view.getByText('No TV ranked yet')).toBeTruthy());
 });
 
 /**

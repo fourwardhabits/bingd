@@ -41,10 +41,14 @@ export type GoalCategory = RankingCategory;
 
 export const GOAL_CATEGORIES: readonly GoalCategory[] = ['movies', 'tv_seasons'];
 
-/** The label a goal is given on screen. `tv_seasons` is a schema word, not a noun. */
+/**
+ * The label a goal is given on screen. `tv_seasons` is a schema word, not a noun —
+ * and the visible category is "TV" everywhere (external-beta polish), while the unit
+ * counted below stays the season, because seasons are what the goal actually counts.
+ */
 export const GOAL_LABEL: Record<GoalCategory, string> = {
   movies: 'Movies',
-  tv_seasons: 'TV seasons',
+  tv_seasons: 'TV',
 };
 
 /** The unit, for the sentence under a bar: "12 of 52 movies". */

@@ -98,7 +98,7 @@ export function TopRanked({ userId, otherName, onPressTitle }: TopRankedProps) {
       <SectionHeader title="Top ranked" />
 
       {/* Offered only where both halves have something. Somebody who has ranked only
-          films is not asked to choose between Movies and TV seasons — the same rule the
+          films is not asked to choose between Movies and TV — the same rule the
           person page's filmography filter follows. */}
       {hasBoth ? (
         <View style={styles.tabs}>
@@ -106,7 +106,7 @@ export function TopRanked({ userId, otherName, onPressTitle }: TopRankedProps) {
             options={[
               { id: 'all' as const, label: 'All' },
               { id: 'movies' as const, label: 'Movies' },
-              { id: 'tv_seasons' as const, label: 'TV seasons' },
+              { id: 'tv_seasons' as const, label: 'TV' },
             ]}
             value={filter}
             onChange={setFilter}
