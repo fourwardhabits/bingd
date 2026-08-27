@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
 
-import { theme } from '../tokens';
+import { inputText, theme } from '../tokens';
 
 export type SearchFieldProps = Omit<TextInputProps, 'style'> & {
   onClear?: () => void;
@@ -40,9 +40,11 @@ const styles = StyleSheet.create({
     gap: theme.space[2],
     paddingHorizontal: theme.space[3],
   },
+  // `inputText`, not `typography.body`: a line-height on a single-line iOS
+  // TextInput sinks the text below the field's visual centre.
   input: {
     flex: 1,
     color: theme.text.primary,
-    ...theme.typography.body,
+    ...inputText,
   },
 });

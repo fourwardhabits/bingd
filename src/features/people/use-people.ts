@@ -26,11 +26,14 @@ export type PersonSuggestion = {
   /**
    * The one line of context under the handle.
    *
-   * Exactly one of the two, because the two sections answer different questions and a
+   * Exactly one of the two, because the two modes answer different questions and a
    * row that showed both would be inviting a comparison between a percentage and a
-   * count.
+   * count. `names` carries at most three of the mutuals, for the card's line —
+   * the full list is `useMutualsWith`, read only when the sheet opens.
    */
-  context: { kind: 'mutuals'; count: number } | { kind: 'match'; score: number };
+  context:
+    | { kind: 'mutuals'; count: number; names: string[] }
+    | { kind: 'match'; score: number };
 };
 
 type Row = {
@@ -52,11 +55,12 @@ const identity = (row: Row) => ({
 /**
  * People followed by the people you follow, most shared connections first.
  *
- * **The number is a count and never a list of names.** `people_mutuals` could name them
- * — every edge it counts is one `follows_read` would admit to this caller individually
- * — but "Followed by Sarah and 2 others" puts a specific person's following list on
- * somebody else's screen as a claim, in something they can screenshot. The founder's
- * instruction was to fall back to a number if naming raised any doubt, and it does.
+ * **The mutuals are named now** (`20260827000100`) — the founder reversed the
+ * count-only decision after the physical pass: "1 mutual" without a name asks the
+ * reader to act on a number. The privacy ground is unchanged, because it never needed
+ * to change: every edge counted is one `follows_read` would admit to this caller
+ * individually, so the names were always theirs to read one query at a time; the
+ * server caps the inline list at three and `mutuals_with` carries the rest.
  *
  * Keyed by the viewer, like every viewer-relative key in this app. The answer is
  * *entirely* about who is asking, and a cache entry reachable from a second account
@@ -76,10 +80,16 @@ export function usePeopleMutuals(viewerId: string, enabled = true) {
       const { data, error } = await supabase.rpc('people_mutuals', { p_limit: 10 });
       if (error) throw error;
 
-      return ((data ?? []) as (Row & { mutual_count: number })[]).map((row) => ({
-        ...identity(row),
-        context: { kind: 'mutuals' as const, count: row.mutual_count },
-      }));
+      return ((data ?? []) as (Row & { mutual_count: number; mutual_names: string[] | null })[]).map(
+        (row) => ({
+          ...identity(row),
+          context: {
+            kind: 'mutuals' as const,
+            count: row.mutual_count,
+            names: row.mutual_names ?? [],
+          },
+        }),
+      );
     },
   });
 }
@@ -113,30 +123,60 @@ export function usePeopleTasteMatches(viewerId: string, enabled = true) {
   });
 }
 
-/**
- * The two lists as one screen's worth of sections, with the order the founder asked for
- * and nothing that would draw an empty heading.
- *
- * Mutuals lead when there are any, because a shared connection is a stronger reason to
- * look at somebody than an agreement about films. With no mutuals, taste matches lead
- * rather than sitting under a heading with nothing above it.
- *
- * **Nobody appears twice.** Somebody can easily be both a friend of a friend and a good
- * taste match, and two rows for one person in one scroll is the list looking broken.
- * Mutuals win the duplicate, which follows from them leading.
- *
- * Separated from the component so the ordering rules are testable without a render.
- */
-export function peopleSections(
-  mutuals: PersonSuggestion[] | undefined,
-  matches: PersonSuggestion[] | undefined,
-): { title: string; people: PersonSuggestion[] }[] {
-  const first = mutuals ?? [];
-  const seen = new Set(first.map((person) => person.id));
-  const second = (matches ?? []).filter((person) => !seen.has(person.id));
+export type MutualPerson = {
+  id: string;
+  username: string;
+  name: string;
+  avatarUri: string | null;
+};
 
-  return [
-    { title: 'Mutuals', people: first },
-    { title: 'Taste matches', people: second },
-  ].filter((section) => section.people.length > 0);
+/**
+ * The server reads at most this many rows for the inspection sheet (`mutuals_with`'s
+ * own `limit 30`). Exported so the sheet can *say* when the page is full (review 60b)
+ * — the card's count is not capped, and a count of 45 over a silent list of 30 would
+ * be the sheet contradicting the line it opened from.
+ */
+export const MUTUALS_WITH_PAGE = 30;
+
+/**
+ * Everybody behind one card's mutual count — the caller's approved followees who
+ * follow the subject — read only when the inspection sheet opens.
+ *
+ * Same predicates as `people_mutuals`' aggregate, so the sheet can never name an edge
+ * the count did not include. Keyed by the viewer like every viewer-relative key.
+ */
+export function useMutualsWith(subjectId: string | null, viewerId: string) {
+  return useQuery({
+    queryKey: ['mutuals-with', viewerId, subjectId],
+    enabled: Boolean(subjectId) && Boolean(viewerId),
+    staleTime: 60_000,
+    queryFn: async (): Promise<MutualPerson[]> => {
+      const { data, error } = await supabase.rpc('mutuals_with', { p_subject: subjectId });
+      if (error) throw error;
+
+      return ((data ?? []) as Row[]).map((row) => ({
+        id: row.user_id,
+        username: row.username,
+        name: row.display_name || row.username,
+        avatarUri: avatarUri(row.avatar_path),
+      }));
+    },
+  });
+}
+
+/**
+ * The one line under a mutual suggestion's handle: who the connection is, not just
+ * that one exists. "1 mutual" asked the reader to act on a number; the name is what
+ * the number was standing in for. Overflow stays a count — the card is a row, and
+ * the full list is the sheet's job.
+ *
+ * Separated from the component so the wording is testable without a render.
+ */
+export function mutualsLine(context: { count: number; names: string[] }): string {
+  const [first] = context.names;
+  // The server always names at least one mutual for a counted row; a bare count is
+  // the fallback for a cache written before names existed.
+  if (!first) return `${context.count} ${context.count === 1 ? 'mutual' : 'mutuals'}`;
+  if (context.count === 1) return `Mutual: ${first}`;
+  return `${first} + ${context.count - 1} more`;
 }

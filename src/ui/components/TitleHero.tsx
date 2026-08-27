@@ -21,6 +21,24 @@ export type TitleHeroProps = {
    * it, at the size it was drawn for.
    */
   blurred?: boolean;
+  /**
+   * The status-bar inset, when the hero runs under a transparent header.
+   *
+   * **This is the founder's pull-down, made the resting state.** The title page draws
+   * its header transparent, so the top of the frame sits under the status bar and the
+   * navigation controls — and on the physical device the top of every backdrop was
+   * occluded by them. Pulling the scroll view down slid the artwork below the bar and
+   * produced the composition the founder wanted; no `contentPosition` value could,
+   * because the top of the image was never *cropped*, it was *covered*.
+   *
+   * So the image starts this far down inside the same frame, with the frame's warm
+   * band behind the bar. The visible sub-frame is then *wider* than 16:9, which flips
+   * `cover` from height-scaling to width-scaling: the whole width of the backdrop and
+   * its top edge become visible, and the crop moves to the bottom — under the fade,
+   * where the page was already painting over the artwork. Total hero height is
+   * unchanged, so nothing below moves.
+   */
+  topInset?: number;
 };
 
 /**
@@ -40,6 +58,7 @@ export function TitleHero({
   blurhash,
   collapsedHeight = 72,
   blurred = false,
+  topInset = 0,
 }: TitleHeroProps) {
   const { width } = useWindowDimensions();
   /**
@@ -66,11 +85,11 @@ export function TitleHero({
         /**
          * **Top centre, not centre.**
          *
-         * It matters for the poster fallback and costs nothing for a backdrop. A poster
-         * is far taller than this frame, so `cover` drops most of its height; taking
-         * that from the bottom keeps the part somebody composed. A backdrop is wider
-         * than the frame rather than taller, so it loses nothing vertically and this
-         * only centres it horizontally, which is what you want either way.
+         * With `topInset` shrinking the image's box to wider-than-16:9, `cover` scales
+         * a backdrop by *width* and the crop is vertical — anchoring it to the top is
+         * what keeps the upper part somebody composed and pushes the loss into the
+         * fade. The poster fallback wants the same answer for the same reason: far
+         * taller than any frame here, and the bottom is the half nobody framed.
          */
         contentPosition="top center"
         transition={theme.duration.navigation}
@@ -79,7 +98,7 @@ export function TitleHero({
         // at full strength is still the most saturated thing on a Paper page, and the
         // point is a field for the real poster to sit on, not a second subject.
         blurRadius={blurred ? POSTER_BLUR : 0}
-        style={[styles.fill, blurred && styles.dimmed]}
+        style={[styles.fill, { top: topInset }, blurred && styles.dimmed]}
         accessibilityIgnoresInvertColors
       />
       <Scrim height={height} />

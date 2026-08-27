@@ -52,6 +52,22 @@ export type NotificationKind =
    */
   | 'invite_welcome'
   /**
+   * The accepter's own record of approving a follow request (`20260827000200`).
+   *
+   * The founder's correction: accepting a request made the notification vanish, so
+   * the Bell kept every social fact except the one where two people connected. The
+   * actionable `follow_request` row is still cleared on approval — an Accept that can
+   * be drawn twice is a bug — and this row is what replaces the silence. Actor is the
+   * requester; recipient is the accepter; born **pre-read**, because it reports the
+   * reader's own tap. `mutual` freezes whether the connection was two-way at that
+   * moment, which is what decides between "You and Abisola are now friends" and
+   * "Abisola now follows you".
+   *
+   * Never pushed (`_push_eligible` does not list it) and always delivered — a record
+   * of your own action is not a preference axis.
+   */
+  | 'friendship'
+  /**
    * An award tier was crossed. **Nothing writes this yet, and this run did not
    * build it.**
    *
@@ -93,6 +109,12 @@ export type Notification = {
    */
   subjectType: string | null;
   subjectId: string | null;
+  /**
+   * `friendship` only: whether the connection was mutual when it was made. Frozen at
+   * acceptance by the server rather than re-derived here, so an unfollow later does
+   * not rewrite what the row said. Null on every other kind.
+   */
+  mutual: boolean | null;
 };
 
 const KINDS = new Set<string>([
@@ -105,6 +127,7 @@ const KINDS = new Set<string>([
   'recommendation',
   'invite_activated',
   'invite_welcome',
+  'friendship',
   'award_earned',
 ]);
 
@@ -169,6 +192,7 @@ export function useNotifications(viewerId: string) {
           series_title: string | null;
           subject_type: string | null;
           subject_id: string | null;
+          payload: { mutual?: boolean } | null;
         }[]
       )
         .filter(
@@ -191,6 +215,7 @@ export function useNotifications(viewerId: string) {
           seriesTitle: row.series_title,
           subjectType: row.subject_type,
           subjectId: row.subject_id,
+          mutual: row.kind === 'friendship' ? row.payload?.mutual === true : null,
         }));
     },
   });
@@ -287,6 +312,14 @@ export function verbFor(kind: NotificationKind, mediaKind?: Notification['mediaK
     case 'invite_welcome':
       return 'invited you';
     /**
+     * The non-mutual reading, which is the one this shape can say. The mutual case —
+     * "You and Abisola are now friends" — does not begin with the actor, so the Bell
+     * special-cases it beside the welcome; this is the spoken fallback and the row
+     * for an approval that was one-way.
+     */
+    case 'friendship':
+      return 'now follows you';
+    /**
      * Second person, and no actor. Every other verb completes a sentence that began
      * with somebody's name; this one is the whole sentence, which is why the row
      * that draws it must not expect a face.
@@ -310,7 +343,10 @@ export function canFollowBack(
   outgoing: 'approved' | 'pending' | null | undefined,
 ): boolean {
   return (
-    (row.kind === 'follow' || row.kind === 'invite_welcome') &&
+    // `friendship` joins the pair (20260827000200): a one-way acceptance is exactly
+    // "somebody now follows you", and the relationship gate below hides the control
+    // by itself whenever the friendship was mutual.
+    (row.kind === 'follow' || row.kind === 'invite_welcome' || row.kind === 'friendship') &&
     Boolean(row.actorId) &&
     !outgoing
   );

@@ -38,9 +38,17 @@ should bring it back · what it depends on.**
 
 ## 1. People and actor search
 
-**What it is.** A grouped **People** section in Search, alongside Titles and Members, so
-that typing "Tilda Swinton" finds the person and opens the person page the app already
-has (`app/person/[id].tsx`, reached today only by tapping a face in a cast strip).
+**What it is.** A grouped cast-and-crew section in Search, alongside titles and member
+accounts, so that typing "Tilda Swinton" finds the person and opens the person page the
+app already has (`app/person/[id].tsx`, reached today only by tapping a face in a cast
+strip).
+
+> **The word "People" is spent (2026-08-27).** Search's member section — previously
+> titled "Members" partly to reserve People for this feature — is now titled **People**,
+> matching the For You category and a People filter chip: the app had already spent the
+> word on accounts everywhere else, and one surface using it differently was the
+> inconsistency. When this feature ships it needs its own label ("Cast & crew" or
+> similar), not People.
 
 **Why it is wanted.** The person page is built, real and good — a portrait, a biography, a
 filmography drawn from TMDB and cached, with the reader's own Saved / Ranked / Watched

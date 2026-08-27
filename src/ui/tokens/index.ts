@@ -12,7 +12,7 @@ export {
   tier,
   type BucketKey,
 } from './color';
-export { fontFamily, typography, type TypographyToken } from './typography';
+export { fontFamily, inputText, typography, type TypographyToken } from './typography';
 export {
   duration,
   elevation,

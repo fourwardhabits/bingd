@@ -507,29 +507,30 @@ describe('finding people', () => {
   };
 
   /**
-   * **The Users chip is gone, and its absence is the point.**
+   * **People is a chip again, and it is not the Users chip that was removed.**
    *
-   * The three that remain narrow *titles*; members are a different kind of thing and
-   * were never narrowed by them, so a fourth chip made one control mean two things and
-   * put member discovery behind a press nobody had a reason to make.
+   * That one sat among three title filters while members were interleaved into the
+   * same list, so one control meant two things. The People chip shows the (structurally
+   * separate) People section alone — and "Users" stays gone, because the founder's word
+   * for accounts is People everywhere the app speaks of them.
    */
-  it('offers the three title filters and no Users tab', async () => {
+  it('offers the three title filters and People, and no Users tab', async () => {
     withPeople([]);
     const view = await search('anna');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    for (const label of ['All', 'Movies', 'TV']) {
+    for (const label of ['All', 'Movies', 'TV', 'People']) {
       expect(view.getByText(label)).toBeTruthy();
     }
     expect(view.queryByText('Users')).toBeNull();
   });
 
-  it('shows a compact Members section above the titles', async () => {
+  it('shows a compact People section above the titles', async () => {
     withPeople([anna]);
     const view = await search('anna');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    await waitFor(() => expect(view.getByLabelText('Members')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('People')).toBeTruthy());
     expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy();
     // Titles are still there and still the body of the list.
     expect(view.getByLabelText(FILM_ROW)).toBeTruthy();
@@ -542,7 +543,7 @@ describe('finding people', () => {
     const view = await search('ann');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    expect(view.queryByLabelText('Members')).toBeNull();
+    expect(view.queryByLabelText('People')).toBeNull();
   });
 
   /**
@@ -603,7 +604,7 @@ describe('finding people', () => {
     withPeople([anna]);
     const view = await search('anna');
 
-    await waitFor(() => expect(view.getByLabelText('Members')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('People')).toBeTruthy());
     expect(view.queryByText('See all')).toBeNull();
   });
 
@@ -614,7 +615,7 @@ describe('finding people', () => {
     const view = await search('anna');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    expect(view.queryByLabelText('Members')).toBeNull();
+    expect(view.queryByLabelText('People')).toBeNull();
   });
 
   /**
@@ -679,5 +680,55 @@ describe('finding people', () => {
     await fireEvent.press(view.getByLabelText('Anna Rivers, @anna'));
 
     expect(mockPush).toHaveBeenCalledWith('/u/anna');
+  });
+
+  /**
+   * **The People chip lifts the gate and hides the titles.**
+   *
+   * Choosing People is the statement of intent `meaningfulMatch` exists to infer from
+   * a plain query, so the middle-of-the-handle match the gate keeps out of All is shown
+   * here — and the title list is simply absent rather than "filtered to nothing".
+   */
+  it('People shows every name match and no titles', async () => {
+    withPeople([deanna]);
+    const view = await search('ann');
+    // Under All this match is gated out (asserted above) and the titles show.
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
+    await fireEvent.press(view.getByText('People'));
+
+    await waitFor(() => expect(view.getByLabelText('Deanna Troi, @deanna')).toBeTruthy());
+    expect(view.queryByLabelText(FILM_ROW)).toBeNull();
+  });
+
+  it('People shows everybody at once, with no See all', async () => {
+    const many = Array.from({ length: 5 }, (_, index) => ({
+      id: `user-${index}`,
+      username: `anna${index}`,
+      display_name: `Anna ${index}`,
+      avatar_path: null,
+      visibility: 'public',
+    }));
+    withPeople(many);
+    const view = await search('anna');
+    await waitFor(() => expect(view.getByLabelText('Anna 0, @anna0')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('People'));
+
+    await waitFor(() => expect(view.getByLabelText('Anna 4, @anna4')).toBeTruthy());
+    expect(view.queryByText('See all')).toBeNull();
+  });
+
+  it('People says who it could not find, in its own words', async () => {
+    withPeople([]);
+    const view = await search('anna');
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
+    await fireEvent.press(view.getByText('People'));
+
+    await waitFor(() => expect(view.getByText('Nobody by that name')).toBeTruthy());
+    // Not the title empty state: a person search that found nobody is not a
+    // catalogue miss.
+    expect(view.queryByText('Nothing matches that')).toBeNull();
   });
 });

@@ -34,16 +34,19 @@ import {
  * All first, because the filter is a narrowing of a search the user has already made
  * and the unnarrowed state is the one they arrive in.
  *
- * **`users` was a fourth chip here and is not one any more.** These three narrow
- * *titles*; members are a different kind of thing and were never narrowed by them, so a
- * Users chip made one control mean two things and put member discovery behind a press
- * nobody had a reason to make. Members are a grouped section now, always present when
- * somebody matched, with See all to open the rest in place.
+ * **People is a chip again, and it is not the `users` chip that was removed.** That one
+ * sat among three title filters while members were interleaved into the same list, so
+ * one control meant two things. Now the People section is structurally separate and the
+ * chip does exactly one thing: shows that section alone, with the relevance gate lifted
+ * — choosing People *is* the statement of intent the gate exists to infer, so every
+ * name and @handle match shows. The placeholder promises "@someone"; this is the filter
+ * that promise was missing. All still interleaves as before: people above titles.
  */
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'movies', label: 'Movies' },
   { id: 'tv', label: 'TV' },
+  { id: 'people', label: 'People' },
 ] as const;
 
 /**
@@ -105,6 +108,9 @@ export default function LogScreen() {
 
   const filtered = useMemo(() => {
     if (filter === 'all') return results;
+    // People is not a narrowing of titles — it swaps the page over to the People
+    // section, so the title list is simply absent rather than "filtered to nothing".
+    if (filter === 'people') return [];
     return results.filter((result) =>
       filter === 'movies' ? result.kind === 'movie' : result.kind !== 'movie',
     );
@@ -143,12 +149,17 @@ export default function LogScreen() {
   );
 
   // Members are not titles, so a Movies or TV narrowing has nothing to say about them.
+  // The People chip shows them alone: every match the server returned, no relevance
+  // gate and no preview cap — the chip press is the intent the gate would be guessing.
+  const peopleMode = filter === 'people';
   const membersApply = filter === 'all';
-  const shownUsers = membersApply
-    ? allMembers
-      ? matchedMembers
-      : matchedMembers.slice(0, MEMBER_PREVIEW)
-    : [];
+  const shownUsers = peopleMode
+    ? userResults
+    : membersApply
+      ? allMembers
+        ? matchedMembers
+        : matchedMembers.slice(0, MEMBER_PREVIEW)
+      : [];
   const moreMembers = membersApply && !allMembers && matchedMembers.length > MEMBER_PREVIEW;
 
   /**
@@ -247,34 +258,37 @@ export default function LogScreen() {
 
   return (
     <Screen>
-      <AppHeader />
-      {/* The brand header ends here. Everything below is body — the search field
-          included, which is where the founder placed it: it is the first thing you
-          act on, not part of the persistent chrome. */}
+      {/* The field lives in the header row beside the brand — the founder's
+          compaction: a full-width bar under a full-width header spent two rows
+          on chrome above every result. The row is the one thing you act on. */}
+      <AppHeader
+        right={
+          <View style={styles.headerSearch}>
+            <SearchField
+              accessibilityLabel="Search"
+              // Names both halves, because the second was invisible while it sat behind
+              // a chip. "@handle" rather than "a member" so the sigil is discoverable.
+              placeholder="A film, a series, or @someone"
+              value={input}
+              onChangeText={(next) => {
+                setInput(next);
+                setAllMembers(false);
+              }}
+              onClear={() => {
+                setInput('');
+                setAllMembers(false);
+              }}
+              autoFocus
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="search"
+              onSubmitEditing={() => remember(input)}
+              accessibilityHint="Results appear as you type"
+            />
+          </View>
+        }
+      />
       <HeaderBoundary />
-      <View style={styles.field}>
-        <SearchField
-          accessibilityLabel="Search"
-          // Names both halves, because the second was invisible while it sat behind a
-          // chip. "@handle" rather than "a member" so the sigil is discoverable.
-          placeholder="A film, a series, or @someone"
-          value={input}
-          onChangeText={(next) => {
-            setInput(next);
-            setAllMembers(false);
-          }}
-          onClear={() => {
-            setInput('');
-            setAllMembers(false);
-          }}
-          autoFocus
-          autoCorrect={false}
-          autoCapitalize="none"
-          returnKeyType="search"
-          onSubmitEditing={() => remember(input)}
-          accessibilityHint="Results appear as you type"
-        />
-      </View>
 
       {/* Hidden while idle. A filter over nothing is three buttons that do
           nothing, and the recent searches below are not filterable by kind. */}
@@ -293,8 +307,10 @@ export default function LogScreen() {
 
       <Results
         idle={idle}
+        peopleOnly={peopleMode}
         users={shownUsers}
         usersLoading={users.isPending && !idle}
+        usersError={users.isError}
         moreMembers={moreMembers}
         onSeeAllMembers={() => setAllMembers(true)}
         relationshipLabel={relationshipLabel}
@@ -389,8 +405,10 @@ export default function LogScreen() {
  */
 function Results({
   idle,
+  peopleOnly,
   users,
   usersLoading,
+  usersError,
   moreMembers,
   onSeeAllMembers,
   relationshipLabel,
@@ -412,8 +430,10 @@ function Results({
   onOpenLog,
 }: {
   idle: boolean;
+  peopleOnly: boolean;
   users: UserResult[];
   usersLoading: boolean;
+  usersError: boolean;
   moreMembers: boolean;
   onSeeAllMembers: () => void;
   relationshipLabel: (user: UserResult) => string | null;
@@ -481,29 +501,18 @@ function Results({
     );
   }
 
-  if (error) {
-    return (
-      <EmptyState
-        kind="couldNotLoad"
-        title="Could not search"
-        body="Search needs a connection. Your own collection works offline."
-        action={{ label: 'Try again', onPress: onRetry }}
-      />
-    );
-  }
-
-  if (loading && users.length === 0) return <SkeletonRow count={6} />;
-
   /**
-   * Members, in a labelled section of their own and visibly not among the titles.
+   * People, in a labelled section of their own and visibly not among the titles.
    *
    * A profile row is never mistaken for a result in the title ranking — the founder's
    * rule, which the round avatar against a rectangular poster already signals before
    * the label is read.
    *
-   * **"Members", not "People".** People is what an actor-and-director search would be
-   * called, and that is deferred rather than absent — using the word here would have to
-   * be taken back later, on the one surface where the distinction matters.
+   * **"People", the founder's word for members everywhere** — it is already the For
+   * You category. This section called them "Members" to keep People for a future
+   * actor-and-director search, but the app has since spent the word on accounts and
+   * one surface using it differently would be the inconsistency. If cast search ever
+   * ships it will need its own name (deferred-roadmap §1).
    *
    * Renders nothing at all when nobody matched, so a plain title search looks exactly
    * as it did.
@@ -512,7 +521,7 @@ function Results({
     users.length > 0 ? (
       <View style={styles.people}>
         <SectionHeader
-          title="Members"
+          title="People"
           // Not a route. Everything it reveals is already in hand, so the expansion
           // cannot fail and cannot land anybody on a second empty state.
           actionLabel={moreMembers ? 'See all' : undefined}
@@ -530,6 +539,51 @@ function Results({
         ))}
       </View>
     ) : null;
+
+  /**
+   * The People chip: this page is the People section alone. Title-search states —
+   * its error, its loading, its footers — have nothing to say here, so the branch
+   * comes before them and speaks only about the member read.
+   */
+  if (peopleOnly) {
+    if (users.length > 0) {
+      return (
+        <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+          {members}
+        </ScrollView>
+      );
+    }
+    if (usersLoading) return <SkeletonRow count={6} />;
+    if (usersError) {
+      return (
+        <EmptyState
+          kind="couldNotLoad"
+          title="Could not search"
+          body="Search needs a connection. Your own collection works offline."
+        />
+      );
+    }
+    return (
+      <EmptyState
+        kind="nothingMatches"
+        title="Nobody by that name"
+        body="Search a display name or an @handle."
+      />
+    );
+  }
+
+  if (error) {
+    return (
+      <EmptyState
+        kind="couldNotLoad"
+        title="Could not search"
+        body="Search needs a connection. Your own collection works offline."
+        action={{ label: 'Try again', onPress: onRetry }}
+      />
+    );
+  }
+
+  if (loading && users.length === 0) return <SkeletonRow count={6} />;
 
   if (results.length === 0) {
     // Somebody matched and no title did. The title empty states below would all be
@@ -706,11 +760,14 @@ function Results({
 }
 
 const styles = StyleSheet.create({
-  field: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
+  headerSearch: { flex: 1 },
   filters: {
     flexDirection: 'row',
     gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
+    // Top as well as bottom now that the row sits directly under the header seam —
+    // the search field that used to hold this gap lives in the header itself.
+    paddingTop: theme.space[2],
     paddingBottom: theme.space[2],
   },
   // A rule under the section, so the boundary between people and titles is drawn

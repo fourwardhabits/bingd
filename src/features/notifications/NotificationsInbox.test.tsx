@@ -300,3 +300,60 @@ describe('the welcome an invitation writes back', () => {
     expect(view.queryByRole('button', { name: 'Follow' })).toBeNull();
   });
 });
+
+/**
+ * The friendship record (20260827000200) — what replaces the vanishing Accept.
+ *
+ * The server files it pre-read with `payload.mutual` frozen at acceptance; what the
+ * client owns is the two sentences and the one control, so that is what is pinned.
+ */
+describe('the friendship a request leaves behind', () => {
+  const friendship = (overrides: Record<string, unknown> = {}) =>
+    follow({
+      id: 'n-friend',
+      kind: 'friendship',
+      type: 'friendship',
+      read_at: new Date().toISOString(),
+      payload: { mutual: true },
+      ...overrides,
+    });
+
+  it('says the mutual sentence the founder wrote', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(friendship());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.getByText(/You and/)).toBeTruthy();
+    expect(view.getByText(/are now friends/)).toBeTruthy();
+  });
+
+  it('says who follows you when the acceptance was one-way', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(friendship({ payload: { mutual: false } }));
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.getByText(/now follows you/)).toBeTruthy();
+    expect(view.queryByText(/are now friends/)).toBeNull();
+  });
+
+  it('offers Follow back on a one-way friendship', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(friendship({ payload: { mutual: false } }));
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.getByText('Follow back')).toBeTruthy();
+  });
+
+  it('offers no control on a mutual friendship — the reader already follows them', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(friendship());
+    mockRelationships.set('them', { following: 'approved' });
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.queryByText('Follow back')).toBeNull();
+  });
+});

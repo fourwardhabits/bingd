@@ -196,8 +196,8 @@ describe('the one selector', () => {
 });
 
 describe('People', () => {
-  it('draws the discovery lists', async () => {
-    mockRpcResults.people_mutuals = [person({ mutual_count: 3 })];
+  it('draws the discovery modes', async () => {
+    mockRpcResults.people_mutuals = [person({ mutual_count: 3, mutual_names: ['Ben'] })];
     mockRpcResults.people_taste_matches = [
       person({ user_id: 'bo-id', username: 'bo', display_name: 'Bo', match_score: 91 }),
     ];
@@ -205,8 +205,9 @@ describe('People', () => {
     const view = await open();
     await choose(view, 'People');
 
-    await waitFor(() => expect(view.getByText('MUTUALS')).toBeTruthy());
-    expect(view.getByText('TASTE MATCHES')).toBeTruthy();
+    // The two discovery modes as chips — Mutuals showing, Matches one press away.
+    await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
+    expect(view.getByText('Matches')).toBeTruthy();
     expect(showing(view)).toBe('Showing People');
   });
 
@@ -217,14 +218,14 @@ describe('People', () => {
    * drift away from it.
    */
   it('draws none of the title-only controls', async () => {
-    mockRpcResults.people_mutuals = [person({ mutual_count: 3 })];
+    mockRpcResults.people_mutuals = [person({ mutual_count: 3, mutual_names: ['Ben'] })];
     mockRpcResults.recommendations_to_me = [recommendation()];
 
     const view = await open();
     await waitFor(() => expect(view.getByText(/^Sent to you/)).toBeTruthy());
     await choose(view, 'People');
 
-    await waitFor(() => expect(view.getByText('MUTUALS')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
     expect(view.queryByText(/^Sent to you/)).toBeNull();
     expect(view.queryByText(/^Filters/)).toBeNull();
     expect(view.queryByText('Refresh')).toBeNull();

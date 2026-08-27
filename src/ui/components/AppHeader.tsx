@@ -106,7 +106,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  // Flexed so a screen can hand `right` a control that fills the rest of the
+  // row — Search puts its field here. With nothing wide inside, the icons end
+  // up exactly where `space-between` used to leave them.
   right: {
+    flex: 1,
+    justifyContent: 'flex-end',
     marginLeft: theme.space[4],
     flexDirection: 'row',
     alignItems: 'center',

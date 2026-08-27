@@ -169,7 +169,13 @@ export default function NotificationsScreen() {
    * on every welcome row, including the overwhelmingly common one where the redemption
    * had already created the follow a second earlier.
    */
-  const CAN_OFFER_FOLLOW: readonly Notification['kind'][] = ['follow', 'invite_welcome'];
+  const CAN_OFFER_FOLLOW: readonly Notification['kind'][] = [
+    'follow',
+    'invite_welcome',
+    // 20260827000200 — and added here in the same change as `canFollowBack`, which
+    // is the agreement the paragraph above exists to enforce.
+    'friendship',
+  ];
   const followActors = [
     ...new Set(
       rows
@@ -376,6 +382,17 @@ export default function NotificationsScreen() {
                             <Text variant="callout" tone="secondary">Welcome to bingd. </Text>
                             <Text variant="callout">{row.actorName}</Text>
                             <Text variant="callout" tone="secondary"> invited you 🎉</Text>
+                          </Text>
+                        ) : row.kind === 'friendship' && row.mutual ? (
+                          /* The mutual acceptance is the other sentence that does not
+                             begin with the actor: it is about the pair, and "You and
+                             Abisola are now friends" is the founder's copy for it. The
+                             one-way case falls through to the ordinary shape, where
+                             `verbFor` says "now follows you". */
+                          <Text variant="callout" numberOfLines={2}>
+                            <Text variant="callout" tone="secondary">You and </Text>
+                            <Text variant="callout">{row.actorName}</Text>
+                            <Text variant="callout" tone="secondary"> are now friends</Text>
                           </Text>
                         ) : (
                           <Text variant="callout" numberOfLines={2}>

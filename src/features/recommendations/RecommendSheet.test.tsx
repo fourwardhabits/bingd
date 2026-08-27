@@ -506,4 +506,9 @@ describe('filtering the list', () => {
     expect(filterRecipients(people, 'grace').map((p) => p.id)).toEqual(['2']);
     expect(filterRecipients(people, '  ').map((p) => p.id)).toEqual(['1', '2']);
   });
+
+  it('treats a leading @ as the handle sigil, the way Search teaches it', () => {
+    expect(filterRecipients(people, '@grace').map((p) => p.id)).toEqual(['2']);
+    expect(filterRecipients(people, '@').map((p) => p.id)).toEqual(['1', '2']);
+  });
 });

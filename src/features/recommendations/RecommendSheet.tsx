@@ -30,8 +30,13 @@ export type RecommendSheetProps = {
   surface: Surface;
 };
 
-/** Above this many people, reading the list is slower than typing a name. */
-const SEARCH_THRESHOLD = 8;
+/**
+ * Above this many people the search field appears. Zero, after the physical
+ * pass: even a short list is faster to type into than to scan, and a field
+ * that appears only past a hidden threshold reads as a missing feature on the
+ * device where the list happens to be short.
+ */
+const SEARCH_THRESHOLD = 0;
 
 /**
  * Recommend, as one small act.
