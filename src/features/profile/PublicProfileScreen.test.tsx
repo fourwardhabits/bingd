@@ -45,14 +45,29 @@ jest.mock('@/lib/supabase', () => ({
     from: (table: string) => {
       const filters: Record<string, unknown> = {};
       const inFilters: Record<string, unknown[]> = {};
-      const rows = () =>
-        (tableRows[table] ?? []).filter((row) => {
+      // Honoured like the filters are, and for the same review-taught reason: a mock
+      // that ignores `order` and `limit` cannot tell "their most recent N" from "N of
+      // theirs in table order", and the Recent-activity contract is the first of those.
+      let sort: { column: string; ascending: boolean } | null = null;
+      let max: number | null = null;
+      const rows = () => {
+        const matched = (tableRows[table] ?? []).filter((row) => {
           const object = row as Record<string, unknown>;
           return (
             Object.entries(filters).every(([key, value]) => object[key] === value) &&
             Object.entries(inFilters).every(([key, values]) => values.includes(object[key]))
           );
-        });
+        }) as Record<string, unknown>[];
+        if (sort) {
+          const { column, ascending } = sort;
+          matched.sort((a, b) => {
+            const left = String(a[column] ?? '');
+            const right = String(b[column] ?? '');
+            return ascending ? left.localeCompare(right) : right.localeCompare(left);
+          });
+        }
+        return max === null ? matched : matched.slice(0, max);
+      };
       const answer = () =>
         Promise.resolve({ data: rows(), error: null, count: rows().length });
       const chain = {
@@ -65,8 +80,14 @@ jest.mock('@/lib/supabase', () => ({
           inFilters[column] = values;
           return chain;
         },
-        order: () => chain,
-        limit: () => chain,
+        order: (column: string, options?: { ascending?: boolean }) => {
+          sort = { column, ascending: options?.ascending ?? true };
+          return chain;
+        },
+        limit: (count: number) => {
+          max = count;
+          return chain;
+        },
         maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
         then: (resolve: (value: unknown) => unknown) => answer().then(resolve),
       };
@@ -367,6 +388,54 @@ describe('what this person likes', () => {
 
     await waitFor(() => expect(view.getByLabelText('Recent activity')).toBeTruthy());
     expect(view.getAllByText(/Heat/).length).toBeGreaterThan(0);
+  });
+
+  it('shows years-old activity, and puts a new one first', async () => {
+    /**
+     * The other half of the contract the founder's report established: Recent
+     * activity means *their most recent*, not "recent enough". A person whose last
+     * ranking was years ago still shows it — here and on their own profile, which now
+     * runs this same query — and a new ranking takes the top slot rather than a slot.
+     */
+    const event = (id: string, title: string, createdAt: string) => ({
+      id,
+      type: 'title_ranked',
+      actor_id: 'anna-id',
+      media_item_id: id,
+      created_at: createdAt,
+      payload: { position: 1, category: 'movies', bucket: 'loved', score: 9.1 },
+      media_items: {
+        kind: 'movie',
+        title,
+        release_date: '1995-01-01',
+        poster_path: null,
+        genres: ['Drama'],
+        runtime_minutes: 170,
+        parent: null,
+      },
+      profiles: { username: 'anna', display_name: 'Anna', avatar_path: null },
+    });
+    // The old one first in the table, so newest-first can only come from the query's
+    // ordering rather than from insertion order.
+    tableRows.feed_events = [
+      event('a', 'Heat', '2020-03-01T00:00:00Z'),
+      event('b', 'Dune', '2026-08-27T00:00:00Z'),
+    ];
+    tableRows.follows = [];
+    const view = await open();
+
+    await waitFor(() => expect(view.getAllByText(/Dune/).length).toBeGreaterThan(0));
+    expect(view.getAllByText(/Heat/).length).toBeGreaterThan(0);
+    // Rendered strings in draw order — not `JSON.stringify(view.toJSON())`, whose
+    // provider props point back at themselves.
+    const renderedText = (node: unknown): string => {
+      if (typeof node === 'string') return node;
+      if (Array.isArray(node)) return node.map(renderedText).join(' ');
+      const children = (node as { children?: unknown[] })?.children;
+      return children ? children.map(renderedText).join(' ') : '';
+    };
+    const drawn = renderedText(view.toJSON());
+    expect(drawn.indexOf('Dune')).toBeLessThan(drawn.indexOf('Heat'));
   });
 });
 

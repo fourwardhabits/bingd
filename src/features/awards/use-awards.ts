@@ -44,12 +44,17 @@ import type {
  * genres and no language at all, so nine of the twenty tracks were quietly movie-only
  * and `The Last of Us, S1` counted toward nothing but Season Snacker.
  *
- * **Row level security is the authorization and nothing here repeats it.** Every one of
- * these tables is already scoped: `user_media`, `watchlist` and `rankings` to the owner;
- * `title_recommendations` and `invite_attributions` to their two parties; `comments`,
- * `reactions` and `profiles` to what the caller may see. This asks for its own rows and
- * the database decides what that means — which is also why a drill-down cannot show
- * more than the count already counted.
+ * **Row level security is the authorization and nothing here repeats it** — but this
+ * file has to *know the policies*, because a policy that returns zero rows to the wrong
+ * asker looks exactly like an empty collection. The sheet shows the **target's** awards
+ * to whoever is looking (their own, or somebody else's profile), so every read is scoped
+ * to the target and the collection read forks on whether the viewer *is* the target:
+ * `user_media` is owner-only (PRD §22 — it carries the watch date and the note), so a
+ * visitor reads the `logged_collection` projection instead, and the two facts with no
+ * visitor-legal read at all (`title_recommendations`, `invite_attributions`, both
+ * two-party) are declared withheld rather than read into a false zero. See `readFacts`.
+ * The database still decides what every request means — which is also why a drill-down
+ * cannot show more than the count already counted.
  */
 
 /** The columns every media embed on this screen needs, in one place. */
@@ -221,6 +226,19 @@ type WatchedRow = {
   media_items: MediaRow | MediaRow[] | null;
 };
 
+/**
+ * A collection row as `logged_collection` projects it for somebody else's awards.
+ *
+ * No `watched_on` — the date is private at every visibility level (PRD §22), so a
+ * visitor's drill-down simply has no date line — and no note columns: the view carries
+ * the *existence* of a public review, which is all Comment Gremlin ever counted.
+ */
+type VisitorWatchedRow = {
+  media_item_id: string;
+  has_public_note: boolean;
+  media_items: MediaRow | MediaRow[] | null;
+};
+
 type RankedRow = {
   media_item_id: string;
   bucket: Bucket;
@@ -289,7 +307,38 @@ const keyed =
   <Row, K extends keyof Row>(column: K) =>
   (row: Row): readonly string[] => [String(row[column])];
 
-async function readFacts(userId: string): Promise<AwardFacts> {
+/**
+ * `readFacts(userId, own)` — the one read, now honest about who is asking.
+ *
+ * **Every read here is scoped to the target and always was** — the defect the founder's
+ * screenshot caught was never a wrong id. It was RLS answering a right one: `user_media`
+ * is owner-only by policy (20260813000500; it carries `watched_on` and `note`, PRD §22
+ * always-private), so a visitor's read of somebody else's collection returned **zero rows
+ * and no error**, and Movie Muncher stated `0 / 50` over a profile that says 34 movies.
+ * A zero the database never asserted, presented as a fact about somebody else.
+ *
+ * So the collection read forks on `own`, and on nothing else:
+ *
+ *   - **The owner reads `user_media`**, unchanged: their drill-downs show watch dates,
+ *     and their public notes are derived from the same rows.
+ *   - **A visitor reads `logged_collection`** (20260827000400), the PRD §22 projection:
+ *     the same rows, gated by `can_i_view`, carrying the title and the *existence* of a
+ *     public review and neither the date nor any note text. Same keyset, same embed,
+ *     same cursor column. The two paths count the same base rows, which is what makes
+ *     "your sheet about Ravi equals Ravi's own sheet" structural rather than luck.
+ *
+ * Two facts have no visitor-legal read at all: `title_recommendations` is a two-party
+ * table and `invite_attributions` likewise, so a visitor asking about a third party gets
+ * zero rows *by intent*. Those are **withheld** — a named state, not a zero and not a
+ * failure: the award renders a dash with "Only they can see this one" rather than
+ * claiming somebody has never recommended anything. Everything else — rankings,
+ * watchlist, comments, reactions, follows — was already viewer-relative by policy and is
+ * read identically in both modes.
+ */
+async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
+  /** A read a visitor is not entitled to, shaped like one that returned nothing. */
+  const withheldRead = Promise.resolve({ data: [], error: null, pages: 1 });
+
   const [
     watched,
     ranked,
@@ -303,30 +352,49 @@ async function readFacts(userId: string): Promise<AwardFacts> {
       /**
        * The collection, with everything thirteen tracks need on it.
        *
-       * `watched_on` is here for the drill-down — Movie Muncher and Season Snacker show
-       * the date beside a title — and `note`/`note_visibility` because a public note is
-       * one of the two things Comment Gremlin counts. Reading them here rather than in a
-       * second query is what makes double-counting impossible: one row is one
-       * contribution, and the same row is the one Movie Muncher counted.
+       * For the owner, `watched_on` is here for the drill-down — Movie Muncher and
+       * Season Snacker show the date beside a title — and `note`/`note_visibility`
+       * because a public note is one of the two things Comment Gremlin counts. Reading
+       * them here rather than in a second query is what makes double-counting
+       * impossible: one row is one contribution, and the same row is the one Movie
+       * Muncher counted. A visitor gets the same rows through `logged_collection`,
+       * minus exactly the private columns.
        */
-      readAllByKey<WatchedRow>(
-        (cursor, limit) =>
-          after(
-            supabase
-              .from('user_media')
-              .select(`media_item_id, watched_on, note, note_visibility, media_items(${MEDIA})`)
-              .eq('user_id', userId),
-            'media_item_id',
-            cursor,
+      own
+        ? readAllByKey<WatchedRow>(
+            (cursor, limit) =>
+              after(
+                supabase
+                  .from('user_media')
+                  .select(`media_item_id, watched_on, note, note_visibility, media_items(${MEDIA})`)
+                  .eq('user_id', userId),
+                'media_item_id',
+                cursor,
+              )
+                // The cursor column and the sort column are the same column, which is the
+                // whole of what makes the traversal complete: `user_media` is keyed by
+                // `(user_id, media_item_id)` and this read pins the account, so
+                // `media_item_id` is unique across every row the request can return.
+                .order('media_item_id', { ascending: true })
+                .limit(limit),
+            keyed('media_item_id'),
           )
-            // The cursor column and the sort column are the same column, which is the
-            // whole of what makes the traversal complete: `user_media` is keyed by
-            // `(user_id, media_item_id)` and this read pins the account, so
-            // `media_item_id` is unique across every row the request can return.
-            .order('media_item_id', { ascending: true })
-            .limit(limit),
-        keyed('media_item_id'),
-      ),
+        : readAllByKey<VisitorWatchedRow>(
+            (cursor, limit) =>
+              after(
+                supabase
+                  .from('logged_collection')
+                  .select(`media_item_id, has_public_note, media_items(${MEDIA})`)
+                  .eq('user_id', userId),
+                'media_item_id',
+                cursor,
+              )
+                // The view is a projection of `user_media`, so the same key is unique
+                // under the same account filter, and the same keyset argument applies.
+                .order('media_item_id', { ascending: true })
+                .limit(limit),
+            keyed('media_item_id'),
+          ),
 
       // Bucket and position come too, so Rating Rascal's drill-down can show the score
       // the reader actually gave — which is derived from the band, not stored.
@@ -382,8 +450,13 @@ async function readFacts(userId: string): Promise<AwardFacts> {
        * does not count, and a redemption without activation does not count. See
        * `docs/product/growth-instrumentation.md` §1, including the store-install gap that
        * makes this number a floor.
+       *
+       * **Withheld for a visitor.** `invite_attributions_read` names the two parties,
+       * so a third party's read is zero rows by design — a zero this feature must not
+       * repeat as "brought nobody". No request is issued at all: a read whose answer is
+       * predetermined by policy is bandwidth spent asking the database to say no.
        */
-      readAllByKey<InviteRow>(
+      !own ? withheldRead : readAllByKey<InviteRow>(
         (cursor, limit) =>
           after(
             supabase
@@ -423,7 +496,10 @@ async function readFacts(userId: string): Promise<AwardFacts> {
         keyed('id'),
       ),
 
-      readAllByKey<RecommendationRow>(
+      // Withheld for a visitor for the same reason as the invites: what somebody sent
+      // is between them and their recipients (title_recommendations_sender/_recipient),
+      // and a zero-row answer to a third party is policy, not a count.
+      !own ? withheldRead : readAllByKey<RecommendationRow>(
         (cursor, limit) =>
           after(
             supabase
@@ -553,6 +629,11 @@ async function readFacts(userId: string): Promise<AwardFacts> {
    * together, below.
    */
   const unavailable = new Set<keyof AwardFacts>();
+  // Not read because the viewer is not a party to them — a different fact from a read
+  // that failed, and worded differently on the row (`progress.ts`).
+  const withheld = new Set<keyof AwardFacts>(
+    own ? [] : ['invitedSignups', 'recommendationsSent'],
+  );
   const rowsOf = <T>(
     result: { data: unknown; error: unknown },
     field: keyof AwardFacts,
@@ -569,7 +650,7 @@ async function readFacts(userId: string): Promise<AwardFacts> {
   const titles: WatchedTitle[] = [];
   const notes: WrittenContribution[] = [];
 
-  const watchedRows = rowsOf<WatchedRow>(watched, 'watched');
+  const watchedRows = rowsOf<WatchedRow | VisitorWatchedRow>(watched, 'watched');
   // Notes live on these rows, so a collection that could not be read takes the written
   // count with it rather than quietly reporting the comments alone.
   if (watched.error) unavailable.add('written');
@@ -577,13 +658,27 @@ async function readFacts(userId: string): Promise<AwardFacts> {
   for (const row of watchedRows) {
     const title = titleFrom(row.media_item_id, one(row.media_items));
     if (!title) continue;
-    titles.push({ ...title, watchedOn: row.watched_on });
+    // A visitor's row has no date at all — the projection carries none (PRD §22) — so
+    // their drill-down shows the title without a "Watched …" line, not a wrong date.
+    titles.push({ ...title, watchedOn: 'watched_on' in row ? row.watched_on : null });
 
     // A note is one row on `user_media` and appears on two surfaces — the activity row
     // and Bingd Reviews. Counted once, here, and only when it is public: a private note
     // is not social content, and Comment Gremlin is an award for talking to people.
     // Deriving it from the collection read is what makes "counted once" structural.
-    if (row.note && row.note.trim() !== '' && row.note_visibility === 'public') {
+    // The visitor's view answers the same question as one precomputed boolean, so the
+    // two modes count the same rows. The view's predicate is `note is not null` and
+    // this one additionally trims, which looks like a gap and is not one: every note
+    // writer normalises through `nullif(btrim(coalesce(p_note, '')), '')`, so the
+    // column cannot hold a blank string for the two to disagree about. That invariant
+    // is the load-bearing one, so it is pinned in `logged-collection.test.mjs` rather
+    // than left to be re-derived here — a writer that stopped normalising fails a test
+    // instead of showing a visitor a Comment Gremlin the owner does not have.
+    const hasPublicNote =
+      'has_public_note' in row
+        ? row.has_public_note
+        : Boolean(row.note && row.note.trim() !== '' && row.note_visibility === 'public');
+    if (hasPublicNote) {
       notes.push({
         key: `note:${row.media_item_id}`,
         kind: 'note',
@@ -721,6 +816,7 @@ async function readFacts(userId: string): Promise<AwardFacts> {
     reactionsReceived,
     mutualFollows,
     unavailable,
+    withheld,
   };
 }
 
@@ -819,13 +915,22 @@ export type AwardsQuery = {
  * follows arrive from other people, so Heart Magnet and Mutual Mania have nothing to hook
  * and a short staleness is the honest cost of not polling.
  */
-export function useAwards(userId: string, options: { enabled?: boolean } = {}) {
+export function useAwards(viewerId: string, userId: string, options: { enabled?: boolean } = {}) {
   return useQuery({
-    queryKey: ['awards', userId],
-    enabled: (options.enabled ?? true) && Boolean(userId),
+    /**
+     * Keyed by the viewer *and* the target, like every viewer-relative read
+     * (`useRankedTitles` states the convention). What this query returns genuinely
+     * differs per viewer — RLS trims reactions, follows and the collection view to what
+     * the caller may see — and a cache entry reachable from a second signed-in account
+     * on the same device is the recurring defect the convention exists to stop.
+     * `invalidateAwards` matches on the `['awards', viewerId]` prefix, which now means
+     * "everything this viewer computed" — their own sheet and any they were looking at.
+     */
+    queryKey: ['awards', viewerId, userId],
+    enabled: (options.enabled ?? true) && Boolean(userId) && Boolean(viewerId),
     staleTime: 60_000,
     queryFn: async (): Promise<AwardsQuery> => {
-      const facts = await readFacts(userId);
+      const facts = await readFacts(userId, viewerId === userId);
 
       /**
        * Nothing arrived at all, which is a different fact from a metric being unavailable.

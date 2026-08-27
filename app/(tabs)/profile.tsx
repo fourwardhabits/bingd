@@ -11,7 +11,7 @@ import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { useReactions, useSetReaction, REACTION_GLYPH } from '@/features/feed/use-reactions';
-import { useFeed } from '@/features/feed/use-feed';
+import { useActorActivity } from '@/features/feed/use-feed';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { GoalsSection } from '@/features/goals/GoalsSection';
 import { currentYear } from '@/features/goals/use-goals';
@@ -58,7 +58,7 @@ export default function ProfileScreen() {
   const profile = useCurrentProfile();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const feed = useFeed(profile.id);
+  const feed = useActorActivity(profile.id);
   const watched = useWatched(profile.id);
   const stats = useProfileStats(profile.id);
   const notifications = useNotifications(profile.id);
@@ -84,9 +84,22 @@ export default function ProfileScreen() {
   const { awards: awardsParam } = useLocalSearchParams<{ awards?: string }>();
   const [awardsOpen, setAwardsOpen] = useState(awardsParam === '1');
 
-  // Own activity only. The feed query spans everyone this user follows, and a
-  // friend's ranking under a heading on *your* profile is a different claim.
-  const recent = (feed.data ?? []).filter((event) => event.actorId === profile.id).slice(0, 5);
+  /**
+   * Own activity, asked for directly — not the follow feed filtered down to oneself.
+   *
+   * The filter was how the founder's own profile said "Nothing here yet" over a
+   * substantial history: the feed query returns the newest ~30 events across the
+   * *whole follow set*, so anybody who follows people more active than themselves
+   * has their own older events pushed out of that window before the filter ever
+   * runs. Ranking something new "fixed" it, which is exactly the signature — the
+   * new event sat inside the window, the history never did.
+   *
+   * `useActorActivity` is the same query `/u/[username]` already uses for this
+   * section: the newest N events *by this actor*, however old, with
+   * `feed_events_read` still the authorisation. Recent means "their most recent",
+   * not "recent enough for the feed".
+   */
+  const recent = feed.data ?? [];
   const eventIds = recent.map((event) => event.id);
   const reactions = useReactions(eventIds, profile.id);
   const commentCounts = useCommentCounts(eventIds, profile.id);
@@ -336,6 +349,7 @@ export default function ProfileScreen() {
 
       {awardsOpen ? (
         <AwardsSheet
+          viewerId={profile.id}
           userId={profile.id}
           // The same drill-down the goals bars have, now on every row: a number the
           // reader is shown is one they can open and check, and each contributing

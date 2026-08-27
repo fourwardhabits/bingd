@@ -1169,7 +1169,14 @@ describe('the following score', () => {
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
+    // Wait for the community *score*, not merely its label. Both rows are one
+    // `ScoreRow`, which renders "Not enough ratings" for any null score — so between
+    // the section mounting and community_score arriving, both rows carry those words
+    // and `getByText` below would find two. The label renders on mount and therefore
+    // does not close that window; the score does. (CI caught this as a flake; the
+    // race was the test's, not the page's.)
+    await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
+    expect(view.getByText('bingd.')).toBeTruthy();
     // Founder correction, 2026-08-18: the row is always drawn, with the grey circle
     // and the same four words. A row that appears when the data does is a page that
     // moves under somebody reading it.

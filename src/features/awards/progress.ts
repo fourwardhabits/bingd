@@ -50,6 +50,13 @@ export type AwardProgress = {
    * this one" rather than a progress fraction the app does not actually know.
    */
   unavailable: boolean;
+  /**
+   * True when the number is a dash because the viewer may not read it, rather than
+   * because a read failed. Drawn like `unavailable` — no fraction, no drill-down —
+   * but worded as a boundary instead of an apology, and it never sorts into the
+   * could-not-load band's "try again" framing by accident: the copy is the difference.
+   */
+  withheld: boolean;
   /** How far into the next tier, 0 to 1. One once every tier is earned. */
   fraction: number;
 };
@@ -65,9 +72,14 @@ const measure = (track: AwardTrack, facts: AwardFacts, tier: AwardTier) =>
   breakdownTotal(track.contributions(facts, tier));
 
 export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
-  // A read that failed is not a count of zero. Answered before the metric runs, so a
-  // track whose field is missing never produces a number nobody measured.
-  if (facts.unavailable?.has(track.needs)) {
+  // A read that failed is not a count of zero — and neither is a read the viewer is
+  // not entitled to. Both answered before the metric runs, so a track whose field is
+  // missing never produces a number nobody measured. The two dashes differ only in
+  // what the row says: a failure apologises and can be retried; a boundary is stated
+  // once ("Only they can see this one") and a retry would be asking the same policy
+  // the same question.
+  const withheld = facts.withheld?.has(track.needs) ?? false;
+  if (withheld || facts.unavailable?.has(track.needs)) {
     const first = track.tiers[0];
     return {
       trackKey: track.key,
@@ -79,9 +91,10 @@ export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
       earnedTierIndex: -1,
       nextTier: first,
       value: 0,
-      detailLine: 'Could not load this one',
+      detailLine: withheld ? 'Only they can see this one' : 'Could not load this one',
       countLabel: '—',
       unavailable: true,
+      withheld,
       fraction: 0,
     };
   }
@@ -130,6 +143,7 @@ export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
         track.earned(top.threshold),
     countLabel: nextTier ? `${count(value)} / ${count(nextTier.threshold)}` : count(value),
     unavailable: false,
+    withheld: false,
     fraction: nextTier ? Math.min(1, value / nextTier.threshold) : 1,
   };
 }

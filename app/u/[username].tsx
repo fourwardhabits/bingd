@@ -565,6 +565,7 @@ export default function PublicProfileScreen() {
           sheet’s own reads are RLS-governed on top of that. */}
       {awardsOpen ? (
         <AwardsSheet
+          viewerId={viewer.id}
           userId={subjectId}
           onPressTitle={(id) => {
             setAwardsOpen(false);

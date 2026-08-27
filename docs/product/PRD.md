@@ -978,6 +978,29 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 > delivered-versus-pending split and the pending cap of 5 per sender→recipient pair are
 > exactly as specified above.
 
+> ### As built — 2026-08-27: choose your people, then send once
+>
+> **Send to is a multi-select picker.** Each person row is a checkbox — the mark sits at
+> the far right, exactly where the per-row send icon used to be, and tapping anywhere on
+> the row toggles it. The sheet ends in two actions pinned under the list: **Recommend
+> to N** (filled Maroon, the primary act, disabled at zero) beside **Share off bingd.**
+> (outlined — the same native share carrying the reader's invite link, which needs no
+> selection because whether the somebody has the app is a detail of the address).
+>
+> **Multi-select changes the interface, not the semantics.** Each chosen person is their
+> own `recommend_title` call under their own held operation id, so everything specified
+> above is asked per recipient exactly as it was when every tap sent alone: eligibility,
+> the delivered-versus-pending split, the pending cap of 5 per sender→recipient pair,
+> and the rate ceilings. A retry replays an unanswered send under the id the first
+> attempt spent, so one intent cannot become two recommendations however many times the
+> button is pressed.
+>
+> **A batch that half-succeeds says so in full and loses nothing.** The people whose
+> sends stored leave the selection — a retry must not spend another attempt on them —
+> while the refused stay selected under a line naming them and the reason, so "try
+> again" means exactly the failed half. The sheet closes only when everybody chosen has
+> been sent, and the confirmation underneath then names the whole batch.
+
 ### Recommendation engine — public-alpha design
 
 - Runs behind the scenes. The Recommendations surface opens directly to useful suggestions.
@@ -1114,6 +1137,29 @@ series   TV-MA · Drama · Thriller
 >
 > **Unfollowing removes that person's events from your feed entirely, past ones included.** The feed is a live query against your current follow set, not a record of what you have seen. Nothing is deleted, and a re-follow restores visibility. This is also the behaviour a user expects: someone who unfollows wants that person gone, not their last three weeks kept in place.
 
+> ### As built — 2026-08-27: Profile → Recent activity is *their* most recent, however old
+>
+> **The contract.** Recent activity on a profile shows the target user's most recent
+> eligible activities — five of them, newest first — **regardless of how old they are**.
+> "Recent" means *their* most recent, not "recent enough for the feed": a person whose
+> last ranking is years old still shows it, and an account with history never reads
+> "Nothing here yet" merely because its owner has been quiet. The same target user shows
+> the same Recent activity to themselves and to any authorised viewer, subject only to
+> visibility — `feed_events_read` authorises the read on both paths, so a private
+> account's activity still reaches only approved followers, and deleted events are
+> simply absent.
+>
+> **The defect this names.** The own profile derived the section by filtering the
+> viewer's *feed* — the newest ~30 events across the whole follow set — down to the
+> viewer's own rows. Anybody who follows people more active than themselves had their
+> history pushed out of that window before the filter ran, so the founder's own profile
+> said "Nothing here yet" over a substantial collection on both platforms, while the
+> same profile viewed by somebody else (which always asked about the actor directly)
+> rendered fine — and ranking one new title "fixed" it, because the new event sat
+> inside the window. Both profile screens now run the same one-actor query, newest
+> first, limit applied *after* the actor filter. The Feed's own windowing is unchanged:
+> it is a different surface making a different claim.
+
 ### Reactions — Decided for public alpha
 
 A fixed reaction set of six on feed activity items. One reaction per user per item, changeable and removable.
@@ -1170,8 +1216,10 @@ v0.6 listed Achievements under §8 **Deferred** and specified them in [`backlog.
 - Reached from **Profile → Awards**, as a sheet. A grid where locked and unlocked sit together, because the locked slots are the reason to come back and they only read that way beside the unlocked ones.
 - **Every award is derived from canonical tables** — `user_media`, `rankings`, `watchlist`, `follows`, `title_recommendations`, `invite_attributions`, notes. There is no award table, no event log and no stored progress. An achievement system with its own event log is a second source of truth about somebody's collection, free to disagree with the first.
 - Tiered, with progress shown on anything countable, and each track states what earns it.
-- **No social surface**: no comparison, no leaderboard, and nothing is told to anybody else.
+- **No social surface**: no comparison, no leaderboard, and nothing is told to anybody else. *(Since the profile unification, another person's sheet is viewable from their profile — see the visibility note below — which is still not a comparison: it is their sheet, read under the viewer's ordinary visibility.)*
 - **Ten of the twenty tracks still render an emoji placeholder** rather than drawn art, asserted by test so the number cannot drift silently. [`deferred-roadmap.md`](./deferred-roadmap.md) §14.
+
+**What a watch-based award counts, and what a visitor sees (clarified 2026-08-27).** "Watch 50 movies" counts **unique logged titles** — rows of `user_media`, one per `(account, title)`, which ranking also writes because ranking is the watch claim ([§10](#10-ranking-system), decided 2026-08-24). A rewatch or a corrected date never mints a second unit. Opening somebody else's Awards computes **their** progress from the same canonical rows: the collection-based tracks read the `logged_collection` projection (20260827000400), which is §22 applied — the logged *titles* inherit profile visibility exactly as rankings do, while the watch date and note text stay private at every visibility level, so a visitor's Movie Muncher equals the owner's own and their drill-down simply carries no dates. The two facts with no cross-user read by design — sent recommendations and activated invites, both two-party — are shown as **withheld** ("Only they can see this one"), never as a zero the database did not assert. This paragraph exists because a real device showed `Movie Muncher 0 / 50` on a profile whose header said 34 movies: the award was reading a table whose policy answers a visitor with zero rows and no error.
 
 **Genre Gremlin is 14 / 16 / 17 distinct genres, rebalanced 2026-08-20.** It was 12 / 14 / 16, and the founder's Preview verdict was that the whole ladder was too easy and too compressed rather than that one number was wrong. Measured over the loggable catalogue by `scripts/awards/genre-ladder-report.mjs` — which is reproducible, unlike the calibration the previous thresholds rested on — the old ladder cost a median of **15 / 27 / 62** logged titles, against 250–300 for every other Gold in the set. The new one costs **27 / 62 / 116**, roughly doubling at each step.
 
