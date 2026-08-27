@@ -67,22 +67,36 @@ function OpenDiagnosticsSheet({ onClose }: { onClose: () => void }) {
 
   const route = (segments as readonly string[]).join('/') || '(root)';
 
-  const build = useCallback(async () => {
+  /**
+   * Assembles the text, and never rejects.
+   *
+   * Separate from storing it so the effect below has a single `await` boundary to set state
+   * after — `react-hooks/set-state-in-effect` rightly refuses a synchronous set from an
+   * effect, and a helper that returns a string rather than writing one is the honest shape
+   * regardless.
+   */
+  const assemble = useCallback(async () => {
     try {
-      setReport(await buildDiagnosticsReport(queryClient, route));
+      return await buildDiagnosticsReport(queryClient, route);
     } catch (error) {
       // The one screen that must not fail to draw. A report that could not be assembled is
       // still worth showing as the reason it could not be.
-      setReport(
-        `Could not build the report: ${error instanceof Error ? error.name : 'unknown'}`,
-      );
+      return `Could not build the report: ${error instanceof Error ? error.name : 'unknown'}`;
     }
   }, [queryClient, route]);
 
-  // Once, on open. The component only exists while the sheet is open, so mount is open.
+  // Once, on open — this component only exists while the sheet is open, so mount is open.
+  // The liveness flag is not tidiness: assembling waits on a session read that is bounded at
+  // 2.5s, and the founder can close the sheet inside that window.
   useEffect(() => {
-    void build();
-  }, [build]);
+    let alive = true;
+    void assemble().then((text) => {
+      if (alive) setReport(text);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [assemble]);
 
   return (
     <Sheet visible onClose={onClose} label="Diagnostics">
@@ -94,7 +108,11 @@ function OpenDiagnosticsSheet({ onClose }: { onClose: () => void }) {
         </Text>
       </ScrollView>
       <View style={styles.actions}>
-        <Button label="Refresh" kind="secondary" onPress={() => void build()} />
+        <Button
+          label="Refresh"
+          kind="secondary"
+          onPress={() => void assemble().then(setReport)}
+        />
         <Button
           label={copy === 'done' ? 'Copied' : copy === 'failed' ? 'Copy failed' : 'Copy'}
           // Nothing to copy until the report has been assembled, and a press that quietly
