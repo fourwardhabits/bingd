@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
 import { track } from '@/lib/analytics';
+import { note, tally } from '@/lib/flight-recorder';
 import { readPref, writePref } from '@/lib/prefs';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
@@ -130,6 +131,9 @@ async function readState(userId: string): Promise<TasteOnboarding> {
   // Memory first: a decision taken in this process outranks whatever the disk holds,
   // because the write that would have updated the disk may have failed.
   const phase = remembered ?? (await readPref<TastePhase>(phaseKey(userId)));
+  // The exact values the decision is about to be made from, before it is made.
+  note('onboarding', 'read', `${phase ?? 'absent'}${remembered ? '(memory)' : '(disk)'}`);
+  tally('onboarding.reads');
 
   /**
    * **Already decided, and the decision is the whole answer — so nothing is asked.**
@@ -245,8 +249,12 @@ async function readState(userId: string): Promise<TasteOnboarding> {
      * launch that repeats it, which is the state this branch already handles.
      */
     if (ranked >= FIRST_FIVE) {
+      note('onboarding', 'settle', `ranked=${ranked}`);
       intent.set(userId, 'active');
-      void writePref<TastePhase>(phaseKey(userId), 'done').catch(() => {});
+      void writePref<TastePhase>(phaseKey(userId), 'done').then(
+        () => note('onboarding', 'settle.write', 'ok'),
+        () => note('onboarding', 'settle.write', 'failed'),
+      );
     }
 
     return { ranked, needed: true };
@@ -397,7 +405,11 @@ export function useCompleteTasteOnboarding(userId: string) {
        * the write is handed to the platform before this returns, and awaiting it would
        * only make the screen watch it happen while somebody waits on a button press.
        */
-      const written = writePref<TastePhase>(phaseKey(userId), phase).catch(() => {});
+      note('onboarding', 'complete', phase);
+      const written = writePref<TastePhase>(phaseKey(userId), phase).then(
+        () => note('onboarding', 'complete.write', 'ok'),
+        () => note('onboarding', 'complete.write', 'failed'),
+      );
 
       if (ended !== 'done' && ended !== 'skipped') {
         track({
@@ -438,4 +450,54 @@ export function useBeginTasteOnboarding(userId: string) {
     intent.set(userId, 'active');
     await writePref<TastePhase>(phaseKey(userId), 'active').catch(() => {});
   }, [userId]);
+}
+
+/**
+ * What this device actually holds for the first-run flow, read without deciding anything.
+ *
+ * **The read PR #54 needed and did not have.** That tranche argued from row counts that the
+ * stored phase must be `active`, and that one summary exit would settle it. The phone
+ * disagreed and there was no way to see which half was wrong — whether the disk was never
+ * written, or written and read back differently, or read under a different key.
+ *
+ * So this is deliberately *not* `readState`. It performs no repair, writes nothing, sets no
+ * intent and does not touch the query cache; it reports the disk, the memory and the two
+ * counts side by side and lets the reader draw the conclusion. Called only by the
+ * Diagnostics sheet, once, when somebody opens it.
+ */
+export async function tastePhaseOnDevice(userId: string): Promise<{
+  stored: TastePhase | null;
+  remembered: TastePhase | null;
+  ranked: number | null;
+  logged: number | null;
+  needed: boolean | null;
+}> {
+  const remembered = intent.get(userId) ?? null;
+  const stored = await readPref<TastePhase>(phaseKey(userId)).catch(() => null);
+
+  if (stored === 'done' || stored === 'skipped') {
+    return { stored, remembered, ranked: null, logged: null, needed: false };
+  }
+
+  const [rankings, media] = await Promise.all([
+    supabase
+      .from('rankings')
+      .select('media_item_id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('category', 'movies'),
+    supabase
+      .from('user_media')
+      .select('media_item_id', { count: 'exact', head: true })
+      .eq('user_id', userId),
+  ]);
+
+  const ranked = rankings.error ? null : (rankings.count ?? 0);
+  const logged = media.error ? null : (media.count ?? 0);
+  if (ranked === null || logged === null) {
+    return { stored, remembered, ranked, logged, needed: null };
+  }
+
+  const phase = remembered ?? stored;
+  const needed = phase === 'active' ? true : ranked === 0 && logged === 0;
+  return { stored, remembered, ranked, logged, needed };
 }

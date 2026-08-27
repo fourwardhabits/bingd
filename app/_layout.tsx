@@ -9,6 +9,7 @@ import { useFonts } from 'expo-font';
 import { Stack, useNavigationContainerRef } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import { AppState } from 'react-native';
 import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -19,10 +20,14 @@ import {
   useAuth,
   useAuthRouting,
 } from '@/features/auth';
+import { DiagnosticsHost } from '@/features/diagnostics/DiagnosticsHost';
 import { useRedeemPendingInvite } from '@/features/invite';
 import { configurePushPresentation } from '@/features/notifications/push';
 import { usePush } from '@/features/notifications/use-push';
 import { initAnalytics } from '@/lib/analytics';
+import { lastRouteSeen, note, tally } from '@/lib/flight-recorder';
+import { watchQueries } from '@/lib/flight-queries';
+import { persistLastSession } from '@/lib/flight-persistence';
 import { reportBrandFontFailure, startIconFont } from '@/lib/fonts';
 import { initMonitoring, navigationIntegration } from '@/lib/monitoring';
 import { createQueryClient, startQueryFocusTracking } from '@/lib/query';
@@ -81,6 +86,13 @@ function RootLayout() {
   // Without this, `refetchOnWindowFocus` cannot fire at all on a phone — see
   // `startQueryFocusTracking`.
   useEffect(() => startQueryFocusTracking(), []);
+  /**
+   * Where a query begins, which the network log cannot see: `fetchWithAuth` awaits the
+   * session *before* it calls the app’s fetch, so a request stalled there never reaches the
+   * recorder. Pairing this against the network log is what tells “never ran” from “ran and
+   * never left”. See `lib/flight-queries.ts`.
+   */
+  useEffect(() => watchQueries(queryClient), [queryClient]);
 
   useEffect(() => {
     if (fontsLoaded || fontError) {
@@ -99,6 +111,30 @@ function RootLayout() {
   }, [fontError]);
 
   useEffect(() => startIconFont(), []);
+
+  /**
+   * The app’s own lifecycle, recorded.
+   *
+   * `app.mounts` counts root mounts — more than one in a session means the tree is being
+   * torn down and rebuilt, which is a thermal answer and a crash-adjacent answer at once.
+   * The AppState line is what makes the previous-session tail possible: it is the last
+   * moment this process reliably gets before iOS may stop scheduling it.
+   */
+  useEffect(() => {
+    tally('app.mounts');
+    note('app', 'mount');
+
+    const subscription = AppState.addEventListener('change', (next) => {
+      note('app', 'state', next);
+      // **`background` only, not "anything but active".** iOS emits `inactive` on the way
+      // to `background` — and again for a notification banner or the app switcher — so the
+      // looser test wrote two or more times per departure. Review 51's nit, and the whole
+      // claim of this module is one write. Not awaited: iOS gives a backgrounding app a
+      // moment and holding it is not this app's business.
+      if (next === 'background') void persistLastSession(lastRouteSeen());
+    });
+    return () => subscription.remove();
+  }, []);
 
   if (!fontsLoaded && !fontError) {
     return null;
@@ -265,6 +301,9 @@ function Navigation() {
       {/* Outside the boundary, so the two states that are not a place in the app are
           still explained even if the navigator underneath them stopped. */}
       <AuthStatusOverlay />
+      {/* Above everything, including the overlay: the one surface that has to be
+          reachable when the rest of the app is not. It renders nothing until asked. */}
+      <DiagnosticsHost />
     </>
   );
 }

@@ -18,6 +18,7 @@ import {
 } from '@/features/onboarding/use-taste-onboarding';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
+import { diagnosticsAvailable, openDiagnostics } from '@/features/diagnostics/open';
 import { withGrace } from '@/lib/grace';
 import { posterUri } from '@/lib/images';
 import { TAB_ROUTES, type TabRoute } from '@/lib/routes';
@@ -323,8 +324,8 @@ export default function TasteOnboardingScreen() {
           <View style={styles.intro}>
             <Text variant="title1">Build your taste</Text>
             <Text variant="body" tone="secondary">
-              Rank five films you have seen. bingd. learns from how they compare to each
-              other, not from stars.
+              Rank five films you have seen. bingd. learns from how they compare to each other,
+              not from stars.
             </Text>
 
             <Progress ranked={ranked} />
@@ -557,12 +558,23 @@ function Summary({
 }) {
   return (
     <View style={styles.summary}>
-      <Text variant="title1" style={styles.centre}>
+      {/* The heading is the way in to Diagnostics from here, by long press.
+
+          This screen is the one the founder cannot get past, and it is also the one
+          Settings is unreachable from — `useAuthRouting` sends this account back here from
+          any other group, so a route would be pushed and immediately replaced. A gesture on
+          something already on screen is the only entrance that routing cannot take away.
+          Beta and below only; `openDiagnostics` refuses in a release build. */}
+      <Text
+        variant="title1"
+        style={styles.centre}
+        onLongPress={diagnosticsAvailable ? openDiagnostics : undefined}
+      >
         That is a start
       </Text>
       <Text variant="body" tone="secondary" style={styles.centre}>
-        Five films is enough to rank against, so everything you log from here finds its
-        place by comparison. For You gets better the more you add.
+        Five films is enough to rank against, so everything you log from here finds its place by
+        comparison. For You gets better the more you add.
       </Text>
 
       <View style={styles.summaryActions}>

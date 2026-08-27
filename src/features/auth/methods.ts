@@ -6,6 +6,7 @@ import { Platform } from 'react-native';
 
 import { releaseDeviceOnSignOut } from '@/features/notifications/push';
 import { track } from '@/lib/analytics';
+import { note } from '@/lib/flight-recorder';
 import { withGrace } from '@/lib/grace';
 import { reportHandled } from '@/lib/monitoring';
 import { sessionStorage } from '@/lib/session-storage';
@@ -410,6 +411,15 @@ async function bounded(
 ): Promise<boolean> {
   const settled = Symbol('settled');
   const failed = Symbol('failed');
+  /**
+   * Every stage, timed and named.
+   *
+   * The founder watches twenty seconds of "Signing out…" and the only question worth
+   * answering is which of these five steps is the one still outstanding when it happens.
+   * A `start` with no matching outcome in the report *is* the answer.
+   */
+  const began = Date.now();
+  note('signout', scope, 'start');
 
   const outcome = await withGrace(
     work.then(
@@ -423,6 +433,13 @@ async function bounded(
     // Distinct from `failed`: a step that has not answered yet is still running, and
     // the difference matters to whoever reads the report.
     'timeout' as const,
+  );
+
+  note(
+    'signout',
+    scope,
+    outcome === 'timeout' ? 'timeout' : outcome === settled ? 'ok' : 'failed',
+    Date.now() - began,
   );
 
   if (outcome === 'timeout')

@@ -5,6 +5,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 
 import { useTasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
 import { identify } from '@/lib/analytics';
+import { note, rememberRoute, tally } from '@/lib/flight-recorder';
 import { withGrace } from '@/lib/grace';
 import { avatarUri } from '@/lib/images';
 import { identifyForMonitoring } from '@/lib/monitoring';
@@ -102,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
 
+    const hydrationBegan = Date.now();
     void withGrace<Hydration, Hydration>(
       supabase.auth.getSession().then(
         ({ data }): Hydration => ({ ok: true, session: data.session }),
@@ -112,6 +114,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       SESSION_HYDRATION_GRACE_MS,
       UNREADABLE,
     ).then((result) => {
+      note(
+        'auth',
+        'hydrate',
+        result.ok ? (result.session ? 'session' : 'none') : 'unreadable',
+        Date.now() - hydrationBegan,
+      );
       if (!active) return;
       if (!result.ok) {
         setUnreadable(true);
@@ -121,7 +129,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSessionLoaded(true);
     });
 
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => {
+    const { data } = supabase.auth.onAuthStateChange((event, next) => {
+      // Counted as well as listed: a callback storm is a number, not a story.
+      tally('auth.callbacks');
+      note('auth', event, next ? 'session' : 'none');
       // A late answer from a slow store arrives here as `INITIAL_SESSION`, so a launch
       // that gave up above still recovers on its own rather than needing the retry.
       setUnreadable(false);
@@ -339,6 +350,17 @@ export function useAuthRouting() {
       tastePending: taste.isPending,
     });
 
-    if (destination) router.replace(destination as never);
+    /**
+     * Recorded whether or not it moves anybody, because "decided to stay" is exactly as
+     * informative as "decided to move" when the question is whether onboarding is routing
+     * itself in a circle. The `from` is the group and screen the router was on; nothing
+     * here is a path with an id in it.
+     */
+    rememberRoute(`${group ?? '(root)'}/${screen ?? ''}`);
+    note('route', `${group ?? '(root)'}/${screen ?? ''}`, destination ?? `stay:${auth.status}`);
+    if (destination) {
+      tally('route.replace');
+      router.replace(destination as never);
+    }
   }, [auth, segments, router, taste.isPending, taste.data?.needed]);
 }
