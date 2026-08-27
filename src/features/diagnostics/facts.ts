@@ -1,5 +1,5 @@
 import { FIRST_FIVE, tastePhaseOnDevice } from '@/features/onboarding/use-taste-onboarding';
-import { snapshot, withoutRecording } from '@/lib/flight-recorder';
+import { snapshot } from '@/lib/flight-recorder';
 import type { AuthFacts, OnboardingFacts } from '@/lib/flight-report';
 import { supabase } from '@/lib/supabase';
 import type { Session } from '@supabase/supabase-js';
@@ -63,20 +63,21 @@ export async function liveFacts(): Promise<LiveFacts> {
     .at(-1)?.ms;
 
   /**
-   * Suppressed, so the sheet does not write into the evidence it is about to read — review
-   * 51's third finding. These are ordinary Supabase requests and would otherwise enter the
-   * same thirty-record ring, bump the same repeat counters, and on a busy session evict the
-   * records carrying the failure.
+   * **Not suppressed — review 58 reversed review 51 here, and the reversal is right.**
    *
-   * `unknown` is a third answer and not a nicety: on the exact stall this exists to
+   * Suppression kept the sheet's own two count-requests out of the ring, at the cost of a
+   * global blind window: for the whole of these bounded waits, *every* concurrent app
+   * request went unrecorded — which is precisely the activity the report is opened to
+   * capture, erased by the act of capturing it. Two honest self-records in a thirty-slot
+   * ring cost less than seconds of blindness during an active failure.
+   *
+   * `unknown` remains a third answer, and not a nicety: on the exact stall this exists to
    * diagnose, `getSession()` is the thing that does not come back, and reporting that as
    * "session NO" would be the report asserting the opposite of the truth.
    */
-  const asked = await withoutRecording(() =>
-    withinGrace<{ known: true; session: Session | null } | { known: false }>(
-      supabase.auth.getSession().then(({ data }) => ({ known: true, session: data.session })),
-      { known: false },
-    ),
+  const asked = await withinGrace<{ known: true; session: Session | null } | { known: false }>(
+    supabase.auth.getSession().then(({ data }) => ({ known: true, session: data.session })),
+    { known: false },
   );
   const session = asked.known ? asked.session : null;
 
@@ -95,7 +96,7 @@ export async function liveFacts(): Promise<LiveFacts> {
   const userId = session?.user?.id;
   if (!userId) return { auth, onboarding: UNKNOWN_ONBOARDING };
 
-  const state = await withoutRecording(() => withinGrace(tastePhaseOnDevice(userId), null));
+  const state = await withinGrace(tastePhaseOnDevice(userId), null);
   if (!state) return { auth, onboarding: UNKNOWN_ONBOARDING };
 
   return {

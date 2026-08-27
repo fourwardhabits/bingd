@@ -19,9 +19,15 @@ import { buildDiagnosticsReport } from './report';
  */
 
 const mockPrefs = new Map<string, unknown>();
+/** Preference names whose read never settles — the Keychain lane of the device's pathology. */
+const mockReadHangs = new Set<string>();
+let mockSessionHangs = false;
 
 jest.mock('@/lib/prefs', () => ({
-  readPref: (name: string) => Promise.resolve(mockPrefs.get(name) ?? null),
+  readPref: (name: string) =>
+    mockReadHangs.has(name)
+      ? new Promise(() => {})
+      : Promise.resolve(mockPrefs.get(name) ?? null),
   writePref: (name: string, value: unknown) => {
     mockPrefs.set(name, value);
     return Promise.resolve();
@@ -31,7 +37,10 @@ jest.mock('@/lib/prefs', () => ({
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     auth: {
-      getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+      getSession: () =>
+        mockSessionHangs
+          ? new Promise(() => {})
+          : Promise.resolve({ data: { session: null }, error: null }),
     },
     from: () => {
       const chain: Record<string, unknown> = {};
@@ -66,6 +75,8 @@ const setString = Clipboard.setString as unknown as jest.Mock;
 
 beforeEach(() => {
   mockPrefs.clear();
+  mockReadHangs.clear();
+  mockSessionHangs = false;
   resetFlightRecorder();
   setString.mockReset();
 });
@@ -146,5 +157,73 @@ describe('the report, assembled with no component mounted', () => {
     for (const secret of ['fourward_test', 'eyJhbGciOi', 'a private note', 'eq.']) {
       expect(report).not.toContain(secret);
     }
+  });
+});
+
+describe('a report source that does not answer', () => {
+  /**
+   * **The founder's "Building…", as a test.** `readLastSession` is a cold Keychain read —
+   * the one await in the builder that carried no bound, flagged by review 51 and dismissed
+   * as theoretical. On the device it hung, and with it both the sheet and Copy
+   * diagnostics: a hang is not a rejection, so no catch fired and nothing changed.
+   *
+   * The report now arrives anyway, and the timeout is printed as what it is — a storage
+   * finding — rather than silently absent.
+   */
+  it('still produces the report when the persisted tail cannot be read', async () => {
+    jest.useFakeTimers();
+    try {
+      mockReadHangs.add('diagnostics.lastSession');
+      const handle = recordRequest('https://x.supabase.co/rest/v1/rankings');
+      handle.sent();
+      handle.settled({ status: 200 });
+
+      const building = buildDiagnosticsReport(new QueryClient(), 'settings');
+      const outcome = building.then((text) => ({ done: true as const, text }));
+      await jest.advanceTimersByTimeAsync(9000);
+
+      const report = await Promise.race([
+        outcome,
+        Promise.resolve({ done: false as const, text: '' }),
+      ]);
+
+      expect(report.done).toBe(true);
+      expect(report.text).toContain('rest:rankings');
+      expect(report.text).toContain('unreadable — the storage read did not answer');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  /** And the belt over everything: even an unforeseen stall cannot hold the builder. */
+  it('resolves within the watchdog whatever hangs', async () => {
+    jest.useFakeTimers();
+    try {
+      mockReadHangs.add('diagnostics.lastSession');
+      mockSessionHangs = true;
+
+      const building = buildDiagnosticsReport(new QueryClient(), 'settings');
+      const settled = jest.fn();
+      void building.then(settled);
+
+      await jest.advanceTimersByTimeAsync(8100);
+      expect(settled).toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  /** The heat question gets a number: recent request starts, from the ring itself. */
+  it('reports how much network work started recently', async () => {
+    const handle = recordRequest('https://x.supabase.co/rest/v1/rankings');
+    handle.sent();
+    handle.settled({ status: 200 });
+
+    const report = await buildDiagnosticsReport(new QueryClient(), 'settings');
+
+    expect(report).toContain('ACTIVITY');
+    // The window is labelled by what was actually observed — a young process says so
+    // rather than implying a full minute (review 58's minor).
+    expect(report).toMatch(/last \d+s\s+1 requests started/);
   });
 });
