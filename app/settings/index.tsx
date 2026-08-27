@@ -1,11 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
-import { openDiagnostics } from '@/features/diagnostics/open';
+import { DiagnosticsSheet } from '@/features/diagnostics/DiagnosticsSheet';
+import { copyDiagnostics } from '@/features/diagnostics/copy';
+import { buildDiagnosticsReport } from '@/features/diagnostics/report';
 import * as Application from 'expo-application';
 import { Image } from 'expo-image';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { Stack, useRouter } from 'expo-router';
+import { useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { signOut, useCurrentProfile } from '@/features/auth';
 import { env, isRelease, lane } from '@/lib/env';
@@ -288,6 +292,41 @@ function About() {
  * production identity, nonproduction database — showed nothing but the version line.
  */
 function BuildDetails() {
+  /**
+   * Owned here rather than by a shared signal, and rendered here rather than at the root.
+   *
+   * The root-mounted version could not be presented at all: this screen is a native modal,
+   * and iOS will not let the controller presenting it present something else. See
+   * `DiagnosticsSheet`. A boolean in the screen that opens it is both the fix and the
+   * simplest thing that can be true.
+   */
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  // Three states, not two — review 57. Saying "Copied" when the write did not happen is
+  // the silent failure this control exists to replace, reproduced in the replacement.
+  const [copy, setCopy] = useState<'idle' | 'done' | 'failed'>('idle');
+  const queryClient = useQueryClient();
+
+  /**
+   * The failsafe: the report to the clipboard **without opening anything**.
+   *
+   * The whole reason this task exists is that a presentation failure made the recorder
+   * unreachable. So the second control does not present: it builds the text and writes it,
+   * and the founder can paste it even if the sheet never appears again.
+   */
+  const copyNow = async () => {
+    let report: string;
+    try {
+      // The route is this screen, which does not need asking for: the copy control only
+      // exists here. One fewer hook, and one fewer context this screen depends on.
+      report = await buildDiagnosticsReport(queryClient, 'settings');
+    } catch (error) {
+      // Even a failure to assemble is worth having on the clipboard: it names the thing
+      // that would otherwise be a founder saying "nothing happened" for a second time.
+      report = `bingd. diagnostics could not be built: ${error instanceof Error ? error.name : 'unknown'}`;
+    }
+    setCopy(copyDiagnostics(report) ? 'done' : 'failed');
+  };
+
   const version = Constants.expoConfig?.version ?? '?';
 
   /**
@@ -345,20 +384,57 @@ function BuildDetails() {
             <Text variant="caption" tone="tertiary">
               backend {backendRef(env.supabaseUrl)}
             </Text>
-            {/* The ordinary way in to Diagnostics. The onboarding summary has its own,
-                by long press, because Settings is unreachable from there — see
-                `features/diagnostics/open.ts`. Both are hidden in a release build. */}
-            <Text
-              variant="caption"
-              tone="action"
-              accessibilityRole="button"
-              accessibilityLabel="Diagnostics"
-              accessibilityHint="Shows a copyable report of what the app is doing"
-              onPress={openDiagnostics}
-              style={styles.diagnostics}
-            >
-              Diagnostics
-            </Text>
+            {/* Two ways to the same report, and the second one exists because the first
+                failed on a real device.
+
+                `Diagnostics` opens the sheet, which is the readable form. `Copy
+                diagnostics` never presents anything at all — it assembles the text and
+                writes it to the clipboard — so a presentation failure can no longer stand
+                between the recorder and the founder. Both are hidden in a release build.
+
+                The onboarding summary keeps its own long-press entry for the case where
+                Settings is unreachable, and renders the same component. */}
+            <View style={styles.diagnostics}>
+              <Text
+                variant="caption"
+                tone="action"
+                accessibilityRole="button"
+                accessibilityLabel="Diagnostics"
+                accessibilityHint="Shows a copyable report of what the app is doing"
+                onPress={() => setDiagnosticsOpen(true)}
+                style={styles.diagnosticsAction}
+              >
+                Diagnostics
+              </Text>
+              <Text
+                variant="caption"
+                tone="action"
+                accessibilityRole="button"
+                accessibilityLabel={
+                  copy === 'done'
+                    ? 'Diagnostics copied'
+                    : copy === 'failed'
+                      ? 'Copying diagnostics failed'
+                      : 'Copy diagnostics'
+                }
+                accessibilityHint="Copies the report without opening anything"
+                onPress={() => void copyNow()}
+                style={styles.diagnosticsAction}
+              >
+                {copy === 'done'
+                  ? 'Copied'
+                  : copy === 'failed'
+                    ? 'Copy failed'
+                    : 'Copy diagnostics'}
+              </Text>
+            </View>
+
+            {/* Rendered inside this screen, so it presents from this screen’s own view
+                controller rather than from the root’s, which is already presenting it. */}
+            <DiagnosticsSheet
+              visible={diagnosticsOpen}
+              onClose={() => setDiagnosticsOpen(false)}
+            />
           </>
         ) : null}
       </View>
@@ -384,7 +460,10 @@ function short(value: string | null | undefined) {
 const styles = StyleSheet.create({
   // A 44pt target on a caption-sized label, so the one control on this block that is a
   // control can actually be pressed.
-  diagnostics: { paddingTop: theme.space[2], minHeight: theme.layout.minTapTarget },
+  diagnostics: { paddingTop: theme.space[2], gap: theme.space[1] },
+  // A 44pt target on a caption-sized label, so the two controls on this block that are
+  // controls can actually be pressed.
+  diagnosticsAction: { minHeight: theme.layout.minTapTarget },
   page: { paddingBottom: theme.space[10] },
   group: {
     marginTop: theme.space[3],

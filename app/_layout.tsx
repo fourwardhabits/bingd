@@ -20,7 +20,6 @@ import {
   useAuth,
   useAuthRouting,
 } from '@/features/auth';
-import { DiagnosticsHost } from '@/features/diagnostics/DiagnosticsHost';
 import { useRedeemPendingInvite } from '@/features/invite';
 import { configurePushPresentation } from '@/features/notifications/push';
 import { usePush } from '@/features/notifications/use-push';
@@ -301,9 +300,16 @@ function Navigation() {
       {/* Outside the boundary, so the two states that are not a place in the app are
           still explained even if the navigator underneath them stopped. */}
       <AuthStatusOverlay />
-      {/* Above everything, including the overlay: the one surface that has to be
-          reachable when the rest of the app is not. It renders nothing until asked. */}
-      <DiagnosticsHost />
+      {/* Diagnostics is deliberately **not** mounted here.
+
+          It was, and on the founder’s device tapping it did nothing: `settings` is a
+          `Stack.Screen` with `presentation: 'modal'`, so react-native-screens gives it its
+          own view controller, and a React Native `<Modal>` mounted at the root presents from
+          the root controller — which is already presenting Settings. iOS refuses, and the
+          sheet is invisible. Every other sheet in this app is rendered inside the screen that
+          opens it, which is why this was the only one that failed.
+
+          `DiagnosticsSheet` is now rendered by each entry point instead. */}
     </>
   );
 }

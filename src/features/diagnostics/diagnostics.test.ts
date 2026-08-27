@@ -2,7 +2,7 @@ import { readLastSession, persistLastSession } from '@/lib/flight-persistence';
 import { note, rememberRoute, resetFlightRecorder, snapshot } from '@/lib/flight-recorder';
 import { formatReport } from '@/lib/flight-report';
 
-import { diagnosticsAvailable, onDiagnosticsRequested, openDiagnostics } from './open';
+import { diagnosticsAvailable } from './availability';
 
 /**
  * The way in, and the thing that survives a launch.
@@ -37,50 +37,17 @@ beforeEach(() => {
   resetFlightRecorder();
 });
 
+/**
+ * The signal that used to live here is gone. Each entry point now owns its own boolean and
+ * renders its own sheet — see `DiagnosticsSheet` for why a shared host could not be
+ * presented over a native modal route — so what is left to assert is the release gate.
+ */
 describe('the way in', () => {
   it('is available outside a store build', () => {
     // The test configuration is the `preview` variant, which is the lane a tester runs.
     expect(diagnosticsAvailable).toBe(true);
   });
-
-  it('reaches every listener that asked', () => {
-    const opened: string[] = [];
-    const stopA = onDiagnosticsRequested(() => opened.push('a'));
-    const stopB = onDiagnosticsRequested(() => opened.push('b'));
-
-    openDiagnostics();
-
-    expect(opened).toEqual(['a', 'b']);
-    stopA();
-    stopB();
-  });
-
-  it('stops reaching a listener that unsubscribed', () => {
-    const opened: string[] = [];
-    const stop = onDiagnosticsRequested(() => opened.push('a'));
-    stop();
-
-    openDiagnostics();
-
-    expect(opened).toEqual([]);
-  });
-
-  /** A listener that unsubscribes itself while being notified must not break the loop. */
-  it('survives a listener that removes itself mid-notification', () => {
-    const opened: string[] = [];
-    let stopSelf = () => {};
-    stopSelf = onDiagnosticsRequested(() => {
-      opened.push('self');
-      stopSelf();
-    });
-    const stopOther = onDiagnosticsRequested(() => opened.push('other'));
-
-    expect(() => openDiagnostics()).not.toThrow();
-    expect(opened).toEqual(['self', 'other']);
-    stopOther();
-  });
 });
-
 describe('the tail kept for the next launch', () => {
   it('round-trips the last route and what was unfinished', async () => {
     note('route', 'onboarding/taste', 'stay:ready');

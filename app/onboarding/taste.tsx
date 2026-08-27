@@ -18,7 +18,8 @@ import {
 } from '@/features/onboarding/use-taste-onboarding';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
-import { diagnosticsAvailable, openDiagnostics } from '@/features/diagnostics/open';
+import { DiagnosticsSheet } from '@/features/diagnostics/DiagnosticsSheet';
+import { diagnosticsAvailable } from '@/features/diagnostics/availability';
 import { withGrace } from '@/lib/grace';
 import { posterUri } from '@/lib/images';
 import { TAB_ROUTES, type TabRoute } from '@/lib/routes';
@@ -556,6 +557,11 @@ function Summary({
   onExplore: () => void;
   onCollection: () => void;
 }) {
+  // Owned here, like the one in Settings, and for the same reason: a sheet mounted
+  // anywhere but inside the screen that opens it cannot be presented reliably. See
+  // `DiagnosticsSheet`.
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+
   return (
     <View style={styles.summary}>
       {/* The heading is the way in to Diagnostics from here, by long press.
@@ -564,11 +570,11 @@ function Summary({
           Settings is unreachable from — `useAuthRouting` sends this account back here from
           any other group, so a route would be pushed and immediately replaced. A gesture on
           something already on screen is the only entrance that routing cannot take away.
-          Beta and below only; `openDiagnostics` refuses in a release build. */}
+          Beta and below only; the control is absent in a release build. */}
       <Text
         variant="title1"
         style={styles.centre}
-        onLongPress={diagnosticsAvailable ? openDiagnostics : undefined}
+        onLongPress={diagnosticsAvailable ? () => setDiagnosticsOpen(true) : undefined}
       >
         That is a start
       </Text>
@@ -585,6 +591,9 @@ function Summary({
             offered on this branch too, under the real actions rather than beside them. */}
         <UseDifferentAccountButton />
       </View>
+
+      {/* The same component Settings renders, with the same content. */}
+      <DiagnosticsSheet visible={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
     </View>
   );
 }
