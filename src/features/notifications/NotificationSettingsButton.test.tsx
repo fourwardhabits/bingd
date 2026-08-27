@@ -70,10 +70,19 @@ describe('the notifications gear', () => {
     // second subject.
     expect(glyphSizes).toContain(24);
     expect(glyphSizes).toContain(12);
-    // The disc that lifts the gear off the bell's strokes.
+    // No disc behind the gear: the founder's device read the Paper bubble as a badge
+    // background, so the gear now sits directly on the bell. The only filled circle
+    // in this control would be that bubble — assert it is gone.
     expect(
-      styles.some(
-        (style) => style.width === 16 && style.height === 16 && Boolean(style.backgroundColor),
+      styles.some((style) => style.borderRadius !== undefined && Boolean(style.backgroundColor)),
+    ).toBe(false);
+    // And the combined glyph pulls back by half the gear's overhang, so bell-plus-gear
+    // centres in the touch square rather than the bell alone.
+    expect(
+      styles.some((style) =>
+        (style.transform as { translateX?: number }[] | undefined)?.some(
+          (t) => typeof t.translateX === 'number' && t.translateX < 0,
+        ),
       ),
     ).toBe(true);
   });

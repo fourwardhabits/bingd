@@ -62,10 +62,11 @@ import { theme } from '@/ui/tokens';
  * **A bell wearing a small gear, not a bare gear.** A bare gear in this corner read as
  * the app's settings — the same glyph the Profile header carries — when what it opens
  * is the notification preferences alone. The bell names the subject and the gear names
- * the action, the way the unread badge already annotates the bell in `AppHeader`; the
- * badge disc is Paper so the gear reads as sitting *on* the bell rather than tangled
- * in its strokes. Same neutral ink and `icon.md` weight as the Profile gear, so the
- * two settings controls are visibly kin without being the same claim.
+ * the action, the way the unread badge already annotates the bell in `AppHeader`. The
+ * gear sits directly on the bell's shoulder — no disc behind it: the founder's device
+ * read the Paper bubble as a badge background, and at this weight the two glyphs
+ * separate on their own. Same neutral ink and `icon.md` weight as the Profile gear,
+ * so the two settings controls are visibly kin without being the same claim.
  */
 export function NotificationSettingsButton() {
   const router = useRouter();
@@ -83,11 +84,14 @@ export function NotificationSettingsButton() {
           size={theme.layout.icon.md}
           color={theme.text.secondary}
         />
-        <View style={styles.gearBadge}>
-          {/* The filled cut, not the outline: at this size an outlined gear is a
-              smudge, and the disc behind it is already doing the separating. */}
-          <Ionicons name="settings-sharp" size={GEAR_BADGE_SIZE} color={theme.text.secondary} />
-        </View>
+        {/* The filled cut, not the outline: at this size an outlined gear is a
+            smudge. */}
+        <Ionicons
+          name="settings-sharp"
+          size={GEAR_BADGE_SIZE}
+          color={theme.text.secondary}
+          style={styles.gearGlyph}
+        />
       </View>
     </Pressable>
   );
@@ -95,6 +99,9 @@ export function NotificationSettingsButton() {
 
 /** Small enough to read as an annotation on the bell, large enough to still be a gear. */
 const GEAR_BADGE_SIZE = 12;
+
+/** How far the gear pokes past the bell's lower-right corner. */
+const GEAR_OVERHANG = { x: 3, y: 2 };
 
 export default function NotificationsScreen() {
   const profile = useCurrentProfile();
@@ -511,29 +518,26 @@ const styles = StyleSheet.create({
     marginRight: -(theme.layout.minTapTarget - theme.layout.icon.md) / 2,
   },
   gearPressed: { opacity: 0.6 },
-  // The glyph's own box, so the badge's absolute offsets measure from the bell
-  // rather than from the 44pt touch square around it.
+  // The glyph's own box, so the gear's absolute offsets measure from the bell
+  // rather than from the 44pt touch square around it. The translate is half the
+  // gear's overhang, so the *combined* glyph — bell plus the gear poking past its
+  // lower-right corner — centres in the touch square rather than the bell alone.
   bellWrap: {
     width: theme.layout.icon.md,
     height: theme.layout.icon.md,
     alignItems: 'center',
     justifyContent: 'center',
+    transform: [{ translateX: -GEAR_OVERHANG.x / 2 }, { translateY: -GEAR_OVERHANG.y / 2 }],
   },
   /**
-   * The gear, riding the bell's lower-right shoulder on a Paper disc. The disc is
-   * the same trick as `AppHeader`'s count badge: it separates the annotation from
-   * the strokes beneath it, which a bare glyph at this size would tangle with.
+   * The gear, riding the bell's lower-right shoulder directly — no disc behind it.
+   * The founder's device read the old Paper bubble as a badge background; at this
+   * weight the filled gear separates from the bell's strokes on its own.
    */
-  gearBadge: {
+  gearGlyph: {
     position: 'absolute',
-    right: -5,
-    bottom: -3,
-    width: 16,
-    height: 16,
-    borderRadius: theme.radius.full,
-    backgroundColor: theme.surface.base,
-    alignItems: 'center',
-    justifyContent: 'center',
+    right: -GEAR_OVERHANG.x,
+    bottom: -GEAR_OVERHANG.y,
   },
   unread: { backgroundColor: theme.surface.raised },
 
