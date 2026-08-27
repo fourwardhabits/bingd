@@ -336,7 +336,8 @@ describe('opening a goal into the titles behind it', () => {
     );
     await waitFor(() => expect(screen.getByText('1 of 10 seasons')).toBeTruthy());
 
-    await fireEvent.press(screen.getByLabelText('TV seasons, 1 of 10 seasons'));
+    // "TV" is the goal's label; "seasons" stays the counted unit beside it.
+    await fireEvent.press(screen.getByLabelText('TV, 1 of 10 seasons'));
 
     expect(screen.getByText('Severance, S2')).toBeTruthy();
     expect(screen.queryByText('Sinners')).toBeNull();

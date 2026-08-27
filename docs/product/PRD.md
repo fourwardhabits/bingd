@@ -417,6 +417,42 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 > produced the counts, so the sheet can never show a title the counts did not admit;
 > logged-but-unranked titles, notes and watch dates stay owner-only (§22).
 
+> ### As built — 2026-08-27 (second pass): Search is one list under its own header row, and the visible category is **TV**
+>
+> The final visual-polish tranche before the external beta, all founder-requested from
+> physical device use. Two of the three paragraphs in the block above are superseded by
+> it; the People-chip paragraph stands.
+>
+> **The search field sits on its own row under the brand row.** The compaction into the
+> brand header row crowded the bingd. lockup; the correction is the cross-tab header
+> rhythm — row one is the brand, row two is the screen's acting control, the same
+> position the category selector holds on For You and Collection. Results begin
+> normally underneath.
+>
+> **Search returns one continuous list, not grouped sections.** The 2026-08-19 "grouped
+> sections" shape sectioned People while leaving Movies and TV unsectioned, which was
+> the inconsistency. The contract is now: **query → one list → chips narrow it.** Under
+> `All` the two sources merge deterministically — people first in the member search's
+> own order, then titles in the catalogue's — with no "People", "Movies" or "TV"
+> headings anywhere; `Movies` and `TV` are the same surface narrowed to those titles,
+> and `People` is the same surface narrowed to members (gate lifted, no cap, as the
+> block above decided). The relevance gate, the three-person preview and See all
+> survive under `All`; See all is now a row in the list rather than a section action,
+> and still is not a route. A row states its own kind — round avatar and @handle
+> against poster and metadata — rather than a heading stating it for a block. People
+> search continues to match display name and @handle.
+>
+> **The user-facing category label is "TV", no longer "TV seasons".** Everywhere the
+> app names the category — the Collection selector, profile stat and its sheet, Top
+> Ranked filter, goals, award breakdown headings, `#N in TV` placements, the Search
+> chip that already said it — the word is **TV**. This is display terminology only:
+> **individual seasons remain the canonical watched/ranked objects** (§1, §9, §11 are
+> unchanged and still govern), `tv_seasons` remains the schema/RPC/analytics word, and
+> sentences that *count* the unit still say seasons — "12 of 52 seasons" under a goal,
+> "Watch 15 TV seasons" on an award — because seasons are what is being counted. For
+> You's selector alone still says "TV shows", for the reason the 2026-08-26 block
+> gives: that wall genuinely holds series.
+
 ---
 
 ## 8. Scope by product stage

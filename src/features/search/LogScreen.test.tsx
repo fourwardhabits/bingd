@@ -467,12 +467,14 @@ describe('when the wider search cannot answer', () => {
 });
 
 /**
- * Users in Search (founder addendum 2026-08-16 §2).
+ * People in Search (founder addendum 2026-08-16 §2, unified by the external-beta
+ * polish).
  *
- * The rules being asserted, in the founder's words: filters become All | Movies | TV |
- * Users; a user row is visually distinct from a title row; under All titles stay
- * dominant and a compact Users *section* appears only for meaningful matches; never
- * intermix profile rows into the title ranking; tap opens the authorized profile.
+ * The rules being asserted: filters are All | Movies | TV | People over **one
+ * continuous list** — no People section heading, no separator; under All titles stay
+ * dominant, person rows appear above them only for meaningful matches; a user row is
+ * visually distinct from a title row (the row says its kind, not a heading); tap opens
+ * the authorized profile.
  *
  * What is deliberately **not** asserted here is who may be found. That is
  * `search_users`' job and it is tested against a real database in
@@ -507,12 +509,10 @@ describe('finding people', () => {
   };
 
   /**
-   * **People is a chip again, and it is not the Users chip that was removed.**
+   * **People is a chip, not a Users chip.**
    *
-   * That one sat among three title filters while members were interleaved into the
-   * same list, so one control meant two things. The People chip shows the (structurally
-   * separate) People section alone — and "Users" stays gone, because the founder's word
-   * for accounts is People everywhere the app speaks of them.
+   * "Users" stays gone, because the founder's word for accounts is People everywhere
+   * the app speaks of them. The chip narrows the one list to member rows alone.
    */
   it('offers the three title filters and People, and no Users tab', async () => {
     withPeople([]);
@@ -525,15 +525,31 @@ describe('finding people', () => {
     expect(view.queryByText('Users')).toBeNull();
   });
 
-  it('shows a compact People section above the titles', async () => {
+  it('interleaves people above the titles in one list, with no section heading', async () => {
     withPeople([anna]);
     const view = await search('anna');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    await waitFor(() => expect(view.getByLabelText('People')).toBeTruthy());
-    expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy();
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
     // Titles are still there and still the body of the list.
     expect(view.getByLabelText(FILM_ROW)).toBeTruthy();
+    // No "People" heading — the row's own shape is what says it is a person.
+    // (`SectionHeader` exposes its title as the accessible name; the chip does not.)
+    expect(view.queryByLabelText('People')).toBeNull();
+  });
+
+  it('orders the one list people first, titles after', async () => {
+    withPeople([anna]);
+    const view = await search('anna');
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+
+    // Tree order is render order: the person row precedes every title row.
+    const labels = view
+      .getAllByLabelText(/^(Anna Rivers, @anna|Inception, 2010|Breaking Bad, 2008)/)
+      .map((node) => node.props.accessibilityLabel as string);
+    expect(labels[0]).toBe('Anna Rivers, @anna');
+    expect(labels).toContain(FILM_ROW);
   });
 
   it('keeps a middle-of-the-handle match out of a plain query', async () => {
@@ -543,7 +559,7 @@ describe('finding people', () => {
     const view = await search('ann');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    expect(view.queryByLabelText('People')).toBeNull();
+    expect(view.queryByLabelText('Deanna Troi, @deanna')).toBeNull();
   });
 
   /**
@@ -592,7 +608,9 @@ describe('finding people', () => {
     await waitFor(() => expect(view.getByLabelText('Anna 0, @anna0')).toBeTruthy());
     expect(view.queryByLabelText('Anna 4, @anna4')).toBeNull();
 
-    await fireEvent.press(view.getByText('See all'));
+    // The row names the total it reveals — with no section header to carry a "See
+    // all" action, the expansion is a row of the list itself.
+    await fireEvent.press(view.getByLabelText('See all 5 people'));
 
     await waitFor(() => expect(view.getByLabelText('Anna 4, @anna4')).toBeTruthy());
     // No second round trip: the query already asked for the server's ceiling.
@@ -604,18 +622,18 @@ describe('finding people', () => {
     withPeople([anna]);
     const view = await search('anna');
 
-    await waitFor(() => expect(view.getByLabelText('People')).toBeTruthy());
-    expect(view.queryByText('See all')).toBeNull();
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
+    expect(view.queryByText(/^See all/)).toBeNull();
   });
 
   it('says nothing about members when nobody matched', async () => {
-    // No section, no empty state of its own. A title search that found titles is not a
-    // failed member search, and saying so would be noise on every ordinary query.
+    // No person rows, no empty state of their own. A title search that found titles is
+    // not a failed member search, and saying so would be noise on every ordinary query.
     withPeople([]);
     const view = await search('anna');
     await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
 
-    expect(view.queryByLabelText('People')).toBeNull();
+    expect(view.queryByLabelText(/, @/)).toBeNull();
   });
 
   /**
@@ -716,7 +734,56 @@ describe('finding people', () => {
     await fireEvent.press(view.getByText('People'));
 
     await waitFor(() => expect(view.getByLabelText('Anna 4, @anna4')).toBeTruthy());
-    expect(view.queryByText('See all')).toBeNull();
+    expect(view.queryByText(/^See all/)).toBeNull();
+  });
+
+  it('keeps the people on screen when the title search fails (review 61)', async () => {
+    // The one-list contract cuts both ways: a failed *title* query must not blank
+    // rows the *member* query already delivered. The failure is a footer under them.
+    mockRpc.mockImplementation((fn: string) => {
+      if (fn === 'search_titles')
+        return Promise.resolve({ data: null, error: { message: 'boom' } });
+      if (fn === 'search_users') return Promise.resolve({ data: [anna], error: null });
+      if (fn === 'follow_state_with') return Promise.resolve({ data: [], error: null });
+      return Promise.resolve({ data: { status: 'ok' }, error: null });
+    });
+    const view = await search('anna');
+
+    await waitFor(() => expect(view.getByLabelText('Anna Rivers, @anna')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('Could not search titles')).toBeTruthy());
+    expect(view.getByText('Try again')).toBeTruthy();
+  });
+
+  it('keeps the search field below the brand row, not inside it', async () => {
+    // The founder's header rhythm: row one is the bingd. brand, row two is the
+    // screen's acting control — the same position the category selector holds on
+    // For You and Collection. The compaction that put the field *beside* the
+    // lockup is the layout this asserts against.
+    const view = await search('');
+
+    type Node = { props?: Record<string, unknown>; children?: unknown[] } | string | null;
+    const hasSearchField = (node: Node): boolean => {
+      if (!node || typeof node === 'string') return false;
+      if (node.props?.accessibilityLabel === 'Search') return true;
+      return (node.children ?? []).some((child) => hasSearchField(child as Node));
+    };
+    const findHeader = (node: Node): Node => {
+      if (!node || typeof node === 'string') return null;
+      if (node.props?.accessibilityRole === 'header') return node;
+      for (const child of node.children ?? []) {
+        const found = findHeader(child as Node);
+        if (found) return found;
+      }
+      return null;
+    };
+
+    const tree = view.toJSON() as Node;
+    const header = findHeader(tree);
+    expect(header).toBeTruthy();
+    // The brand header exists and the field is not a descendant of it…
+    expect(hasSearchField(header)).toBe(false);
+    // …while the screen still has the field, below.
+    expect(hasSearchField(tree)).toBe(true);
   });
 
   it('People says who it could not find, in its own words', async () => {

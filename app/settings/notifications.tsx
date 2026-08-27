@@ -52,12 +52,20 @@ import { theme } from '@/ui/tokens';
  * control is the only thing that changes it.
  */
 /**
- * The gear in the navigation bar, as its own component so it can be looked at.
+ * The control in the navigation bar, as its own component so it can be looked at.
  *
  * `headerRight` is a function React Navigation calls, not something a screen renders,
  * so an inline element here is unreachable from a test of the screen — which is how a
  * control ends up shipping with no accessible name. Nothing else about it wants to be
  * separate; being nameable is the whole reason.
+ *
+ * **A bell wearing a small gear, not a bare gear.** A bare gear in this corner read as
+ * the app's settings — the same glyph the Profile header carries — when what it opens
+ * is the notification preferences alone. The bell names the subject and the gear names
+ * the action, the way the unread badge already annotates the bell in `AppHeader`; the
+ * badge disc is Paper so the gear reads as sitting *on* the bell rather than tangled
+ * in its strokes. Same neutral ink and `icon.md` weight as the Profile gear, so the
+ * two settings controls are visibly kin without being the same claim.
  */
 export function NotificationSettingsButton() {
   const router = useRouter();
@@ -69,14 +77,24 @@ export function NotificationSettingsButton() {
       onPress={() => router.push('/settings/notification-preferences')}
       style={({ pressed }) => [styles.gear, pressed && styles.gearPressed]}
     >
-      <Ionicons
-        name="settings-outline"
-        size={theme.layout.icon.md}
-        color={theme.semantic.action}
-      />
+      <View style={styles.bellWrap}>
+        <Ionicons
+          name="notifications-outline"
+          size={theme.layout.icon.md}
+          color={theme.text.secondary}
+        />
+        <View style={styles.gearBadge}>
+          {/* The filled cut, not the outline: at this size an outlined gear is a
+              smudge, and the disc behind it is already doing the separating. */}
+          <Ionicons name="settings-sharp" size={GEAR_BADGE_SIZE} color={theme.text.secondary} />
+        </View>
+      </View>
     </Pressable>
   );
 }
+
+/** Small enough to read as an annotation on the bell, large enough to still be a gear. */
+const GEAR_BADGE_SIZE = 12;
 
 export default function NotificationsScreen() {
   const profile = useCurrentProfile();
@@ -252,12 +270,12 @@ export default function NotificationsScreen() {
            * Where somebody looks the moment they decide they are getting too many of
            * these, which is here rather than back in the Settings list.
            *
-           * A gear rather than the word, which the founder asked for off the device.
+           * A glyph rather than the word, which the founder asked for off the device —
            * “Settings” in a navigation bar reads as a second destination competing with
-           * the title beside it — two labels of similar weight and no hierarchy between
-           * them — and it is the one control in the app whose meaning a glyph carries
-           * completely. The word survives for a screen reader, which is where it was
-           * doing the work.
+           * the title beside it. And a bell wearing a small gear rather than a bare
+           * gear, because a bare gear here claimed to be app settings when it opens
+           * notification preferences alone. The words survive for a screen reader,
+           * which is where they were doing the work.
            *
            * The `Pressable` is the full 44pt square and the glyph is 24 inside it. Not
            * `hitSlop`: Android clips touches outside a parent's box, so slop around an
@@ -480,18 +498,43 @@ const styles = StyleSheet.create({
   page: { paddingBottom: theme.space[10] },
   /**
    * A square the size of the minimum target, with the glyph centred in it. The
-   * negative right margin pulls the box back to the bar's own edge: the square is
-   * wider than the glyph, so without it the gear sits a gutter's width in from where
-   * the word “Settings” used to end and looks unaligned with the title opposite.
+   * negative right margin pulls the box back to the bar's own edge — by exactly the
+   * slack the square adds around the glyph, which is what centres the *glyph* on the
+   * position the bar means. The old pull was a spacing token (12) rather than the
+   * slack (10), so the glyph sat two points past the edge and read as off-centre.
    */
   gear: {
     width: theme.layout.minTapTarget,
     height: theme.layout.minTapTarget,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: -theme.space[3],
+    marginRight: -(theme.layout.minTapTarget - theme.layout.icon.md) / 2,
   },
   gearPressed: { opacity: 0.6 },
+  // The glyph's own box, so the badge's absolute offsets measure from the bell
+  // rather than from the 44pt touch square around it.
+  bellWrap: {
+    width: theme.layout.icon.md,
+    height: theme.layout.icon.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /**
+   * The gear, riding the bell's lower-right shoulder on a Paper disc. The disc is
+   * the same trick as `AppHeader`'s count badge: it separates the annotation from
+   * the strokes beneath it, which a bare glyph at this size would tangle with.
+   */
+  gearBadge: {
+    position: 'absolute',
+    right: -5,
+    bottom: -3,
+    width: 16,
+    height: 16,
+    borderRadius: theme.radius.full,
+    backgroundColor: theme.surface.base,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   unread: { backgroundColor: theme.surface.raised },
 
   dot: {

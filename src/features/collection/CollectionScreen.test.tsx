@@ -139,7 +139,7 @@ const tab = (view: Awaited<ReturnType<typeof open>>, name: string) =>
 /** The category control is a dropdown: open it, then choose. */
 const switchTo = async (
   view: Awaited<ReturnType<typeof open>>,
-  medium: 'Movies' | 'TV seasons',
+  medium: 'Movies' | 'TV',
 ) => {
   await fireEvent.press(view.getByLabelText(/^Showing /));
   await fireEvent.press(view.getByRole('button', { name: medium }));
@@ -159,7 +159,7 @@ describe('the Unranked tab', () => {
   it('does appear on TV when that season is the unranked one', async () => {
     mockTables.user_media = [watched('s1', 'season')];
     const view = await open();
-    await switchTo(view, 'TV seasons');
+    await switchTo(view, 'TV');
 
     await waitFor(() => expect(tab(view, 'Unranked')).toBeTruthy());
   });
@@ -168,7 +168,7 @@ describe('the Unranked tab', () => {
     // The mirror of the founder's bug, which the same fix has to cover.
     mockTables.user_media = [watched('m1', 'movie')];
     const view = await open();
-    await switchTo(view, 'TV seasons');
+    await switchTo(view, 'TV');
 
     await waitFor(() => expect(tab(view, 'Unranked')).toBeNull());
   });
@@ -185,7 +185,7 @@ describe('the Unranked tab', () => {
     const view = await open();
 
     await waitFor(() => expect(tab(view, 'Unranked')).toBeTruthy());
-    await switchTo(view, 'TV seasons');
+    await switchTo(view, 'TV');
     await waitFor(() => expect(tab(view, 'Unranked')).toBeTruthy());
   });
 
@@ -198,7 +198,7 @@ describe('the Unranked tab', () => {
 
     await waitFor(() => expect(tab(view, 'Watched')).toBeTruthy());
     expect(tab(view, 'Unranked')).toBeNull();
-    await switchTo(view, 'TV seasons');
+    await switchTo(view, 'TV');
     await waitFor(() => expect(tab(view, 'Unranked')).toBeNull());
   });
 });
@@ -215,7 +215,7 @@ describe('switching category while standing on Unranked', () => {
     await fireEvent.press(view.getByRole('tab', { name: 'Unranked' }));
     await waitFor(() => expect(selected(view, 'Unranked')).toBe(true));
 
-    await switchTo(view, 'TV seasons');
+    await switchTo(view, 'TV');
 
     // The tab is gone and the reader is on Watched, in the same render — not on a
     // hidden segment showing an empty list.
@@ -232,7 +232,7 @@ describe('switching category while standing on Unranked', () => {
     await fireEvent.press(view.getByRole('tab', { name: 'Unranked' }));
     await waitFor(() => expect(selected(view, 'Unranked')).toBe(true));
 
-    await switchTo(view, 'TV seasons');
+    await switchTo(view, 'TV');
     await waitFor(() => expect(selected(view, 'Watched')).toBe(true));
 
     await switchTo(view, 'Movies');
@@ -249,7 +249,7 @@ describe('switching category while standing on Unranked', () => {
     await fireEvent.press(view.getByRole('tab', { name: 'Unranked' }));
     await waitFor(() => expect(selected(view, 'Unranked')).toBe(true));
 
-    await switchTo(view, 'TV seasons');
+    await switchTo(view, 'TV');
 
     await waitFor(() => expect(selected(view, 'Unranked')).toBe(true));
   });
@@ -274,19 +274,19 @@ describe('the remembered category', () => {
     expect(showing(view)).toBe('Showing Movies');
   });
 
-  it('reopens on TV seasons when that is where the reader last was', async () => {
+  it('reopens on TV when that is where the reader last was', async () => {
     mockPrefStore[MEDIUM_KEY] = 'tv_seasons';
     mockTables.user_media = [watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('Showing TV seasons'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
   });
 
   it('records the switch, so the next launch starts there', async () => {
     mockTables.user_media = [watched('s1', 'season')];
     const view = await open();
 
-    await switchTo(view, 'TV seasons');
+    await switchTo(view, 'TV');
 
     await waitFor(() =>
       expect(mockPrefWrites).toContainEqual({ name: MEDIUM_KEY, value: 'tv_seasons' }),
@@ -298,7 +298,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
     const view = await open();
 
-    await waitFor(() => expect(showing(view)).toBe('Showing TV seasons'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
     await switchTo(view, 'Movies');
 
     await waitFor(() =>
@@ -335,13 +335,13 @@ describe('the remembered category', () => {
     const view = await open();
     // Touching the control is what used to poison the switch: it latched "the reader has
     // chosen", and the next account's stored side was then thrown away as their choice.
-    await switchTo(view, 'TV seasons');
+    await switchTo(view, 'TV');
     await switchTo(view, 'Movies');
 
     mockProfile.id = 'user-2';
     await view.rerender(<CollectionScreen />);
 
-    await waitFor(() => expect(showing(view)).toBe('Showing TV seasons'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
   });
 
   it('falls back to Movies for a next account that has no stored side', async () => {
@@ -349,7 +349,7 @@ describe('the remembered category', () => {
     mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
 
     const view = await open();
-    await waitFor(() => expect(showing(view)).toBe('Showing TV seasons'));
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
 
     mockProfile.id = 'user-3';
     await view.rerender(<CollectionScreen />);

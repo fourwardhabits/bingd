@@ -217,7 +217,7 @@ describe('the stat row', () => {
     await waitFor(async () => expect(await stat(view, 'Movies')).toBe('3'));
     expect(await stat(view, 'Followers')).toBeDefined();
     expect(await stat(view, 'Following')).toBeDefined();
-    expect(await stat(view, 'TV seasons')).toBeDefined();
+    expect(await stat(view, 'TV')).toBeDefined();
     expect(view.queryByLabelText(/^Watchlist: /)).toBeNull();
     expect(view.queryByLabelText(/^Watched: /)).toBeNull();
   });

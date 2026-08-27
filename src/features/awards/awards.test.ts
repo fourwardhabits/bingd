@@ -943,7 +943,9 @@ describe('Two-Screen Life', () => {
     // number — and is why twenty films do not appear under a heading saying fifteen.
     expect(movies?.rows).toHaveLength(15);
 
-    expect(seasons?.label).toBe('TV seasons');
+    // The heading is the visible category, "TV"; the sentences that *count* — the
+    // detailLine above — keep "TV seasons" because seasons are what they count.
+    expect(seasons?.label).toBe('TV');
     expect(seasons?.value).toBe('7 / 15');
     expect(seasons?.rows).toHaveLength(7);
 

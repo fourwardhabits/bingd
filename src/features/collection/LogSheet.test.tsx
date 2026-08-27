@@ -1832,11 +1832,11 @@ describe('the state after a ranking', () => {
     expect(sheet.queryByText('Ranked')).toBeNull();
   });
 
-  it('names TV seasons by the category the server sent', async () => {
+  it('names the TV category by the category the server sent', async () => {
     const sheet = await open(filmA, {
       postRank: { score: 6.2, position: 11, category: 'tv_seasons' },
     });
 
-    await waitFor(() => expect(sheet.getByText('#11 in TV seasons')).toBeTruthy());
+    await waitFor(() => expect(sheet.getByText('#11 in TV')).toBeTruthy());
   });
 });

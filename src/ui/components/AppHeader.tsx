@@ -107,8 +107,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   // Flexed so a screen can hand `right` a control that fills the rest of the
-  // row — Search puts its field here. With nothing wide inside, the icons end
-  // up exactly where `space-between` used to leave them.
+  // row. With nothing wide inside, the icons end up exactly where
+  // `space-between` used to leave them.
   right: {
     flex: 1,
     justifyContent: 'flex-end',

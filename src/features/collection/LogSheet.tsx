@@ -975,7 +975,7 @@ function Body({
             <View style={styles.rankedText}>
               <Text variant="headline">Ranked</Text>
               <Text variant="footnote" tone="secondary">
-                {`#${postRank.position} in ${postRank.category === 'tv_seasons' ? 'TV seasons' : 'Movies'}`}
+                {`#${postRank.position} in ${postRank.category === 'tv_seasons' ? 'TV' : 'Movies'}`}
               </Text>
             </View>
           </View>

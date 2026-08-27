@@ -864,7 +864,7 @@ describe('the breakdowns', () => {
 
     expect(screen.getByText('Movies')).toBeTruthy();
     expect(screen.getByText('3 / 15')).toBeTruthy();
-    expect(screen.getByText('TV seasons')).toBeTruthy();
+    expect(screen.getByText('TV')).toBeTruthy();
     expect(screen.getByText('2 / 15')).toBeTruthy();
     // And the award's own line, which is the sum.
     expect(screen.getByText(/5 \/ 30/)).toBeTruthy();

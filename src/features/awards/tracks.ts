@@ -866,7 +866,9 @@ export const AWARD_TRACKS: AwardTrack[] = [
         rows: rows.slice(0, cap).map((title) => titleRow(title)),
       });
       return {
-        sections: [section('Movies', movies), section('TV seasons', seasons)],
+        // "TV", the visible category name — the rows beneath it are still seasons,
+        // and the counting sentences below keep the unit because they count units.
+        sections: [section('Movies', movies), section('TV', seasons)],
         emptyLabel: 'Nothing on either side yet.',
       };
     },
