@@ -160,7 +160,8 @@ describe('what a master switch reads', () => {
   // every assertion below into a test of `undefined`, which is the shape of failure
   // Review 21 kept finding — a fixture that quietly stops being the thing under test.
   const social = SECTIONS.find((s) => s.key === 'social');
-  if (!social) throw new Error('the social section must exist for these tests to mean anything');
+  if (!social)
+    throw new Error('the social section must exist for these tests to mean anything');
 
   const prefs = (over: Partial<NotificationPreferences>): NotificationPreferences => ({
     ...DEFAULTS,
@@ -273,9 +274,9 @@ describe('the screen', () => {
         p_enabled: false,
       }),
     );
-    expect(mockRpc.mock.calls.filter((c) => c[0] === 'set_notification_preference')).toHaveLength(
-      0,
-    );
+    expect(
+      mockRpc.mock.calls.filter((c) => c[0] === 'set_notification_preference'),
+    ).toHaveLength(0);
   });
 
   it('turns every child on when the master goes on, including one that defaults off', async () => {

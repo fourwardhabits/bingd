@@ -3,8 +3,11 @@ import { Alert } from 'react-native';
 import { readPref, writePref } from '@/lib/prefs';
 import { supabase } from '@/lib/supabase';
 
+import { tally } from '@/lib/flight-recorder';
+
 import {
   acquirePushToken,
+  heldToken,
   noteFailure,
   pushPermission,
   pushPlatform,
@@ -190,7 +193,48 @@ function ask(): Promise<boolean> {
  */
 export type RegistrationOutcome = 'registered' | 'unsupported' | 'failed' | 'abandoned';
 
-export async function registerThisDevice(userId: string): Promise<RegistrationOutcome> {
+/**
+ * The one in-flight registration, shared by every concurrent trigger.
+ *
+ * Three things can ask for a registration at nearly the same moment — the launch effect,
+ * the token-roll listener (whose event the launch registration itself causes; see
+ * `deviceTokenRolled`), and the onboarding notification step. Without this, each ran the
+ * whole acquire-and-register path on its own; during the storm, the echo arriving
+ * mid-flight was one of the two re-entry doors. Concurrent callers now await the same
+ * outcome, which is also simply what “register this device” means.
+ */
+let inFlight: { userId: string; epoch: number; work: Promise<RegistrationOutcome> } | null =
+  null;
+
+/** Test seam: a hung registration in one test must not absorb the next test's call. */
+export function resetInFlightRegistration() {
+  inFlight = null;
+}
+
+export function registerThisDevice(userId: string): Promise<RegistrationOutcome> {
+  /**
+   * Reused only within one session epoch — review 59's major, and it is a real loss.
+   *
+   * Sign out of A while A's registration is still acquiring, sign straight back into A,
+   * and the naive single-flight hands the new session the *old* promise — which observes
+   * the moved epoch, correctly returns `abandoned`, and never registers. `usePush` has
+   * already latched for A, so nothing tries again until a relaunch. The epoch is the
+   * boundary sign-out itself moves, so it is the right key: a stale flight is simply not
+   * this session's flight.
+   */
+  const epoch = pushSessionEpoch();
+  if (inFlight && inFlight.userId === userId && inFlight.epoch === epoch) {
+    return inFlight.work;
+  }
+
+  const work = registerOnce(userId).finally(() => {
+    if (inFlight?.work === work) inFlight = null;
+  });
+  inFlight = { userId, epoch, work };
+  return work;
+}
+
+async function registerOnce(userId: string): Promise<RegistrationOutcome> {
   const platform = pushPlatform();
   if (!platform) return 'unsupported';
 
@@ -201,6 +245,21 @@ export async function registerThisDevice(userId: string): Promise<RegistrationOu
   // Signed out while Expo was minting a token. Nothing was written, so there is nothing
   // to undo — just do not write it.
   if (pushSessionEpoch() !== epoch) return 'abandoned';
+
+  /**
+   * Already registered, this session, for this account — so there is nothing to assert.
+   *
+   * `register_device_token` is idempotent, which is why the storm was invisible in the
+   * data while it cooked the phone: a hundred and eighteen identical assertions all
+   * answered 200. Idempotent is not free. The counters make the skip visible in the
+   * report, which is the number the physical acceptance reads.
+   */
+  const held = heldToken();
+  if (held && held.userId === userId && held.token === token) {
+    tally('push.register.skipped');
+    return 'registered';
+  }
+  tally('push.register.rpc');
 
   let outcome: RegistrationOutcome = 'failed';
 

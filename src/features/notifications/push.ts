@@ -5,6 +5,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import { reportHandled } from '@/lib/monitoring';
+import { note } from '@/lib/flight-recorder';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/ui/tokens';
 
@@ -315,6 +316,45 @@ export async function revokePushToken(userId: string, token: string): Promise<Pu
  * switch, which is the exact state this whole lifecycle exists to prevent. The server's
  * `on conflict (token)` already makes the switch safe without it.
  */
+/**
+ * The device token as last delivered by the OS — the edge that broke a feedback loop.
+ *
+ * **This is the register_device_token storm from the 2026-08-27 physical reports** (repeat
+ * 118 by ten seconds of uptime, bursts of ~28 registrations in 300ms). The cycle, proven
+ * from vendor source: `getExpoPushTokenAsync` calls `getDevicePushTokenAsync`, which asks
+ * the OS to register for remote notifications — and expo-notifications emits its
+ * push-token event on **every delivery of the token, not only on change**. The token-roll
+ * listener then called `registerThisDevice`, which acquires the token, which registers,
+ * which delivers, which fires the listener… at one Expo fetch plus one RPC per ~50ms,
+ * for as long as the app was foregrounded. That storm is the sustained network and CPU
+ * churn behind the hot phone — and it began exactly at build 4, because build 4 is the
+ * binary that gained the aps-environment entitlement (#49); on build 3 the OS
+ * registration failed, so the event never fired and the loop could not start.
+ *
+ * So a delivery only counts as a *roll* when the token actually differs from the one last
+ * delivered. The first delivery of a process records and does not count: the only way a
+ * delivery happens is a registration this app initiated, and the initial registration
+ * already has an owner. Deliberately **not** cleared on sign-out — the device token
+ * belongs to the device, not the account, and an account switch must not turn the next
+ * echo back into a “roll”.
+ */
+let lastDeliveredDeviceToken: string | null = null;
+
+export function deviceTokenRolled(delivered: unknown): boolean {
+  const data = typeof delivered === 'string' ? delivered : JSON.stringify(delivered ?? null);
+  if (lastDeliveredDeviceToken === data) return false;
+  const first = lastDeliveredDeviceToken === null;
+  lastDeliveredDeviceToken = data;
+  if (first) return false;
+  // A genuine roll is rare and worth a line in the report; the echoes are not.
+  note('push', 'token-rolled');
+  return true;
+}
+
+/** Test seam: one test's delivered token must not leak into the next. */
+export function resetDeliveredDeviceToken() {
+  lastDeliveredDeviceToken = null;
+}
 let currentToken: { userId: string; token: string } | null = null;
 
 export function rememberToken(userId: string, token: string) {

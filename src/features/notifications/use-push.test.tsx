@@ -28,6 +28,9 @@ jest.mock('expo-notifications', () => ({
 jest.mock('./push', () => ({
   __esModule: true,
   canReceivePush: jest.fn(() => true),
+  // Every event in this suite is treated as a genuine roll — the echo-vs-roll distinction
+  // has its own suite (push-storm.test.ts), with the real module.
+  deviceTokenRolled: jest.fn(() => true),
   forgetToken: jest.fn(),
   nudgePushDelivery: jest.fn(),
   pushPermission: jest.fn(),

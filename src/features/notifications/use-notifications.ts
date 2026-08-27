@@ -153,22 +153,24 @@ export function useNotifications(viewerId: string) {
       const { data, error } = await supabase.rpc('my_notifications', { p_limit: 100 });
       if (error) throw error;
 
-      return ((data ?? []) as {
-        id: string;
-        kind: string;
-        created_at: string;
-        read_at: string | null;
-        actor_id: string | null;
-        actor_username: string | null;
-        actor_display_name: string | null;
-        actor_avatar_path: string | null;
-        media_item_id: string | null;
-        media_title: string | null;
-        media_kind: 'movie' | 'series' | 'season' | null;
-        series_title: string | null;
-        subject_type: string | null;
-        subject_id: string | null;
-      }[])
+      return (
+        (data ?? []) as {
+          id: string;
+          kind: string;
+          created_at: string;
+          read_at: string | null;
+          actor_id: string | null;
+          actor_username: string | null;
+          actor_display_name: string | null;
+          actor_avatar_path: string | null;
+          media_item_id: string | null;
+          media_title: string | null;
+          media_kind: 'movie' | 'series' | 'season' | null;
+          series_title: string | null;
+          subject_type: string | null;
+          subject_id: string | null;
+        }[]
+      )
         .filter(
           (row) =>
             KINDS.has(row.kind) &&
@@ -293,7 +295,6 @@ export function verbFor(kind: NotificationKind, mediaKind?: Notification['mediaK
       return 'You earned a new Award';
   }
 }
-
 
 /**
  * Whether this row should offer Follow back.

@@ -95,7 +95,18 @@ jest.mock('expo-crypto', () => {
 
 jest.mock('expo-constants', () => ({
   __esModule: true,
-  default: { expoConfig: { extra: { eas: { projectId: 'project-abc' } } } },
+  default: {
+    expoConfig: {
+      extra: {
+        // push.ts now reaches the flight recorder, whose env schema refuses to load
+        // without the base configuration — so this mock carries it, like jest.setup does.
+        variant: 'preview',
+        supabaseUrl: 'https://project.supabase.co',
+        supabaseAnonKey: 'anon-key-for-tests',
+        eas: { projectId: 'project-abc' },
+      },
+    },
+  },
 }));
 
 const mockNotifications = jest.requireMock('expo-notifications') as {
