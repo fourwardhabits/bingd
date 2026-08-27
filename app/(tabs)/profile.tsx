@@ -336,6 +336,7 @@ export default function ProfileScreen() {
 
       {awardsOpen ? (
         <AwardsSheet
+          viewerId={profile.id}
           userId={profile.id}
           // The same drill-down the goals bars have, now on every row: a number the
           // reader is shown is one they can open and check, and each contributing

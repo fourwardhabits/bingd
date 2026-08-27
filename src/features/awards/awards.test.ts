@@ -1134,3 +1134,42 @@ describe('the genre vocabulary', () => {
     expect(progress.value).toBe(1);
   });
 });
+
+describe('a track the viewer is not entitled to read', () => {
+  const withheld = facts({
+    watched: many(60),
+    withheld: new Set<keyof AwardFacts>(['recommendationsSent', 'invitedSignups']),
+  });
+
+  it('states the boundary rather than a zero or an apology', () => {
+    const result = award('hype-courier', withheld);
+    expect(result.unavailable).toBe(true);
+    expect(result.withheld).toBe(true);
+    expect(result.detailLine).toBe('Only they can see this one');
+    expect(result.countLabel).toBe('—');
+    expect(result.fraction).toBe(0);
+  });
+
+  it('is not the failure state: a failed read still apologises', () => {
+    const failed = award(
+      'hype-courier',
+      facts({ unavailable: new Set<keyof AwardFacts>(['recommendationsSent']) }),
+    );
+    expect(failed.withheld).toBe(false);
+    expect(failed.detailLine).toBe('Could not load this one');
+  });
+
+  it('costs exactly the two-party tracks and none of the countable ones', () => {
+    const list = awardsFor(withheld);
+    expect(list.filter((a) => a.withheld).map((a) => a.trackKey).sort()).toEqual([
+      'hype-courier',
+      'invite-instigator',
+    ]);
+    expect(list.find((a) => a.trackKey === 'movie-muncher')?.earnedTier?.label).toBe('Bronze');
+  });
+
+  it('keeps a withheld pinned track pinned, like an unavailable one', () => {
+    const list = awardsFor(withheld);
+    expect(list[2]?.trackKey).toBe('invite-instigator');
+  });
+});

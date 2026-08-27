@@ -12,6 +12,13 @@ import { AWARD_TRACKS } from './tracks';
 import { useAwards } from './use-awards';
 
 export type AwardsSheetProps = {
+  /**
+   * Who is looking. The awards are computed from what *this* account may read, so the
+   * same target can honestly show different numbers to different viewers — and the
+   * query is cached per viewer for exactly that reason (`use-awards.ts`).
+   */
+  viewerId: string;
+  /** Whose awards: the profile being looked at, which may or may not be the viewer. */
   userId: string;
   /** Opens a title from a drill-down. Absent where the caller cannot navigate. */
   onPressTitle?: (mediaItemId: string) => void;
@@ -48,12 +55,13 @@ export type AwardsSheetProps = {
  * twenty** tracks rather than the twelve of the first pass. See `AwardBreakdownSheet`.
  */
 export function AwardsSheet({
+  viewerId,
   userId,
   onPressTitle,
   onPressProfile,
   onClose,
 }: AwardsSheetProps) {
-  const awards = useAwards(userId);
+  const awards = useAwards(viewerId, userId);
   const list = awards.data?.awards ?? [];
   // Which row has been opened into its titles. Null is closed.
   const [inspecting, setInspecting] = useState<string | null>(null);
@@ -91,7 +99,10 @@ export function AwardsSheet({
             <EmptyState
               kind="couldNotLoad"
               compact
-              title="Could not load your awards"
+              // Neutral on purpose: this sheet shows the viewer's own awards *and*
+              // other people's, and "your awards" on somebody else's profile would be
+              // the header making the exact identity mistake the reads must not.
+              title="Could not load these awards"
               body={
                 diagnose(awards.error) ?? 'Something went wrong on the way to your collection.'
               }

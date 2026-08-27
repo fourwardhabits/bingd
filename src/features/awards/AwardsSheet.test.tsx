@@ -161,7 +161,7 @@ const awardList = () => {
 
 const open = async (props: Partial<React.ComponentProps<typeof AwardsSheet>> = {}) => {
   const view = await renderWithProviders(
-    <AwardsSheet userId="me" onClose={() => {}} {...props} />,
+    <AwardsSheet viewerId="me" userId="me" onClose={() => {}} {...props} />,
   );
   await waitFor(() => expect(screen.getByText('Movie Muncher')).toBeTruthy());
   return view;
@@ -253,7 +253,7 @@ describe('the sheet', () => {
     await open();
 
     expect(screen.getByLabelText('Movie Muncher. Could not load this one')).toBeTruthy();
-    expect(screen.queryByText('Could not load your awards')).toBeNull();
+    expect(screen.queryByText('Could not load these awards')).toBeNull();
     // Mutual Mania has nothing to do with the collection and still knows its number.
     expect(count('1 / 5')).toBeTruthy();
   });
@@ -275,8 +275,8 @@ describe('the sheet', () => {
       mockBroken().add(table);
     }
 
-    await renderWithProviders(<AwardsSheet userId="me" onClose={() => {}} />);
-    await waitFor(() => expect(screen.getByText('Could not load your awards')).toBeTruthy());
+    await renderWithProviders(<AwardsSheet viewerId="me" userId="me" onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('Could not load these awards')).toBeTruthy());
   });
 
   it('takes the written count with the collection, since public notes live on it', async () => {
@@ -1059,5 +1059,151 @@ describe('privacy', () => {
     await open();
     expect(mockAsked()).toContain('invite_attributions');
     expect(mockAsked()).not.toContain('invite_link_creations');
+  });
+});
+
+/**
+ * Somebody else's awards — the founder's screenshot, pinned.
+ *
+ * A real phone showed another account's sheet reading `Movie Muncher 0 / 50` under a
+ * profile header that said 34 movies, with Rating Rascal correctly at `34 / 100`. The
+ * reads were target-scoped all along; what differed was policy. `user_media` is
+ * owner-only (PRD §22), so the visitor's collection read returned zero rows and no
+ * error — a zero presented as a fact about somebody else. The fix: a visitor reads the
+ * `logged_collection` projection of the same rows, and the two facts with no
+ * visitor-legal read at all are *withheld*, not zero.
+ *
+ * The invariant these tests state: opening B's awards from A's session computes B's
+ * progress, and equals B's own sheet for every fact that is public by product
+ * contract — subject only to the intended visibility policy, which the mock cannot
+ * apply and `supabase/tests/logged-collection.test.mjs` does.
+ */
+describe('somebody else’s awards', () => {
+  const THEM = 'them';
+
+  /** `n` films as `logged_collection` returns them for the target. */
+  const loggedMovies = (n: number, over: Record<string, unknown> = {}) =>
+    Array.from({ length: n }, (_, i) => ({
+      user_id: THEM,
+      media_item_id: `m${String(i).padStart(4, '0')}`,
+      has_public_note: false,
+      media_items: media({ title: `Film ${i}` }),
+      ...over,
+    }));
+
+  const visit = () => open({ viewerId: 'viewer-1', userId: THEM });
+
+  it('computes the target’s progress: the Ravi fixture', async () => {
+    // 34 ranked, logged movies; no TV; viewed by a different signed-in account.
+    seed('logged_collection', loggedMovies(34));
+    seed(
+      'rankings',
+      Array.from({ length: 34 }, (_, i) => ({
+        user_id: THEM,
+        media_item_id: `m${String(i).padStart(4, '0')}`,
+        bucket: 'fine',
+        position: i + 1,
+        category: 'movies',
+        media_items: media({ title: `Film ${i}` }),
+      })),
+    );
+    await visit();
+
+    // By row label, because a bare `0 / 15` is also Truth Worm's and Passport Mode's.
+    // Movie Muncher read 0 of 50 on the device; the other two were right all along.
+    expect(screen.getByLabelText(/^Movie Muncher\..*34 of 50$/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Season Snacker\..*0 of 15$/)).toBeTruthy();
+    expect(screen.getByLabelText(/^Rating Rascal\..*34 of 100$/)).toBeTruthy();
+  });
+
+  it('never asks for the tables a visitor may not read', async () => {
+    seed('logged_collection', loggedMovies(3));
+    await visit();
+
+    // The collection arrives through the projection, not the owner-only table —
+    // asking `user_media` about somebody else is a request whose answer is a lie.
+    expect(mockAsked()).toContain('logged_collection');
+    expect(mockAsked()).not.toContain('user_media');
+    // And the two two-party tables are not asked at all: their zero is policy.
+    expect(mockAsked()).not.toContain('title_recommendations');
+    expect(mockAsked()).not.toContain('invite_attributions');
+  });
+
+  it('matches the sheet the owner sees, for everything public by contract', async () => {
+    // The same 21 titles, once as the owner's own read and once as the projection a
+    // visitor gets. The two modes must land on the same number — the regression the
+    // founder caught was exactly these two disagreeing.
+    seed('user_media', movies(21));
+    const own = await open();
+    expect(count('21 / 50')).toBeTruthy();
+    // Async library: an unawaited unmount leaves an open act() that starves every
+    // later render in the file.
+    await own.unmount();
+
+    seed('logged_collection', loggedMovies(21));
+    await visit();
+    expect(count('21 / 50')).toBeTruthy();
+  });
+
+  it('keeps the viewer’s own activity out of the target’s numbers', async () => {
+    // Five of the viewer's own films and rankings sit in the same tables. Only the
+    // target's two may count — and the read itself must say so, not the seed.
+    seed('logged_collection', [
+      ...loggedMovies(2),
+      ...loggedMovies(5, { user_id: 'viewer-1' }).map((row, i) => ({
+        ...row,
+        media_item_id: `mine-${i}`,
+      })),
+    ]);
+    seed('rankings', [
+      {
+        user_id: 'viewer-1',
+        media_item_id: 'mine-0',
+        bucket: 'loved',
+        position: 1,
+        category: 'movies',
+        media_items: media({ title: 'My Film' }),
+      },
+    ]);
+    await visit();
+
+    expect(count('2 / 50')).toBeTruthy();
+    expect(count('0 / 100')).toBeTruthy(); // the viewer's ranking is not the target's
+
+    const read = pg().reads.find((r) => r.table === 'logged_collection');
+    expect(read?.filters.user_id).toBe(THEM);
+    expect(pg().reads.find((r) => r.table === 'rankings')?.filters.user_id).toBe(THEM);
+  });
+
+  it('says a two-party fact is theirs to see, not zero and not an error', async () => {
+    seed('logged_collection', loggedMovies(1));
+    await visit();
+
+    expect(screen.getByLabelText('Hype Courier. Only they can see this one')).toBeTruthy();
+    expect(screen.getByLabelText('Invite Instigator. Only they can see this one')).toBeTruthy();
+    // Not the apology, and not a countable zero: nothing failed and nothing is known.
+    expect(screen.queryByText('Could not load this one')).toBeNull();
+    expect(screen.queryByText(/0 \/ 3\b/)).toBeNull(); // Invite Instigator's zero
+  });
+
+  it('counts their public reviews without ever holding the note text', async () => {
+    seed('logged_collection', loggedMovies(2).map((row, i) => ({
+      ...row,
+      has_public_note: i === 0,
+    })));
+    await visit();
+
+    // One public note, no comments: Comment Gremlin knows it from a boolean alone.
+    expect(count('1 / 20')).toBeTruthy();
+  });
+
+  it('feeds the genre tracks from the projection’s metadata', async () => {
+    seed('logged_collection', loggedMovies(2, {}).map((row, i) => ({
+      ...row,
+      media_items: media({ title: `Film ${i}`, genres: i === 0 ? ['Horror'] : [] }),
+    })));
+    await visit();
+
+    expect(count('1 / 25')).toBeTruthy(); // Scream Snack sees the visitor-read genres
   });
 });

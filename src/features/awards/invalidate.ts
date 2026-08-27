@@ -21,8 +21,10 @@ import type { QueryClient } from '@tanstack/react-query';
  */
 export function invalidateAwards(queryClient: QueryClient, userId: string) {
   if (!userId) return;
-  // Prefix, matching `useAwards`' `['awards', userId]` exactly and reaching any
-  // descendant a future variant of the query adds.
+  // Prefix over `useAwards`' `['awards', viewerId, targetId]`: everything this account
+  // computed as the viewer — its own sheet (viewer === target) and any other profile's
+  // awards it has cached, which its own writes can also move (reacting to somebody's
+  // activity moves *their* Heart Magnet as this viewer will see it).
   void queryClient.invalidateQueries({ queryKey: ['awards', userId] });
 }
 

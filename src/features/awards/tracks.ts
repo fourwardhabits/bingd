@@ -148,6 +148,17 @@ export type AwardFacts = {
    * meaningless without it and a sheet of thirteen blanks is worse than saying so once.
    */
   unavailable?: ReadonlySet<keyof AwardFacts>;
+  /**
+   * Which fields the viewer is not entitled to read, on somebody else's sheet.
+   *
+   * A third state, deliberately distinct from both zero and `unavailable`: sent
+   * recommendations and activated invites are two-party facts, so a visitor's read of
+   * them is zero rows *by policy* — not a count of nothing and not a failure to ask.
+   * The row says so ("Only they can see this one") instead of apologising for a
+   * request that behaved exactly as designed, and instead of a retry that cannot
+   * change the answer.
+   */
+  withheld?: ReadonlySet<keyof AwardFacts>;
 };
 
 export type AwardTier = {
