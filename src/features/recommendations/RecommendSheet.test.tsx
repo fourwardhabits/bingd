@@ -1,5 +1,5 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
-import { Share } from 'react-native';
+import { Share, useWindowDimensions } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -11,6 +11,14 @@ import { filterRecipients, type Recipient } from './use-recommend';
 // `expo-crypto` has no native module under jest and `randomUUID` answers undefined without this.
 let issued = 0;
 jest.mock('expo-crypto', () => ({ randomUUID: () => `share-${(issued += 1)}` }));
+
+// The footer decides its own layout from the viewport, so the viewport has to be a thing
+// this suite can set. The same hook and the same mock `ScoresSection.test.tsx` uses.
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions');
+const mockWindow = useWindowDimensions as unknown as jest.Mock;
+/** The device the founder is holding, unless a test says otherwise. */
+const setViewport = (width: number, fontScale = 1) =>
+  mockWindow.mockReturnValue({ width, height: 844, scale: 3, fontScale });
 
 const mockRpc = jest.fn();
 let mockRpcResults: Record<string, unknown> = {};
@@ -128,6 +136,9 @@ const props = {
 };
 
 beforeEach(() => {
+  // An ordinary phone unless a layout test says otherwise. Set before every render,
+  // because the footer reads it during render and would otherwise destructure undefined.
+  setViewport(412);
   issued = 0;
   mockRpc.mockReset();
   mockRpcResults = {};
@@ -204,9 +215,9 @@ describe('sending', () => {
   /** Mark a person's row — each row is a checkbox now, not a send. */
   const pick = (view: Awaited<ReturnType<typeof renderWithProviders>>, label: string) =>
     fireEvent.press(view.getByLabelText(label));
-  /** Press the one button that sends, whatever its count reads. */
+  /** Press the one button that sends. Its label is static — see the label test. */
   const sendNow = (view: Awaited<ReturnType<typeof renderWithProviders>>) =>
-    fireEvent.press(view.getByText(/^Recommend to \d+$/));
+    fireEvent.press(view.getByText('Recommend'));
 
   it('sends to a chosen person from the one button, and closes', async () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
@@ -227,21 +238,42 @@ describe('sending', () => {
     expect(props.onClose).toHaveBeenCalled();
   });
 
-  it('counts the chosen on the button, and sends nothing while it reads zero', async () => {
+  /**
+   * The label does not count, and that is the founder's instruction of 2026-08-27.
+   *
+   * It read `Recommend to N` and renamed itself on every tap, which made the widest
+   * control on the sheet a moving target and pushed the button beside it into the squeeze
+   * this tranche is fixing. How many people are chosen is already said by the checkboxes
+   * above; the button says what pressing it does.
+   */
+  it('says Recommend however many are chosen, and sends nothing at zero', async () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
     // Disabled at zero: pressing it must not fire a send with nobody chosen.
-    await fireEvent.press(view.getByText('Recommend to 0'));
+    expect(view.getByText('Recommend')).toBeTruthy();
+    await fireEvent.press(view.getByText('Recommend'));
     expect(mockRpc).not.toHaveBeenCalledWith('recommend_title', expect.anything());
 
     await pick(view, 'Ada, @ada');
-    expect(view.getByText('Recommend to 1')).toBeTruthy();
+    expect(view.getByText('Recommend')).toBeTruthy();
+    expect(view.queryByText(/Recommend to/)).toBeNull();
 
     // A second tap on the row un-chooses — the row toggles, it does not send.
     await pick(view, 'Ada, @ada');
-    expect(view.getByText('Recommend to 0')).toBeTruthy();
+    expect(view.getByText('Recommend')).toBeTruthy();
     expect(mockRpc).not.toHaveBeenCalledWith('recommend_title', expect.anything());
+  });
+
+  it('still says Recommend with two chosen', async () => {
+    mockOutgoing = [person('user-2', 'ada', 'Ada'), person('user-3', 'grace', 'Grace')];
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Grace')).toBeTruthy());
+
+    await pick(view, 'Ada, @ada');
+    await pick(view, 'Grace, @grace');
+    expect(view.getByText('Recommend')).toBeTruthy();
+    expect(view.queryByText(/Recommend to/)).toBeNull();
   });
 
   it('sends to everybody chosen from one press', async () => {
@@ -251,7 +283,7 @@ describe('sending', () => {
 
     await pick(view, 'Ada, @ada');
     await pick(view, 'Grace, @grace');
-    await fireEvent.press(view.getByText('Recommend to 2'));
+    await fireEvent.press(view.getByText('Recommend'));
 
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith(
@@ -287,7 +319,7 @@ describe('sending', () => {
 
     await pick(view, 'Ada, @ada');
     await pick(view, 'Grace, @grace');
-    await fireEvent.press(view.getByText('Recommend to 2'));
+    await fireEvent.press(view.getByText('Recommend'));
 
     await waitFor(() =>
       expect(
@@ -299,7 +331,7 @@ describe('sending', () => {
     );
     // Open, with only the failed half still chosen.
     expect(props.onClose).not.toHaveBeenCalled();
-    expect(view.getByText('Recommend to 1')).toBeTruthy();
+    expect(view.getByText('Recommend')).toBeTruthy();
 
     const sendsTo = (id: string) =>
       mockRpc.mock.calls.filter(
@@ -628,5 +660,110 @@ describe('filtering the list', () => {
   it('treats a leading @ as the handle sigil, the way Search teaches it', () => {
     expect(filterRecipients(people, '@grace').map((p) => p.id)).toEqual(['2']);
     expect(filterRecipients(people, '@').map((p) => p.id)).toEqual(['1', '2']);
+  });
+});
+
+/**
+ * The footer, which is where the founder's Android screenshot pointed.
+ *
+ * It rendered `[ Recommend to 1 ------------- ] [ Share off bi / ngd. ]`: the secondary
+ * squeezed into a column too narrow for its own label, breaking a word in half. The row
+ * was `flexWrap: 'wrap'` over two children with hand-picked `flexBasis` values and
+ * `flexShrink: 1` on both, and Yoga gives a flex item no automatic minimum size — so
+ * shrinking below the content width always succeeded and the wrap never fired.
+ *
+ * The layout decision is a boolean derived from the viewport now, which is the thing
+ * these tests can actually pin. Reading `flexDirection` off the one container the two
+ * buttons share is `ScoresSection.test.tsx`'s method, for its reason: there is no role
+ * for "two columns", and matching on tree shape passes for any stack with a row in it.
+ */
+describe('the footer at different widths', () => {
+  beforeEach(() => {
+    mockOutgoing = [person('user-2', 'ada', 'Ada')];
+  });
+
+  const layout = (view: Awaited<ReturnType<typeof renderWithProviders>>) => {
+    const style = view.getByTestId('recommend-actions').props.style;
+    return (Array.isArray(style) ? Object.assign({}, ...style.filter(Boolean)) : style) as {
+      flexDirection?: string;
+    };
+  };
+
+  it('puts the two actions side by side on an ordinary phone', async () => {
+    setViewport(412);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    expect(layout(view).flexDirection).toBe('row');
+  });
+
+  // 360 is the narrowest width in ordinary use — a small Android, an iPhone 12 mini.
+  // The pair still fits there, and must, or the common device gets the taller layout.
+  it('still fits the pair on the narrowest ordinary Android', async () => {
+    setViewport(360);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    expect(layout(view).flexDirection).toBe('row');
+  });
+
+  it('stacks them on a 320-class screen rather than crushing either', async () => {
+    setViewport(320);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    expect(layout(view).flexDirection).toBe('column');
+  });
+
+  it('stacks them when type is scaled past what two columns can hold', async () => {
+    setViewport(412, 1.6);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    expect(layout(view).flexDirection).toBe('column');
+  });
+
+  /**
+   * Recommend first in both layouts, so stacking is not also a reordering — the primary
+   * act must not end up underneath the way out of the sheet.
+   */
+  it('keeps Recommend above Share off bingd. when stacked', async () => {
+    setViewport(320);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    const order = view
+      .getAllByText(/^(Recommend|Share off bingd\.)$/)
+      .map((node) => node.props.children);
+    expect(order).toEqual(['Recommend', 'Share off bingd.']);
+  });
+
+  /**
+   * The contract that makes `bi / ngd.` unrepresentable at any width.
+   *
+   * `fit` is what caps each label at one line and shrinks it slightly instead of
+   * wrapping it (`Button`'s own note has the arithmetic). Without it no width threshold
+   * is enough, because Dynamic Type can always take a label past its column.
+   */
+  it('never lets either label wrap, which is what broke the word', async () => {
+    setViewport(360);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    for (const label of ['Recommend', 'Share off bingd.']) {
+      expect(view.getByText(label).props.numberOfLines).toBe(1);
+    }
+  });
+
+  it('offers Share off bingd. whatever the selection is', async () => {
+    setViewport(412);
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    // Nobody chosen, and it is still there and still pressable — it shares the title,
+    // not the selection.
+    expect(view.getByText('Share off bingd.')).toBeTruthy();
+    await fireEvent.press(view.getByText('Share off bingd.'));
+    await waitFor(() => expect(Share.share).toHaveBeenCalled());
   });
 });

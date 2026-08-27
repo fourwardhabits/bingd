@@ -1,6 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRef, useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 import { newOperationId } from '@/features/collection/writes';
 import { track, type Surface } from '@/lib/analytics';
@@ -37,6 +44,24 @@ export type RecommendSheetProps = {
  * device where the list happens to be short.
  */
 const SEARCH_THRESHOLD = 0;
+
+/**
+ * The width one of the two footer actions needs before the pair may sit side by side.
+ *
+ * Set by the longer label. "Share off bingd." sets to about 132pt at `headline`, and
+ * `fit` adds 24 of side padding, so 156 is where it stops fitting at full size — 150
+ * is that figure with the rounding taken off it rather than a number chosen to make a
+ * particular phone pass. Below the pair's worth of it the buttons stack, because a
+ * label shrunk toward `fit`'s 85% floor beside a short one is the imbalance this
+ * constant exists to prevent, not a smaller version of a working layout.
+ */
+const ACTION_MIN_WIDTH = 150;
+
+/**
+ * Past this, type is large enough that two columns cannot hold their labels whatever
+ * the screen is. `ScoresSection` draws its own two-up line at the same figure.
+ */
+const SIDE_BY_SIDE_MAX_FONT_SCALE = 1.3;
 
 /** "Ada", "Ada and Bo", "Ada, Bo and Cy" — names the way a sentence holds them. */
 const listNames = (names: string[]): string =>
@@ -87,6 +112,25 @@ export function RecommendSheet({
 }: RecommendSheetProps) {
   const recipients = useRecommendRecipients(viewerId);
   const send = useRecommendTitle(viewerId);
+
+  /**
+   * Whether the two footer actions fit beside each other, decided from the viewport
+   * rather than left to flexbox.
+   *
+   * The founder's Android screenshot is what this replaces: the row was
+   * `flexWrap: 'wrap'` over two children with hand-picked `flexBasis` values and
+   * `flexShrink: 1` on both. Yoga does not give a flex item CSS's automatic minimum
+   * size, so "shrink" has no floor at the content's own width — the children were
+   * squeezed below their labels instead of the row ever wrapping, and `Share off bingd.`
+   * broke mid-word into `bi / ngd.`. Wrapping could not save it because shrinking always
+   * succeeded first.
+   *
+   * So the decision is made here, from a width, and it is one boolean a test can pin.
+   */
+  const { width, fontScale } = useWindowDimensions();
+  const sideBySide =
+    width - theme.layout.gutter * 2 >= ACTION_MIN_WIDTH * 2 + theme.space[3] &&
+    fontScale <= SIDE_BY_SIDE_MAX_FONT_SCALE;
 
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -384,26 +428,40 @@ export function RecommendSheet({
         </Text>
       ) : null}
 
-      {/* The sheet's two acts, side by side under the list and pinned there — the list
-          scrolls, these do not.
+      {/* The sheet's two acts, pinned under the list — the list scrolls, these do not.
 
-          Recommend to N is the primary act and wears the fill (the button-hierarchy
-          rule: filled maroon is for the social CTAs). It grows to take the width the
-          row has spare and the pair wraps to two full-width lines when a narrow screen
-          would otherwise cram them, rather than hard-coding a 50/50 split that fits no
-          label on either side.
+          **Two equal halves, or two full-width rows.** Never one button with the row's
+          spare width and the other with what is left: that is what produced the founder's
+          `Share off bi / ngd.`, and equal weight is also what `ProfileActions` settled on
+          for the same shape and the same reason — a fill beside a starved outline reads
+          as the only real control on the surface.
+
+          `fit` on both is load-bearing rather than defensive, exactly as it is there: it
+          caps each label at one line and shrinks it a little instead of wrapping it, so
+          no width can break a word.
+
+          Recommend is the primary act and wears the fill (the button-hierarchy rule:
+          filled maroon is for the social CTAs). Its label is **static** — the count moved
+          out of it on the founder's instruction, because a CTA that renames itself on
+          every tap is a moving target, and how many people are chosen is already said by
+          the checkboxes above.
 
           Share off bingd. is the same off-platform share as ever — the native sheet
           carrying the reader's invite link — and it needs no selection: whether the
           somebody has the app is a detail of the address, not a different act. It is
-          also still where the title page's Share button went (three labelled chips did
-          not fit an action row on a narrow Android screen). Outlined, because next to
-          a filled Recommend it is the secondary way out. */}
-      <View style={styles.actions}>
+          also still where the title page's Share button went. Outlined, because next to
+          a filled Recommend it is the secondary way out.
+
+          Recommend comes first in both layouts, so stacking reorders nothing. */}
+      <View
+        testID="recommend-actions"
+        style={[styles.actions, sideBySide ? styles.sideBySide : styles.stacked]}
+      >
         {people.length > 0 ? (
-          <View style={styles.primaryAction}>
+          <View style={sideBySide ? styles.half : undefined}>
             <Button
-              label={sending ? 'Sending…' : `Recommend to ${selected.size}`}
+              label={sending ? 'Sending…' : 'Recommend'}
+              fit
               onPress={() => void recommendSelected()}
               disabled={sending || selected.size === 0}
               disabledReason={
@@ -412,10 +470,11 @@ export function RecommendSheet({
             />
           </View>
         ) : null}
-        <View style={styles.secondaryAction}>
+        <View style={sideBySide ? styles.half : undefined}>
           <Button
             label={sharing ? 'Opening…' : 'Share off bingd.'}
             kind="secondary"
+            fit
             onPress={() => void shareOffPlatform()}
             disabled={sharing}
             disabledReason="Preparing your link."
@@ -442,15 +501,21 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.6 },
   status: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[2] },
   actions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
   },
-  // Grow-from-a-floor rather than a 50/50 split: each button takes at least the width
-  // its label needs, the primary soaks up the slack, and a screen too narrow for the
-  // pair wraps them into two full-width rows instead of squeezing both labels.
-  primaryAction: { flexGrow: 1, flexShrink: 1, flexBasis: 172 },
-  secondaryAction: { flexGrow: 1, flexShrink: 1, flexBasis: 148 },
+  /**
+   * The two layouts, and deliberately no `flexWrap` in either.
+   *
+   * Wrapping was what the row used to rely on to protect a narrow screen, and it never
+   * fired: `flexShrink` has no floor at the content width in Yoga, so the children were
+   * always squeezed rather than ever pushed onto a second line. The choice is made from
+   * the viewport now, so these two only have to state the result.
+   */
+  sideBySide: { flexDirection: 'row' },
+  stacked: { flexDirection: 'column' },
+  // Equal halves, which is `ProfileActions`' rule for the same pair of shapes: two
+  // different kinds of thing at equal weight, so the fill is not also the wide one.
+  half: { flex: 1 },
 });

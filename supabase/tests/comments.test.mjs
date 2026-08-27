@@ -156,20 +156,70 @@ describe('the shape the founder specified', () => {
     assert.deepEqual(rows.map((r) => r.column_name), ['body']);
   });
 
-  it('reacts to a comment with a like and not with the six', async () => {
+  /**
+   * Superseded on 2026-08-27, and worth saying why rather than quietly rewriting.
+   *
+   * This test used to assert the *absence* of a `kind` column — "reacts with a like and
+   * not with the six" — which was 20260826000600's deliberate decision: the six meanings
+   * were about a whole activity, and a single remark deserved a toggle and a count.
+   *
+   * The founder overturned it on a device (20260827000500). The reason outranks the
+   * original argument: a reaction is one interaction in this product, and holding the
+   * control offered six on a feed row and nothing on a comment one swipe away. So the
+   * assertion inverts — but it stays an assertion about the *taxonomy being shared*,
+   * which is the thing that must not drift, rather than a list of column names.
+   */
+  it('reacts to a comment with the same six an activity takes', async () => {
     const { rows } = await t.sql(
       `select column_name from information_schema.columns
         where table_name = 'comment_reactions' order by column_name`,
     );
-    assert.deepEqual(rows.map((r) => r.column_name), ['comment_id', 'created_at', 'user_id']);
+    assert.deepEqual(rows.map((r) => r.column_name), [
+      'comment_id',
+      'created_at',
+      'kind',
+      'user_id',
+    ]);
 
-    // The same discipline the original file applied to threading: the excluded thing
-    // has nowhere to go. Without a `kind`, nobody can quietly grow an emoji platform.
-    const { rows: kind } = await t.sql(
-      `select 1 from information_schema.columns
+    // The list is the list. Read off both tables' check constraints and compared, so
+    // adding a seventh meaning to one and not the other fails here rather than on a
+    // phone showing a glyph the other surface cannot store.
+    const clauseFor = async (table) =>
+      (
+        await t.sql(
+          `select pg_get_constraintdef(c.oid) as def
+             from pg_constraint c
+            where c.conrelid = $1::regclass and c.contype = 'c'
+              and pg_get_constraintdef(c.oid) like '%kind%'`,
+          [table],
+        )
+      ).rows.map((r) => r.def);
+
+    const comment = await clauseFor('comment_reactions');
+    const activity = await clauseFor('reactions');
+    assert.equal(comment.length, 1, 'comment_reactions constrains its kind');
+    assert.deepEqual(comment, activity, 'and constrains it to exactly what reactions does');
+
+    for (const kind of ['love', 'agree', 'disagree', 'funny', 'wow', 'moved']) {
+      assert.ok(comment[0].includes(`'${kind}'`), `${kind} is one of the six`);
+    }
+  });
+
+  /**
+   * The column a writer must speak for.
+   *
+   * `add column not null default 'love'` is what turns every existing heart into the
+   * canonical reaction; dropping the default afterwards is what stops a later writer
+   * storing a row that means "whatever the column decided". The second half is the one
+   * a migration can silently forget, so it is pinned.
+   */
+  it('makes every reaction state its meaning', async () => {
+    const { rows } = await t.sql(
+      `select is_nullable, column_default from information_schema.columns
         where table_name = 'comment_reactions' and column_name = 'kind'`,
     );
-    assert.deepEqual(kind, []);
+    assert.equal(rows[0].is_nullable, 'NO');
+    assert.equal(rows[0].column_default, null, 'the backfill default was dropped after it ran');
   });
 
   it('is referenced only by the two things that are meant to reference it', async () => {

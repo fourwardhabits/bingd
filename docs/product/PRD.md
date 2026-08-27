@@ -982,10 +982,20 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 >
 > **Send to is a multi-select picker.** Each person row is a checkbox — the mark sits at
 > the far right, exactly where the per-row send icon used to be, and tapping anywhere on
-> the row toggles it. The sheet ends in two actions pinned under the list: **Recommend
-> to N** (filled Maroon, the primary act, disabled at zero) beside **Share off bingd.**
+> the row toggles it. The sheet ends in two actions pinned under the list: **Recommend**
+> (filled Maroon, the primary act, disabled at zero) beside **Share off bingd.**
 > (outlined — the same native share carrying the reader's invite link, which needs no
 > selection because whether the somebody has the app is a detail of the address).
+>
+> **The Recommend label is static, and the footer stacks rather than crushes** (founder
+> device pass, 2026-08-27). It read `Recommend to N` and renamed itself on every tap,
+> which made the widest control on the sheet a moving target; how many people are chosen
+> is already said by the checkboxes above, so the button says what pressing it does and
+> nothing else. The two actions take **equal halves** where the viewport has room for
+> both at their natural width, and become **two full-width rows — Recommend first —**
+> where it does not. Neither label may wrap or shrink to fit a column: the founder's
+> Android screenshot showed `Share off bi / ngd.`, a word broken in half by a button
+> squeezed below its own content width.
 >
 > **Multi-select changes the interface, not the semantics.** Each chosen person is their
 > own `recommend_title` call under their own held operation id, so everything specified
@@ -1187,6 +1197,42 @@ A fixed reaction set of six on feed activity items. One reaction per user per it
 - Rate-limited to prevent notification flooding.
 
 > **Comments are Deferred.** Comments would make Bingd a public user-generated-content platform, requiring a comment-specific report flow, hide and delete tooling, blocked-user filtering, and a stated response commitment. Reactions deliver the acknowledgment loop — which is what drives return visits — at a small fraction of the cost. Revisit when moderation capacity exists.
+
+> ### As built — 2026-08-27: one reaction, wherever it is attached
+>
+> **A reaction is the same interaction on an activity and on a comment.** The six
+> meanings above, the same glyphs, the same gestures: a plain tap toggles the default
+> `love` on or off, and a **long press opens the same picker** — the six as one row,
+> anchored inside the row it belongs to. A tap on a row already carrying some *other*
+> reaction replaces it with `love` rather than clearing it: the gesture means "react",
+> and the way to remove a reaction you can see is to tap the one you chose.
+>
+> **Display is the same grammar at a comment's scale.** The distinct meanings present,
+> most common first and capped at three, beside the total. No count at all at zero. The
+> control itself stays a heart — filled Maroon when the reaction is mine, outline when
+> it is not — rather than showing my own glyph, because the cluster beside it already
+> does: one emoji twice in one row reads as a duplicate rather than as two statements.
+>
+> **This overturns a narrower decision, deliberately.** Comments shipped (2026-08-26)
+> with a boolean like, on the reasoning that the six meanings were about a whole activity
+> and a single remark deserved a toggle and a count. The founder overturned it on a
+> device: holding the control offered six on a feed row and nothing on a comment one
+> swipe away, and the same gesture doing different things in two places is the
+> inconsistency, whatever the smaller surface deserved on its own. **Every like that
+> already existed is preserved as `love`.**
+>
+> **Replies take reactions exactly as roots do.** A retracted comment takes none — a
+> tombstone is a place in the conversation, not a comment.
+>
+> **What is deliberately *not* shared: notifications.** Reacting to an **activity**
+> notifies its actor (above). Reacting to a **comment** notifies nobody, and that
+> difference is intentional rather than pending. A remark on somebody's remark is the
+> densest thing in the product, and six meanings on it would multiply an inbox that has
+> not been asked to grow. The interaction is unified; the notification volume is not.
+>
+> **Privacy is unchanged and is resolved once.** The count, the glyphs and "mine" all
+> come from a single visibility-filtered set, so a reaction from an account the reader
+> may not see is absent from all three — never counted anonymously.
 
 ### Watch tagging — Decided for public alpha
 
