@@ -161,8 +161,17 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
      * responded to what you posted" arriving at two different screens is the
      * inconsistency the founder named.
      */
+    /**
+     * `recommendation_ranked` (20260827000600) rides the same chain, and for the same
+     * reason the founder gave for comments: the notification is *about* one post —
+     * "Suraj ranked The Martian from your recommendation" — and `subject_id` **is**
+     * that post, recorded by `_rank_finalize` in the ranking's own transaction. The
+     * title page is the surviving parent when the event is gone (the ranking was
+     * removed), and the unavailable state is what remains when the title left too.
+     */
     case 'comment':
     case 'reaction':
+    case 'recommendation_ranked':
       return [...activity, ...title, unavailable('That activity is no longer available.')];
 
     /** The exact Movie or Season the tag was on, never the parent series. */
@@ -356,6 +365,7 @@ export const ROUTED_KINDS: readonly NotificationKind[] = [
   'reaction',
   'watch_tag',
   'recommendation',
+  'recommendation_ranked',
   'invite_activated',
   'invite_welcome',
   'award_earned',

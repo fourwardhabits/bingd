@@ -23,6 +23,18 @@ export type NotificationKind =
   | 'watch_tag'
   | 'recommendation'
   /**
+   * A recommendation this reader sent was ranked (`20260827000600`).
+   *
+   * Written by `_rank_finalize` — the one place a ranking is created — when the
+   * recipient first reaches a completed ranking for the title, in the same
+   * transaction, so a lost reply or a replay cannot double it and a Rank Again or
+   * a bucket change cannot re-fire it. Actor is the person who ranked; recipient
+   * is the recommender; `subject_id` is the exact `title_ranked` feed event, so
+   * the row opens the recipient's actual post the way a comment row opens its
+   * conversation.
+   */
+  | 'recommendation_ranked'
+  /**
    * Somebody this reader invited reached activation — ten ranked titles (PRD §28).
    *
    * **The writer arrived on 2026-08-19** (`20260819000500`), and the order it arrived
@@ -125,6 +137,7 @@ const KINDS = new Set<string>([
   'comment',
   'watch_tag',
   'recommendation',
+  'recommendation_ranked',
   'invite_activated',
   'invite_welcome',
   'friendship',
@@ -273,6 +286,34 @@ export function unreadCount(notifications: Notification[] | undefined) {
   return (notifications ?? []).filter((row) => !row.readAt).length;
 }
 
+/** The inbox's three ages. See `sectionFor`. */
+export type InboxSection = 'today' | 'week' | 'earlier';
+
+/**
+ * Which shelf of the inbox a row belongs on.
+ *
+ * Three, and vague on purpose — Today, This week, Earlier — because the section is
+ * scaffolding for scanning, not a second timestamp: the row already says "2d ago".
+ * The boundaries use the same rounding `relativeTime` uses, so a row can never sit
+ * under a heading its own label contradicts: "1d ago" (which begins at 23.5 hours)
+ * is the first row of This week, and "7d ago" (6.5 days) the first of Earlier.
+ *
+ * `now` is injectable for the same reason `relativeTime`'s is: a test that reads
+ * the clock is a test that rots.
+ */
+export function sectionFor(createdAt: string, now: number = Date.now()): InboxSection {
+  const then = new Date(createdAt).getTime();
+  if (!Number.isFinite(then)) return 'earlier';
+
+  const hours = Math.round(Math.max(0, now - then) / 3_600_000);
+  if (hours < 24) return 'today';
+
+  const days = Math.round(hours / 24);
+  if (days < 7) return 'week';
+
+  return 'earlier';
+}
+
 /**
  * What the row says happened, in the second person.
  *
@@ -302,6 +343,15 @@ export function verbFor(kind: NotificationKind, mediaKind?: Notification['mediaK
       if (mediaKind === 'season') return 'recommended a season';
       if (mediaKind === 'movie') return 'recommended a movie';
       return 'recommended something';
+    /**
+     * The spoken shape and the fallback shape. The row itself says "ranked
+     * The Martian from your recommendation" with the title inline — the
+     * founder's copy — and falls back to this when the event (and with it the
+     * title) is gone. Here the title rides after the sentence, as every other
+     * label appends its subject.
+     */
+    case 'recommendation_ranked':
+      return 'ranked your recommendation';
     case 'invite_activated':
       return 'joined bingd. from your invite';
     /**
