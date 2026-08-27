@@ -34,10 +34,11 @@ describe('logged_collection', () => {
   let t;
   let owner;
   let visitor;
-  /** Movies: one with a public note, one with a private note, one bare. */
+  /** Movies: a public note, a private note, one bare, and one offered as whitespace. */
   let noted;
   let secret;
   let bare;
+  let blank;
   let season;
 
   const uuid = async () => (await t.sql(`select gen_random_uuid() as id`)).rows[0].id;
@@ -50,6 +51,7 @@ describe('logged_collection', () => {
     noted = await t.createMovie('Stalker', 910001);
     secret = await t.createMovie('Solaris', 910002);
     bare = await t.createMovie('Mirror', 910003);
+    blank = await t.createMovie('Nostalghia', 910005);
     const series = await t.createSeries('Decalogue', 910004);
     season = await t.createSeason(series, 1, 'Season 1');
 
@@ -63,6 +65,11 @@ describe('logged_collection', () => {
       secret,
     ]);
     await t.sql(`select log_watched($1, $2, '2026-08-03', null)`, [await uuid(), bare]);
+    // Whitespace offered as a public review — see the blank-note test for what it pins.
+    await t.sql(`select log_watched($1, $2, '2026-08-05', '   ', 'public')`, [
+      await uuid(),
+      blank,
+    ]);
     await t.sql(`select log_watched($1, $2, null, null)`, [await uuid(), season]);
   });
 
@@ -85,7 +92,7 @@ describe('logged_collection', () => {
       await t.sql(`select media_item_id from user_media where user_id = $1`, [owner])
     ).rows.map((row) => row.media_item_id);
 
-    assert.equal(seen.length, 4, 'all four logged titles, dated or not, ranked or not');
+    assert.equal(seen.length, 5, 'every logged title, dated or not, ranked or not');
     assert.deepEqual(new Set(seen.map((row) => row.media_item_id)), new Set(own));
   });
 
@@ -98,6 +105,43 @@ describe('logged_collection', () => {
     assert.equal(byId.get(bare), false);
   });
 
+  /**
+   * The blank note, and why owner/visitor parity does not rest on the client.
+   *
+   * The view says a public review exists when `note is not null and note_visibility =
+   * 'public'`; the owner's own awards read the note text and additionally require it
+   * to be non-blank once trimmed (`use-awards.ts`). Two predicates not written the
+   * same way, on the two sides of an equality this view exists to make structural —
+   * so the question is whether a value can sit between them, and the answer is that
+   * the writers do not let one be stored: every note path normalises through
+   * `nullif(btrim(coalesce(p_note, '')), '')` (20260813002300, 20260816000000,
+   * 20260825000200), so whitespace offered as a review is a NULL note, not an empty
+   * one.
+   *
+   * Pinned here rather than reasoned about in a comment, because it is the writers'
+   * invariant that makes the two predicates agree, and a writer that stopped
+   * normalising would otherwise show a visitor a Comment Gremlin the owner does not
+   * have. Independent review of the combined beta integration raised exactly this.
+   */
+  it('does not let whitespace become a review for either side', async () => {
+    const stored = (
+      await t.sql(
+        `select note, note_visibility from user_media
+           where user_id = $1 and media_item_id = $2`,
+        [owner, blank],
+      )
+    ).rows[0];
+    assert.equal(stored.note, null, 'a whitespace note is normalised to NULL by the writer');
+
+    const seen = await t.asUser(visitor, () => rowsFor(owner));
+    const byId = new Map(seen.map((row) => [row.media_item_id, row.has_public_note]));
+    assert.equal(
+      byId.get(blank),
+      false,
+      'so the view cannot claim a review the owner’s own sheet would not count',
+    );
+  });
+
   it('never grew the private columns', async () => {
     const error = await t.errorFrom(`select watched_on from logged_collection limit 1`);
     assert.equal(error?.code, '42703', 'watched_on must not exist on the view');
@@ -107,7 +151,7 @@ describe('logged_collection', () => {
 
   it('answers the owner about their own collection too', async () => {
     const seen = await t.asUser(owner, () => rowsFor(owner));
-    assert.equal(seen.length, 4);
+    assert.equal(seen.length, 5);
   });
 
   it('gives a stranger nothing from a private account, and a follower everything', async () => {

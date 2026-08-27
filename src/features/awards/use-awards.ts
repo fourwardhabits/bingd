@@ -667,7 +667,13 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
     // is not social content, and Comment Gremlin is an award for talking to people.
     // Deriving it from the collection read is what makes "counted once" structural.
     // The visitor's view answers the same question as one precomputed boolean, so the
-    // two modes count the same rows.
+    // two modes count the same rows. The view's predicate is `note is not null` and
+    // this one additionally trims, which looks like a gap and is not one: every note
+    // writer normalises through `nullif(btrim(coalesce(p_note, '')), '')`, so the
+    // column cannot hold a blank string for the two to disagree about. That invariant
+    // is the load-bearing one, so it is pinned in `logged-collection.test.mjs` rather
+    // than left to be re-derived here — a writer that stopped normalising fails a test
+    // instead of showing a visitor a Comment Gremlin the owner does not have.
     const hasPublicNote =
       'has_public_note' in row
         ? row.has_public_note
