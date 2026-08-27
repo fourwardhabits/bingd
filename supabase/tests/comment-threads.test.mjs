@@ -69,12 +69,24 @@ const remove = async (who, commentId) => {
   return rows[0].r;
 };
 
+/**
+ * The like, through the **boolean** signature — which is now the compatibility one.
+ *
+ * 20260827000500 gave comments the six meanings and added a `text` overload beside this.
+ * PostgREST tells the two apart by argument *name* (`p_on` versus `p_kind`), so the
+ * client path is never ambiguous — but raw SQL with an untyped `$2` resolves to `text`
+ * and would pass the string 'true'. The cast is what keeps these tests exercising the
+ * signature they are about: every phone published before that migration calls this one,
+ * and it has to keep working until the last of them has relaunched.
+ *
+ * The canonical `text` path has its own file, `comment-reactions.test.mjs`.
+ */
 const like = async (who, commentId, on) => {
   await t.actAs(who);
-  const { rows } = await t.sql(`select set_comment_reaction(gen_random_uuid(), $1, $2) as r`, [
-    commentId,
-    on,
-  ]);
+  const { rows } = await t.sql(
+    `select set_comment_reaction(gen_random_uuid(), $1, $2::boolean) as r`,
+    [commentId, on],
+  );
   return rows[0].r;
 };
 

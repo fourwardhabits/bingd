@@ -3,10 +3,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invalidateAwards } from '@/features/awards/invalidate';
 import { newOperationId } from '@/features/collection/writes';
 import { nudgePushDelivery } from '@/features/notifications/push';
+import { REACTIONS, type ReactionKind } from '@/features/feed/use-reactions';
 import { diagnose } from '@/lib/diagnose';
 import { avatarUri } from '@/lib/images';
+import { answerWasLost, useOperationIntent } from '@/lib/operation-intent';
 import { supabase } from '@/lib/supabase';
 import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
+
+/**
+ * Is this one of the six? The list is `REACTIONS`' own, so a seventh meaning added
+ * there is understood here without a second edit — which is the whole reason the
+ * taxonomy is one exported array rather than a string union repeated per surface.
+ */
+const isReactionKind = (value: string | null | undefined): value is ReactionKind =>
+  REACTIONS.some((reaction) => reaction.kind === value);
 
 export type Comment = {
   id: string;
@@ -32,6 +42,17 @@ export type Comment = {
   deleted: boolean;
   reactionCount: number;
   reactedByMe: boolean;
+  /**
+   * The distinct meanings present, most common first — the same order and the same six
+   * `useReactions` gives an activity, resolved server-side because the client is handed
+   * a summary rather than the rows (`activity_comments`, 20260827000500).
+   */
+  reactionKinds: ReactionKind[];
+  /**
+   * The reader's own, or null. `reactedByMe` says *whether*; this says *which*, and the
+   * control needs the second to draw a mind that has changed.
+   */
+  myReaction: ReactionKind | null;
 };
 
 type CommentRow = {
@@ -48,6 +69,8 @@ type CommentRow = {
   deleted_at: string | null;
   reaction_count: number;
   reacted_by_me: boolean;
+  reaction_kinds: string[] | null;
+  my_reaction: string | null;
 };
 
 /**
@@ -180,6 +203,11 @@ export function useComments(eventId: string | null, viewerId: string) {
         deleted: row.deleted_at !== null,
         reactionCount: row.reaction_count,
         reactedByMe: row.reacted_by_me,
+        // Narrowed against the shared list rather than cast: the column is `text`, and a
+        // value this client does not know is a glyph it cannot draw — so an unrecognised
+        // one is dropped here rather than rendering as `undefined` three layers down.
+        reactionKinds: (row.reaction_kinds ?? []).filter(isReactionKind),
+        myReaction: isReactionKind(row.my_reaction) ? row.my_reaction : null,
       }));
     },
   });
@@ -242,6 +270,7 @@ export type CommentWriteResult = { ok: true } | { ok: false; message: string };
  */
 export function useCommentWrites(viewerId: string) {
   const queryClient = useQueryClient();
+  const withIntent = useOperationIntent();
 
   const refresh = async () => {
     await Promise.all([
@@ -363,28 +392,56 @@ export function useCommentWrites(viewerId: string) {
   });
 
   /**
-   * The like, which takes **the state wanted** rather than "toggle".
+   * The reaction, which takes **the state wanted** rather than "toggle".
+   *
+   * Six meanings since 20260827000500, and the same six an activity takes — the founder
+   * ruled that a reaction is one interaction whether it is attached to an activity or to
+   * a remark about one, so this sends a `ReactionKind` exactly as `useSetReaction` does,
+   * with null meaning "take it back".
    *
    * A toggle is unsafe under exactly the condition this app assumes everywhere else: a
    * reply that never arrives. The reader sees the old state, taps again, and a flip
-   * would undo the write that did land. Sending `on` means the retry converges on what
-   * they asked for. The server's primary key makes the row idempotent and the operation
-   * ledger stops a replay spending a second rate slot; neither of those helps if the
-   * *intent* is relative, which is why all three exist.
+   * would undo the write that did land. Sending the *kind* means the retry converges on
+   * what they asked for. The server's primary key makes the row idempotent and the
+   * operation ledger stops a replay spending a second rate slot; neither of those helps
+   * if the *intent* is relative, which is why all three exist.
    *
-   * The id is minted per call rather than held across retries, and that is the one place
-   * this differs from `add`: a like is not lost work. If the reply is lost the list is
-   * reconciled below and the next tap is a fresh intent against a state the reader can
-   * now see.
+   * **The id is held across retries, through the same hook the feed's reaction uses.**
+   *
+   * It was minted per call, on the reasoning that a like is not lost work — the row
+   * converges, so a replay cannot duplicate anything. That is the test
+   * `lib/operation-intent.ts` calls the wrong one. The sharper question is whether a
+   * replay changes *any* observable, and `set_comment_reaction` is rate-limited
+   * (`comment_reactions.max_per_day`), so it does: a write that commits and loses its
+   * reply is reported as a failure, the reader taps again, and the second attempt spends
+   * a second slot for one intent. That is the defect reviews 21h–21j closed one writer at
+   * a time, and parity with the feed means carrying it here too rather than only the
+   * glyphs.
+   *
+   * The key is the arguments, exactly as `useSetReaction`'s is: the kind is in it because
+   * changing your mind from a heart to a laugh is a different thing to say, and replaying
+   * the first id would have the server answer `already_applied` to a reaction nobody has
+   * stored. `answerWasLost` is what holds it only while the outcome is unknown — an id
+   * the server has already answered is released, because holding a spent one is the
+   * dangerous direction.
    */
   const react = useMutation({
-    mutationFn: ({ commentId, on }: { commentId: string; on: boolean }) =>
+    mutationFn: ({ commentId, kind }: { commentId: string; kind: ReactionKind | null }) =>
       run(() =>
-        supabase.rpc('set_comment_reaction', {
-          p_operation_id: newOperationId(),
-          p_comment_id: commentId,
-          p_on: on,
-        }),
+        withIntent(
+          `set_comment_reaction:${commentId}:${kind ?? 'none'}`,
+          (operationId) =>
+            supabase.rpc('set_comment_reaction', {
+              p_operation_id: operationId,
+              p_comment_id: commentId,
+              // `p_kind` and not `p_on`, which is the argument name the signature
+              // published before 20260827000500 takes. PostgREST resolves an overload by
+              // the names in the body, so the two never collide — and the old one stays
+              // callable for a phone that has not yet taken this bundle.
+              p_kind: kind,
+            }),
+          answerWasLost,
+        ),
       ),
   });
 

@@ -262,7 +262,17 @@ Four kinds. Primary is Maroon with `text.inverse`. Secondary is `surface.raised`
 
 Minimum height 48, minimum tap target 44 × 44, radius 8, `headline` label. One primary per screen. Disabled state reduces opacity to 40% **and** the button announces why it is disabled to screen readers — an unexplained dead button is the most common accessibility failure in this pattern.
 
-**Which kind an action takes — canonical, 2026-08-27.** The Maroon fill is reserved for the primary social or gamified act of a surface: **Follow**, **Recommend / Recommend to N**, accept-shaped actions (**Approve**, **Add**), **bingd. Awards**. Everything that is utility, exit, or settled state stays outlined or quiet: **Share Profile**, **Following** (the `outline` kind), **Share off bingd.**, **Watchlist**, **Cancel / Close / Dismiss**, filters and settings. Share Profile is deliberately not Maroon — it sits beside the emphasised bingd. Awards, and two fills side by side is no hierarchy at all. Apply the rule narrowly: it names these actions, it is not a licence to repaint every control that feels important.
+**Which kind an action takes — canonical, 2026-08-27.** The Maroon fill is reserved for the primary social or gamified act of a surface: **Follow**, **Recommend**, accept-shaped actions (**Approve**, **Add**), **bingd. Awards**. Everything that is utility, exit, or settled state stays outlined or quiet: **Share Profile**, **Following** (the `outline` kind), **Share off bingd.**, **Watchlist**, **Cancel / Close / Dismiss**, filters and settings. Share Profile is deliberately not Maroon — it sits beside the emphasised bingd. Awards, and two fills side by side is no hierarchy at all. Apply the rule narrowly: it names these actions, it is not a licence to repaint every control that feels important.
+
+**A pair of actions in one row — canonical, 2026-08-27.** Two buttons side by side take **equal halves** (`flex: 1` each) and both carry `fit`. Below the width where both labels fit at their natural size, the pair becomes **two full-width rows with the primary on top** — it never shrinks one column to buy the other room.
+
+Three rules, and each exists because of a device:
+
+- **Equal halves, not grow-from-a-floor.** A fill that is also the wide one reads as the only real control on the surface. `ProfileActions` settled this for Share Profile / bingd. Awards; the Recommend sheet's footer relearned it the hard way.
+- **`fit` on both, always.** Without it a label wraps, and a label with nowhere to wrap breaks mid-word — the founder's Android screenshot read `Share off bi / ngd.`
+- **Decide the layout from the viewport, not from `flexWrap`.** Yoga gives a flex item no automatic minimum size, so `flexShrink` has no floor at the content width: children are squeezed below their own labels and a wrap that would have saved them never fires. Read the width (`useWindowDimensions`) and choose. `ScoresSection` draws the same line at 360pt and a font scale of 1.3.
+
+A label that cannot fit its half at full size is a copy decision, not a layout one. Shorten the label or accept the stack.
 
 ### Bucket chip
 

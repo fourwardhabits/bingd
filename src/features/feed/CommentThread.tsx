@@ -9,6 +9,7 @@ import { Avatar, Button, EmptyState, SpoilerNote, Text } from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import { relativeTime } from './activity';
+import { ReactionPill } from './ReactionPill';
 import {
   COMMENT_MAX_LENGTH,
   threadsOf,
@@ -16,6 +17,11 @@ import {
   useComments,
   type Comment,
 } from './use-comments';
+import {
+  DEFAULT_REACTION,
+  REACTION_GLYPH,
+  type ReactionKind,
+} from './use-reactions';
 
 export type CommentThreadProps = {
   /** The event whose comments these are. Null renders nothing. */
@@ -105,6 +111,10 @@ export function CommentThread({
   // Which comment's reason sheet is open, by id. An id rather than the row, because a
   // refetch replaces the objects and the sheet should stay open across one.
   const [reporting, setReporting] = useState<string | null>(null);
+  // And which comment's reaction picker is open, by id for the same reason. A separate
+  // idea from `reporting`: a row can be in either, both or neither, which is exactly how
+  // `feed.tsx` keeps its picker and its detail sheet apart.
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
 
   /**
    * The composer belongs to one event, and this is what makes that true.
@@ -264,15 +274,35 @@ export function CommentThread({
     ]);
   };
 
-  const toggleLike = (comment: Comment) => {
+  /**
+   * Choosing a meaning, which is the whole of what the picker does.
+   *
+   * The picker closes first, exactly as the feed's does: the sheet underneath is
+   * refetched by the write, and a pill left open over a row that is about to re-render
+   * is a control pointing at a state nobody chose.
+   */
+  const choose = (comment: Comment, kind: ReactionKind | null) => {
+    setPickerFor(null);
     if (reacting) return;
     void (async () => {
       // The state wanted, not "the opposite of what I am showing" — see `react` in
       // `use-comments.ts`. A retry after a lost reply converges instead of undoing.
-      const result = await react({ commentId: comment.id, on: !comment.reactedByMe });
+      const result = await react({ commentId: comment.id, kind });
       if (!result.ok) Alert.alert('Could not do that', result.message);
     })();
   };
+
+  /**
+   * A plain tap, and it is `feed.tsx`’s rule verbatim.
+   *
+   * Nothing becomes a heart, and a heart becomes nothing. If some *other* reaction is
+   * already set a tap replaces it with the heart rather than clearing it — the gesture
+   * means "react", and the way to remove a reaction you can see is to tap the one you
+   * chose. Stated here rather than shared because it is four lines and a comment; what
+   * must not drift is the *rule*, and the rule is written the same way in both places.
+   */
+  const toggleDefault = (comment: Comment) =>
+    choose(comment, comment.myReaction === DEFAULT_REACTION ? null : DEFAULT_REACTION);
 
   const threads = threadsOf(comments.data);
   const over = draft.length > COMMENT_MAX_LENGTH;
@@ -290,7 +320,16 @@ export function CommentThread({
     mine: comment.authorId === viewerId,
     onPressAuthor: () => onPressPerson(comment.authorUsername),
     onReply: () => beginReply(comment),
-    onLike: () => toggleLike(comment),
+    onReact: () => toggleDefault(comment),
+    onOpenPicker: () => setPickerFor(comment.id),
+    picker:
+      pickerFor === comment.id ? (
+        <ReactionPill
+          current={comment.myReaction}
+          onChoose={(kind) => choose(comment, kind)}
+          onDismiss={() => setPickerFor(null)}
+        />
+      ) : null,
     onEdit: () => beginEdit(comment),
     onDelete: () => confirmDelete(comment),
     onReport: () => setReporting(comment.id),
@@ -461,7 +500,9 @@ function CommentRow({
   isReply = false,
   onPressAuthor,
   onReply,
-  onLike,
+  onReact,
+  onOpenPicker,
+  picker,
   onEdit,
   onDelete,
   onReport,
@@ -473,7 +514,12 @@ function CommentRow({
   isReply?: boolean;
   onPressAuthor: () => void;
   onReply: () => void;
-  onLike: () => void;
+  /** A plain tap: toggles the default reaction on or off. */
+  onReact: () => void;
+  /** A long press: opens the six. */
+  onOpenPicker: () => void;
+  /** Rendered above the actions, inside the row - see ReactionPill. */
+  picker: React.ReactNode;
   onEdit: () => void;
   onDelete: () => void;
   onReport: () => void;
@@ -532,20 +578,36 @@ function CommentRow({
           noun="comment"
         />
 
+        {/* Above the actions and inside the row, which is where `ActivityRow` puts it:
+            positioned against its own parent, so it travels with the row when the thread
+            scrolls and cannot be clipped on Android by being drawn outside it. */}
+        {picker ? <View style={styles.picker}>{picker}</View> : null}
+
         <View style={styles.actions}>
-          {/* The like. One toggle and a count, in the founder's smallest v1 — not the
-              six meanings `reactions` carries, which are about a whole activity. The
-              count is absent at zero rather than showing "0": a nought beside every
+          {/* The reaction, which is the feed's control at a comment's scale.
+
+              Tap toggles the heart; hold opens the same six `ActivityRow` opens. The
+              glyph cluster beside it is that row's too — overlapped so three read as one
+              object and cost the width of about two.
+
+              The icon stays a heart in both states rather than becoming my own glyph,
+              for `ActivityRow`'s reason: the cluster already shows what I chose, and
+              putting it here as well would be the same emoji twice in one row. Filled
+              Maroon says *I* have acted; the cluster says what everybody said.
+
+              The count is absent at zero rather than showing "0": a nought beside every
               remark is a scoreboard nobody asked for. */}
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ selected: comment.reactedByMe }}
             accessibilityLabel={
               comment.reactedByMe
-                ? `Remove your like from ${comment.authorName}'s comment`
-                : `Like ${comment.authorName}'s comment`
+                ? `You reacted to ${comment.authorName}'s comment. Tap to remove, long press to change.`
+                : `React to ${comment.authorName}'s comment. Long press for more reactions.`
             }
-            onPress={onLike}
+            accessibilityHint="Long press to choose a different reaction"
+            onPress={onReact}
+            onLongPress={onOpenPicker}
             hitSlop={slop}
             style={styles.like}
           >
@@ -554,6 +616,17 @@ function CommentRow({
               size={theme.layout.icon.sm}
               color={comment.reactedByMe ? theme.semantic.action : theme.text.tertiary}
             />
+            {comment.reactionKinds.length ? (
+              <View style={styles.glyphs} accessibilityElementsHidden>
+                {comment.reactionKinds.slice(0, 3).map((kind, index) => (
+                  <View key={kind} style={index > 0 ? styles.glyphOverlap : undefined}>
+                    <Text variant="caption" allowFontScaling={false}>
+                      {REACTION_GLYPH[kind]}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
             {comment.reactionCount > 0 ? (
               <Text variant="caption" tone={comment.reactedByMe ? 'action' : 'tertiary'}>
                 {comment.reactionCount}
@@ -661,6 +734,13 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[1],
   },
   like: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
+  // The cluster of what other people chose. Overlapped exactly as ActivityRow does it,
+  // so the glyphs read as one object rather than as a list.
+  glyphs: { flexDirection: 'row', alignItems: 'center' },
+  glyphOverlap: { marginLeft: -theme.space[1] },
+  // The pill sits above the actions and hugs the left edge of the copy column, which
+  // is where the control it belongs to is.
+  picker: { alignSelf: 'flex-start', paddingTop: theme.space[1] },
   composer: {
     gap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,

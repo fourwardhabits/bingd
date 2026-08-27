@@ -160,6 +160,20 @@ const ALLOWED = {
   // so a replay after a lost reply converges instead of undoing itself.
   'set_comment_reaction(uuid,uuid,boolean)': ['authenticated'],
 
+  // The canonical signature since 20260827000500, when a comment gained the same six
+  // meanings an activity carries. Same shape and same authorisation as the boolean one
+  // above; it takes a `kind` (or null to take the reaction back) instead of a flag.
+  //
+  // **Both stay granted, on purpose.** The boolean one is what every phone published
+  // before that migration calls, and an over-the-air update reaches a device on its next
+  // launch while the migration lands first — so dropping it would break the heart on a
+  // comment for every tester who had not relaunched. PostgREST resolves the pair by
+  // argument name (`p_on` versus `p_kind`), so they are never ambiguous.
+  //
+  // The shared body, `_set_comment_reaction`, is deliberately *not* here: it neither
+  // claims an operation nor spends a rate slot, so it is revoked from every client role.
+  'set_comment_reaction(uuid,uuid,text)': ['authenticated'],
+
   // The two reads that replaced a PostgREST select and its embed. Definer, and they take
   // no viewer (20260813001900) — the perspective is always auth.uid()'s own, so neither
   // can be pointed at somebody else's feed. They exist because the per-row cost of

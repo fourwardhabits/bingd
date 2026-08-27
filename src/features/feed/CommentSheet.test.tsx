@@ -4,6 +4,7 @@ import { Alert } from 'react-native';
 import { renderWithProviders } from '@/test-utils/render';
 
 import { CommentSheet } from './CommentSheet';
+import { DEFAULT_REACTION, REACTIONS, REACTION_GLYPH } from './use-reactions';
 
 /**
  * Comments V1 — the surface.
@@ -94,6 +95,10 @@ const comment = (over: Record<string, unknown> = {}) => ({
   deleted_at: null,
   reaction_count: 0,
   reacted_by_me: false,
+  // The two the function grew in 20260827000500, when a comment gained the same six
+  // meanings an activity carries.
+  reaction_kinds: [],
+  my_reaction: null,
   ...over,
 });
 
@@ -807,5 +812,274 @@ describe('reporting a comment', () => {
     // Report and Block are separate acts with separate consequences. Bundling them would
     // silently block somebody who only meant to flag one remark.
     expect(mockRpcCalls.map((c) => c.name)).not.toContain('block');
+  });
+});
+
+/**
+ * Reactions on a comment, which since 20260827000500 are the feed's reactions.
+ *
+ * The founder found the two apart on a device: holding the control on a feed row offered
+ * six meanings, holding it on a comment offered nothing, and the same gesture doing
+ * different things one swipe apart is the inconsistency. What these tests pin is that the
+ * *grammar* is the same one — tap toggles the heart, hold opens the six, the cluster
+ * shows what everybody chose — rather than a second picker that merely resembles it.
+ *
+ * The taxonomy itself is asserted against `REACTIONS`, not against a copied list, so a
+ * seventh meaning added there has to appear here without this file being edited.
+ */
+describe('reacting to a comment', () => {
+  const reactionCalls = () => mockRpcCalls.filter((call) => call.name === 'set_comment_reaction');
+
+  /** The arguments of the one reaction write, failing loudly if none was made. */
+  const reactionArgs = (index = 0) => {
+    const call = reactionCalls()[index];
+    if (!call) throw new Error(`no set_comment_reaction call at index ${index}`);
+    return call.args;
+  };
+
+  /** The control on the one comment, found the way a screen reader finds it. */
+  const control = (view: Awaited<ReturnType<typeof open>>) =>
+    view.getByLabelText(/^(React to|You reacted to)/);
+
+  const mine = (kind: string) => ({
+    reaction_count: 1,
+    reacted_by_me: true,
+    reaction_kinds: [kind],
+    my_reaction: kind,
+  });
+
+  it('sends the default heart on a plain tap, as the feed does', async () => {
+    mockCommentRows = [comment()];
+    const view = await open();
+
+    await fireEvent.press(control(view));
+
+    await waitFor(() => expect(reactionCalls()).toHaveLength(1));
+    expect(reactionArgs()).toMatchObject({ p_kind: DEFAULT_REACTION });
+    // The boolean the old control sent is gone: the argument name is what tells the two
+    // server signatures apart, so sending `p_on` would silently reach the compatibility
+    // one and store a heart whatever the reader chose.
+    expect(reactionArgs()).not.toHaveProperty('p_on');
+  });
+
+  it('takes the heart back when it is already mine', async () => {
+    mockCommentRows = [comment(mine('love'))];
+    const view = await open();
+
+    await fireEvent.press(control(view));
+
+    await waitFor(() => expect(reactionCalls()).toHaveLength(1));
+    expect(reactionArgs()).toMatchObject({ p_kind: null });
+  });
+
+  /**
+   * The feed's rule verbatim: a tap on a row already carrying some *other* reaction
+   * replaces it with the heart rather than clearing it. The gesture means "react", and
+   * the way to remove a reaction you can see is to tap the one you chose.
+   */
+  it('replaces another reaction with the heart rather than clearing it', async () => {
+    mockCommentRows = [comment(mine('wow'))];
+    const view = await open();
+
+    await fireEvent.press(control(view));
+
+    await waitFor(() => expect(reactionCalls()).toHaveLength(1));
+    expect(reactionArgs()).toMatchObject({ p_kind: DEFAULT_REACTION });
+  });
+
+  it('opens the same six on a long press, and no others', async () => {
+    mockCommentRows = [comment()];
+    const view = await open();
+
+    await act(async () => fireEvent(control(view), 'longPress'));
+
+    for (const reaction of REACTIONS) {
+      expect(view.getByLabelText(reaction.label)).toBeTruthy();
+    }
+    expect(view.getByLabelText('Close reactions')).toBeTruthy();
+  });
+
+  it('sends whichever of the six was chosen', async () => {
+    mockCommentRows = [comment()];
+    const view = await open();
+
+    await act(async () => fireEvent(control(view), 'longPress'));
+    await fireEvent.press(view.getByLabelText('Funny'));
+
+    await waitFor(() => expect(reactionCalls()).toHaveLength(1));
+    expect(reactionArgs()).toMatchObject({ p_kind: 'funny' });
+  });
+
+  it('offers to remove the one already chosen, from inside the picker', async () => {
+    mockCommentRows = [comment(mine('wow'))];
+    const view = await open();
+
+    await act(async () => fireEvent(control(view), 'longPress'));
+    await fireEvent.press(view.getByLabelText('Remove Wow'));
+
+    await waitFor(() => expect(reactionCalls()).toHaveLength(1));
+    expect(reactionArgs()).toMatchObject({ p_kind: null });
+  });
+
+  it('closes the picker without sending when it is dismissed', async () => {
+    mockCommentRows = [comment()];
+    const view = await open();
+
+    await act(async () => fireEvent(control(view), 'longPress'));
+    await fireEvent.press(view.getByLabelText('Close reactions'));
+
+    expect(view.queryByLabelText('Close reactions')).toBeNull();
+    expect(reactionCalls()).toHaveLength(0);
+  });
+
+  /**
+   * The cluster is the feed's: the distinct meanings, most common first, capped at three
+   * so a busy comment does not turn its own row into a legend.
+   */
+  it('shows the glyphs other people chose, beside the count', async () => {
+    mockCommentRows = [
+      comment({
+        reaction_count: 5,
+        reacted_by_me: false,
+        reaction_kinds: ['love', 'funny', 'wow', 'moved'],
+        my_reaction: null,
+      }),
+    ];
+    const view = await open();
+
+    expect(view.getByText('5')).toBeTruthy();
+    for (const kind of ['love', 'funny', 'wow'] as const) {
+      expect(view.getByText(REACTION_GLYPH[kind], { includeHiddenElements: true })).toBeTruthy();
+    }
+    // The fourth is not drawn: three is the cap `ActivityRow` sets.
+    expect(
+      view.queryByText(REACTION_GLYPH.moved, { includeHiddenElements: true }),
+    ).toBeNull();
+  });
+
+  it('shows no count at all on a comment nobody has reacted to', async () => {
+    mockCommentRows = [comment()];
+    const view = await open();
+
+    // A nought beside every remark is a scoreboard nobody asked for.
+    expect(view.queryByText('0')).toBeNull();
+  });
+
+  it('says whether the reaction is mine, for a screen reader', async () => {
+    mockCommentRows = [comment(mine('love'))];
+    const view = await open();
+
+    expect(view.getByLabelText(/^You reacted to Anna/)).toBeTruthy();
+    expect(view.getByLabelText(/long press to change/)).toBeTruthy();
+  });
+
+  /**
+   * A reply is a comment, and the server puts a reaction on it through the same writer.
+   * Refusing one here would be the visible half of a rule the reader cannot know about.
+   */
+  it('reacts to a reply exactly as it does to a root', async () => {
+    mockCommentRows = [
+      comment(),
+      comment({ id: 'c2', parent_id: 'c1', body: 'Agreed.', username: 'bo', display_name: 'Bo' }),
+    ];
+    const view = await open();
+
+    const controls = view.getAllByLabelText(/^React to/);
+    expect(controls).toHaveLength(2);
+
+    const reply = controls[1];
+    if (!reply) throw new Error('expected a control on the reply');
+    await act(async () => fireEvent(reply, 'longPress'));
+    await fireEvent.press(view.getByLabelText('Moved'));
+
+    await waitFor(() => expect(reactionCalls()).toHaveLength(1));
+    expect(reactionArgs()).toMatchObject({ p_comment_id: 'c2', p_kind: 'moved' });
+  });
+
+  it('offers nothing to react to on a retracted comment', async () => {
+    mockCommentRows = [
+      comment({ deleted_at: new Date().toISOString(), body: null }),
+      comment({ id: 'c2', parent_id: 'c1', body: 'Still here.', username: 'bo', display_name: 'Bo' }),
+    ];
+    const view = await open();
+
+    // One control, and it belongs to the reply — the tombstone is a place in the
+    // conversation and not a comment.
+    expect(view.getAllByLabelText(/^React to/)).toHaveLength(1);
+  });
+});
+
+/**
+ * The operation id, held while the outcome is unknown — the feed's rule, here too.
+ *
+ * `set_comment_reaction` is rate-limited, so a replay is not free even though the row
+ * converges: a write that commits and loses its reply is reported as a failure, the
+ * reader taps the same control again, and a fresh id spends a second slot for one
+ * intent. That is the defect `lib/operation-intent.ts` exists to close, and the id was
+ * minted per call here until independent review of this tranche pointed at it.
+ */
+describe('a comment reaction whose answer was lost', () => {
+  const reactionIds = () =>
+    mockRpcCalls
+      .filter((call) => call.name === 'set_comment_reaction')
+      .map((call) => call.args.p_operation_id);
+
+  const control = (view: Awaited<ReturnType<typeof open>>) =>
+    view.getByLabelText(/^(React to|You reacted to)/);
+
+  it('replays under the id the first attempt used', async () => {
+    mockCommentRows = [comment()];
+    // No code at all is what a dropped socket looks like through postgrest-js, and
+    // `classifyWrite` calls that 'unknown' — the one outcome that holds the id.
+    mockRpcError = { message: 'network request failed' };
+    const view = await open();
+
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(1));
+
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(2));
+
+    expect(reactionIds()[0]).toBeDefined();
+    expect(reactionIds()[1]).toBe(reactionIds()[0]);
+  });
+
+  it('takes a fresh id once the server has answered', async () => {
+    mockCommentRows = [comment()];
+    mockRpcError = { message: 'network request failed' };
+    const view = await open();
+
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(1));
+
+    // The server answers this time, which spends the claim — so the next intent must not
+    // reuse it, or it would be met with `already_applied` and store nothing.
+    mockRpcError = null;
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(2));
+    expect(reactionIds()[1]).toBe(reactionIds()[0]);
+
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(3));
+    expect(reactionIds()[2]).not.toBe(reactionIds()[0]);
+  });
+
+  /**
+   * A different meaning is a different thing to say, so it is a different intent — the
+   * key carries the kind for the reason `useSetReaction`'s does.
+   */
+  it('gives a different meaning an id of its own', async () => {
+    mockCommentRows = [comment()];
+    mockRpcError = { message: 'network request failed' };
+    const view = await open();
+
+    await fireEvent.press(control(view));
+    await waitFor(() => expect(reactionIds()).toHaveLength(1));
+
+    await act(async () => fireEvent(control(view), 'longPress'));
+    await fireEvent.press(view.getByLabelText('Funny'));
+    await waitFor(() => expect(reactionIds()).toHaveLength(2));
+
+    expect(reactionIds()[1]).not.toBe(reactionIds()[0]);
   });
 });
