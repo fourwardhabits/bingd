@@ -978,6 +978,29 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 > delivered-versus-pending split and the pending cap of 5 per sender→recipient pair are
 > exactly as specified above.
 
+> ### As built — 2026-08-27: choose your people, then send once
+>
+> **Send to is a multi-select picker.** Each person row is a checkbox — the mark sits at
+> the far right, exactly where the per-row send icon used to be, and tapping anywhere on
+> the row toggles it. The sheet ends in two actions pinned under the list: **Recommend
+> to N** (filled Maroon, the primary act, disabled at zero) beside **Share off bingd.**
+> (outlined — the same native share carrying the reader's invite link, which needs no
+> selection because whether the somebody has the app is a detail of the address).
+>
+> **Multi-select changes the interface, not the semantics.** Each chosen person is their
+> own `recommend_title` call under their own held operation id, so everything specified
+> above is asked per recipient exactly as it was when every tap sent alone: eligibility,
+> the delivered-versus-pending split, the pending cap of 5 per sender→recipient pair,
+> and the rate ceilings. A retry replays an unanswered send under the id the first
+> attempt spent, so one intent cannot become two recommendations however many times the
+> button is pressed.
+>
+> **A batch that half-succeeds says so in full and loses nothing.** The people whose
+> sends stored leave the selection — a retry must not spend another attempt on them —
+> while the refused stay selected under a line naming them and the reason, so "try
+> again" means exactly the failed half. The sheet closes only when everybody chosen has
+> been sent, and the confirmation underneath then names the whole batch.
+
 ### Recommendation engine — public-alpha design
 
 - Runs behind the scenes. The Recommendations surface opens directly to useful suggestions.
@@ -1113,6 +1136,29 @@ series   TV-MA · Drama · Thriller
 > **Corrected 2026-08-13.** This section said unfollowing "removes future events; it does not retroactively rewrite history the user already saw." That describes an inbox written per follower, and the feed is assembled on read (AD-6), so it was not true of the system being built.
 >
 > **Unfollowing removes that person's events from your feed entirely, past ones included.** The feed is a live query against your current follow set, not a record of what you have seen. Nothing is deleted, and a re-follow restores visibility. This is also the behaviour a user expects: someone who unfollows wants that person gone, not their last three weeks kept in place.
+
+> ### As built — 2026-08-27: Profile → Recent activity is *their* most recent, however old
+>
+> **The contract.** Recent activity on a profile shows the target user's most recent
+> eligible activities — five of them, newest first — **regardless of how old they are**.
+> "Recent" means *their* most recent, not "recent enough for the feed": a person whose
+> last ranking is years old still shows it, and an account with history never reads
+> "Nothing here yet" merely because its owner has been quiet. The same target user shows
+> the same Recent activity to themselves and to any authorised viewer, subject only to
+> visibility — `feed_events_read` authorises the read on both paths, so a private
+> account's activity still reaches only approved followers, and deleted events are
+> simply absent.
+>
+> **The defect this names.** The own profile derived the section by filtering the
+> viewer's *feed* — the newest ~30 events across the whole follow set — down to the
+> viewer's own rows. Anybody who follows people more active than themselves had their
+> history pushed out of that window before the filter ran, so the founder's own profile
+> said "Nothing here yet" over a substantial collection on both platforms, while the
+> same profile viewed by somebody else (which always asked about the actor directly)
+> rendered fine — and ranking one new title "fixed" it, because the new event sat
+> inside the window. Both profile screens now run the same one-actor query, newest
+> first, limit applied *after* the actor filter. The Feed's own windowing is unchanged:
+> it is a different surface making a different claim.
 
 ### Reactions — Decided for public alpha
 

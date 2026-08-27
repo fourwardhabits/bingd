@@ -258,9 +258,11 @@ Specified by anatomy and rules rather than by pixel measurements, which belong i
 
 ### Button
 
-Three kinds. Primary is Maroon with `text.inverse`. Secondary is `surface.raised` with a `border.strong` outline and Ink label. Tertiary is a bare Ink label with no container.
+Four kinds. Primary is Maroon with `text.inverse`. Secondary is `surface.raised` with a `border.strong` outline and Ink label. Tertiary is a bare Ink label with no container. Outline is `surface.raised` with a Maroon border and Maroon label — the filled button's settled state (Following, Requested), not a primary with a modifier.
 
 Minimum height 48, minimum tap target 44 × 44, radius 8, `headline` label. One primary per screen. Disabled state reduces opacity to 40% **and** the button announces why it is disabled to screen readers — an unexplained dead button is the most common accessibility failure in this pattern.
+
+**Which kind an action takes — canonical, 2026-08-27.** The Maroon fill is reserved for the primary social or gamified act of a surface: **Follow**, **Recommend / Recommend to N**, accept-shaped actions (**Approve**, **Add**), **bingd. Awards**. Everything that is utility, exit, or settled state stays outlined or quiet: **Share Profile**, **Following** (the `outline` kind), **Share off bingd.**, **Watchlist**, **Cancel / Close / Dismiss**, filters and settings. Share Profile is deliberately not Maroon — it sits beside the emphasised bingd. Awards, and two fills side by side is no hierarchy at all. Apply the rule narrowly: it names these actions, it is not a licence to repaint every control that feels important.
 
 ### Bucket chip
 

@@ -26,13 +26,32 @@ jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: () => Promise.resolve({ data: null, error: null }),
     from: (table: string) => {
-      const filters: Record<string, unknown> = {};
-      const rows = () =>
-        (mockTables[table] ?? []).filter((row) =>
-          Object.entries(filters).every(
-            ([key, value]) => (row as Record<string, unknown>)[key] === value,
-          ),
-        );
+      /**
+       * Predicates rather than a column→value map, because `in` filters too now.
+       *
+       * The stand-in used to swallow `in`, `order` and `limit`, which made the one
+       * bug this screen actually shipped untestable: Recent activity was the follow
+       * feed's newest-30 window filtered down to oneself, so a busier follow set
+       * pushed one's own history out of the window — behaviour that only exists
+       * once ordering and the limit are real.
+       */
+      const filters: ((row: Record<string, unknown>) => boolean)[] = [];
+      let sort: { column: string; ascending: boolean } | null = null;
+      let max: number | null = null;
+      const rows = () => {
+        const matched = (mockTables[table] ?? []).filter((row) =>
+          filters.every((keep) => keep(row as Record<string, unknown>)),
+        ) as Record<string, unknown>[];
+        if (sort) {
+          const { column, ascending } = sort;
+          matched.sort((a, b) => {
+            const left = String(a[column] ?? '');
+            const right = String(b[column] ?? '');
+            return ascending ? left.localeCompare(right) : right.localeCompare(left);
+          });
+        }
+        return max === null ? matched : matched.slice(0, max);
+      };
       const answer = () => {
         mockReads[table] = (mockReads[table] ?? 0) + 1;
         return mockFailing.has(table)
@@ -48,16 +67,25 @@ jest.mock('@/lib/supabase', () => ({
       const chain = {
         select: () => chain,
         eq: (column: string, value: unknown) => {
-          filters[column] = value;
+          filters.push((row) => row[column] === value);
           return chain;
         },
-        in: () => chain,
+        in: (column: string, values: unknown[]) => {
+          filters.push((row) => values.includes(row[column]));
+          return chain;
+        },
         // Both return the chain rather than the answer, because the queries on
         // this screen end on different links: the watchlist on `order`, the
         // feed on `limit`. The chain is itself thenable, so awaiting either
         // works.
-        limit: () => chain,
-        order: () => chain,
+        limit: (count: number) => {
+          max = count;
+          return chain;
+        },
+        order: (column: string, options?: { ascending?: boolean }) => {
+          sort = { column, ascending: options?.ascending ?? true };
+          return chain;
+        },
         maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
         then: (resolve: (value: unknown) => unknown) => answer().then(resolve),
       };
@@ -134,6 +162,19 @@ const open = async () => {
 const stat = async (view: Awaited<ReturnType<typeof open>>, label: string) => {
   const node = await view.findByLabelText(new RegExp(`^${label}: `));
   return String(node.props.accessibilityLabel).split(': ')[1];
+};
+
+/**
+ * Every string the tree draws, in the order it draws them, as one string.
+ *
+ * Walking children rather than `JSON.stringify(view.toJSON())`, because the
+ * serialised tree carries provider props that point back at themselves.
+ */
+const renderedText = (node: unknown): string => {
+  if (typeof node === 'string') return node;
+  if (Array.isArray(node)) return node.map(renderedText).join(' ');
+  const children = (node as { children?: unknown[] })?.children;
+  return children ? children.map(renderedText).join(' ') : '';
 };
 
 /**
@@ -258,9 +299,9 @@ describe('recent activity', () => {
   });
 
   it('shows only this profile\u2019s own activity', async () => {
-    // The feed query spans everyone the user follows. A friend's ranking under
-    // a heading on your own profile is a different claim from the one the
-    // heading makes.
+    // A friend's ranking under a heading on your own profile is a different
+    // claim from the one the heading makes. The query asks about this actor
+    // alone, so the friend's event must never arrive here at all.
     mockTables.feed_events = [activity('e1', 'user-1', 'Sai'), activity('e2', 'friend', 'Anna')];
 
     const view = await open();
@@ -269,6 +310,53 @@ describe('recent activity', () => {
     // only place it appears is beside the year.
     await waitFor(() => expect(view.getAllByText(/Inception/)).toHaveLength(1));
     expect(view.queryByText('Anna')).toBeNull();
+  });
+
+  it('shows old activity even when the people you follow are busier', async () => {
+    /**
+     * The founder's report, as a fixture: a substantial history, none of it recent,
+     * behind a follow set that out-posts them. The old implementation filtered the
+     * follow feed — the newest 30 events across *everyone* — down to oneself, so
+     * thirty fresher events from a friend left nothing of one's own to filter, and
+     * the section claimed "Nothing here yet" about an account with years of it.
+     * Recent activity asks about the actor directly now; how old the newest ranking
+     * is was never supposed to matter.
+     */
+    mockTables.follows = [{ follower_id: 'user-1', followee_id: 'friend', state: 'approved' }];
+    mockTables.feed_events = [
+      { ...activity('mine', 'user-1', 'Sai'), created_at: '2026-01-01T00:00:00Z' },
+      ...Array.from({ length: 30 }, (_, i) => ({
+        ...activity(`friend-${i}`, 'friend', 'Anna'),
+        media_item_id: 'film-2',
+        media_items: movie('film-2', 'Heat'),
+        created_at: `2026-08-15T00:00:${String(i).padStart(2, '0')}Z`,
+      })),
+    ];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getAllByText(/Inception/)).toHaveLength(1));
+    expect(view.queryByText(/Heat/)).toBeNull();
+    expect(view.queryByText('Nothing here yet')).toBeNull();
+  });
+
+  it('puts a new ranking first, and keeps the newest five', async () => {
+    // The rest of the contract: a fresh activity takes the top slot, and the five the
+    // section holds are the newest five *of this person's*, however old the fifth is.
+    mockTables.feed_events = Array.from({ length: 6 }, (_, i) => ({
+      ...activity(`e${i}`, 'user-1', 'Sai'),
+      media_item_id: `film-${i}`,
+      media_items: movie(`film-${i}`, `Film number ${i}`),
+      created_at: `2026-08-0${i + 1}T00:00:00Z`,
+    }));
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getAllByText(/Film number 5/)).toHaveLength(1));
+    // Six events, five slots: the oldest is the one that yields.
+    expect(view.queryByText(/Film number 0/)).toBeNull();
+    const drawn = renderedText(view.toJSON());
+    expect(drawn.indexOf('Film number 5')).toBeLessThan(drawn.indexOf('Film number 4'));
   });
 
   it('says so when there is none, rather than leaving a bare heading', async () => {

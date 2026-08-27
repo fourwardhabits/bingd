@@ -29,8 +29,12 @@ jest.mock('@/lib/supabase', () => ({
     functions: { invoke: () => Promise.resolve({ data: null, error: null }) },
     rpc: (name: string, args: unknown) => {
       mockRpc(name, args);
+      // A result may be a function of the arguments, because a multi-recipient send is
+      // one press making N calls — a partial failure is only expressible if the
+      // stand-in can answer each recipient differently.
+      const result = mockRpcResults[name];
       return Promise.resolve({
-        data: mockRpcResults[name] ?? null,
+        data: (typeof result === 'function' ? result(args) : result) ?? null,
         error: mockRpcErrors[name] ?? null,
       });
     },
@@ -197,11 +201,19 @@ describe('sending', () => {
     mockIncoming = [person('user-2', 'ada', 'Ada')];
   });
 
-  it('sends to one person on one tap, and closes', async () => {
+  /** Mark a person's row — each row is a checkbox now, not a send. */
+  const pick = (view: Awaited<ReturnType<typeof renderWithProviders>>, label: string) =>
+    fireEvent.press(view.getByLabelText(label));
+  /** Press the one button that sends, whatever its count reads. */
+  const sendNow = (view: Awaited<ReturnType<typeof renderWithProviders>>) =>
+    fireEvent.press(view.getByText(/^Recommend to \d+$/));
+
+  it('sends to a chosen person from the one button, and closes', async () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await pick(view, 'Ada, @ada');
+    await sendNow(view);
 
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith(
@@ -215,6 +227,97 @@ describe('sending', () => {
     expect(props.onClose).toHaveBeenCalled();
   });
 
+  it('counts the chosen on the button, and sends nothing while it reads zero', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+
+    // Disabled at zero: pressing it must not fire a send with nobody chosen.
+    await fireEvent.press(view.getByText('Recommend to 0'));
+    expect(mockRpc).not.toHaveBeenCalledWith('recommend_title', expect.anything());
+
+    await pick(view, 'Ada, @ada');
+    expect(view.getByText('Recommend to 1')).toBeTruthy();
+
+    // A second tap on the row un-chooses — the row toggles, it does not send.
+    await pick(view, 'Ada, @ada');
+    expect(view.getByText('Recommend to 0')).toBeTruthy();
+    expect(mockRpc).not.toHaveBeenCalledWith('recommend_title', expect.anything());
+  });
+
+  it('sends to everybody chosen from one press', async () => {
+    mockOutgoing = [person('user-2', 'ada', 'Ada'), person('user-3', 'grace', 'Grace')];
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Grace')).toBeTruthy());
+
+    await pick(view, 'Ada, @ada');
+    await pick(view, 'Grace, @grace');
+    await fireEvent.press(view.getByText('Recommend to 2'));
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith(
+        'recommend_title',
+        expect.objectContaining({ p_recipient_id: 'user-3' }),
+      ),
+    );
+    expect(mockRpc).toHaveBeenCalledWith(
+      'recommend_title',
+      expect.objectContaining({ p_recipient_id: 'user-2' }),
+    );
+    expect(props.onSent).toHaveBeenCalledWith('Ada and Grace');
+    expect(props.onClose).toHaveBeenCalled();
+  });
+
+  /**
+   * **A batch that half-succeeds must say so in full, and lose nothing.**
+   *
+   * The stored half must not be resendable — a retry press that replayed a success
+   * would spend a rate-limit slot and bump `recommended_at` for a send the person was
+   * already shown. The failed half must stay chosen with the reason on the screen, so
+   * "try again" means exactly them. And when the retry lands, the confirmation names
+   * everybody this sheet sent, not just the stragglers of the final pass.
+   */
+  it('keeps the successes when one recipient fails, and retries only the failure', async () => {
+    mockOutgoing = [person('user-2', 'ada', 'Ada'), person('user-3', 'grace', 'Grace')];
+    mockRpcResults.recommend_title = (args: unknown) =>
+      (args as { p_recipient_id: string }).p_recipient_id === 'user-3'
+        ? { status: 'refused', reason: 'too_many_pending' }
+        : { status: 'ok', created: true, delivered: true };
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+    await waitFor(() => expect(view.getByText('Grace')).toBeTruthy());
+
+    await pick(view, 'Ada, @ada');
+    await pick(view, 'Grace, @grace');
+    await fireEvent.press(view.getByText('Recommend to 2'));
+
+    await waitFor(() =>
+      expect(
+        view.getByText(
+          'Sent to Ada. Could not send to Grace. ' +
+            'They already have several recommendations from you waiting.',
+        ),
+      ).toBeTruthy(),
+    );
+    // Open, with only the failed half still chosen.
+    expect(props.onClose).not.toHaveBeenCalled();
+    expect(view.getByText('Recommend to 1')).toBeTruthy();
+
+    const sendsTo = (id: string) =>
+      mockRpc.mock.calls.filter(
+        ([name, args]) =>
+          name === 'recommend_title' && (args as { p_recipient_id: string }).p_recipient_id === id,
+      );
+
+    mockRpcResults.recommend_title = { status: 'ok', created: true, delivered: true };
+    await sendNow(view);
+
+    // The retry asked about Grace alone; Ada's stored send was not replayed.
+    await waitFor(() => expect(sendsTo('user-3')).toHaveLength(2));
+    expect(sendsTo('user-2')).toHaveLength(1);
+    // And the confirmation names the whole batch, both passes of it.
+    expect(props.onSent).toHaveBeenCalledWith('Ada and Grace');
+    expect(props.onClose).toHaveBeenCalled();
+  });
+
   it('explains a refusal in words rather than as a code, and stays open', async () => {
     // A refusal comes back in the body with a 200, not as an error — the server
     // returns it so that a refused attempt still costs a slot against the hourly
@@ -223,10 +326,15 @@ describe('sending', () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await pick(view, 'Ada, @ada');
+    await sendNow(view);
 
     await waitFor(() =>
-      expect(view.getByText('You can recommend titles to people you follow.')).toBeTruthy(),
+      expect(
+        view.getByText(
+          'Could not send to Ada. You can recommend titles to people you follow.',
+        ),
+      ).toBeTruthy(),
     );
     expect(props.onSent).not.toHaveBeenCalled();
     expect(props.onClose).not.toHaveBeenCalled();
@@ -244,11 +352,12 @@ describe('sending', () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await pick(view, 'Ada, @ada');
+    await sendNow(view);
 
     await waitFor(() =>
       expect(
-        view.getByText('They already have several recommendations from you waiting.'),
+        view.getByText(/They already have several recommendations from you waiting\./),
       ).toBeTruthy(),
     );
     expect(props.onClose).not.toHaveBeenCalled();
@@ -266,7 +375,8 @@ describe('sending', () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await pick(view, 'Ada, @ada');
+    await sendNow(view);
 
     await waitFor(() => expect(props.onSent).toHaveBeenCalledWith('Ada'));
     expect(props.onClose).toHaveBeenCalled();
@@ -279,11 +389,12 @@ describe('sending', () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await pick(view, 'Ada, @ada');
+    await sendNow(view);
 
     await waitFor(() =>
       expect(
-        view.getByText('You have sent a lot of recommendations today. Try again later.'),
+        view.getByText(/You have sent a lot of recommendations today\. Try again later\./),
       ).toBeTruthy(),
     );
   });
@@ -293,11 +404,12 @@ describe('sending', () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await pick(view, 'Ada, @ada');
+    await sendNow(view);
 
     await waitFor(() =>
       expect(
-        view.getByText('You can recommend a film or a season, not a whole series.'),
+        view.getByText(/You can recommend a film or a season, not a whole series\./),
       ).toBeTruthy(),
     );
     expect(props.onSent).not.toHaveBeenCalled();
@@ -319,10 +431,12 @@ describe('sending', () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    // A failed send keeps its person selected, so the retry is the same button again.
+    await pick(view, 'Ada, @ada');
+    await sendNow(view);
     await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(1));
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await sendNow(view);
     await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(2));
 
     const [first, second] = idsSentTo('recommend_title');
@@ -340,10 +454,11 @@ describe('sending', () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await pick(view, 'Ada, @ada');
+    await sendNow(view);
     await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(1));
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await sendNow(view);
     await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(2));
 
     const [first, second] = idsSentTo('recommend_title');
@@ -357,44 +472,47 @@ describe('sending', () => {
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await pick(view, 'Ada, @ada');
+    await sendNow(view);
     await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(1));
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
+    await sendNow(view);
     await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(2));
 
     const [first, second] = idsSentTo('recommend_title');
     expect(second).not.toBe(first);
   });
 
-  it('holds one id per recipient rather than one for the sheet', async () => {
-    // Each name is its own intent. Sharing an id across them would have the second
-    // person's send answered `already_applied` — a tap that reports success and sends
-    // nothing to anybody.
+  it('holds one id per recipient rather than one for the batch', async () => {
+    // Each name is its own intent, even inside one press. Sharing an id across them
+    // would have the second person's send answered `already_applied` — a press that
+    // reports success and sends nothing to anybody past the first.
     mockOutgoing = [person('user-2', 'ada', 'Ada'), person('user-3', 'grace', 'Grace')];
     mockIncoming = [person('user-2', 'ada', 'Ada'), person('user-3', 'grace', 'Grace')];
     mockRpcErrors.recommend_title = { code: '', message: 'TypeError: Network request failed' };
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Grace')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Recommend to Ada, @ada'));
-    await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(1));
-    await fireEvent.press(view.getByLabelText('Recommend to Grace, @grace'));
+    await pick(view, 'Ada, @ada');
+    await pick(view, 'Grace, @grace');
+    await sendNow(view);
     await waitFor(() => expect(idsSentTo('recommend_title')).toHaveLength(2));
 
     const [first, second] = idsSentTo('recommend_title');
     expect(second).not.toBe(first);
   });
 
-  it('has no multi-select and no Send button', async () => {
+  it('selects on a row tap and offers no per-row send', async () => {
+    // The 2026-08-27 shape: each row is a checkbox — the mark sits where the
+    // paper-plane used to — and the only thing that sends is the counted button.
     const view = await renderWithProviders(<RecommendSheet {...props} />);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    // V1 is one recipient per send. A Send button would imply a selection step that
-    // does not exist, and a checkbox would imply more than one.
-    expect(view.queryByText('Send')).toBeNull();
-    expect(view.queryByText('Send to all')).toBeNull();
-    expect(view.queryByRole('checkbox')).toBeNull();
+    expect(view.getByRole('checkbox', { name: 'Ada, @ada' })).toBeTruthy();
+    await pick(view, 'Ada, @ada');
+    // Choosing is not sending: nothing has been asked of the server yet.
+    expect(mockRpc).not.toHaveBeenCalledWith('recommend_title', expect.anything());
+    expect(view.queryByLabelText('Recommend to Ada, @ada')).toBeNull();
   });
 });
 

@@ -38,23 +38,41 @@ export type RecommendSheetProps = {
  */
 const SEARCH_THRESHOLD = 0;
 
+/** "Ada", "Ada and Bo", "Ada, Bo and Cy" — names the way a sentence holds them. */
+const listNames = (names: string[]): string =>
+  names.length <= 1
+    ? (names[0] ?? '')
+    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+
 /**
- * Recommend, as one small act.
+ * What the confirmation underneath is handed. Names while they fit in a toast;
+ * a count once they would not.
+ */
+const sentSummary = (names: string[]): string =>
+  names.length <= 2 ? listNames(names) : `${names.length} people`;
+
+/**
+ * Recommend, as one considered act.
  *
- * **One recipient per send.** No multi-select, no send-to-all, no message. That is the
- * V1 shape the founder set, and it is also the shape that keeps this honest: a title
- * sent to one person is a recommendation, and the same title sent to everybody at once
- * is a broadcast, which is the thing people learn to ignore.
- *
- * Tapping a person sends immediately rather than selecting them for a later Send. With
- * one recipient there is nothing for a second step to confirm, and a two-tap flow with
- * a disabled button at the bottom is the pattern this sheet exists instead of.
+ * **Choose your people, then send once.** The V1 shape was one recipient per tap, sent
+ * immediately; the founder's 2026-08-27 revision is a picker — tap the people (each row
+ * is a checkbox now, sitting exactly where the per-row send icon used to be), then press
+ * the one button that says how many. What has *not* changed is what a send is: each
+ * chosen person is their own `recommend_title` call under their own held operation id,
+ * so the server's view — the follow requirement, direct-versus-pending, the per-pair
+ * pending cap, the rate ceilings — is exactly the view it had when the taps were
+ * separate. Multi-select is a UI over N recommendations, not a broadcast primitive.
  *
  * The people offered are everybody the sender follows, which is what the server accepts.
  * Whether they follow back decides only whether it lands in their list or waits as a
  * request, and the sender is deliberately not told which — "Sent" either way. If
  * somebody is refused anyway the relationship changed while the sheet was open, and the
  * message says so rather than reporting a code.
+ *
+ * A batch can half-succeed, and the sheet must not lose the half that worked: the
+ * refused or unanswered people stay selected with the reason on the screen, the
+ * successful ones leave the selection (their recommendation is stored; a second press
+ * must not resend them), and the sheet closes only when everybody chosen has been sent.
  */
 export function RecommendSheet({
   viewerId,
@@ -71,9 +89,18 @@ export function RecommendSheet({
   const send = useRecommendTitle(viewerId);
 
   const [query, setQuery] = useState('');
-  const [sending, setSending] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  /**
+   * Everybody sent so far across the attempts one open sheet makes.
+   *
+   * A batch that half-fails leaves the sheet open for a retry of the failed half, and
+   * when that retry succeeds the confirmation underneath should name everybody this
+   * sheet sent to — not just the stragglers of the final pass.
+   */
+  const sentSoFar = useRef<string[]>([]);
   /**
    * The operation id for the off-platform share, held across attempts.
    *
@@ -95,63 +122,107 @@ export function RecommendSheet({
   const shown = filterRecipients(people, query);
   const name = compactName({ kind, title, seriesTitle, seasonNumber }) ?? title;
 
-  const recommend = async (person: Recipient) => {
+  const toggle = (personId: string) => {
     if (sending) return;
-    setSending(person.id);
-    setError(null);
-    /**
-     * **One id per recipient, held only while the outcome is unknown.**
-     *
-     * Independent review 21i: `recommend_title` is keyed on (sender, recipient, title) so
-     * it cannot store the same recommendation twice — but a replay with a *fresh* id
-     * still spends a rate-limit slot and still moves `recommended_at`, which reorders
-     * the recipient's list. Holding the id makes `_claim_operation` answer
-     * `already_applied` instead, which is what that ledger is for.
-     *
-     * Released the moment the server answers **anything**, and that is not symmetry for
-     * its own sake: a `refused` arrives as a 200 and **keeps its claim on purpose**
-     * (`20260817001300` — a raise would roll the claim back and make refused attempts
-     * free). Reusing a spent id would have the next attempt answered `already_applied`
-     * and silently send nothing. So only `changed` — the outcome nobody established —
-     * keeps it.
-     */
-    const held = sendIntents.current.get(person.id) ?? newOperationId();
-    sendIntents.current.set(person.id, held);
-
-    const result = await send.mutateAsync({
-      operationId: held,
-      recipientId: person.id,
-      mediaItemId,
+    setSelected((previous) => {
+      const next = new Set(previous);
+      if (next.has(personId)) next.delete(personId);
+      else next.add(personId);
+      return next;
     });
-    setSending(null);
+  };
 
-    if (result.ok || !result.changed) sendIntents.current.delete(person.id);
+  const recommendSelected = async () => {
+    if (sending || selected.size === 0) return;
+    setSending(true);
+    setError(null);
 
-    if (!result.ok) {
-      setError(result.message);
+    // In list order rather than tap order, so the receipt below reads like the list.
+    const chosen = people.filter((person) => selected.has(person.id));
+    const sent: Recipient[] = [];
+    const failed: { person: Recipient; message: string }[] = [];
+
+    // One at a time, each its own call. The server's ceilings and the per-pair cap are
+    // asked per recipient exactly as they were when each tap was its own send, and a
+    // sequential walk keeps the receipt deterministic.
+    for (const person of chosen) {
+      /**
+       * **One id per recipient, held only while the outcome is unknown.**
+       *
+       * Independent review 21i: `recommend_title` is keyed on (sender, recipient, title)
+       * so it cannot store the same recommendation twice — but a replay with a *fresh*
+       * id still spends a rate-limit slot and still moves `recommended_at`, which
+       * reorders the recipient's list. Holding the id makes `_claim_operation` answer
+       * `already_applied` instead, which is what that ledger is for. Multi-select is
+       * where this earns its keep: a half-failed batch invites a retry press, and the
+       * unanswered sends in it must replay under the ids they already spent.
+       *
+       * Released the moment the server answers **anything**, and that is not symmetry
+       * for its own sake: a `refused` arrives as a 200 and **keeps its claim on
+       * purpose** (`20260817001300` — a raise would roll the claim back and make
+       * refused attempts free). Reusing a spent id would have the next attempt answered
+       * `already_applied` and silently send nothing. So only `changed` — the outcome
+       * nobody established — keeps it.
+       */
+      const held = sendIntents.current.get(person.id) ?? newOperationId();
+      sendIntents.current.set(person.id, held);
+
+      const result = await send.mutateAsync({
+        operationId: held,
+        recipientId: person.id,
+        mediaItemId,
+      });
+
+      if (result.ok || !result.changed) sendIntents.current.delete(person.id);
+
+      if (result.ok) {
+        sent.push(person);
+        /**
+         * `recommendation_sent`, and only from `ok` — once per stored recommendation.
+         *
+         * `ok` here means the row is stored: the mutation has already separated the two
+         * things a 200 can mean, since `recommend_title` returns `not_following` and
+         * its siblings inside the body rather than raising them (`use-recommend.ts`).
+         * A refusal and an unknown outcome emit nothing — the unknown one deliberately,
+         * because that is the send whose id is being *held* for a retry, and a retry
+         * that eventually succeeds is the send this event should count once.
+         */
+        track({
+          name: 'recommendation_sent',
+          props: { media_kind: kind === 'season' ? 'tv_season' : 'movie', surface },
+        });
+      } else {
+        failed.push({ person, message: result.message });
+      }
+    }
+
+    setSending(false);
+    sentSoFar.current.push(...sent.map((person) => person.name));
+
+    if (failed.length === 0) {
+      // The confirmation belongs to the screen underneath, which is still showing the
+      // title this was about. A second one in here would be a message nobody sees,
+      // because the sheet closes on the same tick.
+      onSent(sentSummary(sentSoFar.current));
+      onClose();
       return;
     }
 
     /**
-     * `recommendation_sent`, and only from `ok`.
+     * The half-succeeded batch, said in full.
      *
-     * `ok` here means the row is stored: the mutation has already separated the two
-     * things a 200 can mean, since `recommend_title` returns `not_following` and its
-     * siblings inside the body rather than raising them (`use-recommend.ts`). A refusal
-     * and an unknown outcome both return early above and emit nothing — the unknown one
-     * deliberately, because that is the send whose id is being *held* for a retry, and a
-     * retry that eventually succeeds is the send this event should count once.
+     * The people who worked leave the selection — their recommendation is stored, and
+     * a retry press must not spend another attempt on them — and the people who did
+     * not stay selected under a line that names them, so "try again" means exactly the
+     * failed half. A success silently absorbed into a failure message is a send the
+     * sender re-does by hand; a failure silently absorbed into a close is worse.
      */
-    track({
-      name: 'recommendation_sent',
-      props: { media_kind: kind === 'season' ? 'tv_season' : 'movie', surface },
-    });
-
-    // The confirmation belongs to the screen underneath, which is still showing the
-    // title this was about. A second one in here would be a message nobody sees,
-    // because the sheet closes on the same tick.
-    onSent(person.name);
-    onClose();
+    setSelected(new Set(failed.map(({ person }) => person.id)));
+    const sentLine = sent.length ? `Sent to ${listNames(sent.map((p) => p.name))}. ` : '';
+    setError(
+      `${sentLine}Could not send to ${listNames(failed.map(({ person }) => person.name))}. ` +
+        (failed[0]?.message ?? ''),
+    );
   };
 
   const shareOffPlatform = async () => {
@@ -269,37 +340,39 @@ export function RecommendSheet({
                 Nobody by that name.
               </Text>
             ) : (
-              shown.map((person) => (
-                <Pressable
-                  key={person.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Recommend to ${person.name}, @${person.username}`}
-                  disabled={Boolean(sending)}
-                  onPress={() => void recommend(person)}
-                  style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-                >
-                  <Avatar size="sm" uri={person.avatarUri} name={person.name} />
-                  <View style={styles.copy}>
-                    <Text variant="callout" numberOfLines={1}>
-                      {person.name}
-                    </Text>
-                    <Text variant="caption" tone="tertiary" numberOfLines={1}>
-                      @{person.username}
-                    </Text>
-                  </View>
-                  {sending === person.id ? (
-                    <Text variant="caption" tone="secondary">
-                      Sending…
-                    </Text>
-                  ) : (
+              shown.map((person) => {
+                const checked = selected.has(person.id);
+                return (
+                  // The whole row is the checkbox — one target, not a row plus a
+                  // control that happen to agree. The glyph sits at the far right,
+                  // exactly where the per-row paper-plane used to: the same reach
+                  // now marks a person instead of firing a send.
+                  <Pressable
+                    key={person.id}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked }}
+                    accessibilityLabel={`${person.name}, @${person.username}`}
+                    disabled={sending}
+                    onPress={() => toggle(person.id)}
+                    style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                  >
+                    <Avatar size="sm" uri={person.avatarUri} name={person.name} />
+                    <View style={styles.copy}>
+                      <Text variant="callout" numberOfLines={1}>
+                        {person.name}
+                      </Text>
+                      <Text variant="caption" tone="tertiary" numberOfLines={1}>
+                        @{person.username}
+                      </Text>
+                    </View>
                     <Ionicons
-                      name="paper-plane-outline"
+                      name={checked ? 'checkbox' : 'square-outline'}
                       size={theme.layout.icon.md}
-                      color={theme.semantic.action}
+                      color={checked ? theme.semantic.action : theme.text.secondary}
                     />
-                  )}
-                </Pressable>
-              ))
+                  </Pressable>
+                );
+              })
             )}
           </ScrollView>
         </>
@@ -311,26 +384,43 @@ export function RecommendSheet({
         </Text>
       ) : null}
 
-      {/* The off-Bingd path, which is the existing native share sheet carrying the
-          reader's own invite link. Kept underneath the people rather than beside them:
-          it is a different act, and putting it in the same list would make the person
-          at the bottom of a short list look like an option called "someone".
+      {/* The sheet's two acts, side by side under the list and pinned there — the list
+          scrolls, these do not.
 
-          This is also where the title page’s Share button went. Three labelled chips
-          did not fit an action row on a narrow Android screen, and of the three this
-          was the one with somewhere else to be: everyone who opens Recommend is
-          already in the act of passing a film to somebody, and whether that somebody
-          has the app is a detail of the address, not a separate decision. The label is
-          short for the same reason — it is a row in a sheet now, not a chip competing
-          for width. */}
+          Recommend to N is the primary act and wears the fill (the button-hierarchy
+          rule: filled maroon is for the social CTAs). It grows to take the width the
+          row has spare and the pair wraps to two full-width lines when a narrow screen
+          would otherwise cram them, rather than hard-coding a 50/50 split that fits no
+          label on either side.
+
+          Share off bingd. is the same off-platform share as ever — the native sheet
+          carrying the reader's invite link — and it needs no selection: whether the
+          somebody has the app is a detail of the address, not a different act. It is
+          also still where the title page's Share button went (three labelled chips did
+          not fit an action row on a narrow Android screen). Outlined, because next to
+          a filled Recommend it is the secondary way out. */}
       <View style={styles.actions}>
-        <Button
-          label={sharing ? 'Opening…' : 'Share off bingd.'}
-          kind="secondary"
-          onPress={() => void shareOffPlatform()}
-          disabled={sharing}
-          disabledReason="Preparing your link."
-        />
+        {people.length > 0 ? (
+          <View style={styles.primaryAction}>
+            <Button
+              label={sending ? 'Sending…' : `Recommend to ${selected.size}`}
+              onPress={() => void recommendSelected()}
+              disabled={sending || selected.size === 0}
+              disabledReason={
+                sending ? 'Sending your recommendations.' : 'Choose somebody to recommend to.'
+              }
+            />
+          </View>
+        ) : null}
+        <View style={styles.secondaryAction}>
+          <Button
+            label={sharing ? 'Opening…' : 'Share off bingd.'}
+            kind="secondary"
+            onPress={() => void shareOffPlatform()}
+            disabled={sharing}
+            disabledReason="Preparing your link."
+          />
+        </View>
       </View>
     </Sheet>
   );
@@ -351,5 +441,16 @@ const styles = StyleSheet.create({
   copy: { flex: 1, gap: 2 },
   pressed: { opacity: 0.6 },
   status: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[2] },
-  actions: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[3] },
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.space[3],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+  },
+  // Grow-from-a-floor rather than a 50/50 split: each button takes at least the width
+  // its label needs, the primary soaks up the slack, and a screen too narrow for the
+  // pair wraps them into two full-width rows instead of squeezing both labels.
+  primaryAction: { flexGrow: 1, flexShrink: 1, flexBasis: 172 },
+  secondaryAction: { flexGrow: 1, flexShrink: 1, flexBasis: 148 },
 });

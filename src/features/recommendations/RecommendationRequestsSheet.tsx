@@ -353,7 +353,11 @@ function SenderGroup({
 
         <Button
           label={label}
-          kind="tertiary"
+          // The button hierarchy (founder, 2026-08-27): Follow is a primary social CTA
+          // and wears the fill; the settled states wear the maroon outline, the same
+          // pair `FollowControl` draws. It was `tertiary` — a bare word — which made
+          // the one relationship control in this sheet its least visible thing.
+          kind={following || requested ? 'outline' : 'primary'}
           size="sm"
           // `sm` is 36pt tall; the slop is what carries it past the 44pt floor, which is
           // the rule for every compact control in the app (`ui/components/Button.tsx`).
@@ -438,7 +442,9 @@ function RequestItem({
         <View style={styles.itemActions}>
           <Button
             label="Add"
-            kind="secondary"
+            // Accept-shaped, so it takes the fill (the hierarchy names Accept among the
+            // filled CTAs, and Add is this sheet's word for it — see the note above).
+            // Dismiss beside it stays quiet on purpose.
             size="sm"
             hitSlop={theme.space[2]}
             disabled={busy}

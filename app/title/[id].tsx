@@ -844,6 +844,7 @@ export default function TitleScreen() {
             <RowAction
               icon="paper-plane-outline"
               label="Recommend"
+              primary
               accessibilityLabel={`Recommend ${title.title} to a friend`}
               onPress={() => {
                 setActionError(null);
@@ -1374,6 +1375,7 @@ function RowAction({
   onPress,
   disabled = false,
   selected,
+  primary = false,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
@@ -1381,6 +1383,12 @@ function RowAction({
   onPress: () => void;
   disabled?: boolean;
   selected?: boolean;
+  /**
+   * The button-hierarchy rule (founder, 2026-08-27): filled Maroon marks the primary
+   * social act, outlined chips mark working state. Recommend wears the fill in this
+   * row; Watchlist deliberately does not.
+   */
+  primary?: boolean;
 }) {
   return (
     <Pressable
@@ -1393,11 +1401,16 @@ function RowAction({
       style={({ pressed }) => [
         styles.rowAction,
         selected && styles.rowActionOn,
+        primary && styles.rowActionPrimary,
         (pressed || disabled) && styles.pressed,
       ]}
     >
-      <Ionicons name={icon} size={theme.layout.icon.sm} color={theme.semantic.action} />
-      <Text variant="callout" tone="action">
+      <Ionicons
+        name={icon}
+        size={theme.layout.icon.sm}
+        color={primary ? theme.text.inverse : theme.semantic.action}
+      />
+      <Text variant="callout" tone={primary ? 'inverse' : 'action'}>
         {label}
       </Text>
     </Pressable>
@@ -1578,6 +1591,11 @@ const styles = StyleSheet.create({
   // Saved reads as a held state, so it takes the warm surface rather than a second
   // colour the palette does not have to spend.
   rowActionOn: { backgroundColor: theme.surface.sunken, borderColor: theme.semantic.action },
+  // Recommend, filled: the primary social act of this row, per the button hierarchy.
+  rowActionPrimary: {
+    backgroundColor: theme.semantic.action,
+    borderColor: theme.semantic.action,
+  },
   block: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
