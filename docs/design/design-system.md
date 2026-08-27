@@ -325,6 +325,16 @@ Every list surface needs three distinct empty states that are frequently collaps
 
 The gutter is load-bearing and is the thing that breaks: a header rendered without the screen's horizontal padding sits flush against the display edge while every row below it is inset by 16, and the result reads as a layout bug rather than as a header. Use the component; do not re-implement it with a bare `Text`.
 
+### Notification row
+
+**As built 2026-08-27** (`app/settings/notifications.tsx`). The inbox is one list on the Paper ground — rhythm, not furniture. The founder's diagnosis was every kind of event running together; the correction is separation, deliberately short of cards.
+
+- **Geometry**: the standard person-row — `Avatar sm` (32), 12pt gap, min height 56, gutter padding, sentence + optional subject line + `caption`/`text.tertiary` relative timestamp. The whole row is the tap target; its hint comes from the routing chain, never hardcoded.
+- **Divider**: the house hairline (`border.hairline`, double hairline width) **between** rows only — never after the last row of a section — and **inset to the text edge** (gutter + avatar + gap), so the avatars keep an unbroken left column. Drawn as its own element, not a border. Follow-request rows keep their full-width rule; they are task cards with controls, not lines.
+- **Shelves**: at most three age sections — Today / This week / Earlier — via `SectionHeader`, boundaries rounded exactly as `relativeTime` rounds so a row never contradicts its heading. Headings render only when they separate something: two or more shelves, or a Follow-requests section above. No per-type grouping, tabs, or filters.
+- **Unread**: three signals for one bit — `surface.raised` tint over the whole entry (its action button included), an 8pt Maroon dot, and a spoken "Unread." prefix. Read is settled by seeing: the first paint is always the unread one.
+- **Row actions**: Approve / Decline / Follow back sit inside their row, inset to the row's own text edge, at the compact button size. State-changing social controls are `secondary`; the inbox is never a sea of Maroon.
+
 ### Poster shelf and poster grid
 
 Two ways to show artwork in bulk, both from §7's rules. They are the app's only decorative surfaces and they earn it by being *low-detail on purpose* — a wall of covers is atmosphere, and any label on it competes with the next screen the user is trying to reach.

@@ -1,15 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef } from 'react';
+import { Fragment, useEffect, useMemo, useRef } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
   canFollowBack,
+  sectionFor,
   useMarkNotificationsRead,
   useNotifications,
   verbFor,
+  type InboxSection,
   type Notification,
 } from '@/features/notifications/use-notifications';
 import { useRelationships, useSocialWrites } from '@/features/profile/use-social';
@@ -103,6 +105,16 @@ const GEAR_BADGE_SIZE = 12;
 /** How far the gear pokes past the bell's lower-right corner. */
 const GEAR_OVERHANG = { x: 3, y: 2 };
 
+/**
+ * The three shelves, in the small-caps maroon voice every section on this surface
+ * already speaks — "Earlier" was here first, as the one heading under the requests.
+ */
+const SECTION_TITLES: Record<InboxSection, string> = {
+  today: 'Today',
+  week: 'This week',
+  earlier: 'Earlier',
+};
+
 export default function NotificationsScreen() {
   const profile = useCurrentProfile();
   const router = useRouter();
@@ -114,7 +126,35 @@ export default function NotificationsScreen() {
   // identity every render would re-run that effect on every render.
   const rows = useMemo(() => notifications.data ?? [], [notifications.data]);
   const requests = rows.filter((row) => row.kind === 'follow_request');
-  const rest = rows.filter((row) => row.kind !== 'follow_request');
+  const rest = useMemo(() => rows.filter((row) => row.kind !== 'follow_request'), [rows]);
+  /**
+   * The founder's diagnosis of this list was that everything ran together — six
+   * kinds of event as one undifferentiated column. The fix is rhythm, not
+   * furniture: hairline rules between rows (below, in the render) and these three
+   * age shelves, which are the only grouping this inbox gets. No tabs, no
+   * per-kind categories — the list stays one list, newest first, exactly as
+   * `my_notifications` returns it; the shelves just name the fold lines that were
+   * already there.
+   *
+   * **Headings earn their place or disappear.** A single shelf under no requests
+   * would be one label captioning the entire screen — noise with nothing to
+   * separate — so the headings render only when there are at least two shelves,
+   * or a requests section above for the first shelf to mark the end of. That
+   * second case is exactly the old behaviour: "Earlier", shown only under
+   * requests, was this rule with one shelf.
+   */
+  const { dataUpdatedAt } = notifications;
+  const groupedRest = useMemo(() => {
+    // Anchored to the moment the rows arrived rather than to the render — a render
+    // must be pure, and the shelf a row sits on should change when the data does,
+    // not when an unrelated state update happens to repaint the screen.
+    const byAge: Record<InboxSection, Notification[]> = { today: [], week: [], earlier: [] };
+    for (const row of rest) byAge[sectionFor(row.createdAt, dataUpdatedAt)].push(row);
+    return (Object.keys(SECTION_TITLES) as InboxSection[])
+      .map((age) => [age, byAge[age]] as const)
+      .filter(([, list]) => list.length > 0);
+  }, [rest, dataUpdatedAt]);
+  const showHeadings = requests.length > 0 || groupedRest.length > 1;
   /**
    * **Seeing them is what reads them.**
    *
@@ -310,7 +350,6 @@ export default function NotificationsScreen() {
         />
       ) : (
         <ScrollView contentContainerStyle={styles.page}>
-
           {requests.length ? (
             <View style={styles.section}>
               <SectionHeader title="Follow requests" />
@@ -357,10 +396,10 @@ export default function NotificationsScreen() {
             </View>
           ) : null}
 
-          {rest.length ? (
-            <View style={styles.section}>
-              {requests.length ? <SectionHeader title="Earlier" /> : null}
-              {rest.map((row) => {
+          {groupedRest.map(([age, list]) => (
+            <View key={age} style={styles.section}>
+              {showHeadings ? <SectionHeader title={SECTION_TITLES[age]} /> : null}
+              {list.map((row, index) => {
                 // The subject, named the way the rest of the app names it: a season
                 // says which show it belongs to, because its own title is "Season 2".
                 const subject = row.mediaItemId
@@ -376,23 +415,33 @@ export default function NotificationsScreen() {
                 );
 
                 return (
-                  <View key={row.id} style={[styles.entry, !row.readAt && styles.unread]}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`${row.readAt ? '' : 'Unread. '}${
-                        row.kind === 'invite_welcome' ? 'Welcome to bingd. ' : ''
-                      }${row.actorName} ${verbFor(row.kind, row.mediaKind)}${
-                        subject ? `, ${subject}` : ''
-                      }`}
-                      // From the same chain the tap uses, so the hint cannot promise a
-                      // title and then open a profile.
-                      accessibilityHint={hintFor(row)}
-                      onPress={() => openRow(row)}
-                      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-                    >
-                      <Avatar size="sm" uri={row.actorAvatarUri} name={row.actorName ?? ''} />
-                      <View style={styles.rowCopy}>
-                        {/* The welcome is the one row whose sentence does not begin
+                  <Fragment key={row.id}>
+                    {/* Between rows and only between them: a rule after the last row
+                        would underline the section itself, which the heading above the
+                        next one already does. Inset to the text edge, so the avatars
+                        keep an unbroken left column — the same alignment the follow
+                        request rows' full-width rule deliberately does not share,
+                        because those are cards with controls and these are lines. */}
+                    {index > 0 ? (
+                      <View testID="notification-divider" style={styles.divider} />
+                    ) : null}
+                    <View style={[styles.entry, !row.readAt && styles.unread]}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`${row.readAt ? '' : 'Unread. '}${
+                          row.kind === 'invite_welcome' ? 'Welcome to bingd. ' : ''
+                        }${row.actorName} ${verbFor(row.kind, row.mediaKind)}${
+                          subject ? `, ${subject}` : ''
+                        }`}
+                        // From the same chain the tap uses, so the hint cannot promise a
+                        // title and then open a profile.
+                        accessibilityHint={hintFor(row)}
+                        onPress={() => openRow(row)}
+                        style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                      >
+                        <Avatar size="sm" uri={row.actorAvatarUri} name={row.actorName ?? ''} />
+                        <View style={styles.rowCopy}>
+                          {/* The welcome is the one row whose sentence does not begin
                             with the actor. It is the first thing a new account ever
                             sees, so it greets before it reports, and the inviter's
                             name still carries the emphasis every other row gives the
@@ -402,53 +451,86 @@ export default function NotificationsScreen() {
                             the spoken label — "party popper" in the middle of that
                             sentence helps nobody, and the celebration is the part
                             that survives being dropped. */}
-                        {row.kind === 'invite_welcome' ? (
-                          <Text variant="callout" numberOfLines={2}>
-                            <Text variant="callout" tone="secondary">Welcome to bingd. </Text>
-                            <Text variant="callout">{row.actorName}</Text>
-                            <Text variant="callout" tone="secondary"> invited you 🎉</Text>
-                          </Text>
-                        ) : row.kind === 'friendship' && row.mutual ? (
-                          /* The mutual acceptance is the other sentence that does not
+                          {row.kind === 'invite_welcome' ? (
+                            <Text variant="callout" numberOfLines={2}>
+                              <Text variant="callout" tone="secondary">
+                                Welcome to bingd.{' '}
+                              </Text>
+                              <Text variant="callout">{row.actorName}</Text>
+                              <Text variant="callout" tone="secondary">
+                                {' '}
+                                invited you 🎉
+                              </Text>
+                            </Text>
+                          ) : row.kind === 'friendship' && row.mutual ? (
+                            /* The mutual acceptance is the other sentence that does not
                              begin with the actor: it is about the pair, and "You and
                              Abisola are now friends" is the founder's copy for it. The
                              one-way case falls through to the ordinary shape, where
                              `verbFor` says "now follows you". */
-                          <Text variant="callout" numberOfLines={2}>
-                            <Text variant="callout" tone="secondary">You and </Text>
-                            <Text variant="callout">{row.actorName}</Text>
-                            <Text variant="callout" tone="secondary"> are now friends</Text>
-                          </Text>
-                        ) : (
-                          <Text variant="callout" numberOfLines={2}>
-                            <Text variant="callout">{row.actorName}</Text>
-                            <Text variant="callout" tone="secondary">{` ${verbFor(
-                              row.kind,
-                              row.mediaKind,
-                            )}`}</Text>
-                          </Text>
-                        )}
-                        {/* The title on its own line rather than after a separator.
+                            <Text variant="callout" numberOfLines={2}>
+                              <Text variant="callout" tone="secondary">
+                                You and{' '}
+                              </Text>
+                              <Text variant="callout">{row.actorName}</Text>
+                              <Text variant="callout" tone="secondary">
+                                {' '}
+                                are now friends
+                              </Text>
+                            </Text>
+                          ) : row.kind === 'recommendation_ranked' && subject ? (
+                            /* The founder's copy, with the title inline: "Suraj ranked
+                             The Martian from your recommendation". The title takes the
+                             same emphasis the actor does — the sentence is about the
+                             two of them — and the subject line below stays out of it,
+                             because saying the title twice is the clutter this pass is
+                             removing. Two lines, so a long season name wraps rather
+                             than eating the tail of the sentence. When the ranking
+                             post is gone the title goes with it, and the row falls
+                             through to `verbFor`'s "ranked your recommendation". */
+                            <Text variant="callout" numberOfLines={2}>
+                              <Text variant="callout">{row.actorName}</Text>
+                              <Text variant="callout" tone="secondary">
+                                {' '}
+                                ranked{' '}
+                              </Text>
+                              <Text variant="callout">{subject}</Text>
+                              <Text variant="callout" tone="secondary">
+                                {' '}
+                                from your recommendation
+                              </Text>
+                            </Text>
+                          ) : (
+                            <Text variant="callout" numberOfLines={2}>
+                              <Text variant="callout">{row.actorName}</Text>
+                              <Text variant="callout" tone="secondary">{` ${verbFor(
+                                row.kind,
+                                row.mediaKind,
+                              )}`}</Text>
+                            </Text>
+                          )}
+                          {/* The title on its own line rather than after a separator.
                             "Suraj recommended a movie" and then "Inception" is the
                             founder's shape, and it is also what stops a long name
-                            pushing the verb off the row. */}
-                        {subject ? (
-                          <Text variant="callout" tone="secondary" numberOfLines={1}>
-                            {subject}
-                          </Text>
-                        ) : null}
-                        {/* "2d ago" rather than "23/08/2026". Recency is half of what
+                            pushing the verb off the row. Not on a fulfilment, whose
+                            sentence already carries the title inline. */}
+                          {subject && row.kind !== 'recommendation_ranked' ? (
+                            <Text variant="callout" tone="secondary" numberOfLines={1}>
+                              {subject}
+                            </Text>
+                          ) : null}
+                          {/* "2d ago" rather than "23/08/2026". Recency is half of what
                             an inbox row is telling you, and a bare date makes the
                             reader do the subtraction — the same argument the
                             recommendations list already settled, through the same
                             helper so the two cannot drift. */}
-                        <Text variant="caption" tone="tertiary">
-                          {relativeTime(row.createdAt)}
-                        </Text>
-                      </View>
-                      <UnreadDot show={!row.readAt} />
-                    </Pressable>
-                    {/* Follow, on the two rows that name somebody worth following and
+                          <Text variant="caption" tone="tertiary">
+                            {relativeTime(row.createdAt)}
+                          </Text>
+                        </View>
+                        <UnreadDot show={!row.readAt} />
+                      </Pressable>
+                      {/* Follow, on the two rows that name somebody worth following and
                         nowhere else. Absent once the reader follows them, because a
                         control for a relationship that already exists is a control
                         that can only mislead.
@@ -464,24 +546,25 @@ export default function NotificationsScreen() {
                         the state is not "not following". Tapping through to the
                         profile is where `FollowControl` says "Requested", which is the
                         one place in the app that draws that state. */}
-                    {offerFollowBack ? (
-                      <View style={styles.rowAction}>
-                        <Button
-                          label={row.kind === 'invite_welcome' ? 'Follow' : 'Follow back'}
-                          kind="secondary"
-                          size="sm"
-                          hitSlop={theme.space[2]}
-                          onPress={() => void followBack(row)}
-                          disabled={busy}
-                          disabledReason="One at a time"
-                        />
-                      </View>
-                    ) : null}
-                  </View>
+                      {offerFollowBack ? (
+                        <View style={styles.rowAction}>
+                          <Button
+                            label={row.kind === 'invite_welcome' ? 'Follow' : 'Follow back'}
+                            kind="secondary"
+                            size="sm"
+                            hitSlop={theme.space[2]}
+                            onPress={() => void followBack(row)}
+                            disabled={busy}
+                            disabledReason="One at a time"
+                          />
+                        </View>
+                      ) : null}
+                    </View>
+                  </Fragment>
                 );
               })}
             </View>
-          ) : null}
+          ))}
         </ScrollView>
       )}
     </Screen>
@@ -548,6 +631,18 @@ const styles = StyleSheet.create({
     backgroundColor: theme.semantic.action,
   },
   section: { paddingTop: theme.space[4], gap: theme.space[1] },
+  /**
+   * The rule between rows: the house hairline (`ActivityRow`, the Settings list),
+   * inset to where the sentences begin so the avatar column stays unbroken. Drawn
+   * as its own element rather than a border, because a border cannot be inset and
+   * a full-bleed rule under every row is the "sea of boxes" this pass was told to
+   * avoid — the line separates the text, and the faces separate themselves.
+   */
+  divider: {
+    height: StyleSheet.hairlineWidth * 2,
+    backgroundColor: theme.border.hairline,
+    marginLeft: theme.layout.gutter + theme.layout.avatar.sm + theme.space[3],
+  },
   // The tint belongs to the whole entry, including a Follow back button underneath,
   // or the unread state would stop halfway down the row it describes.
   entry: { gap: theme.space[1] },

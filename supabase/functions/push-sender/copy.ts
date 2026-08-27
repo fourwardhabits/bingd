@@ -173,6 +173,20 @@ function sentence(job: PushJob, name: string, subject: string | null): { title: 
         title: name,
         body: subject ? `recommended ${subject}` : 'recommended something to watch',
       };
+    /**
+     * The other end of the exchange above (`20260827000600`): the person this reader
+     * recommended a title to has ranked it. The founder's copy, verbatim — and the
+     * subject rides inline because "from your recommendation" without the title is a
+     * sentence about nothing. No note, no score, no bucket: who, what kind, which
+     * title, per the rule at the top of this file.
+     */
+    case 'recommendation_ranked':
+      return {
+        title: name,
+        body: subject
+          ? `ranked ${subject} from your recommendation`
+          : 'ranked your recommendation',
+      };
     case 'invite_activated':
       return { title: name, body: 'joined bingd. from your invite' };
     /**

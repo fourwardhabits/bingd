@@ -1340,7 +1340,9 @@ Never request push permission at first launch. Request after the user's first su
 
 Reviewed at 23f PASS. Where this block and the v1 event set above disagree, this block is what ships.
 
-**Eleven notification types.** The canonical names are `follow`, `follow_request`, `follow_approved`, `comment`, `reaction`, `watch_tag`, `recommendation`, `invite_activated`, `invite_welcome`, `friendship`, `award_earned`.
+**Twelve notification types.** The canonical names are `follow`, `follow_request`, `follow_approved`, `comment`, `reaction`, `watch_tag`, `recommendation`, `recommendation_ranked`, `invite_activated`, `invite_welcome`, `friendship`, `award_earned`.
+
+> **`recommendation_ranked` added 2026-08-27** (`20260827000600`). The other end of a recommendation: when the recipient first reaches a completed **ranking** for the title, each outstanding delivered recommendation is fulfilled and its sender is told — "Suraj ranked The Martian from your recommendation" — with the notification pointing at the recipient's exact `title_ranked` feed event. See the second 2026-08-27 As-built block below for the lifecycle and the once-only semantics.
 
 > **`friendship` added 2026-08-27** (`20260827000200`). The accepter's own durable record of approving a follow request — see the 2026-08-27 As-built block below. Deliberately in **no category** (the unmapped-type rule delivers it unconditionally: a record of your own action is not a preference axis) and **not push-eligible** (a phone buzzing about the reader's own tap is noise).
 
@@ -1359,7 +1361,7 @@ Reviewed at 23f PASS. Where this block and the v1 event set above disagree, this
 | `comments` | `comment` | **on** |
 | `reactions` | `reaction` | **off** |
 | `watch_tags` | `watch_tag` | **on** |
-| `recommendations` | `recommendation` | **on** |
+| `recommendations` | `recommendation`, `recommendation_ranked` | **on** |
 | `invites` | `invite_activated` | **on** |
 | `awards` | `award_earned` | **off** |
 
@@ -1385,15 +1387,16 @@ Each type has an ordered chain whose last link always resolves. Staleness is rea
 | `follow` | follower's profile | unavailable notice |
 | `follow_approved` | approver's profile | unavailable notice |
 | `friendship` | requester's profile | unavailable notice |
-| `comment` | the title | unavailable notice |
-| `reaction` | the title | unavailable notice |
+| `comment` | the exact feed activity | the title, then unavailable |
+| `reaction` | the exact feed activity | the title, then unavailable |
 | `watch_tag` | the Movie or Season | unavailable notice |
 | `recommendation` | the Movie or Season | recommender's profile, then unavailable |
+| `recommendation_ranked` | the recipient's exact ranking activity | the title, then unavailable |
 | `invite_activated` | the joined user's profile | unavailable notice |
 | `invite_welcome` | the inviter's profile | unavailable notice |
 | `award_earned` | the Awards sheet | — |
 
-**Comment and reaction route to the title rather than to the exact feed event, deliberately.** There is no per-event route, and the feed tab is a paginated list of *followees'* activity — a reader's own event does not appear in it at all. Routing to a screen that cannot contain the subject is worse than routing to its parent. Deferred as [`deferred-roadmap.md`](./deferred-roadmap.md) §6.
+~~**Comment and reaction route to the title rather than to the exact feed event, deliberately.**~~ **Superseded 2026-08-26**: the per-event route exists (`app/activity/[id].tsx`, reading one event by id through `feed_events_read`), and comment, reaction and — since `20260827000600` — `recommendation_ranked` all open the exact activity, with the title as the surviving parent when the event is gone. The deferral in [`deferred-roadmap.md`](./deferred-roadmap.md) §6 is closed.
 
 #### What is **not** built
 
@@ -1425,9 +1428,26 @@ This deliberately relaxes exactly one cell of the no-free-text-in-push rule, on 
 
 The server carries at most 180 characters; the sender tidies to one line and elides at 120. Reviews, notes, bios and search terms remain structurally excluded — `claim_push_batch` has no column for them.
 
----
+### As built — 2026-08-27, second tranche: a recommendation that hears back, and an inbox with rhythm
 
-## 16. Sharing, deep links, and web fallback
+Two founder requests, shipped together (`20260827000600`).
+
+**The recommendation lifecycle now closes.**
+
+> recommendation sent → recipient **ranks** the title → recommender receives **one** fulfilment notification → the notification opens the recipient's **exact ranking Feed activity**.
+
+- **What fulfils**: the recipient's *first* completed ranking of the title — the `rankings` insert inside `_rank_finalize`, the one place a ranking is created. It is the same `not v_replaced` fact that gates the `title_ranked` feed event, so a fulfilling rank always has a post to point at. Opening the sheet, picking a bucket, logging, watchlisting or abandoning a session fulfils nothing.
+- **Once, ever, per recommendation**: `title_recommendations.fulfilled_at`, written in the ranking's own transaction and guarded by `is null`. A Rank Again, a bucket change, a lost-response retry (the operation ledger returns the prior answer without re-entering the body) and a concurrent second device (serialised by the media lock; raced in `concurrency/races/recommendation.mjs` C5) all notify nobody twice. A partial unique index on `payload.recommendation_id` backs the guard the way the welcome's index backs `redeem_invite`. The column is granted to **no client role** — the sender hears through the notification or not at all.
+- **Several recommenders**: each outstanding delivered recommendation is its own row, so each sender receives their own single notification, all pointing at the same event.
+- **Only delivered recommendations that preceded the rank**: a *pending* (held) request does not fulfil, and accepting one after the title was ranked delivers a recommendation that simply never fulfils. Recommending an already-ranked title remains allowed — the current contract has never prevented it — and earns no retroactive credit; the row can only fulfil if the recipient unranks and later ranks afresh, at which point the recommendation did precede the qualifying rank. Nothing was backfilled at migration time.
+- **Privacy is the feed's own rule**: fulfilment and notification are decided separately. Every matching row is consumed; only senders passing `can_view_profile(sender, ranker)` — no block either way, sender active, ranker public or followed — are told. A sender refused at rank time is refused for ever, so lifting a block later cannot fire a stale notification. `pending`-state rows, the recommendation's own privacy posture, and the note-free payload are all unchanged.
+- **Copy**: inbox and push both say **"Suraj ranked The Martian from your recommendation"** (seasons through the standard compact form: "…ranked The Legend of Vox Machina, S1 from your recommendation"). Push rides the existing pipeline — `recommendation_ranked` is push-eligible, shares the `recommendations` preference category (two ends of one exchange, one switch), and carries the same five-field tap payload every push carries; the tap lands where the inbox tap lands.
+
+**The inbox gained hierarchy without furniture.** The founder's screenshot: every kind of event running together as one undifferentiated column. What shipped, deliberately short of a redesign:
+
+- A hairline rule between rows, inset to the text edge so the avatar column stays unbroken — the house divider (`border.hairline`, double hairline width), never a card per row.
+- Three age shelves in the existing small-caps maroon heading voice — **Today**, **This week**, **Earlier** — using the same rounding as the relative timestamps so a row never sits under a heading its label contradicts. Headings render only when they separate something: at least two shelves, or a Follow-requests section above. No tabs, no per-type categories, no filters.
+- Everything else held: parchment ground, unread as tint + maroon dot + spoken "Unread", timestamps secondary, row actions (Approve / Decline / Follow back) inset to their row's own text edge, the bell + gear settings control untouched.
 
 ### Objective
 

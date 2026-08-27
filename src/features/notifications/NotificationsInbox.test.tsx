@@ -302,6 +302,146 @@ describe('the welcome an invitation writes back', () => {
 });
 
 /**
+ * The fulfilment a ranking writes back (20260827000600).
+ *
+ * The server owns when it fires and to whom; what the client owns is the sentence —
+ * the founder's copy, title inline — the fallback when the post is gone, and the
+ * absence of any follow control on a row about somebody the reader already chose to
+ * recommend things to.
+ */
+describe('the fulfilment a ranking writes back', () => {
+  const fulfilment = (overrides: Record<string, unknown> = {}) =>
+    follow({
+      id: 'n-fulfilled',
+      kind: 'recommendation_ranked',
+      type: 'recommendation_ranked',
+      media_item_id: 'm-vox',
+      media_title: 'Season 1',
+      media_kind: 'season',
+      series_title: 'The Legend of Vox Machina',
+      subject_type: 'feed_event',
+      subject_id: 'event-9',
+      payload: { recommendation_id: 'rec-1' },
+      ...overrides,
+    });
+
+  it('says the founder’s sentence with the title inline, formatted like the rest of the app', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(fulfilment());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.getByText(' ranked ')).toBeTruthy();
+    expect(view.getByText('The Legend of Vox Machina, S1')).toBeTruthy();
+    expect(view.getByText(' from your recommendation')).toBeTruthy();
+  });
+
+  it('does not repeat the title on its own line below the sentence', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(fulfilment());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.getAllByText('The Legend of Vox Machina, S1')).toHaveLength(1);
+  });
+
+  it('falls back to the plain sentence when the ranking post has gone', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      fulfilment({
+        media_item_id: null,
+        media_title: null,
+        media_kind: null,
+        series_title: null,
+      }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.getByText(/ranked your recommendation/)).toBeTruthy();
+  });
+
+  it('offers no follow control — the reader already knows this person', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(fulfilment());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.queryByRole('button', { name: 'Follow back' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'Follow' })).toBeNull();
+  });
+});
+
+/**
+ * The rhythm pass (20260827000600): hairline rules between rows, inset to the text
+ * edge, and the three age shelves — which appear only when they separate something.
+ */
+describe('the shelves and the rules between rows', () => {
+  it('separates neighbouring rows with an inset hairline, and only between them', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      follow({ id: 'a1', created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() }),
+      follow({ id: 'a2', created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() }),
+      follow({ id: 'a3', created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getAllByText(/started following you/)).toHaveLength(3));
+    // Three rows, two gaps: a rule after the last row would underline the section.
+    const dividers = view.getAllByTestId('notification-divider');
+    expect(dividers).toHaveLength(2);
+    const style = StyleSheet.flatten(dividers.at(0)?.props.style);
+    // Inset to where the sentences begin, so the avatar column stays unbroken.
+    expect(style?.marginLeft).toBe(
+      theme.layout.gutter + theme.layout.avatar.sm + theme.space[3],
+    );
+    expect(style?.backgroundColor).toBe(theme.border.hairline);
+  });
+
+  it('shelves rows by age once there is more than one shelf to show', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      follow({ id: 'a1', created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() }),
+      follow({
+        id: 'a2',
+        created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      follow({
+        id: 'a3',
+        created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getAllByText(/started following you/)).toHaveLength(3));
+    expect(view.getByText('TODAY')).toBeTruthy();
+    expect(view.getByText('THIS WEEK')).toBeTruthy();
+    expect(view.getByText('EARLIER')).toBeTruthy();
+  });
+
+  it('shows no heading over a single shelf with nothing above it', async () => {
+    // One follow, two days old — the default fixture. A lone label captioning the
+    // whole screen separates nothing.
+    const view = await open();
+
+    expect(view.queryByText('TODAY')).toBeNull();
+    expect(view.queryByText('THIS WEEK')).toBeNull();
+    expect(view.queryByText('EARLIER')).toBeNull();
+  });
+
+  it('keeps the heading when a requests section sits above the shelf', async () => {
+    mockNotifications.push(
+      follow({ id: 'r1', kind: 'follow_request', type: 'follow_request' }),
+    );
+    const view = await open();
+
+    // The old behaviour, carried: "Earlier" marked where the requests ended.
+    expect(view.getByText('FOLLOW REQUESTS')).toBeTruthy();
+    expect(view.getByText('THIS WEEK')).toBeTruthy();
+  });
+});
+
+/**
  * The friendship record (20260827000200) — what replaces the vanishing Accept.
  *
  * The server files it pre-read with `payload.mutual` frozen at acceptance; what the

@@ -53,6 +53,7 @@ Deno.test('every eligible type says something in the second person', () => {
     reaction: ['Ada Lovelace', 'reacted to your activity'],
     watch_tag: ['Ada Lovelace', 'watched something with you'],
     recommendation: ['Ada Lovelace', 'recommended something to watch'],
+    recommendation_ranked: ['Ada Lovelace', 'ranked your recommendation'],
     invite_activated: ['Ada Lovelace', 'joined bingd. from your invite'],
     invite_welcome: ['Welcome to bingd.', 'Ada Lovelace invited you'],
   };
@@ -70,6 +71,33 @@ Deno.test('names the title where there is one', () => {
     job({ type: 'recommendation', media_kind: 'movie', media_title: 'Stalker' }),
   );
   assertEquals(content?.body, 'recommended Stalker');
+});
+
+// ---------------------------------------------------------------------------
+// A recommendation that hears back (20260827000600)
+// ---------------------------------------------------------------------------
+
+Deno.test('a fulfilment says the founder’s sentence, title inline', () => {
+  const content = contentFor(
+    job({ type: 'recommendation_ranked', media_kind: 'movie', media_title: 'The Martian' }),
+  );
+  assertEquals(content?.title, 'Ada Lovelace');
+  assertEquals(content?.body, 'ranked The Martian from your recommendation');
+});
+
+Deno.test('a fulfilment names a season through its show, like every other push', () => {
+  const content = contentFor(
+    job({
+      type: 'recommendation_ranked',
+      media_kind: 'season',
+      media_title: 'Season 1',
+      series_title: 'The Legend of Vox Machina',
+      feed_event_id: 'event-1',
+    }),
+  );
+  assertEquals(content?.body, 'ranked The Legend of Vox Machina, S1 from your recommendation');
+  // The tap payload carries the exact ranking post, and nothing written.
+  assertEquals(content?.data.feedEventId, 'event-1');
 });
 
 // ---------------------------------------------------------------------------

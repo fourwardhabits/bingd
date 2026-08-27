@@ -27,6 +27,13 @@ import { call, inbox, newOp, raceContext } from './_shared.mjs';
  * commits, because the second call runs entirely after the first has released the
  * pair lock. Not merely "some value"; the ordering is what the recipient's list is
  * sorted by.
+ *
+ * **C5. One fulfilment, whoever wins (20260827000600).** A first ranking fulfils the
+ * recommendations that asked for it, in the ranking's own transaction. Two devices
+ * finalising the same first rank at once must therefore produce one notification,
+ * not two: the media lock serialises them, the loser learns the title is already
+ * ranked, and the `fulfilled_at is null` guard would refuse a second pass even if
+ * it somehow ran.
  */
 export default function suite() {
   const rc = raceContext();
@@ -190,6 +197,98 @@ export default function suite() {
       );
       assert.equal((await inbox(db, recipient, sender)).length, 0);
 
+      await t1.end();
+      await t2.end();
+      await ctl.end();
+    });
+
+    it('C5: two devices finalising the same first rank fulfil the recommendation once', async () => {
+      const { db, fx } = ctx;
+      const sender = await fx.createUser();
+      const recipient = await fx.createUser();
+      await fx.mutualFollow(sender, recipient);
+      const movie = await fx.createMovie('Double Finalise');
+
+      const s = await db.session('sender');
+      await s.actAs(sender);
+      const sent = await call(s, `recommend_title($1, $2, $3)`, [
+        await newOp(db),
+        recipient,
+        movie,
+      ]);
+      assert.equal(sent.delivered, true, 'fixture: the recommendation must be delivered');
+      await s.end();
+
+      // The band is empty, so both rank_starts run straight through to
+      // `_rank_finalize`; the barrier holds the winner at the `rankings` insert —
+      // after the media lock, before the fulfilment — which is the widest window a
+      // second device could slip through.
+      await db.armBarrier('rankings', 'dup-finalise');
+      const ctl = await db.controller();
+      await ctl.hold('dup-finalise');
+
+      const t1 = await db.session('device-a');
+      const t2 = await db.session('device-b');
+      await t1.actAs(recipient);
+      await t2.actAs(recipient);
+
+      await t1.begin();
+      await t1.pauseAt('dup-finalise');
+      const p1 = t1.start(`select rank_start($1, 'loved', $2) as r`, [movie, await newOp(db)]);
+      await t1.awaitBlocked();
+
+      await t2.begin();
+      const p2 = t2.start(`select rank_start($1, 'loved', $2) as r`, [movie, await newOp(db)]);
+      // Correlated with `_lock_media`'s own key: the second device queues on the
+      // media lock, not on luck. Two operation ids, so the ledger serialises nothing.
+      await t2.awaitBlocked({
+        on: 'advisory',
+        advisoryKey: await db.mediaKey(recipient, movie),
+      });
+
+      await ctl.release('dup-finalise');
+      const r1 = (await p1).rows[0].r;
+      await t1.commit();
+
+      let refusal = null;
+      try {
+        await p2;
+        await t2.commit();
+      } catch (error) {
+        refusal = error;
+        await t2.rollback();
+      }
+
+      assert.equal(r1.done, true);
+      assert.equal(refusal?.code, '23505', 'the loser must learn the title is already ranked');
+
+      const notices = await db.rows(
+        `select subject_id from notifications
+          where recipient_id = $1 and type = 'recommendation_ranked'`,
+        [sender],
+      );
+      assert.equal(notices.length, 1, 'C5: exactly one fulfilment, whoever wins');
+
+      const rec = (
+        await db.rows(
+          `select fulfilled_at from title_recommendations
+            where sender_id = $1 and recipient_id = $2 and media_item_id = $3`,
+          [sender, recipient, movie],
+        )
+      )[0];
+      assert.notEqual(rec.fulfilled_at, null, 'the row is durably consumed');
+
+      // And the notification points at the event the winner actually posted.
+      const event = (
+        await db.rows(
+          `select id from feed_events
+            where actor_id = $1 and media_item_id = $2 and type = 'title_ranked'`,
+          [recipient, movie],
+        )
+      )[0];
+      assert.equal(notices[0].subject_id, event.id);
+
+      await db.sql(`drop trigger if exists _race_barrier_rankings on rankings`);
       await t1.end();
       await t2.end();
       await ctl.end();

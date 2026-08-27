@@ -70,6 +70,13 @@ describe('the routing matrix', () => {
      */
     comment: { kind: 'activity', eventId: 'event-1' },
     reaction: { kind: 'activity', eventId: 'event-1' },
+    /**
+     * The founder's explicit requirement (20260827000600): "Suraj ranked The Martian
+     * from your recommendation" opens Suraj's exact ranking post — not his profile,
+     * not the title page, not the top of the Feed. `subject_id` is that post's id,
+     * written by `_rank_finalize` in the ranking's own transaction.
+     */
+    recommendation_ranked: { kind: 'activity', eventId: 'event-1' },
     watch_tag: { kind: 'title', mediaItemId: 'media-1' },
     recommendation: { kind: 'title', mediaItemId: 'media-1' },
     invite_activated: { kind: 'profile', username: 'suraj' },
@@ -131,7 +138,7 @@ describe('a target that is gone', () => {
    * still set resolves to the conversation — correctly, and asserted below. This case is
    * the one where the notification points at nothing at all.
    */
-  it.each(['comment', 'reaction'] as const)(
+  it.each(['comment', 'reaction', 'recommendation_ranked'] as const)(
     'sends %s to a safe stop when the activity is gone',
     (kind) => {
       const target = targetFor(
@@ -148,7 +155,7 @@ describe('a target that is gone', () => {
    * conversation on it is still readable — so this must not degrade to "unavailable"
    * merely because the *other* link is gone.
    */
-  it.each(['comment', 'reaction'] as const)(
+  it.each(['comment', 'reaction', 'recommendation_ranked'] as const)(
     'still opens the conversation for %s when only the title has gone',
     (kind) => {
       expect(targetFor(row({ kind, mediaItemId: null }))).toEqual({
@@ -164,7 +171,7 @@ describe('a target that is gone', () => {
    * This is the case the title link was originally the whole answer to, and keeping it
    * as the second link is what stops the new destination being a regression for it.
    */
-  it.each(['comment', 'reaction'] as const)(
+  it.each(['comment', 'reaction', 'recommendation_ranked'] as const)(
     'falls %s back to the title when the activity itself is gone',
     (kind) => {
       expect(targetFor(row({ kind, subjectType: null, subjectId: null }))).toEqual({

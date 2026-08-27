@@ -51,6 +51,23 @@ describe('a live payload', () => {
     );
   });
 
+  /**
+   * The founder's requirement for 20260827000600, at the lock screen: tapping "Suraj
+   * ranked The Martian from your recommendation" opens Suraj's exact ranking post.
+   * Without the event — a payload composed before the database migration, or an event
+   * since deleted and nulled at claim time — it degrades exactly as a comment does:
+   * the title, then the inbox.
+   */
+  it('opens the exact ranking post for a fulfilled recommendation', () => {
+    expect(
+      hrefForPush(payload({ kind: 'recommendation_ranked', feedEventId: 'event-1' })),
+    ).toBe('/activity/event-1');
+    expect(hrefForPush(payload({ kind: 'recommendation_ranked' }))).toBe('/title/media-1');
+    expect(hrefForPush(payload({ kind: 'recommendation_ranked', mediaItemId: null }))).toBe(
+      PUSH_FALLBACK_HREF,
+    );
+  });
+
   it('opens the Awards sheet for an award', () => {
     expect(hrefForPush(payload({ kind: 'award_earned' }))).toEqual({
       pathname: '/profile',

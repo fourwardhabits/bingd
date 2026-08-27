@@ -345,6 +345,7 @@ describe('the outbox is filled by notifications and by nothing else', () => {
       'reaction',
       'watch_tag',
       'recommendation',
+      'recommendation_ranked',
       'invite_activated',
       'invite_welcome',
     ]) {
@@ -355,12 +356,13 @@ describe('the outbox is filled by notifications and by nothing else', () => {
   });
 
   /**
-   * PRD §15's event table says Push: No for `follow_approved`, and nothing writes an
-   * `award_earned`. Both still reach the inbox, which is the control: the assertion is
-   * that they were written and not queued, rather than that nothing happened.
+   * PRD §15's event table says Push: No for `follow_approved`, nothing writes an
+   * `award_earned`, and `friendship` is the reader's own action. All still reach the
+   * inbox, which is the control: the assertion is that they were written and not
+   * queued, rather than that nothing happened.
    */
-  it('does not queue the two kinds that are inbox-only', async () => {
-    for (const type of ['follow_approved', 'award_earned']) {
+  it('does not queue the kinds that are inbox-only', async () => {
+    for (const type of ['follow_approved', 'award_earned', 'friendship']) {
       // `award_earned` defaults off as a category, so it needs turning on to be written
       // at all -- otherwise this test would pass because of the preference gate.
       await t.asUser(reader, () =>
