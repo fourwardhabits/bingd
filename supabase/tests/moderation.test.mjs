@@ -590,6 +590,9 @@ describe('the guard is wired in, not merely present', () => {
     // `follow`, which is the act these rows lead to, calls the guard.
     'people_mutuals',
     'people_taste_matches',
+    // 20260827000100. The list behind people_mutuals' count, same argument as the
+    // pair above: a pure read filtered through both oracles from the caller's side.
+    'mutuals_with',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

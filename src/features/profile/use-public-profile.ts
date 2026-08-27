@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
-import { avatarUri } from '@/lib/images';
+import { avatarUri, posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
@@ -410,6 +410,79 @@ export function useProfileIdentity(username: string | null) {
         avatarUri: avatarUri(row.avatar_path),
         visibility: row.visibility,
       };
+    },
+  });
+}
+
+export type RankedTitle = {
+  mediaItemId: string;
+  title: string;
+  year: number | null;
+  posterUri: string | null;
+};
+
+/**
+ * Everything one person has ranked in one category, newest addition first — the list
+ * behind the Movies / TV seasons counts on their profile.
+ *
+ * **Ranked, not logged.** `user_media` is owner-only by policy (20260813000500: it
+ * carries notes and watch dates, PRD §22 always-private), so another person's *logged*
+ * titles are structurally unreadable; `rankings` under `rankings_read` is the whole of
+ * what a profile may show, and it is what the counts count.
+ *
+ * Newest-first is `created_at`, which is when the title was *added* — the founder's
+ * ask for this sheet — where the Top Ranked wall sorts by position. Keyed by the
+ * viewer like every viewer-relative read: visibility is decided by `rankings_read`
+ * per viewer, and a cache entry reachable from a second signed-in account is the
+ * recurring defect this convention exists to stop.
+ *
+ * One page of 200: the sheet is an enumeration of a count, not a collection browser,
+ * and a second round trip that can fail buys nothing at friend-beta collection sizes.
+ * The cap is exported so the sheet can *say* when it was reached (review 60) — a count
+ * of 230 over a silent list of 200 would be the sheet contradicting the stat it opened
+ * from.
+ */
+export const RANKED_TITLES_PAGE = 200;
+
+export function useRankedTitles(
+  viewerId: string,
+  userId: string | null,
+  category: 'movies' | 'tv_seasons' | null,
+) {
+  return useQuery({
+    queryKey: ['ranked-titles', viewerId, userId, category],
+    enabled: Boolean(userId) && Boolean(category),
+    staleTime: 60_000,
+    queryFn: async (): Promise<RankedTitle[]> => {
+      const { data, error } = await supabase
+        .from('rankings')
+        .select('media_item_id, created_at, media_items (title, release_date, poster_path)')
+        .eq('user_id', userId!)
+        .eq('category', category!)
+        .order('created_at', { ascending: false })
+        .order('media_item_id', { ascending: true })
+        .limit(RANKED_TITLES_PAGE);
+      if (error) throw error;
+
+      type Joined = {
+        media_item_id: string;
+        media_items: {
+          title: string;
+          release_date: string | null;
+          poster_path: string | null;
+        } | null;
+      };
+
+      return ((data ?? []) as unknown as Joined[])
+        .filter((row) => row.media_items)
+        .map((row) => ({
+          mediaItemId: row.media_item_id,
+          title: row.media_items!.title,
+          year: row.media_items!.release_date
+            ? Number(row.media_items!.release_date.slice(0, 4)) || null
+            : null,
+          posterUri: posterUri(row.media_items!.poster_path),
+        }));
     },
   });
 }

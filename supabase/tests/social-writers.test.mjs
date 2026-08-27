@@ -243,6 +243,102 @@ describe('the private account’s side', () => {
     assert.equal((await inboxOf(shy, 'follow_request', alice)).length, 0);
   });
 
+  /**
+   * The friendship record (20260827000200). Accepting used to make the request row
+   * vanish and leave nothing; now the approval also files a pre-read row to the
+   * accepter, with `mutual` frozen at the moment it was true.
+   */
+  it('leaves the accepter a pre-read friendship record', async () => {
+    const shy = await t.createUser({ username: 'shy_keeps_1', visibility: 'private' });
+    await doFollow(shy);
+
+    await t.actAs(shy);
+    await respond(alice, true);
+    await t.actAs(alice);
+
+    const { rows } = await t.sql(
+      `select actor_id, read_at, payload from notifications
+        where recipient_id = $1 and type = 'friendship'`,
+      [shy],
+    );
+    assert.equal(rows.length, 1, 'exactly one record');
+    assert.equal(rows[0].actor_id, alice, 'the requester is the actor');
+    assert.ok(rows[0].read_at, "born read: it reports the reader's own tap");
+    assert.equal(rows[0].payload.mutual, false, 'one-way at acceptance, and it says so');
+  });
+
+  it('records the friendship as mutual when the accepter already follows back', async () => {
+    const shy = await t.createUser({ username: 'shy_keeps_2', visibility: 'private' });
+    // Shy already follows Alice (public, so it lands approved), then Alice asks.
+    await t.actAs(shy);
+    await doFollow(alice);
+    await t.actAs(alice);
+    await doFollow(shy);
+
+    await t.actAs(shy);
+    await respond(alice, true);
+    await t.actAs(alice);
+
+    const { rows } = await t.sql(
+      `select payload from notifications where recipient_id = $1 and type = 'friendship'`,
+      [shy],
+    );
+    assert.equal(rows[0].payload.mutual, true);
+  });
+
+  it('cannot be duplicated by approving twice', async () => {
+    const shy = await t.createUser({ username: 'shy_keeps_3', visibility: 'private' });
+    await doFollow(shy);
+
+    await t.actAs(shy);
+    await respond(alice, true);
+    // A second approval finds no pending request: P0002, and no second record.
+    const error = await t.errorFrom(`select respond_follow_request(gen_random_uuid(), $1, true)`, [
+      alice,
+    ]);
+    await t.actAs(alice);
+
+    assert.equal(error?.code, 'P0002');
+    const { rows } = await t.sql(
+      `select 1 from notifications where recipient_id = $1 and type = 'friendship'`,
+      [shy],
+    );
+    assert.equal(rows.length, 1);
+  });
+
+  it('queues no push for the friendship record', async () => {
+    const shy = await t.createUser({ username: 'shy_keeps_4', visibility: 'private' });
+    await doFollow(shy);
+
+    await t.actAs(shy);
+    await respond(alice, true);
+    await t.actAs(alice);
+
+    // A phone buzzing about the reader's own tap is noise: `_push_eligible` does not
+    // list the type, so the outbox trigger passes it by.
+    const { rows } = await t.sql(
+      `select 1 from push_outbox po join notifications n on n.id = po.notification_id
+        where n.recipient_id = $1 and n.type = 'friendship'`,
+      [shy],
+    );
+    assert.equal(rows.length, 0);
+  });
+
+  it('leaves no friendship record behind a decline', async () => {
+    const shy = await t.createUser({ username: 'shy_keeps_5', visibility: 'private' });
+    await doFollow(shy);
+
+    await t.actAs(shy);
+    await respond(alice, false);
+    await t.actAs(alice);
+
+    const { rows } = await t.sql(
+      `select 1 from notifications where recipient_id = $1 and type = 'friendship'`,
+      [shy],
+    );
+    assert.equal(rows.length, 0);
+  });
+
   it('declines silently, leaving no row and no message', async () => {
     const shy = await t.createUser({ username: 'shy_2', visibility: 'private' });
     await doFollow(shy);

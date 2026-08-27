@@ -157,6 +157,52 @@ describe('mutuals: people followed by people you follow', () => {
   });
 
   /**
+   * The intermediary passes the same discoverability predicate as the candidate
+   * (review 60). A block raced against a still-standing follow edge, or a suspension,
+   * must not leave the account countable — let alone nameable in `mutual_names` —
+   * when `mutuals_with` correctly refuses to list it: the count and the sheet must
+   * draw from the same set.
+   */
+  it('does not count or name a path through a blocked intermediary', async () => {
+    const bo = await user('bo');
+    const vex = await user('vex');
+    const target = await user('target');
+
+    await follows(alice, bo);
+    await follows(alice, vex);
+    await follows(bo, target);
+    await follows(vex, target);
+    // The block lands after the follow edges exist, which is exactly the race.
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [vex, alice]);
+
+    const rows = await mutuals();
+    assert.deepEqual(ids(rows), [target]);
+    assert.equal(rows[0].mutual_count, 1, 'the blocked intermediary must not be counted');
+    assert.equal(rows[0].mutual_names.length, 1);
+    assert.equal(rows[0].mutual_names[0].startsWith('pd_bo'), true);
+  });
+
+  it('does not count or name a path through a suspended intermediary', async () => {
+    const bo = await user('bo');
+    const gone = await user('gone');
+    const target = await user('target');
+
+    await follows(alice, bo);
+    await follows(alice, gone);
+    await follows(bo, target);
+    await follows(gone, target);
+    await t.sql(`update profiles set status = 'suspended' where id = $1`, [gone]);
+
+    const rows = await mutuals();
+    assert.deepEqual(ids(rows), [target]);
+    assert.equal(rows[0].mutual_count, 1, 'the suspended intermediary must not be counted');
+    assert.deepEqual(
+      rows[0].mutual_names.filter((name) => name.startsWith('pd_gone')),
+      [],
+    );
+  });
+
+  /**
    * **The privacy property this function turns on**, and the reason both endpoints are
    * tested rather than just the candidate.
    *
@@ -235,10 +281,135 @@ describe('mutuals: people followed by people you follow', () => {
       'avatar_path',
       'display_name',
       'mutual_count',
+      'mutual_names',
       'user_id',
       'username',
       'visibility',
     ]);
+  });
+
+  /**
+   * The names, added 2026-08-27 (20260827000100) when the founder reversed the
+   * count-only decision. Every named person is an intermediary the caller approvedly
+   * follows — an edge follows_read admits — so what these tests own is the *shape* of
+   * the naming: capped, ordered, and falling back to the handle.
+   */
+  describe('the mutual names', () => {
+    it('names the mutuals, at most three, ordered by handle', async () => {
+      const target = await user('target');
+      const vias = [];
+      for (const name of ['d_via', 'a_via', 'c_via', 'b_via']) {
+        const via = await user(name);
+        vias.push(via);
+        await follows(alice, via);
+        await follows(via, target);
+      }
+
+      const rows = await mutuals();
+
+      assert.equal(rows[0].mutual_count, 4, 'all four connections are counted');
+      assert.equal(rows[0].mutual_names.length, 3, 'but at most three are named');
+      const sorted = [...rows[0].mutual_names].sort();
+      assert.deepEqual(rows[0].mutual_names, sorted, 'named in handle order');
+      assert.match(rows[0].mutual_names[0], /^pd_a_via_/, 'the first handle leads');
+    });
+
+    // No blank-name test: `profiles.display_name` is NOT NULL and `display_name_shape`
+    // forbids the empty string, so the coalesce-to-handle in the function body is a
+    // belt over a constraint rather than a reachable branch.
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * `mutuals_with` — the list behind one card's count (20260827000100).
+ *
+ * The invariant is symmetry: it may only name edges `people_mutuals` would have
+ * counted, which are edges `follows_read` would admit to this caller individually.
+ * So the exclusions here mirror the count's, and the one deliberate difference is
+ * asserted too — a subject the caller has since followed still answers, because the
+ * sheet can stay open across the Follow it inspired.
+ */
+describe('mutuals_with: who the count is', () => {
+  const mutualsWith = async (subject, asUser = alice) => {
+    await t.actAs(asUser);
+    const { rows } = await t.sql(`select * from mutuals_with($1)`, [subject]);
+    await t.actAs(alice);
+    return rows;
+  };
+
+  it('lists exactly the intermediaries the count aggregates, by handle', async () => {
+    const bo = await user('z_bo');
+    const cy = await user('a_cy');
+    const target = await user('target');
+    await follows(alice, bo);
+    await follows(alice, cy);
+    await follows(bo, target);
+    await follows(cy, target);
+
+    const counted = await mutuals();
+    const named = await mutualsWith(target);
+
+    assert.equal(counted[0].mutual_count, named.length, 'the sheet is the count, unrolled');
+    assert.deepEqual(ids(named), [cy, bo], 'ordered by handle');
+    assert.deepEqual(Object.keys(named[0]).sort(), [
+      'avatar_path',
+      'display_name',
+      'user_id',
+      'username',
+      'visibility',
+    ]);
+  });
+
+  it('does not name somebody the caller merely asked to follow', async () => {
+    const bo = await user('bo');
+    const target = await user('target');
+    await follows(alice, bo, 'pending');
+    await follows(bo, target);
+
+    assert.deepEqual(await mutualsWith(target), [], 'a pending edge is not a mutual');
+  });
+
+  it('still answers for a subject the caller has since followed', async () => {
+    const bo = await user('bo');
+    const target = await user('target');
+    await follows(alice, bo);
+    await follows(bo, target);
+    await follows(alice, target);
+
+    assert.deepEqual(ids(await mutualsWith(target)), [bo]);
+  });
+
+  it('says nothing about a subject who blocked the caller', async () => {
+    const bo = await user('bo');
+    const target = await user('target');
+    await follows(alice, bo);
+    await follows(bo, target);
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [target, alice]);
+
+    assert.deepEqual(await mutualsWith(target), [], 'a block hides the whole list');
+  });
+
+  it('leaves out a blocked intermediary without hiding the rest', async () => {
+    const bo = await user('bo');
+    const cy = await user('cy');
+    const target = await user('target');
+    await follows(alice, bo);
+    await follows(alice, cy);
+    await follows(bo, target);
+    await follows(cy, target);
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [bo, alice]);
+
+    assert.deepEqual(ids(await mutualsWith(target)), [cy]);
+  });
+
+  it('never answers about yourself', async () => {
+    const bo = await user('bo');
+    await follows(alice, bo);
+    await follows(bo, alice);
+
+    assert.deepEqual(await mutualsWith(alice), [], 'you are not a subject of your own graph');
   });
 });
 

@@ -123,9 +123,14 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
      * follow a private account is the ordinary case, not the edge one, and the
      * identity-only profile is exactly what lets the reader decide.
      */
+    /**
+     * `friendship` (20260827000200) rides with the follow family: it is the accepter's
+     * record of a person, and the person is where a tap on it should land.
+     */
     case 'follow_request':
     case 'follow':
     case 'follow_approved':
+    case 'friendship':
       return [...profile, unavailable('This account is no longer available.')];
 
     /**
@@ -346,6 +351,7 @@ export const ROUTED_KINDS: readonly NotificationKind[] = [
   'follow_request',
   'follow',
   'follow_approved',
+  'friendship',
   'comment',
   'reaction',
   'watch_tag',

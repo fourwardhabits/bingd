@@ -867,3 +867,89 @@ describe('deleting an account takes its push state with it', () => {
     assert.equal(await outboxFor(id), null);
   });
 });
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The comment excerpt (20260827000300) — the one written payload a push may carry,
+ * and the three conditions under which it may not.
+ *
+ * Real `add_comment` rows rather than the `notify` shorthand, because the excerpt is
+ * resolved from the payload's `comment_id` and the notification the writer files is
+ * the thing under test.
+ */
+describe('claim_push_batch carries the comment, when it may', () => {
+  let movie;
+  let event;
+
+  const eventOf = async (who, mediaItemId) => {
+    const { rows } = await t.sql(
+      `insert into feed_events (actor_id, type, media_item_id, payload)
+       values ($1, 'title_ranked', $2, '{"position":1,"bucket":"loved","category":"movies","score":10}')
+       returning id`,
+      [who, mediaItemId],
+    );
+    return rows[0].id;
+  };
+
+  const commentBy = async (who, body, spoilers = false) => {
+    await t.actAs(who);
+    const { rows } = await t.sql(`select add_comment(gen_random_uuid(), $1, $2, $3, null) as r`, [
+      event,
+      body,
+      spoilers,
+    ]);
+    return rows[0].r.comment_id;
+  };
+
+  beforeEach(async () => {
+    await clearOutbox();
+    await clearTokens();
+    await t.sql(`delete from notifications`);
+    await register(reader, TOKEN(70), 'ios');
+    movie = await t.createMovie(`Excerpted ${Date.now()}`, 70000 + Math.floor(Math.random() * 1000));
+    event = await eventOf(reader, movie);
+  });
+
+  it('quotes a live, spoiler-free comment', async () => {
+    await commentBy(actor, 'This ending broke me');
+
+    const jobs = await claim();
+    const job = jobs.find((j) => j.type === 'comment');
+    assert.ok(job, 'the comment was not queued');
+    assert.equal(job.comment_excerpt, 'This ending broke me');
+  });
+
+  it('ships no excerpt for a spoiler-marked comment', async () => {
+    // The author asked for a tap between reader and text; a lock screen has none.
+    await commentBy(actor, 'the twist is that he dies', true);
+
+    const jobs = await claim();
+    const job = jobs.find((j) => j.type === 'comment');
+    assert.ok(job, 'the spoiler comment still pushes — only its text stays home');
+    assert.equal(job.comment_excerpt, null);
+  });
+
+  it('pushes nothing at all for a comment deleted before the drain', async () => {
+    // `delete_comment` retracts the announcement rows along with the comment, and the
+    // outbox entry goes with the notification — so the null-excerpt branch in the
+    // claim is a belt for a race inside one drain, not the ordinary retraction path.
+    const commentId = await commentBy(actor, 'regretted immediately');
+    await t.sql(`select delete_comment(gen_random_uuid(), $1)`, [commentId]);
+
+    const jobs = await claim();
+    assert.equal(
+      jobs.find((j) => j.type === 'comment'),
+      undefined,
+      'the retraction takes the push with it',
+    );
+  });
+
+  it('bounds what leaves the server', async () => {
+    await commentBy(actor, 'a'.repeat(500));
+
+    const jobs = await claim();
+    const job = jobs.find((j) => j.type === 'comment');
+    assert.equal(job.comment_excerpt.length, 180, 'left(body, 180), exactly');
+  });
+});

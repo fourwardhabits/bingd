@@ -78,3 +78,19 @@ export const typography = {
 } as const satisfies Record<string, TypeToken>;
 
 export type TypographyToken = keyof typeof typography;
+
+/**
+ * Text style for single-line `TextInput`s — `body` without its `lineHeight`.
+ *
+ * On iOS a paragraph line-height taller than the font is applied to a
+ * `TextInput` as attributed-string leading, which pushes the glyph baseline
+ * low inside the field: the container centres, the text does not. Every input
+ * on the physical device sat visibly below centre for exactly this reason.
+ * `paddingVertical: 0` removes Android's built-in input padding so the same
+ * centring holds there. Multiline inputs opt back into their own spacing.
+ */
+export const inputText = {
+  fontFamily: typography.body.fontFamily,
+  fontSize: typography.body.fontSize,
+  paddingVertical: 0,
+} as const satisfies TextStyle;

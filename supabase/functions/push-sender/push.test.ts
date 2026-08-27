@@ -72,6 +72,58 @@ Deno.test('names the title where there is one', () => {
   assertEquals(content?.body, 'recommended Stalker');
 });
 
+// ---------------------------------------------------------------------------
+// The comment is the message (20260827000300)
+// ---------------------------------------------------------------------------
+
+Deno.test('a comment push leads with what was written', () => {
+  const content = contentFor(
+    job({
+      type: 'comment',
+      media_kind: 'movie',
+      media_title: 'Spider-Man: Far From Home',
+      comment_excerpt: 'This ending broke me',
+    }),
+  );
+
+  assertEquals(content?.title, 'Ada Lovelace commented');
+  assertEquals(content?.body, '“This ending broke me” · Spider-Man: Far From Home');
+});
+
+Deno.test('a comment with no resolvable title still quotes the comment', () => {
+  const content = contentFor(job({ type: 'comment', comment_excerpt: 'so good' }));
+  assertEquals(content?.body, '“so good”');
+});
+
+Deno.test('a long comment is elided by this file, not chopped by the OS', () => {
+  const content = contentFor(job({ type: 'comment', comment_excerpt: 'a'.repeat(180) }));
+  assert(content);
+  assert(content.body.length < 180);
+  assert(content.body.includes('…'), 'an elided quote says so');
+});
+
+Deno.test('newlines in a comment become one lock-screen line', () => {
+  const content = contentFor(job({ type: 'comment', comment_excerpt: 'line one\n\nline two' }));
+  assertEquals(content?.body, '“line one line two”');
+});
+
+Deno.test('no excerpt falls back to the metadata sentence, never an empty quote', () => {
+  // Deleted, spoiler-marked, or a database that predates the migration: the server
+  // sends null (or no key at all) and the old sentence stands.
+  for (const excerpt of [null, undefined, '', '   ']) {
+    const content = contentFor(
+      job({
+        type: 'comment',
+        media_kind: 'movie',
+        media_title: 'Stalker',
+        comment_excerpt: excerpt as string | null,
+      }),
+    );
+    assertEquals(content?.title, 'Ada Lovelace');
+    assertEquals(content?.body, 'commented on your activity — Stalker');
+  }
+});
+
 Deno.test("a season carries its show's name, because its own is Season 2", () => {
   assertEquals(
     subjectName(job({ media_kind: 'season', media_title: 'Season 2', series_title: 'Severance' })),

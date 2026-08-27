@@ -37,6 +37,14 @@ export type ProfileIdentityProps = {
   onPressFollowers?: () => void;
   onPressFollowing?: () => void;
   /**
+   * The other two stats became controls in the external-beta polish: on somebody
+   * else's profile the counts were claims the reader could not check. Optional for
+   * the same loading reason as the pair above, and the own profile may leave them
+   * unwired — its full collection is already a tab away.
+   */
+  onPressMovies?: () => void;
+  onPressSeasons?: () => void;
+  /**
    * Drawn in the stat row's place when the counts could not be read at all.
    *
    * A third state was needed because the two this component already had cannot say it.
@@ -155,6 +163,8 @@ export function ProfileIdentity({
   match,
   onPressFollowers,
   onPressFollowing,
+  onPressMovies,
+  onPressSeasons,
 }: ProfileIdentityProps) {
   return (
     <View style={styles.block}>
@@ -208,11 +218,11 @@ export function ProfileIdentity({
               onPress: onPressFollowing,
               hint: 'Opens the list',
             },
-            // Deliberately not controls. The collection these two count is the next
-            // section down the same screen, so a tap would scroll you to something
-            // already in view.
-            { label: 'Movies', value: stats.movies },
-            { label: 'TV seasons', value: stats.seasons },
+            // Controls when the screen wires them (the external-beta polish): Top
+            // Ranked below shows six, and these counts claim the rest. The tap opens
+            // the full list, newest first.
+            { label: 'Movies', value: stats.movies, onPress: onPressMovies, hint: 'Opens the list' },
+            { label: 'TV seasons', value: stats.seasons, onPress: onPressSeasons, hint: 'Opens the list' },
           ]}
         />
       ) : null}

@@ -11,6 +11,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCurrentProfile } from '@/features/auth';
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
@@ -112,6 +113,9 @@ export default function TitleScreen() {
   const profile = useCurrentProfile();
   const queryClient = useQueryClient();
   const router = useRouter();
+  // For the hero: the header is transparent, so the artwork's own top would sit under
+  // the status bar without it (TitleHero's `topInset`).
+  const insets = useSafeAreaInsets();
   const hasId = Boolean(id);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -667,6 +671,7 @@ export default function TitleScreen() {
             uri={hero.uri}
             blurred={hero.treatment === 'poster'}
             collapsedHeight={HERO_COLLAPSED}
+            topInset={insets.top}
           />
           {/* Who sent this and how long ago, over the artwork they sent it about.
 

@@ -244,6 +244,11 @@ const ALLOWED = {
   'people_mutuals(integer)': ['authenticated'],
   'people_taste_matches(integer)': ['authenticated'],
 
+  // Added 2026-08-27 (20260827000100). The list behind people_mutuals' count for one
+  // subject: same predicates, so it can only name edges the count already included and
+  // follows_read would admit to the caller one at a time.
+  'mutuals_with(uuid)': ['authenticated'],
+
   // Added 2026-08-17 with Settings (20260817000600). Every one of these is about the
   // caller's own account and none takes a target, which is 20260813001900's rule in
   // its strongest form: there is nothing to point at anybody else.

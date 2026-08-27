@@ -12,14 +12,20 @@
  * holding the phone. It is the least private surface this product has, and it is the one
  * surface the recipient cannot re-read the privacy settings of.
  *
- * So a push carries three things and no others: **who** did it, **what kind of thing**
- * they did, and **which title** it was about. It never carries what anybody wrote.
+ * So a push carries **who** did it, **what kind of thing** they did, **which title** it
+ * was about — and, since `20260827000300`, exactly one kind of written content: **the
+ * comment addressed to the recipient**. The founder's physical report was that a
+ * comment push spent its whole visible line on metadata while the message itself was
+ * invisible, and a comment is the one payload that is genuinely *for* the person whose
+ * lock screen it lands on — like any messaging push. The server enforces the two
+ * conditions this file cannot: a spoiler-marked comment ships no excerpt (the author
+ * asked for a tap between reader and text, and a lock screen has no tap), and a
+ * deleted one resolves to null.
  *
- * That is not a filter applied here — it is a property of the query that produces the
- * input. `claim_push_batch` selects a username, a display name and a media title, and
- * there is no column in its output for a note, a comment body, a review or a bio. A note
- * cannot leak through this file because a note never reaches it. If somebody widens that
- * query, this comment is the thing they have to argue with.
+ * Everything else written stays out, as a property of the query that produces the
+ * input: `claim_push_batch` has no column for a note, a review, a bio or a search
+ * term, so none of them can leak through this file. If somebody widens that query,
+ * this comment is the thing they have to argue with.
  *
  * The actor is already known to be nameable to the recipient: `claim_push_batch` applies
  * `can_discover_profile`, the same predicate `my_notifications` applies, so a blocked or
@@ -55,6 +61,12 @@ export type PushJob = {
   media_kind: 'movie' | 'series' | 'season' | null;
   media_title: string | null;
   series_title: string | null;
+  /**
+   * The comment's own words, for `comment` jobs only (`20260827000300`). Null when the
+   * comment was deleted, is spoiler-marked, or the database predates the migration —
+   * all three fall back to the metadata sentence.
+   */
+  comment_excerpt?: string | null;
   tokens: { token: string; platform: 'ios' | 'android' }[] | null;
 };
 
@@ -126,11 +138,26 @@ function sentence(job: PushJob, name: string, subject: string | null): { title: 
       return { title: name, body: 'started following you' };
     case 'follow_request':
       return { title: name, body: 'wants to follow you' };
-    case 'comment':
+    /**
+     * The message leads (`20260827000300`). "Ada commented" names who and what in the
+     * title, and the body is what she wrote — with the title demoted to context after
+     * it, because "on your activity about <long title>" was eating the line the
+     * comment needed. No excerpt (deleted, spoiler-marked, old database) falls back
+     * to the metadata sentence rather than quoting nothing.
+     */
+    case 'comment': {
+      const excerpt = commentExcerpt(job);
+      if (excerpt) {
+        return {
+          title: `${name} commented`,
+          body: subject ? `“${excerpt}” · ${subject}` : `“${excerpt}”`,
+        };
+      }
       return {
         title: name,
         body: subject ? `commented on your activity — ${subject}` : 'commented on your activity',
       };
+    }
     case 'reaction':
       return {
         title: name,
@@ -162,6 +189,18 @@ function sentence(job: PushJob, name: string, subject: string | null): { title: 
       // Returned rather than thrown so one unexpected type cannot fail a whole batch.
       return { title: name, body: 'did something on bingd.' };
   }
+}
+
+/** How much of a comment a push shows. Shorter than the server's 180, so the ellipsis
+ *  is this file's decision and a mid-word cut is tidied here rather than by the OS. */
+const EXCERPT_LIMIT = 120;
+
+/** The excerpt as the lock screen should carry it: one line, tidied, honestly elided. */
+function commentExcerpt(job: PushJob): string | null {
+  const raw = job.comment_excerpt?.replace(/\s+/g, ' ').trim() || null;
+  if (!raw) return null;
+  if (raw.length <= EXCERPT_LIMIT) return raw;
+  return `${raw.slice(0, EXCERPT_LIMIT).trimEnd()}…`;
 }
 
 /**

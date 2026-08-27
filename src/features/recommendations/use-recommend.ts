@@ -148,7 +148,9 @@ export function useRecommendRecipients(viewerId: string) {
  * `_may_recommend_to` tests the same edge this list is built from.
  */
 export function filterRecipients(people: Recipient[], query: string): Recipient[] {
-  const needle = query.trim().toLowerCase();
+  // A leading @ is the handle sigil, not part of the handle — "@ben" must find ben,
+  // exactly as Search's placeholder teaches people to type it.
+  const needle = query.trim().toLowerCase().replace(/^@/, '');
   if (!needle) return people;
   return people.filter(
     (person) =>

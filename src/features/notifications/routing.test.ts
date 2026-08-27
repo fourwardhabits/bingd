@@ -38,6 +38,7 @@ const row = (over: Partial<Notification> & { kind: NotificationKind }): Notifica
   seriesTitle: null,
   subjectType: 'feed_event',
   subjectId: 'event-1',
+  mutual: null,
   ...over,
 });
 
@@ -52,6 +53,8 @@ describe('the routing matrix', () => {
     follow_request: { kind: 'profile', username: 'suraj' },
     follow: { kind: 'profile', username: 'suraj' },
     follow_approved: { kind: 'profile', username: 'suraj' },
+    // The accepter's record of a person (20260827000200): the person is the target.
+    friendship: { kind: 'profile', username: 'suraj' },
     /**
      * **Changed 2026-08-26, and it is the founder's correction rather than a drift.**
      *

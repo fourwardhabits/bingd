@@ -13,6 +13,7 @@ import { useActorActivity } from '@/features/feed/use-feed';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
 import { FollowControl } from '@/features/profile/FollowControl';
 import { FollowListSheet } from '@/features/profile/FollowListSheet';
+import { RankedTitlesSheet } from '@/features/profile/RankedTitlesSheet';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
 import { ProfileActions } from '@/features/profile/ProfileActions';
 import { ProfileMenu } from '@/features/profile/ProfileMenu';
@@ -75,6 +76,8 @@ export default function PublicProfileScreen() {
   const [reportingReview, setReportingReview] = useState<string | null>(null);
   /** Which of the two people lists is open, if either. One sheet, so one piece of state. */
   const [followList, setFollowList] = useState<'followers' | 'following' | null>(null);
+  // Which ranked-title count is open as a list, if any — Movies or TV seasons.
+  const [titleList, setTitleList] = useState<'movies' | 'tv_seasons' | null>(null);
 
   const profile = usePublicProfile(username ?? null);
   /**
@@ -354,6 +357,11 @@ export default function PublicProfileScreen() {
              */
             onPressFollowers={() => setFollowList('followers')}
             onPressFollowing={() => setFollowList('following')}
+            // The same gate carries the other two stats: this branch means the
+            // counts were drawn, and the sheet reads `rankings` under
+            // `rankings_read`, which is what counted them.
+            onPressMovies={() => setTitleList('movies')}
+            onPressSeasons={() => setTitleList('tv_seasons')}
             match={
               /* Directly under the handle — the founder's final placement.
 
@@ -591,8 +599,9 @@ export default function PublicProfileScreen() {
         }}
       />
 
-      {/* `profile.data` is what the counts came from, so the sheet cannot be opened for
-          a profile whose stats were never drawn — see the note on the stat callbacks. */}
+      {/* `profile.data` is what the counts came from, so the sheets cannot be opened
+          for a profile whose stats were never drawn — see the note on the stat
+          callbacks. */}
       {profile.data ? (
         <FollowListSheet
           kind={followList}
@@ -601,6 +610,20 @@ export default function PublicProfileScreen() {
           viewerId={viewer.id}
           isSelf={profile.data.id === viewer.id}
           onClose={() => setFollowList(null)}
+        />
+      ) : null}
+      {profile.data ? (
+        <RankedTitlesSheet
+          category={titleList}
+          userId={profile.data.id}
+          name={profile.data.name}
+          viewerId={viewer.id}
+          isSelf={profile.data.id === viewer.id}
+          onPressTitle={(id) => {
+            setTitleList(null);
+            router.push(`/title/${id}`);
+          }}
+          onClose={() => setTitleList(null)}
         />
       ) : null}
     </Screen>

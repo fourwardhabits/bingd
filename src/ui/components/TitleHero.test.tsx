@@ -83,29 +83,21 @@ describe('the hero fade', () => {
   });
 
   /**
-   * **The alignment, recorded rather than re-litigated.**
+   * **The alignment, third pass — the earlier verdict had the mechanism wrong.**
    *
-   * Asked again in the founder's final pass, where the hero still read "somewhat like a
-   * cropped cutoff". The answer, checked against the arithmetic rather than adjusted by
-   * eye:
+   * The previous version of this comment concluded "no supported one-line change is an
+   * improvement" from the crop arithmetic, and the arithmetic was right: in a 1.62
+   * frame a backdrop loses only its sides, so no `contentPosition` could return the
+   * top. What it missed is that the top was not *cropped* — it was **covered**, by the
+   * transparent header the hero deliberately runs under. The founder proved it
+   * physically: pulling the scroll view down slid the artwork below the status bar and
+   * the composition was suddenly right.
    *
-   * `contentPosition="top center"` is what the Image carries, and expo-image does apply
-   * it — this test asserts the resolved object, not the string that was written.
-   *
-   * **For a real backdrop the vertical half is a no-op.** `cover` scales until both
-   * dimensions are filled. A 16:9 backdrop (1.78) in a 1.62 frame is wider than the
-   * frame once scaled to its height, so the crop comes off the *sides* and nothing is
-   * lost vertically at all. Top, centre and bottom would render identically. What the
-   * founder is seeing is the ~10% horizontal loss `HERO_RATIO` already documents, and
-   * no alignment value can return it: `left: '50%'` is the middle, and moving it left
-   * or right would drop one side of the frame entirely.
-   *
-   * **For the poster fallback the vertical half is load-bearing**, which is the case
-   * below. A 2:3 poster in a 1.62 frame is far taller than the frame, so `cover` takes
-   * the crop from the height — and taking it from the bottom keeps the part somebody
-   * composed. Centre or bottom would be a strictly worse choice there.
-   *
-   * So: no supported one-line change is an improvement, and the hero is left alone.
+   * `topInset` is that observation made the resting state (see `TitleHeroProps`). The
+   * image starts below the bar inside the same frame; the visible box is then *wider*
+   * than 16:9, `cover` flips to width-scaling, and the crop becomes vertical — which
+   * is what finally makes the top anchor load-bearing for backdrops too, not just for
+   * the poster fallback.
    */
   it('anchors the crop to the top, so faces survive it', async () => {
     const nodes = await treeOf(<TitleHero uri={BACKDROP} />);
@@ -123,6 +115,26 @@ describe('the hero fade', () => {
 
     expect(positioned).toHaveLength(1);
     expect(positioned[0]!.props.contentPosition).toEqual({ top: 0, left: '50%' });
+  });
+
+  /**
+   * The status-bar correction. The image starts below the inset inside an unchanged
+   * frame — so the artwork clears the bar the way the founder's pull-down showed it,
+   * and nothing beneath the hero moves.
+   */
+  it('starts the artwork below the status bar without growing the hero', async () => {
+    const bare = await treeOf(<TitleHero uri={BACKDROP} />);
+    const inset = await treeOf(<TitleHero uri={BACKDROP} topInset={59} />);
+
+    const imageOf = (nodes: typeof bare) => nodes.find((node) => node.props.source)!;
+    expect(imageOf(bare).style.top).toBe(0);
+    expect(imageOf(inset).style.top).toBe(59);
+
+    // The frame itself: same height either way. The inset is taken out of the image's
+    // box, not added to the page.
+    const frameOf = (nodes: typeof bare) =>
+      nodes.find((node) => typeof node.style.height === 'number' && !node.props.source)!;
+    expect(frameOf(inset).style.height).toBe(frameOf(bare).style.height);
   });
 
   it('draws a warm band and no artwork when there is none', async () => {

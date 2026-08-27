@@ -385,6 +385,38 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 > PRD §13 As-built; the row is an avatar, a name, a handle, one line of context and a
 > Follow control, and nothing else.
 
+> ### As built — 2026-08-27: Search compacts into its header, **People** is a chip, and profile stats open
+>
+> Three navigation changes from the external-beta polish tranche, all founder-requested
+> from physical device use.
+>
+> **The search field lives in the brand header row.** Search had spent two rows of chrome
+> — the bingd. header, then a separate full-width field — above every result. The field
+> now sits beside the wordmark in the same compact header treatment the other tabs give
+> their controls. Nothing below it changes.
+>
+> **The filter row is `All · Movies · TV · People`.** The 2026-08-19 block above rules out
+> a fourth chip, and the chip it ruled out is not this one: `users` sat among three
+> *title* filters while members were interleaved into the same list, so one control meant
+> two things. People is not a narrowing of titles — choosing it shows the member section
+> alone, and because the press itself is the statement of intent the relevance gate exists
+> to infer, the gate is lifted there: every display-name and @handle match shows, no
+> three-at-a-time cap. **All** still interleaves as before, members above titles, gate and
+> cap intact, so a plain title search looks exactly as it did.
+>
+> **The section is titled "People", no longer "Members".** The founder spent the word on
+> accounts — it is already the For You category — and one surface using it differently
+> was the inconsistency. The future actor-and-director search will need its own label;
+> recorded against [`deferred-roadmap.md`](./deferred-roadmap.md) §1.
+>
+> **A profile's Movies and TV seasons counts are controls.** On somebody's profile the two
+> collection stats were claims the reader could not check — Top Ranked shows six titles
+> and the counts assert the rest. Tapping either opens a sheet listing every title that
+> person has **ranked** in that category, most recently added first (`created_at`, not
+> rank position). The read is `rankings` under `rankings_read`, the same policy that
+> produced the counts, so the sheet can never show a title the counts did not admit;
+> logged-but-unranked titles, notes and watch dates stay owner-only (§22).
+
 ---
 
 ## 8. Scope by product stage
@@ -829,11 +861,12 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 > function the profile calls, so a suggestion showing 87% and a profile showing 87% cannot
 > disagree. Below the shared-title minimum there is no score and therefore no row.
 >
-> **Mutuals are counted, never named.** Every edge counted is one the reader could already
-> select individually — both parties must pass `can_view_profile` — so the count discloses
-> nothing new, and "Followed by Sarah and 2 others" was declined rather than built: it puts
-> a specific person's following list on somebody else's screen as a claim. The consequence
-> is that a private account the reader cannot view is not suggested here even though it is
+> **~~Mutuals are counted, never named.~~ Superseded 2026-08-27 — the mutuals have names;
+> the reversal is recorded in the As-built block below.** The original reasoning, kept for
+> the record: every edge counted is one the reader could already select individually —
+> both parties must pass `can_view_profile` — so the count discloses nothing new, and
+> naming was declined on a fall-back-if-in-doubt instruction. The part that stands: a
+> private account the reader cannot view is still not suggested here even though it is
 > *findable* by name; surfacing it would mean disclosing who follows it.
 >
 > **Suggestions exclude** the reader, anyone already followed, anyone already **asked**,
@@ -849,6 +882,35 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 >
 > **Contacts are deferred, not built** — see [`deferred-roadmap.md`](./deferred-roadmap.md)
 > §21. No permission is requested, no address book is read, and nothing is uploaded.
+
+> ### As built — 2026-08-27: **Mutuals · Matches** are chips, and the mutuals have names
+>
+> Two revisions to the People surface from the external-beta polish tranche.
+>
+> **The two stacked sections became two filter chips** — `Mutuals` and `Matches` — the
+> same compact selector treatment the title categories already use, because two lists
+> answering different questions read better chosen than scrolled. Each mode has its own
+> empty state naming its own cure (follow people / rank more titles); with both sources
+> empty the chips are not drawn at all and the single quiet sentence remains. The
+> taste-match scoring and the shared-title minimum are untouched: `taste_match` is still
+> the one algorithm, and below the minimum there is no score and no row.
+>
+> **The founder reversed the count-only decision** (`20260827000100`): a card saying
+> "1 mutual" without saying *who* asks the reader to follow a stranger on the strength of
+> a number, and on the physical device that read as broken rather than careful. The
+> privacy argument is completed rather than changed — every edge counted was always one
+> the reader could select individually (both parties pass `can_view_profile`, blocks and
+> suspension excluded by `can_discover_profile` on both ends); what had been withheld was
+> only the aggregation.
+>
+> - The card's context line names the connection: **`Mutual: Abisola`** for one,
+>   **`Abisola + 2 more`** for several. The server caps the inline list at three names;
+>   the line stays one line.
+> - The line is its own press target and opens a lightweight sheet listing the full set —
+>   `mutuals_with`, the same predicates as the count, so the sheet can never show a name
+>   the count did not include. Rows are informational (no follow control) and open the
+>   person's profile.
+> - The suggestion cards keep their shape: avatar, name, handle, one line, one control.
 
 > ### As built — 2026-08-26: who a recommendation may be sent to
 >
@@ -872,6 +934,13 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 > recipient list is now invalidated by every follow, unfollow, block, unblock and request
 > response, so it is current by the time the sheet next opens. Caching is unchanged
 > otherwise; nothing was globally disabled to fix it.
+>
+> **Added 2026-08-27: the picker is searchable.** *Send to* had a search field only past a
+> hidden list-length threshold, which on the device read as a missing feature; the field
+> now appears whenever there is anybody to filter, matching display name and @handle.
+> Search narrows the list and nothing else — eligibility, the one-way follow rule, the
+> delivered-versus-pending split and the pending cap of 5 per sender→recipient pair are
+> exactly as specified above.
 
 ### Recommendation engine — public-alpha design
 
@@ -1141,7 +1210,9 @@ Never request push permission at first launch. Request after the user's first su
 
 Reviewed at 23f PASS. Where this block and the v1 event set above disagree, this block is what ships.
 
-**Ten notification types.** The canonical names are `follow`, `follow_request`, `follow_approved`, `comment`, `reaction`, `watch_tag`, `recommendation`, `invite_activated`, `invite_welcome`, `award_earned`.
+**Eleven notification types.** The canonical names are `follow`, `follow_request`, `follow_approved`, `comment`, `reaction`, `watch_tag`, `recommendation`, `invite_activated`, `invite_welcome`, `friendship`, `award_earned`.
+
+> **`friendship` added 2026-08-27** (`20260827000200`). The accepter's own durable record of approving a follow request — see the 2026-08-27 As-built block below. Deliberately in **no category** (the unmapped-type rule delivers it unconditionally: a record of your own action is not a preference axis) and **not push-eligible** (a phone buzzing about the reader's own tap is noise).
 
 > **`invite_welcome` added 2026-08-23** (`20260823000100`). The only type whose recipient is a *brand-new* account: it is filed for the **invitee** by `redeem_invite`, names the inviter, and is the first thing anybody sees in Bingd. It exists because the invitee was the one party to an invitation being told nothing — §17 already creates their follow and already notifies the inviter, so a person who joined through a friend's link arrived to a follow they never watched happen and an empty inbox. A beta tester reported it as a Feed that starts empty.
 >
@@ -1183,6 +1254,7 @@ Each type has an ordered chain whose last link always resolves. Staleness is rea
 | `follow_request` | requester's profile | unavailable notice |
 | `follow` | follower's profile | unavailable notice |
 | `follow_approved` | approver's profile | unavailable notice |
+| `friendship` | requester's profile | unavailable notice |
 | `comment` | the title | unavailable notice |
 | `reaction` | the title | unavailable notice |
 | `watch_tag` | the Movie or Season | unavailable notice |
@@ -1200,6 +1272,28 @@ Each type has an ordered chain whose last link always resolves. Staleness is rea
 - **The scheduled nudge** does not exist. It was deferred with push and stays deferred: nothing drains `push_outbox` on a timer, so it is the scheduler that is missing rather than the delivery path. [`deferred-roadmap.md`](./deferred-roadmap.md) §4.
 - **`invite_activated` gained its writer on 2026-08-19** (`20260819000500`) and is no longer in this list. It is filed by `_maybe_activate_invite` at the activation transition — server-side, once, and not from a client observing a column. It respects the `invites` category, is not written across a block, and is not written when the inviter has gone. §17 As built.
 - **`award_earned` has no writer**, and this is a disposition rather than an omission. Award tiers are computed entirely on the device from raw table reads; **no durable state records which tier an account has reached**, so a *crossing* cannot be distinguished from a *state*, and exactly-once delivery is impossible without an unlock ledger. An award notification that fires twice is worse than one that never fires. [`deferred-roadmap.md`](./deferred-roadmap.md) §5.
+
+### As built — 2026-08-27: acceptance leaves a record, and a comment push carries the comment
+
+Two founder corrections from physical beta use, shipped in the external-beta polish tranche.
+
+**Accepting a follow request files a durable `friendship` record** (`20260827000200`). Before this, approval deleted the actionable `follow_request` row and nothing replaced it — the Bell kept every social fact except the one where two people connected. The shape chosen is **resolve-and-create**, not transform:
+
+- The `follow_request` row is still cleared exactly as before; an Accept control must never be drawable twice. The requester's own `follow_approved` notification is untouched.
+- Approval additionally inserts one `friendship` row to the **accepter**, actor the requester, born **pre-read** — it reports the reader's own tap, and a row born unread would badge an action they just took.
+- **Exactly once, with no new machinery**: the insert rides the same operation-id claim and consumption of the pending `follows` row, under the same pair lock, that has always made approval single-shot. A retried operation returns `already_applied` before touching anything; a second approval finds no pending row and raises before the insert commits.
+- `payload.mutual` freezes whether the accepter also followed the requester **at the moment of acceptance** — a later unfollow does not rewrite what the row said. The Bell renders the mutual case as **"You and Abisola are now friends"** and the one-way case as the ordinary "Abisola now follows you", with a follow-back control offered exactly when the relationship gate would show one.
+- Routing: the requester's profile, same chain as the follow family.
+
+**A comment push leads with the comment** (`20260827000300`). The founder's report: the visible line was all metadata — who, that they commented, a long title — and the thing the person wrote was nowhere. Comment pushes are now **title: "Abisola commented" · body: "“That ending was wild” · Spider-Man: Far From Home"**.
+
+This deliberately relaxes exactly one cell of the no-free-text-in-push rule, on three conditions enforced server-side in `claim_push_batch`:
+
+1. **Already authorised** — the recipient is the activity's owner or a replied-to commenter; the comment is content written *to* them, readable in full one tap away.
+2. **Never a spoiler** — a spoiler-marked comment ships no excerpt (the author asked for a tap between reader and text; a lock screen has no tap) and falls back to the metadata sentence.
+3. **Resolved at claim time** — a comment deleted before the drain yields no excerpt and the copy falls back rather than quoting something retracted.
+
+The server carries at most 180 characters; the sender tidies to one line and elides at 120. Reviews, notes, bios and search terms remain structurally excluded — `claim_push_batch` has no column for them.
 
 ---
 

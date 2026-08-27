@@ -1,7 +1,7 @@
 import { forwardRef, useId, useImperativeHandle, useRef } from 'react';
 import { StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
 
-import { theme } from '../tokens';
+import { inputText, theme } from '../tokens';
 import { useEnsureVisible } from './KeyboardScreen';
 import { Text } from './Text';
 
@@ -58,7 +58,11 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
         accessibilityLabelledBy={`${id}-label`}
         accessibilityHint={description}
         placeholderTextColor={theme.text.tertiary}
-        style={[styles.input, Boolean(error) && styles.inputError]}
+        style={[
+          styles.input,
+          rest.multiline && styles.inputMultiline,
+          Boolean(error) && styles.inputError,
+        ]}
         onFocus={handleFocus}
         {...rest}
       />
@@ -81,7 +85,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface.raised,
     paddingHorizontal: theme.space[3],
     color: theme.text.primary,
-    ...theme.typography.body,
+    // `inputText`, not `typography.body`: a line-height on a single-line iOS
+    // TextInput sinks the text below the field's visual centre.
+    ...inputText,
   },
+  // Multiline opts back into vertical spacing: with `paddingVertical: 0` the
+  // first line of the bio would touch the border.
+  inputMultiline: { paddingVertical: theme.space[2], textAlignVertical: 'top' },
   inputError: { borderColor: theme.semantic.danger },
 });
