@@ -161,16 +161,12 @@ export function logicalName(url: string): string {
 /**
  * Whether the recorder is currently ignoring work.
  *
- * **Review 51's third finding, and it is a subtle one: the sheet was changing the evidence
- * it was reading.** Building the report asks for the session and the two onboarding counts,
- * and those are ordinary Supabase requests — so they entered the same thirty-record ring,
- * bumped the same `repeat` counters, and on a busy session could evict the very records
- * carrying the failure. A report that pushes the failure out of its own buffer is worse
- * than no report.
- *
- * So the reads the sheet makes on its own behalf are excluded. Synchronous flag rather than
- * anything cleverer: the suppressed region is one `await` chain in one component, and a
- * counter keeps nested or overlapping opens honest.
+ * Review 51 added this so the Diagnostics sheet's own reads would not enter the ring;
+ * review 58 reversed that use, because the suppression was a *global* blind window — for
+ * its whole duration every concurrent app request went unrecorded, which is exactly the
+ * evidence the sheet is opened to capture. Nothing in the app calls it any more; it stays
+ * because the primitive is sound and tested, and a future caller with a genuinely
+ * self-referential burst may need it — with the blind-window cost now written down.
  */
 let suppressed = 0;
 

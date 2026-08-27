@@ -73,6 +73,8 @@ export type ReportInput = {
   flight: FlightSnapshot;
   queries: QueryFacts[];
   lastSession: LastSession | null;
+  /** True when the tail read *timed out* — a storage finding, not an absence. */
+  lastSessionUnreadable?: boolean;
 };
 
 /**
@@ -182,6 +184,32 @@ export function formatReport(input: ReportInput): string {
   }
   if (!flight.network.length) lines.push('  (none)');
 
+  /**
+   * The heat question, answered from data already in hand: how much network work started
+   * recently, with the ring's own span stated so a full ring cannot masquerade as a quiet
+   * one. An idle app should show zero here — a number that stays high while the phone
+   * sits untouched is the thermal finding, named without a profiler.
+   */
+  const RECENT_MS = 60_000;
+  const recent = flight.network.filter(
+    (record) => flight.uptimeMs - record.startedAt <= RECENT_MS,
+  ).length;
+  const oldestRecord = flight.network[0];
+  const spanSeconds = oldestRecord
+    ? Math.round((flight.uptimeMs - oldestRecord.startedAt) / 1000)
+    : 0;
+  lines.push('');
+  lines.push('ACTIVITY');
+  // A ten-second-old process has not observed sixty seconds — review 58's point: an
+  // honest window label, or a startup burst reads as a minute of sustained load.
+  const windowSeconds = Math.min(60, Math.max(1, Math.round(flight.uptimeMs / 1000)));
+  lines.push(
+    `  last ${windowSeconds}s     ${recent} requests started${windowSeconds < 60 ? ' (process younger than the window)' : ''}`,
+  );
+  lines.push(
+    `  ring span    ${spanSeconds}s${flight.network.length >= 30 && spanSeconds < 60 ? ' (ring rolled inside 60s — real total is higher)' : ''}`,
+  );
+
   lines.push('');
   lines.push('QUERIES');
   lines.push('  name                      status     fetch      fails  data   updated');
@@ -212,6 +240,13 @@ export function formatReport(input: ReportInput): string {
   lines.push('COUNTS');
   for (const [key, value] of counters) lines.push(`  ${pad(key, 34)} ${value}`);
   if (!counters.length) lines.push('  (none)');
+
+  if (input.lastSessionUnreadable) {
+    lines.push('');
+    lines.push('PREVIOUS SESSION');
+    lines.push('  unreadable — the storage read did not answer in time. On this device');
+    lines.push('  that is a finding: the same Keychain pathology the report is about.');
+  }
 
   if (lastSession) {
     lines.push('');

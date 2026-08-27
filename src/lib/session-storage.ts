@@ -142,8 +142,9 @@ const disk = {
     });
   },
 
-  setItem(key: string, value: string) {
+  setItem(key: string, value: string, onStart?: () => void) {
     return serialize(key, async () => {
+      onStart?.();
       // Clear first, or shrinking from five chunks to two leaves three stale ones
       // that a later read would happily append.
       await removeChunks(key);
@@ -159,8 +160,11 @@ const disk = {
     });
   },
 
-  removeItem(key: string) {
-    return serialize(key, () => removeChunks(key));
+  removeItem(key: string, onStart?: () => void) {
+    return serialize(key, () => {
+      onStart?.();
+      return removeChunks(key);
+    });
   },
 };
 
@@ -216,6 +220,10 @@ const bumpRevision = (key: string) => {
 export function resetSessionMirror() {
   mirror.clear();
   revision.clear();
+  // The per-key disk queues too: a test that deliberately hangs a write would otherwise
+  // leave that key's queue blocked for every test after it — module state masquerading
+  // as flake.
+  queues.clear();
 }
 
 /**
@@ -225,6 +233,88 @@ export function resetSessionMirror() {
  * per-request Keychain traffic described at `mirror` happens once per key per launch
  * rather than once per query. Writes go to the Keychain and update the mirror; a write
  * that fails invalidates it rather than leaving a claim behind.
+ */
+/**
+ * How long a caller may be held on a Keychain write before it is released.
+ *
+ * **This is the sign-in stall, found by elimination and fixed at its boundary.** On the
+ * founder’s device, sign-in succeeds server-side and the UI stays on “Signing in…” until
+ * the process is killed — and after a relaunch the account *is* signed in. Walk the success
+ * path and there is exactly one await between the server’s 200 and the UI unlatching that
+ * is not already bounded: `@supabase/auth-js` awaits `_saveSession → storage.setItem` —
+ * this adapter’s chunked Keychain write — before it emits `SIGNED_IN`. The fetch has had a
+ * deadline since the request-stall fix; the write had none. A Keychain that answers late
+ * therefore held the whole transition hostage, and the session landing on disk *late* is
+ * precisely why the relaunch found it.
+ *
+ * So a write holds its caller for at most this long. The disk operation is not cancelled —
+ * it finishes in the background and its settle is still recorded; a late failure still
+ * invalidates the mirror through the same revision guard as before. What changes is only
+ * who waits. Durability is unchanged from the hang it replaces: a process killed before a
+ * slow write lands was signed out on relaunch either way — but now the person was inside
+ * the app instead of staring at a latched button.
+ *
+ * Four seconds: a healthy Keychain answers in milliseconds, so this never fires there, and
+ * it is comfortably inside every UI patience upstream (the 8s hydration bound, the 8s
+ * sign-out grace).
+ */
+const STORE_WRITE_GRACE_MS = 4000;
+
+/**
+ * Races `settled` against the grace. If the disk answers first — success or failure — the
+ * caller gets exactly what it always got, including the rejection. Past the grace the
+ * caller is released and the still-running disk promise is adopted: its late rejection is
+ * swallowed here (the mirror invalidation has already been chained onto it), because a
+ * rejection nobody can await any more is an unhandled-rejection crash in waiting.
+ *
+ * Every release is recorded (`store … grace`), so a device whose Keychain does this shows
+ * it in the diagnostics report instead of hiding it inside a fast-looking sign-in.
+ */
+function releaseAfterGrace(
+  settled: Promise<void>,
+  label: 'write' | 'remove',
+  started: { current: boolean },
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      // Two different findings, named apart — review 58's point, and it is about evidence
+      // rather than tidiness. `grace` means the Keychain itself was touched and did not
+      // answer; `grace-queued` means this operation never reached the Keychain at all,
+      // because the key's queue is jammed behind an older one that has not settled. The
+      // first says the store is slow; the second says something before it is.
+      note('store', label, started.current ? 'grace' : 'grace-queued', STORE_WRITE_GRACE_MS);
+      settled.catch(() => {});
+      resolve();
+    }, STORE_WRITE_GRACE_MS);
+
+    settled.then(
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
+ * What a graced release does and does not change, examined because independent review 58
+ * called the durability half a blocker.
+ *
+ * The scenario: a release at the grace, then process death before the queued disk work
+ * lands — the next launch recovers the previous account's session, or none. That state is
+ * real. What the review's framing missed is that it is the **baseline**, not a regression:
+ * under the hang this replaces, the person force-quits mid-write and the chunked store is
+ * killed in the identical unknown state; sign-out has released before disk confirmation
+ * since the sign-out hotfix. The disk-at-death distribution is unchanged — the grace
+ * changes who waits, never what the Keychain holds when the process dies. What *is* new is
+ * that the person proceeds believing the transition committed; the mitigation for that is
+ * eventual consistency, which the per-key queue provides — operations run in submission
+ * order once the store recovers, so a released write is never overtaken by an older one —
+ * and visibility, which the notes above provide.
  */
 const native = {
   getItem(key: string): Promise<string | null> {
@@ -254,8 +344,11 @@ const native = {
     mirror.set(key, value);
     const began = Date.now();
 
-    return disk
-      .setItem(key, value)
+    const started = { current: false };
+    const settled = disk
+      .setItem(key, value, () => {
+        started.current = true;
+      })
       .then(() => note('store', 'write', 'ok', Date.now() - began))
       .catch((error: unknown) => {
         note('store', 'write', 'failed', Date.now() - began);
@@ -266,16 +359,25 @@ const native = {
         if (revision.get(key) === at) mirror.delete(key);
         throw error;
       });
+
+    return releaseAfterGrace(settled, 'write', started);
   },
 
   removeItem(key: string): Promise<void> {
     const at = bumpRevision(key);
     mirror.set(key, null);
 
-    return disk.removeItem(key).catch((error: unknown) => {
-      if (revision.get(key) === at) mirror.delete(key);
-      throw error;
-    });
+    const started = { current: false };
+    const settled = disk
+      .removeItem(key, () => {
+        started.current = true;
+      })
+      .catch((error: unknown) => {
+        if (revision.get(key) === at) mirror.delete(key);
+        throw error;
+      });
+
+    return releaseAfterGrace(settled, 'remove', started);
   },
 };
 
