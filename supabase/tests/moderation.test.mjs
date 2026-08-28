@@ -505,6 +505,19 @@ describe('the guard is wired in, not merely present', () => {
     // 20260817000400. A stable pairwise read, filtered by can_view_profile from the
     // caller's own side. A suspended *subject* is already absent from it.
     'taste_match',
+    // 20260827000800. The rows behind following_score, under that aggregate's own
+    // predicate — approved follows, can_view_profile from the caller's side. The
+    // same argument as following_score: a suspended caller sees only their own
+    // follow list, and a suspended subject is absent from everybody's rows.
+    'following_ratings',
+    // 20260827000900. The identities behind a comment's reaction aggregate, under
+    // activity_comments' own three gates. Stable read; a suspended subject is
+    // refused by can_view_profile in every one of them.
+    'comment_reactors',
+    // 20260827001100. One integer behind can_i_view. A suspended subject is
+    // already refused by that oracle, and a suspended caller learns nothing a
+    // viewable profile was not already telling them.
+    'invited_signup_count',
     // 20260817000600. The caller's own inbox and nothing else. Suspension is about
     // what an account may do *to other people*; it does not make somebody unable to
     // read what was sent to them, and hiding a pending follow request from a

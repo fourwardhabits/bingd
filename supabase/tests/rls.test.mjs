@@ -434,6 +434,71 @@ describe('the invite attribution behind the award', () => {
       [],
     );
   });
+
+  /**
+   * The public half, added 2026-08-27 (20260827001100): the COUNT became a public
+   * achievement metric by founder decision, while every row stayed two-party. One
+   * definer scalar, gated on can_i_view — so these tests are the whole contract:
+   * parity between the owner and a visitor, a refusal that is not a zero, and a
+   * surface with nowhere for an identity to hide.
+   */
+  describe('the public count over the private rows', () => {
+    it('shows a visitor the same number the owner counts', async () => {
+      const mine = await t.asUser(alice, () =>
+        t.sql(`select invited_signup_count($1) as n`, [alice]),
+      );
+      const theirs = await t.asUser(mallory, () =>
+        t.sql(`select invited_signup_count($1) as n`, [alice]),
+      );
+      // One activated, one merely accepted — both sheets say 1.
+      assert.equal(mine.rows[0].n, 1);
+      assert.equal(theirs.rows[0].n, 1, 'the visitor and the owner disagree');
+    });
+
+    it('still counts activation, not acceptance', async () => {
+      // priya's row is accepted and dormant; the public number must be the same
+      // strict predicate the owner's award has always used, or the two drift.
+      const { rows } = await t.asUser(mallory, () =>
+        t.sql(`select invited_signup_count($1) as n`, [alice]),
+      );
+      assert.equal(rows[0].n, 1);
+    });
+
+    it('refuses a viewer the profile itself would refuse, with null and not zero', async () => {
+      await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [
+        alice,
+        mallory,
+      ]);
+      try {
+        const { rows } = await t.asUser(mallory, () =>
+          t.sql(`select invited_signup_count($1) as n`, [alice]),
+        );
+        // Null is "you may not ask", which the profile's own refusal already told
+        // them. Zero would be a statement about alice's invites, which is exactly
+        // what a blocked viewer must not receive.
+        assert.equal(rows[0].n, null);
+      } finally {
+        await t.sql(`delete from blocks where blocker_id = $1 and blocked_id = $2`, [
+          alice,
+          mallory,
+        ]);
+      }
+    });
+
+    it('gives the visitor the number and not one row, column, or invitee', async () => {
+      // The function's whole surface is a scalar. The rows behind it still answer
+      // nothing to a third party — the stranger test above — so this pins that the
+      // new object did not quietly widen the table it aggregates.
+      const { rows } = await t.asUser(mallory, () =>
+        t.sql(`select * from invited_signup_count($1)`, [alice]),
+      );
+      assert.deepEqual(Object.keys(rows[0]), ['invited_signup_count']);
+      const raw = await t.asUser(mallory, () =>
+        t.sql(`select invitee_id, token_id, accepted_at from invite_attributions`),
+      );
+      assert.deepEqual(raw.rows, [], 'the aggregate release widened the row policy');
+    });
+  });
 });
 
 /**

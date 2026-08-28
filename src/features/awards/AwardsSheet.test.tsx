@@ -33,7 +33,7 @@ jest.mock('@/lib/supabase', () => {
   const { createPostgrest } = require('@/test-utils/postgrest');
   const client = createPostgrest();
   (globalThis as { __pg?: unknown }).__pg = client;
-  return { supabase: { from: client.from }, startSessionRefresh: () => () => {} };
+  return { supabase: { from: client.from, rpc: client.rpc }, startSessionRefresh: () => () => {} };
 });
 
 const pg = () =>
@@ -131,6 +131,8 @@ beforeEach(() => {
   pg().reads.length = 0;
   pg().broken.clear();
   pg().between = () => {};
+  for (const key of Object.keys(pg().rpcAnswers)) delete pg().rpcAnswers[key];
+  pg().rpcCalls.length = 0;
 });
 
 /**
@@ -1091,7 +1093,13 @@ describe('somebody else’s awards', () => {
       ...over,
     }));
 
-  const visit = () => open({ viewerId: 'viewer-1', userId: THEM });
+  const visit = () => {
+    // The visitor path reads the invite count through its rpc; a null reply is the
+    // oracle refusing and renders as unavailable, so every visit that is not about
+    // that refusal seeds a real number. `??=` lets a test answer first.
+    pg().rpcAnswers['invited_signup_count'] ??= 0;
+    return open({ viewerId: 'viewer-1', userId: THEM });
+  };
 
   it('computes the target’s progress: the Ravi fixture', async () => {
     // 34 ranked, logged movies; no TV; viewed by a different signed-in account.
@@ -1124,9 +1132,12 @@ describe('somebody else’s awards', () => {
     // asking `user_media` about somebody else is a request whose answer is a lie.
     expect(mockAsked()).toContain('logged_collection');
     expect(mockAsked()).not.toContain('user_media');
-    // And the two two-party tables are not asked at all: their zero is policy.
+    // The sent-recommendations table is not asked at all: its zero is policy.
     expect(mockAsked()).not.toContain('title_recommendations');
+    // And the invite rows are never selected either — the count arrives through the
+    // definer scalar, which is the entire public surface of the invite graph.
     expect(mockAsked()).not.toContain('invite_attributions');
+    expect(pg().rpcCalls).toEqual([{ name: 'invited_signup_count', args: { p_user: THEM } }]);
   });
 
   it('matches the sheet the owner sees, for everything public by contract', async () => {
@@ -1175,15 +1186,36 @@ describe('somebody else’s awards', () => {
     expect(pg().reads.find((r) => r.table === 'rankings')?.filters.user_id).toBe(THEM);
   });
 
-  it('says a two-party fact is theirs to see, not zero and not an error', async () => {
+  it('says the one remaining two-party fact is theirs to see, not zero and not an error', async () => {
     seed('logged_collection', loggedMovies(1));
     await visit();
 
     expect(screen.getByLabelText('Hype Courier. Only they can see this one')).toBeTruthy();
-    expect(screen.getByLabelText('Invite Instigator. Only they can see this one')).toBeTruthy();
-    // Not the apology, and not a countable zero: nothing failed and nothing is known.
+    // Not the apology: nothing failed and nothing is known.
     expect(screen.queryByText('Could not load this one')).toBeNull();
-    expect(screen.queryByText(/0 \/ 3\b/)).toBeNull(); // Invite Instigator's zero
+  });
+
+  it('shows a visitor the target’s Invite Instigator progress — the founder’s 2 / 3', async () => {
+    // The count is public achievement data (founder, 2026-08-27); the graph is not.
+    // Two activated invites read exactly as they do on the owner's sheet.
+    pg().rpcAnswers['invited_signup_count'] = 2;
+    seed('logged_collection', loggedMovies(1));
+    await visit();
+
+    expect(screen.getByLabelText(/^Invite Instigator\..*2 of 3$/)).toBeTruthy();
+    expect(count('2 / 3')).toBeTruthy();
+    expect(screen.queryByText('Only they can see this one')).not.toBeNull(); // Hype Courier only
+  });
+
+  it('reads unavailable, never zero, when the invite count cannot be fetched', async () => {
+    // A refusal or a failure is not "brought nobody". `broken` fails the rpc the way
+    // a broken table read fails.
+    pg().broken.add('invited_signup_count');
+    seed('logged_collection', loggedMovies(1));
+    await visit();
+
+    expect(screen.getByLabelText('Invite Instigator. Could not load this one')).toBeTruthy();
+    expect(screen.queryByText('0 / 3', { includeHiddenElements: true })).toBeNull();
   });
 
   it('counts their public reviews without ever holding the note text', async () => {

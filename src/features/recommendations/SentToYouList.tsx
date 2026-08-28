@@ -52,6 +52,9 @@ export function SentToYouList({ rows, saved, busyId, onOpen, onToggleSave }: Sen
               // it in: whose recommendation is this, and how recent.
               secondary={`${row.senderName} recommended this · ${relativeTime(row.recommendedAt)}`}
               tertiary={metadataFor(row)}
+              // Three lines of text per row; the compact padding left the sender
+              // sentence nearly touching the divider (founder, 2026-08-27).
+              spacious
               trailing={
                 <View style={styles.trailing}>
                   {unopened ? (

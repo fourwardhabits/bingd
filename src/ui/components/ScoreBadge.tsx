@@ -5,7 +5,7 @@ import { BUCKET_LABEL, formatScore, type Bucket } from '@/features/collection/sc
 import { theme } from '../tokens';
 import { Text } from './Text';
 
-export type ScoreBadgeSize = 'md' | 'sm' | 'lg';
+export type ScoreBadgeSize = 'md' | 'sm' | 'lg' | 'xl';
 
 export type ScoreBadgeProps = {
   /** Omit for a title that is logged but not yet compared. */

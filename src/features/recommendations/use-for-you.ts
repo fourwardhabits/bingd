@@ -26,6 +26,7 @@ import {
   type Taste,
 } from './rank';
 import { noteSlateOnScreen, useRecommendationArrangement } from './session-seed';
+import { useDismissedTitles } from './use-dismissed';
 
 /**
  * The data half of For You: anchors, candidates, and what to leave out.
@@ -390,6 +391,19 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
   //
   // `useWatchlist` was read here too and no longer is: see the note on `inputs`.
   const watched = useWatched(userId);
+  /**
+   * Dismissed titles, subtracted in `select` and deliberately NOT in the key.
+   *
+   * The bookmark lesson (`inputs` below) applies verbatim: putting this set in the
+   * key would make every X-tap a new cache entry with no data in it — skeleton,
+   * white flash, scroll position gone — for a wall that differs by one tile. The
+   * subtraction in `select` re-derives from data already in hand, so the card
+   * disappears on the tap, and because it runs on every read of the cache it also
+   * covers a slate scored before the dismissal existed. What the queryFn's own
+   * `exclude` gains by not knowing about dismissals is honesty: the cached scoring
+   * is a pure function of what its key says, and the viewer's vetoes are an overlay.
+   */
+  const dismissed = useDismissedTitles(userId);
 
   // Which arrangement this session is showing, and what it has already shown. Not part
   // of the key — see `select`.
@@ -455,7 +469,16 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
     // a different genre picked are a different slate, and a shared key would serve
     // whichever the reader asked for first.
     queryKey: ['for-you', userId, medium, inputs, filters ?? emptyFilters()],
-    enabled: Boolean(userId) && movies.isSuccess && seasons.isSuccess && watched.isSuccess,
+    // The dismissed read gates too — settled, not necessarily successful: waiting
+    // for it stops a cold wall drawing a tile the reader vetoed last week and
+    // yanking it a beat later, while a *failed* read fails open. A wall without
+    // vetoes is degraded; no wall at all because a veto list timed out is worse.
+    enabled:
+      Boolean(userId) &&
+      movies.isSuccess &&
+      seasons.isSuccess &&
+      watched.isSuccess &&
+      !dismissed.isPending,
     // See the note on `inputs`: everything the viewer can change is in the key, and
     // what is left changes on a six-hour clock at fastest.
     staleTime: 30 * 60_000,
@@ -480,14 +503,22 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
      * new wall, parked, new exposure, new wall.
      */
     select: useCallback(
-      (scoring: ForYouScoring): ForYouSlate => ({
-        ...scoring,
-        items: diversify(scoring.scored, SLATE_SIZE, arrangement.seed, {
-          current: arrangement.current,
-          seen: arrangement.seen,
-        }),
-      }),
-      [arrangement],
+      (scoring: ForYouScoring): ForYouSlate => {
+        // The veto first, so a dismissed title costs a wall slot to a neighbour
+        // rather than leaving a hole: diversify picks its twenty from a pool that
+        // no longer contains it.
+        const vetoed = dismissed.data?.size
+          ? scoring.scored.filter((item) => !dismissed.data.has(item.mediaItemId))
+          : scoring.scored;
+        return {
+          ...scoring,
+          items: diversify(vetoed, SLATE_SIZE, arrangement.seed, {
+            current: arrangement.current,
+            seen: arrangement.seen,
+          }),
+        };
+      },
+      [arrangement, dismissed.data],
     ),
     queryFn: async (): Promise<ForYouScoring> => {
       const taste = tasteFrom(

@@ -314,6 +314,13 @@ than one that never fires.
 `awards` category defaulting off, the preference row, and the route to the Awards sheet.
 The day a ledger lands, the writer is the only new part.
 
+**A constraint recorded now, for the day the writer lands (2026-08-27).** An
+award-earned post or notification for **Invite Instigator** may carry the award name and
+the badge — *earned Invite Instigator* — and may never name an invitee. The count became
+public achievement data on 2026-08-27 (`invited_signup_count`, PRD §14's Awards block);
+the identities behind it did not, and a celebration is not a licence to leak the graph
+it celebrates.
+
 **Revisit when.** A durable unlock or tier ledger is built — which is a migration and a
 review, not an afternoon.
 
@@ -1170,6 +1177,70 @@ other, cannot tell us.
 **Depends on.** A privacy-policy revision · store-listing disclosures for iOS and Android ·
 a matching scheme · a contacts permission, which is a **native** change and therefore
 downstream of the RC binary.
+
+---
+
+## 22. Per-title watch history — revisiting each watch
+
+**Deferred by the founder, 2026-08-27**, in the tranche that reduced the log sheet to
+one Note row.
+
+**What it is.** A future surface on the title page — a tab or section in the row Cast /
+Videos / Details / Reviews already occupies — where a reader revisits each of their own
+watches of this title: the watch dates, the note or review **as it stood at that
+watch**, who they watched with, and repeated watches as separate entries.
+
+**Why it is wanted.** Rank again already records that a second watch happened (PRD §10),
+and the one-note model deliberately keeps a single current text per title — so the
+history of an opinion is overwritten by its latest edit. The founder's intent is that
+revisiting a title should eventually read like a diary of that title, not only its
+current state.
+
+**Why it is deferred.** Today's model is **one current note per title, for good** — §19
+is the schema design per-watch entries would live in (§19.4's table), and §19.13's
+verdict that building it now is not friend-beta-safe stands. This surface is the
+*reader* of that model, and it must not complicate the one-note model on its way in: no
+second composer, no per-watch visibility matrix, no "which note is canonical" question.
+The writing surface stays exactly as decided on 2026-08-27; this entry is about reading
+what the future table would hold.
+
+**Revisit when.** §19 is built — this is its natural companion surface, not a separate
+schema decision.
+
+**Depends on.** The §19 watch-history table · the title page's tab row
+(`design/screens.md` §6) · a decision on how a note edit is snapshotted per watch
+(§19.14 territory).
+
+---
+
+## 23. Match v2 — broader taste similarity
+
+**Deferred by the founder, 2026-08-27**, in the audit that fixed Match's false precision
+(`20260827001000`, PRD §13).
+
+**What it is.** Match beyond exactly-shared titles: content-based taste profiles
+(genres, people, eras) and collaborative filtering, so two people with adjacent but
+non-overlapping catalogues can still read as compatible.
+
+**Why it is wanted.** The founder's intent, recorded with the deferral rather than lost
+to it: Match should eventually capture broader taste similarity, not only agreement over
+the titles both accounts happen to have ranked. In a small network, exact overlap is the
+scarcest input there is.
+
+**Why it is deferred.** Both candidate mechanisms were researched in the audit and
+neither survives the current constraints. The population is small and sparse — cold-start
+territory for collaborative filtering — and a genre-profile similarity over
+`media_items.genres` would put confident-looking numbers on pairs with **no shared
+evidence at all**, which is precisely the failure the 2026-08-27 fix removed. Rebuilding
+that failure a week later under a different name would be the same defect with better
+branding.
+
+**Revisit when.** Enough accounts and rankings that collaborative signal is real — and
+any v2 must keep the evidence-shrinkage property the fix established: a number's
+confidence must be visible in the number.
+
+**Depends on.** A larger ranked population · a content-profile design that states its
+evidence · `taste_match` remaining the single algorithm every surface calls.
 
 ---
 

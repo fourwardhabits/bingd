@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { AppState, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { invalidateAfterCollectionChange } from './invalidate';
 import { diagnose } from '@/lib/diagnose';
@@ -116,18 +116,18 @@ export type LogSheetProps = {
    */
   postRank?: PostRank | null;
   /**
-   * Open the writing composer as soon as the sheet appears, on the named kind.
+   * Open the writing composer as soon as the sheet appears.
    *
-   * The Ranked menu's Write review and Add private note rows are what use it: a row
-   * that names a piece of writing should land the reader in it rather than in a sheet
-   * where they have to find the row again.
+   * The Ranked menu's writing row is what uses it: a row that names a piece of
+   * writing should land the reader in it rather than in a sheet where they have to
+   * find the row again.
    *
-   * **It cannot publish anything by itself.** It seeds which row is open, and the
-   * visibility still resolves the way it always has — a note that already exists opens
-   * on the value it was *saved* with, whichever door was used. So asking for `public`
-   * on a title carrying a private note opens the private note, with the Review row
-   * directly above it and its confirmation behind that tap. That ordering is the whole
-   * privacy property of this sheet and this prop is deliberately too weak to break it.
+   * **It cannot publish anything by itself.** With one Note row the value only ever
+   * opens the composer; which visibility the writing carries still resolves the way
+   * it always has — a note that already exists opens on the value it was *saved*
+   * with, whichever door was used, and only the named value can seed a note that
+   * does not exist yet. That ordering is the whole privacy property of this sheet
+   * and this prop is deliberately too weak to break it.
    */
   openWriting?: NoteVisibility | null;
   /**
@@ -176,8 +176,9 @@ export function LogSheet({
 
   // Keyed by the title, and unmounted entirely when there is none. Both matter: a sheet
   // that stays mounted between titles inherits the last one's bucket, its message and —
-  // worst of all — its unsaved note, which then gets filed against whatever is on screen
-  // now.
+  // worst of all — its note overlay, which would then be filed against whatever is on
+  // screen now. The unmount is also what makes the autosave's last-net flush safe: the
+  // flush armed by the old body still holds the old title.
   return (
     <Body
       key={title.id}
@@ -194,6 +195,29 @@ export function LogSheet({
 }
 
 type Expanded = 'notes' | 'date' | 'who' | null;
+
+/**
+ * How long typing may rest before the note is persisted.
+ *
+ * Long enough that a sentence in progress is not a write per word; short enough that
+ * "I typed it, then the app was killed" has a saved note behind it in almost every
+ * real sequence. Every path that leaves the field — blur, collapsing the row, the
+ * sheet closing, the app backgrounding, unmount — flushes immediately rather than
+ * waiting this out.
+ */
+const AUTOSAVE_DELAY = 1200;
+
+/**
+ * Whichever of two `note_updated_at` readings is newer, by instant rather than by
+ * string: both come from the same server, but one arrives through PostgREST's row
+ * serialisation and the other through a jsonb reply, and assuming their text forms
+ * sort identically is a bet this comparison does not need to make.
+ */
+const newerVersion = (a: string | null, b: string | null): string | null => {
+  if (!a) return b;
+  if (!b) return a;
+  return Date.parse(a) >= Date.parse(b) ? a : b;
+};
 
 /** PRD §14. Mirrors `watch_tags.max_per_watch`, which is what actually enforces it. */
 const MAX_COMPANIONS = 10;
@@ -369,6 +393,25 @@ function Body({
     dateQueue.current = next.catch(() => {});
     return next;
   };
+
+  /**
+   * The newest `note_updated_at` this sheet has seen, from either writer's reply.
+   *
+   * `state.noteVersion` lags every save by an invalidation round trip, so a second
+   * autosave inside that window would carry the *pre-save* base version and earn the
+   * 55000 conflict against this sheet's own write. The ref carries the version the
+   * server just returned; `saveDetails` sends whichever of the two is newer, and a
+   * real conflict — another device moved the note — still refuses, because neither
+   * source knows that version.
+   */
+  const knownNoteVersion = useRef<string | null>(null);
+  /**
+   * The claims the server last acknowledged from this sheet, for the same reason:
+   * `state.noteVisibility` trails a save by a refetch, and a second toggle inside
+   * that window must be judged against what was actually stored, not against the
+   * pre-save read. Null means "trust the query" — the reset after a conflict.
+   */
+  const knownClaims = useRef<{ visibility: NoteVisibility; spoilers: boolean } | null>(null);
   const stored = companions.data?.map((c) => c.id) ?? [];
   const chosen = companionEdit ?? stored;
   // Mutual follows plus whoever is already on this watch. See `taggableWith`.
@@ -623,9 +666,16 @@ function Body({
     // The two claims travel with the note and are meaningless without one, so a
     // toggle flipped against an empty field is held locally and written by the
     // save that first stores the text.
+    //
+    // Judged against the freshest known stored value, not the query alone — the
+    // same lag `knownNoteVersion` covers for the version. The query trails every
+    // save by a refetch, so share-then-unshare inside that window used to compute
+    // "private, same as stored" from a read that predated the share, write nothing,
+    // and leave the sheet showing private over a server that kept public.
+    const storedVisibility = knownClaims.current?.visibility ?? state.noteVisibility;
+    const storedSpoilers = knownClaims.current?.spoilers ?? state.noteSpoilers;
     const claimsChanged =
-      Boolean(trimmed) &&
-      (nextVisibility !== state.noteVisibility || nextSpoilers !== state.noteSpoilers);
+      Boolean(trimmed) && (nextVisibility !== storedVisibility || nextSpoilers !== storedSpoilers);
 
     if (!noteChanged && !dateChanged && !claimsChanged) return;
 
@@ -663,8 +713,18 @@ function Body({
           noteVisibility: writesNoteHere ? nextVisibility : null,
           noteSpoilers: writesNoteHere ? nextSpoilers : null,
         });
+        if (result.outcome !== 'failed') {
+          if (result.noteVersion) knownNoteVersion.current = result.noteVersion;
+          if (writesNoteHere) {
+            knownClaims.current = { visibility: nextVisibility, spoilers: nextSpoilers };
+          }
+        }
         ok = report(result);
         touched = touched || mustReconcile(result);
+        // A first note that failed to land is still unsaved writing — the same
+        // re-arm the save_note branch below carries. Without it, only a note on an
+        // already-existing row ever retried.
+        if (!ok && writesNoteHere && noteChanged) dirtyNote.current = true;
       }
 
       // An existing note goes through save_note, which assigns rather than coalesces.
@@ -675,21 +735,113 @@ function Body({
           operationId: newOperationId(),
           mediaItemId: title.id,
           note: trimmed,
-          baseVersion: state.noteVersion,
+          // Whichever is newer of the query's answer and the last reply this sheet
+          // received — see `knownNoteVersion`. An autosave chained behind its own
+          // predecessor must not present the pre-save version as its base.
+          baseVersion: newerVersion(knownNoteVersion.current, state.noteVersion ?? null),
           // Always the value the sheet is displaying, so what the user can see is
           // what gets stored — including for a note written before notes were
           // social, which opens on `private` and stays there unless they change it.
           noteVisibility: nextVisibility,
           noteSpoilers: nextSpoilers,
         });
+        if (result.outcome !== 'failed') {
+          if (result.noteVersion) knownNoteVersion.current = result.noteVersion;
+          knownClaims.current = { visibility: nextVisibility, spoilers: nextSpoilers };
+        }
+        if (result.outcome === 'failed' && result.conflict) {
+          // The stored note moved under this edit. Forget the remembered version and
+          // claims and refetch, so the *next* save is judged against what is really
+          // there. The typed text stays in the overlay — the problem line says what
+          // happened, and silently discarding writing is the one thing this sheet
+          // must never do.
+          knownNoteVersion.current = null;
+          knownClaims.current = null;
+          touched = true;
+        }
         ok = report(result);
         touched = touched || mustReconcile(result);
+        // A failed note write is still unsaved writing: re-arm the dirty flag so the
+        // next flush — the next keystroke, blur or close — retries rather than
+        // treating the failure as the end of the story.
+        if (!ok && noteChanged) dirtyNote.current = true;
       }
     });
 
     endSaving();
     if (touched) refresh();
   };
+  /**
+   * **The autosave lane (founder correctness pass, 2026-08-27).**
+   *
+   * Before this, the only thing that persisted typed text was `TextInput.onBlur` —
+   * and React Native does not fire blur on unmount, so the backdrop, the hardware
+   * back, the header Close, the post-rank Done and a collapsed row all discarded
+   * whatever was typed. The founder met it as "my review didn't save".
+   *
+   * Three refs, no state: this is machinery, and a render per keystroke-adjacent
+   * event is exactly what it must not cost.
+   *
+   * - `saveDetailsRef` — the latest render's `saveDetails`, re-pointed after every
+   *   commit, so a timer or unmount cleanup armed several renders ago saves what is
+   *   *now* in the field rather than what was there when the closure was made. Its
+   *   updating effect is declared before the effects that read it, which is the
+   *   ordering `react-hooks/immutability` requires.
+   * - `dirtyNote` — there is typed text the server has not been offered yet. Set on
+   *   change, cleared when a flush hands the text to `saveDetails`, re-set by
+   *   `saveDetails` when the note write itself fails so the next flush retries.
+   * - `autosaveTimer` — the debounce. One timer, re-armed per change; typing is not
+   *   a write per keystroke, resting for `AUTOSAVE_DELAY` is one write.
+   *
+   * `flushNote` is safe to call from anywhere, any number of times: it does nothing
+   * unless text is dirty, and `saveDetails` itself refuses no-op writes. The write
+   * lands on `queueDateWrite`'s lane like every other save here, so a flush racing
+   * a date tap cannot interleave.
+   */
+  const saveDetailsRef = useRef(saveDetails);
+  useEffect(() => {
+    saveDetailsRef.current = saveDetails;
+  });
+  const dirtyNote = useRef(false);
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushNote = () => {
+    if (autosaveTimer.current) {
+      clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
+    }
+    if (!dirtyNote.current) return;
+    // Event-time machinery: this runs from handlers, timers and effect cleanups,
+    // never during render; the rule flags it only transitively, because the unmount
+    // effect closes over this function.
+    // eslint-disable-next-line react-hooks/immutability
+    dirtyNote.current = false;
+    void saveDetailsRef.current({});
+  };
+  const scheduleAutosave = () => {
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => {
+      autosaveTimer.current = null;
+      if (!dirtyNote.current) return;
+      dirtyNote.current = false;
+      void saveDetailsRef.current({});
+    }, AUTOSAVE_DELAY);
+  };
+
+  // Backgrounding is a leave-the-field event like any other. `flushNote` reads only
+  // refs, so the first render's closure is never stale.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') flushNote();
+    });
+    return () => subscription.remove();
+  }, []);
+
+  // The last net: unmount for any reason — title change, parent deciding the sheet
+  // is gone — flushes. The async write outlives the component; it captured the
+  // right title and the right text from the render that armed it.
+  useEffect(() => {
+    return () => flushNote();
+  }, []);
 
   /**
    * "I don't remember", which is a save and not a cancel.
@@ -856,78 +1008,54 @@ function Body({
   const written = note.trim();
   const wordCount = written ? `${written.split(/\s+/).length} words` : null;
   /**
-   * **One field, two rows, and the row that has it is the one it is currently saved
-   * as.**
+   * **One field, one row (founder simplification, 2026-08-27).**
    *
    * `user_media` holds exactly one `note` and one `note_visibility`. A review and a
-   * private note are the same text under two different answers to "who may read this"
-   * — which is what `20260817001100`'s "one object, two names" already established
-   * and what this sheet is not going to relitigate.
+   * private note are the same text under two different answers to "who may read
+   * this" — which is what `20260817001100`'s "one object, two names" established.
    *
-   * What changes is that both names are now on screen at once. The row it used to be
-   * was labelled by whichever state the note happened to be in, so a reader who wanted
-   * to write a *review* had to find a row called Private note, open it, and notice a
-   * chip — the founder's exact complaint, and a genuinely bad way to discover the
-   * social half of the product. Two rows say what the two things are before either is
-   * opened, and the empty one says Add rather than pretending to hold something.
-   *
-   * Review is first because Bingd should nudge the social contribution. Neither is
-   * forced, and finishing without writing anything is one tap on Done.
+   * The previous pass drew that one field as *two* rows — Review and Private note,
+   * each converting to the other — and the founder's device verdict was that it made
+   * the sheet conceptually complicated: a reader had to decide which of two names
+   * their writing would go under before writing anything. So it is one row now, one
+   * word, private by default; "Share as a review" is a chip beside the text, an
+   * explicit act on writing that already exists rather than a fork in front of it.
+   * The row's value carries the shared state, so a published note says so before
+   * the composer is even opened.
    */
-  const reviewValue = loaded ? (visibility === 'public' && wordCount ? wordCount : 'Add') : undefined;
-  const privateValue = loaded ? (visibility === 'private' && wordCount ? wordCount : 'Add') : undefined;
+  const noteValue = loaded
+    ? wordCount
+      ? visibility === 'public'
+        ? `Shared · ${wordCount}`
+        : wordCount
+      : 'Add'
+    : undefined;
 
-  /**
-   * Open the composer as one of the two, converting if something is already written.
-   *
-   * (Named `chooseWriting` rather than `openWriting` only because the prop above owns
-   * that name; the prop decides what is open on arrival and this decides what a tap
-   * opens.)
-   *
-   * The conversion is the "Share as a review" chip's job said as a row instead, and it
-   * confirms in exactly one direction. Publishing something the author kept private is
-   * the one move on this sheet that cannot be taken back by tapping again — the text is
-   * on a profile and in a feed the moment it saves — so it asks. Making a review private
-   * is the safe direction and does not ask, which is the same asymmetry the note claims
-   * have had since visibility became a thing at all.
-   *
-   * With nothing written there is nothing to convert: the tap just decides what the next
-   * save will be, and no write happens until there are words.
-   */
-  const chooseWriting = (next: NoteVisibility) => {
-    if (expanded === 'notes' && visibility === next) {
+  const toggleNotes = () => {
+    if (expanded === 'notes') {
+      // Leaving the field, so the field's contract applies: what was typed is
+      // already on its way to the server before the composer is gone.
+      flushNote();
       setExpanded(null);
       return;
     }
-
-    const converting = Boolean(written) && visibility !== next;
-
-    if (converting && next === 'public') {
-      Alert.alert(
-        'Share this as a review?',
-        `Anyone who can see your profile will be able to read it, and it appears with your rating on ${heading}.`,
-        [
-          { text: 'Keep it private', style: 'cancel' },
-          {
-            text: 'Share as review',
-            onPress: () => {
-              setVisibilityEdit('public');
-              setExpanded('notes');
-              void saveDetails({ visibility: 'public' });
-            },
-          },
-        ],
-      );
-      return;
-    }
-
-    setVisibilityEdit(next);
     setExpanded('notes');
-    if (converting) void saveDetails({ visibility: next });
+  };
+
+  // Every deliberate way out of the sheet flushes first. The unmount effect would
+  // catch these too, but a flush that waits for an unmount is a flush that runs
+  // while the modal is animating away — doing it on the tap is free and earlier.
+  const close = () => {
+    flushNote();
+    onClose();
+  };
+  const finish = () => {
+    flushNote();
+    (onDone ?? onClose)();
   };
 
   return (
-    <Sheet visible onClose={onClose} label={`Log ${heading}`}>
+    <Sheet visible onClose={close} label={`Log ${heading}`}>
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
@@ -946,7 +1074,7 @@ function Body({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close"
-            onPress={onClose}
+            onPress={close}
             hitSlop={theme.space[3]}
           >
             <Text variant="callout" tone="secondary">
@@ -1082,32 +1210,32 @@ function Body({
               sheet's shape, and having them appear a beat after the buckets would
               make the sheet resize under the thumb that just tapped one. What is
               withheld is the ability to act on a baseline that is not there yet. */}
-          {/* **Two rows, Review first.** See `openWriting` above for why one stored
-              field gets two rows and what happens when the reader moves writing
-              between them — `chooseWriting`. */}
+          {/* **One row.** See `noteValue` above for what happened to the Review /
+              Private note pair. */}
           <SheetRow
-            icon="chatbubble-ellipses-outline"
-            label="Review"
-            value={reviewValue}
-            expanded={expanded === 'notes' && visibility === 'public'}
-            onPress={loaded ? () => chooseWriting('public') : undefined}
-            disabledReason={GATE_REASON[fieldState]}
-          />
-          <SheetRow
-            icon="lock-closed-outline"
-            label="Private note"
-            value={privateValue}
-            expanded={expanded === 'notes' && visibility === 'private'}
-            onPress={loaded ? () => chooseWriting('private') : undefined}
+            icon="create-outline"
+            label="Note"
+            value={noteValue}
+            expanded={expanded === 'notes'}
+            onPress={loaded ? toggleNotes : undefined}
             disabledReason={GATE_REASON[fieldState]}
           />
           {loaded && expanded === 'notes' ? (
             <View style={[styles.expanded, styles.noteBox]}>
               <NoteInput
                 value={note}
-                label={visibility === 'public' ? 'Review' : 'Private note'}
-                onChangeText={setNoteEdit}
-                onBlur={() => void saveDetails({})}
+                label="Note"
+                onChangeText={(next) => {
+                  setNoteEdit(next);
+                  // Typing is what saves — see the autosave block. The dirty flag
+                  // and the timer are refs, so this costs no render beyond the
+                  // overlay's own. (Disabled rule: an event handler, not render;
+                  // flagged transitively via the unmount effect.)
+                  // eslint-disable-next-line react-hooks/immutability
+                  dirtyNote.current = true;
+                  scheduleAutosave();
+                }}
+                onBlur={flushNote}
               />
               {/* Both claims sit with the field they describe rather than in a
                   settings screen, because both are decisions about this piece of
@@ -1194,9 +1322,10 @@ function Body({
           *
           * Only in the post-rank state, and it is the whole reason that state is not a
           * dead end: everything above it is optional, and without a control that says so
-          * a form of four Add rows reads as four things you have to do. Nothing here is
-          * saved by pressing it — every row above writes on its own, as this sheet
-          * always has — so Done is genuinely "I am finished", not "commit".
+          * a form of Add rows reads as things you have to do. Done commits nothing —
+          * every row above writes on its own, and the flush it carries is only the
+          * autosave's leave-the-field contract applied to leaving the sheet, so text
+          * typed a moment ago is not waiting out a debounce when the sheet unmounts.
           *
           * The ordinary sheet does not get one. It has a Close in its header and a
           * backdrop, and a title that has not been ranked yet has no moment this would
@@ -1204,7 +1333,7 @@ function Body({
           */}
         {postRank ? (
           <View style={styles.done}>
-            <Button label="Done" onPress={() => (onDone ?? onClose)()} />
+            <Button label="Done" onPress={finish} />
           </View>
         ) : null}
       </ScrollView>
@@ -1223,7 +1352,7 @@ function NoteInput({
   onBlur,
 }: {
   value: string;
-  /** What this is right now — "Review" or "Private note". The field is one field. */
+  /** "Note". One field, one name; whether it is shared is the chip's job to say. */
   label: string;
   onChangeText: (next: string) => void;
   onBlur: () => void;

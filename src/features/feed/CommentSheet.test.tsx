@@ -22,6 +22,8 @@ const SEASON_1 = 'season-1';
 const SEASON_2 = 'season-2';
 
 let mockCommentRows: Record<string, unknown>[] = [];
+/** What `comment_reactors` answers — the reactor list behind a cluster (§18). */
+let mockReactorRows: Record<string, unknown>[] = [];
 const mockRpcCalls: { name: string; args: Record<string, unknown> }[] = [];
 let mockRpcError: unknown = null;
 /** The list read's own failure, kept apart from the writers' so one cannot mask the other. */
@@ -49,6 +51,13 @@ jest.mock('@/lib/supabase', () => ({
     rpc: async (name: string, args: Record<string, unknown>) => {
       if (name === 'activity_comments') {
         return { data: mockCommentRows, error: mockReadError };
+      }
+      // A read like the list above, kept out of the writer ledger for the same
+      // reason: a write assertion must not accidentally match a read. It is still
+      // recorded, because *what it was asked about* is its own assertion.
+      if (name === 'comment_reactors') {
+        mockRpcCalls.push({ name, args });
+        return { data: mockReactorRows, error: null };
       }
       if (mockRpcGate) await mockRpcGate;
       mockRpcCalls.push({ name, args });
@@ -169,6 +178,7 @@ const confirmLastAlert = (text: string) => {
 
 beforeEach(() => {
   mockCommentRows = [];
+  mockReactorRows = [];
   mockRpcCalls.length = 0;
   mockRpcError = null;
   mockRpcGate = null;
@@ -1006,6 +1016,94 @@ describe('reacting to a comment', () => {
     // One control, and it belongs to the reply — the tombstone is a place in the
     // conversation and not a comment.
     expect(view.getAllByLabelText(/^React to/)).toHaveLength(1);
+  });
+});
+
+/**
+ * The people behind the cluster (founder, 2026-08-27 §18).
+ *
+ * The count and the glyphs are an aggregate; holding — or tapping — them opens the
+ * feed's own `ReactionDetail` over the identities, from `comment_reactors`, which
+ * restates `activity_comments`' visibility gates so the number on the row and the
+ * people in the sheet cannot disagree.
+ */
+describe('who reacted to a comment', () => {
+  const reacted = () =>
+    comment({
+      reaction_count: 2,
+      reacted_by_me: false,
+      reaction_kinds: ['funny', 'love'],
+      my_reaction: null,
+    });
+
+  const reactors = [
+    { user_id: 'u1', username: 'abisola', display_name: 'Abisola', avatar_path: null, kind: 'funny' },
+    { user_id: 'u2', username: 'ravi', display_name: 'Ravi', avatar_path: null, kind: 'love' },
+  ];
+
+  it('opens the people on a long press of the cluster, each with their reaction', async () => {
+    mockCommentRows = [reacted()];
+    mockReactorRows = reactors;
+    const view = await open();
+
+    await act(async () => fireEvent(view.getByLabelText('2 reactions. See who reacted.'), 'longPress'));
+
+    // Person and meaning together — the founder's "Abisola ❤️" list, as the feed
+    // already draws it.
+    await waitFor(() =>
+      expect(view.getByLabelText('Abisola, reacted Funny. Open their profile.')).toBeTruthy(),
+    );
+    expect(view.getByLabelText('Ravi, reacted Love. Open their profile.')).toBeTruthy();
+    expect(
+      mockRpcCalls.filter((call) => call.name === 'comment_reactors').map((call) => call.args),
+    ).toEqual([{ p_comment_id: 'c1' }]);
+  });
+
+  it('opens on a plain tap too — a target this small does not demand the rarer gesture', async () => {
+    mockCommentRows = [reacted()];
+    mockReactorRows = reactors;
+    const view = await open();
+
+    await fireEvent.press(view.getByLabelText('2 reactions. See who reacted.'));
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Abisola, reacted Funny. Open their profile.')).toBeTruthy(),
+    );
+  });
+
+  it('asks about the reply whose cluster was held, not the root', async () => {
+    mockCommentRows = [
+      comment(),
+      comment({
+        id: 'c2',
+        parent_id: 'c1',
+        body: 'Agreed.',
+        username: 'bo',
+        display_name: 'Bo',
+        reaction_count: 1,
+        reaction_kinds: ['wow'],
+      }),
+    ];
+    mockReactorRows = [
+      { user_id: 'u3', username: 'silky', display_name: 'Silky', avatar_path: null, kind: 'wow' },
+    ];
+    const view = await open();
+
+    await act(async () => fireEvent(view.getByLabelText('1 reaction. See who reacted.'), 'longPress'));
+
+    await waitFor(() =>
+      expect(view.getByLabelText('Silky, reacted Wow. Open their profile.')).toBeTruthy(),
+    );
+    expect(
+      mockRpcCalls.filter((call) => call.name === 'comment_reactors').map((call) => call.args),
+    ).toEqual([{ p_comment_id: 'c2' }]);
+  });
+
+  it('offers no way in on a comment nobody has reacted to', async () => {
+    mockCommentRows = [comment()];
+    const view = await open();
+
+    expect(view.queryByLabelText(/See who reacted/)).toBeNull();
   });
 });
 

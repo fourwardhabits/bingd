@@ -36,6 +36,7 @@ import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { useSeasons } from '@/features/search/use-title-search';
 import { useCommunityScore } from '@/features/title/use-community-score';
 import { useFollowingScore } from '@/features/title/use-following-score';
+import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
 import { useCredits } from '@/features/title/use-credits';
 import { useTitleEnrichment } from '@/features/title/use-enrichment';
 import { TitleReviews } from '@/features/title/TitleReviews';
@@ -154,6 +155,8 @@ export default function TitleScreen() {
   const [recommending, setRecommending] = useState(false);
   /** The Ranked control's menu: change the rating, drop it, or remove the title. */
   const [managing, setManaging] = useState(false);
+  /** The people behind the Following score (§13), opened from the Scores section. */
+  const [followingRatingsOpen, setFollowingRatingsOpen] = useState(false);
   /** Whom this title was last recommended to, which is the confirmation. */
   const [recommendedTo, setRecommendedTo] = useState<string | null>(null);
 
@@ -685,10 +688,11 @@ export default function TitleScreen() {
               clear of the transparent navigation bar without having to guess at its
               height on a device this code cannot measure.
 
-              Only where there *is* artwork. The collapsed band is 96pt and the poster
-              rises the same 96 into it, so a title with no backdrop has no hero to
-              overlay — an absolute callout there would sit on the poster or above the
-              screen. That case gets the same callout inline, under the heading. */}
+              Only where there *is* artwork. The collapsed band is exactly POSTER_LIFT
+              tall and the poster rises the whole way into it, so a title with no
+              backdrop has no hero to overlay — an absolute callout there would sit on
+              the poster or above the screen. That case gets the same callout inline,
+              under the heading. */}
           {recommendedBy && hero.uri ? (
             <RecommendedCallout label={recommendedBy} overlay />
           ) : null}
@@ -840,11 +844,13 @@ export default function TitleScreen() {
               rather than to an address book. A series has no Recommend, for the same
               reason it has no Rank — it is not a thing anybody watched (PRD §10), which
               leaves a series page with Watchlist alone. Season pages keep both. */}
+          {/* Outlined since the hierarchy pass: Rank, up in the hero cluster, is the
+              page's one filled-Maroon action. Two equally dominant maroon CTAs was
+              exactly the founder's complaint — see RowAction's `primary` note. */}
           {rankable ? (
             <RowAction
               icon="paper-plane-outline"
               label="Recommend"
-              primary
               accessibilityLabel={`Recommend ${title.title} to a friend`}
               onPress={() => {
                 setActionError(null);
@@ -928,6 +934,9 @@ export default function TitleScreen() {
               score: following.data?.score ?? null,
               ratingCount: following.data?.ratingCount ?? 0,
             }}
+            // §13: the aggregate opens its members. Only offered once the count is
+            // real — ScoresSection itself refuses a tap on an empty unit.
+            onPressFollowing={() => setFollowingRatingsOpen(true)}
           />
         ) : null}
 
@@ -1169,47 +1178,29 @@ export default function TitleScreen() {
               */}
             <MenuGroup title="Your log" />
             {/**
-              * **One field, two rows, and the label says which state it is in.**
+              * **One field, one row (founder simplification, 2026-08-27).**
               *
-              * `user_media` holds one `note` under one `note_visibility`, so exactly one
-              * of these two ever reads Edit. The other offers the conversion, named as
-              * the act it performs rather than as "add" — writing already exists, and a
-              * row that said Add would be promising a second piece of writing this
-              * schema has nowhere to put.
-              *
-              * Publishing confirms; making something private does not. That asymmetry is
-              * the log sheet's, and it is enforced there rather than duplicated here —
-              * these rows open the sheet, and the sheet owns what a conversion costs.
+              * `user_media` holds one `note` under one `note_visibility`, and the sheet
+              * now shows it as one thing: a note, with "Share as a review" as a state it
+              * can be in. The two rows this replaces — Review and Private note, each
+              * offering the conversion the other way — asked the reader to choose
+              * between two names for one piece of writing before opening it, which was
+              * the founder's exact complaint about the sheet itself. The label still
+              * says which state the writing is in, because "Edit your review" is a
+              * promise about where the text is visible; the conversion controls live in
+              * the composer, beside the text they describe.
               *
               * **The founder's device pass: every `value` in this menu is gone.**
               * `SheetRow` draws the label and the secondary sentence on one line, so at
-              * the width of a phone each of the five explanations truncated — five rows
-              * of clipped grey text under five clear labels, which is worse than no
-              * explanation at all, because the reader can see that something was meant
-              * to be said and cannot read it. The labels below carry their own meaning;
-              * the sentences that did not fit are in this comment, where they are for
-              * whoever changes the rows next rather than for somebody choosing one.
+              * the width of a phone every explanation truncated — rows of clipped grey
+              * text under clear labels, worse than no explanation at all.
               */}
             <SheetRow
               icon="chatbubble-ellipses-outline"
-              label={hasReview ? 'Edit review' : hasPrivateNote ? 'Share as a review' : 'Write review'}
+              label={hasReview ? 'Edit your review' : hasPrivateNote ? 'Edit your note' : 'Add a note'}
               onPress={() => {
                 setManaging(false);
-                openLog('review', 'public');
-              }}
-            />
-            <SheetRow
-              icon="lock-closed-outline"
-              label={
-                hasPrivateNote
-                  ? 'Edit private note'
-                  : hasReview
-                    ? 'Make it a private note'
-                    : 'Add private note'
-              }
-              onPress={() => {
-                setManaging(false);
-                openLog('note', 'private');
+                openLog('note', hasReview ? 'public' : 'private');
               }}
             />
 
@@ -1293,6 +1284,22 @@ export default function TitleScreen() {
           onClose={() => setRecommending(false)}
           onSent={setRecommendedTo}
           surface="title"
+        />
+      ) : null}
+      {/* Mounted only while open, like every sheet here: it runs a per-member
+          taste_match on mount, which is exactly the read to not keep warm. */}
+      {followingRatingsOpen ? (
+        <FollowingRatingsSheet
+          mediaItemId={title.id}
+          titleName={displayTitle ?? title.title}
+          viewerId={profile.id}
+          onPressPerson={(username) => {
+            // Close first: a route change behind an open Modal leaves the sheet in
+            // front of the screen it navigated to (`RecommendationRequestsSheet`).
+            setFollowingRatingsOpen(false);
+            router.push(`/u/${username}`);
+          }}
+          onClose={() => setFollowingRatingsOpen(false)}
         />
       ) : null}
     </Screen>
@@ -1384,9 +1391,13 @@ function RowAction({
   disabled?: boolean;
   selected?: boolean;
   /**
-   * The button-hierarchy rule (founder, 2026-08-27): filled Maroon marks the primary
-   * social act, outlined chips mark working state. Recommend wears the fill in this
-   * row; Watchlist deliberately does not.
+   * The button-hierarchy rule, revised (founder, 2026-08-27, second pass): filled
+   * Maroon marks the primary action *of the current context*, not the primary social
+   * act everywhere. On a title page that context is the score/Rank cluster in the
+   * hero — ranking is the core act and directly creates the score — so nothing in
+   * this row wears the fill any more. Recommend is still filled Maroon *inside* the
+   * Recommend sheet, where sending is the point of the surface. The prop survives
+   * for the next context that earns it.
    */
   primary?: boolean;
 }) {
@@ -1468,19 +1479,26 @@ function formatDate(date: string | null) {
 }
 
 /** Tall enough that the poster still overlaps something when there is no
- *  backdrop, so the page does not become a different design. */
-const HERO_COLLAPSED = 96;
+ *  backdrop, so the page does not become a different design. Tracks POSTER_LIFT:
+ *  a lift deeper than this band would put the poster's top above the page. */
+const HERO_COLLAPSED = 120;
 
 /**
  * How far the poster rises into the hero.
  *
- * Raised from 64 with the taller hero. The founder's note was that the poster sat
- * "beneath a separate strip" rather than in the artwork, and at 64 against the old
- * 16:9 frame its top landed where the fade had already reached the page — so it
- * overlapped Paper, not an image. At 96 against the taller frame it sits on artwork
- * that is still visibly artwork, which is what makes the two read as one object.
+ * Raised from 64 with the taller hero, then from 96 to 120 in the hierarchy pass.
+ * The founder's original note was that the poster sat "beneath a separate strip"
+ * rather than in the artwork; the follow-up was that a band of low-information
+ * space still sat between the hero composition and the title. The framed poster is
+ * 206pt tall, so the lift decides how much of it hangs *below* the hero — 110pt at
+ * 96, 86pt at 120 — and every extra point of lift is a point of page the title gets
+ * back without the hero giving up any artwork. 120 keeps the poster's top clear of
+ * the un-faded upper artwork (the fade's first working stop is at 74% of the frame;
+ * on a 393pt-wide phone the poster's top sits below it at either value), and the
+ * hero's own growth (`TitleHero` now adds the status-bar inset to the frame) more
+ * than covers the deeper overlap.
  */
-const POSTER_LIFT = 96;
+const POSTER_LIFT = 120;
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
@@ -1522,7 +1540,11 @@ const styles = StyleSheet.create({
   scoreColumn: { flex: 1, justifyContent: 'flex-end', paddingBottom: theme.space[3] },
   heading: {
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[4],
+    // Halved in the hierarchy pass (16 → 8): with the poster overlapping the hero
+    // more deeply, this gap was the last of the dead band between the artwork
+    // composition and the title, and the identity row's own baseline padding
+    // already separates the two.
+    paddingTop: theme.space[2],
     gap: theme.space[1],
   },
   /**

@@ -343,7 +343,7 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 | `tmdb-adapter` | User request, and an operator for the three maintenance actions | Search and detail. Sole holder of the TMDB key (AD-8). Writes through to `media_items`, `media_cache`, `provider_list_cache` and `person_cache`. **Built 2026-08-15** |
 | `import-worker` | Queue, after upload | Parse, match, build the preview, apply on confirmation, delete the source file |
 | `recs-builder` | Schedule + on significant ranking change | Generate a slate per user. See [`recommendations.md`](./recommendations.md) |
-| `match-builder` | Schedule | Materialize `match_scores` (AD-7) |
+| `match-builder` | Schedule | ~~Materialize `match_scores` (AD-7)~~ Not built, and no longer intended at this scale — `taste_match` computes live per call (AD-7, corrected 2026-08-27) |
 | `notify-dispatch` | Database trigger on notifiable events | Resolve recipients, check preferences, write inbox rows, consult the push flag |
 | `nudge-scheduler` | Schedule, twice weekly | Evaluate whether a user has qualifying content. **Sends nothing when there is nothing to say** |
 | `og-render` | Web request | Server-render Open Graph images for share and invite pages |

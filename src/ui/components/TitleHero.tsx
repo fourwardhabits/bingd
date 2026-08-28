@@ -31,12 +31,11 @@ export type TitleHeroProps = {
    * produced the composition the founder wanted; no `contentPosition` value could,
    * because the top of the image was never *cropped*, it was *covered*.
    *
-   * So the image starts this far down inside the same frame, with the frame's warm
-   * band behind the bar. The visible sub-frame is then *wider* than 16:9, which flips
-   * `cover` from height-scaling to width-scaling: the whole width of the backdrop and
-   * its top edge become visible, and the crop moves to the bottom — under the fade,
-   * where the page was already painting over the artwork. Total hero height is
-   * unchanged, so nothing below moves.
+   * So the image starts this far down, with the frame's warm band behind the bar —
+   * and the frame is taller by exactly this much, so the inset is not paid for out of
+   * the artwork. The image box below the bar keeps the backdrop's own 16:9 (see
+   * `height` in the component), which is what makes the whole picture, top edge
+   * included, visible on every device.
    */
   topInset?: number;
 };
@@ -62,14 +61,21 @@ export function TitleHero({
 }: TitleHeroProps) {
   const { width } = useWindowDimensions();
   /**
-   * Taller than the artwork's own 16:9, and no taller than it has to be.
+   * The inset, plus the backdrop's own 16:9 — so the visible image box is exactly the
+   * shape the artwork was composed in, on every device.
    *
-   * At a true 16:9 the fade starts almost immediately and the poster overlaps a strip
-   * that has already become page. A little extra height is what the poster needs to sit
-   * *in* the artwork rather than under it. Every point beyond that is paid for by the
-   * sides of the image, which is what `HERO_RATIO` explains.
+   * This replaces a fixed frame ratio (1.62, then 1.5), and the founder's fourth look
+   * is why: at any fixed ratio the image box — the frame minus `topInset` — is the
+   * wrong shape on most devices, so `cover` always crops something. Wider than 16:9
+   * and the bottom of the backdrop is lost under the fade; narrower and the sides go,
+   * which is what the founder called "too cropped" back when the whole frame was 1.4.
+   * Sizing the box *from* the artwork instead of reverse-engineering a ratio means the
+   * full backdrop — its top edge included — is on screen everywhere: a 393pt phone
+   * with a 59pt inset gets a 280pt frame (deeper than 1.5 gave it), a small-inset
+   * Android does not pay for an inset it does not have, and the no-inset case (tests,
+   * no transparent header) is a bare 16:9.
    */
-  const height = width / HERO_RATIO;
+  const height = topInset + width / BACKDROP_RATIO;
 
   // No artwork at all is still common — the seed catalogue ships without any. A short
   // warm band is not a failure state and does not pretend to be an image: no grey box,
@@ -85,11 +91,11 @@ export function TitleHero({
         /**
          * **Top centre, not centre.**
          *
-         * With `topInset` shrinking the image's box to wider-than-16:9, `cover` scales
-         * a backdrop by *width* and the crop is vertical — anchoring it to the top is
-         * what keeps the upper part somebody composed and pushes the loss into the
-         * fade. The poster fallback wants the same answer for the same reason: far
-         * taller than any frame here, and the bottom is the half nobody framed.
+         * The image box is held to 16:9, so a standard backdrop is not cropped at
+         * all — but not every artwork is standard. Anything taller than 16:9 (the
+         * blurred poster fallback most of all, and the odd non-conforming backdrop)
+         * is width-scaled by `cover` and cropped vertically, and anchoring to the
+         * top keeps the part somebody composed while the loss goes under the fade.
          */
         contentPosition="top center"
         transition={theme.duration.navigation}
@@ -115,27 +121,13 @@ export function TitleHero({
 const POSTER_BLUR = 28;
 
 /**
- * The hero's aspect. Taller than the artwork's own 16:9, but only just.
- *
- * It was 1.4, which the founder’s second look called "too cropped" — a frame narrower
- * than 16:9 makes `cover` scale by height and lose the *sides* (27% of the width at
- * 1.4). 1.62 fixed the sides but the founder's third look still wanted more of the
- * artwork: the pulled-down composition, where the visible picture runs deeper before
- * the fade. So: 1.5, the smallest step that noticeably deepens it — about twenty
- * points of height on a 393pt screen.
- *
- * The arithmetic changed when `topInset` arrived, which is why 1.5 does not reopen
- * the side-crop that 1.4 had. With the image starting `topInset` down, its visible
- * box is *wider* than 16:9 on any real device, so `cover` scales by width: the full
- * width and the top edge of the backdrop are on screen at either ratio, and extra
- * frame height converts one-for-one into artwork that was previously cropped under
- * the fade — at 1.62 about 37 points of a 393pt-wide backdrop never showed, at 1.5
- * about 17. Only the inset-less case (tests, edge devices) is height-scaled, where
- * 1.5 costs ~16% of the sides against ~10% at 1.62 — the founder's authorized trade.
- * The poster still rises into artwork rather than into Paper, and the fade, drawn in
- * percentages, moves with the frame.
+ * TMDB backdrops are published at 16:9 (`w1280` is 1280×720), and the image box —
+ * the frame minus `topInset` — is held to exactly this shape so `cover` has nothing
+ * to crop in either direction. The full history of chasing this with fixed frame
+ * ratios (1.4 → 1.62 → 1.5, each one a different wrong crop on some device) is in
+ * the `height` comment inside the component.
  */
-const HERO_RATIO = 1.5;
+const BACKDROP_RATIO = 16 / 9;
 
 /**
  * One continuous gradient, drawn by the platform.

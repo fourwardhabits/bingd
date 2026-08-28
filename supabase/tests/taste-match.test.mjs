@@ -73,13 +73,21 @@ after(async () => t?.close());
 // ---------------------------------------------------------------------------
 
 describe('the founder’s fixtures', () => {
-  it('scores identical evaluations near 100', async () => {
+  it('scores identical evaluations high — and no longer near 100 at eight titles', async () => {
     // Same bucket, same order, so both sides derive the same score for every film.
+    //
+    // Before 20260827001000 this asserted >= 90, and that assertion *was* the
+    // defect the founder's Match audit named: eight shared titles cannot prove two
+    // people near-identical, and the formula now says so — the blend is shrunk
+    // toward the 50 stranger baseline by n/(n+5), so identical evaluations over
+    // eight films land near 80. Near-100 is still reachable; it just has to be
+    // earned with evidence (see 'confidence grows with evidence' below).
     const other = await pair('identical', 8, () => ({ mine: 'loved', theirs: 'loved' }));
 
     const row = await match(other);
     assert.equal(row.common_count, 8);
-    assert.ok(row.score >= 90, `expected near 100, got ${row.score}`);
+    assert.ok(row.score >= 75, `expected high, got ${row.score}`);
+    assert.ok(row.score <= 85, `expected the shrink to hold at n=8, got ${row.score}`);
   });
 
   it('scores inverted opinions low', async () => {
@@ -201,6 +209,62 @@ describe('the minimum overlap', () => {
 
     // One ranked Season 1 and the other Season 2. That is no overlap at all.
     assert.equal((await match(other)).common_count, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('evidence and confidence (20260827001000)', () => {
+  // The founder's Match audit: five shared titles were enough to print 90%, with
+  // nothing anywhere saying how thin that evidence was. The blend is now shrunk
+  // toward the 50 stranger baseline by n/(n + taste.shrink_prior), so a confident
+  // number has to be earned with evidence rather than granted at the threshold.
+
+  it('does not grant a near-certain match at the minimum evidence', async () => {
+    // Identical evaluations over exactly five titles — the case that used to read
+    // 90+. Shrunk by 5/(5+5), it now reads ~75: promising, and visibly not proof.
+    const other = await pair('shrunk_five', 5, () => ({ mine: 'loved', theirs: 'loved' }));
+
+    const row = await match(other);
+    assert.equal(row.common_count, 5);
+    assert.ok(row.score !== null);
+    assert.ok(row.score <= 80, `expected the shrink at n=5, got ${row.score}`);
+    assert.ok(row.score >= 65, `expected promising rather than dismissed, got ${row.score}`);
+  });
+
+  it('lets more evidence raise the same agreement higher', async () => {
+    // The same perfect agreement, five titles versus eighteen. Confidence is
+    // n/(n+5), monotonic in n, so the larger sample must score strictly higher —
+    // which is the property the founder asked for in one sentence: more shared
+    // evidence, more trust in the number.
+    const thin = await pair('conf_thin', 5, () => ({ mine: 'loved', theirs: 'loved' }));
+    const thick = await pair('conf_thick', 18, () => ({ mine: 'loved', theirs: 'loved' }));
+
+    const thinScore = (await match(thin)).score;
+    const thickScore = (await match(thick)).score;
+    assert.ok(
+      thickScore > thinScore,
+      `expected ${thickScore} (n=18) > ${thinScore} (n=5)`,
+    );
+    // A loose floor, deliberately: alice's shared catalogue keeps growing across
+    // this file, so the shared films sit ever deeper in her band and proximity
+    // carries some fixture noise. The strict inequality above is the contract;
+    // this only guards against the pair somehow reading as strangers.
+    assert.ok(thickScore >= 70, `expected a well-evidenced pair to read high, got ${thickScore}`);
+  });
+
+  it('shrinks disagreement symmetrically', async () => {
+    // Five titles of opposition is thin evidence too. An inverted pair at the
+    // threshold reads nearer the middle than the floor — the formula is saying "I
+    // cannot tell you much yet" in both directions, not softening only the good news.
+    const other = await pair('shrunk_inverted', 5, () => ({
+      mine: 'loved',
+      theirs: 'not_for_me',
+    }));
+
+    const row = await match(other);
+    assert.ok(row.score !== null);
+    assert.ok(row.score >= 20 && row.score <= 40, `expected shrunk disagreement, got ${row.score}`);
   });
 });
 

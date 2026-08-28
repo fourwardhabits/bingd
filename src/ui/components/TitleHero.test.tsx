@@ -118,11 +118,12 @@ describe('the hero fade', () => {
   });
 
   /**
-   * The status-bar correction. The image starts below the inset inside an unchanged
-   * frame — so the artwork clears the bar the way the founder's pull-down showed it,
-   * and nothing beneath the hero moves.
+   * The status-bar correction, revised in the ranking/hero tranche. The image still
+   * starts below the inset — the founder's pull-down made the resting state — but the
+   * frame now grows by exactly the inset, so the bar's height is not paid for out of
+   * the artwork. The image box below the bar keeps the backdrop's own 16:9.
    */
-  it('starts the artwork below the status bar without growing the hero', async () => {
+  it('starts the artwork below the status bar, and grows the frame by exactly the inset', async () => {
     const bare = await treeOf(<TitleHero uri={BACKDROP} />);
     const inset = await treeOf(<TitleHero uri={BACKDROP} topInset={59} />);
 
@@ -130,29 +131,29 @@ describe('the hero fade', () => {
     expect(imageOf(bare).style.top).toBe(0);
     expect(imageOf(inset).style.top).toBe(59);
 
-    // The frame itself: same height either way. The inset is taken out of the image's
-    // box, not added to the page.
     const frameOf = (nodes: typeof bare) =>
       nodes.find((node) => typeof node.style.height === 'number' && !node.props.source)!;
-    expect(frameOf(inset).style.height).toBe(frameOf(bare).style.height);
+    expect(frameOf(inset).style.height).toBe((frameOf(bare).style.height as number) + 59);
   });
 
   /**
-   * The polish-tranche height: 1.5, up from 1.62 — the smallest step that
-   * noticeably deepens the visible artwork before the fade (the founder's
-   * pulled-down composition). Pinned so a future "small tweak" moves this
-   * number knowingly rather than by accident.
+   * The image box is the backdrop's own shape. Fixed frame ratios (1.4, 1.62, 1.5)
+   * each cropped something on some device; sizing the box from the artwork means
+   * `cover` has nothing to crop, and the founder's "more of the top" is simply the
+   * whole picture. Pinned so a future "small tweak" moves this knowingly.
    */
-  it('gives the frame the tranche’s taller aspect, and no more', async () => {
+  it('holds the visible image box to the backdrop’s 16:9, inset or not', async () => {
     const { Dimensions } = jest.requireActual('react-native');
     const { width } = Dimensions.get('window');
 
-    const nodes = await treeOf(<TitleHero uri={BACKDROP} />);
-    const frame = nodes.find(
-      (node) => typeof node.style.height === 'number' && !node.props.source,
-    )!;
+    const frameOf = (nodes: ReturnType<typeof walk>) =>
+      nodes.find((node) => typeof node.style.height === 'number' && !node.props.source)!;
 
-    expect(frame.style.height).toBe(width / 1.5);
+    const bare = await treeOf(<TitleHero uri={BACKDROP} />);
+    expect(frameOf(bare).style.height).toBe(width / (16 / 9));
+
+    const inset = await treeOf(<TitleHero uri={BACKDROP} topInset={48} />);
+    expect((frameOf(inset).style.height as number) - 48).toBe(width / (16 / 9));
   });
 
   it('draws a warm band and no artwork when there is none', async () => {

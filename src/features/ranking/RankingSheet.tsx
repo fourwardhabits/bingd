@@ -66,8 +66,14 @@ export type RankingSheetProps = {
   /** "Rank another" — closes this and sends the user back to search. */
   onRankAnother?: () => void;
   /**
-   * "Finish your log" — closes this and hands the reader back to `LogSheet` in its
+   * "Add more details" — closes this and hands the reader back to `LogSheet` in its
    * post-rank state, carrying the score the session just produced.
+   *
+   * The label used to be "Finish your log", and the founder's correction is about
+   * what that word promised: the ranking is already complete by the time this button
+   * exists, so "finish" framed the optional half — the note, the date, the people —
+   * as an unfinished obligation. Everything behind this button is enrichment, and
+   * the label now says so.
    *
    * **This is the seam the founder's central complaint was about.** Ranking used to end
    * here: a number, Rank another, Done, and the review you might have written or the
@@ -998,7 +1004,7 @@ function Reveal({
        */}
       {onFinishLog ? (
         <View style={styles.revealControls}>
-          <Button label="Finish your log" onPress={onFinishLog} />
+          <Button label="Add more details" onPress={onFinishLog} />
           <View style={styles.revealExits}>
             <View style={styles.revealExit}>
               <Button label="Rank another" kind="secondary" onPress={onRankAnother} />

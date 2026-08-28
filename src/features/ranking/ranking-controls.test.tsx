@@ -295,7 +295,10 @@ describe('finishing the log after a ranking', () => {
     const sheet = await openSheet({ onFinishLog });
 
     await sheet.findByLabelText(REVEAL);
-    await fireEvent.press(sheet.getByRole('button', { name: 'Finish your log' }));
+    // "Add more details", not "Finish your log": the ranking is complete by the time
+    // this button exists, and the label must not frame the optional half as an
+    // unfinished obligation (founder correction, 2026-08-27).
+    await fireEvent.press(sheet.getByRole('button', { name: 'Add more details' }));
 
     // The placement travels with the call: the session already had it, and making the
     // log sheet re-query for a number this screen is holding would put a spinner in the
@@ -339,7 +342,7 @@ describe('finishing the log after a ranking', () => {
     await sheet.findByLabelText(REVEAL);
     // A caller with no log sheet mounted gets what the reveal always had, rather than a
     // button that leads nowhere.
-    expect(sheet.queryByRole('button', { name: 'Finish your log' })).toBeNull();
+    expect(sheet.queryByRole('button', { name: 'Add more details' })).toBeNull();
     expect(sheet.getByRole('button', { name: 'Rank another' })).toBeTruthy();
     expect(sheet.getByRole('button', { name: 'Done' })).toBeTruthy();
   });

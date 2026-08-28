@@ -39,8 +39,9 @@ export type ProfileIdentityProps = {
   /**
    * The other two stats became controls in the external-beta polish: on somebody
    * else's profile the counts were claims the reader could not check. Optional for
-   * the same loading reason as the pair above, and the own profile may leave them
-   * unwired — its full collection is already a tab away.
+   * the same loading reason as the pair above. The own tab wires them too since the
+   * ranking/hero tranche — "the collection is a tab away" left a number that was a
+   * button on everyone's profile but your own, which the founder read as broken.
    */
   onPressMovies?: () => void;
   onPressSeasons?: () => void;

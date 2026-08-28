@@ -9,10 +9,11 @@ export type StatItem = {
   /**
    * What tapping this opens, for the stats that lead somewhere.
    *
-   * Followers and Following do; Movies and TV seasons do not — the collection they
-   * describe is already the next section down the same screen. Optional rather than a
-   * no-op, so a stat with nothing behind it is not drawn as a button: a control that
-   * looks pressable and does nothing is the thing people press twice and then report.
+   * All four lead somewhere now — Followers and Following to their people lists,
+   * Movies and TV to the ranked-titles drill-down — on both the own tab and
+   * `/u/[username]`. Optional rather than a no-op, so a stat with nothing behind it
+   * (still loading, say) is not drawn as a button: a control that looks pressable
+   * and does nothing is the thing people press twice and then report.
    */
   onPress?: () => void;
   /** Said after the label, for a stat that is a control. */

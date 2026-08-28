@@ -327,13 +327,16 @@ const keyed =
  *     same cursor column. The two paths count the same base rows, which is what makes
  *     "your sheet about Ravi equals Ravi's own sheet" structural rather than luck.
  *
- * Two facts have no visitor-legal read at all: `title_recommendations` is a two-party
- * table and `invite_attributions` likewise, so a visitor asking about a third party gets
- * zero rows *by intent*. Those are **withheld** — a named state, not a zero and not a
- * failure: the award renders a dash with "Only they can see this one" rather than
- * claiming somebody has never recommended anything. Everything else — rankings,
- * watchlist, comments, reactions, follows — was already viewer-relative by policy and is
- * read identically in both modes.
+ * One fact has no visitor-legal read at all: `title_recommendations` is a two-party
+ * table, so a visitor asking about a third party gets zero rows *by intent*. That one
+ * is **withheld** — a named state, not a zero and not a failure: the award renders a
+ * dash with "Only they can see this one" rather than claiming somebody has never
+ * recommended anything. `invite_attributions` is two-party too, and used to sit
+ * beside it — until the founder decided (2026-08-27) that the invite COUNT is public
+ * achievement data: a visitor now reads it through `invited_signup_count`, a definer
+ * scalar over the owner's own predicate, and still cannot reach a single row.
+ * Everything else — rankings, watchlist, comments, reactions, follows — was already
+ * viewer-relative by policy and is read identically in both modes.
  */
 async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
   /** A read a visitor is not entitled to, shaped like one that returned nothing. */
@@ -451,12 +454,20 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
        * `docs/product/growth-instrumentation.md` §1, including the store-install gap that
        * makes this number a floor.
        *
-       * **Withheld for a visitor.** `invite_attributions_read` names the two parties,
-       * so a third party's read is zero rows by design — a zero this feature must not
-       * repeat as "brought nobody". No request is issued at all: a read whose answer is
-       * predetermined by policy is bandwidth spent asking the database to say no.
+       * **A visitor gets the count, not the rows (founder, 2026-08-27).** The rows
+       * are still two-party — `invite_attributions_read` names the parties and a
+       * third party's select is zero rows by design — but the COUNT became public
+       * achievement data. `invited_signup_count` (20260827001100) is a definer
+       * scalar over the same predicate, gated on `can_i_view`, so the number a
+       * visitor sees is the owner's number by construction, and nothing that could
+       * name an invitee crosses the wire. The branch below the reads turns this
+       * reply into `invitedSignupCount` with an empty `invitedSignups`.
        */
-      !own ? withheldRead : readAllByKey<InviteRow>(
+      !own
+        ? supabase
+            .rpc('invited_signup_count', { p_user: userId })
+            .then(({ data, error }) => ({ data, error, pages: 1 }))
+        : readAllByKey<InviteRow>(
         (cursor, limit) =>
           after(
             supabase
@@ -629,11 +640,12 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
    * together, below.
    */
   const unavailable = new Set<keyof AwardFacts>();
-  // Not read because the viewer is not a party to them — a different fact from a read
-  // that failed, and worded differently on the row (`progress.ts`).
-  const withheld = new Set<keyof AwardFacts>(
-    own ? [] : ['invitedSignups', 'recommendationsSent'],
-  );
+  // Not read because the viewer is not a party to it — a different fact from a read
+  // that failed, and worded differently on the row (`progress.ts`). One entry now,
+  // not two: Invite Instigator's count became a public aggregate on 2026-08-27,
+  // and that decision was explicitly scoped to that one award — Hype Courier's
+  // sent-recommendation count stays the sender's own.
+  const withheld = new Set<keyof AwardFacts>(own ? [] : ['recommendationsSent']);
   const rowsOf = <T>(
     result: { data: unknown; error: unknown },
     field: keyof AwardFacts,
@@ -721,10 +733,28 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
     return title ? [title] : [];
   });
 
-  const invitedSignups = rowsOf<InviteRow>(invites, 'invitedSignups').map((row) => ({
-    person: personFrom(row.invitee_id, one(row.invitee)),
-    activatedAt: row.activated_at,
-  }));
+  const invitedSignups = own
+    ? rowsOf<InviteRow>(invites, 'invitedSignups').map((row) => ({
+        person: personFrom(row.invitee_id, one(row.invitee)),
+        activatedAt: row.activated_at,
+      }))
+    : [];
+  /**
+   * The visitor's number, from the definer scalar; the owner's, from the rows just
+   * read — the same predicate on the same table, which is what makes the two sheets
+   * agree by construction. A null reply is the oracle refusing (a profile this
+   * viewer cannot see), and a refusal is not a zero: it lands in `unavailable`
+   * rather than being presented as "brought nobody".
+   */
+  const invitedSignupCount = own
+    ? invitedSignups.length
+    : (() => {
+        if (invites.error || invites.data == null) {
+          unavailable.add('invitedSignups');
+          return 0;
+        }
+        return invites.data as number;
+      })();
 
   const commentRows = newestFirst(
     rowsOf<CommentRow>(comments, 'written'),
@@ -811,6 +841,7 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
     rankings,
     watchlist: watchlistTitles,
     invitedSignups,
+    invitedSignupCount,
     written: [...commentRows, ...notes],
     recommendationsSent,
     reactionsReceived,
