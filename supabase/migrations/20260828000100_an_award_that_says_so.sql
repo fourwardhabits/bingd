@@ -435,7 +435,7 @@ $$;
 
 revoke execute on function _award_metric(uuid, text, integer) from public, anon, authenticated;
 comment on function _award_metric(uuid, text, integer) is
-  'One track''s metric for one account, owner-truth — src/features/awards/tracks.ts in SQL, held to it by parity tests. The threshold argument matters to exactly one track (Two-Screen Life''s per-tier cap) and is ignored by the rest. Internal.';
+  'One track''s metric for one account, owner-truth — src/features/awards/tracks.ts in SQL. The seeded thresholds and patterns are text-parity-tested against the TypeScript (awards-server-parity.test.ts); the metric SEMANTICS are pinned by the behavioral battery in supabase/tests/award-unlocks.test.mjs, which is where a drift in inheritance, filtering, caps or counting fails. The threshold argument matters to exactly one track (Two-Screen Life''s per-tier cap) and is ignored by the rest. Internal.';
 
 create or replace function _award_genre_count(p_user uuid, p_canonical text[])
 returns bigint

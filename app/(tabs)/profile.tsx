@@ -1,7 +1,7 @@
 
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -84,14 +84,29 @@ export default function ProfileScreen() {
   // when it mounts, and one that stayed mounted would read them on every profile visit
   // for a screen nobody had asked for.
   //
-  // `?awards=1` opens it on arrival, which is where an award notification routes
-  // (`features/notifications/routing.ts`). The sheet is a component on this tab rather
-  // than a route of its own, so a parameter is the only way in from outside. Read as
-  // the initial state rather than in an effect: it should open once because the reader
-  // arrived that way, not again every time this tab re-renders with the param still on
-  // the URL.
+  // `?awards=1` opens it on arrival, which is where an award notification and an
+  // award feed tap route (`features/notifications/routing.ts`, 20260828000100). The
+  // sheet is a component on this tab rather than a route of its own, so a parameter
+  // is the only way in from outside.
+  //
+  // Read at mount AND consumed on change (review 67, Major 1). A tab stays mounted,
+  // so an initial-state-only read meant a warm push tap — the app already open, the
+  // tab already visited — updated the param and opened nothing. The effect opens on
+  // every fresh arrival and immediately clears the param, which is what keeps the
+  // original rule true by construction: closing the sheet cannot re-trigger a
+  // param that is no longer there, and the *next* arrival sets it afresh.
   const { awards: awardsParam } = useLocalSearchParams<{ awards?: string }>();
   const [awardsOpen, setAwardsOpen] = useState(awardsParam === '1');
+  useEffect(() => {
+    if (awardsParam === '1') {
+      // Synchronising FROM an external system — the URL — which is the case the
+      // rule's own doc carves out; the param is consumed in the same breath, so
+      // this fires once per arrival, not per render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAwardsOpen(true);
+      router.setParams({ awards: undefined });
+    }
+  }, [awardsParam, router]);
 
   /**
    * Own activity, asked for directly — not the follow feed filtered down to oneself.

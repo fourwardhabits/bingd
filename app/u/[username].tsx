@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
@@ -77,11 +77,23 @@ export default function PublicProfileScreen() {
   //
   // `?awards=1` opens it on arrival — the profile tab's own idiom (20260828000100),
   // here for the feed's award rows: "Ada earned Movie Muncher" lands on Ada's
-  // Awards, not on Ada's profile with one more tap to guess. Initial state rather
-  // than an effect, so it opens once for the arrival and not again on re-renders
-  // with the param still on the URL. The sheet itself waits for `profile.data`, so
-  // an early open simply paints when the profile resolves.
+  // Awards, not on Ada's profile with one more tap to guess. Read at mount AND
+  // consumed on change (review 67, Major 1): Expo Router can reuse a mounted
+  // dynamic route, and an initial-state-only read would leave a second award tap
+  // updating the param and opening nothing. The effect opens per fresh arrival and
+  // clears the param, so a closed sheet stays closed until the next arrival sets
+  // it again. The sheet itself waits for `profile.data`, so an early open simply
+  // paints when the profile resolves.
   const [awardsOpen, setAwardsOpen] = useState(awardsParam === '1');
+  useEffect(() => {
+    if (awardsParam === '1') {
+      // URL-driven, consumed on arrival — the profile tab's exact pattern and
+      // the same rule carve-out (see its comment).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAwardsOpen(true);
+      router.setParams({ awards: undefined });
+    }
+  }, [awardsParam, router]);
   // Which review's reason sheet is open, by `user_media.id`.
   const [reportingReview, setReportingReview] = useState<string | null>(null);
   /** Which of the two people lists is open, if either. One sheet, so one piece of state. */
