@@ -450,6 +450,23 @@ expectRefused(
   await rpc('invited_signup_count', { p_user: NIL }),
 );
 
+// Added 2026-08-28 with the award loop (20260828000100). The detector is internal —
+// a caller who could invoke it could probe another account's counts or mint the
+// announcement for a tier they typed — and the seeded ladder is not client data.
+expectRefused(
+  'anon cannot execute _maybe_award_unlocks',
+  await rpc('_maybe_award_unlocks', { p_user: NIL, p_awards: ['movie-muncher'] }),
+);
+expectRefused(
+  'anon cannot execute _award_metric',
+  await rpc('_award_metric', { p_user: NIL, p_award: 'movie-muncher', p_threshold: 50 }),
+);
+expectRefused('anon cannot read award_tiers', await get('award_tiers?select=award_key&limit=1'));
+expectRefused(
+  'anon cannot read award_unlocks',
+  await get('award_unlocks?select=user_id&limit=1'),
+);
+
 // Own-read only, and a stranger is not the owner. An empty array is the correct
 // answer under RLS; a row would mean the policy is not doing its job.
 {
