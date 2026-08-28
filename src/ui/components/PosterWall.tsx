@@ -37,6 +37,15 @@ export type PosterShelfProps = {
   onPressTile: (tile: PosterTile) => void;
   /** Turns the header into a button to the full list. */
   onPressAll?: () => void;
+  /**
+   * Whether the shelf draws its own heading.
+   *
+   * False when a caller has already put the title somewhere the shelf cannot reach — the
+   * Feed draws it in a content header row shared with the mode toggle, and the same words
+   * twice would be worse than either. `title` stays required: it is the shelf's
+   * accessible name whether or not it is painted.
+   */
+  showTitle?: boolean;
 };
 
 /**
@@ -47,7 +56,13 @@ export type PosterShelfProps = {
  * more — so the width is derived from the screen rather than fixed, to make the
  * partial card happen on purpose instead of by luck.
  */
-export function PosterShelf({ title, tiles, onPressTile, onPressAll }: PosterShelfProps) {
+export function PosterShelf({
+  title,
+  tiles,
+  onPressTile,
+  onPressAll,
+  showTitle = true,
+}: PosterShelfProps) {
   const { width } = useWindowDimensions();
   const { gap, peek } = theme.layout.posterShelf;
 
@@ -60,12 +75,14 @@ export function PosterShelf({ title, tiles, onPressTile, onPressAll }: PosterShe
   if (tiles.length === 0) return null;
 
   return (
-    <View style={styles.shelf}>
-      <SectionHeader
-        title={title}
-        actionLabel={onPressAll ? 'All' : undefined}
-        onPressAction={onPressAll}
-      />
+    <View style={styles.shelf} accessibilityLabel={showTitle ? undefined : title}>
+      {showTitle ? (
+        <SectionHeader
+          title={title}
+          actionLabel={onPressAll ? 'All' : undefined}
+          onPressAction={onPressAll}
+        />
+      ) : null}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}

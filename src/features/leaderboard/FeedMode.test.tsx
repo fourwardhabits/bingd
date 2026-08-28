@@ -8,27 +8,28 @@ import { renderWithProviders } from '@/test-utils/render';
 import FeedScreen from '../../../app/(tabs)/feed';
 
 /**
- * The Feed ↔ Leaderboard toggle, and the board it opens (founder §§5–10, §26, §31).
+ * The Feed ↔ Leaderboard toggle, the timeframe selector, and the board's rows.
  *
  * ---------------------------------------------------------------------------
- * THE THREE PROPERTIES WORTH A SCREEN TEST RATHER THAN A UNIT ONE
+ * WHAT THIS FILE GUARDS
  *
- * **The default, and that it is not sticky.** §6 is a *negative* requirement — a fresh
- * launch must open on Feed, never on Leaderboard — and the only way to assert a negative
- * about persistence is to toggle, mount fresh, and look. It is also the requirement most
- * likely to be "improved" away by somebody adding the preference Collection has, which is
- * why the test says why in as many words.
+ * **Two preferences that must not be conflated.** The founder was explicit: the
+ * *timeframe* is remembered across launches and the *mode* is not. They live one line
+ * apart in `feed.tsx`, they are both stored-preference-shaped, and swapping them would
+ * mean the app opening on a scoreboard instead of the homepage. Every persistence test
+ * below asserts one and denies the other.
  *
- * **That the bell survives.** The toggle is placed beside the one control that appears in
- * the same corner on every tab. A header that pushed it off, or made it unreachable, is a
- * regression in a control nothing else on this screen leads to.
+ * **Where the toggle is.** It spent a day in the app bar and the founder's physical
+ * review moved it. The app bar is the one row identical on every tab, so a control that
+ * appears on exactly one of them makes the app's most stable landmark move. Asserted as
+ * an absence up there as well as a presence down here.
  *
- * **That returning leaves the feed alone** (founder acceptance D). The board replaces the
- * content area; everything the feed owns has to still be there afterwards.
+ * **The row's hierarchy.** Name and handle share the first line; Match and its evidence
+ * take the second; the count is never crushed; the whole row is one tap target.
  *
  * The RPCs are mocked at the boundary rather than the hooks, so the query keys, the
- * enabled-gating and the row mapping are all exercised — a hook-level mock would pass
- * with the board wired to the wrong metric.
+ * enabled-gating, the timeframe argument and the row mapping are all exercised — a
+ * hook-level mock would pass with the board wired to the wrong timeframe.
  */
 
 const mockRpc = jest.fn();
@@ -62,9 +63,12 @@ jest.mock('expo-router', () => ({
   useFocusEffect: (callback: () => void) => callback(),
 }));
 
+/** Mutable so a test can sign one reader out and another in. */
+const mockProfile = { id: 'user-1' };
+
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({
-    id: 'user-1',
+    id: mockProfile.id,
     username: 'sai',
     display_name: 'Sai',
     avatar_path: null,
@@ -72,13 +76,32 @@ jest.mock('@/features/auth', () => ({
   }),
 }));
 
+/** A real preference store, so a remembered timeframe can be seeded and read back. */
+const mockPrefStore: Record<string, unknown> = {};
+const mockPrefWrites: { name: string; value: unknown }[] = [];
+const mockPrefFailing = new Set<string>();
+
+jest.mock('@/lib/prefs', () => ({
+  readPref: (name: string) =>
+    mockPrefFailing.has(name)
+      ? Promise.reject(new Error('store unavailable'))
+      : Promise.resolve(mockPrefStore[name] ?? null),
+  writePref: (name: string, value: unknown) => {
+    mockPrefWrites.push({ name, value });
+    mockPrefStore[name] = value;
+    return Promise.resolve();
+  },
+}));
+
 const mockTrack = jest.fn();
 jest.mock('@/lib/analytics', () => ({ track: (event: unknown) => mockTrack(event) }));
 
-/** The board rows the RPC answers with, per metric. */
+const TIMEFRAME_KEY = 'user-1.leaderboard.timeframe';
+
+/** Board rows and standings, keyed `metric|timeframe` so the views cannot be confused. */
 const mockBoard: Record<string, unknown[]> = {};
-/** The caller's own standing, per metric. */
 const mockStanding: Record<string, unknown> = {};
+const boardKey = (args: Record<string, unknown>) => `${args.p_metric}|${args.p_timeframe}`;
 
 const entry = (over: Record<string, unknown> = {}) => ({
   user_id: 'u-1',
@@ -89,23 +112,29 @@ const entry = (over: Record<string, unknown> = {}) => ({
   metric_count: 9,
   rank: 1,
   is_you: false,
+  match_percent: null,
+  shared_count: 0,
   ...over,
 });
 
 beforeEach(() => {
+  mockProfile.id = 'user-1';
   mockPush.mockClear();
   mockTrack.mockClear();
   for (const key of Object.keys(mockBoard)) delete mockBoard[key];
   for (const key of Object.keys(mockStanding)) delete mockStanding[key];
+  for (const key of Object.keys(mockPrefStore)) delete mockPrefStore[key];
+  mockPrefWrites.length = 0;
+  mockPrefFailing.clear();
 
   mockRpc.mockReset();
   mockRpc.mockImplementation((name: string, args: Record<string, unknown>) => {
-    if (name === 'monthly_leaderboard') {
-      return Promise.resolve({ data: mockBoard[args.p_metric as string] ?? [], error: null });
+    if (name === 'leaderboard') {
+      return Promise.resolve({ data: mockBoard[boardKey(args)] ?? [], error: null });
     }
     if (name === 'my_leaderboard_standing') {
       return Promise.resolve({
-        data: [mockStanding[args.p_metric as string] ?? { metric_count: 0, rank: null, entrants: 0 }],
+        data: [mockStanding[boardKey(args)] ?? { metric_count: 0, rank: null, entrants: 0 }],
         error: null,
       });
     }
@@ -113,16 +142,72 @@ beforeEach(() => {
   });
 });
 
+type View = Awaited<ReturnType<typeof renderWithProviders>>;
+
 const open = async () => {
   const view = await renderWithProviders(<FeedScreen />);
   await waitFor(() => expect(view.getByLabelText('Feed')).toBeTruthy());
   return view;
 };
 
-const toBoard = async (view: Awaited<ReturnType<typeof open>>) => {
+const toBoard = async (view: View, expecting = 'This month') => {
   await fireEvent.press(view.getByLabelText('Leaderboard'));
-  await waitFor(() => expect(view.getByText('This month')).toBeTruthy());
+  await waitFor(() => expect(view.getByLabelText(`Showing ${expecting}`)).toBeTruthy());
 };
+
+/** Open the timeframe dropdown and choose. The same two-step MediumSelector everywhere. */
+const chooseTimeframe = async (view: View, from: string, to: string) => {
+  await fireEvent.press(view.getByLabelText(`Showing ${from}`));
+  await fireEvent.press(view.getByText(to));
+  await waitFor(() => expect(view.getByLabelText(`Showing ${to}`)).toBeTruthy());
+};
+
+// ---------------------------------------------------------------------------
+
+describe('where the toggle lives', () => {
+  /**
+   * Founder acceptance A. Asserted as an *absence* in the app bar, not merely a presence
+   * elsewhere: the bar is the one row identical on every tab, and a control that appears
+   * on exactly one of them makes the app's most stable landmark move.
+   */
+  it('is not in the app bar, which holds the wordmark and the bell', async () => {
+    /**
+     * Walked from the tree rather than queried by role.
+     *
+     * `AppHeader` and `SectionHeader` both wear `accessibilityRole="header"`, so a role
+     * query is ambiguous here — and the claim is structural anyway: is this control a
+     * *descendant* of the app bar? The first header in tree order is the app bar.
+     */
+    const view = await open();
+    const appBar = view.root?.queryAll(
+      (node) => node.props.accessibilityRole === 'header',
+    )[0];
+
+    expect(appBar).toBeDefined();
+    expect(
+      appBar?.queryAll((node) => node.props.accessibilityLabel === 'Feed mode') ?? [],
+    ).toHaveLength(0);
+    // And the bell is still in it, untouched.
+    expect(
+      appBar?.queryAll((node) => /^Notifications/.test(String(node.props.accessibilityLabel))) ??
+        [],
+    ).not.toHaveLength(0);
+  });
+
+  it('is in the content header row instead', async () => {
+    const view = await open();
+    expect(view.getByLabelText('Feed mode')).toBeTruthy();
+    expect(view.getByLabelText('Leaderboard')).toBeTruthy();
+  });
+
+  it('leaves the bell reachable in both modes', async () => {
+    const view = await open();
+    expect(view.getByLabelText(/^Notifications/)).toBeTruthy();
+
+    await toBoard(view);
+    expect(view.getByLabelText(/^Notifications/)).toBeTruthy();
+  });
+});
 
 // ---------------------------------------------------------------------------
 
@@ -131,7 +216,7 @@ describe('the toggle', () => {
     const view = await open();
 
     expect(view.getByLabelText('Activity')).toBeTruthy();
-    expect(view.queryByText('This month')).toBeNull();
+    expect(view.queryByLabelText('Showing This month')).toBeNull();
   });
 
   it('switches to the Leaderboard on the trophy', async () => {
@@ -142,129 +227,278 @@ describe('the toggle', () => {
   });
 
   it('goes back to the Feed, with the feed untouched', async () => {
-    // Founder acceptance D. The board replaces the content area rather than being
-    // appended to it, so the assertion that matters on the way back is that the feed's
-    // own furniture is exactly where it was.
+    // Founder acceptance: the board replaces the content area rather than being appended
+    // to it, so what matters on the way back is that the feed's furniture is where it was.
     const view = await open();
     await toBoard(view);
 
     await fireEvent.press(view.getByLabelText('Feed'));
 
     await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
-    expect(view.queryByText('This month')).toBeNull();
+    expect(view.queryByLabelText('Showing This month')).toBeNull();
+  });
+
+  it('does not read the board until it is opened', async () => {
+    await open();
+    expect(mockRpc.mock.calls.filter(([name]) => name === 'leaderboard')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The two preferences, and the line between them.
+ *
+ * This is what the founder's §2 is about, and every test here exists because the obvious
+ * implementation gets one of the two wrong.
+ */
+describe('the timeframe, remembered — and the mode, not', () => {
+  it('opens the board on This month when nothing has been chosen', async () => {
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() =>
+      expect(mockRpc).toHaveBeenCalledWith('leaderboard', {
+        p_metric: 'titles',
+        p_timeframe: 'month',
+        p_limit: 50,
+      }),
+    );
+  });
+
+  it('offers exactly the two timeframes', async () => {
+    // Week and year were ruled out. Asserted as an absence so neither arrives without a
+    // decision.
+    const view = await open();
+    await toBoard(view);
+    await fireEvent.press(view.getByLabelText('Showing This month'));
+
+    expect(view.getByText('All time')).toBeTruthy();
+    expect(view.queryByText('This week')).toBeNull();
+    expect(view.queryByText('This year')).toBeNull();
+  });
+
+  it('re-reads the board on All time, and says so in the heading', async () => {
+    mockBoard['titles|all_time'] = [entry({ display_name: 'Bea', username: 'bea' })];
+    const view = await open();
+    await toBoard(view);
+
+    await chooseTimeframe(view, 'This month', 'All time');
+
+    await waitFor(() => expect(view.getByText('Bea')).toBeTruthy());
+    expect(mockRpc).toHaveBeenCalledWith('leaderboard', {
+      p_metric: 'titles',
+      p_timeframe: 'all_time',
+      p_limit: 50,
+    });
+  });
+
+  it('records the choice, so the next visit starts there', async () => {
+    const view = await open();
+    await toBoard(view);
+    await chooseTimeframe(view, 'This month', 'All time');
+
+    await waitFor(() =>
+      expect(mockPrefWrites).toContainEqual({ name: TIMEFRAME_KEY, value: 'all_time' }),
+    );
+  });
+
+  it('keeps All time when the board is left and reopened', async () => {
+    const view = await open();
+    await toBoard(view);
+    await chooseTimeframe(view, 'This month', 'All time');
+
+    await fireEvent.press(view.getByLabelText('Feed'));
+    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    await toBoard(view, 'All time');
   });
 
   /**
-   * §6, and the reason it is a negative requirement: Leaderboard is an alternate surface,
-   * not a way of drawing the homepage, so a launch that opened on it would have replaced
-   * the homepage. Collection's toggle *is* persisted and this one must not be — the two
-   * look alike deliberately, which is exactly why the difference needs a test.
+   * The pair the founder drew a line between, in one test.
+   *
+   * A fresh launch opens **Feed** — the mode is not remembered — and tapping Trophy opens
+   * on **All time**, because the timeframe is. Getting either half backwards is the
+   * mistake this section exists to catch.
    */
-  it('does not survive a fresh launch', async () => {
+  it('opens on Feed after a relaunch, and on the remembered timeframe when asked', async () => {
     const first = await open();
     await toBoard(first);
-    // `cleanup()` rather than `first.unmount()`: the library unmounts every rendered
-    // tree again after the test, and a tree already unmounted by hand makes that second
-    // pass throw — which leaves the *next* test rendering into a broken root and failing
-    // for a reason that has nothing to do with what it asserts. Every test after this one
-    // failed that way before the change, which is a good demonstration of why a
-    // suspicious cascade is worth reading as one fault rather than fourteen.
+    await chooseTimeframe(first, 'This month', 'All time');
+    // `cleanup()` rather than `unmount()`: the library unmounts every rendered tree again
+    // after the test, and one already unmounted by hand makes that pass throw — which
+    // breaks the *next* test for a reason that has nothing to do with what it asserts.
     await cleanup();
 
     const second = await open();
 
     expect(second.getByLabelText('Activity')).toBeTruthy();
-    expect(second.queryByText('This month')).toBeNull();
+    expect(second.queryByLabelText(/^Showing /)).toBeNull();
+
+    await toBoard(second, 'All time');
   });
 
-  it('leaves the bell reachable in both modes', async () => {
+  it('records This month again when the reader switches back', async () => {
+    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
     const view = await open();
-    expect(view.getByLabelText(/^Notifications/)).toBeTruthy();
+    await toBoard(view, 'All time');
 
-    await toBoard(view);
-    expect(view.getByLabelText(/^Notifications/)).toBeTruthy();
+    await chooseTimeframe(view, 'All time', 'This month');
+
+    await waitFor(() =>
+      expect(mockPrefWrites).toContainEqual({ name: TIMEFRAME_KEY, value: 'month' }),
+    );
   });
 
-  it('does not read the board until it is opened', async () => {
-    // The Feed is the default and most readers will never toggle. An eager read would be
-    // a request per app open for a surface nobody asked for.
-    await open();
-    expect(mockRpc.mock.calls.filter(([name]) => name === 'monthly_leaderboard')).toHaveLength(0);
+  it('ignores a stored value the selector has no option for', async () => {
+    mockPrefStore[TIMEFRAME_KEY] = 'this_week';
+    const view = await open();
+    await toBoard(view);
+  });
+
+  it('gives a second account the default rather than the first one’s choice', async () => {
+    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
+    const view = await open();
+    await toBoard(view, 'All time');
+    await cleanup();
+
+    mockProfile.id = 'user-2';
+    const second = await open();
+    await toBoard(second);
+  });
+
+  it('falls back to This month when the preference read fails', async () => {
+    // A store that refuses should cost the reader their preference, not hand them the
+    // previous account's — the cross-account leak `CollectionScreen` records.
+    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
+    mockPrefFailing.add(TIMEFRAME_KEY);
+    const view = await open();
+    await toBoard(view);
   });
 });
 
 // ---------------------------------------------------------------------------
 
 describe('the metrics', () => {
-  it('opens on Titles', async () => {
-    mockBoard.titles = [entry()];
-    const view = await open();
-    await toBoard(view);
-
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith('monthly_leaderboard', {
-        p_metric: 'titles',
-        p_limit: 50,
-      }),
-    );
-  });
-
   it('offers exactly the four, in the founder’s order', async () => {
     const view = await open();
     await toBoard(view);
 
-    // The order is the product decision — Titles is the total and Movies and TV are its
-    // two halves, so they sit beside it and the different question comes last.
-    const labels = ['Titles', 'Movies', 'TV', 'Reviews'];
-    for (const label of labels) expect(view.getByText(label)).toBeTruthy();
+    for (const label of ['Titles', 'Movies', 'TV', 'Reviews']) {
+      expect(view.getByText(label)).toBeTruthy();
+    }
     expect(view.queryByText('Watched')).toBeNull();
-    expect(view.queryByText('All Time')).toBeNull();
   });
 
-  it('re-reads the board when a different chip is chosen', async () => {
-    mockBoard.titles = [entry()];
-    mockBoard.reviews = [entry({ username: 'bea', display_name: 'Bea', metric_count: 3 })];
+  it('re-reads the board on a chip, without resetting the timeframe', async () => {
+    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
+    mockBoard['titles|all_time'] = [entry()];
+    mockBoard['reviews|all_time'] = [entry({ username: 'bea', display_name: 'Bea' })];
 
     const view = await open();
-    await toBoard(view);
+    await toBoard(view, 'All time');
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
     await fireEvent.press(view.getByText('Reviews'));
 
     await waitFor(() => expect(view.getByText('Bea')).toBeTruthy());
-    expect(view.queryByText('Ada')).toBeNull();
+    expect(mockRpc).toHaveBeenCalledWith('leaderboard', {
+      p_metric: 'reviews',
+      p_timeframe: 'all_time',
+      p_limit: 50,
+    });
   });
 });
 
 // ---------------------------------------------------------------------------
 
-describe('the rows', () => {
+describe('the row', () => {
   it('draws rank, name, handle and count', async () => {
-    mockBoard.titles = [entry({ metric_count: 12, rank: 1 })];
+    mockBoard['titles|month'] = [entry({ metric_count: 12, rank: 1 })];
     const view = await open();
     await toBoard(view);
 
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
     expect(view.getByText('@ada')).toBeTruthy();
     expect(view.getByText('12')).toBeTruthy();
-    expect(view.getByLabelText(/^Number 1, Ada, @ada, 12 titles/)).toBeTruthy();
   });
 
-  it('opens a profile when a row is tapped', async () => {
-    mockBoard.titles = [entry()];
+  it('puts Match and its evidence on the second line', async () => {
+    mockBoard['titles|month'] = [entry({ match_percent: 91, shared_count: 37 })];
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('91% Match · 37 shared')).toBeTruthy());
+  });
+
+  it('says Match TBD, with the count, when there is no score yet', async () => {
+    mockBoard['titles|month'] = [entry({ match_percent: null, shared_count: 3 })];
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('Match TBD · 3 shared')).toBeTruthy());
+  });
+
+  /**
+   * A 100% match with your own catalogue is a tautology, `taste_match` refuses the self
+   * case, and an empty `Match TBD · 0 shared` on the row the reader looks at first would
+   * be the feature appearing broken. "You" instead.
+   */
+  it('shows You on the reader’s own row, and never a self-Match', async () => {
+    mockBoard['titles|month'] = [
+      entry({ user_id: 'user-1', username: 'sai', display_name: 'Sai', is_you: true }),
+    ];
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('You')).toBeTruthy());
+    expect(view.queryByText(/Match/)).toBeNull();
+  });
+
+  it('opens that person’s profile from any part of the row', async () => {
+    mockBoard['titles|month'] = [entry({ match_percent: 91, shared_count: 37 })];
     const view = await open();
     await toBoard(view);
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
 
-    await fireEvent.press(view.getByText('Ada'));
+    // The whole row is one Pressable, so tapping the *second* line — not the name, the
+    // handle or the avatar — must still navigate.
+    await fireEvent.press(view.getByText('91% Match · 37 shared'));
 
     expect(mockPush).toHaveBeenCalledWith('/u/ada');
   });
 
+  it('opens the reader’s own profile from their own row', async () => {
+    mockBoard['titles|month'] = [
+      entry({ user_id: 'user-1', username: 'sai', display_name: 'Sai', is_you: true }),
+    ];
+    const view = await open();
+    await toBoard(view);
+    await waitFor(() => expect(view.getByText('You')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Sai'));
+
+    expect(mockPush).toHaveBeenCalledWith('/u/sai');
+  });
+
+  it('keeps the count when the name and handle are both long', async () => {
+    // The count is the other thing this screen is for; a long display name must cost the
+    // handle its width, never the number.
+    mockBoard['titles|month'] = [
+      entry({
+        display_name: 'Abisola Oluwaseun Adeyemi-Fitzgerald',
+        username: 'abisolaoluwaseunadeyemi',
+        metric_count: 64,
+      }),
+    ];
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('64')).toBeTruthy());
+    expect(view.getByText('Abisola Oluwaseun Adeyemi-Fitzgerald')).toBeTruthy();
+  });
+
   it('gives tied people the same rank, as the server reported it', async () => {
-    // `rank()` shares a number on a tie and the next person is third. The row must draw
-    // the server's rank rather than its own index, or a tie would silently renumber.
-    mockBoard.titles = [
+    mockBoard['titles|month'] = [
       entry({ user_id: 'u-1', username: 'ada', display_name: 'Ada', rank: 1, metric_count: 5 }),
       entry({ user_id: 'u-2', username: 'bea', display_name: 'Bea', rank: 1, metric_count: 5 }),
       entry({ user_id: 'u-3', username: 'cy', display_name: 'Cy', rank: 3, metric_count: 2 }),
@@ -277,33 +511,34 @@ describe('the rows', () => {
     expect(view.getByLabelText(/^Number 3, Cy/)).toBeTruthy();
   });
 
-  it('marks the reader’s own row, and does not pin a second copy of it', async () => {
-    mockBoard.titles = [entry({ user_id: 'user-1', username: 'sai', display_name: 'Sai', is_you: true })];
-    mockStanding.titles = { metric_count: 9, rank: 1, entrants: 1 };
+  it('pins the reader’s standing when they are past the end of the page', async () => {
+    mockBoard['titles|month'] = [entry()];
+    mockStanding['titles|month'] = { metric_count: 2, rank: 84, entrants: 96 };
 
     const view = await open();
     await toBoard(view);
 
-    await waitFor(() => expect(view.getByLabelText(/, You$/)).toBeTruthy());
-    // The pinned row's own label. Seeing yourself twice is the confusion §10 names.
+    await waitFor(() =>
+      expect(view.getByLabelText('You are number 84 of 96, 2 titles')).toBeTruthy(),
+    );
+  });
+
+  it('does not pin a second copy of a row already on screen', async () => {
+    mockBoard['titles|month'] = [
+      entry({ user_id: 'user-1', username: 'sai', display_name: 'Sai', is_you: true }),
+    ];
+    mockStanding['titles|month'] = { metric_count: 9, rank: 1, entrants: 1 };
+
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('You')).toBeTruthy());
     expect(view.queryByLabelText(/^You are number/)).toBeNull();
   });
 
-  it('pins the reader’s standing when they are past the end of the page', async () => {
-    mockBoard.titles = [entry()];
-    mockStanding.titles = { metric_count: 2, rank: 84, entrants: 96 };
-
-    const view = await open();
-    await toBoard(view);
-
-    await waitFor(() => expect(view.getByLabelText('You are number 84 of 96, 2 titles')).toBeTruthy());
-  });
-
-  it('pins nothing for somebody who has done nothing this month', async () => {
-    // Rank is null, not zero: a person with nothing to count has no position, and last
-    // place is something you earn by being on the board.
-    mockBoard.titles = [entry()];
-    mockStanding.titles = { metric_count: 0, rank: null, entrants: 1 };
+  it('pins nothing for somebody who has done nothing', async () => {
+    mockBoard['titles|month'] = [entry()];
+    mockStanding['titles|month'] = { metric_count: 0, rank: null, entrants: 1 };
 
     const view = await open();
     await toBoard(view);
@@ -326,6 +561,14 @@ describe('an empty and sparse beta', () => {
     await fireEvent.press(view.getByText('Reviews'));
     await waitFor(() => expect(view.getByText('No reviews yet this month.')).toBeTruthy());
     expect(view.getByText('Yours could be the first.')).toBeTruthy();
+  });
+
+  it('drops the “yet” on an all-time board, where it would read oddly', async () => {
+    mockPrefStore[TIMEFRAME_KEY] = 'all_time';
+    const view = await open();
+    await toBoard(view, 'All time');
+
+    await waitFor(() => expect(view.getByText('No watches here yet.')).toBeTruthy());
   });
 });
 

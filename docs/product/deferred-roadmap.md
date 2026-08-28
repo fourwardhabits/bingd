@@ -1329,6 +1329,37 @@ You — the two are different products and only the second one is ruled out here
 
 ---
 
+## 26. Further leaderboard timeframes — week, year, custom
+
+**Not built, 2026-08-29**, in the tranche that added All time (PRD §14).
+
+**What it is.** Any leaderboard window other than the two that exist: this week, this
+year, or a custom range.
+
+**Why they are not built.** Each fails for its own reason rather than for a shared one:
+
+- **Week.** The behaviour is low-frequency. A weekly board over films and TV seasons is
+  mostly zeroes and is decided by whoever happened to have a free Saturday, which is a
+  worse competition than none. This was ruled out when the board was first specified and
+  the reasoning has not changed.
+- **Year.** It is the all-time board with a slower reset — nearly the same list, and on a
+  product this young *literally* the same list. It becomes interesting only once there is
+  more than one year of history worth comparing.
+- **Custom ranges.** A date picker over a leaderboard is an analytics feature. Nobody
+  competes over an arbitrary fortnight.
+
+**What it would cost if the evidence arrived.** Very little, which is the point of
+recording it: `_leaderboard_counts` takes a timeframe and branches on it, so a third value
+is a branch, a validator entry and an option in one table. The client's selector, its
+stored preference, the metrics, the ordering and the rows are all timeframe-agnostic
+already.
+
+**Revisit when.** Beta evidence, and specifically evidence of the *shape* — readers asking
+"how did I do this week", not the team deciding the dropdown looks sparse with two entries
+in it.
+
+---
+
 ## Carried forward from earlier decisions
 
 Still deferred, still agreed, recorded so that nothing is lost between documents:

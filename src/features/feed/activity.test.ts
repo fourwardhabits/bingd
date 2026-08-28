@@ -19,7 +19,10 @@ describe('the activity sentence', () => {
     // "ranked" there and "finished" in the feed. A table with a hole in it is the
     // same bug one type later.
     for (const type of ACTIVITY_TYPES) {
-      expect(verbFor(type)).toMatch(/^[a-z]+$/);
+      // Lower-case words, one or more. `goal_completed` is the first verb that is two
+      // words — "hit their" — because the possessive belongs with the verb rather than
+      // inside the emphasised slot, which holds the goal itself.
+      expect(verbFor(type)).toMatch(/^[a-z]+( [a-z]+)*$/);
     }
   });
 

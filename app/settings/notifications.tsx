@@ -6,6 +6,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useCurrentProfile } from '@/features/auth';
 import { AwardBadge } from '@/features/awards/AwardBadge';
 import { badgeFor } from '@/features/awards/badges';
+import { GOAL_LABEL } from '@/features/goals/goals';
 import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
   canFollowBack,
@@ -438,7 +439,12 @@ export default function NotificationsScreen() {
                         }${
                           row.kind === 'award_earned'
                             ? `You earned ${row.award?.name ?? 'a new Award'}`
-                            : `${row.actorName} ${verbFor(row.kind, row.mediaKind)}`
+                            : row.kind === 'goal_completed'
+                              ? // The second actorless sentence. `verbFor` returns the
+                                // whole clause here, so there is no name to template in
+                                // and no "null" to read aloud.
+                                verbFor(row.kind, row.mediaKind, row.goal)
+                              : `${row.actorName} ${verbFor(row.kind, row.mediaKind)}`
                         }${subject ? `, ${subject}` : ''}`}
                         // From the same chain the tap uses, so the hint cannot promise a
                         // title and then open a profile.
@@ -449,7 +455,18 @@ export default function NotificationsScreen() {
                         {/* The award's own badge where every other row has a face —
                             nobody did this to the reader, and an empty avatar chip
                             says "somebody unnameable" rather than "your award". */}
-                        {row.kind === 'award_earned' && row.award ? (
+                        {row.kind === 'goal_completed' ? (
+                          // The same flag the feed row leads with, at avatar size. An
+                          // empty avatar chip would say "somebody unnameable" where the
+                          // truth is that nobody did this to them.
+                          <View style={styles.goalMark}>
+                            <Ionicons
+                              name="flag"
+                              size={theme.layout.icon.md}
+                              color={theme.semantic.action}
+                            />
+                          </View>
+                        ) : row.kind === 'award_earned' && row.award ? (
                           <AwardBadge
                             badge={badgeFor(row.award.key, row.award.tierKey)}
                             earned
@@ -490,6 +507,26 @@ export default function NotificationsScreen() {
                                 You earned{' '}
                               </Text>
                               <Text variant="callout">{row.award?.name ?? 'a new Award'}</Text>
+                              <Text variant="callout" tone="secondary">
+                                {' '}
+                                🎉
+                              </Text>
+                            </Text>
+                          ) : row.kind === 'goal_completed' ? (
+                            /* "You hit your 2026 Movies goal 🎉" — the founder's copy.
+                             The goal takes the emphasis every other row gives the actor,
+                             because it is the subject; the emoji stays out of the spoken
+                             label for the same reason the welcome's and the award's do. */
+                            <Text variant="callout" numberOfLines={2}>
+                              <Text variant="callout" tone="secondary">
+                                You hit your{' '}
+                              </Text>
+                              <Text variant="callout">
+                                {row.goal
+                                  ? `${row.goal.year} ${GOAL_LABEL[row.goal.category]}`
+                                  : 'annual'}{' '}
+                                goal
+                              </Text>
                               <Text variant="callout" tone="secondary">
                                 {' '}
                                 🎉
@@ -705,6 +742,14 @@ const styles = StyleSheet.create({
   },
   personCopy: { flex: 1, gap: 2 },
   answers: { flexDirection: 'row', gap: theme.space[3] },
+  // The avatar slot, holding a glyph instead of a face for the one actorless kind that
+  // has no badge of its own to draw.
+  goalMark: {
+    width: theme.layout.avatar.sm,
+    height: theme.layout.avatar.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

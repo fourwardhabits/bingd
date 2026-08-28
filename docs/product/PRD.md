@@ -1547,7 +1547,28 @@ and is not worked for.
 Toggling the trophy replaces the Feed's whole content area — Trending included. Returning
 leaves the feed exactly as it was.
 
-### The monthly leaderboard — new 2026-08-28
+### As built — 2026-08-29: the toggle moved out of the app bar
+
+The Feed/Leaderboard control spent one day beside the notification bell. The founder's
+physical review moved it, and the reasoning is worth keeping: **the app bar is the one
+row that is identical on every tab**, so a control appearing on exactly one of them makes
+the app's most stable landmark move — and it put a *content* decision in the chrome,
+next to a control about something else.
+
+It now sits in a **content header row**, opposite the heading of whatever is directly
+below it:
+
+```
+TRENDING NOW                         [Feed] [Trophy]
+THIS MONTH ▼                         [Feed] [Trophy]
+```
+
+The app bar is the wordmark and the bell again, with the bell's position and hit area
+untouched. In Feed mode the left side is drawn only when the Trending shelf will actually
+render — the shelf returns nothing when it has nothing, and a heading over an absent
+shelf is a label for nothing.
+
+### The leaderboard — new 2026-08-28, timeframes added 2026-08-29
 
 A subsection of Social interaction rather than a section of its own: it is a second view
 of the same tab, reached from the toggle above, and numbering it separately would have
@@ -1561,26 +1582,66 @@ and then never moves. A month is the shortest window that produces a number wort
 comparing and the shortest that resets often enough for second place to be worth playing
 for.
 
-The heading is **This month**. The window is `date_trunc('month', current_date)` to the
-same day next month, half-open, by the **server's** clock — `watched_on` is a zoneless
-date, so a per-viewer timezone would make two people disagree about who is winning.
+The window is the first day of the current month to the same day next month, half-open,
+in **UTC** — stated rather than inherited, because `current_date` reads the connection's
+timezone and PostgREST does not pin it. A per-viewer timezone would make two people
+disagree about who is winning, which is worse than a boundary that moves at UTC midnight
+for somebody in Auckland.
+
+#### This month and All time — added 2026-08-29
+
+The heading is a **dropdown**, using the same interaction as the Movies/TV/People
+selector, at section-header weight so it sits properly opposite the toggle:
+
+```
+THIS MONTH ▼        ALL TIME ▼
+```
+
+Two values only. **This month is the default and stays the primary competitive
+mechanic** — it resets incumbent advantage, which is what makes second place worth
+playing for. All time is curiosity, historical standing, and a way of finding the people
+who are actually active; it is decided once and then barely moves. Week and year are not
+built and are on the deferred roadmap. There are no separate tabs: the dropdown is the
+whole navigation, and the timeframe is named in exactly one place on the screen.
+
+**The timeframe is remembered; the mode is not.** These are one line apart in the code
+and conflating them is the easy mistake:
+
+| | Persisted? | Why |
+| --- | --- | --- |
+| Feed vs Leaderboard **mode** | **No** | Leaderboard is an alternate surface. A launch that opened on it would have replaced the homepage with a scoreboard. |
+| Leaderboard **timeframe** | **Yes**, per account, locally | Once the reader is *in* the board, which timeframe they read it in is a preference about the same surface — the Collection Poster/List argument exactly. |
+
+So a fresh launch opens Feed, and tapping the trophy opens the board on the timeframe
+they last chose.
 
 ### The four metrics
 
 Chips read **Titles | Movies | TV | Reviews**, defaulting to Titles. Titles is the total
 and Movies and TV are its two halves, so they sit beside it and the different question
-comes last. No further metrics in V1; no All Time.
+comes last. Four metrics, and no more.
 
-| Metric | Definition | Canonical fact |
+| Metric | This month | All time |
 | --- | --- | --- |
-| **Titles** | unique rankable titles watched this calendar month (movies + TV seasons) | `user_media.watched_on` |
-| **Movies** | the same, films only | `watched_on` + `media_items.kind = 'movie'` |
-| **TV** | the same, seasons only | `watched_on` + `kind = 'season'` |
-| **Reviews** | public reviews first published this calendar month | `user_media.note_first_published_at` |
+| **Titles** | unique rankable titles with a watch date in this calendar month | unique rankable titles watched, ever |
+| **Movies** | the same, films only | the same, films only |
+| **TV** | the same, seasons only | the same, seasons only |
+| **Reviews** | reviews **first published** this month | titles the account **currently has** a public review on |
 
 **Watch-date semantics, not logging-date.** Logging a July film in August is not an
-August watch. The cost is that a row with no date counts in no month, which is right: a
-memory without a date cannot be attributed to one without inventing it.
+August watch. The cost is that a row with no date counts in no *month*, which is right: a
+memory without a date cannot be attributed to one without inventing it. **All time drops
+the date test**, because there is no month to misattribute to and an onboarding
+collection of undated favourites would otherwise count for nothing. That makes it the
+same count `_award_metric` uses for Movie Muncher and the same number a profile's
+Movies/TV stats already show an authorised viewer — one definition of "watched", three
+surfaces.
+
+**Reviews differs in kind between the two timeframes, deliberately.** Monthly is an
+*event* (first publication, stamped once); all-time is a *state* (what is public now).
+Both are uninflatable, by different mechanisms: the monthly stamp never moves, and the
+all-time count cannot exceed the number of titles actually carrying a public review
+however many times they are toggled.
 
 **Rewatches cannot double-count structurally.** `user_media` is keyed `(user, title)`, so
 a rewatch updates the row in place — there is no shape in which one title appears twice
@@ -1611,18 +1672,102 @@ collection and timestamped activity.
 
 ### Design
 
-Rank, avatar, display name, handle, count. The top three carry the app's accent on their
-rank — no medals, no podium, no confetti, no XP, no points economy, no streaks, no
-all-time column. Ties share a rank and sort by handle, so the list is deterministic;
-people with zero are absent rather than listed as noughts.
+The top three carry the app's accent on their rank — no medals, no podium, no confetti,
+no XP, no points economy, no streaks. Ties share a rank and sort by handle, so the list is
+deterministic; people with zero are absent rather than listed as noughts.
 
-Tapping a row opens that profile under the ordinary privacy rules. When the reader's own
-rank is past the end of the page, a pinned "You" row shows their position and the number
-of entrants; it is drawn only when no visible row is already theirs, so they can never see
-themselves twice.
+#### The row — revised 2026-08-29
+
+```
+1   ◯  Abisola  @abisolaleye                        64
+       91% Match · 37 shared
+```
+
+Name and handle share the **first** line — the name primary, the handle muted and the
+first to shrink — which frees the second line for the thing a leaderboard is actually
+useful for. The count is never crushed by a long name.
+
+The second line is **Match and its evidence**, the same two forms the profile shows and
+from the same `taste_match` row: `91% Match · 37 shared`, or `Match TBD · 3 shared`.
+Visually secondary: this is a leaderboard, and what must read first is who the person is
+and what they scored. Match is the reason to tap, not the reason the row exists.
+
+**The reader's own row shows "You" and no Match.** A 100% match with your own catalogue is
+a tautology, `taste_match` refuses the case, and an empty placeholder on the row somebody
+looks at first would be the feature appearing broken.
+
+All existing Match privacy rules hold unchanged: an unapproved private account is not on
+the board at all, so there is nothing of theirs to leak; an account the viewer may read
+gets the ordinary treatment.
+
+**The whole row is one tap target**, opening that profile under the ordinary privacy
+rules — the locked shell for a private identity, the reader's own profile for their own
+row. No chevrons, no second Profile button, no card around each person: the row stays
+shaped like the app's other people lists.
+
+When the reader's own rank is past the end of the page, a pinned "You" row shows their
+position and the number of entrants; it is drawn only when no visible row is already
+theirs, so they can never see themselves twice.
 
 Empty states say what is true and invite: *"No watches yet this month." / "You could take
-the first spot."*
+the first spot."* The all-time wording drops the "yet", where it would read oddly.
+
+### Annual goal completion — new 2026-08-29
+
+Bingd has supported annual Movies and TV goals since 2026-08-16. **Crossing one now
+produces a celebration**, in the two halves an achievement has: a social Feed event and a
+personal congratulation.
+
+Documented here rather than beside the goal *setting* surface because it is the same
+mechanic as `award_earned` — a server-owned crossing, a durable ledger, a feed post and an
+actorless notification — and the two should be read together.
+
+#### What counts as completing a goal
+
+A **transition caused by a watch**:
+
+```
+count before this watch  <  target
+count after  this watch  >= target
+```
+
+The count is the one the profile already shows: titles with a `watched_on` in that year,
+of that medium, counted once each. Undated rows count for nothing, a series belongs to no
+goal, and a rewatch is one title.
+
+Everything the founder ruled out falls out of that shape rather than needing its own
+guard:
+
+| | Result |
+| --- | --- |
+| Opening Profile, a query recalculating, a relaunch | Nothing. These are reads; the trigger is on the write. |
+| A goal edited **downward** below a count already reached | Nothing. Setting a goal never checks for completion — a goal is not finished by moving the finish line. |
+| An account already past its goal when this shipped | Nothing. There is no backfill, and their next watch has `before >= target`. |
+| A goal edited **upward** after a completion, then crossed again | Nothing. One celebration per account, per year, per medium. |
+| The next calendar year | Independently eligible. |
+
+`goal_completions` is keyed `(user, year, category)`, and that key is the whole
+exactly-once mechanism: a replay, a two-device race and a re-crossing all resolve to the
+same row. The target is recorded as it stood at the crossing, so editing the goal
+afterwards does not rewrite what was achieved.
+
+#### The two halves
+
+**Feed** — *"Abisola hit their 2026 Movies goal 🎉"*, with the target as a secondary line
+("25 movies"). No poster: a film's artwork on a row about a year would attribute the
+achievement to whichever title happened to be last. It is an ordinary feed row otherwise —
+reactions, comments, the reactor list — and tapping it opens the earner's profile, where
+their goals are. It obeys the normal actor visibility contract, so a private account's
+completion is seen only by approved followers.
+
+**Inbox** — *"You hit your 2026 Movies goal 🎉"*, actorless, opening the reader's own
+profile rather than the social post about them. **Push-eligible** through the existing
+notification → outbox → push-sender pipeline; with push off the inbox row still exists and
+nothing is sent.
+
+It rides the **Awards** notification category rather than growing one of its own: they are
+the same thing to a reader — "you achieved something" — and a switch labelled Awards that
+left goal congratulations arriving would be the more confusing outcome.
 
 ---
 

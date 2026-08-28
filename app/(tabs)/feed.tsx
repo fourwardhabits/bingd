@@ -1,10 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { AwardActivityLead } from '@/features/awards/AwardActivityLead';
+import { GoalActivityLead } from '@/features/goals/GoalActivityLead';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
@@ -25,13 +26,19 @@ import {
 import { LeaderboardView } from '@/features/leaderboard/LeaderboardView';
 import {
   DEFAULT_METRIC,
+  DEFAULT_TIMEFRAME,
+  isLeaderboardTimeframe,
+  LEADERBOARD_TIMEFRAMES,
   useLeaderboard,
   useMyStanding,
   type LeaderboardMetric,
+  type LeaderboardTimeframe,
 } from '@/features/leaderboard/use-leaderboard';
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { TrendingShelf } from '@/features/trending/TrendingShelf';
+import { useTrending } from '@/features/trending/use-trending';
 import { track } from '@/lib/analytics';
+import { readPref, writePref } from '@/lib/prefs';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
 import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
@@ -41,6 +48,7 @@ import {
   EmptyState,
   HeaderBoundary,
   IconToggle,
+  MediumSelector,
   Screen,
   SectionHeader,
   SkeletonRow,
@@ -56,6 +64,19 @@ import { theme } from '@/ui/tokens';
  * default is the rule the Collection toggle follows too.
  */
 type FeedMode = 'feed' | 'leaderboard';
+
+/**
+ * Which leaderboard timeframe this reader last chose, per account.
+ *
+ * **Not the Feed's mode**, which is deliberately not persisted (§2). The two are one line
+ * apart in this file precisely because conflating them is the easy mistake: remembering
+ * the timeframe is remembering how to draw a surface, and remembering the mode would be
+ * remembering to replace the homepage.
+ *
+ * Local only, through the same `readPref`/`writePref` pair Collection's two preferences
+ * use — a device habit rather than something about the account, so no column and no sync.
+ */
+const TIMEFRAME_PREF_KEY = 'leaderboard.timeframe';
 
 const FEED_MODES = [
   // `newspaper` rather than `list`: Collection's list glyph means "the other way of
@@ -92,12 +113,97 @@ export default function FeedScreen() {
    */
   const [mode, setMode] = useState<FeedMode>('feed');
   const [metric, setMetric] = useState<LeaderboardMetric>(DEFAULT_METRIC);
+  /**
+   * Which timeframe the board is showing — **and this one IS remembered** (founder §2).
+   *
+   * The distinction the founder drew, and the reason the two live side by side here
+   * without being conflated:
+   *
+   *   `mode`      not persisted. Leaderboard is an alternate surface, and a launch that
+   *               opened on it would have replaced the homepage with a scoreboard.
+   *   `timeframe` persisted. Once the reader is *in* the board, which timeframe they
+   *               read it in is a preference about the same surface — the Collection
+   *               Poster/List argument exactly — and re-choosing All time on every visit
+   *               would be the app forgetting something it watched them decide.
+   *
+   * So: a fresh launch opens Feed; tapping Trophy opens the board on the timeframe they
+   * last chose.
+   */
+  /**
+   * **Tagged with the account it was read for**, which is `mediumPref`'s shape in
+   * `CollectionScreen` and is here for the reason independent review found: without it,
+   * the previous account's timeframe stays *usable* for the whole of the asynchronous
+   * preference read. Sign out of an account that chose All time, sign in as somebody with
+   * no preference, tap Trophy quickly, and their first board is drawn — and requested —
+   * as All time before the miss resolves.
+   *
+   * Carrying the id fixes it *during the render that switches*, with no effect to fire and
+   * nothing to clean up: a preference belongs to whoever it was read for, so one that does
+   * not name the current reader is simply not theirs and the default stands.
+   */
+  const [timeframePref, setTimeframePref] = useState<{
+    profileId: string;
+    value: LeaderboardTimeframe;
+  }>({ profileId: profile.id, value: DEFAULT_TIMEFRAME });
+  const timeframe: LeaderboardTimeframe =
+    timeframePref.profileId === profile.id ? timeframePref.value : DEFAULT_TIMEFRAME;
+  /** Whether the reader has chosen since their preference was read. Same guard Collection uses. */
+  const chosenTimeframe = useRef(false);
   const showingBoard = mode === 'leaderboard';
   // Not fetched until the board is actually opened. The Feed is the default and most
   // readers will never toggle, so an eager read would be a request per app open for a
   // surface nobody asked for.
-  const leaderboard = useLeaderboard(profile.id, metric, showingBoard);
-  const standing = useMyStanding(profile.id, metric, showingBoard);
+  const leaderboard = useLeaderboard(profile.id, metric, timeframe, showingBoard);
+  const standing = useMyStanding(profile.id, metric, timeframe, showingBoard);
+  /**
+   * Whether the shelf will draw anything, so the header row knows whether to name it.
+   *
+   * The same query key `TrendingShelf` reads, so React Query answers both from one fetch
+   * — this costs no request. Lifting the whole shelf's data into the screen would have
+   * been the alternative and is worse: the shelf owns its own scores, its own failure
+   * behaviour and its own staleness, and none of that belongs here.
+   */
+  const trendingHasItems = (useTrending().data?.items ?? []).length > 0;
+
+  /**
+   * The remembered timeframe, applied when it arrives.
+   *
+   * Deliberately the same shape as Collection's two preference reads, down to the
+   * `cancelled` flag, the ref reset and the failure fallback — three preferences with one
+   * pattern rather than three patterns, so a fix to one is a fix to all.
+   *
+   * The miss and the failure both resolve to the default rather than leaving whatever was
+   * there, which is the cross-account leak `CollectionScreen` records: this state is not
+   * tagged with the account it was read for, so the read has to write in both directions.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    chosenTimeframe.current = false;
+    const settle = (next: LeaderboardTimeframe) => {
+      if (cancelled || chosenTimeframe.current) return;
+      setTimeframePref({ profileId: profile.id, value: next });
+    };
+    readPref<unknown>(`${profile.id}.${TIMEFRAME_PREF_KEY}`)
+      .then((stored) => settle(isLeaderboardTimeframe(stored) ? stored : DEFAULT_TIMEFRAME))
+      .catch(() => settle(DEFAULT_TIMEFRAME));
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id]);
+
+  /**
+   * Choosing a timeframe, and remembering it.
+   *
+   * The write is not awaited and its failure is swallowed, exactly as Collection's is: a
+   * store that refuses should cost the reader nothing more than opening on This month
+   * next time.
+   */
+  const changeTimeframe = (next: LeaderboardTimeframe) => {
+    if (next === timeframe) return;
+    chosenTimeframe.current = true;
+    setTimeframePref({ profileId: profile.id, value: next });
+    void writePref(`${profile.id}.${TIMEFRAME_PREF_KEY}`, next).catch(() => {});
+  };
 
   /**
    * Entering a mode, with the one analytics event this surface needs.
@@ -236,35 +342,24 @@ export default function FeedScreen() {
 
   return (
     <Screen>
+      {/**
+        * **The app bar is the app bar again** — wordmark left, bell right, and nothing
+        * else (founder follow-up §1).
+        *
+        * The Feed/Trophy toggle lived here for a day. It fitted, and it was the wrong
+        * place: the top bar is the one row that is identical on every tab, so a control
+        * that appears on exactly one of them makes the app's most stable landmark move.
+        * It also put a *content* decision — which list am I reading — in the chrome,
+        * beside a control about a different thing entirely.
+        *
+        * It is now in the content header row below, opposite whatever that content is
+        * called. The bell keeps its corner and its hit area untouched.
+        */}
       <AppHeader
         notifications={{
           count: unreadCount(notifications.data),
           onPress: () => router.push('/settings/notifications'),
         }}
-        right={
-          /**
-           * Feed or Leaderboard, in the corner the bell already lives in (§5).
-           *
-           * `AppHeader` draws `right` *after* the bell, so the toggle sits immediately
-           * beside it without displacing it — which is the constraint the founder stated
-           * as "the bell must remain easy to hit". The header's `right` container is
-           * `flex-end`, so a two-cell control 88pt wide still leaves the bell where every
-           * other tab puts it.
-           *
-           * The same `IconToggle` Collection's Poster/List control uses, which is founder
-           * §5's "same interaction and visual grammar" made structural: one component, so
-           * the two cannot drift into two dialects of the same idea. They behave
-           * differently on purpose — Collection persists its choice across launches and
-           * this one deliberately does not (§6) — and that is exactly why they must look
-           * the same by construction rather than by agreement.
-           */
-          <IconToggle
-            label="Feed mode"
-            value={mode}
-            onChange={changeMode}
-            options={FEED_MODES}
-          />
-        }
       />
       <HeaderBoundary />
       {/* Pull to refresh, which the app did not have anywhere and which a feed of
@@ -320,10 +415,58 @@ export default function FeedScreen() {
           * recommend flow — stays mounted and untouched, so returning to Feed returns to
           * exactly the feed that was there. That is founder acceptance D.
           */}
+        {/**
+          * **The content header row** (founder follow-up §1).
+          *
+          *     TRENDING NOW                    [Feed] [Trophy]
+          *     THIS MONTH ▼                    [Feed] [Trophy]
+          *
+          * One row, drawn in both modes, so the toggle keeps its position while the thing
+          * across from it changes. That is what makes it read as a control over *this
+          * content* rather than as chrome: it sits at the head of the list it switches.
+          *
+          * The left side is the heading of whatever is immediately below — the shelf's
+          * name in Feed mode, the timeframe selector in Leaderboard mode. In Feed mode it
+          * is drawn only when the shelf will actually render: `TrendingShelf` returns null
+          * when it has nothing, and a heading over an absent shelf would be a label for
+          * nothing. `useTrending` is called here purely to know that, and costs no
+          * request — it is the same query key the shelf itself uses, so React Query
+          * answers both from one fetch.
+          */}
+        <View style={styles.contentHeader}>
+          <View style={styles.contentHeaderLeft}>
+            {showingBoard ? (
+              <MediumSelector
+                size="section"
+                value={timeframe}
+                onChange={changeTimeframe}
+                options={LEADERBOARD_TIMEFRAMES}
+              />
+            ) : trendingHasItems ? (
+              <SectionHeader title="Trending now" />
+            ) : null}
+          </View>
+
+          {/**
+            * The same `IconToggle` Collection's Poster/List control uses — one component,
+            * so the two cannot drift into two dialects of the same idea. They behave
+            * differently on purpose: Collection persists its choice across launches and
+            * this one deliberately does not (§6), which is exactly why they must look the
+            * same by construction rather than by agreement.
+            */}
+          <IconToggle
+            label="Feed mode"
+            value={mode}
+            onChange={changeMode}
+            options={FEED_MODES}
+          />
+        </View>
+
         {showingBoard ? (
           <LeaderboardView
             metric={metric}
             onChangeMetric={changeMetric}
+            timeframe={timeframe}
             entries={leaderboard.data}
             standing={standing.data}
             loading={leaderboard.isPending}
@@ -333,10 +476,14 @@ export default function FeedScreen() {
           <>
         {/* One shelf, above the activity. It renders nothing at all when there is
             nothing to show, so the social feed keeps the top of the screen whenever
-            discovery has nothing to add — which is the ordering PRD §14 wants. */}
+            discovery has nothing to add — which is the ordering PRD §14 wants.
+
+            `showTitle={false}`: its heading moved up into the content header row above,
+            opposite the toggle. Drawing it in both places would be the same words twice. */}
         <View style={styles.trending}>
           <TrendingShelf
             userId={profile.id}
+            showTitle={false}
             onPressTitle={(mediaItemId) => router.push(`/title/${mediaItemId}`)}
           />
         </View>
@@ -416,9 +563,30 @@ export default function FeedScreen() {
               lead={
                 event.award ? (
                   <AwardActivityLead awardKey={event.award.key} tierKey={event.award.tierKey} />
+                ) : event.goal ? (
+                  <GoalActivityLead />
                 ) : undefined
               }
-              metadata={event.award ? event.award.tierLabel : metadataFor(event)}
+              /**
+               * The optional secondary line the founder allowed — "25 movies" — and only
+               * where it is genuinely secondary. `metadataFor` would otherwise reach for
+               * a runtime and a certification that no goal row has.
+               */
+              metadata={
+                event.award
+                  ? event.award.tierLabel
+                  : event.goal
+                    ? `${event.goal.target} ${
+                        event.goal.category === 'movies'
+                          ? event.goal.target === 1
+                            ? 'movie'
+                            : 'movies'
+                          : event.goal.target === 1
+                            ? 'season'
+                            : 'seasons'
+                      }`
+                    : metadataFor(event)
+              }
               score={event.score}
               bucket={event.bucket}
               note={event.note?.text ?? null}
@@ -445,6 +613,20 @@ export default function FeedScreen() {
                       pathname: '/u/[username]',
                       params: { username: event.actorUsername, awards: '1' },
                     });
+                  }
+                } else if (event.goal) {
+                  /**
+                   * The earner's profile, where their goals live (founder §12).
+                   *
+                   * Not a dead end and not a title: the useful thing to do with "Abisola
+                   * hit their 2026 Movies goal" is look at Abisola. No `?awards=1` here —
+                   * goals are on the profile itself, a scroll under the identity block,
+                   * rather than behind a sheet.
+                   */
+                  if (event.actorId === profile.id) {
+                    router.push('/profile');
+                  } else if (event.actorUsername) {
+                    router.push(`/u/${event.actorUsername}`);
                   }
                 }
               }}
@@ -546,6 +728,25 @@ const styles = StyleSheet.create({
   // Collapses to nothing when the shelf renders null, so an absent shelf costs no
   // space rather than an empty band above the first activity row.
   trending: { gap: theme.space[2] },
+  /**
+   * The content header row: a heading on the left, the mode toggle on the right.
+   *
+   * The gutter lives here rather than on the children, because the two left-hand
+   * occupants are different components — a `SectionHeader`, which pads itself, and a
+   * section-sized `MediumSelector`, which deliberately does not. Padding the row is what
+   * makes them line up with each other and with the list below.
+   */
+  contentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    minHeight: theme.layout.minTapTarget,
+  },
+  // Takes the space the toggle leaves, so a long heading truncates rather than pushing
+  // the control off the row.
+  contentHeaderLeft: { flex: 1, justifyContent: 'center' },
   /**
    * The rule between discovery and activity.
    *

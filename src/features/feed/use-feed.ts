@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { GOAL_LABEL } from '@/features/goals/goals';
 import type { Bucket } from '@/features/collection/score';
 import { avatarUri } from '@/lib/images';
 import { effectiveCertification, effectiveGenres } from '@/lib/media-metadata';
@@ -87,6 +88,14 @@ export type FeedItem = {
    * "Abisola earned Movie Muncher" through the ordinary grammar.
    */
   award: { key: string; tierKey: string; tierLabel: string | null } | null;
+  /**
+   * The goal, for a `goal_completed` row — and only there (20260829000200).
+   *
+   * Shaped like `award` above and for the same reason: the sentence slot carries the
+   * goal's name ("their 2026 Movies goal"), and this is what the row needs to draw its
+   * lead and route its tap. Null on every other type.
+   */
+  goal: { year: number; category: 'movies' | 'tv_seasons'; target: number } | null;
 };
 
 type Embedded<T> = T | T[] | null;
@@ -141,6 +150,9 @@ type FeedRow = {
     tier?: string;
     award_name?: string;
     tier_label?: string;
+    /** goal_completed rows only (20260829000200). `category` is shared with rankings. */
+    year?: number;
+    target?: number;
   } | null;
   media_items: Embedded<MediaShape>;
   profiles: Embedded<ProfileShape>;
@@ -343,7 +355,11 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
           })
         : row.type === 'award_earned'
           ? (row.payload?.award_name ?? 'a bingd. Award')
-          : null,
+          : // And for a goal it is the goal's own name, so the sentence reads
+            // "Abisola hit their 2026 Movies goal" through the same three slots.
+            row.type === 'goal_completed' && row.payload?.year && row.payload?.category
+            ? `${row.payload.year} ${GOAL_LABEL[row.payload.category]} goal`
+            : null,
       year: media?.release_date ? Number(media.release_date.slice(0, 4)) : null,
       posterPath: media?.poster_path ?? null,
       genres: subject ? effectiveGenres(subject) : [],
@@ -363,6 +379,14 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
               key: row.payload.award,
               tierKey: row.payload.tier,
               tierLabel: row.payload.tier_label ?? null,
+            }
+          : null,
+      goal:
+        row.type === 'goal_completed' && row.payload?.year && row.payload?.category
+          ? {
+              year: Number(row.payload.year),
+              category: row.payload.category,
+              target: Number(row.payload.target ?? 0),
             }
           : null,
     });

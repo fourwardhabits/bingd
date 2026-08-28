@@ -40,6 +40,7 @@ const row = (over: Partial<Notification> & { kind: NotificationKind }): Notifica
   subjectId: 'event-1',
   mutual: null,
   award: null,
+  goal: null,
   ...over,
 });
 
@@ -83,6 +84,9 @@ describe('the routing matrix', () => {
     invite_activated: { kind: 'profile', username: 'suraj' },
     invite_welcome: { kind: 'profile', username: 'suraj' },
     award_earned: { kind: 'awards' },
+    // The earner's own profile, where GoalsSection sits — not the feed post the same
+    // crossing produced, and not the Awards sheet.
+    goal_completed: { kind: 'goals' },
   };
 
   for (const kind of ROUTED_KINDS) {

@@ -13,6 +13,7 @@ import inviteRedeem from './races/invite-redeem.mjs';
 import rateLimit from './races/rate-limit.mjs';
 import ranking from './races/ranking.mjs';
 import awardUnlock from './races/award-unlock.mjs';
+import goalCompletion from './races/goal-completion.mjs';
 import stress from './races/stress.mjs';
 
 /**
@@ -46,4 +47,5 @@ inviteRedeem();
 rateLimit();
 ranking();
 awardUnlock();
+goalCompletion();
 stress();

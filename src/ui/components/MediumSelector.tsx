@@ -32,6 +32,23 @@ export type MediumSelectorProps<T extends string = Medium> = {
    * shows and says so. One control, two accurate labels, rather than two controls.
    */
   labels?: Partial<Record<T, string>>;
+  /**
+   * How large the closed control reads. The open sheet is identical either way.
+   *
+   * `title` — DM Serif at `title1`, the screen's actual title. Collection and For You.
+   *
+   * `section` — the app's section-header treatment: uppercase, Maroon, `sectionHeader`.
+   *   Added 2026-08-29 for the Leaderboard's timeframe, which sits in a *content* header
+   *   row opposite the Feed/Trophy toggle rather than at the top of a screen. A page
+   *   title there would out-shout the row it belongs to and disagree with `TRENDING NOW`
+   *   directly across from it.
+   *
+   * A prop rather than a second component, for the reason `IconToggle` is one component
+   * with two callers: these are the same interaction — tap, choose from a sheet — and two
+   * implementations of it would drift into two dialects at the next tuning pass. What
+   * changes is type size, not behaviour.
+   */
+  size?: 'title' | 'section';
 };
 
 /**
@@ -69,6 +86,7 @@ export function MediumSelector<T extends string = Medium>({
   onChange,
   options,
   labels,
+  size = 'title',
 }: MediumSelectorProps<T>) {
   const [open, setOpen] = useState(false);
   /**
@@ -88,14 +106,23 @@ export function MediumSelector<T extends string = Medium>({
         accessibilityHint="Choose a category"
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen(true)}
-        style={styles.button}
+        style={size === 'section' ? styles.buttonSection : styles.button}
       >
         <View style={styles.row}>
-          <Text variant="title1">{labelFor(value, table, labels)}</Text>
+          {size === 'section' ? (
+            // Uppercased as a *style*, exactly as `SectionHeader` does it — the accessible
+            // label on the Pressable carries the readable spelling, so a screen reader is
+            // not made to spell out "T H I S  M O N T H".
+            <Text variant="sectionHeader" tone="action">
+              {labelFor(value, table, labels).toUpperCase()}
+            </Text>
+          ) : (
+            <Text variant="title1">{labelFor(value, table, labels)}</Text>
+          )}
           <Ionicons
             name="chevron-down"
-            size={theme.layout.icon.md}
-            color={theme.text.secondary}
+            size={size === 'section' ? theme.layout.icon.sm : theme.layout.icon.md}
+            color={size === 'section' ? theme.semantic.action : theme.text.secondary}
           />
         </View>
       </Pressable>
@@ -146,6 +173,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     justifyContent: 'center',
   },
+  // No gutter of its own: a section-sized control sits inside a row the caller has
+  // already padded, where the title-sized one is measuring from the screen edge.
+  buttonSection: { minHeight: theme.layout.minTapTarget, justifyContent: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
   scrim: {
     flex: 1,
