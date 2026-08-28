@@ -392,11 +392,65 @@ way of drawing this same thing"; the Feed's left cell means "the ordinary homepa
 takes `newspaper-outline` rather than reusing `list`. Two toggles wearing the same glyph
 would claim they answer the same question.
 
-### Leaderboard row — canonical, 2026-08-28
+### The content header row — canonical, 2026-08-29
 
-`rank · avatar · name / @handle · count`. The rank column is fixed-width and
-right-aligned, so avatars line up whether the rank is 1 or 48 and the digits themselves
-line up — which is what makes a column of numbers scannable.
+A tab's *content* may have a header of its own, below the app bar: a heading on the left
+naming what is directly beneath it, and at most one control on the right acting on it.
+
+```
+TRENDING NOW                         [Feed] [Trophy]
+THIS MONTH ▼                         [Feed] [Trophy]
+```
+
+**Controls that switch content belong here, not in the app bar.** The app bar is the one
+row identical on every tab — wordmark left, bell right — and that sameness is what makes
+it a landmark. A control appearing there on one tab only moves the landmark, and puts a
+decision about content among the chrome. The Feed/Leaderboard toggle spent a day in the
+app bar and was moved for exactly this.
+
+The left occupant is a `SectionHeader` or a section-sized selector (below); both read at
+`sectionHeader` weight in Maroon, so the row has one voice whichever is showing. It is
+drawn only when there is something beneath it to name — a heading over an absent shelf is
+a label for nothing.
+
+### Section-sized selector — canonical, 2026-08-29
+
+`MediumSelector` takes a `size`: `title` (DM Serif at `title1` — a screen's own name, as
+Collection and For You use it) or `section` (uppercase Maroon `sectionHeader`, with a
+smaller chevron). The open sheet is identical either way.
+
+A prop rather than a second component, for the same reason `IconToggle` is one component
+with two callers: this is one interaction — tap, choose from a sheet — and two
+implementations of it drift into two dialects at the next tuning pass. What changes is
+type size, not behaviour. Uppercasing is a *style*; the accessible name keeps the readable
+spelling, so a screen reader does not spell out "T H I S  M O N T H".
+
+### Leaderboard row — canonical, 2026-08-28, revised 2026-08-29
+
+```
+rank · avatar · [ name  @handle          ] · count
+                [ 91% Match · 37 shared  ]
+```
+
+The rank column is fixed-width and right-aligned, so avatars line up whether the rank is 1
+or 48 and the digits themselves line up — which is what makes a column of numbers
+scannable.
+
+**Name and handle share the first line.** The name is primary and keeps its intrinsic
+width; the handle is muted and shrinks first. The count never shrinks: it is the other
+thing the screen is for, and a long display name must cost the handle its width rather
+than the number. Stacking them, as the first version did, spent the second line on a
+handle and left nowhere for the row's actual social value.
+
+**The second line is Match and its evidence** — the same two forms the profile uses, from
+the same `taste_match` row. Secondary in size and tone: a leaderboard's first two facts
+are who the person is and what they scored. On the reader's own row it is the word **You**
+and never a self-Match — `taste_match` refuses that case, and an empty `Match TBD · 0
+shared` on the row somebody looks at first would be the feature appearing broken.
+
+**The whole row is one tap target.** Not the avatar, not the name — the row. No chevron
+per row and no second Profile button: an entire row that is obviously pressable does not
+need a mark saying so.
 
 The top three carry `tone="action"` on the **rank only**. No medals, no metals, no podium:
 gold/silver/bronze would be three new colours in a two-colour system, and the app's own

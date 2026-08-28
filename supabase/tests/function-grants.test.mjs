@@ -307,7 +307,22 @@ const ALLOWED = {
   // is that internal helpers stay internal so the reachable surface is the smallest set
   // that answers the product's questions.
   'monthly_leaderboard(text,integer)': ['authenticated'],
-  'my_leaderboard_standing(text)': ['authenticated'],
+
+  // Added 2026-08-29 (20260829000100). The board gained a timeframe, so it gained a name
+  // that does not claim to be monthly — and the old signature stays above as a delegating
+  // wrapper, for phones still on the 2026-08-28 OTA (the 20260827000900 rule about
+  // un-relaunched clients).
+  //
+  // Same argument as the wrapper: definer over owner-only `user_media`, no viewer
+  // argument, population filtered by `can_view_profile` in both timeframes. The Match
+  // columns are decided by `taste_match` itself, which refuses the caller and anyone
+  // `can_view_profile` does not admit, so the row cannot disclose what the population
+  // filter already refuses.
+  //
+  // `_leaderboard_timeframe` is absent for the reason `_leaderboard_metric` is: a
+  // validator with no product surface of its own stays internal.
+  'leaderboard(text,text,integer)': ['authenticated'],
+  'my_leaderboard_standing(text,text)': ['authenticated'],
 
   // Added 2026-08-28 with For You rotation (20260828000500).
   //

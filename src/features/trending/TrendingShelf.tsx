@@ -10,6 +10,14 @@ import { useTrending } from './use-trending';
 export type TrendingShelfProps = {
   userId: string;
   onPressTitle: (mediaItemId: string) => void;
+  /**
+   * Passed through to `PosterShelf`.
+   *
+   * The Feed draws this shelf's heading in its own content header row, opposite the
+   * Feed/Leaderboard toggle, so the shelf must not draw it a second time. The shelf keeps
+   * its accessible name either way.
+   */
+  showTitle?: boolean;
 };
 
 /**
@@ -31,7 +39,7 @@ export type TrendingShelfProps = {
  * uses. Trending TV is series-level and a series is never ranked (PRD §10), so those
  * tiles are bare — which is a property of the data, not a case handled here.
  */
-export function TrendingShelf({ userId, onPressTitle }: TrendingShelfProps) {
+export function TrendingShelf({ userId, onPressTitle, showTitle = true }: TrendingShelfProps) {
   const trending = useTrending();
   const ranked = useRankedCollection(userId, 'movies');
 
@@ -51,6 +59,7 @@ export function TrendingShelf({ userId, onPressTitle }: TrendingShelfProps) {
   return (
     <PosterShelf
       title="Trending now"
+      showTitle={showTitle}
       tiles={items.map((item) => ({
         id: item.mediaItemId,
         title: item.title,

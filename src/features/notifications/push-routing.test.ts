@@ -85,8 +85,11 @@ describe('a payload whose subject is gone', () => {
   it('lands on the inbox rather than nowhere, for every kind', () => {
     for (const kind of ROUTED_KINDS) {
       const href = hrefForPush(payload({ kind, actorUsername: null, mediaItemId: null }));
-      const landed =
-        kind === 'award_earned' ? typeof href === 'object' : href === PUSH_FALLBACK_HREF;
+      // The two actorless kinds route to the reader's *own* profile — Awards behind a
+      // parameter, goals plain — so neither has a subject to have gone missing and
+      // neither falls back to the inbox. Everything else does.
+      const ownProfile = kind === 'award_earned' || kind === 'goal_completed';
+      const landed = ownProfile ? typeof href === 'object' : href === PUSH_FALLBACK_HREF;
       expect(landed).toBe(true);
     }
   });

@@ -33,15 +33,18 @@ import { createTestDb } from './harness.mjs';
 let t;
 let seq = 91000;
 
-const board = (who, metric = 'titles') =>
+const board = (who, metric = 'titles', timeframe = 'month') =>
   t.asUser(who, async () => {
-    const { rows } = await t.sql(`select * from monthly_leaderboard($1, 50)`, [metric]);
+    const { rows } = await t.sql(`select * from leaderboard($1, $2, 50)`, [metric, timeframe]);
     return rows;
   });
 
-const standing = (who, metric = 'titles') =>
+const standing = (who, metric = 'titles', timeframe = 'month') =>
   t.asUser(who, async () => {
-    const { rows } = await t.sql(`select * from my_leaderboard_standing($1)`, [metric]);
+    const { rows } = await t.sql(`select * from my_leaderboard_standing($1, $2)`, [
+      metric,
+      timeframe,
+    ]);
     return rows[0];
   });
 
@@ -111,18 +114,6 @@ describe('the month, and what falls inside it', () => {
     assert.deepEqual(names(await board(alice)), []);
   });
 
-  /**
-   * The boundary is UTC, and it is **the same** boundary for both kinds of metric.
-   *
-   * Independent review's finding: the first version used `current_date` and cast the
-   * boundary with `::timestamptz`, both of which read the *session's* TimeZone. PostgREST
-   * does not pin that, so around a rollover two connections could have answered for
-   * different months — and worse, the watched metrics (date) and the reviews metric
-   * (timestamptz) could have disagreed with each other inside one call.
-   *
-   * Driven by moving the session's timezone a long way in each direction: if either
-   * boundary still consulted it, one of these three would differ.
-   */
   /**
    * The boundary is UTC, and neither half of it may consult the session's timezone.
    *
@@ -635,11 +626,259 @@ describe('viewer-relative: the founder’s §26', () => {
       'avatar_path',
       'display_name',
       'is_you',
+      // Match and its evidence, added 20260829000100. Two numbers about the *pair*,
+      // decided by taste_match itself — never a title, never a date, never a ranking.
+      'match_percent',
       'metric_count',
       'rank',
+      'shared_count',
       'user_id',
       'username',
       'visibility',
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * All time — `20260829000100`.
+ *
+ * The founder approved it as an alternate view and was explicit that This month stays the
+ * default: a monthly board resets incumbent advantage, and an all-time board is decided
+ * once and then never moves. So these tests are about the *second* view being honest
+ * rather than about it being primary.
+ *
+ * Three of the four metrics are the monthly ones with the date window removed. **Reviews
+ * is different in kind** — a state rather than an event — and that asymmetry is the part
+ * most worth pinning, because it is the one a reader would assume was a mistake.
+ */
+describe('the all-time board', () => {
+  let alice;
+  let bob;
+  let movieA;
+  let movieB;
+  let seasonA;
+
+  before(async () => {
+    alice = await t.createUser({ username: 'at_alice' });
+    bob = await t.createUser({ username: 'at_bob' });
+    movieA = await t.createMovie('All Time A', seq++);
+    movieB = await t.createMovie('All Time B', seq++);
+    const show = await t.createSeries('All Time Show', seq++);
+    seasonA = await t.createSeason(show, 1, 'All Time Show S1');
+  });
+
+  beforeEach(clearAll);
+
+  it('counts watches from every month, not just this one', async () => {
+    await watch(alice, movieA, `date_trunc('month', current_date)::date - 400`);
+    await watch(alice, movieB, thisMonth(2));
+
+    assert.deepEqual(names(await board(alice, 'titles', 'month')), ['at_alice']);
+    assert.equal((await board(alice, 'titles', 'month'))[0].metric_count, 1);
+    assert.equal((await board(alice, 'titles', 'all_time'))[0].metric_count, 2);
+  });
+
+  /**
+   * The one place all-time is *more* inclusive than monthly, and it is deliberate.
+   *
+   * `20260824000100` made "I watched this and I do not remember when" a first-class
+   * state. A dateless row cannot be attributed to a month without inventing one, so
+   * monthly refuses it — but all-time has no month to be wrong about, and refusing it
+   * there would mean an onboarding collection of historical favourites counted for
+   * nothing at all.
+   */
+  it('counts a watch with no date, which the monthly board cannot', async () => {
+    await t.sql(
+      `insert into user_media (user_id, media_item_id, bucket, watched_on)
+       values ($1, $2, 'loved', null)`,
+      [alice, movieA],
+    );
+
+    assert.deepEqual(names(await board(alice, 'titles', 'month')), []);
+    assert.equal((await board(alice, 'titles', 'all_time'))[0].metric_count, 1);
+  });
+
+  it('splits Movies and TV the same way', async () => {
+    await watch(alice, movieA, `date_trunc('month', current_date)::date - 700`);
+    await watch(alice, movieB, `date_trunc('month', current_date)::date - 60`);
+    await watch(alice, seasonA, `date_trunc('month', current_date)::date - 900`);
+
+    assert.equal((await board(alice, 'movies', 'all_time'))[0].metric_count, 2);
+    assert.equal((await board(alice, 'tv', 'all_time'))[0].metric_count, 1);
+    assert.equal((await board(alice, 'titles', 'all_time'))[0].metric_count, 3);
+  });
+
+  it('still refuses a series', async () => {
+    const show = await t.createSeries('Not Rankable', seq++);
+    await watch(alice, show, `date_trunc('month', current_date)::date - 30`);
+    assert.deepEqual(names(await board(alice, 'titles', 'all_time')), []);
+  });
+
+  it('still counts a rewatched title once', async () => {
+    await watch(alice, movieA, `date_trunc('month', current_date)::date - 300`);
+    await watch(alice, movieA, thisMonth(3));
+    assert.equal((await board(alice, 'titles', 'all_time'))[0].metric_count, 1);
+  });
+
+  describe('Reviews, which is a state rather than an event', () => {
+    const publish = (user, item, visibility = 'public') =>
+      t.sql(
+        `insert into user_media (user_id, media_item_id, bucket, note, note_visibility)
+         values ($1, $2, 'loved', 'Words.', $3::note_visibility)
+         on conflict (user_id, media_item_id)
+           do update set note = excluded.note, note_visibility = excluded.note_visibility`,
+        [user, item, visibility],
+      );
+
+    it('counts titles currently carrying a public review, whenever written', async () => {
+      await publish(alice, movieA);
+      await publish(alice, movieB);
+      // Backdate one publication well out of this month; all-time does not care.
+      await t.sql(
+        `update user_media set note_first_published_at = now() - interval '400 days'
+          where user_id = $1 and media_item_id = $2`,
+        [alice, movieA],
+      );
+
+      assert.equal((await board(alice, 'reviews', 'month'))[0].metric_count, 1);
+      assert.equal((await board(alice, 'reviews', 'all_time'))[0].metric_count, 2);
+    });
+
+    it('drops a review that has been unshared, and restores it on re-share', async () => {
+      // The state reading in one test. Un-sharing lowers the number and re-sharing puts
+      // it back — so the toggle is a way of reaching a count already earned, never a way
+      // of exceeding it. That is what makes an all-time board unfarmable by a different
+      // mechanism than the monthly one's stamped-once fact.
+      await publish(alice, movieA);
+      assert.equal((await board(alice, 'reviews', 'all_time'))[0].metric_count, 1);
+
+      await publish(alice, movieA, 'private');
+      assert.deepEqual(names(await board(alice, 'reviews', 'all_time')), []);
+
+      await publish(alice, movieA, 'public');
+      assert.equal((await board(alice, 'reviews', 'all_time'))[0].metric_count, 1);
+    });
+
+    it('cannot be farmed past the number of titles actually reviewed', async () => {
+      await publish(alice, movieA);
+      for (let i = 0; i < 5; i += 1) {
+        await publish(alice, movieA, 'private');
+        await publish(alice, movieA, 'public');
+      }
+      assert.equal((await board(alice, 'reviews', 'all_time'))[0].metric_count, 1);
+      // And the monthly board is unmoved too: the stamp never re-fires.
+      assert.equal((await board(alice, 'reviews', 'month'))[0].metric_count, 1);
+    });
+
+    it('does not count a private note', async () => {
+      await publish(alice, movieA, 'private');
+      assert.deepEqual(names(await board(alice, 'reviews', 'all_time')), []);
+    });
+  });
+
+  it('orders and ties exactly as the monthly board does', async () => {
+    await watch(alice, movieA, `date_trunc('month', current_date)::date - 500`);
+    await watch(alice, movieB, `date_trunc('month', current_date)::date - 500`);
+    await watch(bob, movieA, `date_trunc('month', current_date)::date - 500`);
+
+    const rows = await board(alice, 'titles', 'all_time');
+    assert.deepEqual(names(rows), ['at_alice', 'at_bob']);
+    assert.deepEqual(rows.map((r) => r.rank), [1, 2]);
+  });
+
+  it('gives the caller a standing in the timeframe they asked for', async () => {
+    await watch(alice, movieA, `date_trunc('month', current_date)::date - 500`);
+    await watch(bob, movieA, thisMonth(2));
+
+    assert.equal((await standing(alice, 'titles', 'month')).rank, null);
+    assert.equal((await standing(alice, 'titles', 'all_time')).rank, 1);
+  });
+
+  it('refuses a timeframe it does not have', async () => {
+    // Week and year were ruled out by the founder. An unknown value is a visible failure
+    // rather than a silent fall back to this month.
+    const error = await t.asUser(alice, () =>
+      t.errorFrom(`select * from leaderboard('titles', 'this_week', 50)`),
+    );
+    assert.equal(error?.code, 'P0002');
+  });
+
+  it('defaults to this month when no timeframe is given', async () => {
+    await watch(alice, movieA, `date_trunc('month', current_date)::date - 500`);
+    const rows = await t.asUser(alice, async () => {
+      const { rows } = await t.sql(`select * from leaderboard('titles')`);
+      return rows;
+    });
+    assert.deepEqual(rows.map((r) => r.username), [], 'the default view is this month');
+  });
+
+  it('keeps the all-time board viewer-relative too', async () => {
+    // §26 holds in both timeframes; there is one population filter and both views use it.
+    const hidden = await t.createUser({ username: 'at_hidden', visibility: 'private' });
+    await watch(hidden, movieA, `date_trunc('month', current_date)::date - 500`);
+
+    assert.ok(!names(await board(alice, 'titles', 'all_time')).includes('at_hidden'));
+    assert.ok(names(await board(hidden, 'titles', 'all_time')).includes('at_hidden'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Match on the row — founder §6 and the row-polish addendum.
+ *
+ * `20260826000600` part N refused Match on the Followers list on a cost argument: fifty
+ * rows would be fifty `taste_match` calls and there is no batched form. That reasoning is
+ * unchanged, which is exactly why it is allowed here — `people_taste_matches` already
+ * pays the same price over a set bounded to thirty, and this board is bounded to a
+ * hundred on a surface whose whole purpose is social discovery.
+ *
+ * The privacy claim is that nothing is decided *here*: `taste_match` refuses the caller
+ * themselves and anyone `can_view_profile` does not admit, and returns the identical
+ * insufficient-overlap shape either way.
+ */
+describe('Match beside the name', () => {
+  let viewer;
+  let other;
+  let film;
+
+  before(async () => {
+    viewer = await t.createUser({ username: 'lm_viewer' });
+    other = await t.createUser({ username: 'lm_other' });
+    film = await t.createMovie('Match Row', seq++);
+  });
+
+  beforeEach(clearAll);
+
+  it('carries a shared count and a null score when the overlap is thin', async () => {
+    await watch(viewer, film, thisMonth(2));
+    await watch(other, film, thisMonth(2));
+
+    const rows = await board(viewer, 'titles');
+    const theirs = rows.find((r) => r.username === 'lm_other');
+    assert.equal(theirs.match_percent, null, 'no score below the shared-title minimum');
+    assert.equal(theirs.shared_count, 0, 'and nothing ranked in common');
+  });
+
+  it('returns nulls on the caller’s own row', async () => {
+    // A 100% match with your own catalogue is a tautology. `taste_match` refuses the self
+    // case, so the row carries nothing and the client draws "You" there instead.
+    await watch(viewer, film, thisMonth(2));
+
+    const mine = (await board(viewer, 'titles')).find((r) => r.is_you);
+    assert.equal(mine.match_percent, null);
+    assert.equal(mine.shared_count, 0);
+  });
+
+  it('says the same thing in both timeframes', async () => {
+    await watch(viewer, film, `date_trunc('month', current_date)::date - 500`);
+    await watch(other, film, `date_trunc('month', current_date)::date - 500`);
+
+    const rows = await board(viewer, 'titles', 'all_time');
+    const theirs = rows.find((r) => r.username === 'lm_other');
+    assert.equal(theirs.shared_count, 0);
+    assert.equal(theirs.match_percent, null);
   });
 });

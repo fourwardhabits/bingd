@@ -63,6 +63,8 @@ export type NotificationTarget =
    */
   | { kind: 'activity'; eventId: string }
   | { kind: 'awards' }
+  /** The reader's own profile, where their annual goals live (20260829000200). */
+  | { kind: 'goals' }
   /**
    * Stay on the inbox and say why. Reached when every better link is gone.
    *
@@ -206,6 +208,22 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
     /** The earner's own Awards — written by the unlock ledger since 20260828000100. */
     case 'award_earned':
       return [{ kind: 'awards' }];
+
+    /**
+     * The earner's own annual goals (20260829000200).
+     *
+     * Their **profile**, not the feed post the same crossing produced. The founder was
+     * explicit: a congratulation is about the reader, and sending them to a social post
+     * about themselves is the wrong half of the event. `GoalsSection` sits directly under
+     * the identity block, so the profile is the goals within one scroll — which is the
+     * practical reading of "the annual goals section where practical".
+     *
+     * A distinct target rather than reusing `awards`: that one opens the Awards *sheet*,
+     * which is a different thing entirely and would leave the reader closing a modal to
+     * find what they were congratulated for.
+     */
+    case 'goal_completed':
+      return [{ kind: 'goals' }];
   }
 }
 
@@ -240,6 +258,10 @@ export function hrefFor(target: NotificationTarget): Href | null {
      */
     case 'awards':
       return { pathname: '/profile', params: { awards: '1' } };
+    // No parameter: the goals section is on the profile itself, a scroll under the
+    // identity block, rather than behind a sheet the way Awards is.
+    case 'goals':
+      return { pathname: '/profile' };
     /** Null is "stay here"; the caller says why, from `target.reason`. */
     case 'unavailable':
       return null;
@@ -264,6 +286,8 @@ export function hintFor(row: Notification): string {
       return 'Opens the conversation';
     case 'awards':
       return 'Opens your awards';
+    case 'goals':
+      return 'Opens your goals';
     case 'unavailable':
       return 'No longer available';
   }
@@ -369,4 +393,5 @@ export const ROUTED_KINDS: readonly NotificationKind[] = [
   'invite_activated',
   'invite_welcome',
   'award_earned',
+  'goal_completed',
 ];

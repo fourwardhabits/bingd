@@ -53,6 +53,7 @@ export const ACTIVITY_TYPES = [
   'season_completed',
   'watchlist_added',
   'award_earned',
+  'goal_completed',
 ] as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
@@ -85,6 +86,9 @@ const VERB: Record<ActivityType, string> = {
   season_completed: 'finished',
   watchlist_added: 'added',
   award_earned: 'earned',
+  // "Abisola hit their 2026 Movies goal" — the possessive rides with the verb so the
+  // emphasised slot holds the goal itself rather than the word "their".
+  goal_completed: 'hit their',
 };
 
 /**
@@ -96,6 +100,10 @@ const VERB: Record<ActivityType, string> = {
  */
 const TAIL: Partial<Record<ActivityType, string>> = {
   watchlist_added: 'to their watchlist',
+  // The one emoji in the feed's vocabulary, and it is the founder's copy. In the tail
+  // rather than in the title so a screen reader reaches it after the sentence has been
+  // said — "party popper" in the middle of the clause is what it would otherwise be.
+  goal_completed: '🎉',
 };
 
 export const verbFor = (type: ActivityType): string => VERB[type];

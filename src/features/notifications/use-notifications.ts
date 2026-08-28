@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef } from 'react';
 
+import { GOAL_LABEL } from '@/features/goals/goals';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
@@ -87,7 +88,22 @@ export type NotificationKind =
    * (the ledger's primary key), and this row is the earner's own congratulations:
    * actorless, because nobody did it to them, with the award named in `payload`.
    */
-  | 'award_earned';
+  | 'award_earned'
+  /**
+   * An annual watch goal was finished — written by `_maybe_goal_completion` off the
+   * durable `goal_completions` ledger since 20260829000200.
+   *
+   * The same shape as `award_earned` and for the same reasons: the crossing is detected
+   * where the facts change (a statement-level trigger on `user_media`), recorded at most
+   * once per account, year and medium (the ledger's primary key), and this row is the
+   * earner's own congratulations — actorless, because nobody did it to them.
+   *
+   * What makes it a *crossing* rather than a state is the arithmetic in the trigger:
+   * the count before this write was below the target and the count after it is not. So
+   * editing a goal downward under an existing count, a recalculation, a relaunch and the
+   * migration's own rollout all produce nothing.
+   */
+  | 'goal_completed';
 
 export type Notification = {
   id: string;
@@ -129,6 +145,11 @@ export type Notification = {
    * every other kind.
    */
   award: { key: string; tierKey: string; name: string; tierLabel: string | null } | null;
+  /**
+   * `goal_completed` only (20260829000200): which annual goal was finished, for the row's
+   * sentence. Null on every other kind.
+   */
+  goal: { year: number; category: 'movies' | 'tv_seasons'; target: number } | null;
 };
 
 const KINDS = new Set<string>([
@@ -144,6 +165,7 @@ const KINDS = new Set<string>([
   'invite_welcome',
   'friendship',
   'award_earned',
+  'goal_completed',
 ]);
 
 /**
@@ -155,7 +177,7 @@ const KINDS = new Set<string>([
  * and it is not held to that rule. Before it existed the rule was simply "always",
  * which would have silently swallowed the first actorless notice ever written.
  */
-const ACTORLESS_KINDS = new Set<string>(['award_earned']);
+const ACTORLESS_KINDS = new Set<string>(['award_earned', 'goal_completed']);
 
 /**
  * The caller's own inbox.
@@ -214,6 +236,10 @@ export function useNotifications(viewerId: string) {
             tier?: string;
             award_name?: string;
             tier_label?: string;
+            // `goal_completed` (20260829000200).
+            year?: number;
+            category?: 'movies' | 'tv_seasons';
+            target?: number;
           } | null;
         }[]
       )
@@ -245,6 +271,14 @@ export function useNotifications(viewerId: string) {
                   tierKey: row.payload.tier,
                   name: row.payload.award_name ?? 'a new Award',
                   tierLabel: row.payload.tier_label ?? null,
+                }
+              : null,
+          goal:
+            row.kind === 'goal_completed' && row.payload?.year && row.payload?.category
+              ? {
+                  year: Number(row.payload.year),
+                  category: row.payload.category,
+                  target: Number(row.payload.target ?? 0),
                 }
               : null,
         }));
@@ -343,7 +377,16 @@ export function sectionFor(createdAt: string, now: number = Date.now()): InboxSe
  * a season" — because the title on the next line is often "Season 2", and the kind is
  * what makes that sentence mean anything before the show's name is read.
  */
-export function verbFor(kind: NotificationKind, mediaKind?: Notification['mediaKind']): string {
+export function verbFor(
+  kind: NotificationKind,
+  mediaKind?: Notification['mediaKind'],
+  /**
+   * `goal_completed` only. Optional for the same reason `mediaKind` is: most kinds have a
+   * sentence that is a constant, and the two that do not take exactly what they need
+   * rather than the whole row.
+   */
+  goal?: Notification['goal'],
+): string {
   switch (kind) {
     case 'follow':
       return 'started following you';
@@ -394,6 +437,18 @@ export function verbFor(kind: NotificationKind, mediaKind?: Notification['mediaK
      */
     case 'award_earned':
       return 'You earned a new Award';
+    /**
+     * Second person and actorless, like the award above it — nobody did this to them.
+     *
+     * The year and the medium come from the row, because a congratulation that does not
+     * say *which* goal is one the reader has to go and look up. The emoji is the founder's
+     * copy and is the only one in this file: a goal is the single most deliberate thing
+     * anybody does in this app, and it is the one place a 🎉 is not decoration.
+     */
+    case 'goal_completed':
+      return goal
+        ? `You hit your ${goal.year} ${GOAL_LABEL[goal.category]} goal 🎉`
+        : 'You hit your goal 🎉';
   }
 }
 

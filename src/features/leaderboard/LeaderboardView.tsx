@@ -7,15 +7,16 @@ import {
   countLabel,
   emptyCopy,
   LEADERBOARD_METRICS,
-  LEADERBOARD_TITLE,
   type LeaderboardEntry,
   type LeaderboardMetric,
+  type LeaderboardTimeframe,
   type MyStanding,
 } from './use-leaderboard';
 
 export type LeaderboardViewProps = {
   metric: LeaderboardMetric;
   onChangeMetric: (next: LeaderboardMetric) => void;
+  timeframe: LeaderboardTimeframe;
   entries: readonly LeaderboardEntry[] | undefined;
   standing: MyStanding | undefined;
   loading: boolean;
@@ -59,6 +60,7 @@ export type LeaderboardViewProps = {
 export function LeaderboardView({
   metric,
   onChangeMetric,
+  timeframe,
   entries,
   standing,
   loading,
@@ -66,13 +68,14 @@ export function LeaderboardView({
 }: LeaderboardViewProps) {
   const rows = entries ?? [];
   const youAreListed = rows.some((entry) => entry.isYou);
-  const empty = emptyCopy(metric);
+  const empty = emptyCopy(metric, timeframe);
 
   return (
     <View style={styles.body}>
-      <Text variant="title2" style={styles.heading}>
-        {LEADERBOARD_TITLE}
-      </Text>
+      {/* The heading is the timeframe selector, and it lives in the screen's content
+          header row rather than here — see `app/(tabs)/feed.tsx`. This component draws
+          the board beneath it, so there is exactly one place the timeframe is named
+          (founder §3). */}
 
       {/* The same chip row Search and Collection filters use, so a reader who has met
           one has met all three. Horizontal and wrapping rather than scrolling: four
@@ -133,6 +136,7 @@ function LeaderboardRow({
   onPress: (username: string) => void;
 }) {
   const top = entry.rank <= 3;
+  const secondary = secondLine(entry);
 
   return (
     <Pressable
@@ -142,11 +146,11 @@ function LeaderboardRow({
         entry.name,
         `@${entry.username}`,
         countLabel(metric, entry.count),
-        entry.isYou ? 'You' : null,
+        entry.isYou ? 'You' : secondary,
       ]
         .filter(Boolean)
         .join(', ')}
-      accessibilityHint="Opens their profile"
+      accessibilityHint={entry.isYou ? 'Opens your profile' : 'Opens their profile'}
       onPress={() => onPress(entry.username)}
       style={({ pressed }) => [
         styles.row,
@@ -166,22 +170,74 @@ function LeaderboardRow({
       <Avatar size="sm" uri={entry.avatarUri} name={entry.name} />
 
       <View style={styles.copy}>
-        <Text variant="callout" numberOfLines={1}>
-          {entry.name}
-          {/* "You" as a suffix rather than as a badge in the row's tail, where the count
-              already lives. It is a fact about the name, not a second statistic. */}
-          {entry.isYou ? <Text variant="callout" tone="tertiary"> · You</Text> : null}
-        </Text>
-        <Text variant="caption" tone="tertiary" numberOfLines={1}>
-          @{entry.username}
-        </Text>
+        {/**
+          * **Name and handle share the first line** (founder row-polish §1).
+          *
+          * They were stacked, which spent the row's second line on a handle and left
+          * nowhere for the thing a leaderboard is actually useful for — who this person
+          * is to *you*. The name is primary and takes whatever width it needs; the handle
+          * is muted and shrinks first, so a long display name pushes the handle out
+          * rather than pushing the count off the row.
+          */}
+        <View style={styles.identity}>
+          <Text variant="callout" numberOfLines={1} style={styles.name}>
+            {entry.name}
+          </Text>
+          <Text variant="caption" tone="tertiary" numberOfLines={1} style={styles.handle}>
+            @{entry.username}
+          </Text>
+        </View>
+
+        {/**
+          * **The second line is Match and its evidence** — or, on the reader's own row,
+          * the word You.
+          *
+          * Secondary by size and tone on purpose: this is a leaderboard, and the two
+          * things that must read first are who the person is and what they scored. Match
+          * is the reason to tap, not the reason the row exists.
+          *
+          * Nothing is drawn for the reader themselves beyond "You": a 100% match with
+          * your own catalogue is a tautology, `taste_match` refuses the case, and an
+          * empty `Match TBD · 0 shared` placeholder on your own row would be the feature
+          * looking broken at exactly the row you look at first.
+          */}
+        {entry.isYou ? (
+          <Text variant="caption" tone="tertiary" numberOfLines={1}>
+            You
+          </Text>
+        ) : secondary ? (
+          <Text
+            variant="caption"
+            tone={entry.matchPercent !== null ? 'action' : 'tertiary'}
+            numberOfLines={1}
+          >
+            {secondary}
+          </Text>
+        ) : null}
       </View>
 
-      <Text variant="callout" numberOfLines={1}>
+      <Text variant="callout" numberOfLines={1} style={styles.count} allowFontScaling={false}>
         {entry.count}
       </Text>
     </Pressable>
   );
+}
+
+/**
+ * `91% Match · 37 shared`, or `Match TBD · 3 shared`.
+ *
+ * The same two forms the profile uses, in the same order, from the same `taste_match`
+ * row — so a reader who has met one has met both, and the two surfaces cannot come to
+ * disagree about what "shared" counts.
+ *
+ * Null for the reader's own row, where the caller draws "You" instead.
+ */
+export function secondLine(entry: LeaderboardEntry): string | null {
+  if (entry.isYou) return null;
+  const shared = `${entry.sharedCount} shared`;
+  return entry.matchPercent === null
+    ? `Match TBD · ${shared}`
+    : `${entry.matchPercent}% Match · ${shared}`;
 }
 
 /**
@@ -239,7 +295,14 @@ const styles = StyleSheet.create({
   // Fixed width so the avatars line up whether the rank is 1 or 48. Right-aligned so
   // the digits themselves line up, which is what makes a column of numbers scannable.
   rank: { minWidth: 24, textAlign: 'right' },
-  copy: { flex: 1 },
+  copy: { flex: 1, gap: 1 },
+  // Name and handle on one baseline. The name keeps its intrinsic width and the handle
+  // shrinks first, so a long display name costs the handle rather than the count.
+  identity: { flexDirection: 'row', alignItems: 'baseline', gap: theme.space[2] },
+  name: { flexShrink: 0 },
+  handle: { flexShrink: 1 },
+  // Never crushed by a long name: the count is the other thing this screen is for.
+  count: { flexShrink: 0, minWidth: 28, textAlign: 'right' },
   pinned: { paddingTop: theme.space[2] },
   pressed: { opacity: 0.7 },
 });

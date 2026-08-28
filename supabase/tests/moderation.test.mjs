@@ -617,6 +617,14 @@ describe('the guard is wired in, not merely present', () => {
     'monthly_leaderboard',
     'my_leaderboard_standing',
 
+    // 20260829000100. The same board with a timeframe argument, under a name that does
+    // not claim to be monthly. Pure reads, and the suspension question resolves without
+    // the guard for the reason the pair above records: a suspended *subject* is already
+    // absent from every board because the population is filtered by `can_view_profile`,
+    // and a suspended *caller* reading a list of counts reaches nobody — the row leads to
+    // a profile, and every act available from there calls the guard.
+    'leaderboard',
+
     // 20260828000500. The two read halves of For You rotation.
     //
     // `recommendation_exposure` takes no arguments and aggregates the caller's own
