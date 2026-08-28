@@ -12,6 +12,7 @@ import {
 import {
   CollectionView,
   initialViewState,
+  isCollectionViewMode,
   type CollectionViewState,
 } from '@/features/collection/CollectionView';
 import {
@@ -63,6 +64,25 @@ const isMedium = (value: unknown): value is Medium =>
   value === 'movies' || value === 'tv_seasons';
 
 /**
+ * Poster or List, per account, across launches (founder §11).
+ *
+ * The same device-habit argument the medium preference above records, and the same
+ * mechanism — `readPref`/`writePref` over the existing local store, no new native
+ * dependency and no column. What differs is the default: Movies is the first-ever side
+ * because a new account has no habit, and **Poster** is the first-ever mode because the
+ * founder decided artwork is what a collection should open as. So an unset preference is
+ * not "no opinion" here; it is an opinion the product holds until the reader overrules
+ * it, at which point their choice is kept and reapplied on every launch.
+ *
+ * **Not to be confused with the Feed's Leaderboard toggle**, which is deliberately *not*
+ * persisted (§6): Leaderboard is an alternate surface rather than a way of drawing the
+ * same list, and a launch that opened on it would have replaced the homepage. The two
+ * controls look alike on purpose and behave differently on purpose, and this is the
+ * comment that says so on the side that does persist.
+ */
+const VIEW_MODE_PREF_KEY = 'collection.view-mode';
+
+/**
  * The user's own working surface (screens.md §5).
  *
  * Ranked and Watched used to be separate tabs and were largely the same list:
@@ -108,6 +128,8 @@ export default function CollectionScreen() {
   const [nudgePrefLoaded, setNudgePrefLoaded] = useState(false);
   /** Whether this reader has touched the selector since their preference was read. */
   const chosenMedium = useRef(false);
+  /** The same guard for the view control, for the same race. */
+  const chosenMode = useRef(false);
 
   useEffect(() => {
     readPref<UnrankedNudgePref>(`${profile.id}.${NUDGE_PREF_KEY}`)
@@ -144,6 +166,84 @@ export default function CollectionScreen() {
       cancelled = true;
     };
   }, [profile.id]);
+
+  /**
+   * The remembered view mode, applied when it arrives.
+   *
+   * Deliberately the same shape as the medium read above, down to the `cancelled` flag
+   * and the ref reset — two preferences with one pattern rather than two patterns, so a
+   * fix to one is a fix to both.
+   *
+   * **Poster is not written on first use**, which is what makes "no saved preference"
+   * a state that survives: the default lives in `initialViewState`, and the store gains
+   * a key only when the reader actually chooses. A screen that saved its own default on
+   * mount could never change that default for anybody who had opened Collection once.
+   *
+   * A value that fails `isCollectionViewMode` — a key left by the build that spelled
+   * this `wall`, or one that failed to parse — is ignored rather than applied, so an
+   * older string cannot put the control in a state it has no cell for.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    chosenMode.current = false;
+    readPref<unknown>(`${profile.id}.${VIEW_MODE_PREF_KEY}`)
+      .then((stored) => {
+        if (cancelled || chosenMode.current) return;
+        /**
+         * **Resolved in both directions, never only on a hit.**
+         *
+         * `viewState` is not tagged with the account it was read for, the way
+         * `mediumPref` is — it holds filters and a sort as well, and tagging the whole
+         * object would mean re-deriving four things to answer a question about one. So
+         * the miss has to write too: without the `else`, an account that chose List
+         * would hand its mode to the next account to sign in on the same device, which
+         * has no stored preference and is owed the Poster default.
+         */
+        const mode = isCollectionViewMode(stored) ? stored : initialViewState().mode;
+        setViewState((current) => (current.mode === mode ? current : { ...current, mode }));
+      })
+      .catch(() => {
+        /**
+         * A failed read resolves to the default too, rather than to whatever was there.
+         *
+         * Independent review's finding: `.catch(() => {})` left the *previous account's*
+         * mode standing indefinitely on a store error, which is the same cross-account
+         * leak the `else` branch above exists to close — reached by the one path that
+         * skipped it. A store that refuses should cost the reader their preference, not
+         * hand them somebody else's.
+         */
+        if (cancelled || chosenMode.current) return;
+        const fallback = initialViewState().mode;
+        setViewState((current) =>
+          current.mode === fallback ? current : { ...current, mode: fallback },
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id]);
+
+  /**
+   * Every change to the view state, with the mode written through when it is the part
+   * that moved.
+   *
+   * One handler rather than a second callback on `CollectionView`, because the component
+   * owns four things in one object and splitting the mode out would mean it reporting the
+   * same change twice. The comparison against the current mode is what keeps a filter tap
+   * from writing the preference store — the founder's rule is that choosing List persists
+   * List, not that touching the sort menu re-saves whatever mode you happen to be in.
+   *
+   * The write is not awaited and its failure is swallowed, exactly as the medium's is: a
+   * store that refuses should cost the reader nothing more than opening on Poster next
+   * time.
+   */
+  const changeView = (next: CollectionViewState) => {
+    if (next.mode !== viewState.mode) {
+      chosenMode.current = true;
+      void writePref(`${profile.id}.${VIEW_MODE_PREF_KEY}`, next.mode).catch(() => {});
+    }
+    setViewState(next);
+  };
 
   /**
    * Unranked titles **in the category being looked at**, which is the fix.
@@ -262,13 +362,13 @@ export default function CollectionScreen() {
       ) : null}
 
       {active === 'watched' ? (
-        <Watched userId={profile.id} medium={medium} state={viewState} onChange={setViewState} />
+        <Watched userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
       ) : null}
       {active === 'watchlist' ? (
-        <Watchlist userId={profile.id} medium={medium} state={viewState} onChange={setViewState} />
+        <Watchlist userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
       ) : null}
       {active === 'unranked' ? (
-        <Unranked userId={profile.id} medium={medium} state={viewState} onChange={setViewState} />
+        <Unranked userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
       ) : null}
     </Screen>
   );

@@ -563,6 +563,69 @@ export function diversify(
   return chosen;
 }
 
+/**
+ * A wall that grows as the reader scrolls, one diversified page at a time.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY NOT SIMPLY RAISE `limit`
+ *
+ * The obvious way to show forty titles is `diversify(pool, 40)`, and it is wrong in a way
+ * that is invisible until somebody scrolls. Two of the three ceilings are absolute counts
+ * but the genre one is a *share* of the limit — `maxPerGenre(20)` is 8 and
+ * `maxPerGenre(40)` is 16 — and `explore`'s sampling pool is `limit × 3`. So the greedy
+ * pass makes different choices from the very first slot, and the wall the reader was
+ * looking at **reshuffles underneath them** the moment it grows. Every "load more" would
+ * be a small earthquake in the part they had already read.
+ *
+ * Paging fixes that by construction. Each page is a full `diversify` over what is left
+ * after the pages before it, at the page's own limit, so:
+ *
+ *   **the prefix never moves.** Page one is computed identically whether the reader ever
+ *   scrolls or not; page two cannot reach back into it.
+ *
+ *   **the diversity contract holds per screenful, which is the honest reading of it
+ *   anyway.** "At most eight of one genre" means at most eight in the twenty being
+ *   looked at, not eight in an ever-growing list where the ceiling relaxes the further
+ *   you scroll. A forty-item wall under `maxPerGenre(40)` may legitimately be sixteen
+ *   thrillers; under paging it is at most eight in each half.
+ *
+ * The seed and the exposure are the same for every page, so the *relative* ordering
+ * rationale — rotation, the exploration draw — is one decision applied consistently
+ * rather than re-rolled per page.
+ *
+ * Returns fewer than `pages × pageSize` when the pool runs out, which is what the screen
+ * reads as "there is no more" rather than being told separately.
+ */
+export function diversifyPaged(
+  scored: readonly Scored[],
+  pageSize: number,
+  pages: number,
+  seed: number = 0,
+  exposure?: Exposure,
+): Scored[] {
+  const out: Scored[] = [];
+  const taken = new Set<string>();
+
+  for (let page = 0; page < Math.max(1, pages); page += 1) {
+    const remaining = scored.filter((candidate) => !taken.has(candidate.mediaItemId));
+    if (remaining.length === 0) break;
+
+    const next = diversify(remaining, pageSize, seed, exposure);
+    // A page that yields nothing means every remaining candidate is blocked by a
+    // ceiling it cannot get past, which on a fresh page's fresh counters cannot happen
+    // — but breaking here is what guarantees the loop terminates rather than trusting
+    // that it does.
+    if (next.length === 0) break;
+
+    for (const candidate of next) {
+      taken.add(candidate.mediaItemId);
+      out.push(candidate);
+    }
+  }
+
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Freshness: the same relevance, presented differently
 // ---------------------------------------------------------------------------

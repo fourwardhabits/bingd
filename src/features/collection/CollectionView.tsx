@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -7,6 +6,8 @@ import { compactName } from '@/lib/titles';
 import {
   EmptyState,
   FilterChip,
+  IconToggle,
+  type IconToggleOption,
   PosterGrid,
   ScoreBadge,
   Text,
@@ -29,7 +30,16 @@ import {
   type SortKey,
 } from './filters';
 
-export type CollectionViewMode = 'list' | 'wall';
+/**
+ * Poster or list.
+ *
+ * **Named `poster` and not `wall`**, which it was until the 2026-08-28 tranche. The
+ * value had never left the process, so the internal name and the label on the control
+ * were free to disagree; that tranche persists the choice, and a stored string reading
+ * `wall` under a control labelled Poster is a disagreement that outlives every rename
+ * anybody would think to make. The word the founder uses is Poster, so this is Poster.
+ */
+export type CollectionViewMode = 'list' | 'poster';
 
 export type CollectionViewState = {
   filters: CollectionFilters;
@@ -39,12 +49,41 @@ export type CollectionViewState = {
   seed: number;
 };
 
+/**
+ * A fresh collection, before any stored preference has arrived.
+ *
+ * **Poster, which is the founder's aesthetic default** (§11). It was List, and the
+ * reasoning for the change is that a collection is a wall of artwork before it is a
+ * table of scores — the first thing a person should see of what they have watched is
+ * what it looked like.
+ *
+ * This is the *unset* default rather than the startup mode. `CollectionScreen` reads a
+ * stored choice over the top of it, so a reader who has chosen List gets List on every
+ * launch; this value is what a device with nothing stored opens on, and what a stored
+ * value that fails to parse falls back to.
+ */
 export const initialViewState = (): CollectionViewState => ({
   filters: emptyFilters(),
   sort: 'score-desc',
-  mode: 'list',
+  mode: 'poster',
   seed: 1,
 });
+
+/** Whether an unknown value from the preference store is a mode this component can draw. */
+export const isCollectionViewMode = (value: unknown): value is CollectionViewMode =>
+  value === 'list' || value === 'poster';
+
+/**
+ * Poster first, list second — the founder's ordering (§11).
+ *
+ * The leftmost cell is the one a device with no stored preference opens on, so the
+ * control reads as its own default without the reader having to discover that it does.
+ * Reversed from the original, which drew List first and then had to default to Poster.
+ */
+const VIEW_MODES = [
+  { value: 'poster', icon: 'grid', label: 'Poster view' },
+  { value: 'list', icon: 'list', label: 'List view' },
+] as const satisfies readonly IconToggleOption<CollectionViewMode>[];
 
 export type CollectionViewProps = {
   items: readonly CollectionItem[];
@@ -59,8 +98,8 @@ export type CollectionViewProps = {
 /**
  * One collection, two views.
  *
- * List and Wall are not separate screens and not separate tabs — the brief is
- * explicit that Wall is a *view mode* over the same Movies/TV and Watched/Watchlist
+ * List and Poster are not separate screens and not separate tabs — the brief is
+ * explicit that Poster is a *view mode* over the same Movies/TV and Watched/Watchlist
  * selection, so both read the same filtered, sorted array and differ only in what
  * they draw. Everything above them is shared: one filter sheet, one sort menu, one
  * shuffle seed.
@@ -120,21 +159,20 @@ export function CollectionView({
 
         <View style={styles.spacer} />
 
-        {/* The view control, not a third collection state. */}
-        <View style={styles.modes} accessibilityRole="radiogroup">
-          <ModeButton
-            icon="list"
-            label="List view"
-            selected={state.mode === 'list'}
-            onPress={() => onChange({ ...state, mode: 'list' })}
-          />
-          <ModeButton
-            icon="grid"
-            label="Wall view"
-            selected={state.mode === 'wall'}
-            onPress={() => onChange({ ...state, mode: 'wall' })}
-          />
-        </View>
+        {/* The view control, not a third collection state.
+
+            **Poster first, list second** — the founder's §11 ordering, and it is the
+            control reading as its own default: the leftmost cell is the one a device
+            with no stored preference opens on, so the row and the state agree without
+            the reader having to discover that they do. Reversed from the original,
+            which put List first and then defaulted to it, and then had to default to
+            Poster while still drawing List first. */}
+        <IconToggle
+          label="View"
+          value={state.mode}
+          onChange={(mode) => onChange({ ...state, mode })}
+          options={VIEW_MODES}
+        />
       </View>
 
       {sortOpen ? (
@@ -182,7 +220,7 @@ export function CollectionView({
             }}
           />
         </View>
-      ) : state.mode === 'wall' ? (
+      ) : state.mode === 'poster' ? (
         <ScrollView contentContainerStyle={styles.wall}>
           <PosterGrid
             tiles={visible.map((item) => ({
@@ -256,34 +294,6 @@ const nameOf = (item: CollectionItem) =>
     seasonNumber: item.seasonNumber,
   }) ?? item.title;
 
-function ModeButton({
-  icon,
-  label,
-  selected,
-  onPress,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ selected }}
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={({ pressed }) => [styles.mode, selected && styles.modeOn, pressed && styles.pressed]}
-    >
-      <Ionicons
-        name={icon}
-        size={theme.layout.icon.sm}
-        color={selected ? theme.semantic.actionText : theme.text.secondary}
-      />
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   body: { flex: 1 },
   controls: {
@@ -295,21 +305,6 @@ const styles = StyleSheet.create({
   },
   spacer: { flex: 1 },
 
-  modes: {
-    flexDirection: 'row',
-    borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
-    overflow: 'hidden',
-  },
-  mode: {
-    width: theme.layout.minTapTarget - theme.space[2],
-    height: theme.layout.control.chipHeight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.surface.raised,
-  },
-  modeOn: { backgroundColor: theme.semantic.action },
   sortMenu: {
     flexDirection: 'row',
     flexWrap: 'wrap',

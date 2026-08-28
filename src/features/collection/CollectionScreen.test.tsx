@@ -76,8 +76,14 @@ jest.mock('@/features/auth', () => ({
 const mockPrefStore: Record<string, unknown> = {};
 const mockPrefWrites: { name: string; value: unknown }[] = [];
 
+/** Keys whose read rejects, so a store failure is expressible rather than only absence. */
+const mockPrefFailing = new Set<string>();
+
 jest.mock('@/lib/prefs', () => ({
-  readPref: (name: string) => Promise.resolve(mockPrefStore[name] ?? null),
+  readPref: (name: string) =>
+    mockPrefFailing.has(name)
+      ? Promise.reject(new Error('store unavailable'))
+      : Promise.resolve(mockPrefStore[name] ?? null),
   writePref: (name: string, value: unknown) => {
     mockPrefWrites.push({ name, value });
     mockPrefStore[name] = value;
@@ -86,6 +92,7 @@ jest.mock('@/lib/prefs', () => ({
 }));
 
 const MEDIUM_KEY = 'user-1.collection.medium';
+const VIEW_MODE_KEY = 'user-1.collection.view-mode';
 const NUDGE_KEY = 'user-1.collection.unranked-nudge';
 
 const watched = (id: string, kind: 'movie' | 'season') => ({
@@ -117,6 +124,7 @@ beforeEach(() => {
   mockProfile.id = 'user-1';
   for (const key of Object.keys(mockPrefStore)) delete mockPrefStore[key];
   mockPrefWrites.length = 0;
+  mockPrefFailing.clear();
   for (const key of Object.keys(mockTables)) delete mockTables[key];
   mockTables.user_media = [];
   // Nothing is ranked in any of these: `rankings` is what turns a logged title into a
@@ -366,6 +374,148 @@ describe('the remembered category', () => {
  * their collection. It is only ever drawn when this side of the selector genuinely holds
  * unranked titles, so it can say so.
  */
+/**
+ * Poster and List — the founder's §11 change, and the properties it turns on.
+ *
+ * **Poster is the unset default**, not a value written on first mount. A screen that
+ * saved its own default could never change that default again for anybody who had opened
+ * Collection once, and the assertion that nothing is written until the reader chooses is
+ * the only way to hold that shut.
+ *
+ * **The choice survives a relaunch**, which is the whole point and is simulated by
+ * seeding the store and mounting fresh — the same shape `the remembered category` uses,
+ * because it is the same mechanism.
+ *
+ * **It does not leak between accounts.** The mode lives inside `viewState`, which is not
+ * tagged with the account it was read for the way `mediumPref` is, so the read has to
+ * resolve a *miss* as well as a hit. Without that, one person's List became the next
+ * person's default on the same device.
+ */
+describe('the remembered view mode', () => {
+  const modeOf = (view: Awaited<ReturnType<typeof open>>) =>
+    view.getByLabelText('Poster view').props.accessibilityState?.selected ? 'poster' : 'list';
+
+  const choose = (view: Awaited<ReturnType<typeof open>>, mode: 'Poster' | 'List') =>
+    fireEvent.press(view.getByLabelText(`${mode} view`));
+
+  it('opens on Poster when this device has never chosen', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    await waitFor(() => expect(modeOf(view)).toBe('poster'));
+  });
+
+  it('writes nothing until the reader actually chooses', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    await open();
+
+    expect(mockPrefWrites.filter((write) => write.name === VIEW_MODE_KEY)).toEqual([]);
+  });
+
+  it('records List when the reader picks it', async () => {
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    await choose(view, 'List');
+
+    await waitFor(() =>
+      expect(mockPrefWrites).toContainEqual({ name: VIEW_MODE_KEY, value: 'list' }),
+    );
+    expect(modeOf(view)).toBe('list');
+  });
+
+  it('reopens on List after a relaunch', async () => {
+    mockPrefStore[VIEW_MODE_KEY] = 'list';
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    await waitFor(() => expect(modeOf(view)).toBe('list'));
+  });
+
+  it('records Poster again when the reader switches back', async () => {
+    mockPrefStore[VIEW_MODE_KEY] = 'list';
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    await waitFor(() => expect(modeOf(view)).toBe('list'));
+    await choose(view, 'Poster');
+
+    await waitFor(() =>
+      expect(mockPrefWrites).toContainEqual({ name: VIEW_MODE_KEY, value: 'poster' }),
+    );
+    expect(modeOf(view)).toBe('poster');
+  });
+
+  it('does not re-save the mode when the reader taps the cell they are already in', async () => {
+    // The founder's rule is that choosing List persists List, not that every tap in the
+    // control row re-saves whichever mode you happen to be standing in. Without the
+    // comparison in `changeView`, a filter or sort change would write too.
+    mockPrefStore[VIEW_MODE_KEY] = 'list';
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+    await waitFor(() => expect(modeOf(view)).toBe('list'));
+    mockPrefWrites.length = 0;
+
+    await choose(view, 'List');
+
+    expect(mockPrefWrites.filter((write) => write.name === VIEW_MODE_KEY)).toEqual([]);
+  });
+
+  it('ignores a stored value the control has no cell for', async () => {
+    // Including `wall`, which is what the build before this tranche called Poster.
+    mockPrefStore[VIEW_MODE_KEY] = 'wall';
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    await waitFor(() => expect(modeOf(view)).toBe('poster'));
+  });
+
+  it('gives a second account the Poster default rather than the first one’s List', async () => {
+    mockPrefStore[VIEW_MODE_KEY] = 'list';
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+    await waitFor(() => expect(modeOf(view)).toBe('list'));
+
+    mockProfile.id = 'user-2';
+    const second = await open();
+
+    await waitFor(() => expect(modeOf(second)).toBe('poster'));
+  });
+
+  /**
+   * Independent review's finding: the read's `.catch` swallowed the error and left
+   * whatever mode was already there.
+   *
+   * That is the same cross-account leak the miss branch exists to close, reached by the
+   * one path that skipped it — and it is the worse version, because a failed read never
+   * resolves later. A store that refuses should cost the reader their preference, not
+   * hand them the previous account's.
+   */
+  it('falls back to Poster when the preference read fails, rather than keeping the last mode', async () => {
+    mockPrefStore[VIEW_MODE_KEY] = 'list';
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+    await waitFor(() => expect(modeOf(view)).toBe('list'));
+
+    mockProfile.id = 'user-2';
+    mockPrefFailing.add('user-2.collection.view-mode');
+    const second = await open();
+
+    await waitFor(() => expect(modeOf(second)).toBe('poster'));
+  });
+
+  it('does not corrupt the collection it is drawing', async () => {
+    // A view mode is a way of drawing one list. The same titles must be present in both,
+    // which is the assertion that would fail if the toggle had been wired to a filter.
+    mockTables.user_media = [watched('m1', 'movie'), watched('m2', 'movie')];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('2 titles')).toBeTruthy());
+    await choose(view, 'List');
+    await waitFor(() => expect(view.getByText('2 titles')).toBeTruthy());
+  });
+});
+
 describe('the unranked card', () => {
   it('names the unranked titles it is about', async () => {
     mockTables.user_media = [watched('m1', 'movie')];

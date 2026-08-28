@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -190,6 +190,52 @@ const slateKeys = (client: { getQueryCache: () => { getAll: () => { queryKey: re
     .map((query) => query.queryKey)
     .filter((key) => key[0] === 'for-you');
 
+/**
+ * Pull to refresh — which is how a reader asks for a different arrangement now that the
+ * Refresh chip is gone (founder 2026-08-28 §18).
+ *
+ * The chip was removed because the wall rotates across launches on its own; what the
+ * founder still required was *some* explicit way to ask for a new slate, and this is it.
+ * Driven through the control the screen actually renders rather than by calling
+ * `refreshRecommendations` directly, so these tests still fail if the gesture stops being
+ * wired to it — which is the whole thing that changed.
+ */
+/**
+ * The screen's own id for the pull control, matched on the `refreshControl` **prop**.
+ *
+ * A `RefreshControl` handed to a `ScrollView` is never rendered as a node under this
+ * test renderer — it stays an element on the scroll view's props — so there is nothing
+ * for `getByTestId` or any role query to find. Walking the tree for the scroll view that
+ * owns one, and reading its handler, is the only way to reach the gesture, and it is
+ * still an honest one: the function invoked is exactly the function the screen wired to
+ * the pull, so this fails if that wiring breaks.
+ *
+ * The id is on the control rather than the scroll view because the screen has two scroll
+ * views — the wall and the Sent to you list — and only one of them is this gesture.
+ */
+const REFRESH_CONTROL = 'for-you-refresh';
+
+type Instance = { props: Record<string, unknown> };
+
+const refreshHandler = (view: { root: { queryAll: (m: (n: Instance) => boolean) => Instance[] } | null }) => {
+  const owners = view.root?.queryAll((node) => {
+    const control = node.props?.refreshControl as { props?: Record<string, unknown> } | undefined;
+    return control?.props?.testID === REFRESH_CONTROL;
+  });
+  const control = owners?.[0]?.props.refreshControl as
+    | { props: { onRefresh?: () => void } }
+    | undefined;
+  return control?.props.onRefresh;
+};
+
+const pullToRefresh = async (view: Parameters<typeof refreshHandler>[0]) => {
+  const onRefresh = refreshHandler(view);
+  expect(onRefresh).toBeDefined();
+  await act(async () => {
+    onRefresh?.();
+  });
+};
+
 const renderWall = async () => {
   const view = await renderWithProviders(<RecommendationsScreen />);
   await waitFor(() => expect(wall(view).length).toBeGreaterThan(0));
@@ -306,9 +352,19 @@ describe('bookmarking on the For You wall', () => {
 });
 
 describe('refreshing the wall', () => {
-  it('offers a Refresh control in the filter row', async () => {
+  it('no longer offers a Refresh chip in the filter row', async () => {
+    // The founder's §18 end state: a reader should not have to think "I need to press
+    // Refresh to make recommendations work". Removed only because the wall now rotates
+    // by itself across launches AND an explicit way to ask still exists — the gesture
+    // the tests below drive. Asserted as an absence so the chip cannot quietly return.
     const view = await renderWall();
-    expect(view.getByLabelText('Refresh recommendations')).toBeTruthy();
+    expect(view.queryByLabelText('Refresh recommendations')).toBeNull();
+    expect(view.queryByText('Refresh')).toBeNull();
+  });
+
+  it('offers pull-to-refresh on the wall instead', async () => {
+    const view = await renderWall();
+    expect(refreshHandler(view)).toBeDefined();
   });
 
   it('draws a different arrangement without refetching anything', async () => {
@@ -316,7 +372,7 @@ describe('refreshing the wall', () => {
     const before = wall(view);
     const candidateReads = mockReads.media_items;
 
-    await fireEvent.press(view.getByLabelText('Refresh recommendations'));
+    await pullToRefresh(view);
 
     await waitFor(() => expect(wall(view)).not.toEqual(before));
     // The whole design of the split: a refresh is a sort over data already in the
@@ -329,7 +385,7 @@ describe('refreshing the wall', () => {
     const view = await renderWall();
     const before = wall(view);
 
-    await fireEvent.press(view.getByLabelText('Refresh recommendations'));
+    await pullToRefresh(view);
     await waitFor(() => expect(wall(view)).not.toEqual(before));
 
     // Freshness must not cost coverage. The diversity ceilings still run, so this is a
@@ -342,7 +398,7 @@ describe('refreshing the wall', () => {
     // it by widening the pool either. Everything on a refreshed wall came from the same
     // scored candidate set.
     const view = await renderWall();
-    await fireEvent.press(view.getByLabelText('Refresh recommendations'));
+    await pullToRefresh(view);
 
     await waitFor(() => {
       for (const label of wall(view)) {

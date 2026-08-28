@@ -52,59 +52,93 @@ export function useTasteMatch(subjectId: string | null, viewerId: string) {
  * The one line under a handle, as a decision rather than as a render.
  *
  * ---------------------------------------------------------------------------
- * WHY THIS REPLACED A BADGE THAT SOMETIMES SHOWED NOTHING
+ * WHAT THE LINE SAYS NOW, AND WHY IT CHANGED TWICE
  *
- * The founder's report was that Match is **missing** when visiting somebody's profile,
- * and the cause was not a wiring bug: the number was drawn under the avatar and
- * `tasteMatchBadge` returned null whenever `taste_match` had no score. On a friend beta
- * where nobody has ranked much, that is nearly always — `taste.min_common` is five
- * *exactly shared* titles, both accounts having ranked the same film or the same season
- * — so the feature was invisible on every profile that mattered, with nothing on screen
- * to say why or what would fix it.
+ * It started as a badge under the avatar that drew a percentage or nothing. On a friend
+ * beta "nothing" is nearly every profile — `taste.min_common` is five *exactly shared*
+ * rankings — so the founder's report was that Match is missing, and the cause was a
+ * sixty-point column with no room to explain itself. It moved under the handle and grew
+ * four states, three of which were sentences.
  *
- * Silence was the right call for a badge stacked in a sixty-point column. It is the
- * wrong call under a handle, where there is a line's width and the reader is looking at
- * the person the number is about.
+ * The founder's 2026-08-28 §2 replaces those sentences with one compact form that
+ * carries the **evidence** beside the number:
+ *
+ *     89% Match · 42 shared
+ *     Match TBD · 3 shared
+ *
+ * The reasoning is that the number alone was never the whole answer. "How much weight
+ * should I give this person's recommendation" depends on the score *and* on how much
+ * agreement it was measured over, and since `20260827001000` the score itself is shrunk
+ * toward 50 by exactly that count — so a reader seeing 89% has been told something the
+ * evidence count is the other half of. Putting them together is what makes the shrink
+ * legible instead of mysterious.
  *
  * ---------------------------------------------------------------------------
- * THE FOUR STATES, AND WHY THE INSUFFICIENT ONE IS TWO
+ * `MATCH TBD` IS NOT THE PLACEHOLDER THE FOUNDER RULED OUT
  *
- *   `match`     — a score. `87% Match`.
- *   `rank-more` — the *viewer* has not ranked enough for any overlap to be likely.
- *   `too-few`   — the overlap is short for a reason ranking more will not reliably fix.
- *   null        — say nothing: the reader's own profile, or an answer not yet in.
+ * An earlier instruction forbade `TBD` and this file enforced it. That rule was about a
+ * **placeholder percentage** — `0% Match` on a pair with no evidence, which is a lie
+ * told in the units of the answer. `Match TBD` is in different units: it says there is
+ * no number yet, which is true, and it says it in a form that keeps the line's shape
+ * stable so the row does not reflow when the number arrives. The founder has asked for
+ * it explicitly and it is not the thing the old rule protected against. **No percentage
+ * is ever invented**, and that is still asserted.
  *
- * The founder's instruction is precise about the split: do not tell somebody to rank
- * more when ranking more will not unlock it. `common_count` alone cannot tell the two
- * apart — an intersection of two says nothing about which side is short — so this takes
- * both catalogues' sizes, which every caller already has on screen: the subject's from
- * `rankedMovies + rankedSeasons`, the viewer's from their own logged collection.
+ * ---------------------------------------------------------------------------
+ * WHERE THE OLD THREE SENTENCES WENT
  *
- *   subject below the minimum   → `too-few`. Nothing the viewer ranks can reach five
- *                                 shared titles with somebody who has ranked three.
- *   viewer below the minimum    → `rank-more`. This is the one case where the advice is
- *                                 true, and it is the common one on a new account.
- *   both above, overlap short   → `too-few`. Both have ranked plenty and have not
- *                                 happened to watch the same things; "rank more" would
- *                                 be a guess dressed as an instruction.
- *
- * **No number is invented for the nudge.** "Rank 3 more titles" would be a lie in every
- * branch — the gap is in *shared* titles, and three arbitrary films may share none of
- * them — so the copy says what is true and stops. And `TBD` appears nowhere: a
- * placeholder percentage is the one thing the founder ruled out explicitly, and an
- * absence of evidence is not a low score.
+ * Into the sheet. The distinction between "the *viewer* has ranked too little" and
+ * "there is simply no overlap" is real, and telling somebody to rank more when ranking
+ * more cannot help is the mistake this module was written to avoid — but it is a
+ * *second* sentence, and §3 says the profile treatment stays compact. So the line is
+ * always the compact pair, and `explanation.nudge` carries the advice to the sheet that
+ * opens when the line is tapped, where there is room for it and where it is only read by
+ * somebody who asked.
  */
-export type TasteMatchState =
-  | { kind: 'match'; label: string }
-  | { kind: 'rank-more'; label: string }
-  | { kind: 'too-few'; label: string }
-  | null;
 
-export function tasteMatchState({
+/** Which of the two compact forms this is. Drives the tone, and nothing else. */
+export type TasteMatchKind = 'match' | 'tbd';
+
+export type TasteMatchLine = {
+  kind: TasteMatchKind;
+  /** `89% Match · 42 shared`, or `Match TBD · 3 shared`. */
+  label: string;
+  /** The two paragraphs and the optional nudge, for the sheet behind the line. */
+  explanation: {
+    match: string;
+    shared: string;
+    /**
+     * Present only in the one branch where "rank more" is true: the subject has ranked
+     * plenty and the viewer has not, so every missing shared title is one the *viewer*
+     * has yet to rank. Absent when the subject is the short side, or when both have
+     * ranked plenty and simply have not overlapped — in both of those, ranking more is
+     * a guess dressed as an instruction.
+     */
+    nudge: string | null;
+  };
+};
+
+/**
+ * The compact line, or null when there is nothing honest to put in it.
+ *
+ * Null covers three genuinely different absences and they are deliberately collapsed:
+ * the reader's own profile (a 100% match with your own catalogue is a tautology, and
+ * `taste_match` refuses the case as well), an answer still in flight, and a profile
+ * whose counts this viewer is not entitled to. In all three the right render is no line
+ * at all rather than a line that changes its mind under the reader.
+ *
+ * **The counts are only needed for the nudge.** The compact label is derivable from
+ * `match` alone; `viewerRanked` and `subjectRanked` decide which side is short, which
+ * only the sheet says out loud. They are still required rather than optional, because a
+ * line drawn before they arrive would open a sheet whose advice was decided by an
+ * absence — and the two profiles that call this have both numbers on screen already.
+ */
+export function tasteMatchLine({
   match,
   isSelf,
   viewerRanked,
   subjectRanked,
+  name,
 }: {
   match: TasteMatch | undefined;
   /** A 100% match with your own catalogue is a tautology; the RPC refuses it too. */
@@ -113,62 +147,44 @@ export function tasteMatchState({
   viewerRanked: number | undefined;
   /** How many the subject has ranked, or undefined on a profile with no visible stats. */
   subjectRanked: number | undefined;
-}): TasteMatchState {
+  /** The subject's display name, for copy that names a person rather than "them". */
+  name: string;
+}): TasteMatchLine | null {
   if (isSelf || !match) return null;
-  if (match.score !== null) return { kind: 'match', label: `${match.score}% Match` };
-
-  // Nobody has looked yet on one side or the other. Nothing rather than a guess: the
-  // line appears once when there is something true to put in it, instead of changing
-  // its mind under the reader.
   if (viewerRanked === undefined || subjectRanked === undefined) return null;
 
-  if (subjectRanked >= match.minCommon && viewerRanked < match.minCommon) {
-    return { kind: 'rank-more', label: 'Rank more to see Match' };
+  // "shared" is not pluralised. It is a count of a thing the label does not name —
+  // `42 shared` reads as an adjective over the titles, and `42 shareds` is not English.
+  const shared = `${match.commonCount} shared`;
+
+  const explanation = {
+    match:
+      `How similarly you and ${name} rate titles you've both ranked. ` +
+      'More shared titles makes the Match more reliable.',
+    shared: `Titles you and ${name} have both ranked.`,
+    nudge:
+      match.score === null && subjectRanked >= match.minCommon && viewerRanked < match.minCommon
+        ? 'Rank a few more titles and this will fill in.'
+        : null,
+  };
+
+  if (match.score !== null) {
+    return { kind: 'match', label: `${match.score}% Match · ${shared}`, explanation };
   }
 
-  return { kind: 'too-few', label: 'Not enough shared taste yet' };
+  return { kind: 'tbd', label: `Match TBD · ${shared}`, explanation };
 }
 
 /**
- * The two short lines that sat under the avatar. **Kept for the compact case and no
- * longer used by either profile**, both of which now put `tasteMatchState` under the
- * handle instead.
+ * The badge that sat under the avatar. **Kept, and used by neither profile.**
  *
  * Retained rather than deleted because it is the only form that fits a sixty-point
  * column, and the rule it encodes — a number or nothing, never `0%` — is the one this
- * feature must never lose.
+ * feature must never lose whatever shape the line takes.
  */
 export function tasteMatchBadge(
   match: TasteMatch | undefined,
 ): { value: string; label: string } | null {
   if (!match || match.score === null) return null;
   return { value: `${match.score}%`, label: 'Match' };
-}
-
-/**
- * The two lines the long form prints, or null when there is nothing to say.
- *
- * Separated from the component so the copy rules are testable without a render, and
- * because the "not enough yet" case has a shape that is easy to get wrong: it must
- * still show the count, or the reader cannot tell whether they are one film away or
- * five.
- */
-export function tasteMatchCopy(match: TasteMatch | undefined): { headline: string; detail: string } | null {
-  if (!match) return null;
-
-  const titles = `${match.commonCount} ${match.commonCount === 1 ? 'title' : 'titles'} in common`;
-
-  if (match.score === null) {
-    // Deliberately not "0% match". An absence of evidence is not a low score, and
-    // printing a number here would be the feature's first lie.
-    return {
-      headline: 'Not enough overlap yet',
-      detail:
-        match.commonCount === 0
-          ? 'Nothing you have both ranked.'
-          : `${titles} — ${match.minCommon} needed.`,
-    };
-  }
-
-  return { headline: `${match.score}% Taste Match`, detail: titles };
 }

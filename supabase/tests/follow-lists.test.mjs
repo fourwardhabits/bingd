@@ -4,23 +4,38 @@ import { after, before, describe, it } from 'node:test';
 import { createTestDb } from './harness.mjs';
 
 /**
- * Followers and Following as lists — `20260826000600` §5.
+ * Followers and Following as lists — `20260826000600` §5, rewritten by `20260828000400`.
  *
- * These two functions are the only reads in that migration that are **`security
- * invoker`**, and that choice is the whole of their privacy: `follows_read` has said
- * since `20260813001900` that a viewer may see an approved edge only when they can view
- * *both* ends of it, and `profiles_read` decides whether the person on the other end can
- * be named. A definer version would have had to restate both rules and would have been
- * the copy that got one of them wrong.
+ * ---------------------------------------------------------------------------
+ * THE CONTRACT THESE ASSERT, AND THE HALF OF IT THE FOUNDER REVERSED
  *
- * So this file is mostly a proof that the existing contract still governs when the same
- * facts are reached through a new door. Every case is one somebody could reasonably
- * expect to work and must not:
+ * They were `security invoker`, on the argument that `follows_read` already *was* the
+ * rule — a viewer may see an approved edge only when they can view **both** ends of it —
+ * and that a definer copy would be the copy that got it wrong.
  *
- *   · a stranger reading a private account's followers
- *   · a private account's own follower appearing to somebody who cannot see them
- *   · a blocked account appearing in either list
- *   · search reaching past the list into the directory
+ * The founder's 2026-08-28 §21B change makes that one rule into two, and `follows_read`
+ * has no column to express the split:
+ *
+ *   the SUBJECT whose list this is   `can_view_profile`. Whose followers these are is
+ *                                    content, and a private account keeps it behind
+ *                                    approval. Unchanged.
+ *
+ *   each PERSON listed in it         `can_identify_profile` — identity only. A private
+ *                                    account is a person who can be *named* in a list
+ *                                    even when nothing they wrote can be read.
+ *
+ * So the functions are definer now and the rules live in their bodies. This file is
+ * where both halves are held: the relaxed one, because a silent omission was the bug
+ * (`fl_shy` follows `fl_owner` and was invisible to everybody), and the unrelaxed one,
+ * because "a private account is discoverable" must not quietly become "a private
+ * account's follower list is readable".
+ *
+ * Every case is one somebody could reasonably expect to work:
+ *
+ *   · a stranger reading a private account's followers — still nothing
+ *   · a private account appearing *in* a readable list — now yes, as identity
+ *   · a blocked account appearing in either list — still never
+ *   · search reaching past the list into the directory — still never
  *
  * The cast: `owner` is public and is who the lists are about. `viewer` follows nobody
  * and is the outside. `shy` is private. `blocked` has been blocked by `viewer`.
@@ -44,16 +59,17 @@ const follow = (follower, followee, state = 'approved') =>
  * **`asUser`, never `actAs`, and that distinction is the entire test.**
  *
  * `actAs` sets `auth.uid()` while staying the table owner, and **an owner bypasses row
- * security** — so under it these two functions return every edge in the database and
- * every assertion below passes for the wrong reason. That is not a hypothetical: the
+ * security** — so under it a `security invoker` read returns every edge in the database
+ * and every assertion below passes for the wrong reason. That is not a hypothetical: the
  * first draft of this file used `actAs` and reported a blocked account and a private one
  * in a stranger's list, which is precisely the leak it was written to refuse.
  *
- * It matters more here than anywhere else in this suite because `followers_of` and
- * `following_of` are `security invoker`: their authorisation *is* `follows_read`, so a
- * harness that skips policies is a harness that tests nothing at all. The definer reads
- * in `comment-threads.test.mjs` are different — they ask `can_view_profile(auth.uid())`
- * themselves — which is why `actAs` is honest there and dishonest here.
+ * `20260828000400` made both functions definer, which weakens that argument without
+ * retiring it: their authorisation is now their own body, so `actAs` would be honest.
+ * `asUser` is kept anyway, deliberately. It is the stricter harness, it is what the app
+ * actually runs as, and it is the only one that would notice if a future rewrite went
+ * back to invoker — at which point the assertions here would silently start proving
+ * nothing again.
  */
 const followers = async (who, subject, query = null) =>
   t.asUser(who, async () => {
@@ -92,14 +108,44 @@ after(async () => {
 
 describe('a public account, read by somebody outside', () => {
   it('lists the followers the caller is allowed to see', async () => {
-    // `fl_shy` is private and the viewer does not follow them, so `can_i_view` is false
-    // and `follows_read` never admits that edge. `fl_blocked` is absent for the same
-    // predicate reached a different way. Neither is a new rule.
-    assert.deepEqual(await followers(viewer, owner), ['fl_friend', 'fl_viewer']);
+    // `fl_shy` is private and the viewer does not follow them — and is **present**,
+    // which is the founder's §21B reversal. Identity is not content: the row carries a
+    // handle, a name, an avatar and `visibility = private`, and the client draws the
+    // locked shell when it is tapped. `fl_blocked` is still absent, because a block is
+    // not a visibility setting and `can_identify_profile` refuses it in both directions.
+    assert.deepEqual(await followers(viewer, owner), ['fl_friend', 'fl_shy', 'fl_viewer']);
   });
 
   it('lists the following set the same way', async () => {
-    assert.deepEqual(await following(viewer, owner), ['fl_friend', 'fl_viewer']);
+    assert.deepEqual(await following(viewer, owner), ['fl_friend', 'fl_shy', 'fl_viewer']);
+  });
+
+  /**
+   * The row is identity and only identity, which is the claim the reversal rests on.
+   *
+   * These functions return five columns and always have; the point of asserting it here
+   * is that a private account now reaches them, so the *shape* is the disclosure
+   * boundary rather than the predicate. `visibility` coming back as `private` is what
+   * lets the client offer Request instead of Follow, so it is required rather than
+   * incidental.
+   */
+  it('returns identity only for the private account it now names', async () => {
+    const row = await t.asUser(viewer, async () => {
+      const { rows } = await t.sql(
+        `select * from followers_of($1) where username = 'fl_shy'`,
+        [owner],
+      );
+      return rows[0];
+    });
+
+    assert.deepEqual(Object.keys(row).sort(), [
+      'avatar_path',
+      'display_name',
+      'user_id',
+      'username',
+      'visibility',
+    ]);
+    assert.equal(row.visibility, 'private');
   });
 
   /**
@@ -168,7 +214,9 @@ describe('a block', () => {
       const { rows } = await t.sql(`select count(*)::int as n from followers_of($1)`, [owner]);
       return rows[0].n;
     });
-    assert.equal(n, 2);
+    // Three: friend, viewer, and the private `fl_shy` the founder's §21B change now
+    // names. `fl_blocked` is the fourth follower and is neither counted nor listed.
+    assert.equal(n, 3);
   });
 });
 
@@ -187,7 +235,14 @@ describe('search, which stays inside the list', () => {
   });
 
   it('treats an empty query as no query', async () => {
-    assert.deepEqual(await followers(viewer, owner, '   '), ['fl_friend', 'fl_viewer']);
+    assert.deepEqual(await followers(viewer, owner, '   '), ['fl_friend', 'fl_shy', 'fl_viewer']);
+  });
+
+  it('finds the private account by name, inside the list', async () => {
+    // Discoverability reaches the search box too, and stays inside the list while it
+    // does: `fl_shy` is findable here because they follow `fl_owner`, not because the
+    // directory is reachable from a follower list.
+    assert.deepEqual(await followers(viewer, owner, 'shy'), ['fl_shy']);
   });
 
   /**

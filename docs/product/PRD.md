@@ -744,6 +744,31 @@ The value of a position decays sharply down the list. Users care intensely about
 
 Once a user has a ranked spine, a single bonus comparison offered after each new ranking could gradually position imported titles as a by-product of normal use. Noted for post-v1; explicitly out of scope now.
 
+### As built — 2026-08-28: Poster is the default, and the choice is remembered
+
+The view control reads **Poster | List**, in that order, and the leftmost cell is the one
+a device with no stored preference opens on — so the control reads as its own default
+rather than asking the reader to discover that it does. Poster is the founder's aesthetic
+default: a collection is a wall of artwork before it is a table of scores.
+
+Choosing List persists it locally, per account, through the same `readPref`/`writePref`
+store the Movies/TV side already uses — no new native dependency and no column. Reopening
+Collection, and relaunching the app, then opens in List; choosing Poster persists Poster.
+
+Two details that are decisions rather than mechanics:
+
+- **Nothing is written until the reader chooses.** The default lives in the code, not in
+  the store, so it can be changed again for everybody who has opened Collection without
+  ever picking a side.
+- **The stored value is `poster`, not `wall`.** The internal name was `wall` while it
+  never left the process; a stored string that disagreed with the label on the control
+  would have outlived every rename anybody would think to make.
+
+This is deliberately **not** the same contract as the Feed's Leaderboard toggle, which is
+not persisted — see §14. The two controls look alike because they are the same component;
+they differ because one chooses how to draw a list and the other chooses which surface to
+show.
+
 ---
 
 ## 12. Letterboxd import
@@ -1167,6 +1192,91 @@ Filtered search is intentional exploration, not recommendation. It supports comb
 > not fetch today. There is **no TMDB `/discover` integration**: filters narrow the
 > already-fetched candidate pool client-side, here as everywhere in filtered discovery.
 
+### As built — 2026-08-28: Match and its evidence, side by side
+
+The profile line is now a verdict **and** the evidence it was measured over:
+
+```
+89% Match · 42 shared          a score, and how much agreement it rests on
+Match TBD · 3 shared           no score yet, and how close the pair is to one
+```
+
+**"Shared" is the exact Match evidence population and cannot be anything else.** It is
+`common_count` from the same `taste_match` row the percentage came from — the count of
+media items *both accounts have ranked* — so there is one query, one definition, and no
+way for the two halves of the line to disagree. It is deliberately **not** titles both
+have merely watched, watchlist overlap, or any content-similarity estimate. No new
+server function was needed: `taste_match` has returned the count since its first
+migration, and only the client was discarding it.
+
+Putting the two together is what makes the score legible. Since `20260827001000` the
+blend is shrunk toward the 50 stranger baseline by `n / (n + prior)`, so the count beside
+the percentage is the thing that explains why five identical opinions read as 75 rather
+than 95.
+
+**`Match TBD` is permitted and a placeholder percentage still is not.** The earlier rule
+forbade `0% Match` on a pair with no evidence — a lie told in the units of the answer.
+`TBD` is in different units: it says there is no number yet, which is true, and keeps the
+line's shape stable so the row does not reflow when a number arrives.
+
+**The line is tappable** and opens a short sheet. Plain English only — no formula, no
+Spearman, no shrinkage, no "rank agreement":
+
+> **MATCH** — How similarly you and *[Name]* rate titles you've both ranked. More shared
+> titles makes the Match more reliable.
+>
+> **SHARED** — Titles you and *[Name]* have both ranked.
+
+A third line appears in the sheet only in the one case where it is true: the other
+account has ranked plenty and the reader has not, so ranking more can genuinely close the
+gap. When the *subject* is the short side, nothing the reader ranks reaches the
+threshold, and the app says nothing rather than sending them to do work that will not
+change the screen.
+
+**Where Match appears, and where it deliberately does not.** Full Match + Shared is the
+other-user profile only. A Match percentage alone may remain on For You → People and the
+Following ratings sheet, which is where it already was. It is **not** added to search
+results, feed rows, the leaderboard, follower/following lists, Collection, or title
+cards.
+
+### As built — 2026-08-28: For You rotation V1.5
+
+The founder's report — opening For You repeatedly produces substantially the same slate —
+was half-fixed on 2026-08-27 and half-fixed here. That pass separated *which titles are
+good* from *which arrangement this session is showing*; what it could not do is survive a
+relaunch, because exposure was process memory. So the **first** slate after every launch
+was drawn from an un-penalised pool and was therefore the same first slate.
+
+**The candidate pool, unchanged plus one.** Anchors' `similar` lists, the trending
+fallback, and — new — `social_candidates`: titles the reader's approved followees put in
+their top band and the reader has not watched, ranked, saved or dismissed. The RPC
+returns **media item ids and a count, never a person**, so no social sentence can be
+composed from it; the pool is wider and the no-fabricated-social-proof rule is intact.
+Match-weighted endorsement is deferred — one `taste_match` per followee per slate is the
+N×M cost the founder said to defer.
+
+**Rotation.** `recommendation_impressions` gains its first writer. A title counts as
+shown when it is included in a slate the client rendered; `shown_at` is truncated to the
+hour, so the primary key makes the write idempotent and a render loop cannot inflate it.
+The ranker demotes what has been shown, in tiers, merging the durable count with the
+session's by `max` rather than by sum — a tier is a staleness band, not a tally.
+Impressions **expire** from the penalty after `foryou.impression_window_hours` (72), so a
+strong candidate returns by itself. A dismissal remains a separate, permanent veto.
+
+**Loading.** The wall grows a diversified page at a time as the reader scrolls, to five
+pages. Paging rather than a growing limit, because the genre ceiling is a share of the
+limit — so raising it would reshuffle the part already read. The diversity contract
+therefore holds per screenful, which is its honest reading.
+
+**The Refresh chip is gone.** It existed only because the wall could not rotate by
+itself; that is no longer true. Pull-to-refresh on the wall remains the explicit way to
+ask for a new slate, so the control was replaced rather than merely deleted. When the
+pool is exhausted the wall stops and says so once — *"Rank a few more titles to sharpen
+your recommendations."* — instead of recycling its weakest tail.
+
+**For You gets no poster/list toggle.** The current presentation is canonical; the
+complexity budget went to freshness.
+
 ---
 
 ## 14. Social interaction: feed, reactions, and tagging
@@ -1421,6 +1531,98 @@ The canonical contract: **an award milestone newly earned produces exactly one s
 **In the inbox**, the row reads "You earned Movie Muncher 🎉" with the award badge in place of the avatar, and a tap routes to the reader's own Awards through the existing chain. **As a push**: `award_earned` joined `_push_eligible` (ten of the twelve types), `claim_push_batch` was rebuilt to let actorless jobs through and to carry `award_name`, and the copy is title "bingd. Awards", body "You earned Movie Muncher" — no emoji in the notification centre, `invite_welcome`'s rule. The `awards` category default flipped **on** by the `20260820000100` mechanism — no data migration, explicit choices preserved — and the settings screen's `pending` badge and its "not being sent yet" explainer are gone. When push is off, or the category is, the inbox row still exists and no push sends: the `BEFORE`-trigger preference gate and the `AFTER`-trigger enqueue make that structural rather than checked.
 
 **Analytics `award_earned` stays deferred**, with a new reason replacing the old one: the crossing is now a server-side fact, and the client has no honest emission point for it. [`analytics.md`](./analytics.md) §4.
+
+### As built — 2026-08-28: the Feed ↔ Leaderboard toggle
+
+A compact two-state control sits in the Feed header, immediately beside the notification
+bell, using the **same component** as Collection's Poster/List toggle rather than merely
+the same styling. Feed glyph on the left, trophy on the right.
+
+**The two toggles behave differently on purpose.** Collection persists its choice across
+launches; this one does not. Leaderboard is an alternate social surface, not another way
+of drawing the homepage, so a launch that opened on it would have replaced the homepage.
+Within a mounted session the choice survives, which falls out of the tab staying mounted
+and is not worked for.
+
+Toggling the trophy replaces the Feed's whole content area — Trending included. Returning
+leaves the feed exactly as it was.
+
+### The monthly leaderboard — new 2026-08-28
+
+A subsection of Social interaction rather than a section of its own: it is a second view
+of the same tab, reached from the toggle above, and numbering it separately would have
+renumbered every section after it for a surface that shares the Feed's screen.
+
+#### Why monthly
+
+Films and TV seasons are low-frequency. A weekly board is mostly zeroes and is decided by
+whoever had a free Saturday; an all-time board is decided once, by whoever joined first,
+and then never moves. A month is the shortest window that produces a number worth
+comparing and the shortest that resets often enough for second place to be worth playing
+for.
+
+The heading is **This month**. The window is `date_trunc('month', current_date)` to the
+same day next month, half-open, by the **server's** clock — `watched_on` is a zoneless
+date, so a per-viewer timezone would make two people disagree about who is winning.
+
+### The four metrics
+
+Chips read **Titles | Movies | TV | Reviews**, defaulting to Titles. Titles is the total
+and Movies and TV are its two halves, so they sit beside it and the different question
+comes last. No further metrics in V1; no All Time.
+
+| Metric | Definition | Canonical fact |
+| --- | --- | --- |
+| **Titles** | unique rankable titles watched this calendar month (movies + TV seasons) | `user_media.watched_on` |
+| **Movies** | the same, films only | `watched_on` + `media_items.kind = 'movie'` |
+| **TV** | the same, seasons only | `watched_on` + `kind = 'season'` |
+| **Reviews** | public reviews first published this calendar month | `user_media.note_first_published_at` |
+
+**Watch-date semantics, not logging-date.** Logging a July film in August is not an
+August watch. The cost is that a row with no date counts in no month, which is right: a
+memory without a date cannot be attributed to one without inventing it.
+
+**Rewatches cannot double-count structurally.** `user_media` is keyed `(user, title)`, so
+a rewatch updates the row in place — there is no shape in which one title appears twice
+in one person's count.
+
+**Reviews cannot be farmed.** `note_first_published_at` is a new column, stamped **once**
+when a note first becomes public, never cleared, and never moved by an edit. So editing a
+review does not mint a second one, and un-sharing then re-sharing does not either.
+
+**Not counted:** the watchlist, private notes, comments, recommendations sent or
+received, awards, reactions, and series rows (a series is not loggable, PRD §10).
+
+### Scope and privacy
+
+Global for the friend beta, and **viewer-relative under the privacy contract**. The
+population is filtered by `can_view_profile`, so a private account the viewer has not been
+approved by never appears — count and all. The same call is a different list for every
+caller by construction rather than by a post-filter. Blocks in either direction and
+suspended accounts are absent; the caller always sees themselves.
+
+This is the boundary the 2026-08-19 discoverability change does **not** cross: identity is
+discoverable, monthly totals are content.
+
+**One deliberate narrowing of §22.** `watched_on` is classified always-private per title
+and remains so — the board publishes *how many* fell in a month and never which, never a
+date, and never a title, and only to viewers who could already read that account's
+collection and timestamped activity.
+
+### Design
+
+Rank, avatar, display name, handle, count. The top three carry the app's accent on their
+rank — no medals, no podium, no confetti, no XP, no points economy, no streaks, no
+all-time column. Ties share a rank and sort by handle, so the list is deterministic;
+people with zero are absent rather than listed as noughts.
+
+Tapping a row opens that profile under the ordinary privacy rules. When the reader's own
+rank is past the end of the page, a pinned "You" row shows their position and the number
+of entrants; it is drawn only when no visible row is already theirs, so they can never see
+themselves twice.
+
+Empty states say what is true and invite: *"No watches yet this month." / "You could take
+the first spot."*
 
 ---
 
@@ -2265,6 +2467,69 @@ One change per 30 days. The previous username redirects for 90 days, then releas
 ### Account deletion — Required
 
 A user-initiated deletion path that removes personal data, invalidates tokens, removes public web pages, and is reachable from Settings without contacting support.
+
+### As built — 2026-08-28: a private account is discoverable as an identity
+
+**A private account is discoverable as an identity. Its content remains private.** This
+does not make private profiles public; it separates two things one setting had collapsed.
+
+`20260819000100` established the split for Search and for the locked profile shell a
+search result leads to. This tranche finishes it on the two surfaces the founder's device
+pass found still collapsing them.
+
+#### What a viewer may see of an unapproved private account
+
+Only the identity/discovery shell: profile photo, display name, `@handle`, the private
+marker, and the Follow / Requested control. Mutual-friend count where the Mutuals product
+already supports it.
+
+Everything else stays behind `can_view_profile`, and none of it moved: rankings, the
+Movies/TV collection, scores, notes and reviews, watchlist, feed activity, awards and
+progress, **Match**, **the shared-title count**, **monthly leaderboard activity**, goals,
+and the underlying taste data. Approved followers retain full access.
+
+#### Where private identities appear
+
+- **Search** — by name and handle (unchanged since 2026-08-19).
+- **Followers / Following lists** — new. These functions previously omitted a private
+  account the viewer had not been approved by, which also meant *your own* private
+  follower was missing from your own followers list.
+- **For You → People / Mutuals** — new. A private account may be suggested where the
+  existing mutual logic has a legitimate social reason. This reverses the 2026-08-26
+  decision, and it is coherent rather than a softening: the same change makes
+  `following_of` name that edge directly, so withholding it in one place while stating it
+  in the other would be an inconsistency, not a protection.
+
+No broad private-account recommendations with no social signal.
+
+#### The one new disclosure, stated plainly
+
+Exactly one fact becomes visible that was not: **that a follow edge exists between an
+account the viewer may read and a private account they may not.** Nothing about what that
+account watched, ranked, wrote, or earned.
+
+#### Tapping through
+
+An unauthorized private identity opens a limited locked shell — avatar, display name,
+handle, Follow/Requested, and a concise "This account is private" treatment. Not empty
+versions of every profile section, not fake zeros for hidden stats, and no query is issued
+for private content in order to render a placeholder.
+
+#### Safety is not relaxed
+
+Blocked in either direction: the identity stays hidden under the existing block contract.
+Suspended or deleted: existing exclusion behaviour. The identity predicate is server-only
+— revoked from client roles for the reason `20260819000200` revoked its sibling, since a
+definer helper that accepts a viewer is a block-graph oracle.
+
+#### Architecture
+
+Identity discovery and content visibility are separate predicates, not one weakened one.
+`can_view_profile` is untouched, and every full-content read still goes through it.
+Followers/Following now apply **two** predicates — content visibility on the subject whose
+list it is, identity on each account named in it — which is a split `follows_read` has no
+column to express, and is why those functions moved into the definer form where the rule
+can be read in one place.
 
 ---
 

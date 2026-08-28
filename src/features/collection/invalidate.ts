@@ -68,6 +68,61 @@ export function invalidateAfterCollectionChange(
   // Profile → Recent activity, which asks about one actor rather than a follow set.
   invalidate(['actor-activity', userId]);
 
+  /**
+   * **The three surfaces that show note text, which nothing has ever invalidated.**
+   *
+   * Founder physical finding, 2026-08-28: editing a published review left the old text
+   * on the title's Reviews tab. The audit found one cause and it is this list — not a
+   * write that failed, not a view, not a revision:
+   *
+   *   · `save_note` stores the new text and returns a new `note_updated_at`; the sheet's
+   *     own state proves it landed, and re-opening the log sheet shows the edit.
+   *   · `title_reviews` (20260825000100) selects `um.note` **live**, with no snapshot
+   *     and no history table, so the server returns the new text the instant it is
+   *     asked. `user_media` is keyed `(user_id, media_item_id)`, so there is not even a
+   *     second row an edit could be selected out of — a duplicate review is unreachable.
+   *   · Nothing asked. `['title-reviews', …]` appeared in exactly one place in the
+   *     codebase — the hook that reads it.
+   *
+   * The global `staleTime` is 60s, which is why the founder could not shake it loose by
+   * closing the sheet: the sheet opens *over* the title screen, so nothing unmounts, and
+   * a remount inside the minute would not have refetched either. It looked like a write
+   * that had not persisted and was a read nobody re-ran.
+   *
+   * This is the failure the module header describes — a surface added later gets added
+   * to one writer's list or to none — reaching a third writer. It is fixed here, where
+   * both note writers already come.
+   *
+   * **`title-reviews` by prefix**, because the full key is
+   * `['title-reviews', mediaItemId, sort]` and the tab has two sorts: invalidating only
+   * the visible one leaves the stale text waiting behind the other chip.
+   *
+   * **Only this title.** The key carries the media item, so no other film's Reviews tab
+   * is refetched by an edit.
+   *
+   * A ranking moves this list too, not only a note edit: the row carries the author's
+   * *live* score and the reaction count of their latest `title_ranked` event, both of
+   * which a completed ranking changes. So it belongs to the whole collection change
+   * rather than to a note-only branch.
+   */
+  invalidate(['title-reviews', mediaItemId]);
+
+  /**
+   * The author's own profile Reviews shelf, which reads `public_notes` under a key of
+   * its own and had the identical defect for the identical reason.
+   */
+  invalidate(['profile-notes', userId]);
+
+  /**
+   * One activity opened from a notification, which hydrates through the same
+   * `attachNotes` the feed does and so carries the note text with it.
+   *
+   * Keyed `['activity-event', viewerId, eventId]`, and the prefix here is the *viewer* —
+   * this device's own reader. Stale copies in other people's caches are not reachable
+   * from here and do not need to be: their `staleTime` expires and their feed refetches.
+   */
+  invalidate(['activity-event', userId]);
+
   // The spoiler set. Watching something is what unmasks other people's spoiler notes
   // about it, so a title logged now must stop being masked now.
   invalidate(['watched', userId]);

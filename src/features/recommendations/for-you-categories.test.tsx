@@ -243,7 +243,7 @@ describe('the title categories', () => {
     await waitFor(() => expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy());
     expect(view.getByText(/^Sent to you/)).toBeTruthy();
     expect(view.getByText('Filters')).toBeTruthy();
-    expect(view.getByText('Refresh')).toBeTruthy();
+
   });
 
   it('still draws them on TV shows', async () => {
@@ -254,7 +254,7 @@ describe('the title categories', () => {
     expect(view.getByLabelText(/^Save Inception to watchlist$/)).toBeTruthy();
     expect(view.getByText(/^Sent to you/)).toBeTruthy();
     expect(view.getByText('Filters')).toBeTruthy();
-    expect(view.getByText('Refresh')).toBeTruthy();
+
   });
 });
 

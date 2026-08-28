@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -230,7 +231,13 @@ function PersonRow({
     <View style={styles.row}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={[person.name, `@${person.username}`].join(', ')}
+        accessibilityLabel={[
+          person.name,
+          `@${person.username}`,
+          person.isPrivate ? 'Private' : null,
+        ]
+          .filter(Boolean)
+          .join(', ')}
         accessibilityHint="Opens their profile"
         onPress={onPressIdentity}
         style={({ pressed }) => [styles.identity, pressed && styles.pressed]}
@@ -240,9 +247,33 @@ function PersonRow({
           <Text variant="callout" numberOfLines={1} style={styles.name}>
             {person.name}
           </Text>
-          <Text variant="caption" tone="tertiary" numberOfLines={1}>
-            @{person.username}
-          </Text>
+          {/**
+            * The handle, and a lock when the account is private.
+            *
+            * **New in the 2026-08-28 tranche, and it is the change to this list rather
+            * than a decoration.** `followers_of` and `following_of` used to omit a
+            * private account the reader had not been approved by; §21B reversed that, so
+            * these rows now include people whose profile leads to a locked shell. Without
+            * a marker the tap is a surprise — a row that looks like every other one and
+            * opens to almost nothing.
+            *
+            * A glyph beside the handle rather than a word: it sits in a row that already
+            * ends in a Follow control, and "Private" spelled out there competes with the
+            * one thing the reader might press. The screen reader gets the word.
+            */}
+          <View style={styles.handle}>
+            <Text variant="caption" tone="tertiary" numberOfLines={1}>
+              @{person.username}
+            </Text>
+            {person.isPrivate ? (
+              <Ionicons
+                name="lock-closed"
+                size={theme.layout.icon.sm - 8}
+                color={theme.text.tertiary}
+                accessibilityElementsHidden
+              />
+            ) : null}
+          </View>
         </View>
       </Pressable>
 
@@ -284,6 +315,9 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.rowMinHeight,
   },
   identity: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.space[3] },
+  // The handle and its lock on one baseline. Gap rather than a margin so the row is
+  // identical whether or not the lock is there.
+  handle: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   copy: { flex: 1, gap: 2 },
   name: { fontFamily: fontFamily.sansSemibold },
   pressed: { opacity: 0.7 },

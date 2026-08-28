@@ -606,6 +606,29 @@ describe('the guard is wired in, not merely present', () => {
     // 20260827000100. The list behind people_mutuals' count, same argument as the
     // pair above: a pure read filtered through both oracles from the caller's side.
     'mutuals_with',
+
+    // 20260828000300. The monthly leaderboard and the caller's own standing on it.
+    //
+    // Pure reads, and the suspension question resolves in the direction that matters
+    // without the guard: a suspended *subject* is already absent from every board,
+    // because the population is filtered by `can_view_profile`, which refuses a
+    // suspended account. A suspended *caller* seeing a list of counts reaches nobody —
+    // the row leads to a profile, and every act available from there calls the guard.
+    'monthly_leaderboard',
+    'my_leaderboard_standing',
+
+    // 20260828000500. The two read halves of For You rotation.
+    //
+    // `recommendation_exposure` takes no arguments and aggregates the caller's own
+    // impressions; there is no other account it could describe. `social_candidates`
+    // returns media item ids and a count, never a person, and drops any endorser
+    // `can_view_profile` refuses — which includes a suspended one.
+    //
+    // Their *writer* is deliberately not here: `note_recommendations_shown` calls
+    // `assert_can_write()` like every other write path, so a suspended account cannot
+    // add rows to `recommendation_impressions`.
+    'recommendation_exposure',
+    'social_candidates',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

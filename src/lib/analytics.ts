@@ -80,6 +80,15 @@ export type Surface =
 
 export type SignInMethod = 'email_code' | 'password' | 'apple' | 'google';
 
+/**
+ * Which monthly leaderboard is being looked at.
+ *
+ * The server's own metric names, so the event, the chip and the RPC argument are one
+ * string. A separate analytics vocabulary here would be a fourth spelling of the same
+ * four things and the first one to drift.
+ */
+export type LeaderboardMetricName = 'titles' | 'movies' | 'tv' | 'reviews';
+
 /** The three bands. `not_for_me` is the database's spelling and the one used here. */
 export type Bucket = 'loved' | 'fine' | 'not_for_me';
 
@@ -246,7 +255,29 @@ export type AnalyticsEvent =
    * Nothing is inferred here. An app that counted rankings client-side would emit this
    * for accounts with no attribution at all, and would emit it again after a reinstall.
    */
-  | { name: 'invite_activated'; props?: undefined };
+  | { name: 'invite_activated'; props?: undefined }
+
+  // --- Experiments ----------------------------------------------------------
+  /**
+   * The Leaderboard was opened from the Feed's toggle.
+   *
+   * One of this tranche's two explicit experiments (founder §27), and the only one that
+   * needs an event at all: the board is behind a control nothing else leads to, so
+   * "did anybody find it" has no other answer. Carries the metric it opened on — which
+   * is always the default today, and will not be if the surface ever remembers a choice.
+   *
+   * Emitted on entering the mode, not per render and not on every chip. Leaving and
+   * returning is a second view, because it is a second decision to look.
+   */
+  | { name: 'leaderboard_viewed'; props: { metric: LeaderboardMetricName } }
+  /**
+   * A different metric chip was chosen.
+   *
+   * The question is which of the four people actually care about, which is what decides
+   * whether the set stays at four. Only a *change* — re-tapping the chip you are on
+   * emits nothing, or the count would measure fidgeting.
+   */
+  | { name: 'leaderboard_metric_selected'; props: { metric: LeaderboardMetricName } };
 
 /** The emittable names, for tests and for the spec to be checked against. */
 export const ANALYTICS_EVENTS = [

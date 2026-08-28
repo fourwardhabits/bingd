@@ -24,6 +24,7 @@ export { EmptyState, type EmptyStateKind } from './EmptyState';
 export { Field, type FieldProps } from './Field';
 export { FilterChip, type FilterChipProps } from './FilterChip';
 export { HeaderBoundary } from './HeaderBoundary';
+export { IconToggle, type IconToggleOption, type IconToggleProps } from './IconToggle';
 export { KeyboardScreen, type KeyboardScreenProps } from './KeyboardScreen';
 export { FeaturedCard, type FeaturedCardProps } from './FeaturedCard';
 export { LoadingScreen, type LoadingScreenProps } from './LoadingScreen';
