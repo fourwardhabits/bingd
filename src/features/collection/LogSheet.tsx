@@ -208,6 +208,17 @@ type Expanded = 'notes' | 'date' | 'who' | null;
 const AUTOSAVE_DELAY = 1200;
 
 /**
+ * The ceiling on how long typing may stay unsaved, however continuous.
+ *
+ * A trailing debounce alone re-arms on every keystroke, so a sentence typed
+ * without a 1.2s pause could ride unsaved for its whole length — review 66b's
+ * correction of this file's own claim. Once dirty text has waited this long, the
+ * next keystroke saves instead of re-arming, so the exposure of any crash,
+ * force-quit or conflict is bounded by this number rather than by typing stamina.
+ */
+const AUTOSAVE_MAX_WAIT = 4000;
+
+/**
  * Whichever of two `note_updated_at` readings is newer, by instant rather than by
  * string: both come from the same server, but one arrives through PostgREST's row
  * serialisation and the other through a jsonb reply, and assuming their text forms
@@ -830,22 +841,30 @@ function Body({
    * lands on `queueDateWrite`'s lane like every other save here, so a flush racing
    * a date tap cannot interleave.
    *
-   * **The accepted residual (review 66, Major 3, disposition: documented).** A
-   * conflict on the *final* flush — another device saved a newer note during this
-   * session, and this sheet closed inside the last debounce window — re-arms the
-   * dirty flag on a component that has already unmounted, so the tail typed since
-   * the previous successful autosave (at most `AUTOSAVE_DELAY` of writing) is lost
-   * without a visible message. The alternative — retrying without a base version —
-   * would silently overwrite the other device's newer note, which offline-sync.md
-   * §5 forbids by name. The window needs a concurrent cross-device edit *and* a
-   * close inside 1.2s of typing; everything older in the session is already saved
-   * and version-chained.
+   * **The accepted residuals (reviews 66 Major 3 and 66b, disposition:
+   * documented).** Two windows remain, both needing a network or cross-device
+   * event inside seconds of a close:
+   *
+   * - A conflict on the *final* flush — another device saved a newer note during
+   *   this session, and this sheet closed with unsaved tail — re-arms the dirty
+   *   flag on a component that has already unmounted, so the tail (bounded by
+   *   `AUTOSAVE_MAX_WAIT`, since the cap keeps continuous typing saved) is lost
+   *   without a visible message. The alternative — retrying without a base
+   *   version — would silently overwrite the other device's newer note, which
+   *   offline-sync.md §5 forbids by name.
+   * - A first note whose reply was *lost* may have committed. A changed retry
+   *   converges — `log_watched` assigns the new text over the old via
+   *   `coalesce(excluded.note, …)` — but a **clear** in that window is judged
+   *   against the stale empty read, writes nothing, and the maybe-committed text
+   *   survives on the server until the refetch (already triggered by the unknown
+   *   outcome) resolves the truth for the next edit.
    */
   const saveDetailsRef = useRef(saveDetails);
   useEffect(() => {
     saveDetailsRef.current = saveDetails;
   });
   const dirtyNote = useRef(false);
+  const dirtySince = useRef<number | null>(null);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flushNote = () => {
     if (autosaveTimer.current) {
@@ -858,16 +877,27 @@ function Body({
     // effect closes over this function.
     // eslint-disable-next-line react-hooks/immutability
     dirtyNote.current = false;
+    dirtySince.current = null;
     void saveDetailsRef.current({});
   };
   const scheduleAutosave = () => {
-    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    autosaveTimer.current = setTimeout(() => {
+    const fire = () => {
       autosaveTimer.current = null;
       if (!dirtyNote.current) return;
       dirtyNote.current = false;
+      dirtySince.current = null;
       void saveDetailsRef.current({});
-    }, AUTOSAVE_DELAY);
+    };
+    if (dirtySince.current == null) dirtySince.current = Date.now();
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    // The max-wait cap: dirty text that has already waited its ceiling saves now
+    // rather than re-arming — a trailing debounce alone never fires under
+    // continuous typing (review 66b). "Now" is a zero-delay timer, not a direct
+    // call: this runs inside the keystroke's own handler, and `saveDetailsRef` is
+    // re-pointed in an effect after the commit, so a synchronous save would carry
+    // the field as it was one character ago.
+    const waited = Date.now() - dirtySince.current;
+    autosaveTimer.current = setTimeout(fire, waited >= AUTOSAVE_MAX_WAIT ? 0 : AUTOSAVE_DELAY);
   };
 
   // Backgrounding is a leave-the-field event like any other. `flushNote` reads only

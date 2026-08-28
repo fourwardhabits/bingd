@@ -865,6 +865,51 @@ describe('the autosave lane', () => {
     expect(callsTo('save_note')[0][1].p_note).toBe('');
   });
 
+  it('saves mid-stream once typing has outrun the max wait', async () => {
+    // A trailing debounce alone re-arms on every keystroke, so a sentence typed
+    // without a pause would ride unsaved for its whole length (review 66b). Once
+    // dirty text has waited AUTOSAVE_MAX_WAIT, the next keystroke saves instead.
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    // Keep typing across the ceiling with no pause long enough for the debounce.
+    const started = Date.now();
+    let draft = 'no';
+    while (Date.now() - started < 4200) {
+      draft += ' pause';
+      await fireEvent.changeText(sheet.note(), draft);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      });
+    }
+
+    // The save fired during the stream — before any blur, close or 1.2s rest.
+    expect(callsTo('log_watched').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('converges when a first save loses its reply and the text has moved on', async () => {
+    // 08007: the first write may have committed. The retry is a new intent with the
+    // current text, and `log_watched` assigns the new text over whatever landed —
+    // `coalesce(excluded.note, …)` takes the non-null new value — so the two
+    // outcomes of the ambiguous first write converge on what is in the field.
+    failing('log_watched', { code: '08007', message: 'connection lost' });
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await fireEvent.changeText(sheet.note(), 'the first attempt');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+
+    mockRpc.mockImplementation(() => Promise.resolve({ data: { status: 'ok' }, error: null }));
+    await fireEvent.changeText(sheet.note(), 'the second thought');
+    await fireEvent(sheet.note(), 'blur');
+
+    // Still the coalescing writer — an unacknowledged write proves no row — and it
+    // carries the current text, which is what makes the retry safe either way.
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(2));
+    expect(callsTo('log_watched')[1][1].p_note).toBe('the second thought');
+  });
+
   it('saves what was typed when the sheet is closed from its header', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
