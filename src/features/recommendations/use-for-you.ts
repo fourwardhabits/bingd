@@ -512,6 +512,12 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
           : scoring.scored;
         return {
           ...scoring,
+          // The pool feeds the filter sheet's facet counts, so it takes the veto
+          // too — a dismissed title must not keep a genre option alive, or inflate
+          // a count, for a wall it can never appear on (review 66, Minor 5).
+          candidatePool: dismissed.data?.size
+            ? scoring.candidatePool.filter((item) => !dismissed.data.has(item.mediaItemId))
+            : scoring.candidatePool,
           items: diversify(vetoed, SLATE_SIZE, arrangement.seed, {
             current: arrangement.current,
             seen: arrangement.seen,

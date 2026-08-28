@@ -356,10 +356,12 @@ function Body({
   const [companionEdit, setCompanionEdit] = useState<string[] | null>(null);
   const companionRequest = useRef(0);
   const companionQueue = useRef<Promise<void>>(Promise.resolve());
-  // Set once this sheet has created the `user_media` row itself. The query's answer
-  // lags that write by an invalidation, so without it two quick taps would both read
-  // `exists: false` and both try to log the watch. Only ever written from inside an
-  // async callback, never during render.
+  // Set once this sheet has created the `user_media` row itself — by the companion
+  // path or by `saveDetails`' log_watched branch. The query's answer lags that write
+  // by an invalidation, so without it two quick taps would both read `exists: false`
+  // and both try to log the watch — and, review 66's finding, chained note saves
+  // would keep using the coalescing writer against a row that already exists. Only
+  // ever written from inside an async callback, never during render.
   const createdRow = useRef(false);
   // Single-flight for the default-date stamp. Two quick bucket taps launch two
   // detached decisions, and if both read "no date" before either write lands, both
@@ -412,6 +414,15 @@ function Body({
    * pre-save read. Null means "trust the query" — the reset after a conflict.
    */
   const knownClaims = useRef<{ visibility: NoteVisibility; spoilers: boolean } | null>(null);
+  /**
+   * And the text itself, completing the set (review 66 follow-through): "did the
+   * note change" judged against `state.note` alone misses the write whose target
+   * happens to equal the stale read — the named case being a clear. Type, let the
+   * autosave land, clear the field: the server holds the text, the query still says
+   * empty, `'' === ''` says nothing changed, and the clear never leaves the device —
+   * the old text resurrects on reopen. Null means "trust the query".
+   */
+  const knownNote = useRef<string | null>(null);
   const stored = companions.data?.map((c) => c.id) ?? [];
   const chosen = companionEdit ?? stored;
   // Mutual follows plus whoever is already on this watch. See `taggableWith`.
@@ -661,7 +672,7 @@ function Body({
     // note, or a decision about one, against a baseline nobody has seen.
     if (!loaded) return;
 
-    const noteChanged = trimmed !== state.note;
+    const noteChanged = trimmed !== (knownNote.current ?? state.note);
     const dateChanged = nextDate != null && nextDate !== state.watchedOn;
     // The two claims travel with the note and are meaningless without one, so a
     // toggle flipped against an empty field is held locally and written by the
@@ -695,7 +706,21 @@ function Body({
      */
     let ok = true;
     let touched = false;
-    const writesNoteHere = (noteChanged || claimsChanged) && !state.exists;
+    /**
+     * Whether the `user_media` row exists, answered by the freshest source — the
+     * query, or this sheet's own acknowledged writes (`createdRow`, the companions
+     * path's flag, now set by every acknowledged `log_watched` here too).
+     *
+     * Review 66's two Majors were both this staleness: after the first autosave
+     * created the row, `state.exists` stayed false until the refetch, so every
+     * chained save kept going through `log_watched` — which coalesces, so a
+     * cleared note silently resurrected, and which checks no version, so another
+     * device's edit could be overwritten inside the window. On the freshest
+     * answer, the second save and everything after it goes through `save_note`,
+     * which can clear and which carries the base version.
+     */
+    const rowExists = state.exists || createdRow.current;
+    const writesNoteHere = (noteChanged || claimsChanged) && !rowExists;
 
     // On the shared lane, so a date written here cannot overtake — or be overtaken by —
     // a clear the reader tapped a moment earlier. See `queueDateWrite`.
@@ -714,8 +739,13 @@ function Body({
           noteSpoilers: writesNoteHere ? nextSpoilers : null,
         });
         if (result.outcome !== 'failed') {
+          // Only an acknowledged success proves the row is there — the companions
+          // path's rule, applied to this writer too. An unknown outcome leaves the
+          // flag alone, and `log_watched` upserts, so asking again stores it once.
+          createdRow.current = true;
           if (result.noteVersion) knownNoteVersion.current = result.noteVersion;
           if (writesNoteHere) {
+            knownNote.current = trimmed;
             knownClaims.current = { visibility: nextVisibility, spoilers: nextSpoilers };
           }
         }
@@ -730,7 +760,7 @@ function Body({
       // An existing note goes through save_note, which assigns rather than coalesces.
       // log_watched cannot clear one: it treats an empty string as "no change", so a
       // deleted note would reappear on the next read.
-      if (ok && (noteChanged || claimsChanged) && state.exists) {
+      if (ok && (noteChanged || claimsChanged) && rowExists) {
         const result = await saveNote({
           operationId: newOperationId(),
           mediaItemId: title.id,
@@ -747,15 +777,17 @@ function Body({
         });
         if (result.outcome !== 'failed') {
           if (result.noteVersion) knownNoteVersion.current = result.noteVersion;
+          knownNote.current = trimmed;
           knownClaims.current = { visibility: nextVisibility, spoilers: nextSpoilers };
         }
         if (result.outcome === 'failed' && result.conflict) {
-          // The stored note moved under this edit. Forget the remembered version and
-          // claims and refetch, so the *next* save is judged against what is really
-          // there. The typed text stays in the overlay — the problem line says what
-          // happened, and silently discarding writing is the one thing this sheet
-          // must never do.
+          // The stored note moved under this edit. Forget the remembered version,
+          // text and claims and refetch, so the *next* save is judged against what
+          // is really there. The typed text stays in the overlay — the problem line
+          // says what happened, and silently discarding writing is the one thing
+          // this sheet must never do.
           knownNoteVersion.current = null;
+          knownNote.current = null;
           knownClaims.current = null;
           touched = true;
         }
@@ -797,6 +829,17 @@ function Body({
    * unless text is dirty, and `saveDetails` itself refuses no-op writes. The write
    * lands on `queueDateWrite`'s lane like every other save here, so a flush racing
    * a date tap cannot interleave.
+   *
+   * **The accepted residual (review 66, Major 3, disposition: documented).** A
+   * conflict on the *final* flush — another device saved a newer note during this
+   * session, and this sheet closed inside the last debounce window — re-arms the
+   * dirty flag on a component that has already unmounted, so the tail typed since
+   * the previous successful autosave (at most `AUTOSAVE_DELAY` of writing) is lost
+   * without a visible message. The alternative — retrying without a base version —
+   * would silently overwrite the other device's newer note, which offline-sync.md
+   * §5 forbids by name. The window needs a concurrent cross-device edit *and* a
+   * close inside 1.2s of typing; everything older in the session is already saved
+   * and version-chained.
    */
   const saveDetailsRef = useRef(saveDetails);
   useEffect(() => {

@@ -821,6 +821,50 @@ describe('the autosave lane', () => {
     expect(callsTo('log_watched')).toHaveLength(1);
   });
 
+  /**
+   * Review 66, Majors 1 and 2. `state.exists` lags every write by a refetch, and the
+   * first draft of the lane kept trusting it: the second save after the row's own
+   * creation still went through `log_watched`, which coalesces (a clear resurrects)
+   * and checks no version (another device's edit is overwritten). The sheet now
+   * answers "does the row exist" from its own acknowledged writes as well.
+   */
+  it('moves to the assigning writer the moment its own write has created the row', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await fireEvent.changeText(sheet.note(), 'first thought');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+
+    // The query has not refetched — the stub never mirrors — so `state.exists` is
+    // still false. The sheet must not care: it created the row itself.
+    await fireEvent.changeText(sheet.note(), 'first thought, refined');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1].p_note).toBe('first thought, refined');
+    expect(callsTo('log_watched')).toHaveLength(1);
+  });
+
+  it('clears a note it only just created', async () => {
+    // The sharpest corner of the same staleness: the cleared field equals the stale
+    // read (`'' === ''`), so a change-detector trusting the query alone writes
+    // nothing at all and the old text resurrects on reopen. The lane remembers what
+    // it last sent, and a clear against that is a change.
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await fireEvent.changeText(sheet.note(), 'a passing thought');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+
+    await fireEvent.changeText(sheet.note(), '');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1].p_note).toBe('');
+  });
+
   it('saves what was typed when the sheet is closed from its header', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();

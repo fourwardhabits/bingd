@@ -66,7 +66,10 @@ export function ReactionControl({
         accessibilityRole="button"
         accessibilityState={{ selected: active }}
         accessibilityLabel={label}
-        accessibilityHint="Long press to choose a different reaction"
+        // Only where a long press does something — a surface wired without the
+        // picker (the profile's compact rows) must not announce an action it
+        // cannot perform.
+        accessibilityHint={onOpenPicker ? 'Long press to choose a different reaction' : undefined}
         onPress={onToggle}
         onLongPress={onOpenPicker}
         hitSlop={slop}

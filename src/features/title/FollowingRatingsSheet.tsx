@@ -87,6 +87,15 @@ export function FollowingRatingsSheet({
           {ratings.data!.map((row) => (
             <RatingRow key={row.userId} row={row} onPress={() => onPressPerson(row.username)} />
           ))}
+          {/* The function caps at 50, and a full page is the one case where the
+              aggregate may count people this list does not show. Said rather than
+              implied — a list that silently disagrees with the number it explains
+              is review 66's Minor 4. */}
+          {ratings.data!.length === 50 ? (
+            <Text variant="footnote" tone="tertiary" style={styles.truncated}>
+              The 50 strongest matches. The score averages everyone.
+            </Text>
+          ) : null}
         </ScrollView>
       )}
 
@@ -161,6 +170,7 @@ const styles = StyleSheet.create({
   copy: { flex: 1, gap: 2 },
   name: { fontFamily: fontFamily.sansSemibold },
   verdict: { alignItems: 'flex-end', gap: 2 },
+  truncated: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
   foot: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
   pressed: { opacity: 0.7 },
 });
