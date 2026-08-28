@@ -429,6 +429,27 @@ expectRefused('anon cannot execute search_users', await rpc('search_users', { p_
 // no catalogue to compare — but the grant is what makes that a decision.
 expectRefused('anon cannot execute taste_match', await rpc('taste_match', { p_user_id: NIL }));
 
+// Added 2026-08-27 with the ranking/taste tranche (20260827000700–001100). Four new
+// surfaces, all authenticated-only: a feedback writer, two visibility-gated reads,
+// and the one public aggregate over a private table — the last being exactly the
+// kind of object whose grant deserves a probe against the running database.
+expectRefused(
+  'anon cannot execute dismiss_for_you',
+  await rpc('dismiss_for_you', { p_operation_id: NIL, p_media_item_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute following_ratings',
+  await rpc('following_ratings', { p_media_item_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute comment_reactors',
+  await rpc('comment_reactors', { p_comment_id: NIL }),
+);
+expectRefused(
+  'anon cannot execute invited_signup_count',
+  await rpc('invited_signup_count', { p_user: NIL }),
+);
+
 // Own-read only, and a stranger is not the owner. An empty array is the correct
 // answer under RLS; a row would mean the policy is not doing its job.
 {
