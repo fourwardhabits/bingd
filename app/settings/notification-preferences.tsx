@@ -137,18 +137,12 @@ export default function NotificationPreferencesScreen() {
             );
           })}
 
-          {/* One row, not two. This said "Invite and Award notifications" until
-              2026-08-20, and by then it was wrong: `20260819000500` gave
-              `invite_activated` a writer, so that switch has been governing real
-              traffic while the screen told readers it was not. Awards are the last one
-              without a writer, and stay deferred until a tier crossing is something the
-              server records rather than something a device believes. */}
-          <View style={styles.explain}>
-            <Text variant="caption" tone="tertiary">
-              Award notifications are not being sent yet. Your choice here is saved and
-              will be honoured when they start.
-            </Text>
-          </View>
+          {/* The not-being-sent-yet explainer that stood here is gone, and its own
+              history says why it had to go promptly: it said "Invite and Award
+              notifications" for a day after invites had a writer, and it would have
+              said "Award notifications" today with the unlock ledger
+              (20260828000100) delivering them. A screen that tells readers a
+              working feature is not built is worse than one that says nothing. */}
         </ScrollView>
       )}
     </Screen>

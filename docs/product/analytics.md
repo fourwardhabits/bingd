@@ -191,10 +191,20 @@ union**, so sending it is a compile error until the state behind it exists.
 
 | Name | What it would mean | What is missing |
 |---|---|---|
-| `award_earned` | an award tier was crossed | a durable unlock ledger. Tiers are computed on the device from raw reads, so a *crossing* cannot be distinguished from a *state* |
+| `award_earned` | an award tier was crossed | an honest client emission point. The ledger exists now (`award_unlocks`, `20260828000100`) — the reason changed on 2026-08-28, see the note below |
 
 Declaring the name now settles the taxonomy without faking the data. Roadmap item §5 is
 where it comes from.
+
+> **The reason changed on 2026-08-28, and the disposition did not.** Until then the
+> missing piece was a durable unlock ledger — tiers were computed on the device from raw
+> reads, so a *crossing* could not be distinguished from a *state*. `20260828000100`
+> built that ledger and the whole social loop on top of it, but the crossing is decided
+> **server-side**, inside triggers: the client learns of it by reading a feed event or a
+> notification, and emitting an analytics event from an observation of one is exactly the
+> observed-state pattern this file refuses everywhere else. The event stays in
+> `DEFERRED_EVENTS` until there is an emission point that witnesses the crossing rather
+> than its announcement.
 
 > **`invite_redeemed` and `invite_activated` left this list on 2026-08-19**, and that is
 > the mechanism working rather than the list eroding. `20260819000500` gave both of them a

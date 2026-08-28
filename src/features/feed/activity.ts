@@ -52,6 +52,7 @@ export const ACTIVITY_TYPES = [
   'title_logged',
   'season_completed',
   'watchlist_added',
+  'award_earned',
 ] as const;
 
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
@@ -71,14 +72,19 @@ export type ActivityType = (typeof ACTIVITY_TYPES)[number];
  * attributing a review of a film to the moment somebody decided to watch it. A
  * watchlist add is an intention, and nothing about having watched it belongs on it.
  */
-export const isWatchActivity = (type: ActivityType): boolean => type !== 'watchlist_added';
+export const isWatchActivity = (type: ActivityType): boolean =>
+  // An allow-list since award_earned arrived: the old `!== 'watchlist_added'`
+  // shape silently promoted every future type to a watch claim, and an award is
+  // not about any title at all.
+  type === 'title_ranked' || type === 'title_logged' || type === 'season_completed';
 
-/** The verb between the actor and the title. */
+/** The verb between the actor and the title — or, for an award, the award's name. */
 const VERB: Record<ActivityType, string> = {
   title_ranked: 'ranked',
   title_logged: 'watched',
   season_completed: 'finished',
   watchlist_added: 'added',
+  award_earned: 'earned',
 };
 
 /**

@@ -65,13 +65,23 @@ import { theme } from '@/ui/tokens';
  * set — so somebody who has seen Season 1 still gets Season 2 masked.
  */
 export default function PublicProfileScreen() {
-  const { username } = useLocalSearchParams<{ username: string }>();
+  const { username, awards: awardsParam } = useLocalSearchParams<{
+    username: string;
+    awards?: string;
+  }>();
   const viewer = useCurrentProfile();
   const router = useRouter();
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
   // Mounted only while open, as on the own profile: it reads nine things when it
   // mounts, and one that stayed mounted would read them on every visit to anybody.
-  const [awardsOpen, setAwardsOpen] = useState(false);
+  //
+  // `?awards=1` opens it on arrival — the profile tab's own idiom (20260828000100),
+  // here for the feed's award rows: "Ada earned Movie Muncher" lands on Ada's
+  // Awards, not on Ada's profile with one more tap to guess. Initial state rather
+  // than an effect, so it opens once for the arrival and not again on re-renders
+  // with the param still on the URL. The sheet itself waits for `profile.data`, so
+  // an early open simply paints when the profile resolves.
+  const [awardsOpen, setAwardsOpen] = useState(awardsParam === '1');
   // Which review's reason sheet is open, by `user_media.id`.
   const [reportingReview, setReportingReview] = useState<string | null>(null);
   /** Which of the two people lists is open, if either. One sheet, so one piece of state. */

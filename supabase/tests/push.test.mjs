@@ -353,22 +353,25 @@ describe('the outbox is filled by notifications and by nothing else', () => {
       assert.ok(id, `${type} was not written at all`);
       assert.ok(await outboxFor(id), `${type} was not queued`);
     }
+
+    // The tenth, actorless — the award congratulations (20260828000100). Written
+    // with no actor because nobody did this to the recipient, and queued all the
+    // same: eligibility is about the type, not about having a face.
+    const congrats = await notify(reader, 'award_earned', { actorId: null });
+    assert.ok(congrats, 'award_earned was not written at all');
+    assert.ok(await outboxFor(congrats), 'award_earned was not queued');
   });
 
   /**
-   * PRD §15's event table says Push: No for `follow_approved`, nothing writes an
-   * `award_earned`, and `friendship` is the reader's own action. All still reach the
-   * inbox, which is the control: the assertion is that they were written and not
-   * queued, rather than that nothing happened.
+   * PRD §15's event table says Push: No for `follow_approved`, and `friendship` is
+   * the reader's own action. Both still reach the inbox, which is the control: the
+   * assertion is that they were written and not queued, rather than that nothing
+   * happened. (`award_earned` left this list on 20260828000100, when the unlock
+   * ledger gave it a writer and a push.)
    */
   it('does not queue the kinds that are inbox-only', async () => {
-    for (const type of ['follow_approved', 'award_earned', 'friendship']) {
-      // `award_earned` defaults off as a category, so it needs turning on to be written
-      // at all -- otherwise this test would pass because of the preference gate.
-      await t.asUser(reader, () =>
-        t.sql(`select set_notification_preference('awards', true)`),
-      );
-      const id = await notify(reader, type, { actorId: type === 'award_earned' ? null : actor });
+    for (const type of ['follow_approved', 'friendship']) {
+      const id = await notify(reader, type);
       assert.ok(id, `${type} was not written, so this proves nothing`);
       assert.equal(await outboxFor(id), null, `${type} was queued`);
     }

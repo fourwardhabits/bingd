@@ -4,6 +4,8 @@ import { Fragment, useEffect, useMemo, useRef } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { AwardBadge } from '@/features/awards/AwardBadge';
+import { badgeFor } from '@/features/awards/badges';
 import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
   canFollowBack,
@@ -428,18 +430,34 @@ export default function NotificationsScreen() {
                     <View style={[styles.entry, !row.readAt && styles.unread]}>
                       <Pressable
                         accessibilityRole="button"
+                        // The award row is the first actorless sentence: templating a
+                        // null actor into the label read "null You earned…" aloud, so
+                        // the actor's name joins the sentence only when there is one.
                         accessibilityLabel={`${row.readAt ? '' : 'Unread. '}${
                           row.kind === 'invite_welcome' ? 'Welcome to bingd. ' : ''
-                        }${row.actorName} ${verbFor(row.kind, row.mediaKind)}${
-                          subject ? `, ${subject}` : ''
-                        }`}
+                        }${
+                          row.kind === 'award_earned'
+                            ? `You earned ${row.award?.name ?? 'a new Award'}`
+                            : `${row.actorName} ${verbFor(row.kind, row.mediaKind)}`
+                        }${subject ? `, ${subject}` : ''}`}
                         // From the same chain the tap uses, so the hint cannot promise a
                         // title and then open a profile.
                         accessibilityHint={hintFor(row)}
                         onPress={() => openRow(row)}
                         style={({ pressed }) => [styles.row, pressed && styles.pressed]}
                       >
-                        <Avatar size="sm" uri={row.actorAvatarUri} name={row.actorName ?? ''} />
+                        {/* The award's own badge where every other row has a face —
+                            nobody did this to the reader, and an empty avatar chip
+                            says "somebody unnameable" rather than "your award". */}
+                        {row.kind === 'award_earned' && row.award ? (
+                          <AwardBadge
+                            badge={badgeFor(row.award.key, row.award.tierKey)}
+                            earned
+                            size={theme.layout.avatar.sm}
+                          />
+                        ) : (
+                          <Avatar size="sm" uri={row.actorAvatarUri} name={row.actorName ?? ''} />
+                        )}
                         <View style={styles.rowCopy}>
                           {/* The welcome is the one row whose sentence does not begin
                             with the actor. It is the first thing a new account ever
@@ -460,6 +478,21 @@ export default function NotificationsScreen() {
                               <Text variant="callout" tone="secondary">
                                 {' '}
                                 invited you 🎉
+                              </Text>
+                            </Text>
+                          ) : row.kind === 'award_earned' ? (
+                            /* The congratulations, named: "You earned Movie Muncher 🎉"
+                             — the founder's copy. The award takes the emphasis every
+                             other row gives the actor, because it is the subject; the
+                             emoji stays out of the spoken label, same as the welcome's. */
+                            <Text variant="callout" numberOfLines={2}>
+                              <Text variant="callout" tone="secondary">
+                                You earned{' '}
+                              </Text>
+                              <Text variant="callout">{row.award?.name ?? 'a new Award'}</Text>
+                              <Text variant="callout" tone="secondary">
+                                {' '}
+                                🎉
                               </Text>
                             </Text>
                           ) : row.kind === 'friendship' && row.mutual ? (

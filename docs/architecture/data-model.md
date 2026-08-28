@@ -591,9 +591,28 @@ So `_leave_watchlist` deleting the row when a title is watched leaves the activi
 
 **Nothing was added to the read path**, which is what makes the privacy argument short: `feed_events_read` is type-independent, so the event is visible to exactly the accounts that may see the actor's rankings — and `20260820000200` set `watchlist`'s own select policy to the same visibility. `reactions_read`, `add_comment` and `set_reaction` all key on the event id and never on `type`, so a new type inherits the social controls by construction.
 
----
+### The award loop — `award_unlocks`, `award_tiers`, `award_genre_patterns` — `20260828000100`
 
-## 7. Notifications
+Three tables arrived with the award social loop, and one feed event type with them.
+
+```sql
+create table award_unlocks (
+  user_id         uuid not null references profiles(id) on delete cascade,
+  award_key       text not null,
+  tier_key        text not null,
+  value_at_unlock bigint not null,
+  announced       boolean not null default false,
+  earned_at       timestamptz not null default now(),
+  primary key (user_id, award_key, tier_key),
+  foreign key (award_key, tier_key) references award_tiers (award_key, tier_key)
+);
+```
+
+**`award_unlocks` is the durable ledger of "this account newly earned this tier"**, and its writer is not an RPC: `_maybe_award_unlocks` runs from row-level `AFTER` triggers on the eight source tables (`user_media`, `rankings`, `watchlist`, `comments`, `title_recommendations`, `reactions`, `follows`, `invite_attributions`), so the crossing is recorded on the qualifying action whoever performed it — a reaction moves the event actor's Heart Magnet, an approval moves both parties' Mutual Mania, an invitee's tenth ranking moves the *inviter's* Invite Instigator. Exactly-once is insert-wins on the primary key; replays never reach the triggers because the operation ledger (§12) answers them before any write; and the invariant is restated where a future writer cannot miss it, in two partial unique indexes — `feed_events_one_award_post` on `(actor_id, payload->>'award', payload->>'tier') where type = 'award_earned'`, and `notifications_one_award_congrats` on the same shape over recipients. `value_at_unlock` freezes the metric at the moment of crossing and is never re-derived: counts can fall and the unlock stands, exactly as `activated_at` does. The owner may `select` their own rows; the public surface of an unlock is the feed event. The migration backfilled every existing account's earned tiers with `announced = false`, which is why nobody was congratulated for history.
+
+**`award_tiers` (60 seeded threshold rows) and `award_genre_patterns` (18 POSIX patterns)** are configuration, not state: they let the triggers reproduce `src/features/awards/tracks.ts` server-side, and `src/features/awards/awards-server-parity.test.ts` holds the two representations to each other. Two deliberate divergences from the client's viewer-relative counts (`comments_read` filtering; Mutual Mania's `can_i_view`) are documented in the migration header. The Awards sheet stays purely client-derived — the ledger drives only the announcement, so a count that falls after an unlock (unranking) lowers the sheet without un-earning anything.
+
+**The `award_earned` feed event** is the fourth entry in the two-lifetimes table above in spirit: it records a past act, is never deleted by state movement (`remove_from_collection` and `unlog` do not touch it), carries actor = earner, `media_item_id` null, and a payload of exactly `{award, tier, award_name, tier_label}`. It inherits every social control by the type-independence argued above — comments, reactions, `feed_events_read`. One tier per award per action is announced (the highest newly crossed); skipped tiers are recorded quietly; Hype Courier, the one `social = false` track, writes no feed event at all — its congratulations notification is the whole announcement, because its progress is withheld from visitors.
 
 ```sql
 create table notifications (
@@ -658,7 +677,7 @@ create table push_outbox (
 
 Preferences default to enabled by absence: a missing row means enabled. This avoids writing seven rows per signup and avoids a backfill every time a category is added.
 
-> **As built, 2026-08-19 — absence resolves to the *category's* default.** `20260819000300` replaced "absence means enabled" with `_notification_default(category)`, because `reactions` and `awards` default **off** and the old rule could not express that without a row per account per signup. Six of the eight categories still default on, so for those nothing changed. The paragraph above describes the v0.6 design.
+> **As built, 2026-08-19 — absence resolves to the *category's* default.** `20260819000300` replaced "absence means enabled" with `_notification_default(category)`, because `reactions` and `awards` default **off** and the old rule could not express that without a row per account per signup. Six of the eight categories still default on, so for those nothing changed. The paragraph above describes the v0.6 design. *(2026-08-28: `awards` flipped to **on** by redefining `_notification_default` when `20260828000100` gave `award_earned` its writer — no data migration, so an explicit `false` row somebody had already chosen is untouched. `reactions` remains the one category defaulting off.)*
 
 > **As built, 2026-08-19 — a block is a barrier, not a filter.** Every writer that acts on a *pair* of accounts takes `_lock_pair` before the check that reads `follows` or `blocks`, and holds it through the `notifications` insert. Without it a writer's check passes, `block()` commits and deletes both inboxes, and the writer's row lands afterwards — a row that cannot exist under the product model, because `block` removes every row between the pair and every writer is refused thereafter.
 >
@@ -1063,3 +1082,5 @@ The point of several choices above is that a violation cannot be written, not me
 | A block overrides public visibility | The block test precedes the public test in `can_view_profile` |
 | Two titles never share a position | Unique constraint on `(user_id, category, position)` |
 | Tagging never alters the tagged user's collection | `watch_tags` references neither `user_media` nor `rankings` |
+| An award tier is announced at most once, for ever | Insert-wins on `award_unlocks (user_id, award_key, tier_key)`; the partial unique indexes `feed_events_one_award_post` and `notifications_one_award_congrats` restate it as backstops |
+| An award, once earned, is never revoked by a falling count | Nothing deletes or re-derives `award_unlocks` rows; `value_at_unlock` is frozen at the crossing |

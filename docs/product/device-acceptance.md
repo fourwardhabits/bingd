@@ -565,3 +565,66 @@ titles as A, so do that early: it is what makes Match calculable at all.
   §21 — and its absence is the expected result.
 - Mutuals will be thin or empty in a two-account cohort. That is the algorithm being
   honest, not a failure.
+
+---
+
+## The award loop — 2026-08-28
+
+Migration baseline for this section: **`20260828000100`**. You need accounts A and B,
+with B following A. Pick a low threshold you can genuinely cross during the run — five
+mutual follows (Mutual Mania's first tier) is the cheapest honest one.
+
+### Crossing a tier
+
+- [ ] On A, cross the threshold for real — approve the fifth mutual. A congratulations
+      row appears in A's inbox: **You earned** the award, 🎉, and the **award badge**
+      where an avatar would be. No name of whoever's action tipped it.
+- [ ] Tap the row. It opens **A's own Awards sheet**, and the tier reads as earned.
+- [ ] ⚠ The sheet must show the same tier the notification announced — the loop and the
+      grid disagreeing is the finding this checklist exists to catch.
+
+### What B sees
+
+- [ ] Refresh B's Feed. **Exactly one** entry: "A earned …" with the tier label as the
+      metadata line and the **real award badge** where the poster would be — not an
+      emoji, not a blank 40×60 box.
+- [ ] Tap the row on B. It opens **A's** Awards, not B's.
+- [ ] React to the post, then comment on it. Both behave exactly as on a ranking entry,
+      and A is notified of each under the ordinary categories.
+
+### No duplicates, no revocation
+
+- [ ] On A, undo and redo the qualifying state where the mechanic allows it (unfollow /
+      re-approve around the threshold). ⚠ **No second feed post and no second
+      congratulations, ever** — the crossing was recorded once.
+- [ ] Force-quit and reopen both apps. Still one post, one inbox row.
+- [ ] Drop the count back under the bar and leave it there. The feed post stands, the
+      inbox row stands, and A's sheet honestly shows the lower progress — the
+      achievement is not un-earned.
+
+### The two exceptions
+
+- [ ] Cross a **Hype Courier** tier on A (send the qualifying recommendations). A gets
+      the congratulations; ⚠ B's feed shows **nothing** — its progress is withheld from
+      visitors, so there is no public post to leak it.
+- [ ] If an **Invite Instigator** tier is reachable in this cohort: the post and the
+      notification say *earned Invite Instigator* with the badge and ⚠ name **no
+      invitee** anywhere — not in the row, not in the push.
+
+### Push and the preference
+
+- [ ] With push on for A (a registered device, `awards` category untouched): the
+      crossing arrives as title **bingd. Awards**, body **You earned …** — no emoji in
+      the notification centre.
+- [ ] Turn the `awards` category off on A and cross another low tier. The inbox row
+      still appears; ⚠ no push arrives.
+- [ ] Settings › Notification Settings: the awards row carries **no `pending` badge and
+      no "not being sent yet" explainer** — that copy is retired.
+
+### What is not testable here, and is not a defect
+
+- Nobody is congratulated for history: every tier earned before the migration was
+  backfilled quietly. An old account seeing no fanfare for its existing shelf is the
+  rollout working.
+- A tier skipped past in one leap announces only the highest tier crossed. The lower
+  ones are recorded, silently, and that is by design.

@@ -39,6 +39,7 @@ const row = (over: Partial<Notification> & { kind: NotificationKind }): Notifica
   subjectType: 'feed_event',
   subjectId: 'event-1',
   mutual: null,
+  award: null,
   ...over,
 });
 

@@ -213,11 +213,21 @@ is no second axis.
 No per-channel settings were added. The operating system's own permission remains
 independent, because it is the platform's to hold.
 
-**Eight of the ten types are pushed.** `follow_approved` is excluded by PRD §15's own event
-table (Push: No), and `award_earned` has no writer. `_push_eligible` is the list, and an
-unmapped type is **not** eligible — the opposite of the preference trigger's rule for an
-unmapped category, because a missing notification is a bug somebody can see and an
+**Ten of the twelve types are pushed.** *(This read "eight of the ten" when written:
+`friendship` and `recommendation_ranked` arrived 2026-08-27, and `award_earned` joined
+`_push_eligible` on 2026-08-28 when `20260828000100` gave it its writer.)* `follow_approved`
+is excluded by PRD §15's own event table (Push: No), and `friendship` is a record of the
+reader's own tap — a phone buzzing about it would be noise. `_push_eligible` is the list,
+and an unmapped type is **not** eligible — the opposite of the preference trigger's rule
+for an unmapped category, because a missing notification is a bug somebody can see and an
 unreviewed push is not.
+
+**`award_earned` is the one actorless push.** `claim_push_batch` used to join through the
+actor profile, which silently dropped any job with no actor; it was rebuilt to let
+actorless jobs through (`p.id is not null or n.actor_id is null`) and to carry
+`award_name`. The copy is title "bingd. Awards", body "You earned Movie Muncher" — no
+emoji in the notification centre, which is `invite_welcome`'s rule. The inbox row keeps
+its 🎉.
 
 ## 5. Device tokens
 
@@ -285,6 +295,8 @@ be worst to grant to a client.
 `my_notifications` applies and for the same reason: `block()` deletes the notifications that
 exist when it runs, so a writer that passed its visibility check and committed afterwards
 leaves a row behind. The inbox already refuses to draw that row; this refuses to push it.
+An actorless `award_earned` job has no actor to test and passes — the predicate gates on
+the actor exactly when there is one.
 
 **Delivery is at least once, bounded at three attempts.** Rows are leased for five minutes
 with `skip locked`.
@@ -387,7 +399,9 @@ throwing, because that code path is a cold start from a tap.
 - **The scheduled nudge** (PRD §15). It ships with push in the PRD's plan and is not in this
   tranche.
 - **Per-channel preferences.** §4 — deliberately, and reversibly.
-- **Push for `follow_approved` and `award_earned`.** §4.
+- **Push for `follow_approved` and `friendship`.** §4. *(This bullet named `award_earned`
+  until 2026-08-28, when `20260828000100` gave it a writer and a place in
+  `_push_eligible`.)*
 - **Analytics events.** Failures go to Sentry with a stage, a platform and a safe category.
   `lib/analytics.ts` is a closed vocabulary of thirteen product events, and "push
   registration failed" is operational rather than something anybody will build a funnel on.

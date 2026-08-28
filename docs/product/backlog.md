@@ -9,6 +9,15 @@ made once.
 
 ## 1. Achievements
 
+> ### ✅ Shipped as Bingd Awards — 2026-08-18. This specification is historical.
+>
+> The record of what shipped is PRD §14's As-built block, which is canonical where the
+> two disagree. Two lines below aged in opposite ways: "no social surface in V1" held
+> until 2026-08-28, when `20260828000100` built the award social loop (one feed post and
+> one congratulations per tier newly earned — the As-built block dated 2026-08-28); and
+> the retroactivity worry at the end was answered exactly as it hoped — the rollout
+> backfilled every already-earned tier quietly, so nobody got twelve notifications.
+
 **Where it lives:** Profile → Achievements. A dedicated screen, reached from the profile
 and not scattered across it.
 

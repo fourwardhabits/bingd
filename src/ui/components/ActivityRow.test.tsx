@@ -18,6 +18,37 @@ const props = {
 
 beforeEach(() => props.onPressTitle.mockReset());
 
+describe('a custom lead (the award badge, 20260828000100)', () => {
+  it('replaces the poster and its placeholder, keeping the chip and the tap', async () => {
+    // The award row's subject is a badge, not a title: no fake poster, and no
+    // `MissingArtwork` initials of an award name pretending to be a broken
+    // catalogue row. The lead node renders inside the same Pressable, so the
+    // leading tap target and the actor chip's geometry are untouched.
+    const onPressTitle = jest.fn();
+    const view = await render(
+      <ActivityRow
+        {...props}
+        title="Movie Muncher"
+        verb="earned"
+        posterUri={null}
+        onPressTitle={onPressTitle}
+        lead={<Text testID="award-lead">badge</Text>}
+      />,
+    );
+
+    expect(view.getByTestId('award-lead')).toBeTruthy();
+    // The initials the placeholder would have drawn for "Movie Muncher".
+    expect(view.queryByText('MM')).toBeNull();
+    // The sentence still reads through the ordinary grammar.
+    expect(view.getByText(/Suraj/)).toBeTruthy();
+    expect(view.getByText(/earned/)).toBeTruthy();
+    expect(view.getByText(/Movie Muncher/)).toBeTruthy();
+
+    await fireEvent.press(view.getByLabelText(/^Movie Muncher/));
+    expect(onPressTitle).toHaveBeenCalled();
+  });
+});
+
 describe('the poster placeholder', () => {
   it('initials the film, not the sentence around it', async () => {
     // The SR bug. `ActivityCard` passed its whole sentence in as the poster's

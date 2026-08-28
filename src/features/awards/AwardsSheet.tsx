@@ -45,11 +45,15 @@ export type AwardsSheetProps = {
  * filter with: twenty rows is a scroll, and a filter over twenty rows costs more
  * attention than the thing it organises.
  *
- * **Nothing fires when an award is earned.** No notification, no feed event, no share,
- * no unlock ledger. An award is a reading of canonical data taken when this sheet opens
- * (`use-awards.ts`), which is what makes the whole feature a client-side delight layer
- * with no migration behind it — and what keeps an award from ever disagreeing with the
- * collection it describes.
+ * **The social loop fires server-side, and this sheet stays derived.** Since
+ * 20260828000100 a newly crossed tier is recorded on the `award_unlocks` ledger by
+ * triggers where the facts change, and that transition — not anything this sheet
+ * computes — creates the feed post and the congratulations. What is drawn HERE is
+ * still a reading of canonical data taken when the sheet opens (`use-awards.ts`),
+ * which keeps the numbers from ever disagreeing with the collection they describe.
+ * The one divergence that buys: a count can fall after an unlock (an unranking),
+ * and the ledger keeps the achievement while this sheet honestly shows the lower
+ * progress.
  *
  * What a row *does* have behind it is the rows that produced its number, for **all
  * twenty** tracks rather than the twelve of the first pass. See `AwardBreakdownSheet`.

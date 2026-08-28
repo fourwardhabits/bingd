@@ -386,30 +386,19 @@ describe('the screen', () => {
     expect(view.queryByLabelText('Reactions')).toBeNull();
   });
 
-  it('says plainly that award notifications are not being sent yet', async () => {
+  it('no longer claims any category is not being sent', async () => {
     const view = await renderLoaded();
 
-    // **One badge, not two, since 2026-08-20.** `invites` had a writer from
-    // `20260819000500` and kept its `pending` flag anyway, so the screen spent a day
-    // telling readers a working feature was not built.
-    //
-    // Two things say it and they are not the same thing: a badge under the one pending
-    // setting, and the explainer saying why the switch is still worth setting. The
-    // explainer renders from the first frame; the badge appears only
-    // once the read lands. So `getByText(/not being sent yet/i)` matched one element
-    // while loading and three afterwards, and threw "found multiple" the moment the data
-    // arrived — it passed only when polling happened to catch the loading window, which
-    // is the opposite race to the rest of this file and why it flaked in both directions.
-    //
-    // Asserted separately and exactly, so either one going missing is its own failure
-    // rather than being absorbed by the other.
-    expect(view.getAllByText('Not being sent yet.')).toHaveLength(1);
-    expect(view.getByText(/^Award notifications are not being sent yet\./)).toBeTruthy();
+    // The pending badge and the awards explainer are both gone (20260828000100):
+    // the unlock ledger writes award_earned now, so a screen saying "not being
+    // sent yet" would be the exact wrong-claim failure the invites day taught —
+    // a working feature described as unbuilt. Asserted as absences, so either
+    // one creeping back is its own failure.
+    expect(view.queryByText('Not being sent yet.')).toBeNull();
+    expect(view.queryByText(/not being sent yet/i)).toBeNull();
   });
 
-  it('marks bingd. Awards as unwritten and no longer marks invites', async () => {
-    // The badge has to be on the right row. Asserting the count alone would pass if the
-    // flag had merely moved from Awards to Invites.
+  it('draws the Awards row like any other, and keeps the invites copy honest', async () => {
     const view = await renderLoaded();
 
     expect(view.getByText('bingd. Awards')).toBeTruthy();

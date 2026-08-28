@@ -78,6 +78,15 @@ export type FeedItem = {
    * had said not to.
    */
   companions: string[];
+  /**
+   * The award, for an `award_earned` row — and only there (20260828000100).
+   *
+   * Keys resolve the badge through `badgeFor`; the names are the payload's
+   * snapshot, so a row renders even if this bundle predates a future track. The
+   * award's display name rides in `title`, which is what makes the sentence read
+   * "Abisola earned Movie Muncher" through the ordinary grammar.
+   */
+  award: { key: string; tierKey: string; tierLabel: string | null } | null;
 };
 
 type Embedded<T> = T | T[] | null;
@@ -127,6 +136,11 @@ type FeedRow = {
     category?: 'movies' | 'tv_seasons';
     score?: number;
     bucket?: Bucket;
+    /** award_earned rows only (20260828000100). */
+    award?: string;
+    tier?: string;
+    award_name?: string;
+    tier_label?: string;
   } | null;
   media_items: Embedded<MediaShape>;
   profiles: Embedded<ProfileShape>;
@@ -318,6 +332,8 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
       actorAvatarUri: avatarUri(profile?.avatar_path),
       mediaItemId: row.media_item_id,
       kind: media?.kind ?? null,
+      // For an award the "title" is the award's name — the sentence slot is the
+      // same slot, and "Abisola earned Movie Muncher" is the founder's copy.
       title: media
         ? compactName({
             kind: media.kind,
@@ -325,7 +341,9 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
             seriesTitle: parent?.title ?? null,
             seasonNumber: media.season_number,
           })
-        : null,
+        : row.type === 'award_earned'
+          ? (row.payload?.award_name ?? 'a bingd. Award')
+          : null,
       year: media?.release_date ? Number(media.release_date.slice(0, 4)) : null,
       posterPath: media?.poster_path ?? null,
       genres: subject ? effectiveGenres(subject) : [],
@@ -339,6 +357,14 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
       category: row.payload?.category ?? null,
       note: null,
       companions: [],
+      award:
+        row.type === 'award_earned' && row.payload?.award && row.payload?.tier
+          ? {
+              key: row.payload.award,
+              tierKey: row.payload.tier,
+              tierLabel: row.payload.tier_label ?? null,
+            }
+          : null,
     });
   }
 

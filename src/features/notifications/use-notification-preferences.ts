@@ -36,10 +36,11 @@ export type NotificationSetting = {
    * it yet**. The screen says so rather than presenting a switch that implies traffic
    * the app does not produce.
    *
-   * It is also what decides the default. A category nothing writes defaults off, so the
-   * app is not claiming a feature it does not have; every category that works defaults
-   * on. `awards` is the only one left — `invites` lost this flag on 2026-08-20, having
-   * had a writer since `20260819000500`.
+   * Nobody carries it today. `invites` lost it on 2026-08-20 (writer since
+   * `20260819000500`), and `awards` — the last holdout — lost it on 2026-08-28 when
+   * the unlock ledger gave `award_earned` its writer and the category's default
+   * flipped on with the other seven. Kept for the next category that ships ahead of
+   * its writer.
    */
   pending?: boolean;
 };
@@ -132,7 +133,6 @@ export const SECTIONS: readonly NotificationSection[] = [
         key: 'awards',
         label: 'bingd. Awards',
         description: 'You reach a new tier on an Award.',
-        pending: true,
       },
     ],
   },
@@ -195,12 +195,12 @@ export function masterOn(
  *
  * Read from `my_notification_preferences`, which returns all eight every time with
  * each one defaulted by its own category. The screen never assembles a default: a
- * default written in two places is a default that disagrees with itself, and the one
- * that differs from the rest — awards, off because nothing writes one — is exactly the
- * one a second copy would get wrong.
+ * default written in two places is a default that disagrees with itself, and the
+ * history of the two late movers — reactions (20260820000100) and awards
+ * (20260828000100, when the unlock ledger gave the category its writer) — is
+ * exactly what a second copy would have got wrong twice.
  *
- * Seven of the eight default on as of `20260820000100`. `reactions` was the eighth
- * until the founder's Preview pass.
+ * All eight default on as of `20260828000100`.
  */
 export function useNotificationPreferences(viewerId: string) {
   return useQuery({
@@ -216,12 +216,14 @@ export function useNotificationPreferences(viewerId: string) {
        * A category this build knows and the response did not carry is an **error**,
        * not something to fill in.
        *
-       * This filled the gap with `true` until independent review 23. That was wrong in
-       * the one direction that matters: `reactions` and `awards` default *off*, so a
-       * build talking to a backend that predates 20260819000300 would have drawn them
-       * on, and a reader who then touched anything in that section would have switched
-       * on a category they never chose. Guessing a default on the client is the exact
-       * duplication `my_notification_preferences` exists to prevent.
+       * This filled the gap with `true` until independent review 23. That was wrong
+       * in the one direction that mattered at the time: `reactions` and `awards`
+       * then defaulted *off*, so a build talking to a backend that predates
+       * 20260819000300 would have drawn them on, and a reader who then touched
+       * anything in that section would have switched on a category they never
+       * chose. Both categories default on today, and the rule stands anyway:
+       * guessing a default on the client is the exact duplication
+       * `my_notification_preferences` exists to prevent.
        *
        * Throwing puts the screen into its Could-not-load state with a Try again, which
        * is a true statement about a backend this build cannot read.

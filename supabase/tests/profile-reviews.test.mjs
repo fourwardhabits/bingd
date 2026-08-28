@@ -521,9 +521,11 @@ describe('notification preferences', () => {
 
   it('answers for every category, defaulted by the category rather than by absence', async () => {
     // 20260819000300 replaced the two categories with eight, and made absence mean
-    // *the category's default* rather than a flat true. 20260820000100 then moved
-    // reactions on, leaving awards as the only category that is off -- and off because
-    // nothing writes an award notification, rather than because nobody wants one.
+    // *the category's default* rather than a flat true. 20260820000100 moved
+    // reactions on, and 20260828000100 moved awards on when the unlock ledger gave
+    // award_earned its writer -- so all eight now default on, and what this pins is
+    // that the answer comes from _notification_default per category, not from a
+    // hardcoded absence-means-true.
     const rows = await t.asUser(heidi, async () => {
       const { rows } = await t.sql(`select * from my_notification_preferences() order by category`);
       return rows;
@@ -531,7 +533,7 @@ describe('notification preferences', () => {
     await t.actAs(null);
 
     assert.deepEqual(rows, [
-      { category: 'awards', enabled: false },
+      { category: 'awards', enabled: true },
       { category: 'comments', enabled: true },
       { category: 'follow_accepted', enabled: true },
       { category: 'follows', enabled: true },

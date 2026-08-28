@@ -66,6 +66,39 @@ Deno.test('every eligible type says something in the second person', () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// An award that says so (20260828000100)
+// ---------------------------------------------------------------------------
+
+Deno.test('the congratulations is the one actorless push, and names the award', () => {
+  // No actor at all — the row is the earner's own — and still a push. The name gate
+  // exists to refuse a sentence about nobody; this sentence is about the reader.
+  const content = contentFor(
+    job({
+      type: 'award_earned',
+      actor_username: null,
+      actor_name: null,
+      award_name: 'Movie Muncher',
+    }),
+  );
+  assert(content, 'award_earned produced no push');
+  assertEquals(content.title, 'bingd. Awards');
+  assertEquals(content.body, 'You earned Movie Muncher');
+  // The tap payload keeps the five-field whitelist, honestly null where an award
+  // has no person and no title; `kind` alone routes to the reader's own Awards.
+  assertEquals(content.data.kind, 'award_earned');
+  assertEquals(content.data.actorUsername, null);
+  assertEquals(content.data.mediaItemId, null);
+  assertEquals(content.data.feedEventId, null);
+});
+
+Deno.test('an award job from a database mid-deploy still says something honest', () => {
+  const content = contentFor(
+    job({ type: 'award_earned', actor_username: null, actor_name: null }),
+  );
+  assertEquals(content?.body, 'You earned a new Award');
+});
+
 Deno.test('names the title where there is one', () => {
   const content = contentFor(
     job({ type: 'recommendation', media_kind: 'movie', media_title: 'Stalker' }),
