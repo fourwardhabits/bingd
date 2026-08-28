@@ -30,7 +30,8 @@ import {
   useRelationships,
   useSocialWrites,
 } from '@/features/profile/use-social';
-import { tasteMatchState, useTasteMatch } from '@/features/profile/use-taste-match';
+import { MatchExplainer, MatchLine } from '@/features/profile/MatchExplainer';
+import { tasteMatchLine, useTasteMatch } from '@/features/profile/use-taste-match';
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
 import {
@@ -100,6 +101,9 @@ export default function PublicProfileScreen() {
   const [followList, setFollowList] = useState<'followers' | 'following' | null>(null);
   // Which ranked-title count is open as a list, if any — Movies or TV seasons.
   const [titleList, setTitleList] = useState<'movies' | 'tv_seasons' | null>(null);
+  // Whether the Match explanation is open. Its own state rather than a mode of the
+  // sheets above, because it can be opened from a profile whose lists are also open.
+  const [matchOpen, setMatchOpen] = useState(false);
 
   const profile = usePublicProfile(username ?? null);
   /**
@@ -201,17 +205,27 @@ export default function PublicProfileScreen() {
    * Saying *why* means knowing which side is short, and the intersection count cannot
    * tell — so both catalogue sizes go in. The subject's is on screen already; the
    * viewer's comes from their own logged collection, which Collection has usually
-   * warmed and which is a cheap read either way. `tasteMatchState` owns the decision;
+   * warmed and which is a cheap read either way. `tasteMatchLine` owns the decision;
    * this line owns the inputs.
+   *
+   * Since the 2026-08-28 tranche the line carries the **evidence** as well as the
+   * number — `89% Match · 42 shared` — and `shared` is `common_count` from the same
+   * `taste_match` row the percentage came from. That is founder §2's requirement stated
+   * as a data path rather than as a promise: there is no second query and no second
+   * definition of the shared population, so the two halves of the line cannot disagree
+   * about what they were measured over. **No new server function was needed** —
+   * `taste_match` has returned `common_count` since 20260817000400 and the hook has
+   * always carried it; only the profile was throwing it away.
    */
   const viewerCollection = useLoggedCollection(viewer.id);
-  const matchState = tasteMatchState({
+  const matchLine = tasteMatchLine({
     match: taste.data,
     isSelf: profile.data?.id === viewer.id,
     viewerRanked: viewerCollection.data?.rankedCount,
     subjectRanked: profile.data
       ? profile.data.rankedMovies + profile.data.rankedSeasons
       : undefined,
+    name: profile.data?.name ?? `@${username}`,
   });
 
   /**
@@ -392,19 +406,14 @@ export default function PublicProfileScreen() {
                  rendered as nothing at all. That is the "Match is missing" report: not a
                  wiring bug, a layout that had no room to explain itself.
 
-                 Maroon for a number, because that is the fact the row is for. Tertiary
-                 grey for the two absences, which are context rather than a result — and
-                 which say what is true without inventing a count of titles to go and
-                 rank. Never a placeholder percentage. Absent entirely on the reader's own
-                 profile and while the answer is still in flight. */
-              matchState ? (
-                <Text
-                  variant="footnote"
-                  tone={matchState.kind === 'match' ? 'action' : 'tertiary'}
-                  numberOfLines={1}
-                >
-                  {matchState.label}
-                </Text>
+                 Now it is a control as well as a line (§3): the compact pair cannot say
+                 what either number means, so the sentence lives one tap away instead of
+                 being cut. Absent entirely on the reader's own profile, while the answer
+                 is still in flight, and on a private account this viewer may not read —
+                 §25, and it comes for free because `taste_match` refuses that case and
+                 this branch of the screen is not the one a locked shell renders. */
+              matchLine ? (
+                <MatchLine line={matchLine} onPress={() => setMatchOpen(true)} />
               ) : null
             }
             controls={
@@ -647,6 +656,16 @@ export default function PublicProfileScreen() {
             router.push(`/title/${id}`);
           }}
           onClose={() => setTitleList(null)}
+        />
+      ) : null}
+      {/* Rendered only while there is a line to explain, so the sheet cannot be reached
+          on a profile that has no Match — including the locked shell, which draws no
+          identity block at all and therefore no line to tap. */}
+      {matchLine ? (
+        <MatchExplainer
+          visible={matchOpen}
+          onClose={() => setMatchOpen(false)}
+          line={matchLine}
         />
       ) : null}
     </Screen>

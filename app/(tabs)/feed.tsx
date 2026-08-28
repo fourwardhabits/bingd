@@ -22,6 +22,13 @@ import {
   useSetReaction,
   type ReactionKind,
 } from '@/features/feed/use-reactions';
+import { LeaderboardView } from '@/features/leaderboard/LeaderboardView';
+import {
+  DEFAULT_METRIC,
+  useLeaderboard,
+  useMyStanding,
+  type LeaderboardMetric,
+} from '@/features/leaderboard/use-leaderboard';
 import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { TrendingShelf } from '@/features/trending/TrendingShelf';
 import { track } from '@/lib/analytics';
@@ -33,12 +40,30 @@ import {
   AppHeader,
   EmptyState,
   HeaderBoundary,
+  IconToggle,
   Screen,
   SectionHeader,
   SkeletonRow,
   Text,
+  type IconToggleOption,
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
+
+/**
+ * Feed or Leaderboard — the two states of this tab's content area.
+ *
+ * Feed first, because it is the default and because the leftmost cell being the
+ * default is the rule the Collection toggle follows too.
+ */
+type FeedMode = 'feed' | 'leaderboard';
+
+const FEED_MODES = [
+  // `newspaper` rather than `list`: Collection's list glyph means "the other way of
+  // drawing this same thing", and this control's left cell means "the ordinary
+  // homepage". Reusing the glyph would say the two toggles answer the same question.
+  { value: 'feed', icon: 'newspaper-outline', label: 'Feed' },
+  { value: 'leaderboard', icon: 'trophy-outline', label: 'Leaderboard' },
+] as const satisfies readonly IconToggleOption<FeedMode>[];
 
 /** PRD §14. Fan-out on read: followed users' activity is queried at read time
  *  rather than written into per-user inboxes (docs/architecture/README.md AD-5). */
@@ -51,6 +76,48 @@ export default function FeedScreen() {
   const watchlist = useWatchlist(profile.id);
   const watched = useWatched(profile.id);
   const [busy, setBusy] = useState<string | null>(null);
+  /**
+   * Which surface this tab is showing, and **deliberately not persisted** (§6).
+   *
+   * `useState`, so a fresh launch is Feed. That is the whole of the rule and it is worth
+   * stating why the obvious improvement is wrong: Collection remembers Poster or List
+   * because both are ways of drawing the same collection, so either is a reasonable thing
+   * to open on. Leaderboard is a *different surface*, and a launch that opened on it would
+   * have quietly replaced the homepage with a scoreboard — which is the product decision
+   * the founder made in the other direction.
+   *
+   * Within a mounted session the choice does survive, because the tab stays mounted while
+   * the reader visits other tabs. That is the founder's "acceptable if it falls naturally
+   * out of the navigation tree", and it does: nothing here works to preserve it.
+   */
+  const [mode, setMode] = useState<FeedMode>('feed');
+  const [metric, setMetric] = useState<LeaderboardMetric>(DEFAULT_METRIC);
+  const showingBoard = mode === 'leaderboard';
+  // Not fetched until the board is actually opened. The Feed is the default and most
+  // readers will never toggle, so an eager read would be a request per app open for a
+  // surface nobody asked for.
+  const leaderboard = useLeaderboard(profile.id, metric, showingBoard);
+  const standing = useMyStanding(profile.id, metric, showingBoard);
+
+  /**
+   * Entering a mode, with the one analytics event this surface needs.
+   *
+   * Emitted on the *transition into* Leaderboard rather than on render, so leaving and
+   * coming back is a second view — which it is, being a second decision to look — while
+   * a re-render caused by anything else on this busy screen is not.
+   */
+  const changeMode = (next: FeedMode) => {
+    if (next === mode) return;
+    setMode(next);
+    if (next === 'leaderboard') track({ name: 'leaderboard_viewed', props: { metric } });
+  };
+
+  /** Only a genuine change. Re-tapping the chip you are on would measure fidgeting. */
+  const changeMetric = (next: LeaderboardMetric) => {
+    if (next === metric) return;
+    setMetric(next);
+    track({ name: 'leaderboard_metric_selected', props: { metric: next } });
+  };
   // Which row has the picker open, and which has its detail sheet open. Two
   // separate ideas: the picker changes your own reaction, the detail shows everyone
   // else's, and a row can be in neither.
@@ -174,6 +241,30 @@ export default function FeedScreen() {
           count: unreadCount(notifications.data),
           onPress: () => router.push('/settings/notifications'),
         }}
+        right={
+          /**
+           * Feed or Leaderboard, in the corner the bell already lives in (§5).
+           *
+           * `AppHeader` draws `right` *after* the bell, so the toggle sits immediately
+           * beside it without displacing it — which is the constraint the founder stated
+           * as "the bell must remain easy to hit". The header's `right` container is
+           * `flex-end`, so a two-cell control 88pt wide still leaves the bell where every
+           * other tab puts it.
+           *
+           * The same `IconToggle` Collection's Poster/List control uses, which is founder
+           * §5's "same interaction and visual grammar" made structural: one component, so
+           * the two cannot drift into two dialects of the same idea. They behave
+           * differently on purpose — Collection persists its choice across launches and
+           * this one deliberately does not (§6) — and that is exactly why they must look
+           * the same by construction rather than by agreement.
+           */
+          <IconToggle
+            label="Feed mode"
+            value={mode}
+            onChange={changeMode}
+            options={FEED_MODES}
+          />
+        }
       />
       <HeaderBoundary />
       {/* Pull to refresh, which the app did not have anywhere and which a feed of
@@ -186,8 +277,16 @@ export default function FeedScreen() {
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl
-            refreshing={feed.isRefetching}
+            refreshing={showingBoard ? leaderboard.isRefetching : feed.isRefetching}
             onRefresh={() => {
+              // The board is the whole screen when it is showing, so the gesture means
+              // "re-read this" and nothing else. Refetching the feed underneath it would
+              // spend two requests to update something nobody is looking at.
+              if (showingBoard) {
+                void leaderboard.refetch();
+                void standing.refetch();
+                return;
+              }
               void feed.refetch();
               void reactions.refetch();
               void commentCounts.refetch();
@@ -209,6 +308,29 @@ export default function FeedScreen() {
           />
         }
       >
+        {/**
+          * The board replaces the whole content area, Trending included.
+          *
+          * Not a section appended below the feed. The founder's word for it is a mode:
+          * "toggling Trophy switches the main Feed content area into Leaderboard", and a
+          * board sharing the screen with a shelf and an activity list would be a fourth
+          * thing on the busiest screen in the app rather than an alternative to it.
+          *
+          * Everything the feed owns — the sheets below, the reaction pickers, the
+          * recommend flow — stays mounted and untouched, so returning to Feed returns to
+          * exactly the feed that was there. That is founder acceptance D.
+          */}
+        {showingBoard ? (
+          <LeaderboardView
+            metric={metric}
+            onChangeMetric={changeMetric}
+            entries={leaderboard.data}
+            standing={standing.data}
+            loading={leaderboard.isPending}
+            onPressPerson={(username) => router.push(`/u/${username}`)}
+          />
+        ) : (
+          <>
         {/* One shelf, above the activity. It renders nothing at all when there is
             nothing to show, so the social feed keeps the top of the screen whenever
             discovery has nothing to add — which is the ordering PRD §14 wants. */}
@@ -344,6 +466,8 @@ export default function FeedScreen() {
               commentCount={commentCounts.data?.get(event.id) ?? 0}
             />
           ))
+        )}
+          </>
         )}
       </ScrollView>
 

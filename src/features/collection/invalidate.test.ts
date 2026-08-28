@@ -58,6 +58,19 @@ const KEYS = {
   otherUserCommunity: ['community-score', OTHER, TITLE],
   // Other people's rankings, which nothing this reader does can move.
   following: ['following-score', USER, TITLE],
+  // The Reviews tab for this title, one key per sort chip — the founder's stale-review
+  // bug, 2026-08-28. Both must go: invalidating only the visible one leaves the old text
+  // waiting behind the other chip.
+  reviewsTop: ['title-reviews', TITLE, 'top'],
+  reviewsRecent: ['title-reviews', TITLE, 'recent'],
+  // The author's own profile Reviews shelf, which reads public_notes under its own key.
+  profileNotes: ['profile-notes', USER],
+  // One activity opened from a notification, which hydrates its note the same way.
+  activityEvent: ['activity-event', USER, 'event-1'],
+  // Another film's Reviews tab, which an edit here cannot touch.
+  otherTitleReviews: ['title-reviews', 'film-2', 'top'],
+  // Somebody else's profile Reviews shelf.
+  otherProfileNotes: ['profile-notes', OTHER],
   goalsThisYear: ['goals', USER, 2026],
   goalsLastYear: ['goals', USER, 2025],
   awards: ['awards', USER],
@@ -122,6 +135,44 @@ describe('after a ranking completes', () => {
     // until the one-minute staleTime expired — and `use-awards.ts` carried a comment
     // saying the opposite. Independent review 21.
     expect(has(touched(), KEYS.awards)).toBe(true);
+  });
+
+  /**
+   * **The founder's stale-review bug, as the assertion that would have caught it.**
+   *
+   * Editing a published review left the old text on the title's Reviews tab. Everything
+   * server-side was already right — `save_note` stored the text, `title_reviews` selects
+   * `um.note` live, and `user_media`'s primary key makes a duplicate row unreachable —
+   * and nothing invalidated the key, so React Query kept serving the slate it had. The
+   * global staleTime is 60s and the log sheet opens *over* the title screen, so closing
+   * it neither unmounted the query nor expired it: it looked exactly like a write that
+   * had not persisted.
+   *
+   * Both sorts, because the tab has two chips and the stale text would otherwise be
+   * waiting behind the one the reader was not on.
+   */
+  it('refreshes this title’s Reviews tab, on both sorts', async () => {
+    const set = touched();
+    expect(has(set, KEYS.reviewsTop)).toBe(true);
+    expect(has(set, KEYS.reviewsRecent)).toBe(true);
+  });
+
+  it('refreshes the author’s own profile Reviews shelf', async () => {
+    expect(has(touched(), KEYS.profileNotes)).toBe(true);
+  });
+
+  it('refreshes a single activity, which carries the note text too', async () => {
+    expect(has(touched(), KEYS.activityEvent)).toBe(true);
+  });
+
+  it('leaves another film’s Reviews tab alone', async () => {
+    // The key carries the media item, so an edit on one title must not refetch every
+    // Reviews tab this session has opened.
+    expect(has(touched(), KEYS.otherTitleReviews)).toBe(false);
+  });
+
+  it('leaves somebody else’s Reviews shelf alone', async () => {
+    expect(has(touched(), KEYS.otherProfileNotes)).toBe(false);
   });
 
   it('leaves somebody else’s awards alone', async () => {

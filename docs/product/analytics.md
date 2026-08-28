@@ -77,6 +77,34 @@ error rather than a decision somebody makes at 2am before a demo.
 | `invite_redeemed` | `redeem_invite` answered `ok` — an `invite_attributions` row was inserted **by this call** | the **invitee** | none |
 | `invite_activated` | `_rank_finalize` answered `activated: true` — this transaction flipped `activated_at` | the **invitee** | none |
 
+### Experiments — added 2026-08-28
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `leaderboard_viewed` | the reader **entered** Leaderboard from the Feed toggle | the reader | `metric` |
+| `leaderboard_metric_selected` | a **different** metric chip was chosen | the reader | `metric` |
+
+Two events, for one of this tranche's two experiments. The board sits behind a control
+nothing else leads to, so *did anybody find it* has no other answer; and *which of the
+four metrics people care about* is what decides whether the set stays at four.
+
+Both are narrow on purpose. `leaderboard_viewed` fires on the **transition into** the
+mode, not on render — so leaving and returning is a second view, which it is, being a
+second decision to look, while a re-render on the busiest screen in the app is not.
+`leaderboard_metric_selected` fires only on a genuine change; re-tapping the chip you are
+already on emits nothing, or the count would measure fidgeting.
+
+`metric` is the server's own name for the board (`titles` | `movies` | `tv` | `reviews`),
+so the event, the chip and the RPC argument are one string rather than a fourth spelling
+of the same four things.
+
+**The other experiment — recommendation rotation — has no events at all**, deliberately.
+Its question is whether repeated visits produce a fresher slate, and that is answerable
+from data the feature already stores: `recommendation_impressions` records what was shown
+and `recommendation_feedback` records what was dismissed. Emitting a client event per
+slate would be a second, worse copy of a server-side fact — and would put a stream of
+writes on a screen the founder asked to keep quiet (PRD §13).
+
 ---
 
 ## 3. What each event does **not** mean

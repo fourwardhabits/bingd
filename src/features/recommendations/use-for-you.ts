@@ -17,7 +17,7 @@ import { AdapterError, cacheSimilar } from '@/lib/tmdb-adapter';
 import {
   ANCHOR_LIMIT,
   SLATE_SIZE,
-  diversify,
+  diversifyPaged,
   scoreSlate,
   tasteFrom,
   type Anchor,
@@ -25,8 +25,10 @@ import {
   type Scored,
   type Taste,
 } from './rank';
+import { noteImpressions } from './impressions';
 import { noteSlateOnScreen, useRecommendationArrangement } from './session-seed';
 import { useDismissedTitles } from './use-dismissed';
+import { mergeExposure, useRecommendationExposure } from './use-exposure';
 
 /**
  * The data half of For You: anchors, candidates, and what to leave out.
@@ -305,6 +307,24 @@ type CandidateRow = {
   popularity: number | null;
 };
 
+/**
+ * Titles the reader's approved followees put in their top band and the reader has not met.
+ *
+ * Server-side aggregation, so the client is never given another account's rankings — the
+ * rule `rank.ts`' header exists to protect. `social_candidates` applies `can_view_profile`
+ * to every endorser, so every row behind the count is one `rankings_read` would admit to
+ * this caller individually.
+ *
+ * Fails to an empty list rather than throwing. This is one of three candidate sources and
+ * the newest; a slate is still a slate without it, and a reader with no follows gets
+ * nothing from it on every visit by design.
+ */
+async function socialCandidates(): Promise<string[]> {
+  const { data, error } = await supabase.rpc('social_candidates', { p_limit: 40 });
+  if (error || !data) return [];
+  return (data as { media_item_id: string }[]).map((row) => row.media_item_id);
+}
+
 async function candidatesFor(ids: readonly string[], medium: Medium): Promise<Candidate[]> {
   if (ids.length === 0) return [];
 
@@ -378,7 +398,27 @@ export function rankingFingerprint(...lists: readonly (readonly RankedEntry[])[]
   return (hash >>> 0).toString(36);
 }
 
-export function useForYou(userId: string, medium: Medium, filters?: CollectionFilters) {
+/**
+ * How many diversified pages a caller may ask for.
+ *
+ * Five, so a reader who keeps scrolling reaches a hundred titles. Not unbounded: the
+ * candidate pool is a few hundred at best — six anchors' similar lists, a trending page
+ * and the social source — and a wall that kept promising more would end up recycling the
+ * weakest tail, which the founder ruled out by name ("do not infinite-loop or keep
+ * recycling the same five cards at the bottom").
+ *
+ * Reaching this ceiling is not the usual way the wall ends. The pool almost always runs
+ * out first, and `diversifyPaged` returning short is what the screen actually reads.
+ */
+export const MAX_PAGES = 5;
+
+export function useForYou(
+  userId: string,
+  medium: Medium,
+  filters?: CollectionFilters,
+  /** How many pages of `SLATE_SIZE` to reveal. The screen grows this as the reader scrolls. */
+  pages: number = 1,
+) {
   // Taste spans both media. Someone who ranks Japanese cinema highly means that about
   // television too, and splitting the affinity vector by medium would halve the
   // evidence behind every genre for no reason anybody could state.
@@ -408,6 +448,20 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
   // Which arrangement this session is showing, and what it has already shown. Not part
   // of the key — see `select`.
   const arrangement = useRecommendationArrangement();
+
+  /**
+   * What *previous* sessions showed. Read once per process and never re-read.
+   *
+   * The other half of the same penalty, and the reason it is a separate hook with
+   * `staleTime: Infinity` is written at length in `use-exposure.ts`: a live read would
+   * loop, because recording this wall's impressions would move the exposure, which would
+   * re-derive the wall, which would record again.
+   *
+   * Deliberately **not** in the query key and deliberately not gated on. The slate is
+   * worth drawing without it — a wall that is merely less rotated is far better than a
+   * skeleton — so a slow or failed exposure read costs the rotation and nothing else.
+   */
+  const exposure = useRecommendationExposure(userId);
 
   const ranked = medium === 'movies' ? movies : seasons;
   // The filtered subset of *this* medium, which is what the founder asked the slate to
@@ -455,14 +509,26 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
   /**
    * Which wall this is, for exposure purposes.
    *
-   * Medium and filters, because those are the two things that make a genuinely different
-   * slate; the anchors and the watched set are not here on purpose, since a title the
-   * reader has seen on the Movies wall has been seen whether or not they have since
-   * ranked something. Deliberately *not* the query key — that carries `inputs`, which
-   * moves whenever a ranking does, and exposure keyed on it would forget everything the
-   * reader had been shown the moment they logged a film.
+   * **The viewer, then** medium and filters. Those two are what make a genuinely
+   * different slate; the anchors and the watched set are not here on purpose, since a
+   * title the reader has seen on the Movies wall has been seen whether or not they have
+   * since ranked something. Deliberately *not* the query key — that carries `inputs`,
+   * which moves whenever a ranking does, and exposure keyed on it would forget everything
+   * the reader had been shown the moment they logged a film.
+   *
+   * **`userId` leads it, and that is a correctness fix rather than tidiness.** Independent
+   * review found the omission: `impressions.ts` holds its sent-id sets for the life of the
+   * process, so on a shared device where one account signs out and another signs in
+   * without a relaunch, the second reader's wall overlapped the first's — and every
+   * overlapping title was treated as already recorded. Those titles would then have **no
+   * durable cooldown at all** for the new account, which is the one thing the ledger
+   * exists to give them. It is the same viewer-relative-key defect reviews 6 and 10 each
+   * found somewhere else in this app, and it belongs in the key rather than in a reset
+   * somebody has to remember to call.
+   *
+   * `noteSlateOnScreen` takes the same key and gets the same fix for free.
    */
-  const wallKey = `${medium}|${JSON.stringify(filters ?? emptyFilters())}`;
+  const wallKey = `${userId}|${medium}|${JSON.stringify(filters ?? emptyFilters())}`;
 
   const slate = useQuery({
     // The filters are part of the key: the same anchors and the same candidates with
@@ -518,13 +584,22 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
           candidatePool: dismissed.data?.size
             ? scoring.candidatePool.filter((item) => !dismissed.data.has(item.mediaItemId))
             : scoring.candidatePool,
-          items: diversify(vetoed, SLATE_SIZE, arrangement.seed, {
+          /**
+           * Pages rather than one growing `limit`, and the durable exposure folded in.
+           *
+           * `diversifyPaged` keeps the prefix fixed as the wall grows — see its header
+           * for why raising `limit` reshuffles what the reader has already read. The
+           * exposure handed to it is both halves at once: what this session has shown,
+           * and what previous ones did, merged by `Math.max` so a tier stays a staleness
+           * band rather than becoming a tally.
+           */
+          items: diversifyPaged(vetoed, SLATE_SIZE, pages, arrangement.seed, {
             current: arrangement.current,
-            seen: arrangement.seen,
+            seen: mergeExposure(exposure.data, arrangement.seen),
           }),
         };
       },
-      [arrangement, dismissed.data],
+      [arrangement, dismissed.data, exposure.data, pages],
     ),
     queryFn: async (): Promise<ForYouScoring> => {
       const taste = tasteFrom(
@@ -572,8 +647,30 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
       const anchorsUsed = anchors.filter((anchor) => anchor.similarIds.length > 0).length;
 
       const fallback = await trendingFallback(TRENDING_FOR[medium]);
+      /**
+       * The third source: titles the people this reader follows put in their top band.
+       *
+       * Founder §17, the approved cheap half. It widens the pool, which is what rotation
+       * most needs — a cooldown over a pool of sixty runs out of things to promote — and
+       * it is the only source here that is about *people* rather than about titles.
+       *
+       * **No social claim is composed from it, deliberately.** The RPC returns media item
+       * ids and a count and never a person, so this module cannot say "Ravi loved this"
+       * even if a future edit wanted to. That is what keeps `rank.ts`' no-fabricated-
+       * social-proof rule intact while the pool grows: these arrive as candidates and are
+       * scored by the same on-device rules as every other candidate, on evidence that is
+       * entirely about the reader.
+       *
+       * Failing open. It is an enrichment of the pool, and a slate built from two sources
+       * instead of three is a slightly narrower slate rather than a broken one.
+       */
+      const social = await socialCandidates();
       const candidateIds = [
-        ...new Set([...anchors.flatMap((anchor) => anchor.similarIds), ...fallback]),
+        ...new Set([
+          ...anchors.flatMap((anchor) => anchor.similarIds),
+          ...social,
+          ...fallback,
+        ]),
       ];
 
       const candidates = await candidatesFor(candidateIds, medium);
@@ -633,7 +730,18 @@ export function useForYou(userId: string, medium: Medium, filters?: CollectionFi
   const items = slate.data?.items;
   useEffect(() => {
     if (!items) return;
-    noteSlateOnScreen(wallKey, items.map((item) => item.mediaItemId));
+    const ids = items.map((item) => item.mediaItemId);
+    noteSlateOnScreen(wallKey, ids);
+    /**
+     * And the durable half, which is the same fact written where a relaunch can read it.
+     *
+     * `noteImpressions` is guarded twice — by an unchanged-set check here and by the
+     * hour-truncated primary key on the server — so this effect firing on every render
+     * would still cost one write per wall per hour. Not awaited and its failure is
+     * swallowed: nothing on screen depends on it, and the exposure it feeds is read once
+     * at launch and never during this session, so there is nothing here to invalidate.
+     */
+    void noteImpressions(wallKey, ids);
   }, [wallKey, items]);
 
   /**

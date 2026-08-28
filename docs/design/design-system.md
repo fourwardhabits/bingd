@@ -363,6 +363,76 @@ Three states, and using the wrong one is the common failure:
 - **The app is up but the session is not resolved**: the full-screen loader. A rounded-square tile in `surface.raised` at radius 20 with `e1` and the brand mark inside, the wordmark beneath it, and a small Maroon activity indicator. It is the only place the app shows an indeterminate spinner, because it is the only wait whose length is genuinely unknown.
 - **A list whose shape is known**: skeleton rows in `surface.sunken`, matching the real row's geometry. Never a spinner, and never the word "Loading…" — a spinner in a list discards the layout information the app already has, and text where content will be reads as an error message.
 
+### Icon toggle — canonical, 2026-08-28
+
+Two glyphs in one segmented cell: *pick a way of looking at this screen*. Hairline-bordered
+group, `control.chipHeight` tall, each cell a `minTapTarget − space[2]` square; the selected
+cell is filled Maroon with `semantic.actionText`, the other is `surface.raised` with
+`text.secondary`. `radiogroup` on the group and `radio` on each cell — never a switch,
+because neither state is "off": the reader is always looking at one of the two.
+
+**One component, two callers, and that is the rule rather than the implementation.**
+Collection's Poster/List control and the Feed's Feed/Leaderboard control are the *same*
+component. They behave differently on purpose — Collection persists its choice across
+launches, the Feed deliberately does not (PRD §11, §14) — which is exactly why they have to
+look identical by construction. Two controls that behave differently and merely look
+similar drift into two dialects of one idea at the next tuning pass.
+
+**Exactly two options.** Not a limit awaiting removal: at three this stops being a toggle
+and becomes a segmented control, which this system already has with room for labels. A
+glyph-only cell is legible because there are two of them and the pair is a question with
+two answers; a third unlabelled icon is a guess.
+
+**The left cell is the default.** Whatever a fresh install or a fresh launch opens on sits
+on the left, so the control reads as its own default rather than asking the reader to
+discover that it does.
+
+**Glyphs must not be borrowed across toggles.** Collection's list glyph means "the other
+way of drawing this same thing"; the Feed's left cell means "the ordinary homepage", so it
+takes `newspaper-outline` rather than reusing `list`. Two toggles wearing the same glyph
+would claim they answer the same question.
+
+### Leaderboard row — canonical, 2026-08-28
+
+`rank · avatar · name / @handle · count`. The rank column is fixed-width and
+right-aligned, so avatars line up whether the rank is 1 or 48 and the digits themselves
+line up — which is what makes a column of numbers scannable.
+
+The top three carry `tone="action"` on the **rank only**. No medals, no metals, no podium:
+gold/silver/bronze would be three new colours in a two-colour system, and the app's own
+accent already means "this is the part that matters". The treatment keys on the *rank*
+rather than on the row's index, so a three-way tie for first accents three rows and the
+next person is fourth.
+
+The reader's own row takes a `surface.raised` fill and a `· You` suffix on the name — a
+fact about the name, not a second statistic competing with the count in the row's tail.
+When their rank is past the end of the page a pinned row is drawn below the list instead,
+carrying the rank, the word You, the denominator, and the count. The two are mutually
+exclusive by construction: the pinned row is drawn only when no visible row is the
+reader's, so nobody sees themselves twice.
+
+Metric selection uses the **same `Chip` row as Search's filters**, wrapping rather than
+scrolling — four short words fit on one line at every supported text size, and a scrolling
+row of four hides the fourth on the narrowest phone.
+
+### Limited profile shell — canonical, 2026-08-28
+
+What a private account the viewer has not been approved by draws: avatar, display name,
+`@handle`, the Follow/Requested control, and one concise line — *"This account is
+private."*
+
+The rule is what it must **not** draw. No empty versions of the normal profile sections,
+no zeroed stat row, no skeletons that never resolve. `ProfileIdentity`'s `stats` prop is
+optional precisely for this: absent stats mean "this viewer is not entitled to these
+numbers", where a row of zeros would be a claim that somebody has no followers and has
+ranked nothing. Nor is any query issued for private content in order to render a
+placeholder from its failure.
+
+The same identity appears **in lists** now — followers, following, mutuals — and there it
+carries a small `lock-closed` glyph beside the handle, with the word "Private" in the
+accessible label. Without the marker a row that looks like every other row opens to almost
+nothing, which reads as breakage rather than as privacy.
+
 ### Pending and offline
 
 Queued writes render with a `pending` marker per [`offline-sync.md`](../architecture/offline-sync.md) §4: the row stays fully legible at 70% opacity with a small Sage sync glyph. Not a spinner, and never a greyed-out row — the user's action did happen, it just has not reached the server.

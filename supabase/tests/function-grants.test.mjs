@@ -290,6 +290,46 @@ const ALLOWED = {
   // follows_read would admit to the caller one at a time.
   'mutuals_with(uuid)': ['authenticated'],
 
+  // Added 2026-08-28 with the monthly leaderboard (20260828000300).
+  //
+  // Both are definer over `user_media`, which is owner-only by policy — that is the
+  // whole reason they exist, since an invoker board would have one entrant. Neither
+  // takes a viewer: `auth.uid()` is the perspective and the only argument is which of
+  // four metrics to count, so there is no third-party question to pose (20260813001900).
+  // The population is filtered by `can_view_profile`, so an unapproved private account
+  // is absent from the board rather than listed with a number (founder §26), and the
+  // rows carry counts only — never a title, never a date.
+  //
+  // `_leaderboard_counts`, `_leaderboard_metric` and `_leaderboard_month_start` are
+  // deliberately absent. The first is the one that actually reads `user_media` across
+  // accounts, and a client holding it would get the same rows without the ordering that
+  // makes them a board — which changes nothing about safety, but the allow-list's rule
+  // is that internal helpers stay internal so the reachable surface is the smallest set
+  // that answers the product's questions.
+  'monthly_leaderboard(text,integer)': ['authenticated'],
+  'my_leaderboard_standing(text)': ['authenticated'],
+
+  // Added 2026-08-28 with For You rotation (20260828000500).
+  //
+  // `note_recommendations_shown` writes `recommendation_impressions`, a table with RLS
+  // and deliberately no policy at all — the same shape `dismiss_for_you` gave
+  // `recommendation_feedback`. It writes `auth.uid()` and takes only title ids, so it
+  // cannot record an impression for anybody else; the hour-truncated primary key makes
+  // it idempotent, which is why it needs no operation ledger.
+  //
+  // `recommendation_exposure` is the read side of the same table and takes no arguments
+  // at all, so it can only aggregate the caller's own rows.
+  //
+  // `social_candidates` is the one that touches other people's `rankings`, and it is the
+  // reason the grant is worth arguing: it returns **media item ids and a count**, never
+  // a person and never a per-endorser fact. Every endorser passes `can_view_profile`, so
+  // every row it aggregates is one `rankings_read` would admit to the caller one at a
+  // time — the same argument `people_mutuals` and `following_score` record. It takes no
+  // viewer.
+  'note_recommendations_shown(uuid[])': ['authenticated'],
+  'recommendation_exposure()': ['authenticated'],
+  'social_candidates(integer)': ['authenticated'],
+
   // Added 2026-08-17 with Settings (20260817000600). Every one of these is about the
   // caller's own account and none takes a target, which is 20260813001900's rule in
   // its strongest form: there is nothing to point at anybody else.

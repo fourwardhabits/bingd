@@ -15,7 +15,7 @@ import {
 } from '@/features/collection/filters';
 import { useLoggedCollection, useWatchlist } from '@/features/collection/use-collection';
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
-import { headlineFor } from '@/features/recommendations/rank';
+import { headlineFor, SLATE_SIZE } from '@/features/recommendations/rank';
 import { RecommendationRequestsSheet } from '@/features/recommendations/RecommendationRequestsSheet';
 import { RequestAlertRow } from '@/features/recommendations/RequestAlertRow';
 import {
@@ -26,7 +26,12 @@ import { PeopleDiscovery } from '@/features/people/PeopleDiscovery';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
 import { refreshRecommendations } from '@/features/recommendations/session-seed';
 import { useDismissTitle } from '@/features/recommendations/use-dismissed';
-import { useForYou, type ForYouItem, type Medium } from '@/features/recommendations/use-for-you';
+import {
+  MAX_PAGES,
+  useForYou,
+  type ForYouItem,
+  type Medium,
+} from '@/features/recommendations/use-for-you';
 import {
   asCollectionItem as recommendationAsItem,
   unopenedCount,
@@ -50,6 +55,7 @@ import {
   PosterGrid,
   Screen,
   SkeletonRow,
+  Text,
   type Medium as CollectionMedium,
   type MediumSelectorOption,
 } from '@/ui/components';
@@ -136,9 +142,33 @@ export default function RecommendationsScreen() {
   const changeCategory = (next: ForYouCategory) => {
     setCategory(next);
     if (next !== 'people') setMedium(SELECTOR_TO_MEDIUM[next]);
+    // A different medium is a different question, so the wall starts at page one rather
+    // than opening four pages deep into a slate this reader never scrolled.
+    setPages(1);
   };
 
-  const slate = useForYou(profile.id, medium, filters);
+  /**
+   * Filters, and the page count that has to move with them.
+   *
+   * One setter rather than three call sites each remembering to reset. The pool a page is
+   * drawn from changes when the filters do, so a reader four pages into an unfiltered
+   * wall who then picks Comedy would otherwise be handed eighty Comedy titles at once —
+   * most of them the weak tail — instead of the best twenty.
+   */
+  const changeFilters = (next: CollectionFilters) => {
+    setFilters(next);
+    setPages(1);
+  };
+
+  /**
+   * How many diversified pages the wall is showing (founder §18).
+   *
+   * Reset whenever the reader changes what they are looking at — a new medium or new
+   * filters is a new question, and arriving at page four of the old one would be the
+   * scroll position surviving a change it should not have.
+   */
+  const [pages, setPages] = useState(1);
+  const slate = useForYou(profile.id, medium, filters, pages);
   const logged = useLoggedCollection(profile.id);
   const sent = useSentToYou(profile.id);
   /**
@@ -153,6 +183,65 @@ export default function RecommendationsScreen() {
 
   const items = slate.data?.items ?? [];
   const sentRows = sent.data ?? [];
+
+  /**
+   * Whether asking for another page could produce anything.
+   *
+   * `diversifyPaged` returns short when the candidate pool runs out, so a wall holding
+   * fewer than `pages × SLATE_SIZE` titles has already been told there is no more —
+   * which is a better signal than a count, because it accounts for the diversity
+   * ceilings rejecting the tail as well as for the pool being empty.
+   */
+  const exhausted = pages >= MAX_PAGES || items.length < pages * SLATE_SIZE;
+
+  /**
+   * One more page, when the reader reaches the end of this one.
+   *
+   * Costs nothing over the network: `pages` feeds `select`, which re-derives from
+   * candidates already in the cache. So this is a sort rather than a fetch, and there is
+   * no request to debounce, fail, or loop on — which is the founder's "no infinite
+   * request loop" satisfied by there being no request.
+   */
+  const loadMore = () => {
+    if (exhausted) return;
+    /**
+     * `pages + 1`, and **not** the functional `current => current + 1`.
+     *
+     * `onScroll` fires about once a frame, so a fast flick near the bottom delivers
+     * several events before React re-renders. Every one of them sees the same `exhausted`
+     * from this render and calls this. With the functional form each queued update would
+     * increment, so one gesture could take the wall from twenty titles to a hundred in a
+     * single commit — five pages of posters mounted at once, which is the kind of thing
+     * that shows up as heat on a real device rather than as a failing test.
+     *
+     * Setting a *value* makes the repeated calls idempotent: they all write the same
+     * number, so the wall grows by exactly one page per render however many events
+     * arrive. The next page needs the next render, by which time `exhausted` has been
+     * recomputed against the wall that actually came back.
+     */
+    setPages(Math.min(MAX_PAGES, pages + 1));
+  };
+
+  /**
+   * A new arrangement and a fresh first page.
+   *
+   * **This is what replaced the Refresh chip** (§18). The founder's end state is that a
+   * reader should never have to think "I need to press Refresh to make recommendations
+   * work", and after this tranche they do not: the wall rotates across launches on its
+   * own, from `recommendation_exposure`. What is still needed is an *explicit* way to ask
+   * for a different slate now — the founder was clear that Refresh should not be removed
+   * merely for looks if one is still required — and pull-to-refresh is that way. It is
+   * already the gesture on this screen for the Sent to you list and on the Feed, so it is
+   * a control the reader has met rather than a new one.
+   *
+   * `refreshRecommendations` advances the seed and marks everything currently on screen
+   * as shown; `setPages(1)` puts the reader back at a first page, because a refreshed
+   * wall they are four pages down inside is a wall whose change they cannot see.
+   */
+  const refreshSlate = () => {
+    refreshRecommendations();
+    setPages(1);
+  };
 
   // Filtered here rather than in the query, so turning the chip on cannot refetch and
   // cannot reorder: the server's ordering survives, narrowed.
@@ -349,46 +438,27 @@ export default function RecommendationsScreen() {
               selected={activeCount > 0}
               onPress={() => setFiltering(true)}
             />
-            {/* **Refresh rearranges; it does not reload.**
-            The founder's report was that For You showed essentially the same titles
-            every visit, and it did: the slate is a pure function of the rankings and the
-            provider cache, so with neither moving there was one answer and the app kept
-            giving it. This asks for a different arrangement of the same scored
-            candidates — a new session seed, which `rank.ts` samples an order from.
+            {/* **The Refresh chip was here, and it is gone** (founder §18).
 
-            **A new seed, and so almost always a new arrangement rather than certainly
-            one.** `session-seed.ts` carries the two cases where the wall can come back
-            identical — an all-equal pool, where there is no near-tie to break; and two
-            seeds simply surviving the ceilings to the same twenty, which needs no ties
-            at all and gets likelier as the pool shrinks toward the wall's size.
-            Independent review 29c found this comment implying more than that, and 29d
-            found the first correction lumping the two cases together as though both
-            required a pool with nothing to choose between. Only the first does.
+            It existed because the wall could not rotate by itself: exposure was module
+            state, so every launch drew from an un-penalised pool and produced the same
+            first slate, and pressing Refresh was the only way past it. That was the
+            reader having to know a mechanism, which is exactly what §18 asks to remove —
+            "the user should not have to think: I need to press Refresh to make
+            recommendations work".
 
-            It costs no network. Nothing is refetched, no query key changes, and the
-            reader's filters and medium are untouched: a refreshed wall is still Comedy
-            if Comedy was picked.
-
-            Not shown over Sent to you. That list is other people's recommendations in
-            the order the server sent them, so there is no arrangement to sample — a
-            control that could never do anything is worse than an absent one. */}
-            {!sentOnly ? (
-              <FilterChip
-                icon="refresh"
-                label="Refresh"
-                accessibilityLabel="Refresh recommendations"
-                // No telemetry. `ANALYTICS_EVENTS` is a closed union with a privacy
-                // boundary asserted around it, and this Preview pass has no reason to widen
-                // it — whether Refresh gets used is a question for the tranche that decides
-                // whether freshness worked, not for founder acceptance.
-                onPress={refreshRecommendations}
-              />
-            ) : null}
+            Two changes let it go rather than a decision that the row looked busy, which
+            the founder ruled out as a reason on its own. `recommendation_exposure`
+            (20260828000500) makes the rotation survive a relaunch, so the *default*
+            behaviour is now what Refresh used to buy. And an explicit way to ask for a
+            new slate still exists: pull-to-refresh on the wall, which runs the same
+            `refreshRecommendations` this chip did. A gesture the screen already had for
+            Sent to you, rather than a control competing with the filters. */}
             {isFiltered(filters) ? (
               <FilterChip
                 icon="close"
                 label="Clear all"
-                onPress={() => setFilters(emptyFilters())}
+                onPress={() => changeFilters(emptyFilters())}
               />
             ) : null}
           </View>
@@ -420,10 +490,52 @@ export default function RecommendationsScreen() {
               ranked={logged.data?.rankedCount ?? 0}
               filtered={isFiltered(filters)}
               onRank={() => router.push('/log')}
-              onClearFilters={() => setFilters(emptyFilters())}
+              onClearFilters={() => changeFilters(emptyFilters())}
             />
           ) : (
-            <ScrollView contentContainerStyle={styles.content}>
+            <ScrollView
+              contentContainerStyle={styles.content}
+              /**
+               * The wall grows as the reader nears its end (§18).
+               *
+               * `onScroll` with a threshold rather than a `FlatList`'s `onEndReached`,
+               * because the wall is a `PosterGrid` inside a `ScrollView` and converting it
+               * to a virtualised list is a change to how every tile is measured and drawn —
+               * a bigger risk than this tranche is buying. The grid is at most a hundred
+               * posters under `MAX_PAGES`, which is well inside what a `ScrollView` renders
+               * comfortably.
+               *
+               * `scrollEventThrottle` at 16 is one event a frame; `loadMore` is a no-op
+               * once the pool is exhausted, so the common case at the bottom of the wall is
+               * a comparison and a return.
+               */
+              scrollEventThrottle={16}
+              onScroll={({ nativeEvent }) => {
+                const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+                const remaining =
+                  contentSize.height - (contentOffset.y + layoutMeasurement.height);
+                // Two screenfuls of slack, so the next page is already there by the time
+                // the reader arrives rather than appearing under their thumb.
+                if (remaining < layoutMeasurement.height * 2) loadMore();
+              }}
+              refreshControl={
+                <RefreshControl
+                  // The only way a test can reach a pull. There is no accessible name on
+                  // a refresh control and no role to query it by, and asserting on the
+                  // gesture matters more than usual here: it is the *replacement* for a
+                  // control that was removed, so a wiring mistake would look exactly like
+                  // the feature having been dropped.
+                  testID="for-you-refresh"
+                  // Not `slate.isRefetching`: this gesture rearranges rather than
+                  // refetching, and it completes in one render. Tying the spinner to a
+                  // query that never runs would leave it spinning for ever.
+                  refreshing={false}
+                  onRefresh={refreshSlate}
+                  tintColor={theme.semantic.action}
+                  colors={[theme.semantic.action]}
+                />
+              }
+            >
               <PosterGrid
                 tiles={items.map((item) => ({
                   id: item.mediaItemId,
@@ -457,6 +569,25 @@ export default function RecommendationsScreen() {
                   if (item) explain(item);
                 }}
               />
+
+              {/**
+                * The end of the wall, said once, quietly (§18).
+                *
+                * The founder's rule is not to keep recycling the same five cards at the
+                * bottom — so when the pool is out the wall simply stops, and this line
+                * says why in the one way that is both true and actionable. It is not a
+                * button: the reader is on a wall of recommendations and the thing to do
+                * about a thin one is to rank more, which the Log tab already offers.
+                *
+                * Only under a wall with something on it. Under an empty one `Nothing`
+                * has already said something better, and two explanations of the same
+                * absence is worse than either.
+                */}
+              {exhausted && items.length > 0 ? (
+                <Text variant="footnote" tone="tertiary" style={styles.exhausted}>
+                  Rank a few more titles to sharpen your recommendations.
+                </Text>
+              ) : null}
             </ScrollView>
           )}
 
@@ -472,7 +603,7 @@ export default function RecommendationsScreen() {
               value={filters}
               showBuckets={false}
               onApply={(next) => {
-                setFilters(next);
+                changeFilters(next);
                 setFiltering(false);
               }}
               onClose={() => setFiltering(false)}
@@ -662,6 +793,11 @@ function Nothing({
 
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10], gap: theme.space[3] },
+  exhausted: {
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[4],
+    textAlign: 'center',
+  },
   filterRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

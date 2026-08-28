@@ -955,72 +955,128 @@ describe('Taste Match', () => {
     }));
   };
 
-  it('shows the percentage under the handle', async () => {
+  /**
+   * The compact line, and the sheet behind it (founder 2026-08-28 §§2–4).
+   *
+   * The line used to be a percentage or one of two sentences. It is now always the same
+   * shape — a verdict and its evidence — because the number alone was never the whole
+   * answer: since `20260827001000` the score is shrunk toward 50 by exactly the count
+   * beside it, so a reader seeing 89% has been told something the shared count is the
+   * other half of.
+   *
+   * The old sentences did not disappear; they moved into the sheet, where `explanation`
+   * carries them and only a reader who asked has to read them.
+   */
+  it('states the score and its evidence in one line', async () => {
     mockRpcResults.taste_match = [{ score: 84, common_count: 12, min_common: 5 }];
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('84% Match')).toBeTruthy());
-    // The long form is gone from this surface. The count was never the thing anybody
-    // came for, and a second line here competes with the handle above it.
+    await waitFor(() => expect(view.getByText('84% Match · 12 shared')).toBeTruthy());
+    // The long form is gone from this surface. A second line here competes with the
+    // handle above it.
     expect(view.queryByText(/Taste Match/)).toBeNull();
     expect(view.queryByText(/titles in common/)).toBeNull();
+  });
+
+  it('says TBD, with the count, when there is no score yet', async () => {
+    subjectHasRanked(12);
+    viewerHasRanked(1);
+    mockRpcResults.taste_match = [{ score: null, common_count: 3, min_common: 5 }];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Match TBD · 3 shared')).toBeTruthy());
+    expect(view.queryByText(/%/)).toBeNull();
+  });
+
+  it('opens the explanation when the line is tapped', async () => {
+    mockRpcResults.taste_match = [{ score: 84, common_count: 12, min_common: 5 }];
+
+    const view = await open();
+    await waitFor(() => expect(view.getByText('84% Match · 12 shared')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('84% Match · 12 shared'));
+
+    await waitFor(() =>
+      expect(
+        view.getByText(
+          "How similarly you and Anna rate titles you've both ranked. " +
+            'More shared titles makes the Match more reliable.',
+        ),
+      ).toBeTruthy(),
+    );
+    expect(view.getByText('Titles you and Anna have both ranked.')).toBeTruthy();
   });
 
   /**
    * The founder's incentive case, and the one where the advice is actually true: the
    * subject has plenty ranked, so the shortfall is the reader's and ranking more can
-   * genuinely close it.
+   * genuinely close it. It is a sentence in the sheet now rather than the line itself.
    */
-  it('tells the viewer to rank more only when that is what is missing', async () => {
+  it('nudges the viewer, inside the sheet, only when that is what is missing', async () => {
     subjectHasRanked(12);
     viewerHasRanked(1);
     mockRpcResults.taste_match = [{ score: null, common_count: 1, min_common: 5 }];
 
     const view = await open();
+    await waitFor(() => expect(view.getByText('Match TBD · 1 shared')).toBeTruthy());
 
-    await waitFor(() => expect(view.getByText('Rank more to see Match')).toBeTruthy());
-    expect(view.queryByText(/%/)).toBeNull();
+    await fireEvent.press(view.getByLabelText('Match TBD · 1 shared'));
+
+    await waitFor(() =>
+      expect(view.getByText('Rank a few more titles and this will fill in.')).toBeTruthy(),
+    );
   });
 
   /**
    * And the case it must not blame the reader for. Anna has ranked three films; nothing
    * the viewer ranks can produce five shared titles with somebody who has three.
    */
-  it('does not blame the viewer when the other account is the one with too little', async () => {
+  it('does not nudge when the other account is the one with too little', async () => {
     subjectHasRanked(3);
     viewerHasRanked(40);
     mockRpcResults.taste_match = [{ score: null, common_count: 2, min_common: 5 }];
 
     const view = await open();
+    await waitFor(() => expect(view.getByText('Match TBD · 2 shared')).toBeTruthy());
 
-    await waitFor(() => expect(view.getByText('Not enough shared taste yet')).toBeTruthy());
-    expect(view.queryByText(/Rank more/)).toBeNull();
+    await fireEvent.press(view.getByLabelText('Match TBD · 2 shared'));
+
+    await waitFor(() => expect(view.getByText(/have both ranked/)).toBeTruthy());
+    expect(view.queryByText(/Rank a few more/)).toBeNull();
   });
 
-  it('says the overlap is short when both have ranked plenty', async () => {
+  it('does not nudge when both have ranked plenty and simply have not overlapped', async () => {
     subjectHasRanked(30);
     viewerHasRanked(30);
     mockRpcResults.taste_match = [{ score: null, common_count: 2, min_common: 5 }];
 
     const view = await open();
+    await waitFor(() => expect(view.getByText('Match TBD · 2 shared')).toBeTruthy());
 
-    await waitFor(() => expect(view.getByText('Not enough shared taste yet')).toBeTruthy());
-    expect(view.queryByText(/Rank more/)).toBeNull();
+    await fireEvent.press(view.getByLabelText('Match TBD · 2 shared'));
+
+    await waitFor(() => expect(view.getByText(/have both ranked/)).toBeTruthy());
+    expect(view.queryByText(/Rank a few more/)).toBeNull();
   });
 
   /**
-   * The one thing the founder ruled out by name. An absence of evidence is not a low
-   * score, and a placeholder percentage is worse than either.
+   * The rule that survived the rewrite, and the one the founder ruled out by name: an
+   * absence of evidence is not a low score.
+   *
+   * `Match TBD` is permitted now and is not that rule broken — it is in a different unit
+   * from a percentage, so it cannot be misread as one. What must never appear is a
+   * figure the app does not have.
    */
-  it('never prints a number it does not have', async () => {
+  it('never prints a percentage it does not have', async () => {
     mockRpcResults.taste_match = [{ score: null, common_count: 3, min_common: 5 }];
 
     const view = await open();
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
 
-    expect(view.queryByText(/TBD/)).toBeNull();
     expect(view.queryByText(/%/)).toBeNull();
+    expect(view.queryByText(/0% Match/)).toBeNull();
   });
 
   it('is absent on the viewer’s own profile', async () => {
@@ -1043,7 +1099,7 @@ describe('Taste Match', () => {
    * raises — must not produce a percentage of any kind.
    *
    * The genuinely-still-loading case, where the line is absent rather than provisional,
-   * is `tasteMatchState`'s own and is pinned in `use-taste-match.test.ts`: this mock
+   * is `tasteMatchLine`'s own and is pinned in `use-taste-match.test.ts`: this mock
    * resolves in the same tick, so there is no pending moment here to observe.
    */
   it('prints no percentage when the server answers with nothing', async () => {
@@ -1053,7 +1109,6 @@ describe('Taste Match', () => {
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
 
     expect(view.queryByText(/%/)).toBeNull();
-    expect(view.queryByText(/TBD/)).toBeNull();
   });
 
   /**

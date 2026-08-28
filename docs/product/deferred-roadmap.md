@@ -636,10 +636,26 @@ mounting neighbours versus rendering them lazily.
 
 ## 17. Recommendation freshness beyond a session's own memory
 
+**Largely delivered 2026-08-28 (V1.5). This entry is now the remainder of the
+remainder** — see the *What shipped, third pass* note below for what left it, and the
+*What is still deferred* note at the end for what did not.
+
 **What it is.** The parts of recommendation freshness that in-memory session exposure does
 *not* buy. **The seed shipped** in the 2026-08-20 Preview micropass and **session exposure
 shipped in the micropass after it** — see `docs/architecture/recommendations.md` §7 — so
 this entry is only the remainder.
+
+**What shipped, third pass (2026-08-28, founder §§13–18).** The durable half. This entry's
+own headline complaint — that exposure "resets with the process", so the first slate after
+every launch was drawn from an un-penalised pool and was therefore the same first slate —
+is closed. `recommendation_impressions` gained its first writer
+(`note_recommendations_shown`, hour-truncated so the primary key makes it idempotent) and
+its reader (`recommendation_exposure`, windowed by `foryou.impression_window_hours` so a
+penalty expires rather than accumulating for ever). The ranker merges the durable count
+with the session's by `max`. Also shipped in the same pass: a small social candidate source
+(`social_candidates` — followees' top-band titles, ids and a count only, no Match
+weighting), diversified paging so the wall grows on scroll without reshuffling what has
+been read, and the removal of the Refresh chip in favour of pull-to-refresh.
 
 **What shipped, second pass (2026-08-20).** The seed alone turned out not to be enough,
 and the founder's physical test is the record of it: two consecutive Refreshes kept eight of
@@ -688,11 +704,32 @@ including the false ones — are in `docs/architecture/recommendations.md` §7.
   lists for weeks (`media_cache`), so refreshing rearranges a fixed set. Genuinely new
   candidates need more anchors, a second candidate source, or a shorter cache life.
 
-**Revisit when.** The beta produces evidence about whether *session* memory was enough.
-The signal to watch for is a reader who says the recommendations feel familiar **on opening
-the app** rather than on pressing Refresh — that is the cross-session gap and cannot be
-closed without the ledger. A complaint about Refresh itself would mean something regressed,
-not that this entry came due.
+**What is still deferred after 2026-08-28.** Four of the five bullets above survive V1.5,
+and the list they sit under is now the *only* part of this entry still open:
+
+- **No "repeatedly ignored" signal.** V1.5 records that a title was **shown**, which is
+  what the cooldown needs; it still cannot distinguish a title the reader scrolled past
+  four times from one they never reached. That needs a visibility threshold, which is a
+  second definition of "shown" living inside a layout — deliberately not built.
+- **No novelty or recency term in the score.** Unchanged: freshness is presentational.
+- **No exploration feedback.** Unchanged: nothing learns from whether an explored title
+  was opened, saved or ignored, so the temperature is still a constant.
+- **The candidate pool widens only a little.** `social_candidates` is a genuine third
+  source and is bounded by how much the reader's followees have ranked; the anchors still
+  return the same `similar` lists for weeks. A materially deeper pool still needs more
+  anchors or a shorter cache life.
+
+**Revisit when.** The beta produces evidence about whether the *durable* cooldown was
+enough. The signal to watch for now is a reader who says recommendations feel familiar
+**after several days**, which would mean the 72-hour window is too short to matter against
+a pool this size — a pool problem rather than a memory problem, and the bullets above are
+where it would be answered.
+
+**Privacy cost, now paid rather than pending.** The dependency below asked for a decision
+on impression logging as a new category of stored data. It was taken on 2026-08-28: the
+table is owner-scoped with no read policy at all, the only client read is an aggregate of
+the caller's own rows, rows age out of the penalty window, and the fact stored is "this
+title was on your wall" and nothing about when within the hour.
 
 **Depends on.** A decision on impression logging and its privacy cost — a durable record
 of what somebody was *shown* is a new category of stored data and PRD §22 has no row for it
@@ -1227,6 +1264,68 @@ confidence must be visible in the number.
 
 **Depends on.** A larger ranked population · a content-profile design that states its
 evidence · `taste_match` remaining the single algorithm every surface calls.
+
+**Reaffirmed 2026-08-28.** The founder reassessed Match and accepted it for beta: "the
+next improvement is presentation, not mathematics." That tranche changed nothing in
+`taste_match` — no weight, no shrinkage constant, no minimum-common threshold, no Spearman
+component — and spent its budget on stating the evidence beside the number instead (PRD
+§13). This entry is unchanged and still the right shape.
+
+---
+
+## 24. Network-relative leaderboard
+
+**Deferred by the founder, 2026-08-28**, in the tranche that shipped the monthly board
+(PRD §14).
+
+**What it is.** A leaderboard scoped to the reader's own network — people they follow, or
+mutuals — rather than to everybody they are permitted to see.
+
+**Why it is wanted.** The board that shipped is **global**, which is right for a friend
+beta where the global set and the friend set are nearly the same list. They stop being the
+same list quickly. At any real scale a global board is won by whoever watches the most
+television in the world, which is not a comparison anybody in this product is trying to
+make, and the people a reader actually wants to be measured against are the ones whose
+recommendations they take.
+
+**Why it is deferred.** It is not needed while the beta is a few dozen accounts, and
+building it now would mean choosing between "people I follow", "mutuals", and "friends of
+friends" with no evidence about which one people mean — a choice better made against a
+network that exists.
+
+**What already makes it cheap.** The board is viewer-relative by construction: the
+population is a `can_view_profile` filter over `profiles`, so a network scope is a
+narrower `from` clause in one CTE rather than a new architecture. The metrics, the
+ordering, the tie rule, the pinned "You" row and the whole client are unchanged.
+
+**Revisit when.** The global board stops being legible — either it is long enough that a
+reader cannot find themselves without the pinned row, or it is won consistently by
+somebody the reader has no relationship with.
+
+**Depends on.** Enough accounts for the two scopes to differ · a decision on which network
+definition the product means.
+
+---
+
+## 25. External editorial and top-film-list ingestion
+
+**Not currently planned. Recorded 2026-08-28** so that a future proposal has to argue
+against a decision rather than fill a silence.
+
+**What it is.** Importing curated third-party lists — a publication's top 100, a critics'
+poll, an awards shortlist — as a recommendation candidate source.
+
+**Why it is not planned.** The founder's reasoning, in the same breath as approving the
+social candidate source: *"someone with high Match loved this and I haven't seen it"* is
+more bingd.-native than importing generic critics' lists. A canon list is the same list for
+every reader, so it cannot answer "what should **I** watch next", and a product whose whole
+claim is a personal ranking has no use for a ranking somebody else made. It would also
+re-import the labelling problem `20260817001000` removed: presenting another organisation's
+judgement inside a surface people read as theirs.
+
+**What would change the answer.** Nothing currently foreseen. If a canon ever arrives it
+should be a *browsable list*, clearly attributed, and not a candidate source feeding For
+You — the two are different products and only the second one is ruled out here.
 
 ---
 

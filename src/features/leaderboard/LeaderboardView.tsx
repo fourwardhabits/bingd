@@ -1,0 +1,245 @@
+import { Pressable, StyleSheet, View } from 'react-native';
+
+import { Avatar, Chip, Divider, EmptyState, SkeletonRow, Text } from '@/ui/components';
+import { theme } from '@/ui/tokens';
+
+import {
+  countLabel,
+  emptyCopy,
+  LEADERBOARD_METRICS,
+  LEADERBOARD_TITLE,
+  type LeaderboardEntry,
+  type LeaderboardMetric,
+  type MyStanding,
+} from './use-leaderboard';
+
+export type LeaderboardViewProps = {
+  metric: LeaderboardMetric;
+  onChangeMetric: (next: LeaderboardMetric) => void;
+  entries: readonly LeaderboardEntry[] | undefined;
+  standing: MyStanding | undefined;
+  loading: boolean;
+  onPressPerson: (username: string) => void;
+};
+
+/**
+ * The monthly board (founder §§7–10).
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IT DELIBERATELY IS NOT
+ *
+ * No podium illustration, no confetti, no XP, no points economy, no streak multiplier,
+ * no all-time column. The founder ruled each out by name, and the reason they belong in
+ * a comment rather than in a design doc is that every one of them is the *obvious* next
+ * thing to add to a leaderboard — so the absence has to be a decision somebody can read,
+ * or it will be filled in by the next person who thinks the screen looks bare.
+ *
+ * What is left is a heading, four chips and a list. The restraint is the design.
+ *
+ * ---------------------------------------------------------------------------
+ * THE TOP THREE, AND WHY THE TREATMENT IS A COLOUR RATHER THAN A MEDAL
+ *
+ * The founder allowed "a restrained medal/rank treatment for top three". A gold/silver/
+ * bronze palette would be three new colours in an app with a two-colour system, so the
+ * top three get the app's own accent on their rank instead: same mark, same weight,
+ * carrying the one colour the design already spends on things that matter.
+ *
+ * It keys on `rank`, not on position in the array — so a three-way tie for first shows
+ * three accented rows and the fourth person is fourth, which is what the board says.
+ *
+ * ---------------------------------------------------------------------------
+ * THE "YOU" ROW
+ *
+ * `is_you` marks the reader's row wherever it lands. When their rank is past the end of
+ * the page, `standing` supplies it and a pinned row is drawn beneath the list instead.
+ * The two are mutually exclusive by construction — the pinned row is drawn only when no
+ * visible row carries `isYou` — so the reader can never see themselves twice, which is
+ * the confusion the founder named.
+ */
+export function LeaderboardView({
+  metric,
+  onChangeMetric,
+  entries,
+  standing,
+  loading,
+  onPressPerson,
+}: LeaderboardViewProps) {
+  const rows = entries ?? [];
+  const youAreListed = rows.some((entry) => entry.isYou);
+  const empty = emptyCopy(metric);
+
+  return (
+    <View style={styles.body}>
+      <Text variant="title2" style={styles.heading}>
+        {LEADERBOARD_TITLE}
+      </Text>
+
+      {/* The same chip row Search and Collection filters use, so a reader who has met
+          one has met all three. Horizontal and wrapping rather than scrolling: four
+          short words fit on one line at every text size this app supports, and a
+          scrolling row of four hides the fourth on the narrowest phone. */}
+      <View style={styles.chips}>
+        {LEADERBOARD_METRICS.map((option) => (
+          <Chip
+            key={option.value}
+            label={option.label}
+            selected={option.value === metric}
+            onPress={() => onChangeMetric(option.value)}
+          />
+        ))}
+      </View>
+
+      {loading ? (
+        <View style={styles.padded}>
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+        </View>
+      ) : rows.length === 0 ? (
+        <View style={styles.padded}>
+          <EmptyState kind="nothingYet" title={empty.title} body={empty.body} />
+        </View>
+      ) : (
+        <View>
+          {rows.map((entry, index) => (
+            <View key={entry.id}>
+              {index > 0 ? <Divider /> : null}
+              <LeaderboardRow entry={entry} metric={metric} onPress={onPressPerson} />
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Only when they are not already above. A second copy of a row the reader can
+          see is the duplication the founder asked to avoid, and `isYou` is what makes
+          the two cases exclusive rather than merely unlikely. */}
+      {!loading && !youAreListed && standing && standing.rank !== null ? (
+        <View style={styles.pinned}>
+          <Divider />
+          <YouRow standing={standing} metric={metric} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function LeaderboardRow({
+  entry,
+  metric,
+  onPress,
+}: {
+  entry: LeaderboardEntry;
+  metric: LeaderboardMetric;
+  onPress: (username: string) => void;
+}) {
+  const top = entry.rank <= 3;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={[
+        `Number ${entry.rank}`,
+        entry.name,
+        `@${entry.username}`,
+        countLabel(metric, entry.count),
+        entry.isYou ? 'You' : null,
+      ]
+        .filter(Boolean)
+        .join(', ')}
+      accessibilityHint="Opens their profile"
+      onPress={() => onPress(entry.username)}
+      style={({ pressed }) => [
+        styles.row,
+        entry.isYou && styles.rowYou,
+        pressed && styles.pressed,
+      ]}
+    >
+      <Text
+        variant="callout"
+        tone={top ? 'action' : 'tertiary'}
+        style={styles.rank}
+        allowFontScaling={false}
+      >
+        {entry.rank}
+      </Text>
+
+      <Avatar size="sm" uri={entry.avatarUri} name={entry.name} />
+
+      <View style={styles.copy}>
+        <Text variant="callout" numberOfLines={1}>
+          {entry.name}
+          {/* "You" as a suffix rather than as a badge in the row's tail, where the count
+              already lives. It is a fact about the name, not a second statistic. */}
+          {entry.isYou ? <Text variant="callout" tone="tertiary"> · You</Text> : null}
+        </Text>
+        <Text variant="caption" tone="tertiary" numberOfLines={1}>
+          @{entry.username}
+        </Text>
+      </View>
+
+      <Text variant="callout" numberOfLines={1}>
+        {entry.count}
+      </Text>
+    </Pressable>
+  );
+}
+
+/**
+ * The reader's own position, when it is past the end of the page.
+ *
+ * Not a control. Every other row opens a profile and this one would open the reader's
+ * own, which the tab bar already does — and a row that looks like the others and goes
+ * somewhere they would not expect is worse than one that goes nowhere.
+ */
+function YouRow({ standing, metric }: { standing: MyStanding; metric: LeaderboardMetric }) {
+  return (
+    <View
+      style={[styles.row, styles.rowYou]}
+      accessibilityLabel={`You are number ${standing.rank} of ${standing.entrants}, ${countLabel(
+        metric,
+        standing.count,
+      )}`}
+    >
+      <Text variant="callout" tone="tertiary" style={styles.rank} allowFontScaling={false}>
+        {standing.rank}
+      </Text>
+      <View style={styles.copy}>
+        <Text variant="callout">You</Text>
+        {/* The denominator, because a rank without one is a number a reader cannot
+            place — 84th of 96 and 84th of 4,000 are different pieces of news. */}
+        <Text variant="caption" tone="tertiary">
+          of {standing.entrants}
+        </Text>
+      </View>
+      <Text variant="callout">{standing.count}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  body: { paddingBottom: theme.space[6] },
+  heading: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.space[2],
+    paddingHorizontal: theme.layout.gutter,
+    paddingTop: theme.space[3],
+    paddingBottom: theme.space[2],
+  },
+  padded: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.space[3],
+    paddingHorizontal: theme.layout.gutter,
+    paddingVertical: theme.space[3],
+  },
+  rowYou: { backgroundColor: theme.surface.raised },
+  // Fixed width so the avatars line up whether the rank is 1 or 48. Right-aligned so
+  // the digits themselves line up, which is what makes a column of numbers scannable.
+  rank: { minWidth: 24, textAlign: 'right' },
+  copy: { flex: 1 },
+  pinned: { paddingTop: theme.space[2] },
+  pressed: { opacity: 0.7 },
+});

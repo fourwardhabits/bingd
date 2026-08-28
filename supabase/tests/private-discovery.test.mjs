@@ -464,3 +464,133 @@ describe('the discovery predicate is server-only', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The founder's §33 matrix, as one readable contract.
+ *
+ * `20260819000100` separated identity from content on two surfaces — Search, and the
+ * locked shell a search result leads to. `20260828000400` finished the job on the two the
+ * founder's device pass found still collapsing them: Followers/Following, and Mutuals.
+ *
+ * Everything above in this file asserts the *content* half, which did not move. This
+ * block asserts the identity half that did, and — in the same place, deliberately — the
+ * three content surfaces that were newly at risk *because* it moved: Match, the shared
+ * count that comes with it, and the monthly leaderboard. Those three are the ones a
+ * reader would most plausibly assume follow discoverability, and they must not.
+ *
+ * `asRole('authenticated')` throughout. Under the owner every one of these returns rows
+ * regardless of policy, which is the failure mode three earlier reviews of this file
+ * each found in a different disguise.
+ */
+describe('a private identity, across every surface the founder named', () => {
+  let bystander;
+
+  const asViewer = (query, params = []) =>
+    t.asRole('authenticated', viewer, async () => (await t.sql(query, params)).rows);
+
+  before(async () => {
+    bystander = await t.createUser({ username: 'matrix_bystander' });
+    // `shy` already follows a bystander from the fixtures above. The edge that matters
+    // here is the other direction — a public account both parties can see, with the
+    // private account inside its follower list.
+    await t.sql(
+      `insert into follows (follower_id, followee_id, state, approved_at)
+       values ($1, $2, 'approved', now()) on conflict do nothing`,
+      [shy, bystander],
+    );
+    await t.sql(
+      `insert into follows (follower_id, followee_id, state, approved_at)
+       values ($1, $2, 'approved', now()) on conflict do nothing`,
+      [bystander, shy],
+    );
+  });
+
+  // --- identity: now visible -------------------------------------------------
+
+  it('is found by Search', async () => {
+    const rows = await asViewer(`select username, visibility from search_users('shy_one', 30)`);
+    assert.deepEqual(rows.map((r) => r.username), ['shy_one']);
+    assert.equal(rows[0].visibility, 'private');
+  });
+
+  it('leads to a locked shell rather than to nothing', async () => {
+    const rows = await asViewer(
+      `select username, display_name, visibility from profile_identity('shy_one')`,
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].visibility, 'private');
+  });
+
+  it('appears in a readable account’s follower list', async () => {
+    const rows = await asViewer(`select username, visibility from followers_of($1)`, [bystander]);
+    assert.ok(
+      rows.some((r) => r.username === 'shy_one' && r.visibility === 'private'),
+      'the §21B change: a private account is named in a list it belongs to',
+    );
+  });
+
+  it('appears in a readable account’s following list', async () => {
+    const rows = await asViewer(`select username, visibility from following_of($1)`, [bystander]);
+    assert.ok(rows.some((r) => r.username === 'shy_one' && r.visibility === 'private'));
+  });
+
+  it('can be suggested as a mutual', async () => {
+    // The viewer follows `bystander`, `bystander` follows `shy`, and the viewer has
+    // neither followed nor asked. That is the legitimate social reason §21C requires.
+    await t.sql(
+      `insert into follows (follower_id, followee_id, state, approved_at)
+       values ($1, $2, 'approved', now()) on conflict do nothing`,
+      [viewer, bystander],
+    );
+
+    const rows = await asViewer(`select username, visibility from people_mutuals(30)`);
+    assert.ok(rows.some((r) => r.username === 'shy_one' && r.visibility === 'private'));
+  });
+
+  // --- content: still refused ------------------------------------------------
+
+  it('still refuses Match, so the shared count cannot be read either', async () => {
+    // §25. Match and the shared-title count are both derived from private ranking data,
+    // and they arrive in the same row — so a client that got a count without a score
+    // would have read exactly what it may not. `taste_match` returns its
+    // insufficient-overlap shape rather than an error, which is what makes the two
+    // indistinguishable to a caller.
+    const rows = await asViewer(`select score, common_count from taste_match($1)`, [shy]);
+    assert.equal(rows.length, 1, 'taste_match always answers with exactly one row');
+    assert.equal(rows[0].score, null);
+    assert.equal(rows[0].common_count, 0, 'no score and no evidence count, in the same refusal');
+  });
+
+  it('returns Match and the shared count once the viewer is approved', async () => {
+    // The control. Without it the assertion above cannot tell "refused" from "no overlap".
+    const rows = await asViewer(`select score, common_count, min_common from taste_match($1)`, [
+      befriended,
+    ]);
+    assert.equal(rows.length, 1);
+    assert.ok(rows[0].min_common > 0, 'the row is real; only the evidence is thin');
+  });
+
+  it('still refuses a monthly leaderboard count', async () => {
+    // §26, at the surface rather than in `leaderboard.test.mjs`'s own fixtures: an
+    // account the viewer can find by name must not arrive on the board with a number.
+    await t.sql(
+      `insert into user_media (user_id, media_item_id, bucket, watched_on)
+       select $1, id, 'loved', current_date from media_items limit 1
+       on conflict (user_id, media_item_id) do update set watched_on = current_date`,
+      [shy],
+    );
+
+    const rows = await asViewer(`select username from monthly_leaderboard('titles', 50)`);
+    assert.ok(!rows.some((r) => r.username === 'shy_one'));
+  });
+
+  it('still refuses their ranked collection through the list they now appear in', async () => {
+    // The specific worry the §21B change creates: a row in a list carries a `user_id`,
+    // and a client holding one could try the content reads with it. They are the same
+    // reads the matrix above already refuses; this asserts it from the new entry point.
+    const rows = await asViewer(`select media_item_id from rankings where user_id = $1`, [shy]);
+    assert.deepEqual(rows, []);
+  });
+});

@@ -203,28 +203,37 @@ describe('mutuals: people followed by people you follow', () => {
   });
 
   /**
-   * **The privacy property this function turns on**, and the reason both endpoints are
-   * tested rather than just the candidate.
+   * **The founder's §21C reversal, and the exact shape of what it discloses.**
    *
-   * `follows_read` admits an approved row only when the caller can view *both* parties,
-   * so restricting the intermediary and the candidate to `can_view_profile` makes the
-   * count an aggregate over rows the caller could already select one at a time. Drop
-   * either half and the count becomes a disclosure: it would say that somebody follows a
-   * private account, which is exactly the hidden relationship a suggestion may not
-   * explain itself with.
+   * `20260826000500` §9a refused to suggest a private candidate, on the reasoning that
+   * doing so would say "somebody you follow follows this private account" — a hidden
+   * relationship a suggestion may not explain itself with.
    *
-   * The consequence — a private account the caller does not follow cannot be suggested
-   * here at all — is the existing contract rather than a new restriction, and it is
-   * asserted so that widening it later has to be deliberate.
+   * The founder reversed it on 2026-08-28, and the reversal is coherent rather than a
+   * softening, because the same tranche made `following_of(bo)` name `hidden` directly.
+   * A rule that withheld the same edge here while stating it there would be an
+   * inconsistency, not a protection.
+   *
+   * What comes back is identity — handle, name, avatar, `visibility = private` — so the
+   * card offers Request and the tap lands on the locked shell. The intermediary side is
+   * unmoved and is asserted separately below: `can_view_profile` still governs whom the
+   * count may be *aggregated over* and whom `mutual_names` may name.
    */
-  it('does not surface a private candidate the caller cannot view', async () => {
+  it('surfaces a private candidate as identity, with its visibility marked', async () => {
     const bo = await user('bo');
     const hidden = await user('hidden', 'private');
 
     await follows(alice, bo);
     await follows(bo, hidden);
 
-    assert.deepEqual(ids(await mutuals()), []);
+    const rows = await mutuals();
+    assert.deepEqual(ids(rows), [hidden]);
+    assert.equal(rows[0].visibility, 'private');
+    assert.equal(rows[0].mutual_count, 1);
+    // The name in the line is the *intermediary's*, and they are somebody Alice follows
+    // and can read. Nothing about the private candidate beyond its identity is here.
+    assert.equal(rows[0].mutual_names.length, 1);
+    assert.ok(rows[0].mutual_names[0].startsWith('pd_bo'));
   });
 
   it('does not count a path through a private account the caller cannot view', async () => {
