@@ -25,6 +25,7 @@ import {
 import { PeopleDiscovery } from '@/features/people/PeopleDiscovery';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
 import { refreshRecommendations } from '@/features/recommendations/session-seed';
+import { useDismissTitle } from '@/features/recommendations/use-dismissed';
 import { useForYou, type ForYouItem, type Medium } from '@/features/recommendations/use-for-you';
 import {
   asCollectionItem as recommendationAsItem,
@@ -148,6 +149,7 @@ export default function RecommendationsScreen() {
   const requests = useRecommendationRequests(profile.id);
   const watchlist = useWatchlist(profile.id);
   const markOpened = useMarkRecommendationOpened(profile.id);
+  const dismissTitle = useDismissTitle(profile.id);
 
   const items = slate.data?.items ?? [];
   const sentRows = sent.data ?? [];
@@ -441,6 +443,14 @@ export default function RecommendationsScreen() {
                   const item = items.find((candidate) => candidate.mediaItemId === tile.id);
                   if (item)
                     void toggleSaveById(item.mediaItemId, !savedIds.has(item.mediaItemId));
+                }}
+                // The founder's X (§12): the card goes on the tap — the optimistic
+                // set feeds `useForYou`'s select, so no refetch and no flash — and
+                // the write persists it. Only a proven refusal is worth an alert.
+                onDismissTile={(tile) => {
+                  void dismissTitle(tile.id).then((result) => {
+                    if (!result.ok) Alert.alert('Could not hide this', result.message);
+                  });
                 }}
                 onLongPressTile={(tile) => {
                   const item = items.find((candidate) => candidate.mediaItemId === tile.id);

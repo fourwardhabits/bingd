@@ -5,11 +5,13 @@ import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react
 import { shouldMask } from '@/features/collection/use-watched';
 import { newOperationId } from '@/features/collection/writes';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
-import { Avatar, Button, EmptyState, SpoilerNote, Text } from '@/ui/components';
+import { Avatar, Button, EmptyState, ReactionControl, SpoilerNote, Text } from '@/ui/components';
 import { fontFamily, theme } from '@/ui/tokens';
 
 import { relativeTime } from './activity';
+import { ReactionDetail } from './ReactionDetail';
 import { ReactionPill } from './ReactionPill';
+import { useCommentReactors } from './use-comment-reactors';
 import {
   COMMENT_MAX_LENGTH,
   threadsOf,
@@ -115,6 +117,14 @@ export function CommentThread({
   // idea from `reporting`: a row can be in either, both or neither, which is exactly how
   // `feed.tsx` keeps its picker and its detail sheet apart.
   const [pickerFor, setPickerFor] = useState<string | null>(null);
+  /**
+   * And which comment's reactor list is open — the third independent per-row surface,
+   * kept apart from the picker exactly as `feed.tsx` keeps its pair apart. The
+   * identities are fetched on open (`use-comment-reactors`): the thread query
+   * deliberately carries only aggregates.
+   */
+  const [reactorsFor, setReactorsFor] = useState<string | null>(null);
+  const reactors = useCommentReactors(reactorsFor, viewerId);
 
   /**
    * The composer belongs to one event, and this is what makes that true.
@@ -322,6 +332,7 @@ export function CommentThread({
     onReply: () => beginReply(comment),
     onReact: () => toggleDefault(comment),
     onOpenPicker: () => setPickerFor(comment.id),
+    onOpenReactors: () => setReactorsFor(comment.id),
     picker:
       pickerFor === comment.id ? (
         <ReactionPill
@@ -488,6 +499,22 @@ export function CommentThread({
         subjectId={reporting ?? ''}
         noun="comment"
       />
+
+      {/* The feed's own list component over a comment's reactors (§18) — nested the
+          way AwardsSheet nests its drill-down, so a sheet surface and the pushed
+          page both get it. An error resolves to null and the sheet simply closes on
+          the next render; a reactor list is not worth an error state of its own. */}
+      {reactorsFor ? (
+        <ReactionDetail
+          summary={reactors.data ?? null}
+          loading={reactors.isPending}
+          onClose={() => setReactorsFor(null)}
+          onPressPerson={(username) => {
+            setReactorsFor(null);
+            onPressPerson(username);
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -502,6 +529,7 @@ function CommentRow({
   onReply,
   onReact,
   onOpenPicker,
+  onOpenReactors,
   picker,
   onEdit,
   onDelete,
@@ -518,6 +546,8 @@ function CommentRow({
   onReact: () => void;
   /** A long press: opens the six. */
   onOpenPicker: () => void;
+  /** Tap or long press on the glyph cluster: who reacted, with what (§18). */
+  onOpenReactors: () => void;
   /** Rendered above the actions, inside the row - see ReactionPill. */
   picker: React.ReactNode;
   onEdit: () => void;
@@ -584,55 +614,24 @@ function CommentRow({
         {picker ? <View style={styles.picker}>{picker}</View> : null}
 
         <View style={styles.actions}>
-          {/* The reaction, which is the feed's control at a comment's scale.
-
-              Tap toggles the heart; hold opens the same six `ActivityRow` opens. The
-              glyph cluster beside it is that row's too — overlapped so three read as one
-              object and cost the width of about two.
-
-              The icon stays a heart in both states rather than becoming my own glyph,
-              for `ActivityRow`'s reason: the cluster already shows what I chose, and
-              putting it here as well would be the same emoji twice in one row. Filled
-              Maroon says *I* have acted; the cluster says what everybody said.
-
-              The count is absent at zero rather than showing "0": a nought beside every
-              remark is a scoreboard nobody asked for. */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected: comment.reactedByMe }}
-            accessibilityLabel={
+          {/* The reaction — the one control both surfaces render now (§17). This
+              grammar started here and the founder promoted it: heart first, cluster
+              and count inline. What this row adds since PR #64 is the cluster as a
+              way *in*: tap or hold it and the people behind the number are named
+              (§18), which is `feed.tsx`'s detail sheet fed by `comment_reactors`. */}
+          <ReactionControl
+            label={
               comment.reactedByMe
                 ? `You reacted to ${comment.authorName}'s comment. Tap to remove, long press to change.`
                 : `React to ${comment.authorName}'s comment. Long press for more reactions.`
             }
-            accessibilityHint="Long press to choose a different reaction"
-            onPress={onReact}
-            onLongPress={onOpenPicker}
-            hitSlop={slop}
-            style={styles.like}
-          >
-            <Ionicons
-              name={comment.reactedByMe ? 'heart' : 'heart-outline'}
-              size={theme.layout.icon.sm}
-              color={comment.reactedByMe ? theme.semantic.action : theme.text.tertiary}
-            />
-            {comment.reactionKinds.length ? (
-              <View style={styles.glyphs} accessibilityElementsHidden>
-                {comment.reactionKinds.slice(0, 3).map((kind, index) => (
-                  <View key={kind} style={index > 0 ? styles.glyphOverlap : undefined}>
-                    <Text variant="caption" allowFontScaling={false}>
-                      {REACTION_GLYPH[kind]}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-            {comment.reactionCount > 0 ? (
-              <Text variant="caption" tone={comment.reactedByMe ? 'action' : 'tertiary'}>
-                {comment.reactionCount}
-              </Text>
-            ) : null}
-          </Pressable>
+            active={comment.reactedByMe}
+            glyphs={comment.reactionKinds.map((kind) => REACTION_GLYPH[kind])}
+            count={comment.reactionCount}
+            onToggle={onReact}
+            onOpenPicker={onOpenPicker}
+            onOpenDetail={onOpenReactors}
+          />
 
           {/* Offered on a reply as well as on a root. Tapping it there is an ordinary
               thing to do and the server puts the result in the same thread — see
@@ -733,11 +732,6 @@ const styles = StyleSheet.create({
     gap: theme.space[4],
     paddingTop: theme.space[1],
   },
-  like: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
-  // The cluster of what other people chose. Overlapped exactly as ActivityRow does it,
-  // so the glyphs read as one object rather than as a list.
-  glyphs: { flexDirection: 'row', alignItems: 'center' },
-  glyphOverlap: { marginLeft: -theme.space[1] },
   // The pill sits above the actions and hugs the left edge of the copy column, which
   // is where the control it belongs to is.
   picker: { alignSelf: 'flex-start', paddingTop: theme.space[1] },

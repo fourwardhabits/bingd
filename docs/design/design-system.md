@@ -262,7 +262,7 @@ Four kinds. Primary is Maroon with `text.inverse`. Secondary is `surface.raised`
 
 Minimum height 48, minimum tap target 44 × 44, radius 8, `headline` label. One primary per screen. Disabled state reduces opacity to 40% **and** the button announces why it is disabled to screen readers — an unexplained dead button is the most common accessibility failure in this pattern.
 
-**Which kind an action takes — canonical, 2026-08-27.** The Maroon fill is reserved for the primary social or gamified act of a surface: **Follow**, **Recommend**, accept-shaped actions (**Approve**, **Add**), **bingd. Awards**. Everything that is utility, exit, or settled state stays outlined or quiet: **Share Profile**, **Following** (the `outline` kind), **Share off bingd.**, **Watchlist**, **Cancel / Close / Dismiss**, filters and settings. Share Profile is deliberately not Maroon — it sits beside the emphasised bingd. Awards, and two fills side by side is no hierarchy at all. Apply the rule narrowly: it names these actions, it is not a licence to repaint every control that feels important.
+**Which kind an action takes — canonical, 2026-08-27, revised the same day.** The Maroon fill marks **the primary action of the current context** — not "the primary social act everywhere", which is what the first wording of this rule licensed and the founder's title-page pass caught: Recommend carried the only fill in the action row while Rank, the act the whole page exists for, read smaller than it. On a title page the primary context is the personal score/Rank cluster in the hero — the reader's score circle at `xl` (§8), the Rank/Ranked control at full 44pt height with a `headline` label — so **Recommend in the action row is outlined** there, and filled Maroon again inside the Recommend sheet, where sending *is* the context's primary act. Watchlist is unchanged. **Never two equally dominant Maroon CTAs in one view.** The named examples stand where their context agrees: **Follow**, accept-shaped actions (**Approve**, **Add**), **bingd. Awards**; everything that is utility, exit, or settled state stays outlined or quiet — **Share Profile**, **Following** (the `outline` kind), **Share off bingd.**, **Watchlist**, **Cancel / Close / Dismiss**, filters and settings. Share Profile is deliberately not Maroon — it sits beside the emphasised bingd. Awards, and two fills side by side is no hierarchy at all. Apply the rule narrowly: it names a judgement about a context, not a licence to repaint every control that feels important.
 
 **A pair of actions in one row — canonical, 2026-08-27.** Two buttons side by side take **equal halves** (`flex: 1` each) and both carry `fit`. Below the width where both labels fit at their natural size, the pair becomes **two full-width rows with the primary on top** — it never shrinks one column to buy the other room.
 
@@ -288,8 +288,12 @@ A **filled circle** in the title's bucket color, with the score in `score` type 
 
 | Size | Diameter | Where |
 |---|---|---|
-| `md` | 44 | Collection rows, search results, title page |
-| `sm` | 36 | Feed items, profile poster overlays |
+| `xl` | 64 | The title page's personal score cluster — and only there (founder hierarchy pass, 2026-08-27) |
+| `lg` | 56 | The scale's spare step; no shipped surface uses it today |
+| `md` | 44 | Collection rows, search results, the title page's aggregate score rows, the post-rank confirmation |
+| `sm` | 40 | Feed items, review rows, the Following drilldown, profile poster overlays |
+
+The table was `md` 44 / `sm` 36 and drifted twice from the code that ships. `sm` went to 40 on 2026-08-16: the badge sizes its number to fit `10.0` rather than the common `8.7`, and at 36 that arithmetic yields 13pt type — legible, but visibly smaller than the row's own footnote beside it. `xl` was added on 2026-08-27 for exactly one place, the personal cluster in the title hero, where the hierarchy pass made the reader's own number the anchor of the band; the "Your score" caption went with the same pass, because a filled Maroon circle with a number in it, above a button named Rank, does not need a caption to say whose score it is. Lists stay on `md`/`sm`.
 
 Filled, not outlined. Beli's badge is an outline circle whose stroke and number share a color that tracks the score, and that cannot be reproduced here: an outline in Sage measures 2.4:1 and in Stone 3.0:1, so two of the three buckets would ship a number below the body-text floor. Filling the circle inverts the problem — the fill carries the color, the ink carries the contrast, and all three pairs in §3 clear AA. It is a more assertive badge than Beli's, which suits a list that is read at arm's length.
 
@@ -334,6 +338,12 @@ The gutter is load-bearing and is the thing that breaks: a header rendered witho
 - **Shelves**: at most three age sections — Today / This week / Earlier — via `SectionHeader`, boundaries rounded exactly as `relativeTime` rounds so a row never contradicts its heading. Headings render only when they separate something: two or more shelves, or a Follow-requests section above. No per-type grouping, tabs, or filters.
 - **Unread**: three signals for one bit — `surface.raised` tint over the whole entry (its action button included), an 8pt Maroon dot, and a spoken "Unread." prefix. Read is settled by seeing: the first paint is always the unread one.
 - **Row actions**: Approve / Decline / Follow back sit inside their row, inset to the row's own text edge, at the compact button size. State-changing social controls are `secondary`; the inbox is never a sea of Maroon.
+
+### Reaction control
+
+**As built 2026-08-27** (`src/ui/components/ReactionControl.tsx`). One component wherever a reaction can be attached — a feed activity or a comment — because the founder's device finding was the same gesture doing different things one swipe apart. The grammar, in order: the heart, filled Maroon when the viewer's reaction is active and outline when not; then the distinct reaction glyphs present, most common first, capped at three; then the total count, absent entirely at zero. A tap toggles the default `love`; a long press opens the six-glyph picker, anchored inside the row directly above the heart — never floating. Tapping or long-pressing the cluster or count opens the reactor list (each person, and which reaction), the same `ReactionDetail` sheet on both surfaces.
+
+The control stays a heart rather than becoming the viewer's own glyph: the cluster beside it already shows that glyph, and one emoji twice in one row reads as a duplicate rather than as two statements. The feed's old summary band above the action row is gone for the same reason — it said what the control now says, a line apart. PRD §14 carries the full contract, including the visibility rule: a reactor the viewer may not see is absent, never anonymised.
 
 ### Poster shelf and poster grid
 

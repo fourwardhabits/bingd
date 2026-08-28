@@ -42,6 +42,7 @@ export {
   type PosterShelfProps,
   type PosterTile,
 } from './PosterWall';
+export { ReactionControl, type ReactionControlProps } from './ReactionControl';
 export { Screen } from './Screen';
 export { Sheet, SheetRow, type SheetProps, type SheetRowProps } from './Sheet';
 export {

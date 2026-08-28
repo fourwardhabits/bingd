@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen } from '@testing-library/react-native';
 import { useWindowDimensions } from 'react-native';
 
 import { ScoresSection } from './ScoresSection';
@@ -171,5 +171,47 @@ describe('the scores row', () => {
   it('is absent entirely when there is nothing to put in it', async () => {
     const view = await render(<ScoresSection following={null} bingd={null} />);
     expect(view.toJSON()).toBeNull();
+  });
+});
+
+describe('the people behind the Following number (founder, 2026-08-27 §13)', () => {
+  it('makes the Following unit a button once it has members', async () => {
+    const onPressFollowing = jest.fn();
+    await render(
+      <ScoresSection
+        bingd={{ score: 7.4, ratingCount: 128 }}
+        following={{ score: 8.2, ratingCount: 3 }}
+        onPressFollowing={onPressFollowing}
+      />,
+    );
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Following. 3 people you follow' }));
+    expect(onPressFollowing).toHaveBeenCalled();
+  });
+
+  it('refuses to be a button into an empty list', async () => {
+    // Zero members means a sheet with nothing to say; the unit stays a statement.
+    await render(
+      <ScoresSection
+        bingd={{ score: 7.4, ratingCount: 128 }}
+        following={{ score: null, ratingCount: 0 }}
+        onPressFollowing={jest.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('never turns the bingd. unit into a control', async () => {
+    // The app-wide mean is a crowd, not a list. Only Following opens.
+    await render(
+      <ScoresSection
+        bingd={{ score: 7.4, ratingCount: 128 }}
+        following={{ score: 8.2, ratingCount: 3 }}
+        onPressFollowing={jest.fn()}
+      />,
+    );
+
+    expect(screen.getAllByRole('button')).toHaveLength(1);
   });
 });

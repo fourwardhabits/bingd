@@ -88,6 +88,50 @@ describe('the watchlist control on a tile', () => {
   });
 });
 
+describe('the dismiss control on a tile (founder, 2026-08-27 §12)', () => {
+  const suggestions: PosterTile[] = [
+    { id: 'a', title: 'Inception', year: 2010 },
+    { id: 'b', title: 'Dune', year: 2021 },
+  ];
+
+  it('is absent unless the surface asked for it', async () => {
+    // Only a wall of *suggestions* earns a way to refuse one. A collection wall
+    // shows things the reader chose, and an X there would offer to un-choose them.
+    const view = await render(
+      <PosterGrid tiles={suggestions} onPressTile={() => {}} onToggleSave={() => {}} />,
+    );
+
+    expect(view.queryByLabelText('Not interested in Inception')).toBeNull();
+  });
+
+  it('says the act, not the glyph', async () => {
+    // "X" tells a screen reader nothing. The label is the sentence; the hint is
+    // the consequence.
+    const view = await render(
+      <PosterGrid tiles={suggestions} onPressTile={() => {}} onDismissTile={() => {}} />,
+    );
+
+    expect(view.getByLabelText('Not interested in Inception')).toBeTruthy();
+    expect(view.getByLabelText('Not interested in Dune')).toBeTruthy();
+  });
+
+  it('dismisses without opening the title underneath it', async () => {
+    // The bookmark's nested-Pressable rule, applied to the exit: mis-navigating on
+    // the tap that was supposed to remove a suggestion would be the worst reading
+    // of "not interested".
+    const onPressTile = jest.fn();
+    const onDismissTile = jest.fn();
+    const view = await render(
+      <PosterGrid tiles={suggestions} onPressTile={onPressTile} onDismissTile={onDismissTile} />,
+    );
+
+    await fireEvent.press(view.getByLabelText('Not interested in Dune'));
+
+    expect(onDismissTile).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }));
+    expect(onPressTile).not.toHaveBeenCalled();
+  });
+});
+
 describe('PosterShelf', () => {
   it('carries its reason as the header', async () => {
     const view = await render(

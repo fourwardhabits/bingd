@@ -258,6 +258,33 @@ const ALLOWED = {
   'people_mutuals(integer)': ['authenticated'],
   'people_taste_matches(integer)': ['authenticated'],
 
+  // Added 2026-08-27 with the ranking/taste tranche (20260827000700–000900).
+  //
+  // `dismiss_for_you` is the first writer for `recommendation_feedback`, a table
+  // that had a select policy and no insert path at all: the same
+  // writer-not-policy shape as every social writer above, with the operation
+  // ledger and a rate limit an INSERT policy could not carry.
+  //
+  // `following_ratings` returns the rows behind `following_score` under that
+  // aggregate's own population predicate — approved follow plus viewable
+  // profile, which is rankings_read's — so it can only name rows the caller
+  // could already select one at a time. Match per row comes from taste_match
+  // itself, inheriting its refusals.
+  //
+  // `comment_reactors` names the set `activity_comments` already counted, under
+  // the same three gates (viewable event actor, viewable author, viewable
+  // reactor); an unviewable thread yields the same empty list an unreacted
+  // comment does.
+  'dismiss_for_you(uuid,uuid)': ['authenticated'],
+  'following_ratings(uuid)': ['authenticated'],
+  'comment_reactors(uuid)': ['authenticated'],
+
+  // Added 2026-08-27 (20260827001100), the mutuals move one day later: the
+  // aggregation released, the rows still two-party. One integer, gated on
+  // can_i_view — a visitor entitled to the profile sees the same Invite
+  // Instigator count the owner does, and nothing that could name an invitee.
+  'invited_signup_count(uuid)': ['authenticated'],
+
   // Added 2026-08-27 (20260827000100). The list behind people_mutuals' count for one
   // subject: same predicates, so it can only name edges the count already included and
   // follows_read would admit to the caller one at a time.

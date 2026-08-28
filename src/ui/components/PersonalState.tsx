@@ -43,6 +43,17 @@ export type PersonalStateProps = {
  *
  * The unranked state is a filled Maroon button because it is an invitation; the ranked
  * state is an outlined chip because it is a fact you may edit.
+ *
+ * **Rank is the title page's primary action (founder hierarchy pass, 2026-08-27).**
+ * Ranking is the core act — it is what creates and changes the score this cluster
+ * shows — and on the founder's device it read *smaller* than Recommend, which had the
+ * only Maroon fill in the action row. So: the circle is the page's largest (`xl`), the
+ * button is full control height with a headline label, and the "Your score" caption is
+ * gone — a filled Maroon circle with a number in it, above a button named Rank, does
+ * not need a caption to say whose score it is, and the caption was a line of vertical
+ * stack between the score and the action. Recommend, in the row below the description,
+ * is outlined now; filled Maroon means the primary action of the current context, and
+ * on a title page that is this cluster.
  */
 export function PersonalState({
   score,
@@ -59,15 +70,16 @@ export function PersonalState({
   return (
     <View style={styles.column}>
       {ranked ? (
-        <ScoreBadge score={score} bucket={bucket} size="lg" />
+        // "Your score" used to be captioned under this. The circle is the caption now:
+        // it is the reader's own number, in the cluster whose button says Rank, and the
+        // spoken label below still says "out of 10" — nothing is lost to a screen
+        // reader by dropping a line the eye had to step over.
+        <ScoreBadge score={score} bucket={bucket} size="xl" />
       ) : (
         // Not the dashed "Rank" ring: the button under it already says that, and two
         // invitations stacked on top of each other is one more than the region needs.
-        <EmptyScoreBadge size="lg" label="You have not ranked this yet" />
+        <EmptyScoreBadge size="xl" label="You have not ranked this yet" />
       )}
-      <Text variant="caption" tone="secondary">
-        Your score
-      </Text>
       {ordinal ? (
         <Text variant="caption" tone="tertiary" numberOfLines={1} style={styles.ordinal}>
           {ordinal}
@@ -94,7 +106,7 @@ export function PersonalState({
           size={theme.layout.icon.sm}
           color={ranked ? theme.semantic.action : theme.semantic.actionText}
         />
-        <Text variant="callout" tone={ranked ? 'action' : 'inverse'}>
+        <Text variant="headline" tone={ranked ? 'action' : 'inverse'}>
           {ranked ? 'Ranked' : 'Rank'}
         </Text>
       </Pressable>
@@ -116,14 +128,17 @@ const styles = StyleSheet.create({
   // The ordinal can be the widest thing in the column, so it is allowed to use the
   // full width rather than pushing the badge's alignment around.
   ordinal: { alignSelf: 'stretch', textAlign: 'right' },
+  // Full control height, not chip height. This is the page's primary action — the
+  // founder's hierarchy pass found it reading smaller than Recommend — so it takes
+  // the same 44pt floor the action row's chips have, and a headline label.
   control: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: theme.space[1],
-    minHeight: theme.layout.control.chipHeight,
-    minWidth: 104,
-    paddingHorizontal: theme.space[3],
+    gap: theme.space[2],
+    minHeight: theme.layout.minTapTarget,
+    minWidth: 112,
+    paddingHorizontal: theme.space[4],
     borderRadius: theme.radius.control,
     marginTop: theme.space[1],
   },

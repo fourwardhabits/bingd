@@ -662,11 +662,14 @@ Three properties this is required to keep:
 > opened — the server unranked and then opened a session, in one committed transaction —
 > so a reader who opened Rank again and changed their mind lost the ranking they had.
 >
-> **What a second watch does not create, in v1.** One current review and one current
-> private note per title, for good. Ranking a title again does not clear either and does
-> not create a second review object; the post-rank *Finish your log* offers **Edit
-> review** and **Edit private note** where writing already exists. Historical review
-> objects — a review per watch — are deferred, not built.
+> **What a second watch does not create, in v1.** One current note per title, for good
+> — shown as a review while it is shared. Ranking a title again does not clear it and
+> does not create a second review object; the post-rank *Add more details* (renamed from
+> *Finish your log*, 2026-08-27 — the ranking is already complete, and everything behind
+> the button is optional enrichment) reopens the same note where writing already exists.
+> Historical review objects — a review per watch — are deferred, not built
+> ([`deferred-roadmap.md`](./deferred-roadmap.md) §19 for the schema, §22 for the
+> reading surface).
 >
 > **Retries cannot duplicate.** Every ranking RPC carries an operation id
 > (`20260825000200`), so a completion whose reply is lost and is pressed again is
@@ -833,6 +836,24 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 >
 > **An absent score is not a zero.** A title nobody has ranked, a Following mean with no followee who has seen it, and a read that failed are three different states, and the badge distinguishes them.
 
+> ### As built — 2026-08-27: the people behind the Following score
+>
+> **The Following score unit on a title page is a button when it has members.** Tapping
+> it opens a sheet of the people it averages: avatar, name, handle, the live derived
+> score each of them gave the title, and `taste_match`'s verdict for the pair — `87%
+> Match`, or **Match TBD** below the evidence threshold. Rows open profiles. With no
+> members there is nothing to open and the unit stays inert.
+>
+> `following_ratings` (`20260827000800`) uses `following_score`'s own population
+> predicate **verbatim** — approved follow, viewable profile — so every row it names is
+> one the caller could already select individually, and the list can never disagree with
+> the number it explains. Scores are derived live through the same functions the
+> aggregate derives them with, for the same reason. Match comes from calling
+> `taste_match` per row — one taste algorithm, everywhere — inheriting its refusals and
+> its below-threshold null. Ordering is match descending with nulls last, then their
+> rating, then username, capped at 50: the person whose recommendation you would weight
+> most is at the top, and the list never reshuffles between refetches.
+
 > ### As built — 2026-08-26: where Match appears, and what it says when it cannot
 >
 > **Match sits directly under the handle**, in the identity block of every profile that is
@@ -873,6 +894,41 @@ Match compares the **relative ordering of titles both users have Ranked**. The u
 > approved for shows no Match at all, and neither the shared titles nor any comparison
 > input is ever returned. Whether a private profile should carry a Match while its
 > collection stays hidden is **not widened here**; the existing aggregate contract stands.
+
+> ### As built — 2026-08-27: Match knows how much evidence it has
+>
+> The founder's audit question was whether Match answers what its label claims — *how
+> much weight might I give this person's recommendation*. The formula survived the
+> audit: score proximity over exactly-shared titles, blended with midrank-Spearman rank
+> agreement above eight shared titles. The one confirmed defect was **false precision at
+> low evidence**: at the `min_common` gate of five the blend weight is still zero, so
+> the score was pure proximity stated flat — five near-identical ratings printed **90%
+> Match** with nothing anywhere saying how thin that evidence was. The gate was the only
+> brake, and it was a cliff: nothing between "no number" and "a number stated with full
+> confidence".
+>
+> The fix (`20260827001000`) shrinks the blend toward the 50 stranger baseline by
+> `n / (n + taste.shrink_prior)`, prior seeded at 5. Identical evaluations now read
+> **~75 at five shared titles, ~81 at eight, ~90 at twenty, ~95 at fifty**; disagreement
+> shrinks symmetrically, because five titles of opposition is also thin evidence; and
+> 100 is asymptotic, which is honest — no finite catalogue proves two people identical.
+> The transform is monotone in the blend, so the ordering of the founder's fixtures —
+> identical > mostly > mixed > inverted — is preserved at every overlap. Same signature
+> and columns, so the People suggestions (`people_taste_matches`) and both display
+> surfaces inherit the semantics unchanged.
+>
+> Below the threshold the answer is still null, the profile labels above are unchanged
+> (*Not enough shared taste yet* / *Rank more to see Match*), and the Following
+> drilldown says **Match TBD**.
+>
+> **Deferred, deliberately: Match v2.** Content-based taste profiles and collaborative
+> filtering were both researched in the audit, and neither survives the current
+> constraints — the population is small and sparse, which is cold-start territory for
+> collaborative filtering, and a genre-profile similarity would put confident-looking
+> numbers on pairs with **no shared evidence at all**, the exact failure this fix
+> removes. The founder's intent is recorded with the deferral rather than lost to it:
+> Match should eventually capture broader taste similarity, not only exact shared
+> titles. [`deferred-roadmap.md`](./deferred-roadmap.md) §23.
 
 > ### As built — 2026-08-26: **People**, the discovery surface inside For You
 >
@@ -1052,6 +1108,29 @@ These apply identically to Free, Early Access, and any future Pro recommendation
 >
 > **It costs no network request and produces no loading state.** Which titles are good is cached for half an hour; which arrangement is on screen is derived from that cache. So a Refresh is a sort: no skeleton, no white flash, no scroll jump, no new cache key. The same split is what stops a watchlist change from disturbing the wall at all.
 
+> ### As built — 2026-08-27: **Not interested**, on the tile
+>
+> Every For You tile carries a restrained ✕ beneath the bookmark, with the spoken label
+> "Not interested in *title*". Dismissal is **optimistic** — the card goes on the tap,
+> with no wall reload — and **durable**: `dismiss_for_you` (`20260827000700`) writes
+> `recommendation_feedback` with kind `dismiss`, the first writer that table has had
+> since it was created dormant in `20260813001000`. The write is idempotent under
+> replay (the operation ledger) and under repetition (the conflict target), and
+> rate-limited by `recommendation_feedback.max_per_day` (200). It touches nothing else:
+> not rankings, not the watchlist, not the collection — and it is a different act from
+> dismissing a *person's* recommendation, which stays on its own surface with its own
+> semantics.
+>
+> The dismissed set is subtracted in the slate's `select`, deliberately **not** in the
+> query key — the bookmark-flash lesson: a key change is a refetch, and a refetch is a
+> white wall for a one-row subtraction. The rows are stored as the feedback signal the
+> *Feedback learning* guardrail above always intended `dismiss` to be, but **no engine
+> consumes them today** — there is no ML built, and nothing pretends otherwise.
+>
+> The same pass gave **Sent to you** rows the `spacious` TitleRow treatment: three
+> lines of sender, title and message were cramped against the divider at the standard
+> row rhythm, and the fix is air rather than smaller type.
+
 ### Delivery pipeline
 
 | Stage | Requirement |
@@ -1071,6 +1150,22 @@ Recently shown titles receive at least a 7-day cooldown. In the first 20 results
 ### Filtered discovery — separate behavior
 
 Filtered search is intentional exploration, not recommendation. It supports combinations such as "90 minutes or less," "1980s," "Korean thriller," "highly ranked by people I follow," or "available on a selected provider." Global discovery requires connectivity.
+
+> ### As built — 2026-08-27: **Anime** is a filter, defined by the metadata the catalogue has
+>
+> Anime is a first-class option in the shared filter sheet's Type section, on Collection
+> and For You alike — a facet over Movies and TV, never a third medium. The v1
+> definition (`src/features/collection/filters.ts`): **Japanese original language**
+> (`media_items.original_language = 'ja'`) **and an animation genre** (`/anim/i`, which
+> covers both TMDB's "Animation" and Wikidata's "animated film"). The known error cases
+> are documented beside the predicate rather than discovered later: it **misses**
+> international co-productions whose `original_language` is not `ja`, **over-includes**
+> Japanese children's animation few people would call anime, and **excludes Western
+> animation by construction** — Pixar and Disney are not Anime, and that is the
+> definition working rather than failing. The stated upgrade path is TMDB's own `anime`
+> keyword (210024), which is definitive but requires caching keywords the adapter does
+> not fetch today. There is **no TMDB `/discover` integration**: filters narrow the
+> already-fetched candidate pool client-side, here as everywhere in filtered discovery.
 
 ---
 
@@ -1191,7 +1286,7 @@ A fixed reaction set of six on feed activity items. One reaction per user per it
 
 - **No free text.** This is deliberate: reactions carry zero moderation surface.
 - Reacting notifies the activity owner.
-- **Display — Required.** An activity item shows the distinct glyphs present and at most two names ("Jerry and Beth"), with a residual count. Press and hold opens the full list grouped by reaction. This keeps the feed uncluttered and is the pattern Messenger uses ([`../design/reference-notes.md`](../design/reference-notes.md)).
+- **Display.** ~~An activity item shows the distinct glyphs present and at most two names ("Jerry and Beth"), with a residual count. Press and hold opens the full list grouped by reaction.~~ *Superseded 2026-08-27 — the second As-built block below: the glyphs and count live inline in the reaction control itself, and the full list grouped by reaction sits behind a tap on the cluster.* The aim stands unchanged: the feed stays uncluttered, and the grouped list is still the pattern Messenger uses ([`../design/reference-notes.md`](../design/reference-notes.md)).
 - **No reaction is ever aggregated onto a profile.** `disagree` in particular never becomes a running total attached to a person or to their Top 10. It is visible on the activity item it belongs to and nowhere else, which is the difference between banter and a scoreboard.
 - Skin-tone variants are **not** in v1. They are a per-reactor rendering preference rather than part of the reaction, so adding one later is an additive profile column and touches no reaction data. See [`open-questions.md`](./open-questions.md) §2.
 - Rate-limited to prevent notification flooding.
@@ -1234,6 +1329,36 @@ A fixed reaction set of six on feed activity items. One reaction per user per it
 > come from a single visibility-filtered set, so a reaction from an account the reader
 > may not see is absent from all three — never counted anonymously.
 
+> ### As built — 2026-08-27, second pass: one control, and the cluster opens its people
+>
+> **The comment grammar was promoted, and the feed's summary band is gone.** Both
+> surfaces now render the same component (`src/ui/components/ReactionControl.tsx`): the
+> heart first — filled Maroon when the viewer has an active reaction, outline when not —
+> then the distinct glyphs present, most common first and capped at three, with the
+> total beside them and no count at all at zero. The feed's separate summary band above
+> the action row said the same thing as the control a line apart, and it is removed
+> rather than reconciled. The six-glyph picker is anchored inside the row, directly
+> above the heart, on both surfaces — no floating treatment.
+>
+> **Who reacted is one tap away, and the list can never disagree with the count.**
+> Tapping or long-pressing the cluster or its count opens the reactor list — each
+> person, and which reaction — which is the feed's existing `ReactionDetail` sheet, now
+> shared. For feed activities it reads from the already-authorised `reactions` rows the
+> row itself renders. For comments — top-level and replies alike — it fetches on open
+> through `comment_reactors` (`20260827000900`), a definer function that restates
+> `activity_comments`' three visibility gates verbatim: the event's actor viewable, the
+> comment's author viewable, each reactor viewable. The identities it returns are
+> precisely the set the count already counted for this reader, so the number on the row
+> and the people behind it cannot disagree. A reactor the viewer may not see — blocked
+> in either direction, private and unapproved, suspended — is **absent, never
+> anonymised**: no "1 hidden reaction" placeholder, because a placeholder is a statement
+> about an account the reader is not entitled to.
+>
+> **Unchanged, and deliberately**: the six kinds, `love` as the tap default, the
+> tap/long-press semantics, the replacement and removal rules, compatibility with rows
+> the earlier boolean like-writer wrote, and the notification split — a comment reaction
+> still writes no notification.
+
 ### Watch tagging — Decided for public alpha
 
 While logging a watch, the user may tag who they watched with.
@@ -1265,7 +1390,7 @@ v0.6 listed Achievements under §8 **Deferred** and specified them in [`backlog.
 - **No social surface**: no comparison, no leaderboard, and nothing is told to anybody else. *(Since the profile unification, another person's sheet is viewable from their profile — see the visibility note below — which is still not a comparison: it is their sheet, read under the viewer's ordinary visibility.)*
 - **Ten of the twenty tracks still render an emoji placeholder** rather than drawn art, asserted by test so the number cannot drift silently. [`deferred-roadmap.md`](./deferred-roadmap.md) §14.
 
-**What a watch-based award counts, and what a visitor sees (clarified 2026-08-27).** "Watch 50 movies" counts **unique logged titles** — rows of `user_media`, one per `(account, title)`, which ranking also writes because ranking is the watch claim ([§10](#10-ranking-system), decided 2026-08-24). A rewatch or a corrected date never mints a second unit. Opening somebody else's Awards computes **their** progress from the same canonical rows: the collection-based tracks read the `logged_collection` projection (20260827000400), which is §22 applied — the logged *titles* inherit profile visibility exactly as rankings do, while the watch date and note text stay private at every visibility level, so a visitor's Movie Muncher equals the owner's own and their drill-down simply carries no dates. The two facts with no cross-user read by design — sent recommendations and activated invites, both two-party — are shown as **withheld** ("Only they can see this one"), never as a zero the database did not assert. This paragraph exists because a real device showed `Movie Muncher 0 / 50` on a profile whose header said 34 movies: the award was reading a table whose policy answers a visitor with zero rows and no error.
+**What a watch-based award counts, and what a visitor sees (clarified 2026-08-27).** "Watch 50 movies" counts **unique logged titles** — rows of `user_media`, one per `(account, title)`, which ranking also writes because ranking is the watch claim ([§10](#10-ranking-system), decided 2026-08-24). A rewatch or a corrected date never mints a second unit. Opening somebody else's Awards computes **their** progress from the same canonical rows: the collection-based tracks read the `logged_collection` projection (20260827000400), which is §22 applied — the logged *titles* inherit profile visibility exactly as rankings do, while the watch date and note text stay private at every visibility level, so a visitor's Movie Muncher equals the owner's own and their drill-down simply carries no dates. One two-party fact remains with no cross-user read by design — Hype Courier's sent recommendations — and it is shown as **withheld** ("Only they can see this one"), never as a zero the database did not assert. Activated invites were withheld on the same reasoning until later the same day, when the founder reversed it for that aggregate alone — the Invite Instigator paragraph below. This paragraph exists because a real device showed `Movie Muncher 0 / 50` on a profile whose header said 34 movies: the award was reading a table whose policy answers a visitor with zero rows and no error.
 
 **Genre Gremlin is 14 / 16 / 17 distinct genres, rebalanced 2026-08-20.** It was 12 / 14 / 16, and the founder's Preview verdict was that the whole ladder was too easy and too compressed rather than that one number was wrong. Measured over the loggable catalogue by `scripts/awards/genre-ladder-report.mjs` — which is reproducible, unlike the calibration the previous thresholds rested on — the old ladder cost a median of **15 / 27 / 62** logged titles, against 250–300 for every other Gold in the set. The new one costs **27 / 62 / 116**, roughly doubling at each step.
 
@@ -1273,9 +1398,11 @@ v0.6 listed Achievements under §8 **Deferred** and specified them in [`backlog.
 
 **Moving a threshold un-earns a tier, and that was accepted rather than mitigated.** Awards are derived live with no unlock ledger, so a tier is recomputed rather than held: Dabbler goes back from anybody on 12 or 13 genres, Mixer from 14 or 15, Chaos Collector from exactly 16. The population that can affect is the founder's account and test users — there is no external tester — and grandfathering would need the durable ledger that award *notifications* are already waiting on. **This is the last threshold change that can be made for free.**
 
-**Invite Instigator counts activated invitees and therefore reads zero.** It counts `invite_attributions.activated_at is not null`, which nothing writes — see §17's As-built block. It previously counted link creations, which made it a badge for pressing a button, and the founder's instruction was that the award is for bringing people to Bingd. So the metric was moved to the honest one immediately and the number left at zero rather than the semantic left wrong until the backend caught up. It renders **0 / 3**, not an error: the read succeeded, the table is real, and the answer is genuinely none.
+**Invite Instigator counts activated invitees, and the count is public (updated 2026-08-27).** It counts `invite_attributions.activated_at is not null` — a column that read zero for everyone when this block was written, because nothing wrote it until `20260819000500` gave it its writer (§17's As-built block; "which nothing writes" is history now, not the present). It previously counted link creations, which made it a badge for pressing a button, and the founder's instruction was that the award is for bringing people to Bingd. So the metric was moved to the honest one immediately and the number left at zero rather than the semantic left wrong until the backend caught up.
 
-**Award notifications are deferred**, and this is a disposition rather than an oversight. Tiers are computed entirely on the device from raw reads, so **no durable state records which tier an account has reached** — and notifying only on a *crossing* needs exactly that. The `award_earned` type, the `awards` category defaulting off, its preference row and its route to this sheet all exist; only the writer is missing. §15's As-built block and [`deferred-roadmap.md`](./deferred-roadmap.md) §5.
+**The founder reversed the withheld classification on 2026-08-27**: the *count* of activated invites is public achievement data. A visitor entitled to the profile sees the same Invite Instigator progress the owner does — `2 / 3`, `Next: Bring 3 people to bingd.` — through `invited_signup_count` (`20260827001100`), a definer scalar gated on `can_i_view` over the owner's own predicate (attributed **and** activated), which is what makes the two numbers equal by construction rather than by synchronisation. Public: the count and the milestone state. Private, unchanged: invitee identities, tokens, timestamps and the raw `invite_attributions` rows, which stay two-party under the same RLS — a visitor's drill-down shows one aggregate row naming nobody: *N people brought to bingd. / Who they are is theirs to share.* **Hype Courier remains withheld**, explicitly scoped: one aggregate becoming public is a founder decision about that aggregate, not a precedent that widens every two-party fact.
+
+**Award notifications are deferred**, and this is a disposition rather than an oversight. Tiers are computed entirely on the device from raw reads, so **no durable state records which tier an account has reached** — and notifying only on a *crossing* needs exactly that. The `award_earned` type, the `awards` category defaulting off, its preference row and its route to this sheet all exist; only the writer is missing. §15's As-built block and [`deferred-roadmap.md`](./deferred-roadmap.md) §5. **Reaffirmed 2026-08-27**, alongside the Invite Instigator reversal above: nothing writes an award-earned feed post or notification, and when the writer lands, an Invite Instigator milestone may say *earned Invite Instigator* with the badge and may never name an invitee — the constraint is recorded with the deferral (§5).
 
 ---
 
@@ -1991,9 +2118,10 @@ Rationale, and the reason this needed deciding rather than defaulting: a public 
 > **One field stores both**, and `note_visibility` is the whole difference. That was
 > already true — `20260817001100` says in as many words that *"a review is a public Note,
 > which is the same text the Feed shows"*. What changed on 2026-08-23 is that the
-> interface stopped using three names for it. The composer row is now headed **Private
-> note** or **Review** according to what it currently is, the profile section is headed
-> **Reviews** rather than Notes, and the spoiler control names what it is revealing.
+> interface stopped using three names for it. The composer row was then headed **Private
+> note** or **Review** according to what it currently was *(folded into one **Note** row
+> on 2026-08-27 — the decision below)*, the profile section is headed **Reviews** rather
+> than Notes, and the spoiler control names what it is revealing.
 >
 > **Publishing never escapes the account.** A Review by a private account is readable by
 > approved followers only; a block hides it both ways; a suspended author's writing
@@ -2004,6 +2132,40 @@ Rationale, and the reason this needed deciding rather than defaulting: a public 
 > **Existing content was not touched.** Nothing was migrated, nothing changed visibility
 > in either direction, and no second content model was introduced. A note written under
 > the private-only promise is still private; a published review is still published.
+
+> **Founder decision, 2026-08-27 — One note, one row.** The log sheet now carries a
+> single **Note** row and one composer. The two-row presentation this replaces — *Review*
+> above *Private note*, each opening its own copy of the same field — put two doors in
+> front of one piece of storage and made the reader choose a visibility before they had
+> written a word. Storage is untouched: `user_media` still holds one `note` and one
+> `note_visibility`, and this was a UI simplification with no migration.
+>
+> - **A note is private by default**, exactly as decided on 2026-08-23. **Share as a
+>   review** is now a chip beside the text: one explicit tap publishes, and tapping it
+>   again unshares while keeping every word. The row's collapsed value states the social
+>   fact where there is one — *Shared · 84 words* — so the sheet never has to be opened
+>   to know what the world can see.
+> - **The Reviews tab's "Write a review" still opens the composer sharing-on for a new
+>   note** — arriving through that door is the request — and a stored note always opens
+>   on its saved visibility, whichever door the reader came through.
+> - **The title page's Ranked menu has one writing row**: *Edit your review*, *Edit your
+>   note*, or *Add a note*, according to what exists. Two menu rows for one field was
+>   the same double door at a different address.
+> - **Typed text persists without a Done button.** A 1200ms debounce, plus an immediate
+>   flush on blur, on collapsing the row, on every way the sheet closes (backdrop,
+>   hardware back, Close, Done), on app backgrounding and on unmount — never a write per
+>   keystroke. A failed save shows the problem in a line under the field and re-arms, so
+>   the next flush retries rather than the text being silently at risk.
+> - **Chained saves carry the last reply's `note_updated_at`** as the
+>   optimistic-concurrency base, so a fast edit-save-edit on one device is never
+>   mistaken for a conflict; a *genuine* conflict — another device wrote meanwhile —
+>   still refuses with the message and refetches, never silently overwriting either
+>   side. Visibility and spoiler claims are judged the same way, against the last
+>   acknowledged value, so a share-then-unshare inside a refetch window is not lost.
+>
+> The post-ranking button is **Add more details** (renamed from *Finish your log* the
+> same day — [§10](#10-ranking-system)): the ranking is complete, and everything behind
+> the button is optional enrichment.
 
 ### Follow model
 

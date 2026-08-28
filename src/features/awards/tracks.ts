@@ -128,6 +128,16 @@ export type AwardFacts = {
    * client change. See `docs/product/growth-instrumentation.md`.
    */
   invitedSignups: InvitedSignup[];
+  /**
+   * The same fact as a number, because the rows and the count part company on
+   * somebody else's sheet (founder decision, 2026-08-27): the COUNT of activated
+   * invites is public achievement data, the identities behind it are not. The
+   * owner's count equals `invitedSignups.length` by construction; a visitor gets
+   * this number from `invited_signup_count` — the same predicate server-side — and
+   * an empty `invitedSignups`. The track's breakdown carries the difference: named
+   * people for the owner, one aggregate row for a visitor, both summing to this.
+   */
+  invitedSignupCount: number;
   /** Comments the reader has written, plus the notes they have made public. */
   written: WrittenContribution[];
   /** Rows in `title_recommendations` the reader sent. */
@@ -419,18 +429,34 @@ export const AWARD_TRACKS: AwardTrack[] = [
     metalTiers: true,
     // **People, not links.** Opening a share sheet is not an invitation, minting a URL
     // is not an invitation, and sending one is not an invitation either. The only thing
-    // worth a badge is somebody arriving — so the drill-down is people, and it is
-    // honestly empty until the redemption path exists.
+    // worth a badge is somebody arriving — so the owner's drill-down is people.
+    //
+    // **A visitor's drill-down is one aggregate row.** The count is public (founder,
+    // 2026-08-27) and the invite graph is not, so a visitor has the number without
+    // the rows behind it. The synthetic row carries the whole count as its weight,
+    // which is what keeps "the metric is the breakdown" true on both sheets — the
+    // identity awards.test.ts pins for every track.
     contributions: (facts) => ({
       sections: [
         {
-          rows: facts.invitedSignups.map(({ person, activatedAt }) =>
-            personRow(person, {
-              detail: on(activatedAt)
-                ? `Joined ${on(activatedAt)}`
-                : (person.username ? `@${person.username}` : null),
-            }),
-          ),
+          rows: facts.invitedSignups.length
+            ? facts.invitedSignups.map(({ person, activatedAt }) =>
+                personRow(person, {
+                  detail: on(activatedAt)
+                    ? `Joined ${on(activatedAt)}`
+                    : (person.username ? `@${person.username}` : null),
+                }),
+              )
+            : facts.invitedSignupCount > 0
+              ? [
+                  {
+                    key: 'invited-aggregate',
+                    label: `${count(facts.invitedSignupCount)} ${plural(facts.invitedSignupCount, 'person', 'people')} brought to bingd.`,
+                    detail: 'Who they are is theirs to share.',
+                    weight: facts.invitedSignupCount,
+                  },
+                ]
+              : [],
         },
       ],
       emptyLabel: 'No activated invites yet.',

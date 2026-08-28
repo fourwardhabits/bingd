@@ -320,9 +320,12 @@ describe('a title this user has ranked', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByLabelText('Scores')).toBeTruthy());
-    // "Your score" labels the hero badge. Exactly one of them is the correction: the
-    // Scores section carried a second row under the same words until 2026-08-18.
-    expect(view.getAllByText('Your score')).toHaveLength(1);
+    // The hero badge is the one copy, spoken as a score. The "Your score" caption
+    // under it went in the founder's hierarchy pass — a filled circle with a number,
+    // above a button named Rank, does not need a caption to say whose score it is —
+    // and the Scores section carried a second copy under those words until 2026-08-18.
+    expect(view.getAllByLabelText('10.0 out of 10, I liked it')).toHaveLength(1);
+    expect(view.queryByText('Your score')).toBeNull();
     // The section is what everybody *else* thought, and those are its only two rows.
     expect(view.getByText('Following')).toBeTruthy();
     expect(view.getByText('bingd.')).toBeTruthy();
@@ -461,12 +464,10 @@ describe('a title this user has ranked', () => {
     await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
 
     await waitFor(() => expect(view.getByLabelText('Rank again')).toBeTruthy());
-    // This fixture holds a private note, so the log group reads Edit private note over
-    // Share as a review — the other pair of the two states one `user_media.note` can be
-    // in. The three headings and the last three rows are the same whichever it is.
+    // This fixture holds a private note, so the one writing row reads Edit your note.
+    // The headings and the last three rows are the same whichever state it is in.
     for (const label of [
-      'Share as a review',
-      'Edit private note',
+      'Edit your note',
       'Rank again',
       'Change your rating',
       'Remove from collection',
@@ -485,14 +486,15 @@ describe('a title this user has ranked', () => {
   });
 
   /**
-   * **Writing, reachable after the fact.**
+   * **Writing, reachable after the fact — as one row (founder simplification,
+   * 2026-08-27).**
    *
-   * The founder's report: after ranking there was no intuitive moment to write a review
-   * or a private note, and tapping Ranked later gave no obvious path either. One
-   * `user_media` row holds one `note` under one `note_visibility`, so exactly one of
-   * these two rows is ever in "Edit" — the other offers the conversion, named as the act
-   * it performs rather than as an Add for a second piece of writing the schema has
-   * nowhere to put.
+   * One `user_media` row holds one `note` under one `note_visibility`, and the menu
+   * now shows it as one thing. The two rows this replaces — Edit and the conversion,
+   * each way around — asked the reader to choose between two names for one piece of
+   * writing before opening it. The label still says which state the writing is in,
+   * because "Edit your review" is a promise about where the text is visible; the
+   * conversion control lives in the composer, beside the text it describes.
    */
   const openMenu = async () => {
     const view = await open();
@@ -504,18 +506,27 @@ describe('a title this user has ranked', () => {
     return view;
   };
 
-  it('says Edit private note for the note this title already carries', async () => {
+  it('says Edit your note for the note this title already carries, and lands in it', async () => {
     const view = await openMenu();
 
-    // The fixture's writing is private, so that row is the one in Edit — and the other
-    // offers the conversion by the name of the act rather than as an Add for a second
-    // piece of writing there is nowhere to put.
-    expect(view.getByLabelText('Edit private note')).toBeTruthy();
-    expect(view.getByLabelText('Share as a review')).toBeTruthy();
-    expect(view.queryByLabelText('Add private note')).toBeNull();
+    expect(view.getByLabelText('Edit your note')).toBeTruthy();
+    // The old pair — and the conversion rows that travelled with it — are gone.
+    expect(view.queryByLabelText('Edit private note')).toBeNull();
+    expect(view.queryByLabelText('Share as a review')).toBeNull();
+    expect(view.queryByLabelText('Add a note')).toBeNull();
+
+    await fireEvent.press(view.getByLabelText('Edit your note'));
+
+    // A row that names a piece of writing lands the reader inside it: the log sheet
+    // opens with the composer already showing the stored text.
+    await waitFor(() =>
+      expect(view.getByPlaceholderText('What did you think?').props.value).toBe(
+        'Held up better than I expected.',
+      ),
+    );
   });
 
-  it('says Edit review when the writing is one', async () => {
+  it('says Edit your review when the writing is one', async () => {
     tableRows.user_media = [
       {
         user_id: 'user-1',
@@ -529,9 +540,11 @@ describe('a title this user has ranked', () => {
     ];
     const view = await openMenu();
 
-    expect(view.getByLabelText('Edit review')).toBeTruthy();
-    // And the private row is the conversion, in the other direction.
-    expect(view.getByLabelText('Make it a private note')).toBeTruthy();
+    expect(view.getByLabelText('Edit your review')).toBeTruthy();
+    // No conversion row in either direction: the chip in the composer is the only
+    // control that moves writing between the two states now.
+    expect(view.queryByLabelText('Edit review')).toBeNull();
+    expect(view.queryByLabelText('Make it a private note')).toBeNull();
   });
 
   /**
@@ -578,7 +591,7 @@ describe('a title this user has ranked', () => {
     expect(buttons.find((button) => button.text === 'Remove')?.style).toBe('destructive');
   });
 
-  it('offers both as fresh writing when there is none', async () => {
+  it('offers one Add a note row when there is no writing yet', async () => {
     tableRows.user_media = [
       {
         user_id: 'user-1',
@@ -592,10 +605,11 @@ describe('a title this user has ranked', () => {
     ];
     const view = await openMenu();
 
-    // Review first, because Bingd should nudge the social contribution rather than
-    // leave it behind the private one.
-    expect(view.getByLabelText('Write review')).toBeTruthy();
-    expect(view.getByLabelText('Add private note')).toBeTruthy();
+    // One row, one word. A note is private until its author shares it, and the
+    // sharing is the composer's chip — not a second menu row.
+    expect(view.getByLabelText('Add a note')).toBeTruthy();
+    expect(view.queryByLabelText('Write review')).toBeNull();
+    expect(view.queryByLabelText('Add private note')).toBeNull();
   });
 
   it('no longer offers to keep a title in the collection without a ranking', async () => {

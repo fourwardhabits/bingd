@@ -129,13 +129,15 @@ Fan-out on read is a single indexed query against `feed_events` filtered by foll
 
 One consequence worth stating plainly, because the PRD originally described the opposite: **the feed is a live query, not a historical record.** Unfollowing someone removes their events from your feed entirely, past ones included, because the query filters on the current follow set. PRD §14's claim that unfollowing "does not retroactively rewrite history" was true of a fan-out-on-write inbox and is not true here — and it was the more surprising promise anyway. Someone who unfollows expects that person gone from their feed, not their last three weeks preserved. Nothing is deleted; a re-follow restores visibility. §14 has been corrected to describe this.
 
-### AD-7 — Match scores are computed on a schedule, not on demand
+### AD-7 — Match scores are computed on a schedule, not on demand *(reversed as built — live per call; see the correction below)*
 
 Comparing two users' rankings is O(shared titles). Rendering a leaderboard of 50 candidates on demand would mean 50 such comparisons per screen load.
 
 Match scores are materialized into `match_scores` by a scheduled job for user pairs with meaningful overlap, and recomputed when either user's ranking changes materially. The stored row carries `shared_count` so the UI can display confidence (PRD §13) without a second query, and a `computed_at` so staleness is visible.
 
 **Method:** pairwise agreement over commonly ranked titles, transformed to 0–100. PRD `open-questions.md` §4 leaves the exact method to this stage; the reasoning is in [`data-model.md`](./data-model.md).
+
+**Corrected 2026-08-27 — as built, the opposite holds.** `taste_match` computes each pair **live per call**, with no materialization and no `match-builder` job; `match_scores` exists and nothing writes or reads it. The premise above was a leaderboard rendering 50 comparisons per screen load, and no such surface shipped — every live caller is bounded: one pair on a profile header, a capped candidate list in People suggestions, at most 50 rows in the Following drilldown. Since `20260827001000` the live formula also shrinks toward the stranger baseline by evidence volume, a semantic a stale materialized row would have blurred. This decision reverses forward, not back: materialize when an unbounded surface arrives, and keep `taste_match` as the single definition of the number so a cache can never disagree with the function it caches.
 
 ### AD-8 — TMDB is reachable only through one Edge Function
 

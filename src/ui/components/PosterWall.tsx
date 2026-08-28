@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 're
 
 import { formatScore, type Bucket } from '@/features/collection/score';
 
-import { theme } from '../tokens';
+import { inkAlpha, theme } from '../tokens';
 import { Poster } from './Poster';
 import { SectionHeader } from './SectionHeader';
 import { Text } from './Text';
@@ -95,6 +95,17 @@ export type PosterGridProps = {
    * do it would be the slowest possible route to the product's core action (PRD §28).
    */
   onToggleSave?: (tile: PosterTile) => void;
+  /**
+   * Adds a dismiss control under the watchlist one (founder, 2026-08-27).
+   *
+   * Only meaningful on a wall of *suggestions* — For You — where "not this one" is
+   * feedback the reader has no other way to give. Collection walls show things the
+   * reader chose, so they never pass it. Restrained on purpose: the same 28pt
+   * corner treatment as the bookmark, an X rather than a word, and the label says
+   * the act ("Not interested") because the glyph alone says nothing to a screen
+   * reader.
+   */
+  onDismissTile?: (tile: PosterTile) => void;
   /** Long-press, for anything a wall of unlabelled artwork cannot say. */
   onLongPressTile?: (tile: PosterTile) => void;
 };
@@ -112,6 +123,7 @@ export function PosterGrid({
   onPressTile,
   onPressAll,
   onToggleSave,
+  onDismissTile,
   onLongPressTile,
 }: PosterGridProps) {
   const { width } = useWindowDimensions();
@@ -141,6 +153,7 @@ export function PosterGrid({
             onPress={() => onPressTile(tile)}
             onLongPress={onLongPressTile ? () => onLongPressTile(tile) : undefined}
             onToggleSave={onToggleSave ? () => onToggleSave(tile) : undefined}
+            onDismiss={onDismissTile ? () => onDismissTile(tile) : undefined}
           />
         ))}
       </View>
@@ -161,12 +174,14 @@ function Tile({
   onPress,
   onLongPress,
   onToggleSave,
+  onDismiss,
 }: {
   tile: PosterTile;
   width: number;
   onPress: () => void;
   onLongPress?: () => void;
   onToggleSave?: () => void;
+  onDismiss?: () => void;
 }) {
   const { score } = tile;
 
@@ -200,6 +215,21 @@ function Tile({
             size={16}
             color={theme.text.inverse}
           />
+        </Pressable>
+      ) : null}
+      {onDismiss ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Not interested in ${tile.title}`}
+          accessibilityHint="Removes it from your recommendations"
+          onPress={onDismiss}
+          // Same 28pt-glyph-with-grown-target treatment as the bookmark above; a
+          // second 44pt control would cover half the artwork. Quiet rather than
+          // Maroon: dismissal is an exit, not the primary act of the wall.
+          hitSlop={8}
+          style={({ pressed }) => [styles.dismiss, pressed && styles.pressed]}
+        >
+          <Ionicons name="close" size={16} color={theme.text.inverse} />
         </Pressable>
       ) : null}
       {score != null ? (
@@ -252,6 +282,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: theme.semantic.action,
+  },
+  // Beneath the bookmark, same size, same corner column. Ink at 60% rather than
+  // Maroon: the bookmark is the wall's invitation and this is its way out, and two
+  // Maroon squares stacked would read as one two-part control.
+  dismiss: {
+    position: 'absolute',
+    top: theme.space[1] + 28 + theme.space[1],
+    right: theme.space[1],
+    width: 28,
+    height: 28,
+    borderRadius: theme.radius.control,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: inkAlpha(0.6),
   },
   chip: {
     position: 'absolute',

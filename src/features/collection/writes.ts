@@ -74,7 +74,19 @@ export type WriteResult =
    * `outcome === 'failed'` first and returning is the bug review 21e found in four
    * separate screens.
    */
-  | { outcome: 'failed'; message: string; changed?: boolean };
+  | {
+      outcome: 'failed';
+      message: string;
+      changed?: boolean;
+      /**
+       * The note's optimistic-concurrency refusal specifically (save_note's 55000):
+       * the stored version no longer matches the one this edit was based on. Named on
+       * the result because the autosave loop must react to it structurally — drop its
+       * remembered version and refetch — and matching the human-readable message
+       * would be the silent-failure bug `CODES` exists to prevent.
+       */
+      conflict?: boolean;
+    };
 
 /**
  * Whether the caller must reconcile the canonical state this write touches, whatever it
@@ -256,6 +268,7 @@ export async function saveNote(input: {
     if (error.code === CODES.ranked) {
       return {
         outcome: 'failed',
+        conflict: true,
         message: 'This note changed somewhere else. Reopen it to see the latest.',
       };
     }

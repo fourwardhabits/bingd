@@ -53,7 +53,10 @@ export const layout = {
    * Four points of diameter buys two of type and the badge reads as the row's
    * anchor again.
    */
-  scoreBadge: { lg: 56, md: 44, sm: 40 },
+  // `xl` exists for exactly one place: the title page's personal-score cluster,
+  // where the founder's hierarchy pass made the reader's own number the anchor of
+  // the hero band (2026-08-27). Lists stay on `md`/`sm`.
+  scoreBadge: { xl: 64, lg: 56, md: 44, sm: 40 },
   /**
    * The award badge's well (Bingd Awards, 2026-08-18).
    *

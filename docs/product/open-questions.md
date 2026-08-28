@@ -402,9 +402,11 @@ would take their review off the Reviews tab without them touching a control.
 exist; the migration contains no `update user_media set note_visibility`.
 
 **This is a safety invariant, not a change of direction.** The product hierarchy is
-unchanged and unchallenged: the app still offers *Write a review* first and *Add a
-private note* second. What the server now guarantees is only that **silence is not
-consent** — which matters for the next importer, backfill or second client rather than
+unchanged and unchallenged: a note is private until its author shares it, and the
+Reviews tab's *Write a review* still opens ready to publish *(since 2026-08-27 the log
+sheet carries one **Note** row with a "Share as a review" chip rather than two writing
+rows — PRD §22; the hierarchy survives the merge)*. What the server now guarantees is
+only that **silence is not consent** — which matters for the next importer, backfill or second client rather than
 for anything the app does today, since the app has sent an explicit value since
 2026-08-23.
 

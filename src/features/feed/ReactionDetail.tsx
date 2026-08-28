@@ -1,13 +1,20 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { Avatar, Sheet, Text } from '@/ui/components';
+import { Avatar, Sheet, SkeletonRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { REACTIONS, type ReactionKind, type ReactionSummary } from './use-reactions';
 
 export type ReactionDetailProps = {
   summary: ReactionSummary | null;
+  /**
+   * True while a summary is still on its way. The feed never needs this — its
+   * summaries are already in hand when the sheet opens — but a comment's reactor
+   * list is fetched on open (`use-comment-reactors`), and a sheet that only appears
+   * once the network answers is a tap with no acknowledgement.
+   */
+  loading?: boolean;
   onClose: () => void;
   onPressPerson: (username: string) => void;
 };
@@ -26,10 +33,19 @@ export type ReactionDetailProps = {
  * in this list is not a key to a profile — a private account the viewer does not
  * follow still resolves to the same access-safe page it always did.
  */
-export function ReactionDetail({ summary, onClose, onPressPerson }: ReactionDetailProps) {
+export function ReactionDetail({ summary, loading, onClose, onPressPerson }: ReactionDetailProps) {
   const [filter, setFilter] = useState<ReactionKind | null>(null);
 
-  if (!summary) return null;
+  if (!summary) {
+    if (!loading) return null;
+    return (
+      <Sheet visible onClose={onClose} label="Reactions">
+        <View style={styles.loading}>
+          <SkeletonRow count={2} />
+        </View>
+      </Sheet>
+    );
+  }
 
   const present = REACTIONS.filter((reaction) => (summary.byKind[reaction.kind] ?? 0) > 0);
   // A filter whose reaction nobody used would be a tab onto an empty list, so the
@@ -167,5 +183,6 @@ const styles = StyleSheet.create({
   },
   personCopy: { flex: 1, gap: 2 },
   residual: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
+  loading: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[3] },
   pressed: { opacity: 0.7 },
 });

@@ -1,4 +1,4 @@
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { theme } from '../tokens';
 import { EmptyScoreBadge, ScoreBadge } from './ScoreBadge';
@@ -10,6 +10,15 @@ export type ScoresSectionProps = {
   bingd: { score: number | null; ratingCount: number } | null;
   /** The mean over the accounts this viewer follows. One eligible rating is enough. */
   following: { score: number | null; ratingCount: number } | null;
+  /**
+   * Opens the people behind the Following number (founder tranche 2026-08-27 §13).
+   *
+   * Only the Following unit becomes a control, and only while it has members: the
+   * bingd. mean is a crowd with no list worth opening, and an empty unit made
+   * tappable would be a button into a sheet with nothing to say. Wired by the title
+   * page to `FollowingRatingsSheet`.
+   */
+  onPressFollowing?: () => void;
 };
 
 /** Said the same way in both units, and it is the whole of the empty state. */
@@ -83,7 +92,7 @@ const TWO_COLUMN_MAX_FONT_SCALE = 1.3;
  * needed` turns a reader into a spectator of a number they cannot move, and the exact
  * shortfall is a property of a config value rather than of the film.
  */
-export function ScoresSection({ bingd, following }: ScoresSectionProps) {
+export function ScoresSection({ bingd, following, onPressFollowing }: ScoresSectionProps) {
   const { width, fontScale } = useWindowDimensions();
 
   if (!following && !bingd) return null;
@@ -120,6 +129,9 @@ export function ScoresSection({ bingd, following }: ScoresSectionProps) {
             label="Following"
             detail={followingDetail(following.ratingCount)}
             sideBySide={sideBySide}
+            onPress={
+              following.ratingCount > 0 && onPressFollowing ? onPressFollowing : undefined
+            }
           />
         ) : null}
       </View>
@@ -139,12 +151,15 @@ function Score({
   label,
   detail,
   sideBySide,
+  onPress,
 }: {
   score: number | null;
   label: string;
   /** How big the sample behind the number is. Only ever drawn when there is a number. */
   detail: string;
   sideBySide: boolean;
+  /** Makes the unit a button into the list behind the number. See the section props. */
+  onPress?: () => void;
 }) {
   const badge =
     score != null ? (
@@ -153,8 +168,8 @@ function Score({
       <EmptyScoreBadge size="md" label={`${label}: ${NOT_ENOUGH}`} />
     );
 
-  return (
-    <View testID="scores-unit" style={sideBySide ? styles.unit : styles.row}>
+  const body = (
+    <>
       {badge}
       <View style={styles.copy}>
         <Text variant="callout">{label}</Text>
@@ -169,7 +184,30 @@ function Score({
           {score == null ? NOT_ENOUGH : detail}
         </Text>
       </View>
-    </View>
+    </>
+  );
+
+  if (!onPress) {
+    return (
+      <View testID="scores-unit" style={sideBySide ? styles.unit : styles.row}>
+        {body}
+      </View>
+    );
+  }
+
+  // The whole unit is the target — a chevron or a link word would be a second
+  // element competing with the number, and the hint carries what tapping does.
+  return (
+    <Pressable
+      testID="scores-unit"
+      accessibilityRole="button"
+      accessibilityLabel={`${label}. ${score == null ? NOT_ENOUGH : detail}`}
+      accessibilityHint="Opens the people behind this score"
+      onPress={onPress}
+      style={({ pressed }) => [sideBySide ? styles.unit : styles.row, pressed && styles.pressed]}
+    >
+      {body}
+    </Pressable>
   );
 }
 
@@ -226,4 +264,5 @@ const styles = StyleSheet.create({
   // circle being squeezed out of round. A score badge that is 40 wide and 44 tall is
   // the one thing on this section that must not happen.
   copy: { flexShrink: 1, gap: 2 },
+  pressed: { opacity: 0.7 },
 });

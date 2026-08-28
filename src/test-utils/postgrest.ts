@@ -34,6 +34,18 @@ export type Read = {
 
 export type Postgrest = {
   from: (table: string) => unknown;
+  /**
+   * `supabase.rpc`, answered from `rpcAnswers` by function name and recorded in
+   * `rpcCalls`. Deliberately not a database either: a function's real behaviour —
+   * its gates, its predicate — is `supabase/tests`' job; what a client test needs
+   * is "was it called, with what, and what does the screen do with the reply".
+   * A name in `broken` fails the same way a broken table read does.
+   */
+  rpc: (name: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
+  /** Seeded rpc replies by function name. Absent means `data: null`. */
+  rpcAnswers: Record<string, unknown>;
+  /** Every rpc call issued, in order. */
+  rpcCalls: { name: string; args: Record<string, unknown> }[];
   /** Rows per table. Owned here rather than passed in, because a `jest.mock` factory
    * runs before the test file's own `const` initialisers and would capture `undefined`. */
   tables: Rows;
@@ -138,6 +150,15 @@ export function createPostgrest(): Postgrest {
     requests: {},
     broken: new Set(),
     between: () => {},
+    rpcAnswers: {},
+    rpcCalls: [],
+    rpc: (name: string, args: Record<string, unknown> = {}) => {
+      client.rpcCalls.push({ name, args });
+      if (client.broken.has(name)) {
+        return Promise.resolve({ data: null, error: { message: 'nope' } });
+      }
+      return Promise.resolve({ data: client.rpcAnswers[name] ?? null, error: null });
+    },
     from: (table: string) => {
       const read: Read = {
         table,

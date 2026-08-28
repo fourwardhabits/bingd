@@ -497,8 +497,8 @@ titles as A, so do that early: it is what makes Match calculable at all.
       exactly as they were.
 - [ ] Do it again and **answer one comparison**, then close the sheet. Still unchanged.
 - [ ] Do it again and **finish**. Now the score may move — and the reveal is followed by
-      **Finish your log**, which offers **Edit review** and **Edit private note** if you
-      had written either. Neither must have been cleared.
+      **Add more details**, which reopens your note (still shared as a review if it was)
+      if you had written one. It must not have been cleared.
 - [ ] Turn on airplane mode mid-session and close the sheet. The old ranking survives.
 
 ### One activity per watch

@@ -19,6 +19,16 @@ export type TitleRowProps = {
   pending?: boolean;
   /** Draws a hairline under the row, inset to the text column. */
   divided?: boolean;
+  /**
+   * A little more vertical air, for rows carrying three lines of text.
+   *
+   * The compact row's 4pt of padding is right for a title and one subtitle; with a
+   * `secondary` *and* a `tertiary` — the Sent-to-you rows, where the sender sentence
+   * is the point — the last line sat nearly flush against the divider, which is the
+   * cramped spacing the founder flagged. Scoped as a prop rather than changed
+   * globally, because the density of every other list is intentional.
+   */
+  spacious?: boolean;
   onPress: () => void;
 };
 
@@ -50,6 +60,7 @@ export function TitleRow({
   trailing,
   pending = false,
   divided = false,
+  spacious = false,
   onPress,
 }: TitleRowProps) {
   const compact = size !== 'sm';
@@ -62,7 +73,12 @@ export function TitleRow({
       accessibilityLabel={[title, year, secondaryLabel, tertiaryLabel].filter(Boolean).join(', ')}
       accessibilityHint={pending ? 'Saved on this device, waiting to sync' : undefined}
       onPress={onPress}
-      style={[styles.row, compact && styles.rowCompact, pending && styles.pending]}
+      style={[
+        styles.row,
+        compact && styles.rowCompact,
+        spacious && styles.rowSpacious,
+        pending && styles.pending,
+      ]}
     >
       {leading ? <View style={styles.leading}>{leading}</View> : null}
       <Poster uri={posterUri} title={title} size={size} />
@@ -128,6 +144,8 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.compactRow,
     paddingVertical: theme.space[1],
   },
+  // After `rowCompact` in the cascade, so a compact-and-spacious row gets the air.
+  rowSpacious: { paddingVertical: theme.space[2] },
   leading: {
     width: theme.layout.row.ordinalColumn,
     alignItems: 'flex-start',

@@ -27,13 +27,23 @@ const NOTHING: AwardFacts = {
   rankings: [],
   watchlist: [],
   invitedSignups: [],
+  invitedSignupCount: 0,
   written: [],
   recommendationsSent: [],
   reactionsReceived: [],
   mutualFollows: [],
 };
 
-const facts = (over: Partial<AwardFacts> = {}): AwardFacts => ({ ...NOTHING, ...over });
+/**
+ * `invitedSignupCount` follows the rows unless the test says otherwise, the same
+ * way `readFacts` derives it for the owner — a fixture that supplied people and a
+ * count of zero would be a state the reader cannot reach.
+ */
+const facts = (over: Partial<AwardFacts> = {}): AwardFacts => ({
+  ...NOTHING,
+  invitedSignupCount: over.invitedSignups?.length ?? 0,
+  ...over,
+});
 
 let seq = 0;
 const title = (over: Partial<WatchedTitle> = {}): WatchedTitle => {
@@ -1136,9 +1146,14 @@ describe('the genre vocabulary', () => {
 });
 
 describe('a track the viewer is not entitled to read', () => {
+  // One withheld fact now, not two: Invite Instigator's count became a public
+  // aggregate on 2026-08-27 (founder decision, explicitly scoped to that award),
+  // so the visitor's facts carry a real `invitedSignupCount` with no rows. Hype
+  // Courier is the whole of the withheld set.
   const withheld = facts({
     watched: many(60),
-    withheld: new Set<keyof AwardFacts>(['recommendationsSent', 'invitedSignups']),
+    invitedSignupCount: 2,
+    withheld: new Set<keyof AwardFacts>(['recommendationsSent']),
   });
 
   it('states the boundary rather than a zero or an apology', () => {
@@ -1159,17 +1174,31 @@ describe('a track the viewer is not entitled to read', () => {
     expect(failed.detailLine).toBe('Could not load this one');
   });
 
-  it('costs exactly the two-party tracks and none of the countable ones', () => {
+  it('costs exactly Hype Courier and no countable track', () => {
     const list = awardsFor(withheld);
-    expect(list.filter((a) => a.withheld).map((a) => a.trackKey).sort()).toEqual([
-      'hype-courier',
-      'invite-instigator',
-    ]);
+    expect(list.filter((a) => a.withheld).map((a) => a.trackKey)).toEqual(['hype-courier']);
     expect(list.find((a) => a.trackKey === 'movie-muncher')?.earnedTier?.label).toBe('Bronze');
   });
 
-  it('keeps a withheld pinned track pinned, like an unavailable one', () => {
-    const list = awardsFor(withheld);
-    expect(list[2]?.trackKey).toBe('invite-instigator');
+  it('shows a visitor the same Invite Instigator progress the owner sees', () => {
+    // The founder's parity requirement: two activated invites read 2 / 3 on both
+    // sheets. The visitor's number arrives as a count with no rows, and the
+    // synthetic aggregate row is what keeps the metric equal to its breakdown.
+    const result = award('invite-instigator', withheld);
+    expect(result.withheld).toBe(false);
+    expect(result.value).toBe(2);
+    expect(result.countLabel).toBe('2 / 3');
+    expect(result.detailLine).toBe('Next: Bring 3 people to bingd.');
+  });
+
+  it('names no invitee in a visitor’s Invite Instigator breakdown', () => {
+    // The count is public; the graph is not. One aggregate row, weighted by the
+    // whole count, with nowhere to tap.
+    const { rows } = rowsFor('invite-instigator', withheld);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.label).toBe('2 people brought to bingd.');
+    expect(rows[0]?.weight).toBe(2);
+    expect(rows[0]?.link ?? null).toBeNull();
+    expect(rows[0]?.avatarPath ?? null).toBeNull();
   });
 });

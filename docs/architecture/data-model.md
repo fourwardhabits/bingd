@@ -751,7 +751,22 @@ Chosen over Spearman because it degrades more gracefully on small overlaps, whic
 
 `shared_count` is stored alongside so the UI can show `88% match · 126 shared` in one read (PRD §13).
 
-Computation is scheduled, not on demand (AD-7), and only for pairs whose overlap exceeds a floor. Below the floor no row exists, and the UI shows no match rather than a meaningless number.
+~~Computation is scheduled, not on demand (AD-7), and only for pairs whose overlap exceeds a floor.~~ **Corrected 2026-08-27 — see the block below: computation is live per call, and nothing populates this table.** What survives of the sentence is the floor: below `taste.min_common` the answer is null, and the UI shows no match rather than a meaningless number.
+
+> **As built — corrected 2026-08-27.** The product's Match is **not** served from this
+> table. `taste_match` (`20260817000400`, revised `20260827001000`) computes the pair
+> **live per call** — score proximity over exactly-shared titles, derived from
+> `rankings` through `band_bounds` and `score_for`, blended with midrank-Spearman rank
+> agreement above eight shared titles, then shrunk toward the 50 stranger baseline by
+> `n / (n + taste.shrink_prior)` so thin evidence reads as near-chance rather than as
+> certainty. Every display surface calls it or calls something that does: the profile
+> header directly, People suggestions through `people_taste_matches`, the Following
+> drilldown through `following_ratings`. There is no scheduled job, no `match-builder`
+> function, and nothing writes or reads `match_scores`; the table stands as designed
+> capacity for the day live computation stops scaling (AD-7 in
+> [`README.md`](./README.md) records the same correction). The method paragraphs above
+> — Kendall's tau-a, materialised on a schedule — describe the design this schema was
+> written for, not the code that runs.
 
 ---
 

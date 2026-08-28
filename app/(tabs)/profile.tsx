@@ -16,6 +16,7 @@ import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { GoalsSection } from '@/features/goals/GoalsSection';
 import { currentYear } from '@/features/goals/use-goals';
 import { FollowListSheet } from '@/features/profile/FollowListSheet';
+import { RankedTitlesSheet } from '@/features/profile/RankedTitlesSheet';
 import { InviteFriendsButton } from '@/features/profile/InviteFriendsButton';
 import { ProfileActions } from '@/features/profile/ProfileActions';
 import { ProfileIdentity } from '@/features/profile/ProfileIdentity';
@@ -71,6 +72,14 @@ export default function ProfileScreen() {
    * true that somebody has to remember to prevent.
    */
   const [followList, setFollowList] = useState<'followers' | 'following' | null>(null);
+  /**
+   * The Movies / TV drill-down, same shape as `followList`. `/u/[username]` has had
+   * this since the drill-down landed; the own tab left the two stats inert on the
+   * theory that the full collection is a tab away — and the founder's device pass
+   * answered that theory: a number that is a button on everyone else's profile and
+   * a label on your own is a broken affordance, not a shortcut saved.
+   */
+  const [titleList, setTitleList] = useState<'movies' | 'tv_seasons' | null>(null);
   // Mounted only while open, like every other sheet in the app: it reads nine things
   // when it mounts, and one that stayed mounted would read them on every profile visit
   // for a screen nobody had asked for.
@@ -214,6 +223,8 @@ export default function ProfileScreen() {
            */
           onPressFollowers={stats.isPending ? undefined : () => setFollowList('followers')}
           onPressFollowing={stats.isPending ? undefined : () => setFollowList('following')}
+          onPressMovies={stats.isPending ? undefined : () => setTitleList('movies')}
+          onPressSeasons={stats.isPending ? undefined : () => setTitleList('tv_seasons')}
           controls={
             /**
              * Share Profile and Bingd Awards in that order, then Invite friends.
@@ -376,6 +387,18 @@ export default function ProfileScreen() {
         viewerId={profile.id}
         isSelf
         onClose={() => setFollowList(null)}
+      />
+      <RankedTitlesSheet
+        category={titleList}
+        userId={profile.id}
+        name={profile.display_name || profile.username}
+        viewerId={profile.id}
+        isSelf
+        onPressTitle={(id) => {
+          setTitleList(null);
+          router.push(`/title/${id}`);
+        }}
+        onClose={() => setTitleList(null)}
       />
     </Screen>
   );

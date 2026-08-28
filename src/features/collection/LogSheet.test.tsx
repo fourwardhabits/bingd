@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+import { AppState } from 'react-native';
 
 import { queryKeys } from '@/lib/query';
 import { renderWithProviders } from '@/test-utils/render';
@@ -157,32 +157,19 @@ const failing = (fn: string, error: { code?: string; message: string }) => {
   );
 };
 
-/** Whichever of the two names the one writing field is wearing right now. */
 /**
- * **The two writing rows, which used to be one row wearing two names.**
+ * **One row, one name (founder simplification, 2026-08-27).**
  *
- * `user_media` holds one `note` under one `note_visibility`, and the sheet used to
- * draw a single row labelled by whichever state that was in. The founder's objection:
- * somebody who wanted to write a *review* had to find a row called Private note, open
- * it, and notice a chip inside — which is a bad way to discover the social half of the
- * product, and the way most people never discovered it at all.
- *
- * There are two rows now and exactly one of them ever holds the writing. `WRITING` is
- * the private one, because that is where a note with no stored visibility opens and so
- * is the row every test in this file that predates the split was implicitly using.
- * Tests about the *other* row say `REVIEW` and mean it.
+ * `user_media` holds one `note` under one `note_visibility`, and the sheet now draws
+ * it as exactly one row: Note, private by default. The Review / Private note pair this
+ * replaces asked the reader to choose between two names for one piece of writing
+ * before writing anything — the founder's exact complaint about the sheet. "Share as
+ * a review" is a chip beside the text now, an explicit act on writing that already
+ * exists rather than a fork in front of it, and the row's value carries the shared
+ * state so a published note says so before the composer is even opened. There is no
+ * confirmation dialog anywhere in this sheet any more.
  */
-const WRITING = 'Private note';
-const REVIEW = 'Review';
-
-/**
- * The one confirmation this sheet raises, and the only way to observe it.
- *
- * Publishing writing somebody kept private is the single act here that tapping again
- * cannot undo, so the Review row asks before it converts. Under Jest nobody presses
- * anything, so the spy both proves the question was asked and provides the answer.
- */
-const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+const WRITING = 'Note';
 
 const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> = {}) => {
   const view = await renderWithProviders(<LogSheet title={title} onClose={() => {}} surface="search" {...props} />);
@@ -192,16 +179,11 @@ const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> =
     show: (next: LoggableTitle | null) =>
       view.rerender(<LogSheet title={next} onClose={() => {}} surface="search" {...props} />),
     bucket: (label: string) => view.getByLabelText(label),
-    // The row and the field it discloses share a name — which is right for
+    // The row and the field it discloses share the name "Note" — which is right for
     // a screen reader, since one is a button and the other a text field — so the
     // queries here separate them by role rather than by label.
-    // One field, two names: the row is called "Private note" or "Review" depending on
-    // which of the two this piece of writing currently is. The helper matches either,
-    // because almost every test here is about the field rather than about its state —
-    // the ones that *are* about the state assert the exact word themselves.
     notesRow: () => view.getByRole('button', { name: WRITING }),
-    reviewRow: () => view.getByRole('button', { name: REVIEW }),
-    // Both rows are inert until `useLogState` resolves, so that nothing can be
+    // The row is inert until `useLogState` resolves, so that nothing can be
     // decided about a note the sheet has not been told about yet. A user waits for
     // that without noticing; a test has to say so.
     openNotes: async () => {
@@ -209,13 +191,6 @@ const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> =
         expect(view.getByLabelText(WRITING).props.accessibilityState.disabled).toBe(false),
       );
       return fireEvent.press(view.getByRole('button', { name: WRITING }));
-    },
-    /** The other row. Opens the same field, on the public side of it. */
-    openReview: async () => {
-      await waitFor(() =>
-        expect(view.getByLabelText(REVIEW).props.accessibilityState.disabled).toBe(false),
-      );
-      return fireEvent.press(view.getByRole('button', { name: REVIEW }));
     },
     note: () => view.getByPlaceholderText('What did you think?'),
     dateRow: () => view.getByRole('button', { name: 'Watch date' }),
@@ -251,14 +226,22 @@ describe('a second title', () => {
     expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(false);
   });
 
-  it('does not file the first title’s note against the second', async () => {
+  it('files unsaved typing against the title it was typed for, never the second', async () => {
     const sheet = await open(filmA);
 
     await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'a private note about Film A');
     await sheet.show(filmB);
 
-    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(0));
+    // The swap unmounts Film A's body, and unmount is an autosave flush point: the
+    // typed text is saved rather than discarded — against the title whose sheet it
+    // was typed into, because the flush was armed by the old body. Film B gets
+    // nothing filed against it.
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1]).toMatchObject({
+      p_media_item_id: 'film-a',
+      p_note: 'a private note about Film A',
+    });
   });
 });
 
@@ -765,10 +748,12 @@ describe('notes', () => {
     await waitFor(() => expect(readsOf('user_media')).toBeGreaterThan(before));
   });
 
-  it('leaves the cache alone when a note save was refused outright', async () => {
-    // 55000 from `save_note` is its version conflict: somebody else's edit is stored and
-    // this one was declined. Nothing was written, so there is nothing to reconcile — the
-    // reader is told to reopen it, which is a read they take themselves.
+  it('refetches on a version conflict, and keeps the typed text', async () => {
+    // 55000 from `save_note` is its version conflict: another device moved the note and
+    // this edit was declined. The autosave contract for it (2026-08-27): forget the
+    // remembered version, re-read what is really stored so the *next* save is judged
+    // against the truth, and keep the typed text on screen — silently discarding
+    // writing is the one thing this sheet must never do.
     stubReads(
       { bucket: 'loved', watched_on: '2026-08-01', note: 'before', note_updated_at: 'v1' },
       null,
@@ -783,7 +768,279 @@ describe('notes', () => {
     await fireEvent(sheet.note(), 'blur');
 
     await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
-    expect(readsOf('user_media')).toBe(before);
+    await waitFor(() => expect(readsOf('user_media')).toBeGreaterThan(before));
+    // The overlay holds the writing; the problem line says what happened.
+    expect(sheet.note().props.value).toBe('after');
+    expect(
+      sheet.getByText('This note changed somewhere else. Reopen it to see the latest.'),
+    ).toBeTruthy();
+  });
+});
+
+/**
+ * **The autosave lane (founder correctness pass, 2026-08-27).**
+ *
+ * Before it, the only thing that persisted typed text was the field's blur — and React
+ * Native does not fire blur on unmount, so the backdrop, the header Close, the
+ * post-rank Done and a collapsed row all discarded whatever was typed. The founder met
+ * it as "my review didn't save".
+ *
+ * The contract has two halves. Typing at rest for 1200ms is one write — never a write
+ * per keystroke. And every way of leaving the field — blur, collapsing the row, Close,
+ * Done, backgrounding, unmount — flushes immediately rather than waiting the debounce
+ * out. The debounce is pinned under fake timers; the flush points are events and need
+ * no clock. (Unmount has its own test at the top of this file, where two titles swap.)
+ */
+describe('the autosave lane', () => {
+  it('saves once when typing rests, not once per keystroke', async () => {
+    // Real timers, deliberately. Faking the clock here poisons the process: React
+    // Native's Promise polyfill flushes on `setImmediate` and React's scheduler
+    // shares the same clock, so a fake-timer window either stalls the save this test
+    // exists to observe or strands scheduled work when the real clock returns — and
+    // the strand outlives the test. 1200ms of real waiting is the honest version.
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await fireEvent.changeText(sheet.note(), 'one');
+    await fireEvent.changeText(sheet.note(), 'one two');
+    await fireEvent.changeText(sheet.note(), 'one two three');
+    // Three keystroke bursts inside the window: nothing has been written yet.
+    expect(callsTo('log_watched')).toHaveLength(0);
+
+    // The debounce elapses for real, and the burst collapses into one write.
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1), { timeout: 3000 });
+    // The save carries what was in the field when the timer fired, not what armed it.
+    expect(callsTo('log_watched')[0][1].p_note).toBe('one two three');
+    expect(callsTo('save_note')).toHaveLength(0);
+
+    // And it stays one write: a debounce that had leaked a timer per keystroke would
+    // land its stragglers in this window.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    });
+    expect(callsTo('log_watched')).toHaveLength(1);
+  });
+
+  /**
+   * Review 66, Majors 1 and 2. `state.exists` lags every write by a refetch, and the
+   * first draft of the lane kept trusting it: the second save after the row's own
+   * creation still went through `log_watched`, which coalesces (a clear resurrects)
+   * and checks no version (another device's edit is overwritten). The sheet now
+   * answers "does the row exist" from its own acknowledged writes as well.
+   */
+  it('moves to the assigning writer the moment its own write has created the row', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await fireEvent.changeText(sheet.note(), 'first thought');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+
+    // The query has not refetched — the stub never mirrors — so `state.exists` is
+    // still false. The sheet must not care: it created the row itself.
+    await fireEvent.changeText(sheet.note(), 'first thought, refined');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1].p_note).toBe('first thought, refined');
+    expect(callsTo('log_watched')).toHaveLength(1);
+  });
+
+  it('clears a note it only just created', async () => {
+    // The sharpest corner of the same staleness: the cleared field equals the stale
+    // read (`'' === ''`), so a change-detector trusting the query alone writes
+    // nothing at all and the old text resurrects on reopen. The lane remembers what
+    // it last sent, and a clear against that is a change.
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await fireEvent.changeText(sheet.note(), 'a passing thought');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+
+    await fireEvent.changeText(sheet.note(), '');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1].p_note).toBe('');
+  });
+
+  it('saves mid-stream once typing has outrun the max wait', async () => {
+    // A trailing debounce alone re-arms on every keystroke, so a sentence typed
+    // without a pause would ride unsaved for its whole length (review 66b). Once
+    // dirty text has waited AUTOSAVE_MAX_WAIT, the next keystroke saves instead.
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    // Keep typing across the ceiling with no pause long enough for the debounce.
+    const started = Date.now();
+    let draft = 'no';
+    while (Date.now() - started < 4200) {
+      draft += ' pause';
+      await fireEvent.changeText(sheet.note(), draft);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      });
+    }
+
+    // The save fired during the stream — before any blur, close or 1.2s rest.
+    expect(callsTo('log_watched').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('converges when a first save loses its reply and the text has moved on', async () => {
+    // 08007: the first write may have committed. The retry is a new intent with the
+    // current text, and `log_watched` assigns the new text over whatever landed —
+    // `coalesce(excluded.note, …)` takes the non-null new value — so the two
+    // outcomes of the ambiguous first write converge on what is in the field.
+    failing('log_watched', { code: '08007', message: 'connection lost' });
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await fireEvent.changeText(sheet.note(), 'the first attempt');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+
+    mockRpc.mockImplementation(() => Promise.resolve({ data: { status: 'ok' }, error: null }));
+    await fireEvent.changeText(sheet.note(), 'the second thought');
+    await fireEvent(sheet.note(), 'blur');
+
+    // Still the coalescing writer — an unacknowledged write proves no row — and it
+    // carries the current text, which is what makes the retry safe either way.
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(2));
+    expect(callsTo('log_watched')[1][1].p_note).toBe('the second thought');
+  });
+
+  it('saves what was typed when the sheet is closed from its header', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'typed and then closed');
+
+    // No blur first — the thumb goes straight from the field to Close, which is
+    // exactly the sequence that used to lose the text.
+    await fireEvent.press(sheet.getByLabelText('Close'));
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_note).toBe('typed and then closed');
+  });
+
+  it('saves what was typed when Done ends the post-rank flow', async () => {
+    const onDone = jest.fn();
+    const sheet = await open(filmA, {
+      postRank: { score: 8.7, position: 3, category: 'movies' },
+      onDone,
+    });
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'written at the finish line');
+
+    await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_note).toBe('written at the finish line');
+    expect(onDone).toHaveBeenCalled();
+  });
+
+  it('saves what was typed when the Note row is collapsed', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'folded away mid-thought');
+
+    await fireEvent.press(sheet.notesRow());
+
+    // The composer is gone and the text is not: collapsing is a leave-the-field event
+    // like any other.
+    expect(sheet.queryByPlaceholderText('What did you think?')).toBeNull();
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('log_watched')[0][1].p_note).toBe('folded away mid-thought');
+  });
+
+  it('saves what was typed when the app is backgrounded', async () => {
+    // The subscription is captured rather than simulated: the stand-in takes the
+    // OS's place, and invoking the handler is the app going to the background
+    // mid-sentence. Swapped by assignment rather than `jest.spyOn`: the preset
+    // already ships this method as a mock, and `mockRestore` on a pre-existing mock
+    // strips its implementation — after which every later mount subscribes into
+    // undefined and every unmount in the rest of the suite falls over.
+    const handlers: Array<(next: string) => void> = [];
+    const realSubscribe = AppState.addEventListener;
+    AppState.addEventListener = ((_type: string, handler: (next: string) => void) => {
+      handlers.push(handler);
+      return { remove: () => {} };
+    }) as unknown as typeof AppState.addEventListener;
+
+    try {
+      const sheet = await open(filmA);
+      await sheet.openNotes();
+      await fireEvent.changeText(sheet.note(), 'interrupted by a phone call');
+      expect(callsTo('log_watched')).toHaveLength(0);
+
+      await act(async () => {
+        for (const handler of handlers) handler('background');
+      });
+
+      await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+      expect(callsTo('log_watched')[0][1].p_note).toBe('interrupted by a phone call');
+    } finally {
+      AppState.addEventListener = realSubscribe;
+    }
+  });
+
+  it('shows the problem and retries on the next flush when a save is refused', async () => {
+    // A save that fails is still unsaved writing. The failure re-arms the dirty flag,
+    // so the next leave-the-field event retries rather than treating the refusal as
+    // the end of the story — a save is never silently pretended.
+    stubReads(
+      { bucket: 'loved', watched_on: null, note: 'before', note_updated_at: 'v1' },
+      null,
+    );
+    failing('save_note', { code: '22023', message: 'nope' });
+
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('before'));
+    await fireEvent.changeText(sheet.note(), 'after');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    await waitFor(() => expect(sheet.getByText('nope')).toBeTruthy());
+
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(2));
+    expect(callsTo('save_note')[1][1].p_note).toBe('after');
+  });
+
+  it('bases a chained save on the version the last reply returned', async () => {
+    // `state.noteVersion` lags every save by an invalidation round trip, so a second
+    // autosave inside that window carrying the query's answer would 55000 against
+    // this sheet's own predecessor. The reply's `note_version` is the base instead —
+    // whichever of the two is newer by instant, which only real timestamps can say.
+    const storedAt = '2026-08-27T10:00:00.000Z';
+    const savedAt = '2026-08-27T10:00:05.000Z';
+    stubReads(
+      { bucket: 'loved', watched_on: null, note: 'first', note_updated_at: storedAt },
+      null,
+    );
+    mockRpc.mockImplementation((name: string) =>
+      Promise.resolve(
+        name === 'save_note'
+          ? { data: { status: 'ok', note_version: savedAt }, error: null }
+          : { data: { status: 'ok' }, error: null },
+      ),
+    );
+
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('first'));
+
+    await fireEvent.changeText(sheet.note(), 'first, extended');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    expect(callsTo('save_note')[0][1].p_base_updated_at).toBe(storedAt);
+
+    await fireEvent.changeText(sheet.note(), 'first, extended twice');
+    await fireEvent(sheet.note(), 'blur');
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(2));
+    expect(callsTo('save_note')[1][1].p_base_updated_at).toBe(savedAt);
   });
 });
 
@@ -831,10 +1088,9 @@ describe('what a note says about itself', () => {
    */
   it('opens public when the reader came through Write a review', async () => {
     const sheet = await open(filmA, { noteIntent: 'review' });
-    // The Review row, because that is what "Write a review" now lands on. The intent
-    // prop still decides the *visibility* of a note that does not exist yet; what the
-    // row decides is which of the two the reader opened.
-    await sheet.openReview();
+    // One row now, so the intent has exactly one job left: it seeds the visibility of
+    // a note that does not exist yet, and the chip shows the seeded state.
+    await sheet.openNotes();
 
     expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(true);
     expect(sheet.getByText(/Shown with your rating/)).toBeTruthy();
@@ -895,7 +1151,7 @@ describe('what a note says about itself', () => {
     // Through the review door, so the spoiler claim is being made about something
     // that will actually be shown to somebody.
     const sheet = await open(filmA, { noteIntent: 'review' });
-    await sheet.openReview();
+    await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'he was dead the whole time');
     await fireEvent.press(spoilerToggle(sheet));
 
@@ -920,10 +1176,8 @@ describe('what a note says about itself', () => {
       null,
     );
     const sheet = await open(filmA);
-    // Opened on the row it is currently filed under. A stored public note lives on the
-    // Review row, and pressing Private note is the *other* way to take it back — the
-    // row-level conversion, asserted separately below.
-    await sheet.openReview();
+    // A stored public note opens on its saved visibility, so the chip arrives ticked.
+    await sheet.openNotes();
     await waitFor(() => expect(sheet.note().props.value).toBe('out in the open'));
 
     // Unticking "Share as a review" is how a published note is taken back.
@@ -1202,7 +1456,7 @@ describe('when the log state cannot be read', () => {
     await waitFor(() =>
       expect(sheet.getByLabelText(WRITING).props.accessibilityHint).toBe('Unavailable'),
     );
-    for (const label of [WRITING, REVIEW, 'Who I watched with', 'Watch date']) {
+    for (const label of [WRITING, 'Who I watched with', 'Watch date']) {
       expect(sheet.getByLabelText(label).props.accessibilityHint).not.toBe('Loading');
     }
   });
@@ -1579,80 +1833,105 @@ describe('who I watched with', () => {
   });
 });
 /**
- * **One field, two names, and which one it wears is the contract.**
+ * **One row, and what its value says.**
  *
  * `user_media.note` stores both a private note and a review; `note_visibility` is the
- * only thing that tells them apart. The UI used to call it "Notes" in both states —
- * over a caption promising it would appear in friends' feeds — so the word for the
- * private thing was heading the composer for the public one.
- */
-/**
- * **Two rows, and which of them is holding the writing.**
+ * only thing that tells them apart. The sheet drew that one field as *two* rows —
+ * Review and Private note, each converting to the other — and the founder's device
+ * verdict was that it made the sheet conceptually complicated: a reader had to decide
+ * which of two names their writing would go under before writing anything. It is one
+ * row now, one word, private by default.
  *
- * The sheet used to draw one row and rename it — Private note or Review, whichever the
- * stored visibility happened to be. That was an honest label for a state and a bad
- * offer: a reader who wanted to write a review had to open a row called Private note
- * and notice a chip inside it. The founder's brief for this tranche makes both names
- * visible before either is opened, Review first, because Bingd should nudge the social
- * contribution rather than hide it behind the private one.
- *
- * The storage did not move and is not going to: one `note`, one `note_visibility`. So
- * the invariant these tests hold is that **exactly one row ever has words in it**, and
- * that moving them across is an act the reader takes rather than one they stumble into.
+ * The storage did not move and is not going to: one `note`, one `note_visibility`.
+ * The invariants these tests hold are that the row's value tells the truth about the
+ * shared state before the composer is opened, and that the chip — the only conversion
+ * control left anywhere on this sheet — is an act the reader takes on writing they are
+ * looking at.
  */
-describe('what the writing is called', () => {
-  it('offers both before either is opened, with Review first', async () => {
+describe('the one Note row', () => {
+  const shareChip = (sheet: Awaited<ReturnType<typeof open>>) =>
+    sheet.getByLabelText('Share this note as a public review');
+
+  it('offers exactly one writing row, and it reads Add while empty', async () => {
     const sheet = await open(filmA);
     await waitFor(() =>
-      expect(sheet.getByLabelText('Private note').props.accessibilityState.disabled).toBe(false),
+      expect(sheet.getByLabelText(WRITING).props.accessibilityState.disabled).toBe(false),
     );
 
-    expect(sheet.getByRole('button', { name: 'Review' })).toBeTruthy();
-    expect(sheet.getByRole('button', { name: 'Private note' })).toBeTruthy();
-    // Neither holds anything yet, and both say so rather than one pretending to.
-    expect(sheet.reviewRow().props.accessibilityValue.text).toBe('Add');
     expect(sheet.notesRow().props.accessibilityValue.text).toBe('Add');
+    // The pair is gone, in both of its names.
+    expect(sheet.queryByRole('button', { name: 'Review' })).toBeNull();
+    expect(sheet.queryByRole('button', { name: 'Private note' })).toBeNull();
+  });
+
+  it('counts a private note in words, with no Shared claim', async () => {
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'kept back',
+        note_updated_at: 'v1',
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+
+    await waitFor(() => expect(sheet.notesRow().props.accessibilityValue.text).toBe('2 words'));
+  });
+
+  it('says Shared over the word count once the note is a review', async () => {
+    // The row's value is what announces a published note before the composer is even
+    // opened — the whole reason the shared state rides on the row rather than only on
+    // the chip inside it.
+    stubReads(
+      {
+        bucket: 'loved',
+        watched_on: null,
+        note: 'out in the open',
+        note_updated_at: 'v1',
+        note_visibility: 'public',
+        note_has_spoilers: false,
+      },
+      null,
+    );
+    const sheet = await open(filmA);
+
+    await waitFor(() =>
+      expect(sheet.notesRow().props.accessibilityValue.text).toBe('Shared · 4 words'),
+    );
   });
 
   it('is a private note until it is shared', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
 
-    expect(sheet.getByText('Only you can read this.')).toBeTruthy();
     expect(sheet.notesRow().props.accessibilityState.expanded).toBe(true);
-    expect(sheet.reviewRow().props.accessibilityState.expanded).toBe(false);
+    expect(sheet.getByText('Only you can read this.')).toBeTruthy();
   });
 
-  it('is a review once it is', async () => {
-    const sheet = await open(filmA, { noteIntent: 'review' });
-    await sheet.openReview();
-
-    expect(sheet.reviewRow().props.accessibilityState.expanded).toBe(true);
-    expect(sheet.notesRow().props.accessibilityState.expanded).toBe(false);
-  });
-
-  it('moves the writing across when the reader shares it', async () => {
+  it('says Shared on the row the moment new writing is shared', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'three words here');
 
-    await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
+    await fireEvent.press(shareChip(sheet));
 
-    // The word count follows the visibility, because there is one piece of writing and
-    // the rows are two views of it.
-    await waitFor(() => expect(sheet.reviewRow().props.accessibilityValue.text).toBe('3 words'));
-    expect(sheet.notesRow().props.accessibilityValue.text).toBe('Add');
+    await waitFor(() =>
+      expect(sheet.notesRow().props.accessibilityValue.text).toBe('Shared · 3 words'),
+    );
   });
 
   /**
-   * **Publishing asks. Un-publishing does not.**
+   * **The chip is the only conversion control, and one tap of it saves.**
    *
-   * The asymmetry is the same one the note claims have had since visibility existed:
-   * putting somebody's private writing on their profile and in their friends' feeds is
-   * the one move on this sheet that tapping again cannot take back, because by then it
-   * has been read. Making a review private is the safe direction and costs a tap.
+   * The Review row's confirmation dialog is gone with the row. The chip is an explicit
+   * act taken inside the composer, on writing the reader is looking at, and it has
+   * always saved immediately rather than waiting for a blur — one tap publishes, the
+   * same tap takes it back, and nothing asks a question in between.
    */
-  it('will not publish a private note on one tap of the Review row', async () => {
+  it('publishes an existing private note on one tap of the chip, and no dialog', async () => {
     stubReads(
       {
         bucket: 'loved',
@@ -1665,45 +1944,70 @@ describe('what the writing is called', () => {
       null,
     );
     const sheet = await open(filmA);
-    await sheet.openReview();
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('kept back'));
 
-    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
-    expect(alertSpy.mock.calls[0]?.[0]).toBe('Share this as a review?');
-    // Nothing was written by asking.
-    expect(callsTo('save_note')).toHaveLength(0);
-    expect(callsTo('log_watched')).toHaveLength(0);
-  });
+    expect(shareChip(sheet).props.accessibilityState.checked).toBe(false);
+    await fireEvent.press(shareChip(sheet));
 
-  it('publishes once the reader confirms', async () => {
-    stubReads(
-      {
-        bucket: 'loved',
-        watched_on: null,
-        note: 'kept back',
-        note_updated_at: 'v1',
-        note_visibility: 'private',
-        note_has_spoilers: false,
-      },
-      null,
-    );
-    const sheet = await open(filmA);
-    await sheet.openReview();
-
-    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
-    const share = alertSpy.mock.calls[0]?.[2]?.find((button) => button.style !== 'cancel');
-    await share?.onPress?.();
-
+    // Exactly one save, carrying the conversion, and the chip reflects it at once.
     await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
     expect(callsTo('save_note')[0][1]).toMatchObject({
       p_note: 'kept back',
       p_note_visibility: 'public',
     });
+    expect(shareChip(sheet).props.accessibilityState.checked).toBe(true);
+    expect(sheet.getByText(/Shown with your rating/)).toBeTruthy();
+  });
+
+  it('takes it back on a second tap, keeping the text', async () => {
+    // The stand-in behaves like the server: the first save really stores `public`, so
+    // the refetch behind it returns the published state and the second tap is judged
+    // against what is genuinely stored — exactly the device sequence.
+    const row: Record<string, unknown> = {
+      bucket: 'loved',
+      watched_on: null,
+      note: 'kept back',
+      note_updated_at: 'v1',
+      note_visibility: 'private',
+      note_has_spoilers: false,
+    };
+    stubReads(row, null);
+    mockRpc.mockImplementation((name: string, args?: { p_note_visibility?: string }) => {
+      if (name === 'save_note') row.note_visibility = args?.p_note_visibility;
+      return Promise.resolve({ data: { status: 'ok' }, error: null });
+    });
+
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('kept back'));
+
+    await fireEvent.press(shareChip(sheet));
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    // Wait the reconciling refetch out, so the second tap runs against the stored
+    // truth rather than racing it.
+    await waitFor(() =>
+      expect(sheet.client.getQueryData(queryKeys.logState('user-1', 'film-a'))).toMatchObject({
+        noteVisibility: 'public',
+      }),
+    );
+
+    await fireEvent.press(shareChip(sheet));
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(2));
+    // Unsharing changes who may read it and nothing else: the text travels intact.
+    expect(callsTo('save_note')[1][1]).toMatchObject({
+      p_note: 'kept back',
+      p_note_visibility: 'private',
+    });
+    expect(shareChip(sheet).props.accessibilityState.checked).toBe(false);
+    expect(sheet.note().props.value).toBe('kept back');
   });
 
   /**
    * The stored value still wins over the door the reader came through — the guarantee
-   * `20260823000100`'s tranche established, restated because the rows are now derived
-   * from the same expression and would be the first thing to drift.
+   * `20260823000100`'s tranche established, restated at the row: the value must not
+   * claim Shared for a note the intent prop failed to move.
    */
   it('calls a stored private note a private note, even under Write a review', async () => {
     stubReads(
@@ -1718,13 +2022,8 @@ describe('what the writing is called', () => {
       null,
     );
     const sheet = await open(filmA, { noteIntent: 'review' });
-    await sheet.openNotes();
 
-    await waitFor(() => expect(sheet.note().props.value).toBe('kept back'));
-    // The writing is on the private row, and the review row is empty — the intent prop
-    // did not move anything.
-    expect(sheet.notesRow().props.accessibilityValue.text).toBe('2 words');
-    expect(sheet.reviewRow().props.accessibilityValue.text).toBe('Add');
+    await waitFor(() => expect(sheet.notesRow().props.accessibilityValue.text).toBe('2 words'));
   });
 });
 
@@ -1758,12 +2057,11 @@ describe('the state after a ranking', () => {
     expect(sheet.queryByTestId('bucket-choices')).toBeNull();
   });
 
-  it('offers the writing and the details, with Review first', async () => {
+  it('offers the writing and the details', async () => {
     const sheet = await open(filmA, { postRank: placed });
 
     await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
-    expect(sheet.getByRole('button', { name: 'Review' })).toBeTruthy();
-    expect(sheet.getByRole('button', { name: 'Private note' })).toBeTruthy();
+    expect(sheet.getByRole('button', { name: WRITING })).toBeTruthy();
     expect(sheet.getByRole('button', { name: 'Who I watched with' })).toBeTruthy();
     expect(sheet.getByRole('button', { name: 'Watch date' })).toBeTruthy();
   });
@@ -1791,11 +2089,14 @@ describe('the state after a ranking', () => {
     expect(sheet.queryByPlaceholderText('What did you think?')).toBeNull();
   });
 
-  it('is a review that gets written, if one does', async () => {
+  it('is a review that gets written, if the reader shares it', async () => {
     const sheet = await open(filmA, { postRank: placed });
     await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
 
-    await sheet.openReview();
+    await sheet.openNotes();
+    // Sharing first and writing second: the chip against an empty field writes
+    // nothing, and the save that first stores the text carries the choice with it.
+    await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
     await fireEvent.changeText(sheet.note(), 'The last twenty minutes are the whole film.');
     await fireEvent(sheet.note(), 'blur');
 

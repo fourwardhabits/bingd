@@ -6,6 +6,7 @@ import type { Bucket } from '@/features/collection/score';
 import { fontFamily, theme } from '../tokens';
 import { Avatar } from './Avatar';
 import { Poster } from './Poster';
+import { ReactionControl } from './ReactionControl';
 import { ScoreBadge } from './ScoreBadge';
 import { SpoilerNote } from './SpoilerNote';
 import { Text } from './Text';
@@ -378,87 +379,35 @@ export function ActivityRow({
         </View>
       ) : null}
 
-      {/* The glyphs people used and how many there were, and nothing else.
-          Subordinate to the film by construction: footnote size, indented under the
-          poster, no per-kind tally. `disagree` is countable on the activity it
-          belongs to and nowhere else, which is the difference between banter and a
-          scoreboard (PRD §14). The breakdown lives behind the tap. */}
-      {reaction && reaction.count > 0 ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${reaction.count} ${reaction.count === 1 ? 'reaction' : 'reactions'}. See who reacted.`}
-          onPress={reaction.onPressSummary}
-          disabled={!reaction.onPressSummary}
-          style={({ pressed }) => [styles.reactors, pressed && styles.pressed]}
-        >
-          {reaction.glyphs?.length ? (
-            <View style={styles.glyphs} accessibilityElementsHidden>
-              {/* Overlapped rather than spaced, so three glyphs read as one object
-                  and cost the width of about two. */}
-              {reaction.glyphs.slice(0, 3).map((glyph, index) => (
-                <View key={glyph} style={[styles.glyph, index > 0 && styles.glyphOverlap]}>
-                  <Text variant="footnote" allowFontScaling={false}>
-                    {glyph}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-          <Text variant="footnote" tone="secondary">
-            {reaction.count}
-          </Text>
-        </Pressable>
-      ) : null}
-
+      {/* Above the actions and inside the row — the comment thread's placement, which
+          the founder preferred on the device (§17): the pill sits directly on top of
+          the heart it belongs to, not in a floating band of its own. */}
       {reaction?.picker ? <View style={styles.picker}>{reaction.picker}</View> : null}
 
       <View style={styles.actions}>
         {reaction ? (
           /**
-           * Tap toggles the default; long press opens the six.
-           *
-           * The control used to render the reader's own glyph, which put the same
-           * emoji on the row twice — once in the summary cluster above, once here —
-           * and read as a duplicate rather than as two different statements. The
-           * summary is social proof; this is a control, and a control's job is to
-           * say whether *I* have acted.
-           *
-           * So it stays an icon and changes state instead: a filled Maroon heart
-           * when I have reacted, an outline when I have not. The glyph I chose is
-           * still visible — it is in the cluster above, where it is counted with
-           * everybody else's, which is the only place it means anything.
+           * The one reaction control (§17) — the comment grammar, shared. Heart
+           * first; the glyphs people used and the total inline beside it, no
+           * per-kind tally: `disagree` is countable on the activity it belongs to
+           * and nowhere else, which is the difference between banter and a
+           * scoreboard (PRD §14). The breakdown lives behind the cluster — tap or
+           * hold it and the people are named (§18), where the old summary band's
+           * tap used to lead.
            */
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected: Boolean(reaction.mineGlyph) }}
-            accessibilityLabel={
+          <ReactionControl
+            label={
               reaction.mineGlyph
                 ? `You reacted to ${filmName}. Tap to remove, long press to change.`
                 : `React to ${actorName}'s activity about ${filmName}. Long press for more reactions.`
             }
-            accessibilityHint="Long press to choose a different reaction"
-            onPress={reaction.onPress}
-            onLongPress={reaction.onLongPress}
-            hitSlop={theme.space[2]}
-            style={({ pressed }) => [styles.action, pressed && styles.pressed]}
-          >
-            {/* A filled Maroon heart and nothing else.
-
-                The word "You" sat beside it until the founder's acceptance pass, and it
-                was redundant twice over: the filled state already says the reaction is
-                mine, and the aggregate above already counts it among everybody else's.
-                A label that repeats what a colour has already said is a third thing in
-                a row that is mostly artwork, and it made the reacted state wider than
-                the unreacted one so the whole action row shifted on a tap.
-
-                Screen readers keep the ownership — it is in the label above, where it
-                is a sentence rather than a word. */}
-            <Ionicons
-              name={reaction.mineGlyph ? 'heart' : 'heart-outline'}
-              size={theme.layout.icon.sm}
-              color={reaction.mineGlyph ? theme.semantic.action : theme.text.secondary}
-            />
-          </Pressable>
+            active={Boolean(reaction.mineGlyph)}
+            glyphs={reaction.glyphs ?? []}
+            count={reaction.count}
+            onToggle={reaction.onPress}
+            onOpenPicker={reaction.onLongPress}
+            onOpenDetail={reaction.onPressSummary}
+          />
         ) : null}
 
         {/* Comments V1, 2026-08-17. The rule that kept a placeholder off this row
@@ -672,25 +621,7 @@ const styles = StyleSheet.create({
   // above it rather than starting a new one. It now lines up with that sentence and
   // not merely with the poster it clears.
   note: { paddingLeft: textEdge },
-  glyphs: { flexDirection: 'row', alignItems: 'center' },
-  glyph: {
-    width: 18,
-    height: 18,
-    borderRadius: theme.radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.surface.base,
-  },
-  // Half a glyph of overlap: enough to read as a cluster, not so much that the
-  // one underneath becomes unidentifiable.
-  glyphOverlap: { marginLeft: -6 },
   picker: { paddingLeft: textEdge },
-  reactors: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[2],
-    paddingLeft: textEdge,
-  },
   /**
    * Four icons and a timestamp, on the narrowest screen this app supports.
    *

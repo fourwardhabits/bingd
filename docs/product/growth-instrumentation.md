@@ -67,8 +67,20 @@ tiers — 3, 15, 50 — were set on the assumption that they were being counted 
 now they are.
 
 Links created do not count. Links opened do not count. A redemption without activation
-does not count. The drill-down shows only genuinely activated invitees, through
+does not count. The owner's drill-down shows only genuinely activated invitees, through
 `invite_attributions_read`, which admits only the two parties to a row.
+
+**The count is public; the people are not (founder decision, 2026-08-27).**
+`invited_signup_count` (`20260827001100`) publishes the aggregate: a definer scalar
+gated on `can_i_view`, counting the owner's own predicate — attributed **and**
+activated — verbatim, so a visitor entitled to the profile sees the same `2 / 3` the
+owner does, equal by construction rather than by synchronisation. It returns one
+integer or null; it cannot name an invitee, a token or a timestamp, and
+`invite_attributions_read` still admits only the two parties to a row — a visitor's
+drill-down is one aggregate line naming nobody: *N people brought to bingd. / Who they
+are is theirs to share.* The decision is scoped: Hype Courier's sent-recommendation
+count stays withheld, and one aggregate becoming public is a founder decision about
+that aggregate, not a precedent that widens every two-party fact.
 
 ### What each writer will and will not do
 
