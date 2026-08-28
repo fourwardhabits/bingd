@@ -53,6 +53,13 @@
  *      the parent, and already answers P0002 for a row that is gone. It is *who gets
  *      told* — a retraction inside the window must still be announced to its own author,
  *      with a `reply_to` naming a comment that no longer exists.
+ *  12. `_maybe_award_unlocks` with the `on conflict … do nothing` and the `row_count`
+ *      gate replaced by a plain check-then-insert — announcing whenever the metric
+ *      clears the threshold and no *committed* row was seen. Two detectors crossing
+ *      together both pass the check, so the loser's unguarded insert dies on the
+ *      ledger's primary key: a 23505 surfaces from a path the honest version answers
+ *      with silence, which is the observable — the announcement no longer hangs off
+ *      an insert that reported a row.
  *
  * Mutants 1, 2, 9, 10 and 11 all replace the *five*-argument `add_comment`. `20260826000600`
  * drops the four-argument form deliberately, and a mutant declared against the old
@@ -359,6 +366,57 @@ begin
     updated_at = now() where id = v_s.session_id;
   return jsonb_build_object('done', false, 'session_id', v_s.session_id,
     'pivot', _rank_pivot_at(v_user, v_s.category, v_s.band_lo + v_next));
+end; $$;`;
+
+/**
+ * Mutant 12. `_maybe_award_unlocks` without its conflict protection: the existence
+ * probe at the top of the tier walk is the only guard left, the insert carries no
+ * `on conflict`, and the announcement follows every insert instead of hanging off one
+ * that reported a row. The signature is the current two-argument form — `(p_user uuid,
+ * p_awards text[])` — copied exactly, for the reason the header records about stale
+ * signatures.
+ */
+const UNGUARDED_UNLOCK = `
+create or replace function _maybe_award_unlocks(p_user uuid, p_awards text[])
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_award text; v_tier record; v_metric bigint; v_top record; v_top_val bigint; v_event_id uuid;
+begin
+  if p_user is null then return; end if;
+  foreach v_award in array p_awards loop
+    v_top := null;
+    for v_tier in
+      select t.award_key, t.tier_key, t.tier_label, t.display_name, t.threshold, t.social
+        from award_tiers t where t.award_key = v_award order by t.tier_index
+    loop
+      if exists (
+        select 1 from award_unlocks u
+         where u.user_id = p_user and u.award_key = v_tier.award_key and u.tier_key = v_tier.tier_key
+      ) then
+        continue;
+      end if;
+      v_metric := _award_metric(p_user, v_award, v_tier.threshold);
+      exit when v_metric < v_tier.threshold;
+      insert into award_unlocks (user_id, award_key, tier_key, value_at_unlock)
+      values (p_user, v_tier.award_key, v_tier.tier_key, v_metric);
+      v_top := v_tier; v_top_val := v_metric;
+    end loop;
+    if v_top is not null then
+      if v_top.social then
+        insert into feed_events (actor_id, type, payload)
+        values (p_user, 'award_earned', jsonb_build_object(
+          'award', v_top.award_key, 'tier', v_top.tier_key,
+          'award_name', v_top.display_name, 'tier_label', v_top.tier_label))
+        returning id into v_event_id;
+      end if;
+      insert into notifications (recipient_id, type, payload)
+      values (p_user, 'award_earned', jsonb_build_object(
+        'award', v_top.award_key, 'tier', v_top.tier_key,
+        'award_name', v_top.display_name, 'tier_label', v_top.tier_label));
+      update award_unlocks set announced = true
+       where user_id = p_user and award_key = v_top.award_key and tier_key = v_top.tier_key;
+    end if;
+  end loop;
 end; $$;`;
 
 await startCluster();
@@ -998,6 +1056,70 @@ const results = [];
     result?.status === 'ok' && announced.length === 1,
   ]);
 
+  await t1.end();
+  await t2.end();
+  await ctl.end();
+  await db.close();
+}
+
+// --- Mutant 12: the conflict protection dropped from _maybe_award_unlocks. The race
+//     `races/award-unlock.mjs` A1 answers with silence now hands the loser a 23505.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+  const earner = await fx.createUser();
+
+  // Five mutuals with the trigger not watching: the metric is past bronze and the
+  // tier is not on the ledger — the state two devices race from.
+  await db.sql(`alter table follows disable trigger award_on_follow`);
+  for (let i = 0; i < 5; i += 1) await fx.mutualFollow(earner, await fx.createUser());
+  await db.sql(`alter table follows enable trigger award_on_follow`);
+
+  await db.sql(UNGUARDED_UNLOCK);
+
+  // The same window as the honest race: the first detector is paused holding its
+  // uncommitted ledger row, the second runs underneath it and blocks on the primary
+  // key. With `on conflict do nothing` the loser inserts nothing and stays quiet;
+  // without it, the commit turns the loser's wait into a unique violation.
+  await db.armBarrier('award_unlocks', 'm12', { timing: 'after' });
+  const ctl = await db.controller();
+  await ctl.hold('m12');
+
+  const t1 = await db.session('winner');
+  const t2 = await db.session('loser');
+
+  await t1.begin();
+  await t1.pauseAt('m12');
+  const p1 = t1.start(`select _maybe_award_unlocks($1, array['mutual-mania'])`, [earner]);
+  await t1.awaitBlocked();
+
+  await t2.begin();
+  const p2 = t2
+    .start(`select _maybe_award_unlocks($1, array['mutual-mania'])`, [earner])
+    .then(() => null, (e) => e);
+  await t2.awaitBlocked({ on: 'transactionid' });
+
+  await ctl.release('m12');
+  await p1;
+  await t1.commit();
+  const loserError = await p2;
+  await t2.rollback().catch(() => {});
+
+  const posts = await db.rows(
+    `select 1 from feed_events where actor_id = $1 and type = 'award_earned'`,
+    [earner],
+  );
+
+  results.push([
+    'award conflict gate dropped -> the losing detector dies on the ledger PK (23505)',
+    loserError?.code === '23505',
+  ]);
+  results.push([
+    'award conflict gate dropped -> the winner alone still announced (control)',
+    posts.length === 1,
+  ]);
+
+  await db.disarmBarrier('award_unlocks');
   await t1.end();
   await t2.end();
   await ctl.end();

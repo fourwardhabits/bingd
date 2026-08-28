@@ -295,6 +295,61 @@ describe('a watchlist add in the feed', () => {
   });
 });
 
+describe('an award in the feed (20260828000100)', () => {
+  const awardEvent = () =>
+    event({
+      type: 'award_earned',
+      media_item_id: null,
+      media_items: null,
+      payload: {
+        award: 'movie-muncher',
+        tier: 'bronze',
+        award_name: 'Movie Muncher',
+        tier_label: 'Bronze',
+      },
+    });
+
+  it('puts the award name in the sentence slot, so the grammar reads "earned Movie Muncher"', async () => {
+    mockFeedRows = [awardEvent()];
+
+    const item = await only();
+    expect(item.type).toBe('award_earned');
+    // No media row at all — the title is the payload's award name, not a film.
+    expect(item.mediaItemId).toBeNull();
+    expect(item.title).toBe('Movie Muncher');
+    expect(item.award).toEqual({ key: 'movie-muncher', tierKey: 'bronze', tierLabel: 'Bronze' });
+    // Nothing film-shaped leaks onto the row: no score badge, no poster path.
+    expect(item.score).toBeNull();
+    expect(item.posterPath).toBeNull();
+  });
+
+  it('carries neither a note nor companions, and asks the note RPC nothing', async () => {
+    // An award is not a watch claim, so the (actor, title) note/tag joins must not
+    // run — the watchlist row's rule, restated for the second non-watch type.
+    mockFeedRows = [awardEvent()];
+    const item = await only();
+
+    expect(item.note).toBeNull();
+    expect(item.companions).toEqual([]);
+    expect(rpcCalls.find((c) => c.name === 'public_notes')).toBeUndefined();
+  });
+
+  it('still says something honest when the payload predates the names', async () => {
+    mockFeedRows = [
+      event({
+        type: 'award_earned',
+        media_item_id: null,
+        media_items: null,
+        payload: { award: 'movie-muncher', tier: 'bronze' },
+      }),
+    ];
+
+    const item = await only();
+    expect(item.title).toBe('a bingd. Award');
+    expect(item.award?.tierLabel).toBeNull();
+  });
+});
+
 describe('the fields the subheading needs', () => {
   it('reads a movie’s own rating and runtime', async () => {
     mockFeedRows = [

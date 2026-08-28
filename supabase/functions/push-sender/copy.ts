@@ -67,6 +67,12 @@ export type PushJob = {
    * all three fall back to the metadata sentence.
    */
   comment_excerpt?: string | null;
+  /**
+   * The award's display name, for `award_earned` jobs only (`20260828000100`) — the
+   * one actorless push. The name and nothing else: the payload's keys, and anything
+   * about how the award was earned, stay server-side.
+   */
+  award_name?: string | null;
   tokens: { token: string; platform: 'ios' | 'android' }[] | null;
 };
 
@@ -225,6 +231,30 @@ function commentExcerpt(job: PushJob): string | null {
  * the inbox applies when it drops a row whose actor it cannot name.
  */
 export function contentFor(job: PushJob): PushContent | null {
+  /**
+   * The congratulations is the one actorless push (20260828000100): nobody did
+   * this to the recipient, so it is answered before the name gate rather than
+   * exempted from it. Second person, the award named, no emoji — the same rule
+   * `invite_welcome` follows: a notification centre is not the place, and the
+   * celebration lives on the inbox row. The tap payload keeps the five-field
+   * shape with the person-and-title fields honestly null; `kind` alone routes it
+   * to the reader's own Awards.
+   */
+  if (job.type === 'award_earned') {
+    const award = job.award_name?.trim() || null;
+    return {
+      title: 'bingd. Awards',
+      body: award ? `You earned ${award}` : 'You earned a new Award',
+      data: {
+        notificationId: job.notification_id,
+        kind: job.type,
+        actorUsername: null,
+        mediaItemId: null,
+        feedEventId: null,
+      },
+    };
+  }
+
   const name = job.actor_name?.trim() || job.actor_username?.trim() || null;
   if (!name && job.type !== 'invite_welcome') return null;
   if (!name) return null;

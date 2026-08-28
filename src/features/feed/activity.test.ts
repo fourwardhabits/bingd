@@ -66,6 +66,17 @@ describe('the activity sentence', () => {
     expect(isWatchActivity('title_logged')).toBe(true);
     expect(isWatchActivity('season_completed')).toBe(true);
   });
+
+  it('reads an award as the founder’s sentence, and never as a watch', () => {
+    // "Abisola earned Movie Muncher" — the award's name rides in the title slot,
+    // so the ordinary grammar says the founder's copy with no award-shaped
+    // template. And it is emphatically not a watch claim: the note/companion
+    // joins became an allow-list precisely so a new type could not inherit them
+    // by omission (20260828000100).
+    expect(verbFor('award_earned')).toBe('earned');
+    expect(tailFor('award_earned')).toBeNull();
+    expect(isWatchActivity('award_earned')).toBe(false);
+  });
 });
 
 describe('the standardised subheading', () => {

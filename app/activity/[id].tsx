@@ -2,6 +2,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { useAuth } from '@/features/auth';
+import { AwardActivityLead } from '@/features/awards/AwardActivityLead';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentThread } from '@/features/feed/CommentThread';
 import { metadataFor, tailFor, verbFor } from '@/features/feed/activity';
@@ -152,7 +153,13 @@ export default function ActivityScreen() {
             title={event.title}
             year={event.year}
             posterUri={posterUri(event.posterPath)}
-            metadata={metadataFor(event)}
+            // The badge leads an award row, exactly as the feed draws it.
+            lead={
+              event.award ? (
+                <AwardActivityLead awardKey={event.award.key} tierKey={event.award.tierKey} />
+              ) : undefined
+            }
+            metadata={event.award ? event.award.tierLabel : metadataFor(event)}
             score={event.score}
             bucket={event.bucket}
             note={event.note?.text ?? null}
@@ -165,7 +172,21 @@ export default function ActivityScreen() {
               watched: watched.data,
             })}
             timeLabel={relativeTime(event.createdAt)}
-            onPressTitle={() => event.mediaItemId && router.push(`/title/${event.mediaItemId}`)}
+            // An award row opens the earner's Awards rather than a title (§5).
+            onPressTitle={() => {
+              if (event.mediaItemId) {
+                router.push(`/title/${event.mediaItemId}`);
+              } else if (event.award) {
+                if (event.actorId === viewerId) {
+                  router.push({ pathname: '/profile', params: { awards: '1' } });
+                } else if (event.actorUsername) {
+                  router.push({
+                    pathname: '/u/[username]',
+                    params: { username: event.actorUsername, awards: '1' },
+                  });
+                }
+              }
+            }}
             /**
              * No comments control, and no reaction, watchlist or recommend control.
              *

@@ -1,6 +1,6 @@
 # Deferred roadmap — product capability that is specified, wanted, and not being built yet
 
-**Status:** current as of 2026-08-26, at the final pre-RC product pass.
+**Status:** current as of 2026-08-28, when §5's notifications half shipped.
 
 **Companion documents:** [`PRD.md`](./PRD.md) · [`analytics.md`](./analytics.md) ·
 [`growth-instrumentation.md`](./growth-instrumentation.md) · [`backlog.md`](./backlog.md) ·
@@ -292,40 +292,26 @@ is an `AFTER INSERT` trigger. No per-channel settings were added.
 
 ## 5. Award notifications, and `award_earned` analytics
 
-**What it is.** Telling somebody they have earned an award tier — an inbox row, and later a
-push — plus the matching analytics event.
-
-**Why it is wanted.** Awards shipped on 2026-08-18 with twenty tracks and thirty badges.
-An award nobody is told about is a page people have to remember to visit.
-
-**Why it is deferred.** **There is no durable record of which tier an account has reached.**
-Tiers are computed entirely on the device, in `src/features/awards/progress.ts` over
-`tracks.ts`, from raw table reads. Notifying only on a *crossing* — 49→50 yes, 50→51 no —
-therefore requires knowing the previous tier, and Codex confirmed independently that
-existing persisted state can derive the *current* tier but cannot prove a transition was
-previously notified.
-
-A client-held "last seen tier" is exactly the observed-state assumption Review 21 spent
-seven rounds proving unsafe: a reinstall, a second device or a lost reply turns it into
-either a missed award or a repeated one. An award notification that fires twice is worse
-than one that never fires.
-
-**Everything downstream already exists**: the `award_earned` notification type, the
-`awards` category defaulting off, the preference row, and the route to the Awards sheet.
-The day a ledger lands, the writer is the only new part.
-
-**A constraint recorded now, for the day the writer lands (2026-08-27).** An
-award-earned post or notification for **Invite Instigator** may carry the award name and
-the badge — *earned Invite Instigator* — and may never name an invitee. The count became
-public achievement data on 2026-08-27 (`invited_signup_count`, PRD §14's Awards block);
-the identities behind it did not, and a celebration is not a licence to leak the graph
-it celebrates.
-
-**Revisit when.** A durable unlock or tier ledger is built — which is a migration and a
-review, not an afternoon.
-
-**Depends on.** An `award_unlocks` table or equivalent, written transactionally with the
-facts that move a tier · exactly-once semantics on that write.
+> ### ✅ The notifications half is DONE — 2026-08-28, `20260828000100`.
+>
+> The ledger this item was waiting on was built, and the writer with it: `award_unlocks`
+> — insert-wins on `(user_id, award, tier)`, written by `AFTER` triggers on the eight
+> source tables — records each crossing durably, and a milestone newly earned produces
+> exactly one `award_earned` feed post, exactly one congratulations notification, and a
+> push when eligible. The exactly-once demand this entry insisted on ("an award
+> notification that fires twice is worse than one that never fires") is met structurally,
+> and the backfill announced nothing for tiers earned before the rollout. The full
+> disposition is PRD §14's As-built block dated 2026-08-28.
+>
+> **The constraint recorded here on 2026-08-27 was honored.** The Invite Instigator
+> payload carries `{award, tier, award_name, tier_label}` and nothing else — no invitee,
+> no token, no timestamp anywhere in the post, the notification or the push. Hype
+> Courier, whose progress is withheld from visitors, gets the private congratulations and
+> **no feed post** for the same reason the count is withheld.
+>
+> **The analytics half stays deferred**, with a new reason recorded in
+> [`analytics.md`](./analytics.md) §4: the crossing is now a server-side fact, and the
+> client has no honest emission point for it.
 
 ---
 

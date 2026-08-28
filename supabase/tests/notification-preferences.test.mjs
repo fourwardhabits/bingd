@@ -101,15 +101,16 @@ after(async () => {
 
 describe('the defaults', () => {
   /**
-   * Seven on, one off, since 20260820000100 (founder Preview pass).
+   * All eight on, since 20260828000100.
    *
-   * `reactions` moved to on: the volume argument that put it off is an argument about
-   * a populated app, and in a friend beta a reaction is one of the few signals that
-   * anything is happening. `awards` stays off because **nothing writes one** — the
-   * category, the type and the trigger mapping all exist and no writer anywhere
-   * produces the row, so defaulting it on would be a claim rather than a setting.
+   * `reactions` moved on 20260820 (founder Preview pass); `awards` was the last
+   * holdout, off only because nothing wrote one. The award-unlock ledger gave
+   * `award_earned` its writer, so the reasoning that kept it off — do not pretend
+   * the functionality exists — now keeps it on: a congratulations that arrives
+   * unwanted is a setting somebody turns off, and one that never arrives is a bug
+   * nobody can see.
    */
-  it('answers for all eight categories, with only awards off', async () => {
+  it('answers for all eight categories, all on', async () => {
     assert.deepEqual(await prefs(control), {
       follows: true,
       follow_accepted: true,
@@ -118,7 +119,7 @@ describe('the defaults', () => {
       watch_tags: true,
       recommendations: true,
       invites: true,
-      awards: false,
+      awards: true,
     });
   });
 
@@ -130,7 +131,7 @@ describe('the defaults', () => {
     assert.equal(rows[0].n, 0, 'a default must not cost a row');
   });
 
-  it('delivers the seven default-on kinds and drops the one default-off kind', async () => {
+  it('delivers every default-on kind, award_earned now among them', async () => {
     for (const type of [
       'follow',
       'follow_approved',
@@ -139,13 +140,11 @@ describe('the defaults', () => {
       'watch_tag',
       'recommendation',
       'invite_activated',
+      'award_earned',
     ]) {
       await clear(control);
       assert.equal(await deliver(control, type), true, `${type} defaults on`);
     }
-
-    await clear(control);
-    assert.equal(await deliver(control, 'award_earned'), false, 'award_earned defaults off');
     await clear(control);
   });
 
@@ -221,7 +220,7 @@ describe('each category gates exactly its own kind', () => {
     assert.equal(await deliver(muted, 'reaction'), false);
   });
 
-  it('awards on delivers an award, so the deferred writer has a live switch waiting', async () => {
+  it('awards off drops a congratulations, and back on delivers one', async () => {
     await setOne(muted, 'awards', true);
     await clear(muted);
     assert.equal(await deliver(muted, 'award_earned'), true);

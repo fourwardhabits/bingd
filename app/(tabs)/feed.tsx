@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { AwardActivityLead } from '@/features/awards/AwardActivityLead';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
@@ -288,7 +289,14 @@ export default function FeedScreen() {
               title={event.title}
               year={event.year}
               posterUri={posterUri(event.posterPath)}
-              metadata={metadataFor(event)}
+              // The badge leads an award row — the real artwork, in the poster's
+              // box (20260828000100). Everything else about the row is ordinary.
+              lead={
+                event.award ? (
+                  <AwardActivityLead awardKey={event.award.key} tierKey={event.award.tierKey} />
+                ) : undefined
+              }
+              metadata={event.award ? event.award.tierLabel : metadataFor(event)}
               score={event.score}
               bucket={event.bucket}
               note={event.note?.text ?? null}
@@ -301,7 +309,23 @@ export default function FeedScreen() {
                 watched: watched.data,
               })}
               timeLabel={relativeTime(event.createdAt)}
-              onPressTitle={() => event.mediaItemId && router.push(`/title/${event.mediaItemId}`)}
+              // An award row opens the earner's Awards, not a title (§5): their
+              // own tab for the viewer's own award, the public profile's sheet
+              // for anybody else's. An event with neither subject is a no-op.
+              onPressTitle={() => {
+                if (event.mediaItemId) {
+                  router.push(`/title/${event.mediaItemId}`);
+                } else if (event.award) {
+                  if (event.actorId === profile.id) {
+                    router.push({ pathname: '/profile', params: { awards: '1' } });
+                  } else if (event.actorUsername) {
+                    router.push({
+                      pathname: '/u/[username]',
+                      params: { username: event.actorUsername, awards: '1' },
+                    });
+                  }
+                }
+              }}
               // Watchlisting your own already-watched title is not a thing anyone
               // means to do, so the control is not offered on your own activity.
               onPressWatchlist={

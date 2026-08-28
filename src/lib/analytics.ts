@@ -280,11 +280,15 @@ export const ANALYTICS_EVENTS = [
  */
 export const DEFERRED_EVENTS = {
   /**
-   * An award tier was crossed. Tiers are computed on the device from raw reads and no
-   * durable record says which tier an account had reached, so a *crossing* cannot be
-   * distinguished from a *state* — the same reason award notifications are deferred.
+   * An award tier was crossed. The durable ledger exists now (20260828000100) and
+   * the crossing happens SERVER-side, inside whichever write moved the metric —
+   * three of the twenty tracks cross on somebody else's action, with the earner's
+   * app not even running. Client analytics can only observe the aftermath (a
+   * notification arriving), and an event emitted from an observation is the
+   * observed-state bug this file's history is about. Deferred until there is a
+   * client-side moment that IS the crossing, or a server-side analytics path.
    */
-  award_earned: 'needs a durable unlock ledger — see deferred-roadmap.md §5',
+  award_earned: 'crossed server-side (20260828000100); no honest client emission point',
 } as const;
 
 // ---------------------------------------------------------------------------

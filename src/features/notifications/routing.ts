@@ -203,7 +203,7 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
     case 'invite_welcome':
       return [...profile, unavailable('That account is no longer available.')];
 
-    /** Nothing writes this one yet, and the sheet is real regardless. */
+    /** The earner's own Awards — written by the unlock ledger since 20260828000100. */
     case 'award_earned':
       return [{ kind: 'awards' }];
   }

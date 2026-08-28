@@ -71,6 +71,18 @@ export type ActivityRowProps = {
    * by on a narrow screen, because it is one control rather than two.
    */
   onPressRecommend?: () => void;
+  /**
+   * Replaces the poster as the leading artwork, inside the same 40×60 box.
+   *
+   * The one caller is the award row (20260828000100), whose subject is a badge
+   * and not a title — a fake poster would be worse than no artwork, and the
+   * `MissingArtwork` initials of an award name would be worse than either. The
+   * node is rendered inside `styles.lead`'s box under the same Pressable, so the
+   * actor chip still stamps the corner, the single left text edge holds
+   * (`textEdge` is derived from the poster's width), and the row's height does
+   * not change. A caller MUST size its content within 40×60.
+   */
+  lead?: React.ReactNode;
   reaction?: ActivityReaction;
   /**
    * Opens the comment sheet. Absent means the surface has not wired comments up,
@@ -214,6 +226,7 @@ export function ActivityRow({
   onPressWatchlist,
   inWatchlist = false,
   onPressRecommend,
+  lead,
   reaction,
   onPressComments,
   commentCount = 0,
@@ -253,7 +266,7 @@ export function ActivityRow({
             onPress={onPressTitle}
             style={({ pressed }) => pressed && styles.pressed}
           >
-            <Poster uri={posterUri} title={filmName} size="xs" />
+            {lead ?? <Poster uri={posterUri} title={filmName} size="xs" />}
           </Pressable>
 
           {/**

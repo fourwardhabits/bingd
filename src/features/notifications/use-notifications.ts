@@ -80,17 +80,12 @@ export type NotificationKind =
    */
   | 'friendship'
   /**
-   * An award tier was crossed. **Nothing writes this yet, and this run did not
-   * build it.**
-   *
-   * Award tiers are computed on the device from raw table reads
-   * (`src/features/awards/progress.ts` over `tracks.ts`), and no server-side row
-   * records which tier an account has reached. Notifying only on a *crossing* —
-   * 49 to 50 yes, 50 to 51 no — therefore needs a durable record of the previous
-   * tier, and the only honest place for it is a server-side unlock ledger. A
-   * client-held "last seen tier" is exactly the observed-state assumption Review
-   * 21 spent seven rounds proving unsafe: a reinstall, a second device or a lost
-   * reply each turn it into either a missed award or a repeated one.
+   * An award tier was crossed — written by `_maybe_award_unlocks` off the durable
+   * unlock ledger since 20260828000100, which is exactly the server-side record
+   * this comment used to say the type was waiting for. The crossing is detected
+   * where the facts change (triggers on the source tables), recorded at most once
+   * (the ledger's primary key), and this row is the earner's own congratulations:
+   * actorless, because nobody did it to them, with the award named in `payload`.
    */
   | 'award_earned';
 
@@ -127,6 +122,13 @@ export type Notification = {
    * not rewrite what the row said. Null on every other kind.
    */
   mutual: boolean | null;
+  /**
+   * `award_earned` only (20260828000100): which award, for the row's sentence and
+   * badge. The names are the server's snapshot; the keys resolve artwork through
+   * `badgeFor`, which falls back to 🏅 for a track this bundle predates. Null on
+   * every other kind.
+   */
+  award: { key: string; tierKey: string; name: string; tierLabel: string | null } | null;
 };
 
 const KINDS = new Set<string>([
@@ -165,9 +167,10 @@ const ACTORLESS_KINDS = new Set<string>(['award_earned']);
  * be permanently unanswerable, which turns the private setting into a trap. It takes
  * no recipient and cannot be asked about anybody else — the same shape as `my_blocks`.
  *
- * Rows whose actor cannot be named are dropped rather than rendered anonymously. That
- * happens for a system notification with no actor at all, which nothing writes yet;
- * when something does, this is where it gets a case rather than a blank avatar.
+ * Rows whose actor cannot be named are dropped rather than rendered anonymously —
+ * unless the kind is genuinely actorless (`ACTORLESS_KINDS`): the award
+ * congratulations has a null actor by construction and survives the filter, with
+ * its own render branch on the Bell rather than a blank avatar.
  */
 export function useNotifications(viewerId: string) {
   const query = useQuery({
@@ -205,7 +208,13 @@ export function useNotifications(viewerId: string) {
           series_title: string | null;
           subject_type: string | null;
           subject_id: string | null;
-          payload: { mutual?: boolean } | null;
+          payload: {
+            mutual?: boolean;
+            award?: string;
+            tier?: string;
+            award_name?: string;
+            tier_label?: string;
+          } | null;
         }[]
       )
         .filter(
@@ -229,6 +238,15 @@ export function useNotifications(viewerId: string) {
           subjectType: row.subject_type,
           subjectId: row.subject_id,
           mutual: row.kind === 'friendship' ? row.payload?.mutual === true : null,
+          award:
+            row.kind === 'award_earned' && row.payload?.award && row.payload?.tier
+              ? {
+                  key: row.payload.award,
+                  tierKey: row.payload.tier,
+                  name: row.payload.award_name ?? 'a new Award',
+                  tierLabel: row.payload.tier_label ?? null,
+                }
+              : null,
         }));
     },
   });
