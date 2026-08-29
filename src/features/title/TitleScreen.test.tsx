@@ -1232,8 +1232,14 @@ describe('the following score', () => {
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
-    expect(view.getByText('8.6')).toBeTruthy();
+    // Wait for the *score*, not for the label. Both units of `ScoresSection` are drawn
+    // on mount — a row that appears when its data does is a page that moves under the
+    // reader, which is the founder's own rule — so "Following" is on screen before
+    // `following_score` has resolved and waiting on it guards nothing. The third test
+    // in this block records the same lesson from the same CI flake; these two were
+    // still waiting on the label.
+    await waitFor(() => expect(view.getByText('8.6')).toBeTruthy());
+    expect(view.getByText('Following')).toBeTruthy();
     // "3 people you follow" rather than "3 ratings": the population is the whole point
     // of the number, and it is a different population from the row underneath.
     expect(view.getByText('3 people you follow')).toBeTruthy();
@@ -1275,7 +1281,10 @@ describe('the following score', () => {
     mockRpcResults.following_score = [{ score: '8.6', rating_count: 3, following_count: 9 }];
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Following')).toBeTruthy());
+    // The score rather than the label, for the reason above: asserting the absence of
+    // a word while the section is still a skeleton would pass without ever drawing the
+    // copy under test.
+    await waitFor(() => expect(view.getByText('8.6')).toBeTruthy());
     expect(view.queryByText(/friend/i)).toBeNull();
   });
 
