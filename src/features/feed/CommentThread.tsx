@@ -385,7 +385,16 @@ export function CommentThread({
           would give the thread its own scrollbar inside the page's — two gestures for
           one list, and the inner one swallowing the outer one's. */}
       {scroll === 'own' ? (
-        <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+        /**
+         * `keyboardShouldPersistTaps` so a tap on Reply, a reaction or Cancel lands
+         * while the composer has focus, instead of being spent dismissing the keyboard
+         * — the page below already does this and the sheet did not.
+         */
+        <ScrollView
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+        >
           {list}
         </ScrollView>
       ) : (
@@ -626,6 +635,10 @@ function CommentRow({
                 : `React to ${comment.authorName}'s comment. Long press for more reactions.`
             }
             active={comment.reactedByMe}
+            // `myReaction` says *which*, which is what the action slot draws (§6).
+            // `reactedByMe` still says *whether*. The pair was already fetched for the
+            // picker's `current`; nothing new is read.
+            mineGlyph={comment.myReaction ? REACTION_GLYPH[comment.myReaction] : null}
             glyphs={comment.reactionKinds.map((kind) => REACTION_GLYPH[kind])}
             count={comment.reactionCount}
             onToggle={onReact}
@@ -709,7 +722,20 @@ function CommentRow({
 const slop = (theme.layout.minTapTarget - theme.typography.caption.lineHeight) / 2;
 
 const styles = StyleSheet.create({
-  list: { maxHeight: 360 },
+  /**
+   * **`flexShrink`, and it is the whole of the sheet's keyboard bug** (founder, Android).
+   *
+   * `Sheet` already lifts clear of the keyboard — it measures the height and pads its
+   * root, which re-resolves the sheet's `maxHeight: '90%'` against what is left. What it
+   * could not do is decide which of its children gives up the space. This list asked for
+   * a flat 360 and, being the first child, took it; the composer is the last child, so
+   * the part clipped off the bottom of a capped sheet was always the box being typed in.
+   *
+   * The cap stays — a conversation must not push the composer off a *tall* screen either
+   * — but it is now a maximum rather than a claim. The list shrinks, the composer keeps
+   * its intrinsic height, and nothing here has to know the keyboard exists.
+   */
+  list: { flexShrink: 1, maxHeight: 360 },
   listContent: { paddingBottom: theme.space[3] },
   flow: { paddingBottom: theme.space[2] },
   pad: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[3] },

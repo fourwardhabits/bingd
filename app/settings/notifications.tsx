@@ -310,7 +310,24 @@ export default function NotificationsScreen() {
   const openActor = (row: Notification) => openRow(row);
 
   return (
-    <Screen includeBottomInset>
+    /**
+     * **No top edge** (founder physical finding: a large blank band between the
+     * Notifications header and TODAY).
+     *
+     * The gap was safe-area duplication, not padding. This screen declares
+     * `headerShown: true`, and a native-stack header already consumes the status-bar
+     * inset before it draws — so `Screen`'s default `['top', 'left', 'right']` added the
+     * *same* inset a second time, below the header, as an empty band roughly the height
+     * of the status bar. Nothing in this file's own spacing was wrong: `section`'s
+     * `space[4]` above the first heading is the same air every other list screen has.
+     *
+     * `['left', 'right']` rather than `[]`: the horizontal insets still matter in
+     * landscape and under a notch, and only the top one is the header's to own. The
+     * three other header-bearing screens reached the same place from the other
+     * direction (`edges={[]}`, for a full-bleed hero). Nothing moves under the status
+     * bar — the header is still there, at its own height, doing that job.
+     */
+    <Screen includeBottomInset edges={['left', 'right']}>
       <Stack.Screen
         options={{
           headerShown: true,

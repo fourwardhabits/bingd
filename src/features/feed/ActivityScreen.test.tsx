@@ -1,4 +1,5 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { Keyboard, ScrollView, StyleSheet, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -20,6 +21,32 @@ import { renderWithProviders } from '@/test-utils/render';
  *   3. **Back always reaches the Feed**, including on a cold start from a notification
  *      tap, where there is nothing behind this screen to go back to.
  */
+
+/**
+ * **The keyboard, captured rather than simulated.**
+ *
+ * `Keyboard` is a `NativeEventEmitter` with no public way to emit, and there is no
+ * native side under Jest. The screen subscribes through `useKeyboardHeight`, so the
+ * test takes the listener the hook registered and calls it with the frame Android would
+ * have sent — which is precisely what the emitter does with it.
+ */
+const mockKeyboard = new Map<string, (event: unknown) => void>();
+
+const showKeyboard = async (height = 300) =>
+  act(async () => {
+    const listener =
+      mockKeyboard.get('keyboardWillShow') ?? mockKeyboard.get('keyboardDidShow');
+    if (!listener) throw new Error('the screen subscribed to no keyboard event');
+    listener({ endCoordinates: { height } });
+  });
+
+const hideKeyboard = async () =>
+  act(async () => {
+    const listener =
+      mockKeyboard.get('keyboardWillHide') ?? mockKeyboard.get('keyboardDidHide');
+    if (!listener) throw new Error('the screen subscribed to no keyboard event');
+    listener({});
+  });
 
 const mockNav = { pushed: [] as string[], replaced: [] as string[], back: 0, canGoBack: true };
 let mockEvent: Record<string, unknown> | null = null;
@@ -327,5 +354,118 @@ describe('leaving the conversation', () => {
     });
 
     expect(mockNav.pushed).toContain('/title/media-1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **The keyboard must not cover the composer** (founder physical bug, Android).
+ *
+ * The Feed's comment *sheet* was already handled: `Sheet` measures the keyboard and
+ * lifts. This screen is not a sheet — the composer is simply the last thing in a page
+ * `ScrollView` — so under Android edge-to-edge, where the window never resizes and
+ * `adjustResize` has nothing to adjust, the keyboard was drawn straight over it.
+ *
+ * Two assertions, because the fix is two things: room at the foot of the content, and
+ * the scroll that puts the composer into what is left of the screen. And a third for
+ * the way this kind of fix goes wrong — padding that is never given back.
+ */
+describe('the keyboard and the composer', () => {
+  /**
+   * The page's content container, walked up from the composer inside it.
+   *
+   * `contentContainerStyle` rather than `style`: that is the prop the room is declared
+   * on, and it is the only one that scrolls with the content — padding on the scroll
+   * view itself would shrink the viewport instead of extending what is inside it.
+   * `Screen` declares a `paddingBottom` of its own further out, which is the
+   * safe-area inset and a different thing entirely.
+   */
+  const contentPadding = (
+    view: Awaited<ReturnType<typeof renderWithProviders>>,
+    // The composer answers to "Add a comment" until Reply retargets it, at which point
+    // it answers to the person being replied to. Both are the same box.
+    composerLabel = 'Add a comment',
+  ) => {
+    let node: { parent: unknown; props: Record<string, unknown> } | null =
+      view.getAllByLabelText(composerLabel).at(-1) ?? null;
+    while (node) {
+      const style = StyleSheet.flatten(node.props.contentContainerStyle) as ViewStyle | undefined;
+      if (style) return style;
+      node = node.parent as typeof node;
+    }
+    return null;
+  };
+
+  beforeEach(() => {
+    // A comment to reply to, which the default fixture does not have.
+    mockComments = [comment()];
+    mockKeyboard.clear();
+    jest
+      .spyOn(Keyboard, 'addListener')
+      .mockImplementation(((event: string, listener: (payload: unknown) => void) => {
+        mockKeyboard.set(event, listener);
+        return { remove: () => mockKeyboard.delete(event) };
+      }) as never);
+  });
+
+  it('makes room under the content for the measured keyboard', async () => {
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByLabelText('Add a comment')).toBeTruthy());
+
+    const before = contentPadding(view)?.paddingBottom;
+    await showKeyboard(300);
+
+    // Measured, never assumed: the hook is handed the frame and this is that number.
+    expect(contentPadding(view)?.paddingBottom).toBe(300);
+    expect(before).not.toBe(300);
+  });
+
+  it('scrolls the composer into what is left of the screen', async () => {
+    /**
+     * Room alone is not enough — the page can be scrolled anywhere when the keyboard
+     * arrives, and padding under content the reader is not looking at shows them
+     * nothing. The composer is the last thing on the page, so "scroll to the end" *is*
+     * "show me what I am typing", for a new comment and for a reply alike.
+     */
+    const scrollToEnd = jest.spyOn(ScrollView.prototype, 'scrollToEnd');
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByLabelText('Add a comment')).toBeTruthy());
+    scrollToEnd.mockClear();
+
+    await showKeyboard(300);
+    expect(scrollToEnd).toHaveBeenCalled();
+  });
+
+  it('gives the room back when the keyboard goes down', async () => {
+    // No permanent strip of whitespace under the conversation, which is the way a
+    // padding-based fix usually fails.
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByLabelText('Add a comment')).toBeTruthy());
+
+    const resting = contentPadding(view)?.paddingBottom;
+    await showKeyboard(300);
+    await hideKeyboard();
+
+    expect(contentPadding(view)?.paddingBottom).toBe(resting);
+  });
+
+  it('keeps replying to a comment on the same composer', async () => {
+    // The reply banner and the box are one control, so a reply is covered by exactly
+    // the same fix — and this is the assertion that says so rather than assuming it.
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByLabelText('Add a comment')).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.press(view.getByLabelText('Reply to Anna'));
+    });
+    // Two controls answer to that sentence once the reply is open — the row's button
+    // and the composer it retargeted — which is itself the evidence that a reply uses
+    // the same box, and so is covered by the same fix.
+    expect(view.getAllByLabelText('Reply to Anna')).toHaveLength(2);
+    expect(view.getByText('Replying to Anna')).toBeTruthy();
+
+    await showKeyboard(300);
+    expect(contentPadding(view, 'Reply to Anna')?.paddingBottom).toBe(300);
   });
 });

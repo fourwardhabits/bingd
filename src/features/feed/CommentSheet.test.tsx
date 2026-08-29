@@ -1,5 +1,5 @@
-import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+import { act, fireEvent, waitFor, within } from '@testing-library/react-native';
+import { Alert, StyleSheet, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -1179,5 +1179,125 @@ describe('a comment reaction whose answer was lost', () => {
     await waitFor(() => expect(reactionIds()).toHaveLength(2));
 
     expect(reactionIds()[1]).not.toBe(reactionIds()[0]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **The composer, and the keyboard that covered it** (founder physical bug, Android).
+ *
+ * `Sheet` already measures the keyboard and lifts the whole sheet clear — that is where
+ * this was answered for every sheet in the app. What it could not do is decide which of
+ * the sheet's children gives up the space when `maxHeight: '90%'` re-resolves against
+ * what the keyboard has left. The conversation asked for a flat 360 and, being the first
+ * child, took it; the composer is the last child, so the part clipped off the bottom of a
+ * capped sheet was always the box being typed in.
+ */
+describe('the conversation and the composer share the sheet', () => {
+  /** The scrolling list, found by the height cap that is the point of it. */
+  const conversation = (view: Awaited<ReturnType<typeof open>>) => {
+    let node: { parent: unknown; props: Record<string, unknown> } | null = view.getByText(
+      'The ending recontextualises everything.',
+    );
+    while (node) {
+      const style = StyleSheet.flatten(node.props.style) as ViewStyle | undefined;
+      if (style?.maxHeight != null) return style;
+      node = node.parent as typeof node;
+    }
+    return null;
+  };
+
+  it('lets the conversation shrink so the composer is never the part clipped off', async () => {
+    mockCommentRows = [comment()];
+    const view = await open();
+
+    const list = conversation(view);
+    // The cap stays — a long thread must not push the composer off a tall screen
+    // either — but it is a maximum now rather than a claim on the space.
+    expect(list?.maxHeight).toBe(360);
+    expect(list?.flexShrink).toBe(1);
+  });
+
+  it('keeps a tap on Reply working while the composer has focus', async () => {
+    // `keyboardShouldPersistTaps`: without it the first tap on Reply, a reaction or
+    // Cancel is spent dismissing the keyboard instead of doing what it says.
+    mockCommentRows = [comment()];
+    const view = await open();
+
+    let node: { parent: unknown; props: Record<string, unknown> } | null = view.getByText(
+      'The ending recontextualises everything.',
+    );
+    let persists: unknown;
+    while (node) {
+      if (node.props.keyboardShouldPersistTaps != null) {
+        persists = node.props.keyboardShouldPersistTaps;
+        break;
+      }
+      node = node.parent as typeof node;
+    }
+    expect(persists).toBe('handled');
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **One reaction, drawn once** (founder §6) — the Comments half of the contract.
+ *
+ * `ReactionControl.test.tsx` proves the grammar in isolation and `ActivityRow`'s suite
+ * proves the Feed passes it what it needs. This is the third leg: the founder's example
+ * was photographed *here*, on a comment, and the two surfaces must not be able to drift
+ * into two visual grammars again.
+ */
+describe('the reader’s own reaction on a comment', () => {
+  const glyphsOn = (view: Awaited<ReturnType<typeof open>>, glyph: string) =>
+    view.queryAllByText(glyph, { includeHiddenElements: true });
+
+  it('draws the chosen heart once, not twice', async () => {
+    // The founder's photograph: `[filled heart] [❤️] 1`.
+    mockCommentRows = [
+      comment({
+        reaction_count: 1,
+        reacted_by_me: true,
+        reaction_kinds: ['love'],
+        my_reaction: 'love',
+      }),
+    ];
+    const view = await open();
+
+    expect(glyphsOn(view, REACTION_GLYPH.love)).toHaveLength(1);
+    expect(view.getByText('1')).toBeTruthy();
+  });
+
+  it('puts whichever kind they chose in the action slot', async () => {
+    mockCommentRows = [
+      comment({
+        reaction_count: 3,
+        reacted_by_me: true,
+        reaction_kinds: ['funny', 'love'],
+        my_reaction: 'funny',
+      }),
+    ];
+    const view = await open();
+
+    const control = view.getByLabelText(/^You reacted to/);
+    expect(within(control).queryAllByText(REACTION_GLYPH.funny)).toHaveLength(1);
+    // Their own kind is not repeated in the cluster; everybody else's is still there.
+    expect(glyphsOn(view, REACTION_GLYPH.funny)).toHaveLength(1);
+    expect(glyphsOn(view, REACTION_GLYPH.love)).toHaveLength(1);
+    // And the total is still everyone's, the reader included.
+    expect(view.getByText('3')).toBeTruthy();
+  });
+
+  it('keeps the empty heart for a reader who has not reacted', async () => {
+    mockCommentRows = [
+      comment({ reaction_count: 2, reaction_kinds: ['love', 'funny'], my_reaction: null }),
+    ];
+    const view = await open();
+
+    const control = view.getByLabelText(/^React to/);
+    expect(within(control).queryAllByText(REACTION_GLYPH.love)).toHaveLength(0);
+    expect(glyphsOn(view, REACTION_GLYPH.love)).toHaveLength(1);
   });
 });

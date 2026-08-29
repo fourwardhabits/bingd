@@ -1,4 +1,5 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useRef } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { useAuth } from '@/features/auth';
@@ -9,7 +10,14 @@ import { metadataFor, tailFor, verbFor } from '@/features/feed/activity';
 import { useActivityEvent } from '@/features/feed/use-feed';
 import { posterUri } from '@/lib/images';
 import { TAB_ROUTES } from '@/lib/routes';
-import { ActivityRow, EmptyState, LoadingScreen, Screen, SkeletonRow } from '@/ui/components';
+import {
+  ActivityRow,
+  EmptyState,
+  LoadingScreen,
+  Screen,
+  SkeletonRow,
+  useKeyboardHeight,
+} from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 /**
@@ -71,6 +79,21 @@ export default function ActivityScreen() {
    */
   const auth = useAuth();
   const router = useRouter();
+  /**
+   * **The keyboard, measured** (founder physical bug: the reply composer is covered).
+   *
+   * The Feed's comment sheet is lifted by `Sheet`, which owns that for every sheet in
+   * the app. This screen is not a sheet: the composer is simply the last thing in a page
+   * `ScrollView`, so on Android — where edge-to-edge means the window never resizes and
+   * `adjustResize` has nothing to adjust — the keyboard is drawn straight over it.
+   *
+   * The same hook the sheet uses rather than a `KeyboardAvoidingView`, for exactly that
+   * reason: `behavior="padding"` is measuring a window that does not move. Two values
+   * come out of the one measurement — room at the foot of the content, and the scroll
+   * that brings the composer into what is left of the screen.
+   */
+  const keyboard = useKeyboardHeight();
+  const scroller = useRef<ScrollView>(null);
 
   const viewerId = auth.status === 'ready' ? auth.profile.id : null;
   const eventId = typeof id === 'string' && id.length > 0 ? id : null;
@@ -95,6 +118,18 @@ export default function ActivityScreen() {
     if (router.canGoBack()) router.back();
     else router.replace(TAB_ROUTES.feed);
   };
+
+  /**
+   * The composer is the last thing on the page, so `scrollToEnd` *is* "show me what I am
+   * typing" — for a new comment and for a reply alike, since both use the one composer
+   * at the foot. Runs after the padding above has been committed, so there is somewhere
+   * to scroll to; on the way back down it does nothing, and the padding simply goes.
+   *
+   * Before the early return, because hooks cannot be conditional.
+   */
+  useEffect(() => {
+    if (keyboard > 0) scroller.current?.scrollToEnd({ animated: true });
+  }, [keyboard]);
 
   // Nothing to draw and nothing to ask for until it is known who is asking.
   if (!viewerId) return <LoadingScreen />;
@@ -135,7 +170,11 @@ export default function ActivityScreen() {
           />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          ref={scroller}
+          contentContainerStyle={[styles.page, keyboard > 0 && { paddingBottom: keyboard }]}
+          keyboardShouldPersistTaps="handled"
+        >
           {/* The canonical feed card, and the same component the Feed draws. Not a
               reduced copy: a reader arriving here from a notification should recognise
               the post as the one they would have scrolled past. */}

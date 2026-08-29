@@ -1,5 +1,5 @@
 import { waitFor } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { theme } from '@/ui/tokens';
@@ -42,6 +42,53 @@ jest.mock('expo-router', () => ({
   Stack: { Screen: () => null },
   useFocusEffect: () => {},
 }));
+
+/**
+ * **The safe area, resolved in JS so the top inset is a number this test can read.**
+ *
+ * The real `SafeAreaView` is a native view that applies its edges on the other side of
+ * the bridge, so under Jest it produces no padding at all and a gap made of padding
+ * would be invisible to any assertion. This stand-in does in JavaScript exactly what
+ * the native view does — pad each declared edge by that inset — and nothing else.
+ *
+ * 47 is the `top` the shared render helper already reports, which is roughly a modern
+ * iPhone's status bar and about the size of the band the founder photographed.
+ */
+const mockInsets = { top: 47, bottom: 24, left: 0, right: 0 };
+
+jest.mock('react-native-safe-area-context', () => {
+  const { View: RNView } = jest.requireActual('react-native');
+  return {
+    SafeAreaProvider: ({ children }: { children: unknown }) => children,
+    useSafeAreaInsets: () => mockInsets,
+    SafeAreaView: ({
+      children,
+      edges = ['top', 'bottom', 'left', 'right'],
+      style,
+      ...rest
+    }: {
+      children: unknown;
+      edges?: readonly string[];
+      style?: unknown;
+    }) => (
+      <RNView
+        {...rest}
+        testID="screen-safe-area"
+        style={[
+          style,
+          {
+            paddingTop: edges.includes('top') ? mockInsets.top : 0,
+            paddingBottom: edges.includes('bottom') ? mockInsets.bottom : 0,
+            paddingLeft: edges.includes('left') ? mockInsets.left : 0,
+            paddingRight: edges.includes('right') ? mockInsets.right : 0,
+          },
+        ]}
+      >
+        {children}
+      </RNView>
+    ),
+  };
+});
 
 jest.mock('@/features/auth', () => ({
   useCurrentProfile: () => ({
@@ -495,5 +542,68 @@ describe('the friendship a request leaves behind', () => {
 
     await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
     expect(view.queryByText('Follow back')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **The blank band between the header and TODAY** (founder physical screenshot).
+ *
+ * It was safe-area duplication and nothing else. This screen declares
+ * `headerShown: true`, and a native-stack header has already consumed the status-bar
+ * inset before it draws — so `Screen`'s default top edge added the same inset a second
+ * time, *below* the header, as an empty strip about the height of a status bar.
+ *
+ * Asserted as the resolved padding rather than as the `edges` array, so the fix cannot
+ * be "the prop is right" while the band is still there.
+ */
+describe('the top of the page', () => {
+  const rootPadding = (view: Awaited<ReturnType<typeof open>>) =>
+    StyleSheet.flatten(view.getByTestId('screen-safe-area').props.style);
+
+  it('adds no second status-bar inset under the header', async () => {
+    const view = await open();
+    expect(rootPadding(view).paddingTop).toBe(0);
+  });
+
+  it('keeps the horizontal insets, which belong to nobody else', async () => {
+    // `edges={[]}` would have fixed the band and dropped these with it — they still
+    // matter in landscape and under a notch.
+    const view = await open();
+    const style = rootPadding(view);
+    expect(style.paddingLeft).toBe(mockInsets.left);
+    expect(style.paddingRight).toBe(mockInsets.right);
+  });
+
+  it('leaves the first section its ordinary heading spacing', async () => {
+    /**
+     * The gap was never this screen's own rhythm, so the fix must not have taken any of
+     * it away. Summed from the heading up to the root: with the duplicate inset gone,
+     * everything above TODAY is the one `space[4]` that `section` declares — which is
+     * the air every other list screen in the app has over its first heading.
+     */
+    // Two shelves, because a heading is only drawn once there is more than one to tell
+    // apart — and TODAY is the heading the founder's screenshot has the band above.
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      follow({ id: 'a1', created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() }),
+      follow({
+        id: 'a2',
+        created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    // `open()` waits on a single row, so this one renders directly.
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText('TODAY')).toBeTruthy());
+
+    let total = 0;
+    let node: { parent: unknown; props: Record<string, unknown> } | null = view.getByLabelText('Today');
+    while (node) {
+      const style = (StyleSheet.flatten(node.props.style) ?? {}) as ViewStyle;
+      total += Number(style.paddingTop ?? style.paddingVertical ?? 0);
+      node = node.parent as typeof node;
+    }
+    expect(total).toBe(theme.space[4]);
   });
 });

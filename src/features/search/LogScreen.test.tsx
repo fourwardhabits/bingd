@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { fireEvent, waitFor, within } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -797,5 +797,68 @@ describe('finding people', () => {
     // Not the title empty state: a person search that found nobody is not a
     // catalogue miss.
     expect(view.queryByText('Nothing matches that')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **The poster beside a title result** (founder, 2026-08-28 §1).
+ *
+ * This was already how Search drew a title row — `TitleRow` has carried a `Poster`
+ * since it was written, and the screen passes `posterUri(result.poster_path)` — so §1
+ * required no change to the app. It required *this*, because "already correct" is only
+ * worth anything if it stays that way, and nothing in the suite would have noticed the
+ * artwork column being dropped in a future density pass.
+ *
+ * The two states both matter: the list stays a compact list either way, so a title with
+ * no artwork must not become a shorter row than the one above it.
+ */
+describe('artwork on a title result', () => {
+  /**
+   * How many loaded images the row holds, optionally of one exact URL.
+   *
+   * Walked from the row rather than queried, for the reason the toggle test in
+   * `FeedMode` walks too: the claim is structural — is the artwork *inside this row* —
+   * and a screen-wide query would be satisfied by a poster belonging to the row above.
+   */
+  const posterIn = (
+    row: { queryAll: (fn: (node: { props: Record<string, unknown> }) => boolean) => unknown[] },
+    uri: string | null,
+  ) =>
+    row.queryAll((node) => {
+      // `expo-image` normalises `source` to an array before it reaches the native view.
+      const [source] = (node.props.source as { uri?: string }[] | undefined) ?? [];
+      return Boolean(source?.uri) && (uri === null || source?.uri === uri);
+    }).length;
+
+  it('shows the catalogue poster beside the title and its metadata', async () => {
+    const view = await search('breaking');
+    const row = await view.findByLabelText(SERIES_ROW);
+
+    // TMDB's row bucket, built by `posterUri` — the size is a display decision and the
+    // stored value is a path, so asserting the whole URL is asserting that seam too.
+    expect(posterIn(row, 'https://image.tmdb.org/t/p/w342/bb.jpg')).toBe(1);
+    // And the hierarchy the poster sits beside is untouched.
+    expect(view.getByText('Breaking Bad (2008)')).toBeTruthy();
+  });
+
+  it('falls back to the neutral artwork for a title with none', async () => {
+    // `film` carries `poster_path: null`, which is most of the seed catalogue.
+    const view = await search('inception');
+    const row = await view.findByLabelText(FILM_ROW);
+
+    expect(posterIn(row, null)).toBe(0);
+    // The designed placeholder rather than a gap: the title's initials, which for a
+    // one-word title is one letter.
+    expect(within(row).getByText('I')).toBeTruthy();
+  });
+
+  it('keeps the row action beside the artwork', async () => {
+    // A poster column that pushed the + off the row would be the founder's "preserve
+    // existing row actions" going wrong quietly.
+    const view = await search('inception');
+    await view.findByLabelText(FILM_ROW);
+    expect(view.getByLabelText('Log Inception')).toBeTruthy();
   });
 });
