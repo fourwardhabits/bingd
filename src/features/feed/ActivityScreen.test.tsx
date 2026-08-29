@@ -454,7 +454,22 @@ describe('the keyboard and the composer', () => {
     // The reply banner and the box are one control, so a reply is covered by exactly
     // the same fix — and this is the assertion that says so rather than assuming it.
     const view = await renderWithProviders(<ActivityScreen />);
-    await waitFor(() => expect(view.getByLabelText('Add a comment')).toBeTruthy());
+    /**
+     * **The composer is not the anchor, and this test is where that mattered.**
+     *
+     * It waited on "Add a comment", which is on screen from the first paint — the box
+     * exists before the conversation does. So the press below could land while the list
+     * still said "Loading comments…", and there was no Reply button to press. It passed
+     * on a quiet machine and failed in the release gate, which is exactly the shape
+     * `CommentSheet.test.tsx`'s header describes: a `waitFor` that is satisfied by
+     * something present during loading has waited for nothing.
+     *
+     * The loading copy is the one signal that means the rows are in, and it covers the
+     * error and empty states too — the list is replaced wholesale there and the copy goes
+     * with it.
+     */
+    await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
+    expect(view.getByLabelText('Add a comment')).toBeTruthy();
 
     await act(async () => {
       fireEvent.press(view.getByLabelText('Reply to Anna'));
