@@ -29,15 +29,56 @@ export type CollectionItem = {
 export type Decade = '2020s' | '2010s' | '2000s' | '1990s' | 'earlier';
 
 export type CollectionFilters = {
+  /**
+   * Genre names as the catalogue spells them, plus {@link ANIME_GENRE}.
+   *
+   * Anime lives in here rather than in a facet of its own since 2026-08-29 — see the
+   * constant below for why, and for the one behaviour that changed with it.
+   */
   genres: string[];
   languages: string[];
   decades: Decade[];
   buckets: Bucket[];
-  /** Anime as a facet over Movies and TV, never a third medium. */
-  anime: boolean;
   /** A TMDB person id. Needs the credits index below to mean anything. */
   personId: string | null;
 };
+
+/**
+ * Anime, as a genre rather than as a type.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY IT MOVED (founder, 2026-08-29)
+ *
+ * It was a boolean under a filter-sheet section headed **Type**, which is the word this
+ * product uses for the one thing a title *is*: a movie or a TV season. Anime is neither.
+ * It is a kind of thing to watch, exactly like Horror or Documentary, and putting it
+ * under Type implied a third medium beside Movies and TV that no selector in the app
+ * offers and no schema supports — `rankable_category` maps a media kind to `movies` or
+ * `tv_seasons` and to nothing else.
+ *
+ * **Movies and TV remain the only media-type filters.** Anime is a facet *over* them:
+ * the medium comes from the tab or the `MediumSelector` outside the sheet, so Movies +
+ * Anime is anime films and TV + Anime is anime seasons, with no code here aware of which
+ * of the two it is looking at.
+ *
+ * ---------------------------------------------------------------------------
+ * THE ONE BEHAVIOUR THAT CHANGED, AND IT IS THE POINT
+ *
+ * As a separate facet it was **AND**-ed with the genres — Anime + Comedy meant anime
+ * comedies. Inside the Genre facet it is **OR**-ed like every other entry, so Anime +
+ * Comedy means anime *or* comedies. One entry in a checkbox group behaving as an
+ * intersection while its neighbours behave as a union is a rule nobody can see and
+ * nobody would guess. Between-facet AND and within-facet OR is the model the sheet has
+ * always documented; this is Anime joining it rather than sitting beside it.
+ *
+ * **The classification itself is untouched.** {@link isAnime} is the same predicate it
+ * was — Japanese original language *and* an animation genre — deliberately not widened
+ * to all Animation, which would sweep in every Pixar and Disney film. A synthetic value
+ * rather than a real catalogue string, because there is no genre named "Anime" in TMDB's
+ * vocabulary (it is "Animation") and inventing one on the rows would be lying to the
+ * catalogue rather than filtering it.
+ */
+export const ANIME_GENRE = 'Anime';
 
 export type SortKey =
   | 'score-desc'
@@ -53,7 +94,6 @@ export const emptyFilters = (): CollectionFilters => ({
   languages: [],
   decades: [],
   buckets: [],
-  anime: false,
   personId: null,
 });
 
@@ -62,7 +102,6 @@ export const isFiltered = (filters: CollectionFilters): boolean =>
   filters.languages.length > 0 ||
   filters.decades.length > 0 ||
   filters.buckets.length > 0 ||
-  filters.anime ||
   filters.personId !== null;
 
 /** How many distinct conditions are on, for the badge beside the Filter control. */
@@ -71,7 +110,6 @@ export const activeFilterCount = (filters: CollectionFilters): number =>
   (filters.languages.length ? 1 : 0) +
   (filters.decades.length ? 1 : 0) +
   (filters.buckets.length ? 1 : 0) +
-  (filters.anime ? 1 : 0) +
   (filters.personId ? 1 : 0);
 
 export function decadeOf(year: number | null): Decade | null {
@@ -131,7 +169,10 @@ export function applyFilters(
     // Within a facet the conditions are OR — picking Comedy and Horror means
     // either — and between facets they are AND. That is what people expect from
     // checkbox groups, and the opposite of both is unusable.
-    if (filters.genres.length && !filters.genres.some((genre) => item.genres.includes(genre))) {
+    // Anime is the one entry in this facet that is a predicate rather than a string —
+    // the catalogue has no genre by that name, and `isAnime` is what decides it. Every
+    // other entry is an ordinary membership test, and the OR between them is unchanged.
+    if (filters.genres.length && !filters.genres.some((genre) => matchesGenre(item, genre))) {
       return false;
     }
     if (filters.languages.length && !(item.language && filters.languages.includes(item.language))) {
@@ -144,7 +185,6 @@ export function applyFilters(
     if (filters.buckets.length && !(item.bucket && filters.buckets.includes(item.bucket))) {
       return false;
     }
-    if (filters.anime && !isAnime(item)) return false;
     if (filters.personId) {
       // A title whose credits have never been cached is absent rather than
       // present: claiming an actor is *not* in a film we have never looked up
@@ -163,6 +203,10 @@ export function applyFilters(
  * in this collection, is a worse control than one listing the eleven genres actually
  * present. Counts come with them so the most useful options can sort first.
  */
+/** One genre entry's test: {@link ANIME_GENRE} is derived, everything else is stored. */
+const matchesGenre = (item: Pick<CollectionItem, 'language' | 'genres'>, genre: string): boolean =>
+  genre === ANIME_GENRE ? isAnime(item) : item.genres.includes(genre);
+
 export function facetOptions(items: readonly CollectionItem[]) {
   const genres = new Map<string, number>();
   const languages = new Map<string, number>();
@@ -177,6 +221,18 @@ export function facetOptions(items: readonly CollectionItem[]) {
     if (isAnime(item)) anime += 1;
   }
 
+  /**
+   * Anime joins the genres it is now one of, counted by `isAnime` and by nothing else.
+   *
+   * Set rather than added: a catalogue row carrying a literal "Anime" label would
+   * otherwise contribute a count the filter's own predicate does not agree with, and an
+   * option whose number does not match what selecting it returns is worse than an option
+   * that is missing. TMDB's vocabulary has no such label — it is "Animation" — so this
+   * is a guard rather than a case anybody has seen.
+   */
+  if (anime > 0) genres.set(ANIME_GENRE, anime);
+  else genres.delete(ANIME_GENRE);
+
   const byCount = <T>(entries: Map<T, number>) =>
     [...entries].sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }));
 
@@ -189,7 +245,6 @@ export function facetOptions(items: readonly CollectionItem[]) {
       value: decade,
       count: decades.get(decade) ?? 0,
     })),
-    anime,
   };
 }
 

@@ -1,4 +1,5 @@
 import {
+  ANIME_GENRE,
   activeFilterCount,
   applyFilters,
   decadeOf,
@@ -88,7 +89,14 @@ describe('several facets together', () => {
   it('clears back to everything', () => {
     expect(applyFilters(rows, emptyFilters())).toHaveLength(3);
     expect(isFiltered(emptyFilters())).toBe(false);
-    expect(activeFilterCount({ ...emptyFilters(), genres: ['Drama'], anime: true })).toBe(2);
+    // Anime is a genre, so Drama + Anime is one facet and counts once. It counted
+    // twice while it was a facet of its own, under a section headed Type.
+    expect(
+      activeFilterCount({ ...emptyFilters(), genres: ['Drama', ANIME_GENRE] }),
+    ).toBe(1);
+    expect(
+      activeFilterCount({ ...emptyFilters(), genres: ['Drama'], languages: ['ja'] }),
+    ).toBe(2);
   });
 });
 
@@ -133,14 +141,58 @@ describe('anime as a facet, not a medium', () => {
     expect(isAnime({ language: 'ja', genres: ['animated film'] })).toBe(true);
   });
 
-  it('layers over both movies and seasons', () => {
+  it('layers over both movies and seasons, and is never a medium of its own', () => {
+    // **Movies and TV are the only media types.** Anime is a facet over them: the medium
+    // comes from the tab outside the sheet, so Movies + Anime is anime films and
+    // TV + Anime is anime seasons, and nothing in `applyFilters` knows which it is
+    // looking at. Both halves are asserted here on one call because that is the shape
+    // the screens use.
     const rows = [
       item({ mediaItemId: 'film', kind: 'movie', language: 'ja', genres: ['Animation'] }),
       item({ mediaItemId: 'season', kind: 'season', language: 'ja', genres: ['Animation'] }),
       item({ mediaItemId: 'other', kind: 'movie', language: 'en', genres: ['Animation'] }),
     ];
 
-    expect(ids(applyFilters(rows, { ...emptyFilters(), anime: true }))).toEqual(['film', 'season']);
+    const anime = applyFilters(rows, { ...emptyFilters(), genres: [ANIME_GENRE] });
+    expect(ids(anime)).toEqual(['film', 'season']);
+    // Movies + Anime, as the Collection tab composes it.
+    expect(ids(anime.filter((row) => row.kind === 'movie'))).toEqual(['film']);
+    // TV + Anime, likewise.
+    expect(ids(anime.filter((row) => row.kind === 'season'))).toEqual(['season']);
+  });
+
+  it('is not all Animation, which is the whole point of the definition', () => {
+    // Widening to every animated title would sweep in Pixar and Disney, which is the
+    // failure the language half exists to prevent. `isAnime` is untouched by the move
+    // out of Type and this is what says so.
+    const rows = [
+      item({ mediaItemId: 'ja-animated', language: 'ja', genres: ['Animation'] }),
+      item({ mediaItemId: 'pixar', language: 'en', genres: ['Animation', 'Family'] }),
+      item({ mediaItemId: 'ja-live', language: 'ja', genres: ['Drama'] }),
+    ];
+
+    expect(ids(applyFilters(rows, { ...emptyFilters(), genres: [ANIME_GENRE] }))).toEqual([
+      'ja-animated',
+    ]);
+    expect(isAnime(rows[1]!)).toBe(false);
+    expect(isAnime(rows[2]!)).toBe(false);
+  });
+
+  it('unions with its neighbours, because that is what a genre does', () => {
+    // The one behaviour the move changed. As a separate facet it was AND-ed with the
+    // genres — Anime + Comedy meant anime comedies. Inside the Genre facet it is OR-ed
+    // like every other entry, because one checkbox behaving as an intersection while
+    // its neighbours behave as a union is a rule nobody can see.
+    const rows = [
+      item({ mediaItemId: 'anime', language: 'ja', genres: ['Animation'] }),
+      item({ mediaItemId: 'comedy', language: 'en', genres: ['Comedy'] }),
+      item({ mediaItemId: 'neither', language: 'en', genres: ['Drama'] }),
+    ];
+
+    expect(ids(applyFilters(rows, { ...emptyFilters(), genres: [ANIME_GENRE, 'Comedy'] }))).toEqual([
+      'anime',
+      'comedy',
+    ]);
   });
 });
 
@@ -177,9 +229,31 @@ describe('the options offered', () => {
     expect(facetOptions(rows).decades.map((d) => d.value)).toEqual(['2020s', 'earlier']);
   });
 
-  it('reports how many anime there are, so the toggle can hide itself', () => {
-    expect(facetOptions(rows).anime).toBe(0);
-    expect(facetOptions([item({ language: 'ja', genres: ['Animation'] })]).anime).toBe(1);
+  it('offers Anime among the genres, and only when there is any', () => {
+    // It is an option in the Genre list now rather than a section of its own headed
+    // Type, so this is where it has to appear — and a collection with no anime in it
+    // must not offer it, exactly as an absent genre is not offered.
+    expect(facetOptions(rows).genres.map((g) => g.value)).not.toContain(ANIME_GENRE);
+
+    const withAnime = facetOptions([
+      item({ language: 'ja', genres: ['Animation'] }),
+      item({ language: 'en', genres: ['Comedy'] }),
+    ]);
+    expect(withAnime.genres).toContainEqual({ value: ANIME_GENRE, count: 1 });
+  });
+
+  it('counts Anime by the predicate, never by a label on a row', () => {
+    // A row carrying a literal "Anime" label would otherwise contribute a count the
+    // filter's own predicate disagrees with, and an option whose number does not match
+    // what selecting it returns is worse than an option that is missing.
+    const mislabelled = item({ mediaItemId: 'mislabelled', language: 'en', genres: ['Anime'] });
+    const real = item({ mediaItemId: 'real', language: 'ja', genres: ['Animation'] });
+
+    const options = facetOptions([mislabelled, real]);
+    expect(options.genres).toContainEqual({ value: ANIME_GENRE, count: 1 });
+    expect(ids(applyFilters([mislabelled, real], { ...emptyFilters(), genres: [ANIME_GENRE] }))).toEqual(
+      ['real'],
+    );
   });
 });
 

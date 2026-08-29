@@ -856,6 +856,10 @@ describe('tabs that have nothing behind them', () => {
     ];
     const view = await open();
 
+    // `open()` waits for the title, which comes from the media row. The Videos tab comes
+    // from the cached-videos query and is not on screen yet — the two tests above press
+    // it through this same wait, and this one was pressing it through none.
+    await waitFor(() => expect(view.getByRole('tab', { name: 'Videos' })).toBeTruthy());
     await fireEvent.press(view.getByRole('tab', { name: 'Videos' }));
     await fireEvent.press(view.getByLabelText('Play Official Trailer on YouTube'));
 
@@ -1210,8 +1214,12 @@ describe('a series', () => {
 
     const view = await openSeries();
 
-    await waitFor(() => expect(view.getByRole('tab', { name: 'Seasons' })).toBeTruthy());
-    expect(view.getByText('Seasons are still loading')).toBeTruthy();
+    // The empty state, not the tab. The tab is drawn from the media row, which has
+    // already arrived by the time this renders; the sentence under it waits on the
+    // seasons query. Waiting on the tab therefore guards nothing — the same unguarded
+    // shape the Following-score block was corrected for in #74.
+    await waitFor(() => expect(view.getByText('Seasons are still loading')).toBeTruthy());
+    expect(view.getByRole('tab', { name: 'Seasons' })).toBeTruthy();
   });
 });
 
