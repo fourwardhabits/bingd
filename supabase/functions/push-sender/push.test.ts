@@ -50,6 +50,7 @@ Deno.test('every eligible type says something in the second person', () => {
     follow: ['Ada Lovelace', 'started following you'],
     follow_request: ['Ada Lovelace', 'wants to follow you'],
     comment: ['Ada Lovelace', 'commented on your activity'],
+    mention: ['Ada Lovelace', 'mentioned you in a comment'],
     reaction: ['Ada Lovelace', 'reacted to your activity'],
     watch_tag: ['Ada Lovelace', 'watched something with you'],
     recommendation: ['Ada Lovelace', 'recommended something to watch'],
@@ -161,6 +162,39 @@ Deno.test('a long comment is elided by this file, not chopped by the OS', () => 
   assert(content);
   assert(content.body.length < 180);
   assert(content.body.includes('…'), 'an elided quote says so');
+});
+
+/**
+ * **The mention is the one written surface that stays generic** (founder, 2026-08-30).
+ *
+ * A comment push quotes the remark because the remark is *for* the person whose lock
+ * screen it lands on — they posted the thing being answered. A mention is not that: it
+ * arrives on somebody else's activity, addressed at somebody who has not asked to be in
+ * the conversation.
+ *
+ * Belt and braces, and both are asserted: `claim_push_batch` resolves `comment_excerpt`
+ * for `comment` jobs only, so a real mention job has nothing to quote — and this file
+ * would not quote it even if the server started sending one.
+ */
+Deno.test('a mention push never quotes the comment, even if handed one', () => {
+  const content = contentFor(
+    job({
+      type: 'mention',
+      media_kind: 'movie',
+      media_title: 'Sinners',
+      comment_excerpt: 'the twist is that he was dead the whole time',
+    }),
+  );
+
+  assert(content);
+  assertEquals(content.title, 'Ada Lovelace');
+  assertEquals(content.body, 'mentioned you in a comment — Sinners');
+  assert(!content.body.includes('twist'), 'no comment text on a lock screen');
+});
+
+Deno.test('a mention with no resolvable title still says where it happened', () => {
+  const content = contentFor(job({ type: 'mention' }));
+  assertEquals(content?.body, 'mentioned you in a comment');
 });
 
 Deno.test('newlines in a comment become one lock-screen line', () => {

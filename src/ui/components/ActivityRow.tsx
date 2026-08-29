@@ -415,6 +415,10 @@ export function ActivityRow({
                 : `React to ${actorName}'s activity about ${filmName}. Long press for more reactions.`
             }
             active={Boolean(reaction.mineGlyph)}
+            // The reader's own kind, which the control puts in the action slot and
+            // subtracts from the cluster beside it (§6). Already on this prop — every
+            // caller computes it, and `active` was derived from it here anyway.
+            mineGlyph={reaction.mineGlyph}
             glyphs={reaction.glyphs ?? []}
             count={reaction.count}
             onToggle={reaction.onPress}

@@ -213,14 +213,24 @@ is no second axis.
 No per-channel settings were added. The operating system's own permission remains
 independent, because it is the platform's to hold.
 
-**Ten of the twelve types are pushed.** *(This read "eight of the ten" when written:
-`friendship` and `recommendation_ranked` arrived 2026-08-27, and `award_earned` joined
-`_push_eligible` on 2026-08-28 when `20260828000100` gave it its writer.)* `follow_approved`
+**Twelve of the fourteen types are pushed.** *(This read "eight of the ten" when written:
+`friendship` and `recommendation_ranked` arrived 2026-08-27, `award_earned` joined
+`_push_eligible` on 2026-08-28 when `20260828000100` gave it its writer, `goal_completed`
+on 2026-08-29, and `mention` on 2026-08-30.)* `follow_approved`
 is excluded by PRD §15's own event table (Push: No), and `friendship` is a record of the
 reader's own tap — a phone buzzing about it would be noise. `_push_eligible` is the list,
 and an unmapped type is **not** eligible — the opposite of the preference trigger's rule
 for an unmapped category, because a missing notification is a bug somebody can see and an
 unreviewed push is not.
+
+**A comment push quotes; a mention push does not.** `claim_push_batch` resolves
+`comment_excerpt` for `comment` jobs only — live, not spoiler-marked, 180 characters — and
+that has been true since `20260827000300`, because a comment is addressed at the person
+who posted the thing being answered, the way any messaging push is. `mention`
+(`20260830000100`) is deliberately not on that list: it arrives on somebody else's
+activity, aimed at a person who has not asked to be in the conversation, so its push says
+who and where and never what. The rule is in the query rather than only in the copy layer,
+so a mention job has nothing to quote even if the sentence were rewritten.
 
 **`award_earned` is the one actorless push.** `claim_push_batch` used to join through the
 actor profile, which silently dropped any job with no actor; it was rebuilt to let

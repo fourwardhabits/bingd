@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, BackHandler, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { AwardActivityLead } from '@/features/awards/AwardActivityLead';
@@ -217,6 +217,39 @@ export default function FeedScreen() {
     setMode(next);
     if (next === 'leaderboard') track({ name: 'leaderboard_viewed', props: { metric } });
   };
+
+  /**
+   * **Android's hardware Back, while the board is showing** (founder physical bug).
+   *
+   * Leaderboard is a *mode* of this route, not a route of its own, so the navigator had
+   * nothing to pop and Back exited the app from what the reader experienced as a
+   * second screen. The founder's instruction was explicit: do not invent a route to
+   * solve this. So the mode consumes the event itself and hands the reader back to the
+   * Feed, which is where they came from.
+   *
+   * `useFocusEffect`, not `useEffect`: this tab stays mounted while the reader is on
+   * another one, and a listener that outlived focus would swallow Back on Collection.
+   *
+   * Registered unconditionally rather than behind a `Platform.OS` check, and returning
+   * `false` when the Feed is showing — which is the two halves of "iOS behaviour is
+   * preserved". `BackHandler` on iOS is a stub whose `addEventListener` returns a
+   * remover and never fires, so the check would only hide the code from the tests.
+   * Returning `false` leaves normal route back behaviour exactly where it was.
+   *
+   * `setMode` rather than `changeMode`: leaving the board is not a `leaderboard_viewed`
+   * event, and the remembered timeframe is a separate piece of state that this does not
+   * touch — coming back to the board returns to the timeframe they chose.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (!showingBoard) return false;
+        setMode('feed');
+        return true;
+      });
+      return () => subscription.remove();
+    }, [showingBoard]),
+  );
 
   /** Only a genuine change. Re-tapping the chip you are on would measure fidgeting. */
   const changeMetric = (next: LeaderboardMetric) => {
@@ -434,7 +467,13 @@ export default function FeedScreen() {
           * answers both from one fetch.
           */}
         <View style={styles.contentHeader}>
-          <View style={styles.contentHeaderLeft}>
+          {/* The gutter is applied here, on the board's side only. `SectionHeader` pads
+              itself and a section-sized `MediumSelector` deliberately does not, so a
+              single inset on the row would double-pad TRENDING NOW while an inset on
+              neither leaves the timeframe flush against the screen edge — which is what
+              the founder photographed. Padding on the existing flex child, so the row's
+              height and the toggle's position are untouched. */}
+          <View style={[styles.contentHeaderLeft, showingBoard && styles.contentHeaderInset]}>
             {showingBoard ? (
               <MediumSelector
                 size="section"
@@ -747,6 +786,8 @@ const styles = StyleSheet.create({
   // Takes the space the toggle leaves, so a long heading truncates rather than pushing
   // the control off the row.
   contentHeaderLeft: { flex: 1, justifyContent: 'center' },
+  // Only the timeframe selector carries it — see the call site.
+  contentHeaderInset: { paddingLeft: theme.layout.gutter },
   /**
    * The rule between discovery and activity.
    *

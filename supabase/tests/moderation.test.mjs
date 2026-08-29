@@ -550,6 +550,13 @@ describe('the guard is wired in, not merely present', () => {
     // reading them.
     'activity_comments',
     'activity_comment_counts',
+    // 20260830000100. The comment composer's @-mention suggestions, and it belongs here
+    // for exactly `activity_comments`' reason plus one of its own: it is a stable read
+    // whose whole population is the caller's own follow list and the participants of a
+    // conversation the caller can already see, each passed through `_can_mention` — which
+    // itself refuses a suspended subject. A suspended *caller* can therefore see who they
+    // could name and cannot name anybody, because `add_comment` calls the guard.
+    'mention_candidates',
     // 20260826000600. security invoker, so these can only ever return rows follows_read
     // already admits — the caller's own visible slice of one person's follow graph.
     // Exactly `follow_state_with`'s reasoning: suspension does not hide a follow list

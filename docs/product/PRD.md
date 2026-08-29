@@ -1469,6 +1469,115 @@ A fixed reaction set of six on feed activity items. One reaction per user per it
 > the earlier boolean like-writer wrote, and the notification split — a comment reaction
 > still writes no notification.
 
+> ### As built — 2026-08-30: @mentions in comments and replies (`20260830000100`)
+>
+> The founder asked for the smallest natural version: typing `@` inside the existing
+> comment box surfaces a compact list, choosing somebody inserts their handle, and the
+> person named gets told. No People picker, no separate field, no mentions in reviews or
+> feed bodies, and no mention privacy settings.
+>
+> **Who may be named, and the half that is not about the author.** Two populations,
+> union:
+>
+> | Source | Rule |
+> |---|---|
+> | Followed | Anybody the commenter follows, approved. **One direction is enough** — deliberately weaker than the mutual rule watch tagging uses, because a comment mention makes no claim about anybody's evening |
+> | Participants | The activity's actor, and anybody who has commented on the activity — whether or not the author follows them |
+>
+> and then the condition that is about the *mentioned* party rather than the author:
+> **they must be able to see the activity themselves.** Without it a mention would be a
+> way to tell somebody that a private account ranked a particular title — the
+> notification names the actor and the title, and would arrive for a person who could
+> read neither. `_can_mention` therefore asks `can_view_profile(mentioned, actor)`, from
+> their side.
+>
+> Excluded by construction: yourself, blocked in either direction, suspended and deleted
+> accounts, and anybody the two rules above do not admit. **An arbitrary Bingd user is not
+> a low-ranked suggestion — they are not a row.** `mention_candidates` builds the list
+> from the two populations rather than filtering a user search down to them, and returns
+> nothing at all to a caller who cannot see the activity. Matching is prefix-only, on the
+> handle or on any word of the display name, because an infix match over a follow list is
+> a way to enumerate it with a two-letter probe. Ten per comment, capped in `app_config`.
+>
+> **A mention is a row, not a substring**, and that is the whole design.
+> `comment_mentions (comment_id, mentioned_id)` stores ids, because handles move: a body
+> re-parsed after a rename resolves to somebody else or to nobody, and the notification
+> was delivered long before. Two columns carry the rest:
+>
+> - `active` — whether the comment's *current* text still names them. The composer reads
+>   it back when an edit begins, which is what keeps the association alive through a text
+>   field that only knows handles.
+> - `handle` — what the body *spells*, frozen when the mention was applied. Never
+>   authority; the id is. It exists because a body written before a rename still says
+>   `@ravi` while Ravi is now `ravinder`, and a composer matching only against current
+>   handles would resolve nothing on the next typo fix and quietly deactivate a mention
+>   plainly still in the text. Both spellings are returned and both are seeded.
+> - `notified_at` — set once, by the writer that files the inbox row, and **never cleared
+>   by anything**.
+>
+> **Rows are never deleted.** Removing a mention sets `active = false` and leaves the
+> stamp standing. That single decision is the anti-farming rule, and it is what makes the
+> founder's edit matrix hold:
+>
+> | Action | Ravi | Abisola |
+> |---|---|---|
+> | Post `@ravi great film` | **1** | — |
+> | Edit to `@ravi great film actually` | 1 | — |
+> | Edit to `@ravi @abisola great film` | 1 | **1** |
+> | Edit to `@abisola great film` (Ravi removed) | 1 — his delivered notification survives | 1 |
+> | Edit back to `@ravi @abisola` | 1 — **for ever** | 1 |
+>
+> The claim is one statement — `update comment_mentions set notified_at = now() where
+> notified_at is null returning` — so it takes a row lock and yields exactly the pairs
+> *this* transaction moved from unstamped to stamped. Two concurrent saves, a replayed
+> outbox, a double-tapped Save: the second blocks, sees the stamp, and files nothing.
+> Self-mentions notify nobody. **At most one mention notification per (comment, person),
+> ever.**
+>
+> **The client sends ids, and only ids it was given.** A mention is a handle the author
+> *picked from the suggestions* which is *still present in the text* when they post.
+> Picking supplies the id; still-present is what makes deleting the name the way to
+> remove a mention, with no second gesture. A hand-typed `@somebody` that was never
+> chosen is ordinary text and notifies nobody — the safe direction, because the
+> alternative is a client that turns arbitrary strings into lookups against the whole user
+> table.
+>
+> **The activity's visibility is re-checked every time the row is read**, not only when
+> the mention was written. A mention lands on somebody else's post, so that post's owner
+> is a *third party* to the notification — the actor is the commenter — and neither the
+> discoverability filter (about the actor) nor a block between owner and recipient (which
+> deletes rows between that pair, not rows about them) would catch it. Without the gate,
+> a reader keeps the title of an activity whose owner has since blocked them or gone
+> private, on the row and on the lock screen alike. The row survives with no title rather
+> than disappearing: the mention itself was legitimate and is still theirs to know about.
+>
+> **Copy and routing.** "Suraj mentioned you in a comment", or "…in a reply" where the
+> comment was one — the flag is the server's, recorded when the mention was filed. Tapping
+> opens the activity's conversation, the same chain a comment notification takes, with the
+> title as the surviving parent and the ordinary unavailable state at the end. Scrolling
+> to the exact comment is deliberately not built: the founder's minimum was the correct
+> thread, and the alternative is anchor plumbing through two surfaces for a thread that is
+> usually a screenful.
+>
+> **Preference and push.** A mention shares the existing **Comments** category rather than
+> adding a ninth — a mention *is* somebody talking to you in a comment, and a second switch
+> beside that row would ask a reader to hold a distinction the product does not make. It is
+> push-eligible, and its push is **generic**: "Suraj mentioned you in a comment — Sinners",
+> never the comment's text. That is the one place this diverges from the comment push
+> shipped on 2026-08-27, which quotes: a comment is addressed at somebody who posted the
+> thing being answered, and a mention reaches somebody who has not asked to be in the
+> conversation at all. `claim_push_batch` resolves an excerpt for `comment` jobs only, so
+> the server agrees rather than trusting the copy layer to remember.
+>
+> **A retracted comment takes its mentions with it.** `delete_comment` sweeps `mention`
+> rows alongside `comment` rows, and deactivates the mention relation on a tombstone —
+> but never deletes it, because the ledger is what stops a re-mention ringing again.
+>
+> **Deliberately not built**: mentions in reviews or feed bodies, mention mute settings,
+> mention notification grouping, and any form of tagging a person who is not already a
+> follow or a participant.
+
+
 ### Watch tagging — Decided for public alpha
 
 While logging a watch, the user may tag who they watched with.
@@ -1487,6 +1596,67 @@ While logging a watch, the user may tag who they watched with.
 The invite hand-off is the point of this feature as a growth mechanism: it places an invitation prompt at the exact moment of social context.
 
 ---
+
+
+> ### As built — 2026-08-30: the watched-with notice, and a Rank beside it
+>
+> **The eligibility row above is out of date and has been since 2026-08-17.** "Follows or
+> is followed by" was narrowed to an **approved mutual follow** (`_can_tag` is
+> `_is_mutual_follow` and nothing else), so that tagging and recommending obey one social
+> rule. That narrowing is confirmed rather than revisited here: naming somebody in "Who I
+> watched with" is a claim about their evening, and it takes a relationship both people
+> agreed to. A one-way follow is refused; free-text companions, where the flow supports
+> them, are unaffected and notify nobody, because they are not accounts.
+>
+> **Exactly once, and it already was.** `20260816000700` made the notice one per
+> (tagger, tagged, title) **for good**, and this tranche is what made the row visible
+> enough for anybody to notice it firing twice. The behaviour, restated because it is now
+> load-bearing on a surface people read:
+>
+> | What happens | What is sent |
+> |---|---|
+> | Log with Abisola | Abisola: **one** |
+> | The list saved again — autosave, a re-save, a lost reply retried | nothing |
+> | The note or the date edited on the same log | nothing |
+> | Ravi added later | Ravi: **one**. Abisola: nothing |
+> | Abisola removed, then added back | nothing, ever |
+>
+> Removal is a soft delete (`removed_by_tagger`), the notice is guarded by a permanent
+> partial unique index on `(recipient_id, actor_id, subject_id, type)`, and `_can_tag` is
+> re-checked under the pair lock immediately before the insert — so a block or an unfollow
+> between opening the picker and saving refuses the whole call rather than notifying
+> somebody the relationship no longer permits.
+>
+> **The row says what it is about.** "Suraj **watched 100 Meters with you**" — the title
+> inside the sentence rather than on a line beneath it, in the compact form that names a
+> season through its show. A title that has left the catalogue falls back to "watched
+> something with you". The notification carries the actor, the title and nothing else: no
+> note, no review body, no score, and no other companion.
+>
+> **And it offers Rank, conditionally.** Somebody has just said they watched this with
+> you; the useful next act is to place it, and the row previously had none. The control is
+> a small secondary button in the row's action slot — the same grammar as *Follow back* —
+> shown only when the reader has **not** ranked the title. `viewer_ranked` is resolved
+> server-side in the read that draws the row, so there is no local state that could
+> disagree — and a collection change now invalidates the inbox, so the control disappears
+> the moment they rank it rather than whenever the cache next happens to age out. Without
+> that line the obvious sequence — tap Rank, rank it, come straight back — left the
+> control still offered, pointing at a state the reader had already reached.
+>
+> **Rank opens the title page. It does not open the ranking sheet.** A notification is a
+> claim about something that may have happened days ago, and dropping the reader into a
+> comparison session from a Bell tap is a modal state entered by accident. The title page
+> already carries a Rank button, it is where every ranking in the app begins, and it shows
+> the poster and the existing score before anything is committed. The row itself leads to
+> the same place, so this is a second door onto one destination rather than a second
+> behaviour.
+>
+> **Deliberately not built**: a "remove me from this watch" dispute workflow (the tagged
+> person can already hide the tag from their side; a disputed *claim* is a different
+> feature and wants beta evidence first — recorded in [`deferred-roadmap.md`](./deferred-roadmap.md)),
+> watched-with approval requests, and any notification for a companion who is not a Bingd
+> account.
+
 
 ### As built — Bingd Awards, shipped 2026-08-18
 
@@ -1942,6 +2112,43 @@ Two founder requests, shipped together (`20260827000600`).
 - Three age shelves in the existing small-caps maroon heading voice — **Today**, **This week**, **Earlier** — using the same rounding as the relative timestamps so a row never sits under a heading its label contradicts. Headings render only when they separate something: at least two shelves, or a Follow-requests section above. No tabs, no per-type categories, no filters.
 - Everything else held: parchment ground, unread as tint + maroon dot + spoken "Unread", timestamps secondary, row actions (Approve / Decline / Follow back) inset to their row's own text edge, the bell + gear settings control untouched.
 
+### As built — 2026-08-30: an inbox row that says what was said
+
+The founder's report, holding a phone: **"Ravi commented on your activity" is not enough
+to know whether to open it.** One line is.
+
+**A comment, reply or mention row carries a compact preview** under the sentence, at the
+row's ordinary secondary-text density, one line, elided. Nothing else about the inbox
+moves: the Today / This week / Earlier shelves, the hairline dividers, the avatars, the
+unread tint and dot, and the row actions are all as they were. A long comment does not
+grow a row — 140 characters from the server, one line from the renderer.
+
+**Spoiler safety is the server's, and that is a deliberate exception.** Everywhere else in
+Bingd, spoiler masking is viewer-relative and decided on the client (`shouldMask`), because
+a masked body is readable by exactly the accounts an unmasked one is and a server-side
+filter would be a claim a modified client walks past. The inbox is the one surface where
+that reasoning does not hold: the row appears without being opened, the reader did not ask
+to look, and the same string goes to a lock screen. So `my_notifications` withholds the
+text and the client is never handed it.
+
+| The comment is | Second line | Push body |
+|---|---|---|
+| Ordinary | its first line | the comment, as since 2026-08-27 |
+| Marked as containing spoilers | **"Contains spoilers"** — never the text | generic; no excerpt, as since 2026-08-27 |
+| Retracted, or by somebody this reader may not see | nothing at all | no push exists |
+| A **mention** | its first line | **generic — never the comment's text** |
+
+"Contains spoilers" rather than an empty second line: an absent line reads as a rendering
+bug, and knowing there is something behind a tap is useful. The preview is spoken as part
+of the row's label, because a label on a pressable replaces its children rather than
+joining them.
+
+**A row whose comment has been deleted degrades quietly.** No text, no explanation, no
+crash: the sentence stands and the tap resolves through the ordinary chain — the
+conversation, then the title, then the existing unavailable state. In practice such a row
+is usually gone, because `delete_comment` sweeps the notifications it wrote.
+---
+
 ### Objective
 
 Make personal taste legible outside Bingd, convert private enthusiasm into distribution, and give every recipient a useful destination. **Standard sharing is permanently Free.**
@@ -2031,6 +2238,7 @@ A share or invite token is a **routing and attribution identifier, never authori
 > The friend-beta event set is thirteen events and is defined in [`analytics.md`](./analytics.md). The growth events are **`invite_link_created`**, which follows the `invite_link_creations` row rather than the tap, and — since 2026-08-19 — **`invite_redeemed`** and **`invite_activated`**, which follow the attribution row and the activation transition. Sharing is otherwise uninstrumented, deliberately: **opening an OS share sheet is not a share completed**, which is the same rule this section already states.
 
 ---
+
 
 ## 17. Direct friend invitations
 
@@ -2532,6 +2740,30 @@ Rationale, and the reason this needed deciding rather than defaulting: a public 
 > The post-ranking button is **Add more details** (renamed from *Finish your log* the
 > same day — [§10](#10-ranking-system)): the ranking is complete, and everything behind
 > the button is optional enrichment.
+
+> **As built — 2026-08-30: what "Add more details" opens.** The founder's finding was
+> that it "routes into only the Note/Review portion". All three rows had in fact always
+> been rendered — what a phone shows is the thing being described: a sheet that arrives
+> with the note composer already expanded, under a keyboard, puts the companions and the
+> watch date below the fold. The path is real and narrow: the Ranked menu's writing row
+> sets a write-this-now intent that the title screen never cleared, so changing a rating
+> from inside that sheet and finishing the comparison returned here with the intent still
+> set.
+>
+> The contract, stated on the sheet rather than at either call site: **the post-rank sheet
+> opens on nothing, and offers the whole log.** Who I watched with, the Note with its
+> spoiler and share-as-a-review claims, and the Watch date — every field that is already
+> part of the canonical editor, and no new ones. The write-this-now intent still lands the
+> reader in the composer everywhere else, which is what it is for.
+>
+> It edits the object that exists. No comparison is restarted, no score is required to
+> change, no second `user_media` row and no second ranking feed event: the rows write
+> through `log_watched`, which upserts the row the title already has, and nothing in this
+> state touches `set_bucket`, `rank_start` or `rank_rebucket`. **The note autosave is
+> unchanged** — the debounce, the flush on blur, on collapse, on every close, on
+> backgrounding and on unmount, and the chained-save concurrency base all behave exactly
+> as above. Who I watched with keeps its own established interaction (an explicit picker,
+> saved as a set) rather than being redesigned for consistency.
 
 ### Follow model
 

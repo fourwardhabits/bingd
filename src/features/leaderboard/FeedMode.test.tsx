@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, waitFor } from '@testing-library/react-native';
+import { BackHandler, StyleSheet, type ViewStyle } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
@@ -96,6 +98,22 @@ jest.mock('@/lib/prefs', () => ({
 const mockTrack = jest.fn();
 jest.mock('@/lib/analytics', () => ({ track: (event: unknown) => mockTrack(event) }));
 
+/**
+ * **Android's hardware Back, captured rather than simulated.**
+ *
+ * `Platform.OS` is `ios` under this runner and `BackHandler.ios.js` is a stub that
+ * never fires, so there is no event to dispatch. The screen registers its handler
+ * unconditionally — deliberately, and for this reason among others — so the test takes
+ * the callback the screen handed over and calls it, which is exactly what the Android
+ * implementation does with it.
+ */
+const backHandlers: (() => boolean)[] = [];
+const pressBack = () => {
+  const handler = backHandlers.at(-1);
+  if (!handler) throw new Error('the screen registered no hardware-back handler');
+  return handler();
+};
+
 const TIMEFRAME_KEY = 'user-1.leaderboard.timeframe';
 
 /** Board rows and standings, keyed `metric|timeframe` so the views cannot be confused. */
@@ -118,6 +136,14 @@ const entry = (over: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
+  backHandlers.length = 0;
+  jest
+    .spyOn(BackHandler, 'addEventListener')
+    .mockImplementation(((_event: string, handler: () => boolean) => {
+      backHandlers.push(handler);
+      return { remove: () => {} };
+    }) as never);
+
   mockProfile.id = 'user-1';
   mockPush.mockClear();
   mockTrack.mockClear();
@@ -602,5 +628,93 @@ describe('the two analytics events', () => {
       name: 'leaderboard_metric_selected',
       props: { metric: 'movies' },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **Back out of the board, rather than out of the app** (founder physical bug).
+ *
+ * Leaderboard is a *mode* of the Feed route, so the navigator had nothing to pop and
+ * Android's Back exited bingd. from what the reader experienced as a second screen. The
+ * founder's instruction was to fix it without inventing a route, so the assertions here
+ * are about the handler's return value: `true` is "consumed", `false` is "carry on as
+ * before", and the second is as much of the contract as the first.
+ */
+describe('the hardware back button', () => {
+  it('returns to the Feed from the board, and consumes the press', async () => {
+    const view = await open();
+    await toBoard(view);
+
+    expect(pressBack()).toBe(true);
+
+    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    expect(view.queryByLabelText('Showing This month')).toBeNull();
+  });
+
+  it('leaves the press alone on the Feed, so normal back behaviour is untouched', async () => {
+    await open();
+    expect(pressBack()).toBe(false);
+  });
+
+  it('keeps the remembered timeframe, which is a different preference', async () => {
+    // The mode is not persisted and the timeframe is (§2/§6). Leaving the board by Back
+    // must not be mistaken for a third thing that resets one of them.
+    const view = await open();
+    await toBoard(view);
+    await chooseTimeframe(view, 'This month', 'All time');
+
+    expect(pressBack()).toBe(true);
+    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+
+    await toBoard(view, 'All time');
+    expect(view.getByLabelText('Showing All time')).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **The content header's left gutter** (founder physical finding).
+ *
+ * TRENDING NOW was inset and THIS MONTH ▼ was flush against the screen edge, because
+ * `SectionHeader` pads itself and a section-sized `MediumSelector` deliberately does
+ * not. The assertion is the sum of every horizontal inset from the control up to the
+ * root, which is the only version of "where does this sit on the page" that cannot be
+ * satisfied by moving the padding somewhere else.
+ */
+describe('the content header gutter', () => {
+  const leftInsetOf = (node: { parent: unknown; props: Record<string, unknown> } | null) => {
+    let total = 0;
+    let current = node;
+    while (current) {
+      const style = (StyleSheet.flatten(current.props.style) ?? {}) as ViewStyle;
+      total += Number(style.paddingLeft ?? style.paddingHorizontal ?? 0);
+      current = current.parent as typeof current;
+    }
+    return total;
+  };
+
+  it('puts the timeframe selector on the page gutter', async () => {
+    const view = await open();
+    await toBoard(view);
+
+    expect(leftInsetOf(view.getByLabelText('Showing This month'))).toBe(theme.layout.gutter);
+  });
+
+  /**
+   * The obvious fix — a gutter on the row itself — would have doubled TRENDING NOW to
+   * 32, because `SectionHeader` already carries one. So the row stays unpadded on the
+   * left and the inset belongs to the board's occupant alone. Read off the toggle,
+   * which is in that row in both modes and is the one thing on it that pads itself
+   * nowhere.
+   */
+  it('leaves the row itself unpadded, so the heading opposite is not doubled', async () => {
+    const view = await open();
+    expect(leftInsetOf(view.getByLabelText('Feed mode'))).toBe(0);
+
+    await toBoard(view);
+    expect(leftInsetOf(view.getByLabelText('Feed mode'))).toBe(0);
   });
 });

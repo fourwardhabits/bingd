@@ -41,6 +41,10 @@ const row = (over: Partial<Notification> & { kind: NotificationKind }): Notifica
   mutual: null,
   award: null,
   goal: null,
+  mentionInReply: false,
+  preview: null,
+  previewHidden: false,
+  viewerRanked: false,
   ...over,
 });
 
@@ -71,6 +75,14 @@ describe('the routing matrix', () => {
      * the catalogue leaves the event.
      */
     comment: { kind: 'activity', eventId: 'event-1' },
+    /**
+     * The same chain as a comment (20260830000100), and deliberately not a special case:
+     * a mention is one remark in one conversation, and `subject_id` is that conversation.
+     * What makes it worth its own line here is that a mention usually lands on somebody
+     * *else's* activity, so a resolver that started from `mediaItemId` — as an earlier
+     * version of the comment chain did — would send exactly these rows nowhere.
+     */
+    mention: { kind: 'activity', eventId: 'event-1' },
     reaction: { kind: 'activity', eventId: 'event-1' },
     /**
      * The founder's explicit requirement (20260827000600): "Suraj ranked The Martian

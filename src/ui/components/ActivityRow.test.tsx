@@ -559,9 +559,16 @@ describe('the reaction control', () => {
   });
 
   it('marks the control as mine without repeating the glyph beside the summary', async () => {
-    // The same emoji appeared twice — once counted in the cluster, once on the
-    // control — and read as a duplicate rather than as two different statements.
-    // The control says whether I acted; the cluster says what everyone chose.
+    /**
+     * The same emoji appeared twice — once counted in the cluster, once on the control
+     * — and read as a duplicate rather than as two different statements.
+     *
+     * Which of the two survives changed on 2026-08-28 (founder §6) and the count did
+     * not: the row used to keep a filled heart on the control and the emoji in the
+     * cluster, and now the reader's own kind *is* the control and the cluster no longer
+     * repeats it. This row's job is to hand `ReactionControl` the glyph it needs to do
+     * that — `ReactionControl.test.tsx` owns the grammar itself.
+     */
     const view = await render(
       <ActivityRow
         {...props}
@@ -569,12 +576,35 @@ describe('the reaction control', () => {
       />,
     );
 
-    expect(
-      view.getByLabelText('You reacted to Inception. Tap to remove, long press to change.'),
-    ).toBeTruthy();
+    const control = view.getByLabelText(
+      'You reacted to Inception. Tap to remove, long press to change.',
+    );
+    expect(control).toBeTruthy();
     expect(view.queryByText('You')).toBeNull();
-    // Exactly once on the row: in the summary cluster.
+    // Exactly once on the row, and it is the action slot that has it.
     expect(view.getAllByText('😂', { includeHiddenElements: true })).toHaveLength(1);
+    expect(within(control).queryAllByText('😂')).toHaveLength(1);
+  });
+
+  it('leaves the other kinds in the cluster beside the reader’s own', async () => {
+    // Only the reader's kind is de-duplicated. Everybody else's is still on the row,
+    // and the total is still everybody's.
+    const view = await render(
+      <ActivityRow
+        {...props}
+        reaction={{
+          count: 3,
+          mineGlyph: '❤️',
+          glyphs: ['❤️', '😂'],
+          onPress: jest.fn(),
+          onPressSummary: jest.fn(),
+        }}
+      />,
+    );
+
+    expect(view.getAllByText('❤️', { includeHiddenElements: true })).toHaveLength(1);
+    expect(view.getAllByText('😂', { includeHiddenElements: true })).toHaveLength(1);
+    expect(view.getByText('3')).toBeTruthy();
   });
 
   /** The compact summary: glyphs and a total, never a per-kind tally in the row. */

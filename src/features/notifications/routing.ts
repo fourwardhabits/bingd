@@ -171,7 +171,22 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
      * title page is the surviving parent when the event is gone (the ranking was
      * removed), and the unavailable state is what remains when the title left too.
      */
+    /**
+     * `mention` (20260830000100) rides the comment chain exactly, and the reason it is
+     * not a special case is worth stating: the notification is about one remark in one
+     * conversation, `subject_id` **is** that conversation, and the activity page renders
+     * it. The one thing it does not do is scroll to the comment — that is a real
+     * improvement and it is deliberately not built here, because the founder's minimum
+     * was "open the correct thread" and the alternative is anchor plumbing through two
+     * surfaces for a thread that is usually a screenful.
+     *
+     * The stale cases are the comment chain's, and both already degrade: a deleted
+     * comment leaves the thread standing (`delete_comment` sweeps the mention row too,
+     * so in practice the row is gone), a deleted *event* falls through to the title, and
+     * a title out of the catalogue falls through to the unavailable state.
+     */
     case 'comment':
+    case 'mention':
     case 'reaction':
     case 'recommendation_ranked':
       return [...activity, ...title, unavailable('That activity is no longer available.')];
@@ -386,6 +401,7 @@ export const ROUTED_KINDS: readonly NotificationKind[] = [
   'follow_approved',
   'friendship',
   'comment',
+  'mention',
   'reaction',
   'watch_tag',
   'recommendation',

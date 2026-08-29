@@ -10,6 +10,7 @@ import { GOAL_LABEL } from '@/features/goals/goals';
 import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
   canFollowBack,
+  canRankFromRow,
   sectionFor,
   useMarkNotificationsRead,
   useNotifications,
@@ -310,7 +311,24 @@ export default function NotificationsScreen() {
   const openActor = (row: Notification) => openRow(row);
 
   return (
-    <Screen includeBottomInset>
+    /**
+     * **No top edge** (founder physical finding: a large blank band between the
+     * Notifications header and TODAY).
+     *
+     * The gap was safe-area duplication, not padding. This screen declares
+     * `headerShown: true`, and a native-stack header already consumes the status-bar
+     * inset before it draws — so `Screen`'s default `['top', 'left', 'right']` added the
+     * *same* inset a second time, below the header, as an empty band roughly the height
+     * of the status bar. Nothing in this file's own spacing was wrong: `section`'s
+     * `space[4]` above the first heading is the same air every other list screen has.
+     *
+     * `['left', 'right']` rather than `[]`: the horizontal insets still matter in
+     * landscape and under a notch, and only the top one is the header's to own. The
+     * three other header-bearing screens reached the same place from the other
+     * direction (`edges={[]}`, for a full-bleed hero). Nothing moves under the status
+     * bar — the header is still there, at its own height, doing that job.
+     */
+    <Screen includeBottomInset edges={['left', 'right']}>
       <Stack.Screen
         options={{
           headerShown: true,
@@ -444,8 +462,31 @@ export default function NotificationsScreen() {
                                 // whole clause here, so there is no name to template in
                                 // and no "null" to read aloud.
                                 verbFor(row.kind, row.mediaKind, row.goal)
-                              : `${row.actorName} ${verbFor(row.kind, row.mediaKind)}`
-                        }${subject ? `, ${subject}` : ''}`}
+                              : // The watched-with sentence puts the title in the middle
+                                // — "Suraj watched 100 Meters with you" — so it is spoken
+                                // whole rather than assembled with the subject appended,
+                                // which would say the film's name twice.
+                                row.kind === 'watch_tag' && subject
+                                ? `${row.actorName} watched ${subject} with you`
+                                : `${row.actorName} ${verbFor(
+                                    row.kind,
+                                    row.mediaKind,
+                                    row.goal,
+                                    row.mentionInReply,
+                                  )}`
+                        }${
+                          subject && row.kind !== 'watch_tag' ? `, ${subject}` : ''
+                        }${
+                          /* The preview is drawn inside this Pressable, and a label on a
+                             Pressable replaces its children rather than joining them —
+                             so a line a sighted reader can see would be silent without
+                             this. `previewHidden` speaks for itself. */
+                          row.preview
+                            ? `. ${row.preview}`
+                            : row.previewHidden
+                              ? '. Contains spoilers'
+                              : ''
+                        }`}
                         // From the same chain the tap uses, so the hint cannot promise a
                         // title and then open a profile.
                         accessibilityHint={hintFor(row)}
@@ -570,12 +611,34 @@ export default function NotificationsScreen() {
                                 from your recommendation
                               </Text>
                             </Text>
+                          ) : row.kind === 'watch_tag' && subject ? (
+                            /* "Suraj watched 100 Meters with you" — the founder's copy,
+                             with the title inline, because "watched something with you"
+                             and then the name on the next line reads as two facts a
+                             reader has to join up. The title carries the same emphasis
+                             the actor does: the sentence is about the two of them and
+                             the film. `compactName` supplies the season form, so a TV
+                             season says which show it belongs to.
+
+                             The subject line below is suppressed for this kind, the way
+                             it already is for a fulfilment — saying the title twice is
+                             exactly the clutter this pass removes. When the title has
+                             left the catalogue there is no `subject`, and the row falls
+                             through to `verbFor`'s "watched something with you". */
+                            <Text variant="callout" numberOfLines={2}>
+                              <Text variant="callout">{row.actorName}</Text>
+                              <Text variant="callout" tone="secondary"> watched </Text>
+                              <Text variant="callout">{subject}</Text>
+                              <Text variant="callout" tone="secondary"> with you</Text>
+                            </Text>
                           ) : (
                             <Text variant="callout" numberOfLines={2}>
                               <Text variant="callout">{row.actorName}</Text>
                               <Text variant="callout" tone="secondary">{` ${verbFor(
                                 row.kind,
                                 row.mediaKind,
+                                row.goal,
+                                row.mentionInReply,
                               )}`}</Text>
                             </Text>
                           )}
@@ -584,9 +647,43 @@ export default function NotificationsScreen() {
                             founder's shape, and it is also what stops a long name
                             pushing the verb off the row. Not on a fulfilment, whose
                             sentence already carries the title inline. */}
-                          {subject && row.kind !== 'recommendation_ranked' ? (
+                          {subject &&
+                          row.kind !== 'recommendation_ranked' &&
+                          row.kind !== 'watch_tag' ? (
                             <Text variant="callout" tone="secondary" numberOfLines={1}>
                               {subject}
+                            </Text>
+                          ) : null}
+                          {/**
+                            * **What was actually said** (founder, 2026-08-30).
+                            *
+                            * "Ravi commented on your activity" does not tell you whether
+                            * to open it. One line does.
+                            *
+                            * `numberOfLines={1}` is a shape contract as much as a style:
+                            * a comment is up to a thousand characters, and a row that
+                            * grew with it would break the scan rhythm of the whole
+                            * inbox. The server sends at most 140, so this is the last of
+                            * two bounds rather than the only one.
+                            *
+                            * **The text is never withheld here**, and that is deliberate:
+                            * a spoiler-marked or retracted comment arrives as `preview:
+                            * null` from `my_notifications`, so there is no string in this
+                            * component to leak. `previewHidden` is the server saying
+                            * *why*, and "Contains spoilers" is a useful thing to know
+                            * before tapping — where an absent second line reads as a
+                            * rendering bug.
+                            *
+                            * Caption rather than callout, so it sits under the sentence
+                            * as context and does not compete with it.
+                            */}
+                          {row.preview ? (
+                            <Text variant="caption" tone="secondary" numberOfLines={1}>
+                              {row.preview}
+                            </Text>
+                          ) : row.previewHidden ? (
+                            <Text variant="caption" tone="tertiary" numberOfLines={1}>
+                              Contains spoilers
                             </Text>
                           ) : null}
                           {/* "2d ago" rather than "23/08/2026". Recency is half of what
@@ -626,6 +723,45 @@ export default function NotificationsScreen() {
                             onPress={() => void followBack(row)}
                             disabled={busy}
                             disabledReason="One at a time"
+                          />
+                        </View>
+                      ) : null}
+                      {/**
+                        * **Rank, on a watched-with row for a title the reader has not
+                        * placed** (founder, 2026-08-30).
+                        *
+                        * Somebody has just said they watched this with you; the useful
+                        * next act is to place it, and before this the row was a sentence
+                        * with nothing to do about it. In the same grammar as Follow back
+                        * — a small secondary button in the row's action slot — because
+                        * it is the same kind of thing: one optional act, offered where
+                        * the news arrives.
+                        *
+                        * **It opens the title page and not the ranking sheet**, which is
+                        * the founder's instruction and not a shortcut. A notification is
+                        * a claim about something that may have happened days ago;
+                        * dropping the reader straight into a comparison session from a
+                        * Bell tap is a modal state entered by accident. The title page's
+                        * own Rank button is what takes the next step, and it is where
+                        * every ranking in this app begins.
+                        *
+                        * The same destination the row itself already has, so this is a
+                        * second door onto one place rather than a second behaviour —
+                        * which is also why it is `openRow` and not a route built here.
+                        *
+                        * `canRankFromRow` reads `viewerRanked`, resolved server-side in
+                        * the read that drew the row. So the control disappears on the
+                        * next refetch after they rank it, with nothing to invalidate.
+                        */}
+                      {canRankFromRow(row) ? (
+                        <View style={styles.rowAction}>
+                          <Button
+                            label="Rank"
+                            kind="secondary"
+                            size="sm"
+                            hitSlop={theme.space[2]}
+                            accessibilityHint="Opens the title, where you can rank it"
+                            onPress={() => openRow(row)}
                           />
                         </View>
                       ) : null}

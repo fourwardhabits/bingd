@@ -9,9 +9,12 @@ import { Avatar, Button, EmptyState, ReactionControl, SpoilerNote, Text } from '
 import { fontFamily, theme } from '@/ui/tokens';
 
 import { relativeTime } from './activity';
+import { applyMention, mentionFragment, resolveMentions } from './mentions';
+import { MentionSuggestions } from './MentionSuggestions';
 import { ReactionDetail } from './ReactionDetail';
 import { ReactionPill } from './ReactionPill';
 import { useCommentReactors } from './use-comment-reactors';
+import { useMentionCandidates } from './use-mentions';
 import {
   COMMENT_MAX_LENGTH,
   threadsOf,
@@ -127,6 +130,45 @@ export function CommentThread({
   const reactors = useCommentReactors(reactorsFor, viewerId);
 
   /**
+   * ---------------------------------------------------------------------------
+   * @MENTIONS — THE THREE PIECES OF STATE, AND WHY EACH IS SEPARATE
+   *
+   * **`caret`** is where the cursor is. React Native does not tell you on
+   * `onChangeText`, so it is tracked from `onSelectionChange` *and* set optimistically
+   * on every edit — the two events do not arrive in a guaranteed order, and a fragment
+   * computed against a stale caret opens the list on the wrong word.
+   *
+   * **`known`** is handle → id, for everybody the author has ever picked in this
+   * composer plus everybody the comment being edited already names. It is what turns
+   * text back into ids at submit time, and it is a ref rather than state because
+   * nothing renders from it and a set on every keystroke would be a render for nothing.
+   *
+   * **`fragment`** is derived, not stored: it is a pure function of the draft and the
+   * caret, so there is no way for the list to be open while the text says it should not
+   * be. That is the failure this shape rules out rather than tests for.
+   *
+   * The founder's constraint was "keep this visually restrained and do not build a
+   * People picker", so there is no mode, no separate field, and nothing to dismiss: the
+   * list is present exactly while a fragment is.
+   */
+  const [caret, setCaret] = useState(0);
+  const known = useRef(new Map<string, string>());
+  const remember = (handle: string, id: string) => {
+    known.current.set(handle.toLowerCase(), id);
+  };
+
+  const fragment = mentionFragment(draft, caret);
+  /**
+   * Not a user search — see `use-mentions.ts`. The population is the people this reader
+   * follows plus the conversation's own participants, built server-side, so a stranger
+   * is never a row this component has to filter out.
+   *
+   * Called unconditionally and before the early returns below, because hooks cannot be
+   * conditional; `enabled` is what stops it asking anything while nobody is typing an @.
+   */
+  const suggestions = useMentionCandidates(eventId, fragment?.query ?? null, viewerId);
+
+  /**
    * The composer belongs to one event, and this is what makes that true.
    *
    * Found by independent review 11, as a Major. This component is rendered by the screen
@@ -178,6 +220,19 @@ export function CommentThread({
   const openingRef = useRef(composer.opening);
   useLayoutEffect(() => {
     openingRef.current = composer.opening;
+    /**
+     * **And the mentions the author picked go with the composer they were picked in.**
+     *
+     * Carried across, a handle typed against one activity could resolve to an id the
+     * reader chose on another — the same class of bug review 11 found in the draft
+     * itself, one layer down.
+     *
+     * Cleared *here* rather than beside the state resets below, because a ref written
+     * during render is torn between two passes under concurrent rendering. Nothing is at
+     * risk in the gap: the draft is emptied in the same commit, and a mention can only
+     * be resolved out of text that is no longer there.
+     */
+    known.current = new Map();
   }, [composer.opening]);
 
   if (composer.eventId !== eventId) {
@@ -186,6 +241,7 @@ export function CommentThread({
     setSpoilers(false);
     setEditing(null);
     setReplyingTo(null);
+    setCaret(0);
   }
 
   if (!eventId) return null;
@@ -196,6 +252,28 @@ export function CommentThread({
     setSpoilers(false);
     setEditing(null);
     setReplyingTo(null);
+    // An empty draft has no fragment, so the suggestion list closes with it rather than
+    // hanging over a box the reader has just been given back.
+    setCaret(0);
+    forgetMentions();
+  };
+
+  /**
+   * **The picked handles belong to one comment, not to the thread.**
+   *
+   * Independent review 68: clearing this only when the *activity* changes meant one
+   * selection authorised every later comment in the same conversation. Choose Ravi from
+   * the list, post; then hand-type `@ravi` in the next comment and it resolved to his id
+   * — which is precisely the "a handle nobody chose is not a mention" rule failing, and
+   * it turns one deliberate choice into a way to keep naming somebody by typing.
+   *
+   * So it is emptied wherever the composer changes what it is composing: after a
+   * successful post, on Cancel, when a reply target is chosen, and at the start of an
+   * edit (which then re-seeds from the comment's own record). The unmount path in
+   * `useLayoutEffect` above still covers a change of activity.
+   */
+  const forgetMentions = () => {
+    known.current = new Map();
   };
 
   /** Whether this is still the composer the closure was made in. */
@@ -212,13 +290,30 @@ export function CommentThread({
     // retry of the same words carry the id the first try used.
     const operationId = (attempt.current ??= newOperationId());
 
+    /**
+     * Text back into people, at the last moment.
+     *
+     * The intersection of "handles still in what is being posted" and "people this
+     * author actually picked" — `resolveMentions` states both halves and why. Deleting a
+     * name from the draft is therefore how a mention is removed; there is no second
+     * control, and nothing to remember to press.
+     */
+    const mentionIds = resolveMentions(body, known.current);
+
     const result = wasEditing
-      ? await edit({ operationId, commentId: wasEditing.id, body, hasSpoilers: spoilers })
+      ? await edit({
+          operationId,
+          commentId: wasEditing.id,
+          body,
+          hasSpoilers: spoilers,
+          mentionIds,
+        })
       : await add({
           operationId,
           eventId,
           body,
           hasSpoilers: spoilers,
+          mentionIds,
           // Whichever comment Reply was tapped on, including a reply. The server
           // re-points it at that thread's root, so this file never decides what a thread
           // is — see `add_comment`.
@@ -245,6 +340,32 @@ export function CommentThread({
     setEditing(comment);
     setDraft(comment.body ?? '');
     setSpoilers(comment.hasSpoilers);
+    setCaret(comment.body?.length ?? 0);
+    /**
+     * **The ids the comment already carries, seeded before a single key is pressed.**
+     *
+     * Without this, reopening a comment to fix a typo would post it back with an empty
+     * mention list: the handles are in the text but the author never picked them *in
+     * this composer*, so `resolveMentions` would resolve none of them and the server
+     * would deactivate every one. Nobody would be notified twice — the ledger sees to
+     * that — but the relation would quietly rot, and it is the relation that survives a
+     * rename.
+     *
+     * **Both spellings**, and the second is the rename case. The body says whatever it
+     * said when it was written; the person may be called something else now. Seeding only
+     * the current handle leaves `@ravi` in the text resolving to nobody the moment Ravi
+     * becomes `ravinder` — so an ordinary typo fix would drop him, which is the "a handle
+     * change must not break the stored association" rule failing at the one point it
+     * actually gets exercised. Independent review 68.
+     *
+     * `activity_comments.mentions` is where both come from, which is the whole reason
+     * that column crosses the wire.
+     */
+    forgetMentions();
+    for (const mention of comment.mentions) {
+      remember(mention.username, mention.id);
+      if (mention.handle) remember(mention.handle, mention.id);
+    }
   };
 
   const beginReply = (comment: Comment) => {
@@ -254,6 +375,10 @@ export function CommentThread({
     setReplyingTo(comment);
     setDraft('');
     setSpoilers(false);
+    setCaret(0);
+    // A different target is a different comment, and the handles picked for the last one
+    // do not carry into it. See `forgetMentions`.
+    forgetMentions();
   };
 
   const confirmDelete = (comment: Comment) => {
@@ -385,7 +510,16 @@ export function CommentThread({
           would give the thread its own scrollbar inside the page's — two gestures for
           one list, and the inner one swallowing the outer one's. */}
       {scroll === 'own' ? (
-        <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+        /**
+         * `keyboardShouldPersistTaps` so a tap on Reply, a reaction or Cancel lands
+         * while the composer has focus, instead of being spent dismissing the keyboard
+         * — the page below already does this and the sheet did not.
+         */
+        <ScrollView
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+        >
           {list}
         </ScrollView>
       ) : (
@@ -393,6 +527,35 @@ export function CommentThread({
       )}
 
       <View style={styles.composer}>
+        {/**
+          * The suggestions, above the field and above the banner both.
+          *
+          * Above the *field* because the keyboard is below it, and a list drawn under
+          * the composer would be off-screen exactly when it is needed. Above the
+          * *banner* because "Replying to Sarah" is context for the box, and putting a
+          * transient strip between the two would separate a label from the thing it
+          * labels every time somebody typed an @.
+          *
+          * Present exactly while a fragment is: there is no open/closed state to get
+          * out of step, because `fragment` is derived from the draft and the caret.
+          */}
+        {fragment ? (
+          <MentionSuggestions
+            candidates={suggestions.data ?? []}
+            loading={suggestions.isPending}
+            onChoose={(candidate) => {
+              // Remembered before the text changes, so the id is already known by the
+              // time `resolveMentions` reads the handle back out of it.
+              remember(candidate.username, candidate.id);
+              const next = applyMention(draft, fragment, candidate.username);
+              // A different comment is a different intent — the same rule typing obeys.
+              newIntent();
+              setDraft(next.text);
+              setCaret(next.cursor);
+            }}
+          />
+        ) : null}
+
         {editing ? (
           <View style={styles.banner}>
             <Text variant="caption" tone="secondary">
@@ -438,7 +601,23 @@ export function CommentThread({
             // Different words are a different intent, so the held id goes with them.
             newIntent();
             setDraft(next);
+            /**
+             * The caret, for the one case where waiting for the truth is too slow.
+             *
+             * `onSelectionChange` is the authority, and it fires — but the order of the
+             * two events is not guaranteed on either platform, and a fragment computed
+             * against the previous keystroke's caret opens the list one character behind
+             * what is on screen.
+             *
+             * So this guesses **only for a pure append**, which is what typing a name
+             * is: `next` extends the draft, so the caret is at its end, and that is true
+             * whichever order the events arrive in. Editing in the middle of finished
+             * text takes neither branch and is left entirely to the selection handler,
+             * because a guess there would be wrong and would fight the correction.
+             */
+            if (next.startsWith(draft)) setCaret(next.length);
           }}
+          onSelectionChange={(event) => setCaret(event.nativeEvent.selection.start)}
           multiline
           maxLength={COMMENT_MAX_LENGTH}
           style={styles.input}
@@ -626,6 +805,10 @@ function CommentRow({
                 : `React to ${comment.authorName}'s comment. Long press for more reactions.`
             }
             active={comment.reactedByMe}
+            // `myReaction` says *which*, which is what the action slot draws (§6).
+            // `reactedByMe` still says *whether*. The pair was already fetched for the
+            // picker's `current`; nothing new is read.
+            mineGlyph={comment.myReaction ? REACTION_GLYPH[comment.myReaction] : null}
             glyphs={comment.reactionKinds.map((kind) => REACTION_GLYPH[kind])}
             count={comment.reactionCount}
             onToggle={onReact}
@@ -709,7 +892,20 @@ function CommentRow({
 const slop = (theme.layout.minTapTarget - theme.typography.caption.lineHeight) / 2;
 
 const styles = StyleSheet.create({
-  list: { maxHeight: 360 },
+  /**
+   * **`flexShrink`, and it is the whole of the sheet's keyboard bug** (founder, Android).
+   *
+   * `Sheet` already lifts clear of the keyboard — it measures the height and pads its
+   * root, which re-resolves the sheet's `maxHeight: '90%'` against what is left. What it
+   * could not do is decide which of its children gives up the space. This list asked for
+   * a flat 360 and, being the first child, took it; the composer is the last child, so
+   * the part clipped off the bottom of a capped sheet was always the box being typed in.
+   *
+   * The cap stays — a conversation must not push the composer off a *tall* screen either
+   * — but it is now a maximum rather than a claim. The list shrinks, the composer keeps
+   * its intrinsic height, and nothing here has to know the keyboard exists.
+   */
+  list: { flexShrink: 1, maxHeight: 360 },
   listContent: { paddingBottom: theme.space[3] },
   flow: { paddingBottom: theme.space[2] },
   pad: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[3] },

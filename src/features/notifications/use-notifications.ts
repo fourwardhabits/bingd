@@ -21,6 +21,21 @@ export type NotificationKind =
   | 'follow_approved'
   | 'reaction'
   | 'comment'
+  /**
+   * Somebody named this reader in a comment or a reply (`20260830000100`).
+   *
+   * A separate kind rather than a flavour of `comment`, because it is a different
+   * statement — "there is a new remark on your post" versus "this remark is addressed
+   * to you" — and because a mention arrives on activity that is very often not the
+   * reader's at all. It shares the **Comments** preference category deliberately: the
+   * settings screen already has that row, and a second control beside it would ask a
+   * reader to hold a distinction the product does not otherwise make.
+   *
+   * At most one per (comment, person), for good, enforced by the `comment_mentions`
+   * ledger rather than by anything here — so editing a comment, removing a mention and
+   * putting it back cannot ring twice.
+   */
+  | 'mention'
   | 'watch_tag'
   | 'recommendation'
   /**
@@ -150,6 +165,38 @@ export type Notification = {
    * sentence. Null on every other kind.
    */
   goal: { year: number; category: 'movies' | 'tv_seasons'; target: number } | null;
+  /**
+   * One line of what was written, on a `comment` or `mention` row. Null everywhere else,
+   * and null on those two when the comment has been retracted, is spoiler-marked, or
+   * belongs to somebody this reader may not see.
+   *
+   * **Withheld by the server, not by this file**, and that is the deliberate exception
+   * to how spoilers work everywhere else in this app: `shouldMask` is viewer-relative
+   * and lives on the client because a masked body is readable by exactly the accounts an
+   * unmasked one is. The inbox is different — the row appears without being opened and
+   * the same string goes to a lock screen — so `my_notifications` never sends it and
+   * there is nothing here that could leak it.
+   */
+  /**
+   * `mention` only: whether the comment that named this reader was a reply rather than a
+   * top-level remark. Recorded by the server when the mention was filed, so the sentence
+   * cannot be re-derived wrongly from a thread that has moved on.
+   */
+  mentionInReply: boolean;
+  preview: string | null;
+  /**
+   * Why there is no preview, when the reason is a spoiler claim. The row says "Contains
+   * spoilers" rather than leaving a blank second line, which reads as a rendering bug.
+   */
+  previewHidden: boolean;
+  /**
+   * `watch_tag` only: whether this reader has already ranked the title.
+   *
+   * Decides whether the row offers Rank. Resolved in the read that draws the row rather
+   * than held anywhere, so the control disappears on the next refetch after they rank
+   * it, with no write and no invalidation to remember.
+   */
+  viewerRanked: boolean;
 };
 
 const KINDS = new Set<string>([
@@ -158,6 +205,7 @@ const KINDS = new Set<string>([
   'follow_approved',
   'reaction',
   'comment',
+  'mention',
   'watch_tag',
   'recommendation',
   'recommendation_ranked',
@@ -240,7 +288,16 @@ export function useNotifications(viewerId: string) {
             year?: number;
             category?: 'movies' | 'tv_seasons';
             target?: number;
+            // `mention` (20260830000100).
+            reply?: boolean;
           } | null;
+          // 20260830000100. Optional in the type for the same reason `mentions` is in
+          // `use-comments`: a bundle can be newer than the database it is pointed at
+          // during a rollout, and the absence must read as "no preview" rather than
+          // throw.
+          comment_excerpt?: string | null;
+          comment_spoilers?: boolean | null;
+          viewer_ranked?: boolean | null;
         }[]
       )
         .filter(
@@ -281,6 +338,13 @@ export function useNotifications(viewerId: string) {
                   target: Number(row.payload.target ?? 0),
                 }
               : null,
+          // Trimmed here rather than in the row, because the whitespace is an artefact of
+          // how somebody typed and a preview is one line: a comment beginning with a
+          // newline would otherwise draw an empty second line under the sentence.
+          mentionInReply: row.kind === 'mention' && row.payload?.reply === true,
+          preview: row.comment_excerpt?.replace(/\s+/g, ' ').trim() || null,
+          previewHidden: row.comment_spoilers === true,
+          viewerRanked: row.viewer_ranked === true,
         }));
     },
   });
@@ -386,6 +450,13 @@ export function verbFor(
    * rather than the whole row.
    */
   goal?: Notification['goal'],
+  /**
+   * `mention` only, and optional for the same reason the two above it are: one kind
+   * needs it and thirteen do not. Absent reads as "in a comment", which is the more
+   * common of the two and the safer thing to say about a row from a database that
+   * predates the flag.
+   */
+  reply?: boolean,
 ): string {
   switch (kind) {
     case 'follow':
@@ -398,6 +469,20 @@ export function verbFor(
       return 'reacted to your activity';
     case 'comment':
       return 'commented on your activity';
+    /**
+     * "in a comment" and "in a reply" are one sentence apart, and the founder asked for
+     * the distinction where the copy already makes it. The `reply` flag is the server's
+     * (`comment_mentions`' writer records it), so the two surfaces cannot disagree about
+     * which a given row was.
+     */
+    case 'mention':
+      return reply ? 'mentioned you in a reply' : 'mentioned you in a comment';
+    /**
+     * The tail of "Suraj watched 100 Meters with you", which is what the row draws when
+     * it has the title. This is the fallback for a title that has left the catalogue —
+     * and, unlike the row, it cannot put the name in the middle of the sentence, so it
+     * says "something" where the row says the film.
+     */
     case 'watch_tag':
       return 'watched something with you';
     case 'recommendation':
@@ -473,6 +558,28 @@ export function canFollowBack(
     Boolean(row.actorId) &&
     !outgoing
   );
+}
+
+/**
+ * Whether this row should offer Rank.
+ *
+ * Only on `watch_tag`, only where the title still resolves, and only where the reader
+ * has not ranked it. Somebody has just said they watched this with you; the useful next
+ * act is to place it, and before this the row was a sentence with nothing to do about it.
+ *
+ * **It leads to the title page, not to the ranking sheet**, and that is the founder's
+ * instruction rather than a shortcut. A notification is a claim about something that
+ * happened, possibly days ago; dropping the reader straight into a comparison session
+ * from a Bell tap is a modal state entered by accident. The title page already has a
+ * Rank button, it is where every other ranking in the app begins, and it gives them the
+ * poster and the score before they commit to anything.
+ *
+ * `viewerRanked` is resolved server-side in the read that draws the row, so the control
+ * disappears on the next refetch after they rank it. There is nothing to invalidate and
+ * no local state that could disagree.
+ */
+export function canRankFromRow(row: Notification): boolean {
+  return row.kind === 'watch_tag' && Boolean(row.mediaItemId) && !row.viewerRanked;
 }
 
 /**

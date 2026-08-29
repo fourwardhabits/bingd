@@ -335,7 +335,30 @@ function Body({
   // Seeded rather than set in an effect: the sheet is keyed by the title and mounts
   // fresh for each one, so the initial value *is* the answer and an effect would only
   // be a second render saying the same thing.
-  const [expanded, setExpanded] = useState<Expanded>(openWriting ? 'notes' : null);
+  /**
+   * **Nothing is open in the post-rank state, and that is the founder's correction of
+   * 2026-08-30.**
+   *
+   * "Add more details" means *the whole log*: who I watched with, the note and its two
+   * claims, and the watch date. All three rows have always been rendered here — but a
+   * sheet that arrives with the note composer already expanded, under a keyboard, on a
+   * phone, puts the other two below the fold. The founder read that off the device as
+   * "Add more details only opens the Note", and they were describing what they could
+   * see.
+   *
+   * So `openWriting` is honoured only when the sheet was opened *to write something* —
+   * which is what that prop is for, and what the Ranked menu's writing row means by it.
+   * A ranking that has just finished is not that: it is the reader being handed the rest
+   * of their log, and the rest of their log is a list they should be looking at.
+   *
+   * Stated here rather than by clearing the prop at the call site, because "the post-rank
+   * sheet opens on nothing" is a property of this sheet and there are two callers.
+   *
+   * Seeded rather than set in an effect: the sheet is keyed by the title and mounts
+   * fresh for each one, so the initial value *is* the answer and an effect would only be
+   * a second render saying the same thing.
+   */
+  const [expanded, setExpanded] = useState<Expanded>(openWriting && !postRank ? 'notes' : null);
   const [saving, setSaving] = useState(false);
   /**
    * How many writes are in flight, because "Saving…" is a claim and a boolean stopped

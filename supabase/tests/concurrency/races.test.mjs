@@ -14,6 +14,7 @@ import rateLimit from './races/rate-limit.mjs';
 import ranking from './races/ranking.mjs';
 import awardUnlock from './races/award-unlock.mjs';
 import goalCompletion from './races/goal-completion.mjs';
+import commentMention from './races/comment-mention.mjs';
 import stress from './races/stress.mjs';
 
 /**
@@ -48,4 +49,5 @@ rateLimit();
 ranking();
 awardUnlock();
 goalCompletion();
+commentMention();
 stress();

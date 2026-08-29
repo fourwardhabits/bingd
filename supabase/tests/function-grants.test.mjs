@@ -151,6 +151,35 @@ const ALLOWED = {
   'edit_comment(uuid,uuid,text,boolean)': ['authenticated'],
   'delete_comment(uuid,uuid)': ['authenticated'],
 
+  // The mention-carrying signatures (20260830000100), and **both pairs stay granted on
+  // purpose** — the same reasoning `set_comment_reaction`'s two forms record, arrived at
+  // from the opposite direction.
+  //
+  // 20260826000600 had to *drop* the four-argument `add_comment` because it added a
+  // **defaulted** parameter, and PostgREST resolving a four-key body against two
+  // candidates is an ambiguity error rather than a choice. `p_mention_ids` is therefore
+  // deliberately **not** defaulted: a five-key body can only satisfy the old signature
+  // and a six-key body can only satisfy the new one, so the pair is unambiguous and a
+  // phone that has not taken this bundle goes on posting comments without mentions.
+  //
+  // Their shared bodies, `_add_comment` and `_edit_comment`, are deliberately absent and
+  // revoked — the same split as `_set_comment_reaction`. The published wrappers call
+  // `assert_can_write()` in their own bodies rather than relying on the callee's, which
+  // is what keeps `moderation.test.mjs`' delegating-writer invariant true by
+  // construction.
+  'add_comment(uuid,uuid,text,boolean,uuid,uuid[])': ['authenticated'],
+  'edit_comment(uuid,uuid,text,boolean,uuid[])': ['authenticated'],
+
+  // The composer's @-mention suggestions (20260830000100). Definer and takes no viewer,
+  // like the two comment reads below: the population is the caller's own approved
+  // follows plus the participants of a conversation the caller can already see, each
+  // passed through `_can_mention`. It is emphatically **not** `search_users` — an
+  // arbitrary account is not a low-ranked row here, it is not a row — and it answers
+  // nothing at all to a caller who cannot see the activity. `_can_mention` itself is
+  // revoked, because it names a third party and answers questions about their follow
+  // graph and their visibility.
+  'mention_candidates(uuid,text,integer)': ['authenticated'],
+
   // Added 2026-08-26 with threads (20260826000600).
   //
   // `set_comment_reaction` is the same shape as the three above: `comment_reactions` has

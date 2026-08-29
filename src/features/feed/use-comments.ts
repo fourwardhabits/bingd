@@ -53,6 +53,30 @@ export type Comment = {
    * control needs the second to draw a mind that has changed.
    */
   myReaction: ReactionKind | null;
+  /**
+   * Who this comment names, as ids and current handles (`20260830000100`).
+   *
+   * **The composer reads this back when an edit begins, and that is the whole reason it
+   * crosses the wire.** A mention is a row on `comment_mentions` keyed by id, not a
+   * substring of the body — handles move, and a body re-parsed after a rename resolves
+   * to somebody else or to nobody. So a comment reopened for a typo fix has to be able
+   * to re-send the same ids it already carries, and the only place those live is here.
+   *
+   * Empty for a comment that names nobody, and empty for a tombstone: a retracted
+   * comment's words have gone and the people it named go with them.
+   */
+  mentions: {
+    id: string;
+    /** What they are called now. */
+    username: string;
+    /**
+     * What this comment's body spells, frozen when the mention was applied — which is a
+     * different string exactly when somebody has renamed since. The composer seeds both,
+     * or an ordinary typo fix after a rename would drop a mention that is plainly still
+     * in the text (independent review 68).
+     */
+    handle: string | null;
+  }[];
 };
 
 type CommentRow = {
@@ -71,6 +95,7 @@ type CommentRow = {
   reacted_by_me: boolean;
   reaction_kinds: string[] | null;
   my_reaction: string | null;
+  mentions: { id: string; username: string; handle?: string | null }[] | null;
 };
 
 /**
@@ -208,6 +233,16 @@ export function useComments(eventId: string | null, viewerId: string) {
         // one is dropped here rather than rendering as `undefined` three layers down.
         reactionKinds: (row.reaction_kinds ?? []).filter(isReactionKind),
         myReaction: isReactionKind(row.my_reaction) ? row.my_reaction : null,
+        // Defensive against a server that predates 20260830000100 — a bundle can be
+        // newer than the database it is pointed at during a rollout, and an edit that
+        // read `undefined.map` would be a crash rather than a comment with no mentions.
+        mentions: (row.mentions ?? []).map((mention) => ({
+          id: mention.id,
+          username: mention.username,
+          // Absent from a server that predates the column, and from any row written
+          // before it existed. Null reads as "no second spelling", which is right.
+          handle: mention.handle ?? null,
+        })),
       }));
     },
   });
@@ -338,12 +373,14 @@ export function useCommentWrites(viewerId: string) {
       body,
       hasSpoilers,
       parentId = null,
+      mentionIds = [],
     }: {
       operationId: string;
       eventId: string;
       body: string;
       hasSpoilers: boolean;
       parentId?: string | null;
+      mentionIds?: string[];
     }) =>
       run(() =>
         supabase.rpc('add_comment', {
@@ -352,6 +389,16 @@ export function useCommentWrites(viewerId: string) {
           p_body: body,
           p_has_spoilers: hasSpoilers,
           p_parent_id: parentId,
+          /**
+           * Always sent, empty array included, and that is what selects the signature.
+           *
+           * `20260830000100` added `p_mention_ids` with **no default** precisely so the
+           * two overloads stay unambiguous to PostgREST: five keys resolve to the old
+           * function, six to the new one. Omitting the key when nobody is mentioned
+           * would silently take the old path — harmless today, and exactly the sort of
+           * conditional that stops being harmless when the new path grows a behaviour.
+           */
+          p_mention_ids: mentionIds,
         }),
       ),
   });
@@ -365,11 +412,13 @@ export function useCommentWrites(viewerId: string) {
       commentId,
       body,
       hasSpoilers,
+      mentionIds = [],
     }: {
       operationId: string;
       commentId: string;
       body: string;
       hasSpoilers: boolean;
+      mentionIds?: string[];
     }) =>
       run(() =>
         supabase.rpc('edit_comment', {
@@ -377,6 +426,18 @@ export function useCommentWrites(viewerId: string) {
           p_comment_id: commentId,
           p_body: body,
           p_has_spoilers: hasSpoilers,
+          /**
+           * The complete set, every time — the same last-write-wins shape
+           * `set_watch_tags` uses, and for the same reason: an edit is one intent, and
+           * expressing it as add/remove would leave the screen and the database able to
+           * disagree after a lost reply.
+           *
+           * A person still named is not told again, a person newly named is told once,
+           * and a person removed keeps both their delivered notification and the stamp
+           * that stops a re-add ringing. All three are the server's (`comment_mentions`);
+           * this only has to say who is in the text now.
+           */
+          p_mention_ids: mentionIds,
         }),
       ),
   });

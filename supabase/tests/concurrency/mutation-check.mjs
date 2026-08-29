@@ -1126,6 +1126,112 @@ const results = [];
   await db.close();
 }
 
+// --- Mutant 13: the once-ever guard dropped from `_apply_comment_mentions`
+//     (20260830000100). The claim step is what makes a mention notification
+//     at-most-once per (comment, person) for good: `update ... where notified_at is
+//     null returning` takes a row lock and yields only the pairs *this* transaction
+//     stamped, and the notification insert is fed from that set.
+//
+//     Delete the `notified_at is null` predicate and the statement returns the pair
+//     every time — so the second of two concurrent saves of the same edit files a
+//     second notification, which is exactly the founder's "editing must not repeatedly
+//     notify the same person" failing under the one condition the single-connection
+//     suite cannot construct. `races/comment-mention.mjs` M1 is the assertion that
+//     catches it.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+
+  const actor = await fx.createUser();
+  const author = await fx.createUser();
+  const named = await fx.createUser();
+  await fx.follow(author, named);
+
+  const film = await fx.createMovie('Mutant Thirteen');
+  const event = await fx.feedEvent(actor, film, 'title_ranked');
+
+  const setup = await db.session('setup');
+  await setup.actAs(author);
+  const posted = (
+    await setup.one(
+      `select add_comment(gen_random_uuid(), $1, 'placeholder', false, null, '{}'::uuid[]) as r`,
+      [event],
+    )
+  ).r;
+  await setup.end();
+
+  await db.sql(`
+create or replace function _apply_comment_mentions(
+  p_comment_id uuid, p_feed_event_id uuid, p_mention_ids uuid[], p_is_reply boolean
+) returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_wanted uuid[];
+begin
+  select coalesce(array_agg(distinct w.uid), '{}') into v_wanted
+    from unnest(coalesce(p_mention_ids, '{}'::uuid[])) as w(uid) where w.uid is not null;
+
+  insert into comment_mentions (comment_id, mentioned_id, active)
+  select p_comment_id, w.uid, true from unnest(v_wanted) as w(uid)
+  on conflict (comment_id, mentioned_id) do update set active = true;
+
+  update comment_mentions set active = false
+   where comment_id = p_comment_id and mentioned_id <> all (v_wanted) and active;
+
+  -- THE MUTATION: the ledger is stamped unconditionally, so every save "newly"
+  -- notifies everybody the comment names.
+  with claimed as (
+    update comment_mentions m set notified_at = now()
+     where m.comment_id = p_comment_id and m.mentioned_id = any (v_wanted)
+    returning m.mentioned_id
+  )
+  insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
+  select c.mentioned_id, 'mention', auth.uid(), 'feed_event', p_feed_event_id,
+         jsonb_build_object('comment_id', p_comment_id, 'reply', coalesce(p_is_reply, false))
+    from claimed c;
+end;
+$$;
+  `);
+
+  // The same window `races/comment-mention.mjs` M1 constructs: the first save holds its
+  // uncommitted stamp, the second blocks on the comment row, and what it does once it
+  // gets there is the whole question.
+  const t1 = await db.session('phone');
+  const t2 = await db.session('tablet');
+  await t1.actAs(author);
+  await t2.actAs(author);
+
+  await t1.begin();
+  await t1.one(
+    `select edit_comment(gen_random_uuid(), $1, '@x hello', false, $2::uuid[]) as r`,
+    [posted.comment_id, [named]],
+  );
+
+  await t2.begin();
+  const p2 = t2.start(
+    `select edit_comment(gen_random_uuid(), $1, '@x hello', false, $2::uuid[]) as r`,
+    [posted.comment_id, [named]],
+  );
+  await t2.awaitBlocked();
+
+  await t1.commit();
+  await p2;
+  await t2.commit();
+
+  const filed = await db.rows(
+    `select 1 from notifications where recipient_id = $1 and type = 'mention'`,
+    [named],
+  );
+
+  results.push([
+    'mention once-ever guard dropped -> a concurrent duplicate save files a second mention',
+    filed.length === 2,
+  ]);
+
+  await t1.end();
+  await t2.end();
+  await db.close();
+}
+
 await stopCluster();
 let ok = true;
 for (const [name, passed] of results) {

@@ -51,6 +51,12 @@ const KEYS = {
   feed: ['feed', USER, { cursor: undefined }],
   actorActivity: ['actor-activity', USER, 5],
   watched: ['watched', USER],
+  // The Bell. A watched-with row offers Rank only while the reader has not ranked the
+  // title, and that answer is resolved server-side in the read that draws the row —
+  // so ranking it is exactly the event that has to move this key (review 68).
+  notifications: ['notifications', USER],
+  // Somebody else's inbox, which nothing this reader does can move.
+  otherUserNotifications: ['notifications', OTHER],
   // The real hook key, account first. It was seeded here without the account while
   // the hook had gained one, so the assertion below passed against a key nothing uses.
   community: ['community-score', USER, TITLE],
@@ -123,6 +129,24 @@ describe('after a ranking completes', () => {
 
   it('refreshes the watched set, so spoiler notes about it stop being masked', async () => {
     expect(has(touched(), KEYS.watched)).toBe(true);
+  });
+
+  /**
+   * The inbox, because one of its rows is a question about this collection.
+   *
+   * A watched-with notification offers **Rank** only while `viewer_ranked` is false, and
+   * that is resolved server-side in the read that draws the row (20260830000100). Nothing
+   * else would tell the cache the answer had changed: the inbox holds 30s of staleness
+   * and its focus refetch is gated on it, so tapping Rank, ranking the title and coming
+   * straight back left the control still offered — an action pointing at a state the
+   * reader had already reached. Independent review 68.
+   */
+  it('refreshes the reader’s inbox, where a Rank action depends on this', async () => {
+    expect(has(touched(), KEYS.notifications)).toBe(true);
+  });
+
+  it('leaves somebody else’s inbox alone', async () => {
+    expect(has(touched(), KEYS.otherUserNotifications)).toBe(false);
   });
 
   it('refreshes this title’s community score, which now includes the new rating', async () => {
