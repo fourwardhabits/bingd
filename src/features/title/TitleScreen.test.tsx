@@ -1210,8 +1210,12 @@ describe('a series', () => {
 
     const view = await openSeries();
 
-    await waitFor(() => expect(view.getByRole('tab', { name: 'Seasons' })).toBeTruthy());
-    expect(view.getByText('Seasons are still loading')).toBeTruthy();
+    // The empty state, not the tab. The tab is drawn from the media row, which has
+    // already arrived by the time this renders; the sentence under it waits on the
+    // seasons query. Waiting on the tab therefore guards nothing — the same unguarded
+    // shape the Following-score block was corrected for in #74.
+    await waitFor(() => expect(view.getByText('Seasons are still loading')).toBeTruthy());
+    expect(view.getByRole('tab', { name: 'Seasons' })).toBeTruthy();
   });
 });
 
