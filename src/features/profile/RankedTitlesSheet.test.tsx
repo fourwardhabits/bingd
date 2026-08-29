@@ -239,8 +239,8 @@ describe('a collection larger than the sheet will draw', () => {
     await waitFor(() => expect(view.getByText(/Film 0/)).toBeTruthy());
     expect(view.getAllByLabelText(/Film \d+, 2019/).length).toBe(200);
     // The two-hundredth is drawn and the two-hundred-and-first is not.
-    expect(view.getByText('#200')).toBeTruthy();
-    expect(view.queryByText('#201')).toBeNull();
+    expect(view.getByText(/^#200$/)).toBeTruthy();
+    expect(view.queryByText(/^#201$/)).toBeNull();
   });
 
   it('says it was cut, and how much of it there is', async () => {
