@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { bandSizes, scoreFor } from '@/features/collection/score';
 import { useRankedCollection } from '@/features/collection/use-collection';
@@ -8,6 +8,7 @@ import { compactName } from '@/lib/titles';
 import {
   Button,
   EmptyState,
+  FilterChip,
   ScoreBadge,
   SegmentedTabs,
   Sheet,
@@ -30,6 +31,82 @@ export type RankedCategory = 'movies' | 'tv_seasons';
  * here: a `FlatList` inside a `maxHeight: 90%` container measures to zero.
  */
 const VISIBLE_CAP = 200;
+
+/**
+ * The four orders this sheet offers, and there are deliberately only four.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY "RECENTLY RANKED" AND NOT "RECENTLY WATCHED"
+ *
+ * The founder asked for a recency axis on somebody else's collection. The watch date
+ * cannot carry it: PRD §22 states that watch dates are private "on any profile, at any
+ * visibility, to anybody", and `logged_collection` — the projection a visitor's read of a
+ * collection goes through — omits the column on purpose. A control labelled *Recently
+ * watched* over another person's list would either be a lie about what it sorts by or a
+ * reversal of that rule made in passing.
+ *
+ * So the axis is the moment the title entered their ranking (`rankings.created_at`),
+ * which is exactly the instant their public "ranked X" activity already carries, and the
+ * label says so. Same order, same rows, nothing private crossing a boundary. Founder
+ * decision, 2026-08-29.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY RANK IS STILL THE DEFAULT
+ *
+ * Unchanged from the note below: the wall above this sheet shows the best six, and the
+ * question a reader has after seeing it is what comes seventh.
+ */
+export type CollectionSort = 'rank-desc' | 'rank-asc' | 'ranked-newest' | 'ranked-oldest';
+
+const SORTS: readonly { key: CollectionSort; label: string }[] = [
+  { key: 'rank-desc', label: 'Highest first' },
+  { key: 'rank-asc', label: 'Lowest first' },
+  { key: 'ranked-newest', label: 'Newest first' },
+  { key: 'ranked-oldest', label: 'Oldest first' },
+];
+
+/** What the chip says while a menu is closed, so the current order is always on screen. */
+const SORT_CHIP: Record<CollectionSort, string> = {
+  'rank-desc': 'Rank · Highest first',
+  'rank-asc': 'Rank · Lowest first',
+  'ranked-newest': 'Recently ranked · Newest first',
+  'ranked-oldest': 'Recently ranked · Oldest first',
+};
+
+/**
+ * The comparator for one order, **total in every case**.
+ *
+ * `position` is unique per category (`rankings_position_unique`), so the two rank orders
+ * have no ties to break; the id tiebreak is there anyway, because a comparator that is
+ * only total by accident of a constraint elsewhere is one schema change from reordering
+ * itself between renders.
+ *
+ * **Undated titles sort last in both directions**, which is the founder's rule and is
+ * why the date test comes before the direction rather than inside it. `rankings.created_at`
+ * is `not null`, so this can only fire for a bundle reading a response without the
+ * column — and "last, always" is the answer that does not put an unknown at the top of a
+ * list claiming to be newest.
+ */
+export function compareBySort(sort: CollectionSort) {
+  return (a: { position: number; rankedAt: string | null; mediaItemId: string },
+          b: { position: number; rankedAt: string | null; mediaItemId: string }): number => {
+    const tiebreak = a.mediaItemId.localeCompare(b.mediaItemId);
+
+    // Position 1 is the top of the band, so "highest first" is ascending.
+    if (sort === 'rank-desc') return a.position - b.position || tiebreak;
+    if (sort === 'rank-asc') return b.position - a.position || tiebreak;
+
+    if (!a.rankedAt && !b.rankedAt) return tiebreak;
+    if (!a.rankedAt) return 1;
+    if (!b.rankedAt) return -1;
+
+    const byDate =
+      sort === 'ranked-newest'
+        ? b.rankedAt.localeCompare(a.rankedAt)
+        : a.rankedAt.localeCompare(b.rankedAt);
+    return byDate || tiebreak;
+  };
+}
 
 export type RankedTitlesSheetProps = {
   /** Which list is open, or null while the sheet is closed. */
@@ -130,6 +207,10 @@ export function RankedTitlesSheet({
   });
   const list = category === 'tv_seasons' ? seasons : movies;
 
+  const [sort, setSort] = useState<CollectionSort>('rank-desc');
+  const [sortOpen, setSortOpen] = useState(false);
+  const scroll = useRef<ScrollView>(null);
+
   const rows = useMemo(() => {
     const entries = list.data ?? [];
     // **The band is measured over the whole category, the slice is what gets drawn.**
@@ -137,24 +218,31 @@ export function RankedTitlesSheet({
     // (`TopRanked` records the same rule), so `bandSizes` sees everything and the cap is
     // applied afterwards.
     const sizes = bandSizes(entries);
-    return entries.slice(0, VISIBLE_CAP).map((entry) => ({
-      mediaItemId: entry.mediaItemId,
-      // The canonical compact form, so a season reads "The Bear, S2" here exactly as it
-      // does on the wall, in the feed and in search.
-      title:
-        compactName({
-          kind: entry.kind,
-          title: entry.title,
-          seriesTitle: entry.seriesTitle,
-          seasonNumber: entry.seasonNumber,
-        }) ?? entry.title,
-      year: entry.year,
-      posterUri: posterUri(entry.posterPath),
-      position: entry.position,
-      score: scoreFor(entry.bucket, entry.position, sizes),
-      bucket: entry.bucket,
-    }));
-  }, [list.data]);
+    // **Sorted before the cap, never after.** A cap applied first would make each order a
+    // re-arrangement of the same two hundred titles rather than the first two hundred of
+    // that order — so "Oldest first" would silently mean "oldest of their most recent
+    // two hundred", which is a different and wrong claim.
+    return [...entries]
+      .sort(compareBySort(sort))
+      .slice(0, VISIBLE_CAP)
+      .map((entry) => ({
+        mediaItemId: entry.mediaItemId,
+        // The canonical compact form, so a season reads "The Bear, S2" here exactly as it
+        // does on the wall, in the feed and in search.
+        title:
+          compactName({
+            kind: entry.kind,
+            title: entry.title,
+            seriesTitle: entry.seriesTitle,
+            seasonNumber: entry.seasonNumber,
+          }) ?? entry.title,
+        year: entry.year,
+        posterUri: posterUri(entry.posterPath),
+        position: entry.position,
+        score: scoreFor(entry.bucket, entry.position, sizes),
+        bucket: entry.bucket,
+      }));
+  }, [list.data, sort]);
 
   /** How many the category actually holds, for the disclosure under a capped list. */
   const total = list.data?.length ?? 0;
@@ -164,12 +252,9 @@ export function RankedTitlesSheet({
   const whose = isSelf ? 'Your collection' : `${name}'s collection`;
 
   return (
-    <Sheet visible onClose={onClose} label={`${whose}, in rank order`}>
+    <Sheet visible onClose={onClose} label={whose}>
       <View style={styles.head}>
         <Text variant="title2">{whose}</Text>
-        <Text variant="footnote" tone="secondary">
-          In rank order.
-        </Text>
       </View>
 
       {/* Movies and TV are separate rankings and a position only means anything inside
@@ -186,7 +271,59 @@ export function RankedTitlesSheet({
         />
       </View>
 
-      <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+      {/**
+        * **The sort control that replaced "In rank order."** (founder, 2026-08-29).
+        *
+        * A subtitle stating the order is a subtitle nobody can act on. This is the same
+        * chip-and-menu the Collection tab has used since it had sorting — `FilterChip`
+        * naming the current order, a radio list under it — rather than a second grammar
+        * for the same idea on a second screen. Four options, no filters, no third axis:
+        * the founder scoped this pass to exactly these.
+        *
+        * The chip says the whole order ("Rank · Highest first") and not just the axis,
+        * because the direction is half the answer and a control that hides half of what
+        * it is doing is the subtitle again with a chevron on it.
+        */}
+      <View style={styles.sortRow}>
+        <FilterChip
+          icon="swap-vertical-outline"
+          label={SORT_CHIP[sort]}
+          accessibilityLabel={`Sort. ${SORT_CHIP[sort]}`}
+          onPress={() => setSortOpen((open) => !open)}
+        />
+      </View>
+
+      {sortOpen ? (
+        <View style={styles.sortMenu}>
+          {SORTS.map((option) => (
+            <Pressable
+              key={option.key}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: option.key === sort }}
+              accessibilityLabel={SORT_CHIP[option.key]}
+              onPress={() => {
+                setSortOpen(false);
+                setSort(option.key);
+                // **Back to the top on every change.** A `ScrollView` keeps its offset
+                // when its children are replaced, so a reader two hundred rows down would
+                // be dropped into the middle of an order they have not seen the start of.
+                scroll.current?.scrollTo({ y: 0, animated: false });
+              }}
+              style={({ pressed }) => [
+                styles.sortOption,
+                option.key === sort && styles.sortSelected,
+                pressed && styles.sortPressed,
+              ]}
+            >
+              <Text variant="callout" tone={option.key === sort ? 'inverse' : 'primary'}>
+                {option.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      <ScrollView ref={scroll} style={styles.list} contentContainerStyle={styles.listContent}>
         {list.isPending ? (
           <SkeletonRow count={4} />
         ) : list.isError ? (
@@ -248,7 +385,10 @@ export function RankedTitlesSheet({
                 and the scores were computed from. */}
             {total > VISIBLE_CAP ? (
               <Text variant="footnote" tone="secondary" style={styles.truncation}>
-                {`Showing their top ${VISIBLE_CAP} of ${total}.`}
+                {/* "Their top 200" was true while rank was the only order and is a wrong
+                    claim under "Oldest first". The bound is what has to be said; which
+                    end of which order it cuts is on screen already. */}
+                {`Showing ${VISIBLE_CAP} of ${total}.`}
               </Text>
             ) : null}
           </>
@@ -270,6 +410,25 @@ const styles = StyleSheet.create({
     gap: theme.space[1],
   },
   tabs: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[3] },
+  sortRow: {
+    flexDirection: 'row',
+    paddingHorizontal: theme.layout.gutter,
+    paddingBottom: theme.space[3],
+  },
+  // The Collection tab's own menu, to the point: a raised card of radio rows under the
+  // chip that opened it, rather than a sheet inside a sheet.
+  sortMenu: {
+    marginHorizontal: theme.layout.gutter,
+    marginBottom: theme.space[3],
+    borderRadius: theme.radius.card,
+    backgroundColor: theme.surface.raised,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.border.hairline,
+    overflow: 'hidden',
+  },
+  sortOption: { paddingHorizontal: theme.space[3], paddingVertical: theme.space[2] },
+  sortSelected: { backgroundColor: theme.semantic.action },
+  sortPressed: { opacity: 0.6 },
   // Wide enough for "#100" so the posters keep an unbroken left edge however deep the
   // list goes — a column that resizes per row is the ragged one.
   ordinal: { minWidth: 34 },

@@ -79,6 +79,7 @@ create table ranking_sessions (
   pivot         integer,            -- offset of the title currently displayed
   history       jsonb   not null default '[]',
   skips         smallint not null default 0,
+  seen_items    uuid[]  not null default '{}',  -- every title this session has offered
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
   unique (user_id, media_item_id)
@@ -92,6 +93,10 @@ create table ranking_sessions (
 `pivot` records which title is currently being compared against, rather than recomputing it as the midpoint. **Storing it is what makes Skip work at all.** Skip re-anchors deliberately away from the midpoint, so a `rank_answer` that recomputed the midpoint rejected the very title Skip had just displayed — every skip led to a dead end where the only offered answer was refused. Nothing in the bisection requires the pivot to be the midpoint; any offset inside `[lo, hi)` narrows the range correctly, and the midpoint is only the fastest choice.
 
 `history` is a stack of prior `(lo, hi, pivot)` states, which is what makes **Back** work. `skips` counts re-anchors for the 3-skip rule.
+
+`seen_items` is every title the session has put in front of the reader (`20260901000100`). The subject is fixed for the life of a session, so this **is** the set of unordered pairs already shown, and it is what makes "the app never asks the same pair twice" a property of the session rather than of the current band. Bounded by the band size, and in practice by the log of it.
+
+**Back and a resume are exempt, and they are the reader asking rather than the app choosing.** `rank_back` re-displays the comparison being undone — that is what Back is — and a resume returns the one that was on screen when the reader left. Neither goes through `_rank_offer`; neither weakens the rule, because answering a restored pivot narrows through `rank_answer`, which does.
 
 The unique constraint on `(user_id, media_item_id)` means starting a session for a title that already has one resumes it rather than restarting. That is the resumability requirement, satisfied by a constraint rather than by logic.
 
@@ -174,6 +179,12 @@ else:
 ```
 
 The replacement pivot is chosen by stepping away from the midpoint — `mid + 1`, then `mid - 1`, then `mid + 2` — clamped to the range. Stepping outward rather than choosing randomly keeps the remaining search near-balanced, so a skip costs little.
+
+**The walk refuses anything the session has already offered** (`_rank_offer`, `20260901000100`), which is the rule that replaced a per-band counter. It was `band_skips`, reset whenever `[lo, hi)` changed on the reasoning that a different band is a different candidate set — and that reset is how a skipped pair came back: answering the substitute narrows the range, the counter resets, and the new midpoint is the title that was skipped. On a band of three it happened on the first answer. `band_skips`, `skip_lo` and `skip_hi` remain on the table, unwritten.
+
+**`rank_answer` walks too, from the midpoint out.** In a session with no skips the midpoint is always unseen — the answered pivot is excluded from the new range by construction — so the bisection is unchanged; after a skip the midpoint can be a title the reader has already declined to call. Any offset inside `[lo, hi)` narrows correctly (see `pivot` above), so this costs a comparison or two on a skipped session and no correctness.
+
+**When the walk runs dry**, which is a band where every remaining opponent has been declined, the title is placed at the midpoint of the surviving range with `adjustable: true` — the same resolution as the skip cap, reached the same way, and **no comparison row is written**: a skipped pair is an absence of evidence, not a tie.
 
 After three skips the title is placed at the midpoint of the surviving range and **the response carries `adjustable: true`**, which the client uses to show PRD §10's "you can change this from Rankings" message. The flag comes from the server so the message cannot appear in the wrong circumstances.
 

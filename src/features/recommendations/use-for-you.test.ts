@@ -27,6 +27,7 @@ const entry = (over: Partial<RankedEntry> & { mediaItemId: string }): RankedEntr
   bucket: 'loved',
   position: 1,
   category: 'movies',
+  rankedAt: '2026-08-01T00:00:00Z',
   ...over,
 });
 

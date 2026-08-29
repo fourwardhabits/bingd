@@ -48,17 +48,25 @@ const media = {
 
 const profile = { username: 'sai', display_name: 'Sai', avatar_path: null };
 
-const event = (over: Record<string, unknown> = {}) => ({
-  id: 'event-1',
-  type: 'title_ranked',
-  actor_id: 'user-1',
-  media_item_id: 'film-1',
-  created_at: '2026-08-15T00:00:00Z',
-  payload: { position: 1, category: 'movies', bucket: 'loved', score: 8.7 },
-  media_items: media,
-  profiles: profile,
-  ...over,
-});
+const event = (over: Record<string, unknown> = {}) => {
+  const row = {
+    id: 'event-1',
+    type: 'title_ranked',
+    actor_id: 'user-1',
+    media_item_id: 'film-1',
+    created_at: '2026-08-15T00:00:00Z',
+    causal_step: 0,
+    payload: { position: 1, category: 'movies', bucket: 'loved', score: 8.7 },
+    media_items: media,
+    profiles: profile,
+    ...over,
+  };
+  // The feed's sort key (20260901000100). `not null` in the schema and equal to
+  // `created_at` for everything but a goal completion, so a fixture that omits it is a
+  // row the database cannot produce — and the ordering the screen is being asked about
+  // would be decided by the id tiebreak instead.
+  return { causal_at: row.created_at, ...row };
+};
 
 const load = async () => {
   const view = await renderHookWithProviders(() => useFeed('user-1'));
@@ -316,8 +324,17 @@ describe('an award in the feed (20260828000100)', () => {
     expect(item.type).toBe('award_earned');
     // No media row at all — the title is the payload's award name, not a film.
     expect(item.mediaItemId).toBeNull();
+    // Movie Muncher's tiers are metals, so the family name IS the earned name —
+    // `awardAnnouncement`'s one exception, and the reason the founder's own example
+    // copy reads "earned the Movie Muncher award".
     expect(item.title).toBe('Movie Muncher');
-    expect(item.award).toEqual({ key: 'movie-muncher', tierKey: 'bronze', tierLabel: 'Bronze' });
+    expect(item.award).toEqual({
+      key: 'movie-muncher',
+      tierKey: 'bronze',
+      title: 'Movie Muncher',
+      // The second line, from the canonical threshold rather than from "Bronze".
+      achievement: 'Watched 50 movies',
+    });
     // Nothing film-shaped leaks onto the row: no score badge, no poster path.
     expect(item.score).toBeNull();
     expect(item.posterPath).toBeNull();
@@ -334,13 +351,61 @@ describe('an award in the feed (20260828000100)', () => {
     expect(rpcCalls.find((c) => c.name === 'public_notes')).toBeUndefined();
   });
 
+  it('titles a creative track by the tier that was earned, not by the family', async () => {
+    // The founder's mismatch: the notification said "Comment Gremlin" — the track's
+    // family name — while the Awards sheet said "Whisper", the tier actually earned.
+    // Both surfaces read `awardAnnouncement` now, and this is the half of it the feed
+    // draws.
+    mockFeedRows = [
+      event({
+        type: 'award_earned',
+        media_item_id: null,
+        media_items: null,
+        payload: {
+          award: 'comment-gremlin',
+          tier: 'whisper',
+          award_name: 'Comment Gremlin',
+          tier_label: 'Whisper',
+        },
+      }),
+    ];
+
+    const item = await only();
+    expect(item.title).toBe('Whisper');
+    expect(item.award?.achievement).toBe('Wrote 20 comments');
+  });
+
+  it('falls back to the payload for a track this bundle has never heard of', async () => {
+    // A row can outlive the bundle that understands it. The two wrong answers are not
+    // equal: printing the key would be showing somebody `future-track`, which
+    // `tracks.ts` forbids in as many words. The threshold line is dropped rather than
+    // guessed at, because a second line naming the wrong number is worse than none.
+    mockFeedRows = [
+      event({
+        type: 'award_earned',
+        media_item_id: null,
+        media_items: null,
+        payload: {
+          award: 'future-track',
+          tier: 'tier-1',
+          award_name: 'Future Track',
+          tier_label: 'First',
+        },
+      }),
+    ];
+
+    const item = await only();
+    expect(item.title).toBe('Future Track');
+    expect(item.award?.achievement).toBeNull();
+  });
+
   it('still says something honest when the payload predates the names', async () => {
     mockFeedRows = [
       event({
         type: 'award_earned',
         media_item_id: null,
         media_items: null,
-        payload: { award: 'movie-muncher', tier: 'bronze' },
+        payload: { award: 'future-track', tier: 'tier-1' },
       }),
     ];
 
@@ -348,8 +413,11 @@ describe('an award in the feed (20260828000100)', () => {
     // No leading article: the sentence supplies one now ("earned the …"), and
     // `tailFor` drops its trailing "award" for a name that already says it — so this
     // row reads "Abisola earned the bingd. Award" rather than stacking either word.
+    // The inbox's own last resort is "a new Award", because its sentence is "You
+    // earned …" — which is why `awardAnnouncement` takes the fallback rather than
+    // choosing one for both surfaces.
     expect(item.title).toBe('bingd. Award');
-    expect(item.award?.tierLabel).toBeNull();
+    expect(item.award?.achievement).toBeNull();
   });
 });
 

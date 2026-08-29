@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { AppState, StyleSheet } from 'react-native';
+import { AppState } from 'react-native';
 
 import { queryKeys } from '@/lib/query';
 import { renderWithProviders } from '@/test-utils/render';
@@ -792,49 +792,46 @@ describe('notes', () => {
  * no clock. (Unmount has its own test at the top of this file, where two titles swap.)
  */
 /**
- * **The typing jump** (founder, Android/Samsung, 2026-08-28).
+ * **The typing jump, and then the label itself** (founder, 2026-08-28 and 2026-08-29).
  *
- * The report: while typing in the Note, everything below one element moved down two
- * or three millimetres and immediately came back. The sheet frame, the top of the
- * screen and the keyboard were all stationary — so it was never keyboard avoidance
- * and never a snap point, and the founder's clarification said so explicitly.
+ * The first report was Android: while typing in the Note, everything below one element
+ * moved down two or three millimetres and immediately came back. The sheet frame, the
+ * top of the screen and the keyboard were all stationary — so it was never keyboard
+ * avoidance and never a snap point.
  *
- * The element was the "Saving…" line. It is a `footnote` — 18pt of line height, about
- * 2.5mm on that panel — and it *mounted and unmounted* above `styles.rows`, which is
- * the Note composer and every row beneath it. The autosave lane fires on a 1.2s
- * trailing debounce with a max-wait cap, so an ordinary sentence arms it repeatedly:
- * each firing pushed the lower half of the sheet down a line, and each reply pulled it
- * back.
+ * The element was the "Saving…" line. It is a `footnote` — 18pt of line height — and it
+ * *mounted and unmounted* above `styles.rows`, which is the Note composer and every row
+ * beneath it. The autosave lane fires on a 1.2s trailing debounce with a max-wait cap,
+ * so an ordinary sentence arms it repeatedly.
  *
- * The fix reserves the line. These assert the reservation rather than the absence of
- * movement, because a layout that cannot change is the only thing a unit test can
- * honestly prove — and it is exactly the property that was missing. The millimetres
- * themselves need the founder's device.
+ * That pass reserved the line, which stopped the movement. The founder's second report
+ * is that it did not stop the *noise*: the label still appeared and disappeared several
+ * times per sentence, and a status that flickers while somebody is typing is not
+ * information whether or not it moves the page. So the successful path says nothing at
+ * all, and the reserved box goes with it — there is nothing transient left to hold room
+ * for.
+ *
+ * **What must not have changed is the saving.** Those tests are the rest of this file:
+ * the debounce, the max-wait, and every flush point — blur, collapse, Close, Done,
+ * background, unmount. This block asserts only what the founder's second report is
+ * about, plus the one thing hiding a status could have broken, which is a failure the
+ * reader can no longer see.
  */
-describe('the status line does not move the rows below it', () => {
-  /** The reserved height, read the way a layout pass would. */
-  const slotHeight = (sheet: { getByTestId: (id: string) => { props: Record<string, unknown> } }) =>
-    (
-      StyleSheet.flatten(
-        sheet.getByTestId('log-status-slot').props.style as never,
-      ) as { minHeight?: number }
-    ).minHeight;
-
-  it('holds its line open before anything is being saved', async () => {
+describe('a successful autosave says nothing', () => {
+  it('mounts no status at all before anything is being saved', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
 
-    // Nothing to say, and the space is still there. This is the whole fix: before it
-    // there was no slot at all, and the rows sat one line higher until a save began.
     expect(sheet.queryByText('Saving…')).toBeNull();
-    expect(slotHeight(sheet)).toBe(18);
+    // And no reserved box either. It existed only to stop the label moving the rows,
+    // and a blank slot for a label that never comes is dead space on every open.
+    expect(sheet.queryByTestId('log-status-slot')).toBeNull();
   });
 
-  it('keeps exactly the same reserved height while a save is in flight', async () => {
+  it('mounts none while a save is in flight', async () => {
     // The write is held open, the way `clear_watch_date` is held elsewhere in this
-    // file. Without it "Saving…" is true and false again inside one commit and there
-    // is no in-flight state to look at — which is also why the founder saw a *flash*
-    // rather than a sustained shift.
+    // file. Without it the save is over inside one commit and there is no in-flight
+    // state to look at — which is also why the founder saw a *flash*.
     let release = () => {};
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -847,18 +844,14 @@ describe('the status line does not move the rows below it', () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
 
-    const idle = slotHeight(sheet);
     await fireEvent.changeText(sheet.note(), 'a thought worth keeping');
 
     // The debounce is real — see the lane's own note on why fake timers poison this
-    // file.
-    await waitFor(() => expect(sheet.queryByText('Saving…')).toBeTruthy(), { timeout: 3000 });
-
-    // **The assertion the founder's report comes down to.** The indicator arrived
-    // *inside* a slot that was already there, so the rows below it are sitting on
-    // exactly what they were sitting on before the save began.
-    expect(slotHeight(sheet)).toBe(idle);
-    expect(slotHeight(sheet)).toBe(18);
+    // file. Waiting for the call rather than for a label is the point: the write is
+    // demonstrably running, and there is still nothing on screen about it.
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1), { timeout: 3000 });
+    expect(sheet.queryByText('Saving…')).toBeNull();
+    expect(sheet.queryByTestId('log-status-slot')).toBeNull();
 
     await act(async () => {
       release();
@@ -866,38 +859,55 @@ describe('the status line does not move the rows below it', () => {
     });
   });
 
-  it('gives the line back to nobody when the save finishes', async () => {
+  it('still writes what was typed, on the same debounce', async () => {
+    // The guarantee the silence must not have cost. One write for a settled sentence,
+    // carrying the text, exactly as before.
     const sheet = await open(filmA);
     await sheet.openNotes();
 
     await fireEvent.changeText(sheet.note(), 'a thought worth keeping');
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1), { timeout: 3000 });
-    await waitFor(() => expect(sheet.queryByText('Saving…')).toBeNull());
-
-    // Back to silent, and still occupying the same space. A reader typing a second
-    // sentence sees the indicator come and go without the rows acknowledging it.
-    expect(slotHeight(sheet)).toBe(18);
+    expect(callsTo('log_watched')[0][1].p_note).toBe('a thought worth keeping');
   });
 
-  /**
-   * The founder's actual gesture: a burst of keystrokes, which arms the lane several
-   * times over. Every keystroke is a render of this sheet, and none of them may change
-   * what the rows below the status are sitting on.
-   */
-  it('does not change height across a burst of keystrokes', async () => {
+  it('mounts nothing across a burst of keystrokes', async () => {
+    // The founder's actual gesture: a burst that arms the lane several times over.
+    // Every keystroke is a render of this sheet, and none of them may put a line on
+    // screen or take one away.
     const sheet = await open(filmA);
     await sheet.openNotes();
 
-    const heights: (number | undefined)[] = [slotHeight(sheet)];
     for (const text of ['o', 'on', 'one', 'one t', 'one tw', 'one two']) {
       await fireEvent.changeText(sheet.note(), text);
-      heights.push(slotHeight(sheet));
+      expect(sheet.queryByText('Saving…')).toBeNull();
+      expect(sheet.queryByTestId('log-status-slot')).toBeNull();
     }
+  });
 
-    expect(new Set(heights)).toEqual(new Set([18]));
+  it('but a refused save is still visible, and still retries', async () => {
+    // **The one thing hiding a status could have broken.** A save that fails is
+    // unresolved, and an unresolved failure the reader cannot see is worse than the
+    // flicker this pass removed. The message names what happened and the next flush
+    // retries — a save is never silently pretended.
+    stubReads(
+      { bucket: 'loved', watched_on: null, note: 'before', note_updated_at: 'v1' },
+      null,
+    );
+    failing('save_note', { code: '22023', message: 'nope' });
+
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await waitFor(() => expect(sheet.note().props.value).toBe('before'));
+    await fireEvent.changeText(sheet.note(), 'after');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
+    await waitFor(() => expect(sheet.getByText('nope')).toBeTruthy());
+    // Drawn in the slot the transient label used to share, which now exists only when
+    // there is a real event to put in it.
+    expect(sheet.queryByTestId('log-status-slot')).toBeTruthy();
   });
 });
-
 describe('the autosave lane', () => {
   it('saves once when typing rests, not once per keystroke', async () => {
     // Real timers, deliberately. Faking the clock here poisons the process: React

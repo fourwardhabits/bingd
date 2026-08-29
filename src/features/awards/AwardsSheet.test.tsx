@@ -281,10 +281,13 @@ describe('the sheet', () => {
     await waitFor(() => expect(screen.getByText('Could not load these awards')).toBeTruthy());
   });
 
-  it('takes the written count with the collection, since public notes live on it', async () => {
-    // Comment Gremlin counts comments *and* public notes, and the notes are rows on
-    // `user_media`. Falling back to the comments alone would be a confident undercount,
-    // which is the failure the whole unavailable state exists to prevent.
+  it('keeps the written count when the collection is what failed', async () => {
+    // **This used to be the other way round**, and the reason it flipped is the
+    // founder's split. Comment Gremlin counted comments *plus* public notes, and notes
+    // are rows on `user_media` — so a failed collection read had to take the written
+    // count with it or report a confident undercount. Reviews left the track on
+    // 2026-08-29, `written` comes from one query, and a collection that could not be
+    // read now costs the thirteen collection tracks and not this one.
     mockBroken().add('user_media');
     seed('comments', [
       {
@@ -296,7 +299,12 @@ describe('the sheet', () => {
     ]);
     await open();
 
-    expect(screen.getByLabelText('Comment Gremlin. Could not load this one')).toBeTruthy();
+    // The collection tracks are the ones apologising; the comment track is not.
+    expect(screen.getByLabelText('Movie Muncher. Could not load this one')).toBeTruthy();
+    expect(screen.queryByLabelText('Comment Gremlin. Could not load this one')).toBeNull();
+    expect(
+      screen.getByLabelText('Comment Gremlin. Whisper locked. Next: Write 20 comments. 1 of 20'),
+    ).toBeTruthy();
   });
 });
 
@@ -897,7 +905,11 @@ describe('the breakdowns', () => {
     expect(screen.getByText(/Dune/)).toBeTruthy();
   });
 
-  it('Comment Gremlin distinguishes a comment from a public note', async () => {
+  it('Comment Gremlin counts comments and leaves published reviews out of it', async () => {
+    // The founder's split (2026-08-29): a review is a considered thing you publish
+    // about a title you ranked, a comment is talking to somebody under their activity,
+    // and one counter rewards neither. This asserts both halves — the comment is in the
+    // drill-down, and the published review is not in it at all.
     seed('user_media', [
       {
         ...watched('a', { title: 'Arrival' }),
@@ -916,8 +928,9 @@ describe('the breakdowns', () => {
     await open({ onPressTitle: () => {} });
     await drillInto('Comment Gremlin');
 
-    expect(screen.getByText('Review')).toBeTruthy();
     expect(screen.getByText(/^Comment · /)).toBeTruthy();
+    expect(screen.queryByText('Review')).toBeNull();
+    expect(screen.queryByText(/Arrival/)).toBeNull();
     // Never the writing itself.
     expect(screen.queryByText(/Loved the structure/)).toBeNull();
   });
@@ -1218,15 +1231,19 @@ describe('somebody else’s awards', () => {
     expect(screen.queryByText('0 / 3', { includeHiddenElements: true })).toBeNull();
   });
 
-  it('counts their public reviews without ever holding the note text', async () => {
+  it('does not count their published reviews toward the comment track', async () => {
+    // `logged_collection` still carries `has_public_note`; nothing on the client reads
+    // it any more. A visitor's Comment Gremlin is their comments, which is the same
+    // number the owner's own sheet shows — and neither of them is two.
     seed('logged_collection', loggedMovies(2).map((row, i) => ({
       ...row,
       has_public_note: i === 0,
     })));
     await visit();
 
-    // One public note, no comments: Comment Gremlin knows it from a boolean alone.
-    expect(count('1 / 20')).toBeTruthy();
+    expect(
+      screen.getByLabelText('Comment Gremlin. Whisper locked. Next: Write 20 comments. 0 of 20'),
+    ).toBeTruthy();
   });
 
   it('feeds the genre tracks from the projection’s metadata', async () => {

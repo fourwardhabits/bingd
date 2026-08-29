@@ -458,7 +458,7 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 > pays one refetch. Only the category actually on screen is enabled, so that is one and
 > not two; the other loads when it is switched to.
 >
-> **The render is capped at 200 rows** and says so when it cuts. The read is not capped —
+> **The render is capped at 200 rows** and says so when it cuts. *(2026-08-29: the sentence it says is "Showing 200 of N." rather than "their top 200", which stopped being true when the sheet gained orders that are not rank.)* The read is not capped —
 > the whole category is what the bands and the scores are computed from — but this is a
 > `ScrollView` and every row it holds is mounted at once, which is what the 200-row server
 > page it replaced was already bounding. A virtualised list is not available here:
@@ -804,6 +804,24 @@ Three properties this is required to keep:
 
 ---
 
+### As built — 2026-08-29: a pair you are not asked to call twice (`20260901000100`)
+
+**The invariant: within one ranking session, the app never *asks* the same unordered pair twice.** The subject is fixed for the life of a session, so "this opponent, ever again" *is* the pair rule; `ranking_sessions.seen_items` is every title the session has offered and `_rank_offer` refuses all of them.
+
+**Two paths return a pair already shown, both because the reader asked for it.** *Back* restores the previous frame and re-displays the comparison just answered — a Back that refused to show you what you are undoing would not be an undo — and a resume returns the comparison that was on screen when the reader left, which is one unanswered question restored rather than a second asking of it. Neither weakens the rule: answering a restored pivot goes through `rank_answer`, which offers through the same walk, so the next comparison *the app* picks still excludes everything seen. (Independent review 74 found this stated as an unqualified "never shown twice", which it is not.)
+
+**What the founder found.** In onboarding: A versus B, *Too tough*, a different comparison, one answer, and A versus B again. It reproduces on a band of three, which is roughly what onboarding hands a new account.
+
+**Why.** `rank_skip` walked outward from the midpoint skipping the first `band_skips` candidates, and reset `band_skips` whenever `[lo, hi)` changed — on the reasoning that a different band is a different set of candidates. Answering the substitute narrows the range, which resets the counter, and the new midpoint is the title that was skipped. The counter was per band; the reader's memory is per session, and so is the rule now. `band_skips`, `skip_lo` and `skip_hi` remain on the table, unwritten, with a comment saying why.
+
+**Too tough means no evidence, and still does.** It has never written a comparison and it does not write one now — not a win, not a loss, and not a tie. The founder restated it in this pass because the alternative reading ("the titles are equal") is the one a fix could quietly introduce.
+
+**When the walk runs dry**, which is a genuinely sparse band where every remaining opponent has been declined, the title is placed at the midpoint of the range its real answers established and the reveal says it is an estimate — the same resolution, and the same sentence, as the three-skip cap. **The cap is unchanged and still fires first.**
+
+**Per session, deliberately.** A new session may reconsider a pair the last one skipped, which is what makes *Rank again* a second opinion rather than a replay.
+
+**The narrowing is unaffected.** `rank_answer` narrows against the *stored* pivot rather than a recomputed midpoint, so comparing against the nearest unseen index instead of the exact midpoint costs a comparison or two on a skipped session and no correctness. In a session with no skips the midpoint is always unseen and the search is bit-for-bit what it was.
+
 ## 11. Collection model: Logged and Ranked
 
 **Decided.** This section is new in v0.6 and resolves the central tension created by importing large libraries.
@@ -888,6 +906,18 @@ they differ because one chooses how to draw a list and the other chooses which s
 show.
 
 ---
+
+### As built — 2026-08-29: the See all sheet sorts, and what it will not sort by
+
+The static subtitle *In rank order.* is replaced by a control, because a subtitle stating the order is one nobody can act on. Four orders and no more — **Rank: Highest first** (the default) and **Lowest first**; **Recently ranked: Newest first** and **Oldest first**. No filters, no third axis. It is the chip-and-radio-menu the Collection tab has used since it had sorting, rather than a second grammar for the same idea on a second screen, and the chip names the whole order ("Rank · Highest first") because the direction is half the answer.
+
+**The recency axis is "Recently ranked" and not "Recently watched", and that is a privacy decision rather than a naming one.** The founder asked for recency on somebody else's collection. [§22](#22-privacy-safety-and-moderation) makes watch dates private *on any profile, at any visibility, to anybody*, and `logged_collection` — the projection a visitor's read of a collection goes through — omits the column deliberately. A control labelled *Recently watched* over another person's list would either sort by something else while claiming otherwise, or reverse that rule in passing. So the axis is `rankings.created_at`: the moment the title entered their ranking, which is the same instant their public *ranked X* activity already carries. Nothing private crosses a boundary and the label says what it sorts by.
+
+**The comparators are total.** `position` is unique per category, so the rank orders have no ties; the id tiebreak is there anyway, because a comparator that is total only by accident of a constraint elsewhere is one schema change from reordering itself between renders. A title with no date sorts **last in both directions** — the date test comes before the direction rather than inside it — which can only arise for a bundle reading a response without the column, and is the answer that does not put an unknown at the top of a list claiming to be newest.
+
+**Sorted before the cap, never after.** A cap applied first would make each order a rearrangement of the same two hundred titles rather than the first two hundred of that order, so *Oldest first* would silently mean "oldest of their most recent two hundred". Changing the order returns the list to the top, because a `ScrollView` keeps its offset when its children are replaced and a reader two hundred rows down would otherwise be dropped into the middle of an order they have not seen the start of. The Movies / TV selection is a different question and is untouched by sorting. Scores and the `#N` ordinal are computed over the whole category, so no order re-scores anybody.
+
+**The fixed Close button stays, and the comparison is the reason.** The founder asked whether it could go. Of the comparable read-only sheets, `GoalTitlesSheet` and `AwardBreakdownSheet` have exactly this shape — a bounded list over a fixed footer action — and `AwardsSheet` ends on *Done*; only `FollowListSheet` puts Close in its header, and it has a reason this sheet does not share (a search field directly under the heading, and a footer that would sit under a keyboard). `Sheet` also records that its backdrop is hidden from the accessibility tree *because* every sheet carries its own labelled Close, so removing this one would leave a screen-reader user on iOS with no accessible dismissal at all. The canonical pattern requires it; the view is unchanged.
 
 ## 12. Letterboxd import
 
@@ -1776,6 +1806,14 @@ The invite hand-off is the point of this feature as a growth mechanism: it place
 > account.
 
 
+### As built — 2026-08-29: Who I watched with, without going through the rating
+
+The Ranked menu gains one row, directly under the writing row: **Who I watched with**. It opens the canonical log sheet on the log occurrence that already exists, with the companion picker expanded and the note composer closed, so the keyboard stays down.
+
+Companions were reachable only through *Change your rating*, which opens the bucket chooser — so the way to correct who you watched something with ran through a control that offers to re-rate it. The founder's device pass called that hidden, and it is: the row somebody looks for is named "Who I watched with" and the row they had to press was named something else.
+
+**It edits; it does not create.** No ranking session starts, no bucket is written, no second `user_media` row and no second activity. `useSetCompanions` remains the only writer, so watched-with notification stays exactly as once-only as it is from every other door, and the note, its spoiler and visibility state, the watch date and the existing companions are untouched. Opening the row writes nothing at all: a row that is opened is not a row that is edited.
+
 ### As built — Bingd Awards, shipped 2026-08-18
 
 v0.6 listed Achievements under §8 **Deferred** and specified them in [`backlog.md`](./backlog.md) §1. They shipped. This block is the record of what shipped, and the specification in the backlog is now historical.
@@ -1819,6 +1857,20 @@ The canonical contract: **an award milestone newly earned produces exactly one s
 **In the inbox**, the row reads "You earned Movie Muncher 🎉" with the award badge in place of the avatar, and a tap routes to the reader's own Awards through the existing chain. **As a push**: `award_earned` joined `_push_eligible` (ten of the twelve types), `claim_push_batch` was rebuilt to let actorless jobs through and to carry `award_name`, and the copy is title "bingd. Awards", body "You earned Movie Muncher" — no emoji in the notification centre, `invite_welcome`'s rule. The `awards` category default flipped **on** by the `20260820000100` mechanism — no data migration, explicit choices preserved — and the settings screen's `pending` badge and its "not being sent yet" explainer are gone. When push is off, or the category is, the inbox row still exists and no push sends: the `BEFORE`-trigger preference gate and the `AFTER`-trigger enqueue make that structural rather than checked.
 
 **Analytics `award_earned` stays deferred**, with a new reason replacing the old one: the crossing is now a server-side fact, and the client has no honest emission point for it. [`analytics.md`](./analytics.md) §4.
+
+### As built — 2026-08-29: the tier is the name, comments are not reviews, and an award says what it was for (`20260901000100`)
+
+**One name, on every surface.** The founder's device showed a notification reading *You earned Comment Gremlin* over an Awards row reading *Whisper*. Neither was wrong alone — "Comment Gremlin" is the track's family name and "Whisper" is the tier that was earned — and that is the defect: the sheet read the earned tier and the feed and the inbox read `payload.award_name`. **The name is the tier that was earned**, everywhere, resolved by one function (`awardAnnouncement`) from the same canonical table `progress.ts` reads. A track whose tiers are metals keeps its family name — a row headed "Bronze" says nothing about what was done and three of them say less — which is the rule the sheet has always applied and the reason the founder's own example copy reads *earned the Movie Muncher award*.
+
+**Before the first tier the row is the family name and the badge is dim**, never the next tier's name: handing over the reward before it is earned leaves nothing to arrive later. After a tier, the row is titled by it and its badge is drawn earned, in colour.
+
+**The second line explains the achievement.** A feed row's subtitle was the metal — *Bronze* — which is not product copy. It is now the threshold sentence `tracks.ts` already holds for a finished track: *Watched 50 movies*, *Wrote 20 comments*, *Brought 3 people to bingd.* The inbox row gains the same line under *You earned … 🎉*. Derived in one place from the award and tier keys, so the feed and the inbox cannot quote different numbers for one event; a track a bundle has never heard of falls back to the payload's names and drops the second line rather than guessing a number.
+
+**Comment Gremlin counts comments, and nothing else.** It counted comments *plus* published reviews and said so — "Write 100 comments or reviews". The founder's ruling is that a review is a considered thing you publish about a title you ranked, a comment is talking to somebody under their activity, and one counter rewards neither. The track keeps its names, its artwork and its thresholds; the copy is now *Write 20 comments*. The client fact and the server metric both dropped the note term in the same change, held together by the parity test, and the `award_on_note` trigger is gone with the reason it existed.
+
+**Review awards are deferred to their own pass**, deliberately and not invented here. [`deferred-roadmap.md`](./deferred-roadmap.md) carries it.
+
+**The historical treatment, which is the founder's explicit call.** A tier already on the ledger that the comments-only count no longer supports is **revoked**, along with the feed post and the congratulations that hang off it — so the ledger tells the truth about the rule in force, and no surface goes on claiming an award the Awards sheet no longer shows. It is narrow (one track, and only tiers that fail the new metric), deterministic (the metric is a pure function of `comments`), and it leaves every legitimately-earned tier alone. A revoked tier can be earned again later and announces then, once, through the ordinary ledger. This is the one place this schema has taken an achievement back, and the reason is that the achievement was measuring something the product no longer counts.
 
 ### As built — 2026-08-28: the Feed ↔ Leaderboard toggle
 
@@ -2059,6 +2111,17 @@ left goal congratulations arriving would be the more confusing outcome.
 
 ---
 
+### As built — 2026-08-29: a finished goal is congratulated, and a causal group reads in the order it happened (`20260901000100`)
+
+**The goal's second line.** It was `25 movies` — a fragment under a sentence that had already said *hit their 2026 Movies goal*, and nothing at all in the inbox. It is now *Congrats on 25 movies*, from one function, in the feed and in the earner's own notification alike. The medium travels with the noun (*Congrats on 25 TV seasons*) because a completion says its own sentence in a feed of unrelated activity, where a bare "25 seasons" does not say seasons of what. The year, the medium and the threshold are the configured ones, and the threshold is the value `goal_completions` froze at the crossing, so editing a goal afterwards does not rewrite what was celebrated.
+
+**Top to bottom, one action reads: the ranking, then the goal it completed, then the awards it earned.** The founder found the derived rows above their own cause. There were two reasons and one key could not fix both.
+
+- **An award is written in the ranking's own transaction.** `feed_events.created_at` defaults to `now()`, which is transaction time, so the rows carry the same timestamp to the microsecond and `order by created_at desc` alone returns them in whatever order the plan chooses — unstable across a refetch and across a page boundary. A serial column would have been worse than nothing: `_rank_finalize` writes `rankings` and `user_media` *before* it posts `title_ranked`, and the award and goal triggers fire at the end of those statements, so insertion order puts the derived events first. **`causal_step`** is the writers stating the order instead: 0 the act, 1 the goal, 2 and up the awards, one step per announced track in the detector's own argument order.
+- **A goal completion is not.** A goal is completed by a watch *date*, `log_watched` posts no activity of its own, and the celebration commits seconds after the ranking — a real later timestamp that no tiebreak can reach. So a completion carries **`causal_at`**: its own instant, except that it inherits the timestamp of the reader's newest activity when that activity is about one of the titles that carried the count over. The guard is a fact rather than an interval — *is this the post it would sit directly under* — so correcting the date on a film ranked last year completes the goal at its own moment, at the top, alone, instead of being buried a year down the feed. `created_at` is untouched and is still what a row's relative time is drawn from.
+
+The feed reads `causal_at desc, causal_step asc, id asc`. The third key makes the sort **total** — `id` is a primary key — which is what pagination and refetch need: two rows the first two keys cannot separate would otherwise be free to swap between pages and drop or duplicate an activity. Unrelated activity is unaffected, because different transactions have different timestamps; a causal group sits together because its members share one.
+
 ## 15. Notifications and activity awareness
 
 **New in v0.6.** This resolves a structural absence in v0.5, where the brand system referenced notifications but no notification feature existed anywhere in scope, information architecture, entities, tests, or metrics.
@@ -2298,6 +2361,25 @@ conversation, then the title, then the existing unavailable state. In practice s
 is usually gone, because `delete_comment` sweeps the notifications it wrote.
 
 ---
+
+### As built — 2026-08-29: the row names the activity, and the welcome stays in the app (`20260901000100`)
+
+**The title moves into the sentence.** The inbox drew three disconnected lines — *bingd. founder commented on your activity* / *Marty Supreme* / the comment — and "your activity" is the vaguest possible noun for the one thing on the row that says which activity. The clause carries it now:
+
+| | |
+| --- | --- |
+| Comment on a watch | *[Commenter] commented on your Marty Supreme watch* |
+| Reaction | *[Reactor] reacted to your Marty Supreme watch* |
+| Reply to your comment | *[Replier] replied to your comment on Marty Supreme* |
+| Mention | *[Mentioner] mentioned you in a comment on Marty Supreme* |
+
+Every placeholder there is the **bingd. member who did it**, never a cast member of the title — see [§23](#23-data-and-technical-architecture)'s note on the two domains.
+
+**The noun comes from the activity, not from the title.** *Watch* is a claim about what the activity was, and a comment under a watchlist addition is not a watch — so `my_notifications` returns the subject event's own type and the client reads the noun off it, falling back to the neutral *activity* for anything that is not a watch claim and for a bundle older than the column. A reply is distinguished from a remark by `payload.reply_to`, which `add_comment` has always written and nothing read.
+
+The compact title form is the app's canonical one, so a TV season says which show it belongs to; the standalone subject line is suppressed exactly when the title is already in the clause, so no row says a name twice. The comment preview, its one-line bound, the server-side withholding of spoiler and retracted text, the *Contains spoilers* line, grouping, unread styling, routing and the accessible label are all unchanged — the label is now built from the same three parts the visible row draws, which is what stops the two disagreeing. Push copy is untouched and still carries no comment body.
+
+**The invitee's welcome is an inbox row and not a push.** `invite_welcome` leaves `_push_eligible`. The founder's reason: it fires the moment somebody opens Bingd for the first time, so the lock-screen copy arrives while they are already looking at the app that sent it. **Everything else about it is deliberately untouched** — `redeem_invite` still writes exactly one persistent row, it is still exempt from the category gate (like a follow request), it still names the inviter, still routes to their profile, and still carries the Follow / Follow back / Requested / Following control that reports the edge `redeem_invite` created. The inviter's own notifications, the later activation notification, redemption and attribution are all unchanged.
 
 ## 16. Sharing, deep links, and web fallback
 
@@ -2990,6 +3072,24 @@ Rationale, and the reason this needed deciding rather than defaulting: a public 
 > backgrounding and on unmount, and the chained-save concurrency base all behave exactly
 > as above. Who I watched with keeps its own established interaction (an explicit picker,
 > saved as a set) rather than being redesigned for consistency.
+>
+> **2026-08-29: a successful autosave says nothing at all.** There was a *Saving…* line
+> above the rows, and then a reserved blank slot holding its height so nothing jumped when
+> the line mounted. The reservation fixed the movement and left the noise: the label still
+> appeared and disappeared several times per sentence — the lane fires on a 1.2s trailing
+> debounce with a 4s cap, so an ordinary paragraph arms it repeatedly — and a status that
+> flickers while somebody is typing is not information whether or not it moves the page.
+> So the label and the box that reserved room for it are both gone. **Every guarantee
+> above is untouched**: same debounce, same max-wait, same flush on blur, on collapse, on
+> Done, on close, on backgrounding and on unmount, same in-flight depth counter behind the
+> controls that refuse while a write is running. **A failed save is still drawn**, and is
+> now the only thing that slot can say — hiding an unresolved failure is the one change
+> this must not make, and the message is mounted by a real event rather than by a
+> keystroke, so the movement it causes is information.
+>
+> **Who I watched with is also reachable directly** from the Ranked menu, one row under
+> the writing row, which opens this same sheet with the companion picker expanded. See
+> §14's As-built block dated the same day.
 
 ### Follow model
 
@@ -3185,11 +3285,28 @@ An amendment earlier the same day made email-and-password the primary method, on
 **A dedicated store-review account is a release requirement.** App Review and Play review cannot receive a one-time code, so they are given an account with a fixed password, a completed profile, and enough seeded activity to demonstrate the product. No credential for it lives in this repository. See `docs/release/store-review-access.md`.
 
 **Custom SMTP is a launch prerequisite.** Every sign-in that is not Apple or Google sends mail, so it is a gate rather than a polish step; `docs/release/production-bootstrap.md` carries it as one.
+
+#### The code screen — as built, 2026-08-29
+
+**The keyboard can be put away.** `number-pad` has no return key, so on iOS this screen had no gesture that dismissed it at all, and the pad covered the two tertiary controls under *Continue*. Two answers, because neither alone is enough: tapping anywhere off the field dismisses it — the wrapper is around the content rather than behind it, so a child control still takes the tap and *Continue* keeps working with the keyboard up — and iOS gets a **Done** accessory above the pad, for the case where the content is entirely underneath it. Both call the platform's own dismissal rather than blurring a ref, which is the ornamental version that leaves the pad on screen. Android is unchanged and keeps its own back gesture.
+
+**Resend has a cooldown, and the cooldown is the copy.** The control existed with no bound at all, so an impatient second tap earned `over_email_send_rate_limit` — a dead end the reader cannot act on. It reads **Resend code**, is inert for 30 seconds after a send, and says how long is left in its own label, because a disabled button with no explanation is indistinguishable from a broken one. Arriving on this screen *is* the moment a code was sent, so the cooldown is armed on mount; it is armed **before** the request rather than after it, since the round trip is exactly the window a double-tap lands in and a failed send has still cost an attempt at GoTrue. A second guard refuses two presses inside one frame, which the disabled flag cannot see.
+
+It goes through `sendEmailCode` — the same call, the same `shouldCreateUser`, the same screen — so a resend cannot create a second account or land the reader in a different flow, and the pending invite is device-local and untouched, so attribution survives however many codes are sent. On success: *New code sent*, the stale rejection cleared with the code it was about, the field cleared and refocused. On failure: whatever GoTrue said as `sendEmailCode` maps it — a rate limit, a closed signup — and never anything about whether an address has an account. One failure never disables the screen permanently; the same countdown runs and the control returns. The ten-minute expiry the copy states is the backend's and is unchanged.
+
 ### Core entities
 
 `users` · `profiles` (including `status`) · `username_history` · `follows` (including request state) · `blocks` · `reports` · `moderation_actions` · `titles` · `seasons` · `title_cache` · `user_titles` (watched, bucket, state, dates, notes) · `rankings` (per user, per category, ordinal) · `comparisons` · `watch_tags` · `lists` · `list_items` (with `source: imported | in_app`) · `feed_events` · `reactions` · `notifications` · `notification_preferences` · `device_tokens` · `recommendations` · `recommendation_impressions` · `recommendation_feedback` · `match_scores` · `share_tokens` · `invite_tokens` · `invite_attributions` · `import_jobs` · `import_rows` · `capabilities` · `capability_grants` · `outbox_operations` · `analytics_events`
 
 Recorded on every account from day one: `invited_by`, `founding_member`.
+
+#### Two kinds of person, and they never mix — clarified 2026-08-29
+
+A **user** (equivalently *member*, *profile*) is a bingd. account: it ranks, logs, comments, reacts, follows, receives notifications and earns awards, and it is identified by `profiles.id`. A **media person** — a cast or crew member — is catalogue metadata from TMDB, identified by a TMDB person id, and is not a bingd. user unless somebody separately holds an account.
+
+**`notifications.actor_id` and `feed_events.actor_id` mean the initiating bingd. user.** The name is conventional and predates this note; both columns are foreign keys to `profiles`, which is what makes the meaning a fact rather than a convention. It is stated here because "actor" also has an obvious film meaning, and a reader arriving at those columns from the catalogue side would be right to check.
+
+The invariants that follow, all of them enforced by the foreign keys rather than by discipline: a social action, a notification, an award, a goal, a watched-with tag, an invite relationship and every RLS or visibility check reference `profiles.id`; cast and crew reference the canonical media-person identity and nothing else; a notification's avatar and name come from the initiating profile and never from title credits; tapping a member's name opens their profile and tapping a cast member opens the media-person page. Where a local name could be read either way, it is qualified — `initiating_user_id`, `activity_author_user_id`, `cast_person_id`.
 
 ### Security and data constraints — Required
 

@@ -1397,6 +1397,51 @@ the dispute is itself wrong.
 **Revisit when.** Beta evidence, and specifically a real instance: somebody tagged in a
 watch they were not at, saying so. Not the team imagining one.
 
+## 28. Review awards — a track for publishing, split off Comment Gremlin
+
+**Not built, 2026-08-29**, in the tranche that made Comment Gremlin comments-only
+(PRD §14).
+
+**What it is.** An award track for **publishing reviews**, the counterpart to the one
+that now counts comments alone.
+
+**Why there is a hole to fill.** Comment Gremlin counted comments *plus* published
+reviews and said so on the row — "Write 100 comments or reviews". The founder's ruling
+is that the two are different behaviours: a review is a considered thing you publish
+about a title you ranked, a comment is talking to somebody under their activity, and one
+counter that adds them together rewards neither. So the track became comments-only in
+that tranche, which is the half that could be done without inventing anything — and
+publishing a review currently earns nothing at all.
+
+**Why it is not built in the same pass.** A new track is four decisions this tranche had
+no evidence for, and each of them is permanent the day it ships:
+
+- **Three names and three pieces of artwork.** Ten of the twenty existing tracks still
+  draw an emoji placeholder (§14 of this document), so a twenty-first track would
+  start as the eleventh placeholder rather than as a reward.
+- **Three thresholds, which cannot move afterwards.** The award ledger makes a
+  threshold change a migration and an un-earned tier a revocation — the Genre Gremlin
+  paragraph in PRD §14 records what that costs — and there is no review-volume data to
+  calibrate against. Nobody in the beta has published enough reviews to say what a
+  Bronze should be.
+- **What counts, exactly.** A note published, or a note *currently* public? The two
+  differ under a retraction, and `note_first_published_at` exists precisely because the
+  leaderboard needed the distinction (`20260828000200`); an award has to pick one and
+  live with it.
+- **Whether the retired combined progress transfers.** It does not, and that was
+  decided: tiers the comments-only count no longer supports were revoked. Handing that
+  progress to a review track instead would be re-earning an award under a third rule.
+
+**What it would cost.** One `AWARD_TRACKS` entry, three rows in `award_tiers`, one
+branch in `_award_metric`, and a trigger on `user_media` note changes — which is
+almost exactly the `award_on_note` trigger this tranche deleted, and is the smallest
+part of the work. The four decisions above are the feature.
+
+**Revisit when.** There is review volume to calibrate a ladder against, and the
+placeholder artwork backlog (§14) is being worked rather than grown.
+
+---
+
 ---
 
 ## Carried forward from earlier decisions

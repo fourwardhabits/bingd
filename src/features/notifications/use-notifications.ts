@@ -3,6 +3,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef } from 'react';
 
 import { GOAL_LABEL } from '@/features/goals/goals';
+import { awardAnnouncement } from '@/features/awards/announcement';
 import { avatarUri } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
@@ -174,11 +175,34 @@ export type Notification = {
   mutual: boolean | null;
   /**
    * `award_earned` only (20260828000100): which award, for the row's sentence and
-   * badge. The names are the server's snapshot; the keys resolve artwork through
-   * `badgeFor`, which falls back to 🏅 for a track this bundle predates. Null on
-   * every other kind.
+   * badge.
+   *
+   * The keys resolve artwork through `badgeFor`, which falls back to 🏅 for a track this
+   * bundle predates. **The two strings come from `awardAnnouncement`** (2026-08-29) and
+   * not from the payload: the earned tier's name and the threshold sentence behind it,
+   * from the same canonical table the Awards sheet and the feed post read, which is what
+   * stopped this row congratulating somebody for a name their Awards screen never shows.
+   * Null on every other kind.
    */
-  award: { key: string; tierKey: string; name: string; tierLabel: string | null } | null;
+  award: {
+    key: string;
+    tierKey: string;
+    /** The earned tier's name — "Whisper" — or the family name on a metal track. */
+    title: string;
+    /** "Wrote 20 comments". Null for a track this bundle has never heard of. */
+    achievement: string | null;
+  } | null;
+  /**
+   * What kind of activity a `comment`, `reaction` or `mention` row is about
+   * (`my_notifications.subject_activity_type`, 20260901000100).
+   *
+   * The inbox says "commented on your Marty Supreme watch", and *watch* is a claim about
+   * the activity rather than about the title — a comment under a watchlist addition is
+   * not a watch. This is the feed event's own type, so the noun is read from the thing
+   * it describes instead of assumed. Null on a row with no event, and on a bundle
+   * pointed at a database that predates the column.
+   */
+  subjectActivityType: string | null;
   /**
    * `goal_completed` only (20260829000200): which annual goal was finished, for the row's
    * sentence. Null on every other kind.
@@ -202,6 +226,16 @@ export type Notification = {
    * cannot be re-derived wrongly from a thread that has moved on.
    */
   mentionInReply: boolean;
+  /**
+   * `comment` only: whether the row is a reply to this reader's comment rather than a
+   * remark under their activity.
+   *
+   * Both are `type = 'comment'` — `add_comment` files one row for the activity's owner
+   * and one for the parent comment's author — and `payload.reply_to` is the server's own
+   * way of telling them apart. It has always been written; nothing read it until the
+   * founder asked for the two sentences to differ (2026-08-29).
+   */
+  commentIsReply: boolean;
   preview: string | null;
   /**
    * Why there is no preview, when the reason is a spoiler claim. The row says "Contains
@@ -298,6 +332,8 @@ export function useNotifications(viewerId: string) {
           series_title: string | null;
           subject_type: string | null;
           subject_id: string | null;
+          // 20260901000100, optional for the same rollout reason `comment_excerpt` is.
+          subject_activity_type?: string | null;
           payload: {
             mutual?: boolean;
             award?: string;
@@ -310,6 +346,9 @@ export function useNotifications(viewerId: string) {
             target?: number;
             // `mention` (20260830000100).
             reply?: boolean;
+            // `comment` (20260826000600): present iff this row is about a *reply* to the
+            // reader's own comment rather than a remark under their activity.
+            reply_to?: string;
           } | null;
           // 20260830000100. Optional in the type for the same reason `mentions` is in
           // `use-comments`: a bundle can be newer than the database it is pointed at
@@ -340,14 +379,21 @@ export function useNotifications(viewerId: string) {
           seriesTitle: row.series_title,
           subjectType: row.subject_type,
           subjectId: row.subject_id,
+          subjectActivityType: row.subject_activity_type ?? null,
           mutual: row.kind === 'friendship' ? row.payload?.mutual === true : null,
           award:
             row.kind === 'award_earned' && row.payload?.award && row.payload?.tier
               ? {
                   key: row.payload.award,
                   tierKey: row.payload.tier,
-                  name: row.payload.award_name ?? 'a new Award',
-                  tierLabel: row.payload.tier_label ?? null,
+                  ...awardAnnouncement({
+                    key: row.payload.award,
+                    tierKey: row.payload.tier,
+                    // The payload's own names, as the fallback for a track this bundle
+                    // does not have. Never drawn when the track is known.
+                    name: row.payload.award_name ?? null,
+                    tierLabel: row.payload.tier_label ?? null,
+                  }),
                 }
               : null,
           goal:
@@ -362,6 +408,7 @@ export function useNotifications(viewerId: string) {
           // how somebody typed and a preview is one line: a comment beginning with a
           // newline would otherwise draw an empty second line under the sentence.
           mentionInReply: row.kind === 'mention' && row.payload?.reply === true,
+          commentIsReply: row.kind === 'comment' && Boolean(row.payload?.reply_to),
           preview: row.comment_excerpt?.replace(/\s+/g, ' ').trim() || null,
           previewHidden: row.comment_spoilers === true,
           viewerRanked: row.viewer_ranked === true,
@@ -567,6 +614,121 @@ export function verbFor(
         : 'You hit your goal 🎉';
   }
 }
+
+/**
+ * The three parts of an inbox row's sentence: what comes before the title, the title
+ * itself, and what comes after it.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE TITLE IS IN THE SENTENCE (founder, 2026-08-29)
+ *
+ * The inbox drew three disconnected lines —
+ *
+ *     bingd. founder commented on your activity
+ *     Marty Supreme
+ *     Thank you! Someone finally said it!!!
+ *
+ * — and the reader has to join the first two up themselves. "Your activity" is also the
+ * vaguest possible noun for the one thing on the row that says which activity. So the
+ * title moves into the clause: *commented on your Marty Supreme watch*.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS A FUNCTION AND NOT FOUR MORE BRANCHES IN THE COMPONENT
+ *
+ * Two surfaces read it: the visible row, which emphasises `subject` and greys the rest,
+ * and the accessibility label, which says the whole thing in one string. Those were
+ * assembled separately, and the two cases already written that way — the watched-with
+ * row and the fulfilment row — each needed a matching special case in the label to stop
+ * a screen reader saying the film's name twice. Four more would have been four more
+ * chances to get that wrong. One shape, two renderings.
+ *
+ * ---------------------------------------------------------------------------
+ * THE NOUN COMES FROM THE ACTIVITY, NOT FROM THE TITLE
+ *
+ * "…your Marty Supreme watch" is a claim about what the activity *was*. A comment under
+ * a watchlist addition is not a watch, so the noun is read from `subjectActivityType` —
+ * the feed event's own type, which `my_notifications` returns since 20260901000100 — and
+ * falls back to the neutral "activity" for anything that is not a watch claim, including
+ * a bundle pointed at a database without the column.
+ *
+ * A row with no resolvable title gets `subject: null` and the sentence `verbFor` has
+ * always given: the title is gone, and inventing a clause around a name nobody has is
+ * how "commented on your  watch" gets shipped.
+ */
+export type InboxSentence = {
+  /** Follows the actor's name. Never null: every sentence has a verb. */
+  lead: string;
+  /** The emphasised slot, when the title belongs inside the clause. */
+  subject: string | null;
+  /** After the title. Null where the clause ends on it. */
+  tail: string | null;
+};
+
+/**
+ * The three activity types that are a watch claim, and therefore the ones a comment can
+ * be "on your <title> watch".
+ *
+ * A watchlist addition is deliberately absent: it is a thing somebody means to watch. It
+ * takes the neutral noun, which still reads naturally with the title in it — "commented
+ * on your Marty Supreme activity" — and does not assert a viewing that never happened.
+ */
+const WATCH_ACTIVITIES = new Set<string>(['title_ranked', 'title_logged', 'season_completed']);
+
+const activityNoun = (type: string | null): string =>
+  type && WATCH_ACTIVITIES.has(type) ? 'watch' : 'activity';
+
+/**
+ * How one row reads, given the compact title the caller has already resolved.
+ *
+ * `subject` is the caller's, not this function's, because the compact-name rules
+ * (`lib/titles.ts`: a season says which show it belongs to) live where the title is
+ * assembled and a second call here could disagree with the one the row already made.
+ */
+export function sentenceFor(row: Notification, subject: string | null): InboxSentence {
+  const noun = activityNoun(row.subjectActivityType);
+
+  if (subject) {
+    switch (row.kind) {
+      case 'comment':
+        // A reply is about the reader's *comment*, not about their activity, so the
+        // preposition changes and the noun does not apply at all. `payload.reply_to` is
+        // what distinguishes the two rows `add_comment` writes.
+        return row.commentIsReply
+          ? { lead: 'replied to your comment on', subject, tail: null }
+          : { lead: 'commented on your', subject, tail: noun };
+      case 'reaction':
+        return { lead: 'reacted to your', subject, tail: noun };
+      case 'mention':
+        return {
+          lead: row.mentionInReply
+            ? 'mentioned you in a reply on'
+            : 'mentioned you in a comment on',
+          subject,
+          tail: null,
+        };
+      // The two that already read this way, now saying so through the same shape rather
+      // than through a branch in the component and a matching branch in the label.
+      case 'watch_tag':
+        return { lead: 'watched', subject, tail: 'with you' };
+      case 'recommendation_ranked':
+        return { lead: 'ranked', subject, tail: 'from your recommendation' };
+      default:
+        break;
+    }
+  }
+
+  // Everything else, and every row whose title could not be resolved: the verb is the
+  // whole clause and the title — where there is one — sits on its own line under it.
+  return {
+    lead: verbFor(row.kind, row.mediaKind, row.goal, row.mentionInReply),
+    subject: null,
+    tail: null,
+  };
+}
+
+/** The sentence as one string, for a screen reader. */
+export const spokenSentence = (sentence: InboxSentence): string =>
+  [sentence.lead, sentence.subject, sentence.tail].filter(Boolean).join(' ');
 
 /** What the row's relationship control says, and whether pressing it does anything. */
 export type RelationshipAction = {

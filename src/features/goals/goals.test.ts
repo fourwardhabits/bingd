@@ -1,5 +1,6 @@
 import {
   countWatched,
+  goalAchievement,
   goalCategoryOf,
   goalSentence,
   goalStatus,
@@ -157,5 +158,36 @@ describe('progress against a target', () => {
 
   it('says "season" rather than "seasons" for a goal of one', () => {
     expect(goalSentence(goalStatus('tv_seasons', 1, 0))).toBe('0 of 1 season');
+  });
+});
+
+/**
+ * **The second line of a finished goal** (founder, 2026-08-29).
+ *
+ * The feed row said `25 movies` and the inbox row said nothing at all — a fragment and a
+ * blank, under a sentence that had already said "hit their 2026 Movies goal". The founder's
+ * copy is a congratulation, and it is one function so that the two surfaces cannot quote
+ * different numbers for one completion.
+ */
+describe('congratulating a finished goal', () => {
+  it('names the medium in the noun, because the row is read out of context', () => {
+    expect(goalAchievement('movies', 25)).toBe('Congrats on 25 movies');
+    // "TV seasons" and not "seasons": a completion says its own sentence in a feed of
+    // unrelated activity, where a bare "25 seasons" does not say seasons of what. And
+    // never "tv" — TV keeps its capitals mid-sentence everywhere in this product.
+    expect(goalAchievement('tv_seasons', 25)).toBe('Congrats on 25 TV seasons');
+  });
+
+  it('agrees with itself at one', () => {
+    expect(goalAchievement('movies', 1)).toBe('Congrats on 1 movie');
+    expect(goalAchievement('tv_seasons', 1)).toBe('Congrats on 1 TV season');
+  });
+
+  it('uses the number it is given rather than a frozen one', () => {
+    // The target is the one the goal was *completed against* — `goal_completions` freezes
+    // it and the feed event carries that frozen value — so editing a goal afterwards
+    // does not rewrite what was celebrated.
+    expect(goalAchievement('movies', 3)).toBe('Congrats on 3 movies');
+    expect(goalAchievement('movies', 104)).toBe('Congrats on 104 movies');
   });
 });

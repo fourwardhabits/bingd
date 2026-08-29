@@ -4,7 +4,10 @@ import { StyleSheet } from 'react-native';
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
 // expo-router's require.context, which has no exclusion for test files. See
 // app-directory.test.ts.
-import { NotificationSettingsButton } from '../../../app/settings/notifications';
+import {
+  NOTIFICATIONS_HEADER,
+  NotificationSettingsButton,
+} from '../../../app/settings/notifications';
 
 const mockPush = jest.fn();
 
@@ -107,5 +110,45 @@ describe('the notifications gear', () => {
     );
 
     expect(style).toMatchObject({ width: 44, height: 44 });
+  });
+});
+
+/**
+ * **The bubble the founder saw on iOS was UIKit's, not this component's**
+ * (device pass, 2026-08-29; Android drew the bare icon).
+ *
+ * Audited rather than guessed at: the tests above already assert there is no disc in the
+ * component, and `rootStackScreenOptions` sets no header background or blur. What draws
+ * it is iOS 26 — a custom `headerRight` element reaches `ScreenStackHeaderRightView` as a
+ * `UIBarButtonItem` `customView`, and from iOS 26 those items are given a shared glass
+ * background in the navigation bar.
+ *
+ * `hidesSharedBackground` is UIKit's own opt-out for exactly that, and the only way to
+ * reach it is the items form: `headerRight` renders the view with no props, while
+ * `unstable_headerRightItems` passes the flag per item. So the screen hands the same
+ * component over twice — as an item on iOS, where the flag lands, and as `headerRight`
+ * everywhere else. That is what this asserts, because a screen option is invisible to a
+ * render test and would otherwise be a change nothing could see.
+ */
+describe('the header option that carries it', () => {
+  it('offers the same control both ways, and opts the iOS one out of the glass', () => {
+    const items = NOTIFICATIONS_HEADER.unstable_headerRightItems();
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: 'custom', hidesSharedBackground: true });
+
+    // The same component in both, so the two platforms cannot drift into two controls.
+    expect((items[0]?.element as { type: unknown }).type).toBe(NotificationSettingsButton);
+    expect((NOTIFICATIONS_HEADER.headerRight() as { type: unknown }).type).toBe(
+      NotificationSettingsButton,
+    );
+  });
+
+  it('still names the screen and the way back', () => {
+    // The rest of the option object, so the items form cannot arrive by deleting them.
+    expect(NOTIFICATIONS_HEADER).toMatchObject({
+      headerShown: true,
+      title: 'Notifications',
+      headerBackTitle: 'Back',
+    });
   });
 });

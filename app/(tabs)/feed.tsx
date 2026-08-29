@@ -6,6 +6,7 @@ import { Alert, BackHandler, RefreshControl, ScrollView, StyleSheet, View } from
 import { useCurrentProfile } from '@/features/auth';
 import { AwardActivityLead } from '@/features/awards/AwardActivityLead';
 import { GoalActivityLead } from '@/features/goals/GoalActivityLead';
+import { goalAchievement } from '@/features/goals/goals';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { useWatchlist } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
@@ -607,23 +608,24 @@ export default function FeedScreen() {
                 ) : undefined
               }
               /**
-               * The optional secondary line the founder allowed — "25 movies" — and only
-               * where it is genuinely secondary. `metadataFor` would otherwise reach for
-               * a runtime and a certification that no goal row has.
+               * The second line, and on these two types it is the only thing that says
+               * what actually happened (founder, 2026-08-29).
+               *
+               * It was `Bronze` on an award row and `25 movies` on a goal row. Neither
+               * is product copy: a metal names a tier and not an achievement, and a bare
+               * count is a fragment. Both now come from a shared function —
+               * `awardAnnouncement` off the canonical thresholds, `goalAchievement` off
+               * the completion's own frozen target — so this row and the earner's inbox
+               * row cannot quote different numbers for one event.
+               *
+               * `metadataFor` is still the answer everywhere else, and would otherwise
+               * reach for a runtime and a certification that neither of these rows has.
                */
               metadata={
                 event.award
-                  ? event.award.tierLabel
+                  ? event.award.achievement
                   : event.goal
-                    ? `${event.goal.target} ${
-                        event.goal.category === 'movies'
-                          ? event.goal.target === 1
-                            ? 'movie'
-                            : 'movies'
-                          : event.goal.target === 1
-                            ? 'season'
-                            : 'seasons'
-                      }`
+                    ? goalAchievement(event.goal.category, event.goal.target)
                     : metadataFor(event)
               }
               score={event.score}

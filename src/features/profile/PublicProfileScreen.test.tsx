@@ -48,7 +48,14 @@ jest.mock('@/lib/supabase', () => ({
       // Honoured like the filters are, and for the same review-taught reason: a mock
       // that ignores `order` and `limit` cannot tell "their most recent N" from "N of
       // theirs in table order", and the Recent-activity contract is the first of those.
-      let sort: { column: string; ascending: boolean } | null = null;
+      /**
+       * A LIST of keys, not one (20260901000100). The feed's canonical order is three
+       * keys deep — `causal_at desc, causal_step asc, id asc` — and a stand-in that
+       * kept only the last one answered in id order, which is the shape of "no order at
+       * all" wearing a sort. Applied in reverse with a stable sort, which is how a
+       * multi-key comparison is expressed with the one Array.sort gives you.
+       */
+      const sorts: { column: string; ascending: boolean }[] = [];
       let max: number | null = null;
       const rows = () => {
         const matched = (tableRows[table] ?? []).filter((row) => {
@@ -58,8 +65,7 @@ jest.mock('@/lib/supabase', () => ({
             Object.entries(inFilters).every(([key, values]) => values.includes(object[key]))
           );
         }) as Record<string, unknown>[];
-        if (sort) {
-          const { column, ascending } = sort;
+        for (const { column, ascending } of [...sorts].reverse()) {
           matched.sort((a, b) => {
             const left = String(a[column] ?? '');
             const right = String(b[column] ?? '');
@@ -81,7 +87,7 @@ jest.mock('@/lib/supabase', () => ({
           return chain;
         },
         order: (column: string, options?: { ascending?: boolean }) => {
-          sort = { column, ascending: options?.ascending ?? true };
+          sorts.push({ column, ascending: options?.ascending ?? true });
           return chain;
         },
         limit: (count: number) => {
@@ -403,6 +409,12 @@ describe('what this person likes', () => {
       actor_id: 'anna-id',
       media_item_id: id,
       created_at: createdAt,
+      // The feed's sort key (20260901000100), which is `not null` in the schema and
+      // equal to `created_at` for everything but a goal completion. A fixture without
+      // it is a row the database cannot produce, and the order this test is about
+      // would fall through to the id tiebreak.
+      causal_at: createdAt,
+      causal_step: 0,
       payload: { position: 1, category: 'movies', bucket: 'loved', score: 9.1 },
       media_items: {
         kind: 'movie',

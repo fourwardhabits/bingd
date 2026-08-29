@@ -4,6 +4,8 @@ import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useAuth } from '@/features/auth';
 import { AwardActivityLead } from '@/features/awards/AwardActivityLead';
+import { GoalActivityLead } from '@/features/goals/GoalActivityLead';
+import { goalAchievement } from '@/features/goals/goals';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentThread } from '@/features/feed/CommentThread';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
@@ -270,9 +272,24 @@ export default function ActivityScreen() {
             lead={
               event.award ? (
                 <AwardActivityLead awardKey={event.award.key} tierKey={event.award.tierKey} />
+              ) : event.goal ? (
+                // The feed's own lead for a goal row. This page draws the same activity,
+                // and a goal row here with an empty poster box was the one place the two
+                // surfaces disagreed about what a goal looks like.
+                <GoalActivityLead />
               ) : undefined
             }
-            metadata={event.award ? event.award.tierLabel : metadataFor(event)}
+            // The same second line the feed draws, from the same two functions — see
+            // `app/(tabs)/feed.tsx`. A conversation page reached from a notification
+            // shows the activity it is about, so a metal here would be the same
+            // non-explanation in a second place.
+            metadata={
+              event.award
+                ? event.award.achievement
+                : event.goal
+                  ? goalAchievement(event.goal.category, event.goal.target)
+                  : metadataFor(event)
+            }
             score={event.score}
             bucket={event.bucket}
             note={event.note?.text ?? null}

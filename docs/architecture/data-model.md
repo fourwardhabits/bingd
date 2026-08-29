@@ -10,6 +10,10 @@ All SQL is Postgres 15 as provided by Supabase.
 Three differences from the SQL sketched below, all deliberate:
 
 - **`pgcrypto` is not installed.** `gen_random_uuid()` has been core Postgres since 13, so the extension was dead weight.
+> **`actor_id` here and on `notifications` means the initiating bingd. *user***, and the foreign key to `profiles` is what makes that a fact rather than a convention. The word also has an obvious film meaning; cast and crew are catalogue metadata identified by a TMDB person id and are never either of these columns. PRD §23 states the distinction in full.
+
+> **The feed is ordered by `(causal_at desc, causal_step asc, id asc)`, not by `created_at`** — added `20260901000100` because one action produces several events and they were reading out of order. `causal_step` is 0 for the act, 1 for the goal it completed and 2 upward for the awards it earned: those are written in the *same transaction*, so `created_at` ties to the microsecond and one key left the order to the plan. `causal_at` is the other half: a goal completion is caused by a watch date, `log_watched` posts no activity of its own, and the celebration therefore commits seconds *after* its cause — a real later timestamp no tiebreak can reach. A completion inherits the timestamp of the reader's newest activity when that activity is one of the titles that carried the count over, and keeps its own otherwise. `created_at` is untouched and is still what a row's relative time is drawn from. The third key makes the sort total, which is what pagination needs.
+
 - **Check constraints replace comments** wherever this document listed valid values in prose — `media_cache.facet`, `feed_events.type`, `import_jobs.status`, `import_rows.status`, `share_tokens.object_type`, `recommendation_feedback.kind`, and now `reactions.kind`. Same information, in a place where it cannot rot.
 - **`can_view_profile` handles a null viewer explicitly**, returning public profiles only. Unauthenticated reads happen on the public web pages in PRD §16, and leaving that case to `case` fallthrough would have returned null rather than false.
 
@@ -533,7 +537,10 @@ create table feed_events (
   media_item_id uuid references media_items(id) on delete cascade,
   list_id       uuid references lists(id) on delete cascade,
   payload       jsonb not null default '{}',
-  created_at    timestamptz not null default now()
+  created_at    timestamptz not null default now(),
+  -- 20260901000100. The two keys the feed is ordered by; see below.
+  causal_at     timestamptz not null default now(),
+  causal_step   smallint not null default 0
 );
 
 create index on feed_events (actor_id, created_at desc);
