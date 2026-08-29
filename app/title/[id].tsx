@@ -420,7 +420,7 @@ export default function TitleScreen() {
   // One line only, chosen by the founder's rule: top ten overall, else the
   // strongest category placement. Derived from rows already cached.
   const heroRank = data.ranked
-    ? heroRankFor(title.id, rankedList.data ?? [], rankCategory, languageName)
+    ? heroRankFor(title.id, rankedList.data ?? [], rankCategory)
     : null;
   const { score, total } = titleScore;
   const rankable = title.kind === 'movie' || title.kind === 'season';

@@ -85,7 +85,13 @@ const VERB: Record<ActivityType, string> = {
   title_logged: 'watched',
   season_completed: 'finished',
   watchlist_added: 'added',
-  award_earned: 'earned',
+  // "Abisola earned the Movie Muncher award" (founder, 2026-08-29). It was
+  // "earned Movie Muncher", which is the same grammar every other row uses — actor,
+  // verb, emphasised object — and reads as though Movie Muncher were a film. The
+  // article and the noun are what make the object an award rather than a title, and
+  // they ride on the verb and the tail so the emphasised slot still holds the name
+  // alone. See `tailFor` for the case where the name already says "Award".
+  award_earned: 'earned the',
   // "Abisola hit their 2026 Movies goal" — the possessive rides with the verb so the
   // emphasised slot holds the goal itself rather than the word "their".
   goal_completed: 'hit their',
@@ -104,10 +110,29 @@ const TAIL: Partial<Record<ActivityType, string>> = {
   // rather than in the title so a screen reader reaches it after the sentence has been
   // said — "party popper" in the middle of the clause is what it would otherwise be.
   goal_completed: '🎉',
+  // Completes "earned the … award". Suppressed when the name already says it — see
+  // below, which is the founder's own caveat rather than a defensive flourish.
+  award_earned: 'award',
 };
 
 export const verbFor = (type: ActivityType): string => VERB[type];
-export const tailFor = (type: ActivityType): string | null => TAIL[type] ?? null;
+
+/**
+ * The words after the emphasised slot.
+ *
+ * `name` is only consulted for an award, and only to avoid saying "award" twice. Every
+ * seeded award is named like a title — Movie Muncher, Heart Magnet — so the tail is
+ * almost always drawn; the exception is the nameless fallback (`use-feed.ts` renders
+ * "bingd. Award" when a payload carries no `award_name`), where "earned the bingd.
+ * Award award" is the wording the founder asked not to produce.
+ *
+ * Passing a title on a non-award row is harmless and deliberate: the callers hand over
+ * `event.title` unconditionally rather than branching on the type at four call sites.
+ */
+export const tailFor = (type: ActivityType, name?: string | null): string | null => {
+  if (type === 'award_earned' && /\baward\b/i.test(name ?? '')) return null;
+  return TAIL[type] ?? null;
+};
 
 // ---------------------------------------------------------------------------
 // The subheading

@@ -94,6 +94,9 @@ describe('the routing matrix', () => {
     watch_tag: { kind: 'title', mediaItemId: 'media-1' },
     recommendation: { kind: 'title', mediaItemId: 'media-1' },
     invite_activated: { kind: 'profile', username: 'suraj' },
+    // The account that just joined (20260831000100). Same destination as
+    // `invite_activated` and for the same reason: both rows are about that person.
+    invite_joined: { kind: 'profile', username: 'suraj' },
     invite_welcome: { kind: 'profile', username: 'suraj' },
     award_earned: { kind: 'awards' },
     // The earner's own profile, where GoalsSection sits — not the feed post the same

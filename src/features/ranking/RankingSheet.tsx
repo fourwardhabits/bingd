@@ -428,6 +428,7 @@ function Session({
             subject={subject}
             pivotId={step.pivotId}
             skipped={step.skipped}
+            surface={surface}
 
             busy={busy}
             onPick={(winnerId) =>
@@ -551,6 +552,7 @@ function Comparison({
   pivotId,
   skipped,
   busy,
+  surface,
   onPick,
   onBack,
   onSkip,
@@ -560,6 +562,12 @@ function Comparison({
   pivotId: string;
   skipped: boolean;
   busy: boolean;
+  /**
+   * Where this comparison is being made, which changes exactly one word — the skip
+   * control's label. See the note on that Button. It is the same `surface` the session
+   * already carries for analytics, threaded one level further rather than re-derived.
+   */
+  surface: Surface;
   onPick: (winnerId: string) => void;
   onBack: () => void;
   onSkip: () => void;
@@ -751,11 +759,33 @@ function Comparison({
          * Still one control and not two. Beli offers "Too tough" and "Skip" separately
          * and both call the same thing; two buttons with one effect is a decision the
          * reader has to make for no reason.
+         *
+         * **In onboarding the word is "Too tough" instead** (founder, 2026-08-28).
+         * One control, one call, one `rank_skip` — only the label changes, and it
+         * changes because the two readers are different people.
+         *
+         * A beta tester ranked two films, met a comparison they could not call, and
+         * left. "Skip" reads as *skip ahead*, and in the middle of a five-film
+         * onboarding that sounds like abandoning the flow rather than asking for a
+         * different opponent — so the one control that would have kept them went
+         * unused. "Too tough" names the thing that person actually felt, which is the
+         * whole reason the affordance exists (`reference-notes.md`: without it users
+         * force a preference they do not have and the ranking degrades).
+         *
+         * Somebody ranking their two-hundredth title in the Log tab has long since
+         * learnt what this button does and is better served by the shorter, broader
+         * word — the 2026-08-24 reasoning above, which stands. So the divergence is
+         * deliberate, and it is one word on one surface: the mechanism, the hint, the
+         * session and the three-skip fallback are identical either way.
          */}
         <View style={styles.control}>
           <Button
-            label="Skip"
-            accessibilityLabel="Skip this comparison"
+            label={surface === 'onboarding' ? 'Too tough' : 'Skip'}
+            accessibilityLabel={
+              surface === 'onboarding'
+                ? 'Too tough to call. Skip this comparison'
+                : 'Skip this comparison'
+            }
             accessibilityHint="Compares against a different title instead."
             kind="secondary"
             size="sm"

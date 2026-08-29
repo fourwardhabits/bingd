@@ -1247,16 +1247,44 @@ function Body({
           </View>
         ) : null}
 
-        {saving ? (
-          <Text variant="footnote" tone="tertiary" style={styles.status}>
-            Saving…
-          </Text>
-        ) : null}
-        {problem ? (
-          <Text variant="footnote" tone="action" style={styles.status}>
-            {problem}
-          </Text>
-        ) : null}
+        {/**
+         * **The status slot keeps its height whether or not it is saying anything.**
+         *
+         * The founder's Android report: while typing in the Note, everything below one
+         * element jumped down two or three millimetres and immediately came back. The
+         * sheet frame, the top of the screen and the keyboard were all stationary — so
+         * it was never keyboard avoidance, and it was never a snap point.
+         *
+         * It was this. "Saving…" is a `footnote`, whose line height is 18pt — about
+         * 2.5mm on the founder's panel — and it *mounted and unmounted* here, above
+         * `styles.rows`, which is everything: the Note composer and every row under it.
+         * The autosave lane fires on a 1.2s trailing debounce with a max-wait cap, so an
+         * ordinary sentence arms it several times; each firing pushed the whole lower
+         * half of the sheet down by one line and the reply pulled it back. The reader
+         * types, the page twitches, and nothing about the movement is information.
+         *
+         * Reserving the line is the fix rather than hiding, delaying or debouncing the
+         * indicator: the message is honest and worth showing, and it is the *layout*
+         * that had no business changing. `RankingSheet` settled the same question the
+         * same way for the same reason — "the slot keeps its height either way so the
+         * controls below do not jump when the sentence appears".
+         *
+         * One line is reserved, which is what either message costs. Both can still be
+         * on screen at once — a save retrying after a failure — and the slot grows to
+         * fit, which is a real event rather than a keystroke.
+         */}
+        <View testID="log-status-slot" style={styles.statusSlot}>
+          {saving ? (
+            <Text variant="footnote" tone="tertiary" style={styles.status}>
+              Saving…
+            </Text>
+          ) : null}
+          {problem ? (
+            <Text variant="footnote" tone="action" style={styles.status}>
+              {problem}
+            </Text>
+          ) : null}
+        </View>
 
         <View style={styles.rows}>
           {/* One line for all three rows, because they share one read and would
@@ -1504,6 +1532,14 @@ const styles = StyleSheet.create({
   },
   confirmActions: { gap: theme.space[2] },
   status: { paddingHorizontal: theme.layout.gutter, textAlign: 'center' },
+  /**
+   * One footnote line, held open. See the note at the slot: this is what stops an
+   * autosave that starts and finishes mid-sentence from moving every row below it.
+   *
+   * `minHeight` and not `height`, so the rare case where a failure message wraps — or
+   * where a retry puts "Saving…" above it — grows honestly instead of clipping.
+   */
+  statusSlot: { minHeight: theme.typography.footnote.lineHeight },
   unavailable: {
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[2],

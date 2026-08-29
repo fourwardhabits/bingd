@@ -71,14 +71,40 @@ describe('the activity sentence', () => {
   });
 
   it('reads an award as the founder’s sentence, and never as a watch', () => {
-    // "Abisola earned Movie Muncher" — the award's name rides in the title slot,
-    // so the ordinary grammar says the founder's copy with no award-shaped
-    // template. And it is emphatically not a watch claim: the note/companion
-    // joins became an allow-list precisely so a new type could not inherit them
-    // by omission (20260828000100).
-    expect(verbFor('award_earned')).toBe('earned');
-    expect(tailFor('award_earned')).toBeNull();
+    // "Abisola earned the Movie Muncher award" (founder, 2026-08-29). The name still
+    // rides alone in the emphasised slot; the article and the noun sit on either side
+    // of it, so the object reads as an award rather than as a film — which is what
+    // "earned Movie Muncher" did not do.
+    //
+    // And it is emphatically not a watch claim: the note/companion joins became an
+    // allow-list precisely so a new type could not inherit them by omission
+    // (20260828000100).
+    expect(verbFor('award_earned')).toBe('earned the');
+    expect(tailFor('award_earned', 'Movie Muncher')).toBe('award');
     expect(isWatchActivity('award_earned')).toBe(false);
+  });
+
+  /**
+   * The founder's own caveat: a name that already says "Award" must not produce
+   * "earned the … award award". In practice this is the nameless fallback —
+   * `use-feed.ts` renders "bingd. Award" for a payload with no `award_name` — which
+   * is exactly the degradation path an award renamed or removed upstream takes.
+   */
+  it('does not say award twice when the name already says it', () => {
+    expect(tailFor('award_earned', 'bingd. Award')).toBeNull();
+    expect(tailFor('award_earned', 'Lifetime Achievement award')).toBeNull();
+    // A name that merely contains the letters is not the same claim.
+    expect(tailFor('award_earned', 'Awardless Wonder')).toBe('award');
+  });
+
+  /**
+   * Every other row hands `tailFor` its title too, rather than branching on the type
+   * at four call sites. The name must make no difference to any of them.
+   */
+  it('ignores the name on every row that is not an award', () => {
+    expect(tailFor('title_ranked', 'The Award')).toBeNull();
+    expect(tailFor('watchlist_added', 'The Award')).toBe('to their watchlist');
+    expect(tailFor('goal_completed', 'The Award')).toBe('🎉');
   });
 });
 

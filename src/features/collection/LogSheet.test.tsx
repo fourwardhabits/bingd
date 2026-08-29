@@ -1,5 +1,5 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
-import { AppState } from 'react-native';
+import { AppState, StyleSheet } from 'react-native';
 
 import { queryKeys } from '@/lib/query';
 import { renderWithProviders } from '@/test-utils/render';
@@ -791,6 +791,113 @@ describe('notes', () => {
  * out. The debounce is pinned under fake timers; the flush points are events and need
  * no clock. (Unmount has its own test at the top of this file, where two titles swap.)
  */
+/**
+ * **The typing jump** (founder, Android/Samsung, 2026-08-28).
+ *
+ * The report: while typing in the Note, everything below one element moved down two
+ * or three millimetres and immediately came back. The sheet frame, the top of the
+ * screen and the keyboard were all stationary — so it was never keyboard avoidance
+ * and never a snap point, and the founder's clarification said so explicitly.
+ *
+ * The element was the "Saving…" line. It is a `footnote` — 18pt of line height, about
+ * 2.5mm on that panel — and it *mounted and unmounted* above `styles.rows`, which is
+ * the Note composer and every row beneath it. The autosave lane fires on a 1.2s
+ * trailing debounce with a max-wait cap, so an ordinary sentence arms it repeatedly:
+ * each firing pushed the lower half of the sheet down a line, and each reply pulled it
+ * back.
+ *
+ * The fix reserves the line. These assert the reservation rather than the absence of
+ * movement, because a layout that cannot change is the only thing a unit test can
+ * honestly prove — and it is exactly the property that was missing. The millimetres
+ * themselves need the founder's device.
+ */
+describe('the status line does not move the rows below it', () => {
+  /** The reserved height, read the way a layout pass would. */
+  const slotHeight = (sheet: { getByTestId: (id: string) => { props: Record<string, unknown> } }) =>
+    (
+      StyleSheet.flatten(
+        sheet.getByTestId('log-status-slot').props.style as never,
+      ) as { minHeight?: number }
+    ).minHeight;
+
+  it('holds its line open before anything is being saved', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    // Nothing to say, and the space is still there. This is the whole fix: before it
+    // there was no slot at all, and the rows sat one line higher until a save began.
+    expect(sheet.queryByText('Saving…')).toBeNull();
+    expect(slotHeight(sheet)).toBe(18);
+  });
+
+  it('keeps exactly the same reserved height while a save is in flight', async () => {
+    // The write is held open, the way `clear_watch_date` is held elsewhere in this
+    // file. Without it "Saving…" is true and false again inside one commit and there
+    // is no in-flight state to look at — which is also why the founder saw a *flash*
+    // rather than a sustained shift.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockRpc.mockImplementation(async (name: string) => {
+      if (name === 'log_watched') await held;
+      return { data: { status: 'ok' }, error: null };
+    });
+
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    const idle = slotHeight(sheet);
+    await fireEvent.changeText(sheet.note(), 'a thought worth keeping');
+
+    // The debounce is real — see the lane's own note on why fake timers poison this
+    // file.
+    await waitFor(() => expect(sheet.queryByText('Saving…')).toBeTruthy(), { timeout: 3000 });
+
+    // **The assertion the founder's report comes down to.** The indicator arrived
+    // *inside* a slot that was already there, so the rows below it are sitting on
+    // exactly what they were sitting on before the save began.
+    expect(slotHeight(sheet)).toBe(idle);
+    expect(slotHeight(sheet)).toBe(18);
+
+    await act(async () => {
+      release();
+      await held;
+    });
+  });
+
+  it('gives the line back to nobody when the save finishes', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await fireEvent.changeText(sheet.note(), 'a thought worth keeping');
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1), { timeout: 3000 });
+    await waitFor(() => expect(sheet.queryByText('Saving…')).toBeNull());
+
+    // Back to silent, and still occupying the same space. A reader typing a second
+    // sentence sees the indicator come and go without the rows acknowledging it.
+    expect(slotHeight(sheet)).toBe(18);
+  });
+
+  /**
+   * The founder's actual gesture: a burst of keystrokes, which arms the lane several
+   * times over. Every keystroke is a render of this sheet, and none of them may change
+   * what the rows below the status are sitting on.
+   */
+  it('does not change height across a burst of keystrokes', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    const heights: (number | undefined)[] = [slotHeight(sheet)];
+    for (const text of ['o', 'on', 'one', 'one t', 'one tw', 'one two']) {
+      await fireEvent.changeText(sheet.note(), text);
+      heights.push(slotHeight(sheet));
+    }
+
+    expect(new Set(heights)).toEqual(new Set([18]));
+  });
+});
+
 describe('the autosave lane', () => {
   it('saves once when typing rests, not once per keystroke', async () => {
     // Real timers, deliberately. Faking the clock here poisons the process: React

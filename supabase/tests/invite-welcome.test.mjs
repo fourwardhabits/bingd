@@ -94,7 +94,7 @@ describe('the welcome an invitation writes back', () => {
     assert.equal((await welcomes(invitee))[0].read_at, null);
   });
 
-  it('does not give the inviter one — their row is the follow', async () => {
+  it('does not give the inviter one — their row says somebody joined', async () => {
     const inviter = await newUser('halves_inviter');
     const invitee = await newUser('halves_invitee');
     const token = await mintLink(inviter);
@@ -102,6 +102,9 @@ describe('the welcome an invitation writes back', () => {
     await t.actAs(invitee);
     await redeem(token);
 
+    // The welcome is the invitee's alone. The inviter's half of the same acceptance is
+    // `invite_joined` (20260831000100), which replaced the generic `follow` row rather
+    // than arriving beside it — so the pair still has exactly one notification each.
     assert.deepEqual(await welcomes(inviter), []);
 
     const { rows } = await t.sql(
@@ -110,7 +113,7 @@ describe('the welcome an invitation writes back', () => {
     );
     assert.deepEqual(
       rows.map((row) => row.type),
-      ['follow'],
+      ['invite_joined'],
     );
   });
 

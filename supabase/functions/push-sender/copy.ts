@@ -221,6 +221,14 @@ function sentence(job: PushJob, name: string, subject: string | null): { title: 
     case 'invite_activated':
       return { title: name, body: 'joined bingd. from your invite' };
     /**
+     * The same sentence at the earlier moment (`20260831000100`): acceptance rather
+     * than the tenth ranking. It is eligible because it *replaces* the `follow` push an
+     * inviter already got when somebody redeemed their link — the copy improved and
+     * nothing was taken away.
+     */
+    case 'invite_joined':
+      return { title: name, body: 'joined bingd. from your invite' };
+    /**
      * The one push whose title is not a person, because it is the first thing anybody
      * ever sees from Bingd and the greeting is the point. The inbox row does the same —
      * "Welcome to bingd." before the inviter's name — and the emoji it draws is dropped

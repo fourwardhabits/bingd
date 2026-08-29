@@ -68,7 +68,13 @@ export type RankedEntry = {
    * season's contribution to For You has to be made through its show.
    */
   seriesId: string | null;
-  /** ISO 639-1, for the hero's language rank context (`hero-rank.ts`). */
+  /**
+   * ISO 639-1. Read by the Collection language filter (`filters.ts`).
+   *
+   * It used to feed the title-page hero as well, which is where `#17 in English` came
+   * from; `hero-rank.ts` no longer consults language at all (founder, 2026-08-28). The
+   * filter is a different thing — the reader asked for that slice — and keeps it.
+   */
   language: string | null;
   bucket: 'loved' | 'fine' | 'not_for_me';
   position: number;

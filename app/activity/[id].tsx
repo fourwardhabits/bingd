@@ -1,13 +1,22 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useAuth } from '@/features/auth';
 import { AwardActivityLead } from '@/features/awards/AwardActivityLead';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { CommentThread } from '@/features/feed/CommentThread';
+import { ReactionDetail } from '@/features/feed/ReactionDetail';
+import { ReactionPill } from '@/features/feed/ReactionPill';
 import { metadataFor, tailFor, verbFor } from '@/features/feed/activity';
 import { useActivityEvent } from '@/features/feed/use-feed';
+import {
+  DEFAULT_REACTION,
+  REACTION_GLYPH,
+  useReactions,
+  useSetReaction,
+  type ReactionKind,
+} from '@/features/feed/use-reactions';
 import { posterUri } from '@/lib/images';
 import { TAB_ROUTES } from '@/lib/routes';
 import {
@@ -103,6 +112,55 @@ export default function ActivityScreen() {
   const event = activity.data ?? null;
 
   /**
+   * **The post's reactions, read exactly as the Feed reads them** (founder, 2026-08-29).
+   *
+   * The founder opened a comment notification, looked at the post above the thread, and
+   * could not find the reactions they knew were on it. They were right that something
+   * was wrong and wrong about what: this was never a caching or a false-zero problem —
+   * the screen fetched no reaction data at all and drew no control, deliberately, on the
+   * reasoning that "a row of actions at the top turns a message into a post to be worked
+   * on".
+   *
+   * That reasoning still holds for the other three controls and they are still absent.
+   * It does not hold for reactions, because a reaction count is not an action offered —
+   * it is part of what the post *is*, the way the score and the note are, and the same
+   * post reading "6" in the Feed and blank here is the app disagreeing with itself.
+   *
+   * **The same hook, the same components, the same grammar.** `useReactions` against one
+   * id rather than a page of them; `ReactionPill` for the picker and `ReactionDetail`
+   * for the reactor list, both shared with the Feed. Nothing about reactions is
+   * implemented twice here, and no count is ever computed on this screen.
+   *
+   * Privacy needs no argument of its own: `reactions_read` (20260813001900) gates every
+   * row on `can_i_view(e.actor_id)` for the event *and* `can_i_view(user_id)` for the
+   * reactor, which is the same policy the Feed's identical query meets. The id list is
+   * empty until the event itself resolves, so a hidden activity is never probed for
+   * reactions the policy would refuse anyway.
+   */
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const reactions = useReactions(event && viewerId ? [event.id] : [], viewerId ?? '');
+  const { setReaction } = useSetReaction(viewerId ?? '');
+  const summary = event ? (reactions.data?.get(event.id) ?? null) : null;
+
+  const choose = async (kind: ReactionKind | null) => {
+    if (!event) return;
+    setPickerOpen(false);
+    const result = await setReaction(event.id, kind);
+    if (!result.ok && result.message) {
+      Alert.alert('Could not save your reaction', result.message);
+    }
+  };
+
+  /**
+   * A plain tap, with the Feed's rule rather than a second one: nothing becomes a heart,
+   * a heart becomes nothing, and any other reaction is replaced by the heart — the
+   * gesture means "react", and the way to remove one you can see is to tap the one you
+   * chose.
+   */
+  const toggleDefault = () => choose(summary?.mine === DEFAULT_REACTION ? null : DEFAULT_REACTION);
+
+  /**
    * Back, from a screen that may have nothing behind it.
    *
    * A cold start from a notification tap pushes this onto a stack whose only other entry
@@ -187,7 +245,7 @@ export default function ActivityScreen() {
                 : () => router.push(`/u/${event.actorUsername}`)
             }
             verb={verbFor(event.type)}
-            tail={tailFor(event.type)}
+            tail={tailFor(event.type, event.title)}
             companions={event.companions}
             title={event.title}
             year={event.year}
@@ -227,15 +285,34 @@ export default function ActivityScreen() {
               }
             }}
             /**
-             * No comments control, and no reaction, watchlist or recommend control.
+             * **Reactions, and nothing else.**
              *
-             * The conversation is directly below — a button that scrolls you six points
-             * down the screen you are already on is noise. The other three are omitted
-             * for a different reason: this screen exists because somebody was told
-             * something and came to read it, and a row of actions at the top of it turns
-             * a message into a post to be worked on. They are all on the Feed, on the
+             * No comments control: the conversation is directly below, and a button that
+             * scrolls you six points down the screen you are already on is noise. No
+             * watchlist and no recommend: this screen exists because somebody was told
+             * something and came to read it, and a row of *actions* at the top of it
+             * turns a message into a post to be worked on. Both are on the Feed, on the
              * same card, one tap away.
+             *
+             * Reactions were omitted alongside them until 2026-08-29 and should not have
+             * been — see the hook above for the founder's report and why this one is a
+             * different kind of thing. Every value here comes from the shared summary.
              */
+            reaction={{
+              count: summary?.total ?? 0,
+              mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
+              glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
+              onPress: () => void toggleDefault(),
+              onLongPress: () => setPickerOpen(true),
+              onPressSummary: () => setDetailOpen(true),
+              picker: pickerOpen ? (
+                <ReactionPill
+                  current={summary?.mine ?? null}
+                  onChoose={(kind) => void choose(kind)}
+                  onDismiss={() => setPickerOpen(false)}
+                />
+              ) : null,
+            }}
           />
 
           <View style={styles.divider} />
@@ -251,6 +328,17 @@ export default function ActivityScreen() {
             onPressPerson={(username) => router.push(`/u/${username}`)}
             // Already inside a ScrollView. See `CommentThread`.
             scroll="inherited"
+          />
+
+          {/* The Feed's own sheet, with the Feed's own behaviour: tapping a name leaves
+              for that profile and closes this behind it. */}
+          <ReactionDetail
+            summary={detailOpen ? summary : null}
+            onClose={() => setDetailOpen(false)}
+            onPressPerson={(username) => {
+              setDetailOpen(false);
+              router.push(`/u/${username}`);
+            }}
           />
         </ScrollView>
       )}

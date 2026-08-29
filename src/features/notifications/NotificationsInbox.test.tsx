@@ -322,29 +322,158 @@ describe('the welcome an invitation writes back', () => {
     expect(mockAskedAbout.at(-1)).toContain('them');
   });
 
-  it('offers nothing once the follow the redemption made is in place', async () => {
+  /**
+   * **It says Following rather than disappearing**, which is the 20260831000100
+   * correction and the one that matters most on this row.
+   *
+   * `redeem_invite` creates the invitee's follow as part of acceptance, so the edge
+   * exists before the welcome is ever drawn — which meant the old hide-once-followed
+   * rule hid the control on essentially every welcome ever rendered. The row that
+   * exists to introduce two accounts said nothing about whether they were connected.
+   */
+  it('says Following once the follow the redemption made is in place', async () => {
     mockNotifications.length = 0;
     mockNotifications.push(welcome());
     mockRelationships.set('them', { following: 'approved' });
     const view = await renderWithProviders(<NotificationsScreen />);
 
-    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    await waitFor(() => expect(view.getByRole('button', { name: 'Following' })).toBeTruthy());
+    // And never the offer, which would invite a follow that already exists.
     expect(view.queryByRole('button', { name: 'Follow' })).toBeNull();
   });
 
   /**
    * A private inviter leaves the invitee's follow *pending*, which is not the same as
-   * not following. The row shows no control; the profile behind it is where
-   * `FollowControl` draws "Requested".
+   * not following and not the same as following. It keeps its own word, for
+   * `FollowControl`'s reason: collapsing it into "Following" would tell somebody they
+   * have access they have not been granted.
    */
-  it('offers nothing while a request to a private inviter is pending', async () => {
+  it('says Requested while a request to a private inviter is pending', async () => {
     mockNotifications.length = 0;
     mockNotifications.push(welcome());
     mockRelationships.set('them', { following: 'pending' });
     const view = await renderWithProviders(<NotificationsScreen />);
 
-    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    await waitFor(() => expect(view.getByRole('button', { name: 'Requested' })).toBeTruthy());
     expect(view.queryByRole('button', { name: 'Follow' })).toBeNull();
+  });
+
+  /**
+   * The settled state is a statement rather than an offer, so it does not invite the
+   * tap that would undo the relationship. Ending one from an inbox row is a mis-tap
+   * away from a follow nobody meant to lose; `FollowControl` on the profile is where
+   * Unfollow and Withdraw live, and the row already opens it.
+   */
+  it('does not dress its settled state as something to press', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(welcome());
+    mockRelationships.set('them', { following: 'approved' });
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    const control = await waitFor(() => view.getByRole('button', { name: 'Following' }));
+    // The hint is the row's own destination, not "Follow Ada" — which is what a
+    // settled control must never promise.
+    expect(control.props.accessibilityHint).toBe('Opens their profile');
+  });
+});
+
+/**
+ * **The inviter's half of the same acceptance** (20260831000100).
+ *
+ * It replaced a plain `follow` row — "Ada started following you" — which said nothing
+ * about where this person came from. The sentence that did say so belonged to
+ * `invite_activated`, which does not fire until the invitee's tenth ranking, so the
+ * inviter learnt the interesting fact days late or never.
+ *
+ * Where the row *leads* is asserted in `routing.test.ts`, which owns the destination
+ * matrix for every kind and fails if a new one is added unrouted.
+ */
+describe('the row an acceptance files for the inviter', () => {
+  const joined = (overrides: Record<string, unknown> = {}) =>
+    follow({
+      id: 'j1',
+      kind: 'invite_joined',
+      type: 'invite_joined',
+      actor_username: 'ada',
+      actor_display_name: 'Ada',
+      ...overrides,
+    });
+
+  it('says who joined and where they came from', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(joined());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('joined bingd. from your invite')).toBeTruthy());
+    expect(view.getByText('Ada')).toBeTruthy();
+    // Never the sentence it replaced.
+    expect(view.queryByText(/started following you/)).toBeNull();
+  });
+
+  it('spells the whole sentence out for a screen reader', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(joined());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() =>
+      expect(view.getByLabelText(/Ada joined bingd\. from your invite/)).toBeTruthy(),
+    );
+  });
+
+  it('paints as unread, so it reaches the bell', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(joined());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByLabelText(/^Unread\./)).toBeTruthy());
+  });
+
+  /**
+   * The agreement between `CAN_OFFER_FOLLOW` and `relationshipActionFor`, which is the
+   * defect independent review found on the welcome row and which this row inherits: a
+   * kind that reaches the control without reaching the list of actors whose state gets
+   * fetched draws nothing where its state should be.
+   */
+  it('asks the server what the inviter owes the person who joined', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(joined());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(mockAskedAbout.at(-1)).toContain('them');
+  });
+
+  /**
+   * **"Follow back" and not "Follow"**: the invitee has just followed the inviter, so
+   * there genuinely is something to return. The mirror of the welcome's rule.
+   */
+  it('offers Follow back when the inviter does not follow them yet', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(joined());
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByRole('button', { name: 'Follow back' })).toBeTruthy());
+    expect(view.queryByRole('button', { name: 'Follow' })).toBeNull();
+  });
+
+  it('says Requested when the inviter has asked a private invitee', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(joined());
+    mockRelationships.set('them', { following: 'pending' });
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByRole('button', { name: 'Requested' })).toBeTruthy());
+    expect(view.queryByRole('button', { name: 'Follow back' })).toBeNull();
+  });
+
+  it('says Following once the inviter has followed them back', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(joined());
+    mockRelationships.set('them', { following: 'approved' });
+    const view = await renderWithProviders(<NotificationsScreen />);
+
+    await waitFor(() => expect(view.getByRole('button', { name: 'Following' })).toBeTruthy());
+    expect(view.queryByRole('button', { name: 'Follow back' })).toBeNull();
   });
 });
 
