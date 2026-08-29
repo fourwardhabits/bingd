@@ -44,8 +44,13 @@ const BUCKETS: Bucket[] = ['loved', 'fine', 'not_for_me'];
  * through the same control — and the upcoming For You page is meant to reuse it
  * rather than grow a second one. What varies between surfaces is which facets have
  * anything to say, and that is decided from the data rather than by the caller:
- * a collection with no anime does not show an Anime toggle, and a watchlist does not
+ * a collection with no anime offers no Anime option, and a watchlist does not
  * show rating filters because nothing on it has a rating.
+ *
+ * **There is no Type section, and there was one until 2026-08-29.** It held Anime alone,
+ * which implied a third medium beside Movies and TV that nothing in the app offers.
+ * Anime is a genre now and arrives inside the Genre list with the rest;
+ * `filters.ts` carries the reasoning and the one semantic that changed with it.
  *
  * Edits are local until Apply. A sheet that filtered live would re-sort the wall
  * under the reader while they were still choosing, and Clear all would have no
@@ -68,17 +73,6 @@ export function CollectionFilterSheet({
   return (
     <Sheet visible onClose={onClose} label="Filter your collection">
       <ScrollView style={styles.body} contentContainerStyle={styles.content}>
-        {options.anime > 0 ? (
-          <Section title="Type">
-            <Option
-              label="Anime"
-              count={options.anime}
-              selected={draft.anime}
-              onPress={() => setDraft({ ...draft, anime: !draft.anime })}
-            />
-          </Section>
-        ) : null}
-
         {showBuckets ? (
           <Section title="Rating">
             {BUCKETS.map((bucket) => (

@@ -2,7 +2,7 @@ import { waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { applyFilters, emptyFilters, facetOptions } from './filters';
+import { ANIME_GENRE, applyFilters, emptyFilters, facetOptions } from './filters';
 
 import {
   BAND_ORDER,
@@ -540,12 +540,13 @@ describe('the collection filters see an inherited season', () => {
   });
 
   it('lets an animated Japanese season read as anime', () => {
-    // The anime facet is Japanese original language *and* an animation genre. Both now
-    // reach a season through its show, which is the only way a TV anime could ever
-    // satisfy it.
+    // Anime is Japanese original language *and* an animation genre. Both now reach a
+    // season through its show, which is the only way a TV anime could ever satisfy it —
+    // and it is the TV half of "Movies and TV are the only media types, Anime is a genre
+    // over both".
     const anime = { ...season, genres: ['Animation'] };
-    expect(applyFilters([anime], { ...emptyFilters(), anime: true })).toHaveLength(1);
-    expect(applyFilters([season], { ...emptyFilters(), anime: true })).toEqual([]);
+    expect(applyFilters([anime], { ...emptyFilters(), genres: [ANIME_GENRE] })).toHaveLength(1);
+    expect(applyFilters([season], { ...emptyFilters(), genres: [ANIME_GENRE] })).toEqual([]);
   });
 
   it('offers the inherited genres as facet options', () => {

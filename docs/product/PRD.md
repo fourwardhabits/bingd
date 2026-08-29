@@ -1326,8 +1326,10 @@ Filtered search is intentional exploration, not recommendation. It supports comb
 
 > ### As built — 2026-08-27: **Anime** is a filter, defined by the metadata the catalogue has
 >
-> Anime is a first-class option in the shared filter sheet's Type section, on Collection
-> and For You alike — a facet over Movies and TV, never a third medium. The v1
+> Anime is a first-class option in the shared filter sheet, on Collection and For You
+> alike — a facet over Movies and TV, never a third medium. **It sits in the Genre
+> section**, and it sat under a section headed *Type* until 2026-08-29; see the correction
+> below. The v1
 > definition (`src/features/collection/filters.ts`): **Japanese original language**
 > (`media_items.original_language = 'ja'`) **and an animation genre** (`/anim/i`, which
 > covers both TMDB's "Animation" and Wikidata's "animated film"). The known error cases
@@ -1339,6 +1341,39 @@ Filtered search is intentional exploration, not recommendation. It supports comb
 > keyword (210024), which is definitive but requires caching keywords the adapter does
 > not fetch today. There is **no TMDB `/discover` integration**: filters narrow the
 > already-fetched candidate pool client-side, here as everywhere in filtered discovery.
+>
+> #### Corrected 2026-08-29: Anime is a genre, not a type
+>
+> **Movies and TV are the only media-type filters, and Anime was the only thing in a
+> section headed Type.** *Type* is the word this product uses for what a title *is* —
+> a movie or a TV season — and `rankable_category` maps a media kind to `movies` or
+> `tv_seasons` and to nothing else. A section by that name holding Anime implied a third
+> medium that no selector in the app offers: `MediumSelector` and every `SegmentedTabs`
+> pair are Movies and TV (For You adds *People*, which is a category kind and not a
+> medium), and the Anime option never appeared in any of them.
+>
+> So Anime moved into the **Genre** list, where it reads as what it is: a kind of thing
+> to watch, beside Horror and Documentary. The medium still comes from the tab or the
+> selector *outside* the sheet, so **Movies + Anime returns anime films and TV + Anime
+> returns anime seasons** — `applyFilters` does not know which of the two it is looking
+> at, which is what makes the pair work without a case for it.
+>
+> **The classification is unchanged.** `isAnime` is the same predicate the paragraph
+> above describes and was deliberately *not* widened to all Animation, which would sweep
+> in every Pixar and Disney film. It is a synthetic option rather than a catalogue
+> string — TMDB has no genre named Anime, it has Animation — and its count comes from
+> the predicate, never from a label on a row, so the number beside the option and what
+> selecting it returns cannot disagree.
+>
+> **One behaviour changed, deliberately.** As a facet of its own it was AND-ed with the
+> genres: Anime + Comedy meant anime comedies. Inside the Genre facet it is OR-ed like
+> every other entry — anime *or* comedies. Within-facet OR and between-facet AND is the
+> model the sheet has always documented, and one checkbox behaving as an intersection
+> while its neighbours behave as a union is a rule nobody can see and nobody would guess.
+>
+> **Other-profile collections are consistent by construction**: the See-all sheet has no
+> filter sheet at all — Movies / TV and the four sort orders — so there is no third
+> medium to remove there and none to add.
 
 ### As built — 2026-08-28: Match and its evidence, side by side
 
