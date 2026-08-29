@@ -607,3 +607,230 @@ describe('the top of the page', () => {
     expect(total).toBe(theme.space[4]);
   });
 });
+
+// ---------------------------------------------------------------------------
+/**
+ * **Enough context to decide whether to open it** — founder, 2026-08-30.
+ *
+ * "Ravi commented on your activity" is a row you have to tap to understand. One line of
+ * what was actually said is the difference, and the constraint that came with it in the
+ * same breath is that the line must never carry a spoiler or a retracted remark.
+ *
+ * The withholding is the server's — `my_notifications` sends `comment_excerpt: null` and
+ * `comment_spoilers: true` — so what is asserted here is the other half: that the screen
+ * draws what it is given, says why when there is nothing, and never grows a row to fit a
+ * long comment.
+ */
+const commentRow = (overrides: Record<string, unknown> = {}) =>
+  follow({
+    id: 'c1',
+    kind: 'comment',
+    type: 'comment',
+    subject_type: 'feed_event',
+    subject_id: 'event-1',
+    media_item_id: 'media-1',
+    media_title: 'Sinners',
+    media_kind: 'movie',
+    comment_excerpt: 'Pretty good',
+    comment_spoilers: false,
+    ...overrides,
+  });
+
+describe('the comment preview', () => {
+  it('draws one line of what was said, under the sentence', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(commentRow());
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/commented on your activity/)).toBeTruthy());
+
+    expect(view.getByText('Pretty good')).toBeTruthy();
+  });
+
+  it('does the same for a mention, with the mention’s own sentence', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      commentRow({
+        id: 'm1',
+        kind: 'mention',
+        type: 'mention',
+        comment_excerpt: 'sirrr what is that supposed to mean',
+        payload: { reply: false },
+      }),
+    );
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/mentioned you in a comment/)).toBeTruthy());
+
+    expect(view.getByText('sirrr what is that supposed to mean')).toBeTruthy();
+  });
+
+  it('says "in a reply" when that is what it was', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      commentRow({ id: 'm2', kind: 'mention', type: 'mention', payload: { reply: true } }),
+    );
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/mentioned you in a reply/)).toBeTruthy());
+  });
+
+  /**
+   * The shape contract. A comment is up to a thousand characters and the server sends at
+   * most 140 of them; this is the last bound, and without it one long remark would set
+   * the height of a row in a list whose whole job is to be scanned.
+   */
+  it('never lets a long comment grow the row', async () => {
+    mockNotifications.length = 0;
+    const long = 'a '.repeat(120).trim();
+    mockNotifications.push(commentRow({ comment_excerpt: long }));
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(long)).toBeTruthy());
+
+    expect(view.getByText(long).props.numberOfLines).toBe(1);
+  });
+
+  /**
+   * The founder's spoiler rule. The row still says something — an absent second line
+   * reads as a rendering bug, and "Contains spoilers" is a useful thing to know before
+   * tapping.
+   */
+  it('says Contains spoilers instead of the text, and the text is nowhere', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(commentRow({ comment_excerpt: null, comment_spoilers: true }));
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText('Contains spoilers')).toBeTruthy());
+
+    // The whole tree, not the row: the point is that no such string reached the client.
+    expect(JSON.stringify(view.toJSON())).not.toContain('Pretty good');
+  });
+
+  /**
+   * A retracted comment. The server sends neither the text nor the spoiler flag, so there
+   * is nothing to draw and nothing to explain — the row is the sentence it always was,
+   * and the tap still resolves through the ordinary chain.
+   */
+  it('draws no second line at all for a comment that is gone', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(commentRow({ comment_excerpt: null, comment_spoilers: false }));
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/commented on your activity/)).toBeTruthy());
+
+    expect(view.queryByText('Contains spoilers')).toBeNull();
+    expect(view.queryByText('Pretty good')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+const watchTagRow = (overrides: Record<string, unknown> = {}) =>
+  follow({
+    id: 'w1',
+    kind: 'watch_tag',
+    type: 'watch_tag',
+    actor_display_name: 'Suraj',
+    subject_type: 'media_item',
+    subject_id: 'media-1',
+    media_item_id: 'media-1',
+    media_title: '100 Meters',
+    media_kind: 'movie',
+    viewer_ranked: false,
+    ...overrides,
+  });
+
+describe('the watched-with row', () => {
+  /**
+   * "Suraj watched 100 Meters with you" — the founder's copy, with the title inside the
+   * sentence rather than on a line beneath it. The old shape said "watched something with
+   * you" and then the film's name, which is two facts the reader has to join up.
+   */
+  it('puts the title inside the sentence, and does not repeat it below', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(watchTagRow());
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(' watched ')).toBeTruthy());
+
+    expect(view.getByText(' with you')).toBeTruthy();
+    // Once, not twice: the subject line is suppressed for this kind.
+    expect(view.getAllByText('100 Meters')).toHaveLength(1);
+    expect(view.queryByText(/watched something with you/)).toBeNull();
+  });
+
+  /** A title that has left the catalogue has no name to put in the middle. */
+  it('falls back to the plain sentence when the title is gone', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      watchTagRow({ media_item_id: null, media_title: null, media_kind: null }),
+    );
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/watched something with you/)).toBeTruthy());
+  });
+
+  it('offers Rank when the reader has not ranked it', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(watchTagRow());
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByRole('button', { name: 'Rank' })).toBeTruthy());
+  });
+
+  /**
+   * The control disappears on the next refetch after they rank it, because
+   * `viewer_ranked` is resolved server-side in the read that draws the row. There is no
+   * local state and nothing to invalidate — which is what this asserts by changing only
+   * that field.
+   */
+  it('does not offer Rank once they have', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(watchTagRow({ viewer_ranked: true }));
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(' with you')).toBeTruthy());
+
+    expect(view.queryByRole('button', { name: 'Rank' })).toBeNull();
+  });
+
+  it('offers nothing when the title itself has gone', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      watchTagRow({ media_item_id: null, media_title: null, media_kind: null }),
+    );
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/watched something with you/)).toBeTruthy());
+
+    expect(view.queryByRole('button', { name: 'Rank' })).toBeNull();
+  });
+
+  /**
+   * **Rank opens the title page, never the ranking sheet** — the founder was explicit. A
+   * notification is a claim about something that may have happened days ago; dropping the
+   * reader into a comparison session from a Bell tap is a modal state entered by accident.
+   * The hint is what the row promises out loud, and it says the same thing.
+   */
+  it('promises the title page rather than a ranking session', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(watchTagRow());
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByRole('button', { name: 'Rank' })).toBeTruthy());
+
+    expect(view.getByRole('button', { name: 'Rank' }).props.accessibilityHint).toBe(
+      'Opens the title, where you can rank it',
+    );
+  });
+
+  it('does not offer Rank on anything that is not a watched-with row', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(commentRow());
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() => expect(view.getByText(/commented on your activity/)).toBeTruthy());
+
+    expect(view.queryByRole('button', { name: 'Rank' })).toBeNull();
+  });
+});

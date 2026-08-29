@@ -128,6 +128,22 @@ export function invalidateAfterCollectionChange(
   invalidate(['watched', userId]);
 
   /**
+   * **The inbox, because one of its rows is a question about this collection.**
+   *
+   * A watched-with row offers **Rank** only while the reader has not ranked the title,
+   * and `my_notifications` resolves that in the read that draws the row (`viewer_ranked`,
+   * 20260830000100). Nothing else here would ever tell it the answer had changed: the
+   * inbox's `staleTime` is 30s and its focus refetch is gated on staleness, so tapping
+   * Rank, ranking the title and coming straight back left the control still offered —
+   * an action pointing at a state the reader has already reached. Independent review 68.
+   *
+   * By prefix on the reader, which is the whole of that cache. Cheap: it is one round
+   * trip against an index on `(recipient_id, created_at desc)`, and only when a
+   * collection write has actually happened.
+   */
+  invalidate(['notifications', userId]);
+
+  /**
    * The community aggregate for this exact title: the reader's own new rating is part
    * of it, and a score that excludes the rating you just gave reads as broken.
    *

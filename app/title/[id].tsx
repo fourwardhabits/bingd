@@ -1128,6 +1128,21 @@ export default function TitleScreen() {
           setRankingSubject(null);
           if (!rankedTitle) return;
           setLogIntent('note');
+          /**
+           * **Cleared, and it is the founder's "Add more details opens only the Note".**
+           *
+           * `openWriting` is set by the Ranked menu's writing row and is not reset by
+           * anything else on this screen, so a reader who came in that way, changed the
+           * rating from inside the sheet and finished the comparison arrived back at a
+           * log sheet already expanded into the note composer — with the companions and
+           * the watch date pushed under a keyboard.
+           *
+           * `LogSheet` also refuses to auto-expand in the post-rank state, which is the
+           * load-bearing half because there are two callers. This is the other half:
+           * the intent belonged to a visit that has ended, and carrying it forward would
+           * be wrong even if nothing read it.
+           */
+          setOpenWriting(null);
           setPlacement(result);
           setLoggingTitle(rankedTitle);
         }}

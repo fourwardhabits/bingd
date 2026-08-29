@@ -2152,3 +2152,93 @@ describe('the state after a ranking', () => {
     await waitFor(() => expect(sheet.getByText('#11 in TV')).toBeTruthy());
   });
 });
+
+/**
+ * **"Add more details" means the whole log** — founder physical finding, 2026-08-30.
+ *
+ * The report was that the control "routes into only the Note/Review portion". All three
+ * rows have in fact always been rendered here — what the founder was describing is what
+ * a phone shows: a sheet that arrives with the note composer already expanded, under a
+ * keyboard, puts the companions and the watch date below the fold.
+ *
+ * The path that does it is real and narrow. `openWriting` is set by the Ranked menu's
+ * writing row, it is not reset by anything else on the title screen, and a reader who
+ * came in that way, changed their rating from inside the sheet and finished the
+ * comparison arrived back here with the intent still set.
+ *
+ * So the rule is stated on this sheet rather than at the call site — there are two
+ * callers — and it is the one thing these tests are about: **the post-rank sheet opens on
+ * nothing.** `openWriting` still does its job everywhere else, which is the second test.
+ */
+describe('add more details opens the whole log', () => {
+  const placed = { score: 8.7, position: 3, category: 'movies' };
+
+  it('does not land in the note composer, even carrying a writing intent', async () => {
+    const sheet = await open(filmA, { postRank: placed, openWriting: 'private' });
+
+    await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
+    expect(sheet.queryByPlaceholderText('What did you think?')).toBeNull();
+  });
+
+  it('offers all four of them, and each one opens', async () => {
+    const sheet = await open(filmA, { postRank: placed, openWriting: 'private' });
+    await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
+
+    // Who I watched with.
+    await waitFor(() =>
+      expect(
+        sheet.getByLabelText('Who I watched with').props.accessibilityState.disabled,
+      ).toBe(false),
+    );
+    await fireEvent.press(sheet.getByRole('button', { name: 'Who I watched with' }));
+    // The picker itself, which with no mutuals in this fixture is its empty state. What
+    // is being asserted is that the row *discloses* — the picker's own behaviour has its
+    // own section above.
+    await waitFor(() => expect(sheet.getByText('Nobody to tag yet')).toBeTruthy());
+
+    // The note, and the spoiler claim that lives beside it.
+    await sheet.openNotes();
+    expect(sheet.note()).toBeTruthy();
+    expect(sheet.getByLabelText('This note contains spoilers')).toBeTruthy();
+
+    // And the watch date.
+    await sheet.openDate();
+    expect(sheet.getByText('Watch date')).toBeTruthy();
+  });
+
+  /**
+   * The other half of the rule: `openWriting` is not broken, it is scoped. Opening the
+   * sheet *to write something* — which is what the Ranked menu's row means — still lands
+   * the reader in the composer, because there is no ranking that has just finished and
+   * nothing else they came for.
+   */
+  it('still opens the composer when that is what the reader asked for', async () => {
+    const sheet = await open(filmA, { openWriting: 'private' });
+
+    await waitFor(() => expect(sheet.getByPlaceholderText('What did you think?')).toBeTruthy());
+  });
+
+  /**
+   * **Editing details is not re-ranking, and does not create a second anything.**
+   *
+   * The rows write through `log_watched`, which upserts the one `user_media` row this
+   * title already has. Nothing here touches `set_bucket`, `rank_start` or `rank_rebucket`
+   * — and if it did, the position the reader has just earned would be discarded, which is
+   * exactly the accident the post-rank state exists to prevent.
+   */
+  it('writes details without touching the ranking', async () => {
+    const sheet = await open(filmA, { postRank: placed });
+    await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
+
+    await sheet.openNotes();
+    await fireEvent.changeText(sheet.note(), 'the third act earns it');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('rank_start')).toHaveLength(0);
+    expect(callsTo('rank_rebucket')).toHaveLength(0);
+    // One write against the row that already exists, not a second log.
+    expect(callsTo('log_watched')).toHaveLength(1);
+  });
+});

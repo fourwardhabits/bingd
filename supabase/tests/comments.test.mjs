@@ -222,19 +222,21 @@ describe('the shape the founder specified', () => {
     assert.equal(rows[0].column_default, null, 'the backfill default was dropped after it ran');
   });
 
-  it('is referenced only by the two things that are meant to reference it', async () => {
+  it('is referenced only by the three things that are meant to reference it', async () => {
     const { rows } = await t.sql(
       `select c.conrelid::regclass::text as referencing
          from pg_constraint c
         where c.contype = 'f' and c.confrelid = 'comments'::regclass
         order by referencing`,
     );
-    // `comments` twice is `parent_id`; the third is the like. Anything else appearing
-    // here is a table that has attached itself to a comment without a migration saying
-    // why — which is the check the original "nothing may reference a comment" was for.
+    // `comments` twice is `parent_id`; the like is the second; the third is
+    // `comment_mentions` (20260830000100), which is a comment's own record of who it
+    // names and cascades with it. Anything else appearing here is a table that has
+    // attached itself to a comment without a migration saying why — which is the check
+    // the original "nothing may reference a comment" was for.
     assert.deepEqual(
       rows.map((r) => r.referencing),
-      ['comment_reactions', 'comments'],
+      ['comment_mentions', 'comment_reactions', 'comments'],
     );
   });
 });

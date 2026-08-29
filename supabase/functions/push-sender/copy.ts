@@ -164,6 +164,31 @@ function sentence(job: PushJob, name: string, subject: string | null): { title: 
         body: subject ? `commented on your activity — ${subject}` : 'commented on your activity',
       };
     }
+    /**
+     * **The one written surface that stays generic** (founder, 2026-08-30).
+     *
+     * A comment push quotes the remark because the remark is *for* the person whose lock
+     * screen it lands on — they posted the thing being answered. A mention is not that:
+     * it arrives on somebody else's activity, addressed at a person who has not asked to
+     * be in the conversation, and the founder's instruction was explicit that its push
+     * carries no comment text.
+     *
+     * The server agrees rather than trusting this file to remember: `claim_push_batch`
+     * resolves `comment_excerpt` for `comment` jobs only, so a mention job has nothing
+     * to quote even if somebody rewrote the line below. The title rides as context the
+     * way a reaction's does, because "mentioned you" with no idea where is a
+     * notification that has to be opened to be understood.
+     *
+     * "in a comment" whether or not it was a reply. The inbox row distinguishes the two
+     * — the `reply` flag is on the notification's payload — and a push job carries no
+     * payload, deliberately: adding a field so a lock screen can say "reply" instead of
+     * "comment" is a widening of `claim_push_batch` for a word.
+     */
+    case 'mention':
+      return {
+        title: name,
+        body: subject ? `mentioned you in a comment — ${subject}` : 'mentioned you in a comment',
+      };
     case 'reaction':
       return {
         title: name,

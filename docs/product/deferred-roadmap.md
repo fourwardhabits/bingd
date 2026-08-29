@@ -1360,6 +1360,45 @@ in it.
 
 ---
 
+## 27. "Remove me from this watch" — disputing a watched-with claim
+
+**Not built, 2026-08-30**, in the tranche that made the watched-with notice visible
+(PRD §14).
+
+**What it is.** A control on the receiving side that says *I did not watch this with
+you* — as distinct from the one that already exists, which hides the tag from the
+tagged person's own surfaces.
+
+**Why the need is now clearer, which is the only reason this is written down.** Until
+this tranche a watch tag was a quiet thing: a name on somebody else's log, discoverable
+if you went looking. It now arrives as an inbox row that says "Suraj watched 100 Meters
+with you" and offers you a Rank button. That is a claim about your evening, delivered to
+you, with an action attached — and the moment a claim is delivered rather than filed, the
+question "what if it is wrong" stops being hypothetical.
+
+**Why it is still not built.**
+
+- The existing control may well be enough. `hide_watch_tag` already removes the tag from
+  the tagged person's side without altering the tagger's log, which is PRD §14's stated
+  rule and the right default: the tagger's record of their own evening is theirs.
+- A dispute is a different object from a hide. It has to reach the tagger, which means it
+  is a notification; it can be wrong in both directions; and two people disagreeing about
+  a fact neither can prove is a moderation surface, not a button.
+- The population that can do this is already an approved mutual follow. The realistic
+  failure is a mistake between friends, and the realistic fix is a message — which the
+  product deliberately does not have, and is not adding.
+
+**What it would cost.** A column on `watch_tags` and a notification type is the small
+version, which is exactly why it should not be built on a guess: the small version
+answers "the tagger is told", and the questions that actually decide the feature are what
+the tagger's log says afterwards, whether the feed event changes, and what happens when
+the dispute is itself wrong.
+
+**Revisit when.** Beta evidence, and specifically a real instance: somebody tagged in a
+watch they were not at, saying so. Not the team imagining one.
+
+---
+
 ## Carried forward from earlier decisions
 
 Still deferred, still agreed, recorded so that nothing is lost between documents:
