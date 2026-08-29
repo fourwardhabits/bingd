@@ -856,6 +856,10 @@ describe('tabs that have nothing behind them', () => {
     ];
     const view = await open();
 
+    // `open()` waits for the title, which comes from the media row. The Videos tab comes
+    // from the cached-videos query and is not on screen yet — the two tests above press
+    // it through this same wait, and this one was pressing it through none.
+    await waitFor(() => expect(view.getByRole('tab', { name: 'Videos' })).toBeTruthy());
     await fireEvent.press(view.getByRole('tab', { name: 'Videos' }));
     await fireEvent.press(view.getByLabelText('Play Official Trailer on YouTube'));
 
