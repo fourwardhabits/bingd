@@ -213,12 +213,16 @@ is no second axis.
 No per-channel settings were added. The operating system's own permission remains
 independent, because it is the platform's to hold.
 
-**Twelve of the fourteen types are pushed.** *(This read "eight of the ten" when written:
+**Twelve of the fifteen types are pushed.** *(This read "eight of the ten" when written:
 `friendship` and `recommendation_ranked` arrived 2026-08-27, `award_earned` joined
 `_push_eligible` on 2026-08-28 when `20260828000100` gave it its writer, `goal_completed`
-on 2026-08-29, and `mention` on 2026-08-30.)* `follow_approved`
-is excluded by PRD §15's own event table (Push: No), and `friendship` is a record of the
-reader's own tap — a phone buzzing about it would be noise. `_push_eligible` is the list,
+on 2026-08-29, `mention` on 2026-08-30, `invite_joined` on 2026-08-31, and
+`invite_welcome` **left** on `20260901000100`.)* `follow_approved`
+is excluded by PRD §15's own event table (Push: No), `friendship` is a record of the
+reader's own tap — a phone buzzing about it would be noise — and `invite_welcome` is the
+founder's call of 2026-08-29: it fires the moment somebody opens Bingd for the first
+time, so the lock-screen copy arrives while they are already looking at the app that sent
+it. Its inbox row is untouched and is still exempt from the preference gate. `_push_eligible` is the list,
 and an unmapped type is **not** eligible — the opposite of the preference trigger's rule
 for an unmapped category, because a missing notification is a bug somebody can see and an
 unreviewed push is not.

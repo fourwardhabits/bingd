@@ -1,0 +1,536 @@
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+
+import { createTestDb, createTestDbBefore } from './harness.mjs';
+
+/**
+ * The founder's final physical-QA tranche — `20260901000100`.
+ *
+ * Four unrelated server corrections that share one migration because they share one
+ * deploy, and one file because each is a handful of assertions rather than a suite:
+ *
+ *   1. **Comments and reviews are different awards.** Comment Gremlin counted both and
+ *      said so on the row. It counts comments now; a published review moves nothing.
+ *      The historical treatment is the expensive half: a tier already on the ledger
+ *      that the comments-only count no longer supports is revoked, along with the
+ *      announcements that hang off it, so no surface goes on claiming an award the
+ *      Awards sheet no longer shows.
+ *   2. **A causal group reads in the order it happened**, and it took two keys because
+ *      the two derived events fail differently. An award is written in the ranking's
+ *      own transaction, so its `created_at` ties to the microsecond and `causal_step`
+ *      is what breaks it. A goal completion is not: it is caused by a watch date,
+ *      `log_watched` posts no activity, and the celebration commits seconds after the
+ *      ranking — a real later timestamp that no tiebreak can reach, so it carries a
+ *      `causal_at` naming the activity it belongs under.
+ *   3. **The invitee's welcome stays in the app.** The inbox row is untouched; the
+ *      lock-screen copy of it is gone.
+ *   4. **The inbox knows what kind of activity a row is about**, so it can say "your
+ *      Marty Supreme watch" without asserting a watch that never happened.
+ *
+ * The no-repeat ranking invariant from the same migration lives in
+ * `ranking-sessions.test.mjs`, beside the skip tests it corrects.
+ */
+
+const MIGRATION = '20260901000100_a_comparison_you_are_not_asked_twice.sql';
+
+let t;
+let seq = 991000;
+
+const movie = (title) => t.createMovie(title, seq++);
+
+const metric = async (db, user, award, threshold = 20) =>
+  Number(
+    (await db.sql(`select _award_metric($1, $2, $3) as m`, [user, award, threshold])).rows[0].m,
+  );
+
+/** An activity to hang comments on. Written directly: the awards read `comments`. */
+const eventOf = async (db, actor, mediaItemId) =>
+  (
+    await db.sql(
+      `insert into feed_events (actor_id, type, media_item_id, payload)
+       values ($1, 'title_ranked', $2, '{"position":1,"bucket":"loved","category":"movies","score":10}')
+       returning id`,
+      [actor, mediaItemId],
+    )
+  ).rows[0].id;
+
+/** `n` comments by `who`, written straight in — `award_on_comment` fires on inserts. */
+const writeComments = async (db, who, event, n, tag) => {
+  for (let i = 0; i < n; i += 1) {
+    await db.sql(`insert into comments (feed_event_id, author_id, body) values ($1, $2, $3)`, [
+      event,
+      who,
+      `${tag} ${i}`,
+    ]);
+  }
+};
+
+/** `n` published reviews by `who` — a public note on a logged movie. */
+const writeReviews = async (db, who, n, tag) => {
+  for (let i = 0; i < n; i += 1) {
+    const id = await db.createMovie(`${tag}_${seq}`, seq++);
+    await db.sql(
+      `insert into user_media (user_id, media_item_id, bucket, note, note_visibility)
+       values ($1, $2, 'loved', $3, 'public')`,
+      [who, id, `${tag} review ${i}`],
+    );
+  }
+};
+
+before(async () => {
+  t = await createTestDb();
+});
+
+after(async () => t?.close());
+
+// ---------------------------------------------------------------------------
+// 1. Comment Gremlin counts comments
+// ---------------------------------------------------------------------------
+
+describe('comments and reviews are different awards', () => {
+  it('a published review does not advance the comment track', async () => {
+    const writer = await t.createUser({ username: 'cg_reviewer' });
+    await writeReviews(t, writer, 5, 'cg_review');
+
+    assert.equal(
+      await metric(t, writer, 'comment-gremlin'),
+      0,
+      'five published reviews moved a track that is about comments',
+    );
+  });
+
+  it('a comment does', async () => {
+    const writer = await t.createUser({ username: 'cg_commenter' });
+    const film = await movie('cg_subject');
+    const event = await eventOf(t, writer, film);
+
+    await writeComments(t, writer, event, 3, 'cg');
+
+    assert.equal(await metric(t, writer, 'comment-gremlin'), 3);
+  });
+
+  it('and the two do not add together', async () => {
+    const writer = await t.createUser({ username: 'cg_both' });
+    const film = await movie('cg_both_subject');
+    const event = await eventOf(t, writer, film);
+
+    await writeComments(t, writer, event, 4, 'cg_both');
+    await writeReviews(t, writer, 6, 'cg_both_review');
+
+    assert.equal(
+      await metric(t, writer, 'comment-gremlin'),
+      4,
+      'the metric is comments alone; ten was the old combined count',
+    );
+  });
+
+  it('publishing a review announces nothing — the note trigger is gone', async () => {
+    const writer = await t.createUser({ username: 'cg_no_trigger' });
+    const film = await movie('cg_trigger_subject');
+    const event = await eventOf(t, writer, film);
+
+    // One short of Whisper on comments alone.
+    await writeComments(t, writer, event, 19, 'cg_edge');
+    // Then publish a review, which under the old rule was the twentieth contribution
+    // and would have crossed the tier.
+    await writeReviews(t, writer, 1, 'cg_edge_review');
+
+    const { rows } = await t.sql(
+      `select 1 from award_unlocks where user_id = $1 and award_key = 'comment-gremlin'`,
+      [writer],
+    );
+    assert.equal(rows.length, 0, 'a review unlocked a comment tier');
+  });
+
+  it('the twentieth comment still crosses Whisper, once', async () => {
+    const writer = await t.createUser({ username: 'cg_whisper' });
+    const film = await movie('cg_whisper_subject');
+    const event = await eventOf(t, writer, film);
+
+    await writeComments(t, writer, event, 20, 'cg_whisper');
+
+    const unlocks = (
+      await t.sql(
+        `select tier_key, announced from award_unlocks
+          where user_id = $1 and award_key = 'comment-gremlin'`,
+        [writer],
+      )
+    ).rows;
+    assert.deepEqual(unlocks, [{ tier_key: 'whisper', announced: true }]);
+
+    const posts = await t.sql(
+      `select 1 from feed_events
+        where actor_id = $1 and type = 'award_earned' and payload ->> 'award' = 'comment-gremlin'`,
+      [writer],
+    );
+    assert.equal(posts.rows.length, 1, 'exactly one post');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2. The reconciliation of tiers earned under the combined rule
+// ---------------------------------------------------------------------------
+
+describe('the historical award reconciliation', () => {
+  let t2;
+
+  after(async () => t2?.close());
+
+  it('revokes a tier the comments-only count no longer supports, and leaves one it does', async () => {
+    t2 = await createTestDbBefore(MIGRATION);
+
+    // Whisper is 20. One account reaches it on 15 comments and 5 reviews — a tier the
+    // new rule does not support. The other reaches it on 20 comments, which it does.
+    const mixed = await t2.createUser({ username: 'recon_mixed' });
+    const pure = await t2.createUser({ username: 'recon_pure' });
+
+    const film = await t2.createMovie('recon_subject', seq++);
+    const mixedEvent = await eventOf(t2, mixed, film);
+    const pureEvent = await eventOf(t2, pure, film);
+
+    await writeComments(t2, mixed, mixedEvent, 15, 'recon_mixed');
+    await writeReviews(t2, mixed, 5, 'recon_mixed_review');
+    await writeComments(t2, pure, pureEvent, 20, 'recon_pure');
+
+    // Both should hold Whisper under the OLD rule, and both should have announced it.
+    const before = async (who) =>
+      (
+        await t2.sql(
+          `select tier_key from award_unlocks where user_id = $1 and award_key = 'comment-gremlin'`,
+          [who],
+        )
+      ).rows;
+    assert.deepEqual(await before(mixed), [{ tier_key: 'whisper' }], 'fixture: mixed earned it');
+    assert.deepEqual(await before(pure), [{ tier_key: 'whisper' }], 'fixture: pure earned it');
+
+    const postsBefore = await t2.sql(
+      `select actor_id from feed_events where type = 'award_earned'
+        and payload ->> 'award' = 'comment-gremlin'`,
+    );
+    assert.equal(postsBefore.rows.length, 2, 'fixture: both announced');
+
+    await t2.applyMigration(MIGRATION);
+
+    assert.deepEqual(
+      await before(mixed),
+      [],
+      'a tier the comments-only count cannot support must not survive',
+    );
+    assert.deepEqual(
+      await before(pure),
+      [{ tier_key: 'whisper' }],
+      'a tier earned on comments alone must be left exactly alone',
+    );
+
+    // The announcements go with the tier they announced, and only those.
+    const posts = (
+      await t2.sql(
+        `select actor_id from feed_events where type = 'award_earned'
+          and payload ->> 'award' = 'comment-gremlin'`,
+      )
+    ).rows.map((r) => r.actor_id);
+    assert.deepEqual(posts, [pure], 'the revoked tier kept a feed post claiming it');
+
+    const inbox = (
+      await t2.sql(
+        `select recipient_id from notifications where type = 'award_earned'
+          and payload ->> 'award' = 'comment-gremlin'`,
+      )
+    ).rows.map((r) => r.recipient_id);
+    assert.deepEqual(inbox, [pure], 'the revoked tier kept a congratulations claiming it');
+
+    // Nothing else on the ledger was touched: the reconciliation is scoped to one
+    // track by its own predicate, and this is the assertion that says so.
+    const others = await t2.sql(
+      `select 1 from award_unlocks where award_key <> 'comment-gremlin'`,
+    );
+    assert.equal(others.rows.length, 0, 'fixture has no other awards, so this proves scope');
+  });
+
+  it('and a revoked tier can be earned again, announcing once', async () => {
+    // Five more comments carry `mixed` from 15 to 20 on the new rule.
+    const mixed = (
+      await t2.sql(`select id from profiles where username = 'recon_mixed'`)
+    ).rows[0].id;
+    const film = (await t2.sql(`select id from media_items limit 1`)).rows[0].id;
+    const event = await eventOf(t2, mixed, film);
+
+    await writeComments(t2, mixed, event, 5, 'recon_again');
+
+    const unlocks = (
+      await t2.sql(
+        `select tier_key, announced from award_unlocks
+          where user_id = $1 and award_key = 'comment-gremlin'`,
+        [mixed],
+      )
+    ).rows;
+    assert.deepEqual(unlocks, [{ tier_key: 'whisper', announced: true }]);
+
+    const posts = await t2.sql(
+      `select 1 from feed_events where actor_id = $1 and type = 'award_earned'
+        and payload ->> 'award' = 'comment-gremlin'`,
+      [mixed],
+    );
+    assert.equal(posts.rows.length, 1, 'one post, not a second one beside a deleted first');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. The feed's causal order
+// ---------------------------------------------------------------------------
+
+describe('a causal group reads in the order it happened', () => {
+  it('puts a goal completed by a later write under the ranking that earned it', async () => {
+    // The founder's flow exactly: rank the film, then give it a watch date from the
+    // post-rank sheet. `log_watched` posts no activity, so the completion commits
+    // SECONDS AFTER the ranking and is genuinely the newer row — which is why a
+    // tiebreak could not have fixed this and `causal_at` had to.
+    const user = await t.createUser({ username: 'causal_goal' });
+    await t.actAs(user);
+
+    const year = new Date().getUTCFullYear();
+    await t.sql(
+      `insert into watch_goals (user_id, year, category, target) values ($1, $2, 'movies', 1)`,
+      [user, year],
+    );
+
+    const film = await movie('causal_goal_film');
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+
+    // A separate statement, and therefore a separate instant — the point of the test.
+    await t.sql(
+      `update user_media set watched_on = make_date($3, 6, 1)
+        where user_id = $1 and media_item_id = $2`,
+      [user, film, year],
+    );
+
+    const rows = (
+      await t.sql(
+        `select type, causal_step, causal_at, created_at from feed_events
+          where actor_id = $1 order by causal_at desc, causal_step asc, id asc`,
+        [user],
+      )
+    ).rows;
+
+    const ranked = rows.find((r) => r.type === 'title_ranked');
+    const goal = rows.find((r) => r.type === 'goal_completed');
+    assert.ok(ranked, 'the ranking posted');
+    assert.ok(goal, 'the goal completed');
+    assert.equal(ranked.causal_step, 0, 'the act itself is step 0');
+    assert.equal(goal.causal_step, 1, 'its goal is step 1');
+
+    // The two timestamps genuinely differ. If this ever stops being true the test has
+    // stopped exercising the thing it was written for.
+    assert.ok(
+      new Date(goal.created_at).getTime() >= new Date(ranked.created_at).getTime(),
+      'fixture: the completion must be the later write',
+    );
+    assert.equal(
+      new Date(goal.causal_at).getTime(),
+      new Date(ranked.created_at).getTime(),
+      'the completion must sort at the ranking it belongs under',
+    );
+
+    assert.deepEqual(
+      rows.map((r) => r.type),
+      ['title_ranked', 'goal_completed'],
+      'the ranking must come first under the canonical order',
+    );
+  });
+
+  it('leaves a goal completed by an unrelated date correction at its own moment', async () => {
+    // The guard on the inheritance. Correcting the date of a film ranked long ago can
+    // also complete a goal; borrowing that film's timestamp would bury the celebration
+    // wherever that ranking sits. The test for it is a fact — "is this the reader's
+    // newest activity" — and not an interval.
+    const user = await t.createUser({ username: 'causal_stale' });
+    const year = new Date().getUTCFullYear();
+    await t.sql(
+      `insert into watch_goals (user_id, year, category, target) values ($1, $2, 'movies', 1)`,
+      [user, year],
+    );
+
+    const old = await movie('causal_stale_old');
+    const recent = await movie('causal_stale_recent');
+    await t.actAs(user);
+    await t.rankToCompletion(old, 'loved', async (pivot) => pivot);
+    await t.rankToCompletion(recent, 'loved', async (pivot) => pivot);
+
+    // The date lands on the OLDER film, so the reader's newest activity is about the
+    // other one and nothing may be inherited.
+    await t.sql(
+      `update user_media set watched_on = make_date($3, 6, 1)
+        where user_id = $1 and media_item_id = $2`,
+      [user, old, year],
+    );
+
+    const goal = (
+      await t.sql(
+        `select causal_at, created_at from feed_events
+          where actor_id = $1 and type = 'goal_completed'`,
+        [user],
+      )
+    ).rows[0];
+    assert.ok(goal, 'the goal still completed');
+    assert.equal(
+      new Date(goal.causal_at).getTime(),
+      new Date(goal.created_at).getTime(),
+      'an unrelated correction must not move the celebration down the feed',
+    );
+  });
+
+  it('awards are step 2 and up, in the order the detector was given them', async () => {
+    const earner = await t.createUser({ username: 'causal_awards' });
+
+    // Two tracks over their bronze, crossed by the triggers as they were built.
+    for (let i = 0; i < 5; i += 1) {
+      const p = await t.createUser({ username: `causal_p${i}` });
+      await t.sql(
+        `insert into follows (follower_id, followee_id, state, approved_at)
+         values ($1, $2, 'approved', now()), ($2, $1, 'approved', now())`,
+        [earner, p],
+      );
+    }
+    for (let i = 0; i < 3; i += 1) {
+      const invitee = await t.createUser({ username: `causal_i${i}` });
+      await t.sql(
+        `insert into invite_attributions (invitee_id, inviter_id, accepted_at, activated_at)
+         values ($1, $2, now(), now())`,
+        [invitee, earner],
+      );
+    }
+
+    // Wipe what the triggers announced one at a time and re-run the detector with both
+    // tracks in one call, which is the shape a single action produces.
+    await t.sql(`delete from award_unlocks where user_id = $1`, [earner]);
+    await t.sql(`delete from feed_events where actor_id = $1 and type = 'award_earned'`, [earner]);
+    await t.sql(`delete from notifications where recipient_id = $1 and type = 'award_earned'`, [
+      earner,
+    ]);
+
+    await t.sql(`select _maybe_award_unlocks($1, array['mutual-mania','invite-instigator'])`, [
+      earner,
+    ]);
+
+    const rows = (
+      await t.sql(
+        `select payload ->> 'award' as award, causal_step from feed_events
+          where actor_id = $1 and type = 'award_earned'
+          order by causal_at desc, causal_step asc, id asc`,
+        [earner],
+      )
+    ).rows;
+
+    assert.deepEqual(rows, [
+      { award: 'mutual-mania', causal_step: 2 },
+      { award: 'invite-instigator', causal_step: 3 },
+    ]);
+  });
+
+  it('orders a tied group the same way however the rows were written', async () => {
+    // The pagination and refetch property, stated directly: the canonical order is a
+    // total one, so a group whose rows were inserted backwards still reads forwards.
+    const user = await t.createUser({ username: 'causal_stable' });
+    const film = await movie('causal_stable_film');
+
+    await t.sql(
+      `insert into feed_events (actor_id, type, media_item_id, causal_step, payload, created_at, causal_at)
+       values
+         ($1, 'award_earned', null, 3, '{"award":"b","tier":"bronze"}', '2026-08-29T12:00:00Z', '2026-08-29T12:00:00Z'),
+         ($1, 'award_earned', null, 2, '{"award":"a","tier":"bronze"}', '2026-08-29T12:00:00Z', '2026-08-29T12:00:00Z'),
+         ($1, 'goal_completed', null, 1, '{"year":2026,"category":"movies","target":1}', '2026-08-29T12:00:00Z', '2026-08-29T12:00:00Z'),
+         ($1, 'title_ranked', $2, 0, '{"position":1}', '2026-08-29T12:00:00Z', '2026-08-29T12:00:00Z')`,
+      [user, film],
+    );
+
+    const rows = (
+      await t.sql(
+        `select type, causal_step from feed_events
+          where actor_id = $1 order by causal_at desc, causal_step asc, id asc`,
+        [user],
+      )
+    ).rows;
+
+    assert.deepEqual(
+      rows.map((r) => r.type),
+      ['title_ranked', 'goal_completed', 'award_earned', 'award_earned'],
+    );
+    assert.deepEqual(
+      rows.map((r) => r.causal_step),
+      [0, 1, 2, 3],
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. The inbox knows which activity
+// ---------------------------------------------------------------------------
+
+describe('my_notifications names the kind of activity', () => {
+  it('returns the subject event type, so a comment row can say "watch"', async () => {
+    const owner = await t.createUser({ username: 'saytype_owner' });
+    const talker = await t.createUser({ username: 'saytype_talker' });
+    const film = await movie('saytype_film');
+    const event = await eventOf(t, owner, film);
+
+    await t.actAs(talker);
+    await t.sql(`select add_comment(gen_random_uuid(), $1, $2, false, null, '{}'::uuid[]) as r`, [
+      event,
+      'Loved this',
+    ]);
+
+    await t.actAs(owner);
+    const { rows } = await t.sql(
+      `select kind, subject_activity_type from my_notifications(50) where kind = 'comment'`,
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].subject_activity_type, 'title_ranked');
+  });
+
+  it('is null where there is no event to name, rather than guessing at one', async () => {
+    const reader = await t.createUser({ username: 'saytype_reader' });
+    const follower = await t.createUser({ username: 'saytype_follower' });
+
+    await t.sql(
+      `insert into notifications (recipient_id, type, actor_id) values ($1, 'follow', $2)`,
+      [reader, follower],
+    );
+
+    await t.actAs(reader);
+    const { rows } = await t.sql(
+      `select subject_activity_type from my_notifications(50) where kind = 'follow'`,
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].subject_activity_type, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. The welcome is an inbox row and not a push
+// ---------------------------------------------------------------------------
+
+describe("the invitee's welcome does not reach a lock screen", () => {
+  it('is written, is exempt from the preference gate, and is not queued', async () => {
+    const invitee = await t.createUser({ username: 'welcome_quiet' });
+    const inviter = await t.createUser({ username: 'welcome_inviter' });
+
+    const { rows } = await t.sql(
+      `insert into notifications (recipient_id, type, actor_id, subject_type, subject_id)
+       values ($1, 'invite_welcome', $2, 'profile', $2) returning id`,
+      [invitee, inviter],
+    );
+    const id = rows[0].id;
+    assert.ok(id, 'the inbox row must still be written — that half is untouched');
+
+    const queued = await t.sql(`select 1 from push_outbox where notification_id = $1`, [id]);
+    assert.equal(queued.rows.length, 0, 'a welcome was queued for the lock screen');
+
+    assert.equal(
+      (await t.sql(`select _push_eligible('invite_welcome') as e`)).rows[0].e,
+      false,
+    );
+    // The control: the type beside it on the same code path still is eligible, so this
+    // is a decision about one type rather than a broken predicate.
+    assert.equal((await t.sql(`select _push_eligible('invite_joined') as e`)).rows[0].e, true);
+  });
+});

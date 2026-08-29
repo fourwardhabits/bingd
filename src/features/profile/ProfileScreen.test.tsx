@@ -36,14 +36,20 @@ jest.mock('@/lib/supabase', () => ({
        * once ordering and the limit are real.
        */
       const filters: ((row: Record<string, unknown>) => boolean)[] = [];
-      let sort: { column: string; ascending: boolean } | null = null;
+      /**
+       * A LIST of keys, not one (20260901000100). The feed's canonical order is three
+       * keys deep — `causal_at desc, causal_step asc, id asc` — and a stand-in that
+       * kept only the last one answered in id order, which is the shape of "no order at
+       * all" wearing a sort. Applied in reverse with a stable sort, which is how a
+       * multi-key comparison is expressed with the one Array.sort gives you.
+       */
+      const sorts: { column: string; ascending: boolean }[] = [];
       let max: number | null = null;
       const rows = () => {
         const matched = (mockTables[table] ?? []).filter((row) =>
           filters.every((keep) => keep(row as Record<string, unknown>)),
         ) as Record<string, unknown>[];
-        if (sort) {
-          const { column, ascending } = sort;
+        for (const { column, ascending } of [...sorts].reverse()) {
           matched.sort((a, b) => {
             const left = String(a[column] ?? '');
             const right = String(b[column] ?? '');
@@ -83,7 +89,7 @@ jest.mock('@/lib/supabase', () => ({
           return chain;
         },
         order: (column: string, options?: { ascending?: boolean }) => {
-          sort = { column, ascending: options?.ascending ?? true };
+          sorts.push({ column, ascending: options?.ascending ?? true });
           return chain;
         },
         maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
@@ -293,6 +299,9 @@ describe('recent activity', () => {
     actor_id: actor,
     media_item_id: 'film-1',
     created_at: '2026-08-15T00:00:00Z',
+    // See `withCausalAt`: a row without this is one the database cannot produce.
+    causal_at: '2026-08-15T00:00:00Z',
+    causal_step: 0,
     payload: { position: 1, category: 'movies', bucket: 'loved', score: 9.1 },
     media_items: movie('film-1', 'Inception'),
     profiles: { username: name, display_name: name, avatar_path: null },
@@ -324,12 +333,17 @@ describe('recent activity', () => {
      */
     mockTables.follows = [{ follower_id: 'user-1', followee_id: 'friend', state: 'approved' }];
     mockTables.feed_events = [
-      { ...activity('mine', 'user-1', 'Sai'), created_at: '2026-01-01T00:00:00Z' },
+      {
+        ...activity('mine', 'user-1', 'Sai'),
+        created_at: '2026-01-01T00:00:00Z',
+        causal_at: '2026-01-01T00:00:00Z',
+      },
       ...Array.from({ length: 30 }, (_, i) => ({
         ...activity(`friend-${i}`, 'friend', 'Anna'),
         media_item_id: 'film-2',
         media_items: movie('film-2', 'Heat'),
         created_at: `2026-08-15T00:00:${String(i).padStart(2, '0')}Z`,
+        causal_at: `2026-08-15T00:00:${String(i).padStart(2, '0')}Z`,
       })),
     ];
 
@@ -348,6 +362,7 @@ describe('recent activity', () => {
       media_item_id: `film-${i}`,
       media_items: movie(`film-${i}`, `Film number ${i}`),
       created_at: `2026-08-0${i + 1}T00:00:00Z`,
+      causal_at: `2026-08-0${i + 1}T00:00:00Z`,
     }));
 
     const view = await open();
@@ -420,6 +435,8 @@ describe('when a read behind this screen fails', () => {
     actor_id: 'user-1',
     media_item_id: 'film-1',
     created_at: '2026-08-15T00:00:00Z',
+    causal_at: '2026-08-15T00:00:00Z',
+    causal_step: 0,
     payload: { position: 1, category: 'movies', bucket: 'loved', score: 9.1 },
     media_items: movie('film-1', 'Inception'),
     profiles: { username: 'Sai', display_name: 'Sai', avatar_path: null },

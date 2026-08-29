@@ -131,6 +131,19 @@ export type LogSheetProps = {
    */
   openWriting?: NoteVisibility | null;
   /**
+   * Open one of the stacked rows as soon as the sheet appears.
+   *
+   * Added for the Ranked menu's *Who I watched with* row (founder, 2026-08-29), which
+   * names a field and so should land the reader in it rather than in a sheet where they
+   * have to find it. `openWriting` is the same idea for the note, and the two are
+   * separate props because they mean different things: one also carries a visibility.
+   *
+   * **It opens a row and nothing else.** No write, no ranking, no new log — the row it
+   * expands is the one the reader would have tapped, editing the log occurrence the
+   * sheet is already about.
+   */
+  openSection?: Exclude<Expanded, 'notes'>;
+  /**
    * Finishing from the post-rank state, which is a different act from dismissing.
    *
    * The caller usually wants both to close the sheet, and the reason they are two
@@ -170,6 +183,7 @@ export function LogSheet({
   noteIntent,
   postRank,
   openWriting,
+  openSection,
   onDone,
 }: LogSheetProps) {
   if (!title) return null;
@@ -189,6 +203,7 @@ export function LogSheet({
       noteIntent={noteIntent}
       postRank={postRank}
       openWriting={openWriting}
+      openSection={openSection}
       onDone={onDone}
     />
   );
@@ -254,6 +269,7 @@ function Body({
   noteIntent = 'note',
   postRank = null,
   openWriting = null,
+  openSection = null,
   onDone,
 }: LogSheetProps & { title: LoggableTitle }) {
   const queryClient = useQueryClient();
@@ -358,11 +374,16 @@ function Body({
    * fresh for each one, so the initial value *is* the answer and an effect would only be
    * a second render saying the same thing.
    */
-  const [expanded, setExpanded] = useState<Expanded>(openWriting && !postRank ? 'notes' : null);
+  const [expanded, setExpanded] = useState<Expanded>(
+    // `postRank` wins over both, for the reason recorded above the `openWriting` prop:
+    // a reveal that arrives with a row already open under the keyboard is not the sheet
+    // the reader just finished ranking into.
+    postRank ? null : openSection ? openSection : openWriting ? 'notes' : null,
+  );
   const [saving, setSaving] = useState(false);
   /**
-   * How many writes are in flight, because "Saving…" is a claim and a boolean stopped
-   * being able to keep it.
+   * How many writes are in flight, because `saving` gates `choose` and `rebucket` and a
+   * boolean stopped being able to keep that gate honest.
    *
    * Date writes share one lane now (`queueDateWrite`), so two of them genuinely overlap:
    * the second is queued while the first is running. With a plain flag the *first* one
@@ -1248,43 +1269,36 @@ function Body({
         ) : null}
 
         {/**
-         * **The status slot keeps its height whether or not it is saying anything.**
+         * **Nothing is drawn while a save is succeeding** (founder, 2026-08-29).
          *
-         * The founder's Android report: while typing in the Note, everything below one
-         * element jumped down two or three millimetres and immediately came back. The
-         * sheet frame, the top of the screen and the keyboard were all stationary — so
-         * it was never keyboard avoidance, and it was never a snap point.
+         * There was a "Saving…" line here, and then a reserved blank slot holding its
+         * height so the rows below did not jump when it mounted. The founder's device
+         * pass says the reservation solved the jump and left the real problem: the label
+         * still appeared and disappeared several times per sentence — the autosave lane
+         * fires on a 1.2s trailing debounce with a 4s cap, so an ordinary paragraph arms
+         * it repeatedly — and a status that flickers while somebody is typing is noise
+         * whether or not it moves the page.
          *
-         * It was this. "Saving…" is a `footnote`, whose line height is 18pt — about
-         * 2.5mm on the founder's panel — and it *mounted and unmounted* here, above
-         * `styles.rows`, which is everything: the Note composer and every row under it.
-         * The autosave lane fires on a 1.2s trailing debounce with a max-wait cap, so an
-         * ordinary sentence arms it several times; each firing pushed the whole lower
-         * half of the sheet down by one line and the reply pulled it back. The reader
-         * types, the page twitches, and nothing about the movement is information.
+         * So the successful path says nothing at all. **The autosave itself is
+         * untouched**: same debounce, same max-wait, same flush on blur, on collapse, on
+         * close, on background and on unmount, same depth counter behind `saving`, which
+         * still gates `choose` and `rebucket` exactly as it did. What has gone is one
+         * `Text` and the empty box that reserved room for it.
          *
-         * Reserving the line is the fix rather than hiding, delaying or debouncing the
-         * indicator: the message is honest and worth showing, and it is the *layout*
-         * that had no business changing. `RankingSheet` settled the same question the
-         * same way for the same reason — "the slot keeps its height either way so the
-         * controls below do not jump when the sentence appears".
-         *
-         * One line is reserved, which is what either message costs. Both can still be
-         * on screen at once — a save retrying after a failure — and the slot grows to
-         * fit, which is a real event rather than a keystroke.
+         * **A failure is still drawn, and it is the only thing this slot can now say.**
+         * Hiding an unresolved save would be the one change this must not make: the
+         * message names what could not be written and what to do about it, and it is
+         * mounted by a real event rather than by a keystroke, so the movement it causes
+         * is information. There is no reserved height any more precisely because nothing
+         * transient competes for it.
          */}
-        <View testID="log-status-slot" style={styles.statusSlot}>
-          {saving ? (
-            <Text variant="footnote" tone="tertiary" style={styles.status}>
-              Saving…
-            </Text>
-          ) : null}
-          {problem ? (
+        {problem ? (
+          <View testID="log-status-slot">
             <Text variant="footnote" tone="action" style={styles.status}>
               {problem}
             </Text>
-          ) : null}
-        </View>
+          </View>
+        ) : null}
 
         <View style={styles.rows}>
           {/* One line for all three rows, because they share one read and would
@@ -1532,14 +1546,6 @@ const styles = StyleSheet.create({
   },
   confirmActions: { gap: theme.space[2] },
   status: { paddingHorizontal: theme.layout.gutter, textAlign: 'center' },
-  /**
-   * One footnote line, held open. See the note at the slot: this is what stops an
-   * autosave that starts and finishes mid-sentence from moving every row below it.
-   *
-   * `minHeight` and not `height`, so the rare case where a failure message wraps — or
-   * where a retry puts "Saving…" above it — grows honestly instead of clipping.
-   */
-  statusSlot: { minHeight: theme.typography.footnote.lineHeight },
   unavailable: {
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[2],

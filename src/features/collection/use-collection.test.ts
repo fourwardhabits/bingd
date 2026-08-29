@@ -132,6 +132,9 @@ describe('the ranked list', () => {
       bucket: 'loved',
       position: 1,
       category: 'movies',
+      // `rankings.created_at`, which the See all sheet's Recently ranked order reads
+      // (20260901000100).
+      rankedAt: '2026-01-01T00:00:00Z',
     });
   });
 

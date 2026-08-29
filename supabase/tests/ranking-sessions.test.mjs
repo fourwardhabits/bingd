@@ -92,8 +92,14 @@ describe('skipping a comparison', () => {
     // rank_answer does not reset — correctly, since the cap is meant to count the
     // whole session. So once an answer moved the band, the walk skipped past
     // candidates it had never offered, ran out, and placed the title immediately.
-    // A review reproduced it on a band of three.
-    for (let i = 0; i < 3; i += 1) {
+    //
+    // The band is nine rather than the three this was first written against.
+    // 20260901000100 made the walk refuse every title the SESSION has offered, so on
+    // a band of three — start, skip, answer, skip — the fourth call has genuinely run
+    // out of unoffered opponents and finalising is now the correct answer. The
+    // property this test is about is the other one: while an unoffered comparison
+    // exists, a skip after an answer must offer it. Nine leaves plenty.
+    for (let i = 0; i < 9; i += 1) {
       await rankBelow(await movie(`interleave_base_${i}`), 'not_for_me');
     }
 
@@ -121,6 +127,212 @@ describe('skipping a comparison', () => {
     assert.ok(after.pivot, 'and that comparison must be a real title');
 
     await t.assertValid(user);
+  });
+
+  /**
+   * THE FOUNDER'S REPEAT (physical QA, 2026-08-29), and the reason 20260901000100
+   * exists.
+   *
+   * The report: A versus B, "Too tough", a different comparison, one answer, and A
+   * versus B again. It reproduces on a band of three, which is roughly what
+   * onboarding hands a new account — and the old skip walk did it every time, because
+   * `band_skips` reset whenever [lo, hi) moved and the narrowed midpoint was the
+   * title that had just been skipped.
+   */
+  it('never offers the same pair twice in one session', async () => {
+    for (let i = 0; i < 3; i += 1) {
+      await rankBelow(await movie(`norepeat_base_${i}`), 'not_for_me');
+    }
+
+    const subject = await movie('norepeat_subject');
+    const started = await rpc(`select rank_start($1, 'not_for_me') as r`, [subject]);
+    assert.equal(started.done, false);
+
+    const offered = [started.pivot];
+    let result = await rpc(`select rank_skip($1) as r`, [started.session_id]);
+    if (!result.done) offered.push(result.pivot);
+
+    // The founder's exact next move: answer the substitute, letting the subject win
+    // so the band narrows rather than closing.
+    let guard = 0;
+    while (!result.done && guard < 20) {
+      guard += 1;
+      result = await rpc(`select rank_answer($1, $2) as r`, [started.session_id, subject]);
+      if (!result.done) offered.push(result.pivot);
+    }
+
+    assert.ok(result.done, 'the session must terminate rather than loop');
+    assert.equal(
+      new Set(offered).size,
+      offered.length,
+      `a pair was offered twice: ${JSON.stringify(offered)}`,
+    );
+    await t.assertValid(user);
+  });
+
+  /**
+   * The other half of the invariant. "Too tough" means the reader gave no preference
+   * evidence about this pair; it does not mean the two are equal, and nothing may be
+   * written as though it did.
+   */
+  it('writes no comparison for a pair that was skipped', async () => {
+    for (let i = 0; i < 3; i += 1) {
+      await rankBelow(await movie(`noevidence_base_${i}`), 'loved');
+    }
+
+    const subject = await movie('noevidence_subject');
+    const started = await rpc(`select rank_start($1, 'loved') as r`, [subject]);
+    const skippedPivot = started.pivot;
+
+    let result = await rpc(`select rank_skip($1) as r`, [started.session_id]);
+    let guard = 0;
+    while (!result.done && guard < 20) {
+      guard += 1;
+      result = await rpc(`select rank_skip($1) as r`, [started.session_id]);
+    }
+    assert.ok(result.done, 'the session must terminate');
+
+    const { rows } = await t.sql(
+      `select count(*)::int as n from comparisons
+        where user_id = $1
+          and ((winner_id = $2 and loser_id = $3) or (winner_id = $3 and loser_id = $2))`,
+      [user.id, subject, skippedPivot],
+    );
+    assert.equal(rows[0].n, 0, 'a skipped pair produced comparison evidence');
+
+    // And the title is still placed: an honest completion, not a refusal.
+    const placed = await t.sql(
+      `select count(*)::int as n from rankings where media_item_id = $1`,
+      [subject],
+    );
+    assert.equal(placed.rows[0].n, 1, 'the title must still be placed');
+  });
+
+  /**
+   * Per session, deliberately: a new session may reconsider a pair the last one
+   * skipped, which is what makes Rank again a second opinion rather than a replay.
+   */
+  it('may reconsider a skipped pair in a new session', async () => {
+    for (let i = 0; i < 3; i += 1) {
+      await rankBelow(await movie(`fresh_base_${i}`), 'fine');
+    }
+
+    const subject = await movie('fresh_subject');
+    let result = await rpc(`select rank_start($1, 'fine') as r`, [subject]);
+    let guard = 0;
+    while (!result.done && guard < 20) {
+      guard += 1;
+      result = await rpc(`select rank_skip($1) as r`, [result.session_id]);
+    }
+    assert.ok(result.done);
+
+    // A second session over the same title, which is Rank again.
+    const second = await rpc(`select rank_again($1, 'fine', null, true) as r`, [subject]);
+    assert.equal(second.done, false, 'a new session should open');
+    assert.ok(second.pivot, 'and it may offer any opponent, including a skipped one');
+
+    const { rows } = await t.sql(
+      `select cardinality(seen_items) as n from ranking_sessions where id = $1`,
+      [second.session_id],
+    );
+    assert.equal(
+      Number(rows[0].n),
+      1,
+      'a fresh session starts knowing only its own first offer',
+    );
+  });
+
+  /**
+   * **The two paths that DO return a pair already shown, and why neither is the
+   * founder's defect** — independent review 74.
+   *
+   * The seen-set stops the app choosing a comparison it has already put to the reader.
+   * It is not, and must not be, a rule against the reader asking for one: Back exists to
+   * re-display the comparison being undone, and a resume exists to restore the one that
+   * was on screen. Review 74 read the migration's own header as claiming otherwise, which
+   * it did; the prose is corrected and these pin the behaviour so a later pass cannot
+   * "fix" Back into something that is not an undo.
+   */
+  it('Back re-displays the comparison it is undoing, which is what Back is', async () => {
+    for (let i = 0; i < 9; i += 1) {
+      await rankBelow(await movie(`back_base_${i}`), 'loved');
+    }
+
+    const subject = await movie('back_subject');
+    const started = await rpc(`select rank_start($1, 'loved') as r`, [subject]);
+    assert.equal(started.done, false);
+
+    const answered = await rpc(`select rank_answer($1, $2) as r`, [started.session_id, subject]);
+    assert.equal(answered.done, false, 'the band should have narrowed, not closed');
+
+    const back = await rpc(`select rank_back($1) as r`, [started.session_id]);
+    assert.equal(
+      back.pivot,
+      started.pivot,
+      'Back must return the comparison being undone, not a fresh one',
+    );
+
+    // And the seen-set is not corrupted by it: the title is recorded once, not twice.
+    const { rows } = await t.sql(
+      `select cardinality(seen_items) as n,
+              cardinality(array(select distinct e from unnest(seen_items) e)) as distinct_n
+         from ranking_sessions where id = $1`,
+      [started.session_id],
+    );
+    assert.equal(Number(rows[0].n), Number(rows[0].distinct_n), 'seen_items gained a duplicate');
+  });
+
+  it('and the next comparison the app picks after a Back still excludes what was seen', async () => {
+    // The half that matters: Back hands back an old pair, and everything the app chooses
+    // afterwards is still governed by the seen-set.
+    for (let i = 0; i < 9; i += 1) {
+      await rankBelow(await movie(`backnext_base_${i}`), 'fine');
+    }
+
+    const subject = await movie('backnext_subject');
+    const started = await rpc(`select rank_start($1, 'fine') as r`, [subject]);
+    const offered = [started.pivot];
+
+    const answered = await rpc(`select rank_answer($1, $2) as r`, [started.session_id, subject]);
+    if (!answered.done) offered.push(answered.pivot);
+
+    await rpc(`select rank_back($1) as r`, [started.session_id]);
+
+    // Answer the restored comparison the other way, so the search takes the branch it
+    // did not take before.
+    const again = await rpc(`select rank_answer($1, $2) as r`, [started.session_id, started.pivot]);
+    if (!again.done) {
+      assert.ok(
+        !offered.includes(again.pivot),
+        `the app offered a pair it had already shown: ${JSON.stringify(offered)} then ${again.pivot}`,
+      );
+    }
+    await t.assertValid(user);
+  });
+
+  it('a resume restores the comparison that was on screen, and records it once', async () => {
+    for (let i = 0; i < 5; i += 1) {
+      await rankBelow(await movie(`resume_base_${i}`), 'loved');
+    }
+
+    const subject = await movie('resume_subject');
+    const started = await rpc(`select rank_start($1, 'loved') as r`, [subject]);
+    assert.equal(started.done, false);
+
+    // Leaving the screen does not delete the session; opening it again resumes.
+    const resumed = await rpc(`select rank_start($1, 'loved') as r`, [subject]);
+    assert.equal(resumed.resumed, true);
+    assert.equal(
+      resumed.pivot,
+      started.pivot,
+      'a resume is one unanswered question restored, not a second asking of it',
+    );
+
+    const { rows } = await t.sql(
+      `select cardinality(seen_items) as n from ranking_sessions where id = $1`,
+      [started.session_id],
+    );
+    assert.equal(Number(rows[0].n), 1, 'the resume must not record the pivot a second time');
   });
 
   it('places the title and says so once the skip limit is reached', async () => {

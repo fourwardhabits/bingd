@@ -60,6 +60,9 @@ const entry = (over: Record<string, unknown> = {}) => ({
   bucket: 'loved',
   position: 1,
   category: 'movies',
+  // `rankings.created_at`, which the Recently ranked order reads. Never null in the
+  // schema, so a fixture that omitted it would be a row the database cannot produce.
+  rankedAt: '2026-01-01T00:00:00Z',
   ...over,
 });
 
@@ -248,7 +251,9 @@ describe('a collection larger than the sheet will draw', () => {
 
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('Showing their top 200 of 260.')).toBeTruthy());
+    // Not "their top 200": the sheet has four orders since 2026-08-29 and that
+    // sentence is a wrong claim under Oldest first. The bound is what has to be said.
+    await waitFor(() => expect(view.getByText('Showing 200 of 260.')).toBeTruthy());
   });
 
   it('says nothing of the sort when the whole list fits', async () => {
@@ -315,4 +320,154 @@ it('names whose collection it is', async () => {
 
   const self = await open({ isSelf: true });
   await waitFor(() => expect(self.getByText('Your collection')).toBeTruthy());
+});
+
+/**
+ * **The sort control that replaced "In rank order."** (founder, 2026-08-29).
+ *
+ * A subtitle stating the order is a subtitle nobody can act on. Four orders and no more:
+ * two directions on rank, two on when the title entered the ranking.
+ *
+ * **Why the second axis is "Recently ranked" and not "Recently watched".** The founder
+ * asked for recency, and the watch date cannot carry it: PRD §22 makes watch dates
+ * private "on any profile, at any visibility, to anybody", and `logged_collection` — the
+ * projection a visitor's read goes through — omits the column deliberately. A control
+ * labelled *Recently watched* over somebody else's list would either sort by something
+ * else or reverse that rule in passing. So the axis is when the title entered their
+ * ranking, which is the same instant their public "ranked X" activity already carries.
+ */
+describe('the sort control', () => {
+  const openSort = async (view: Awaited<ReturnType<typeof open>>) => {
+    await fireEvent.press(view.getByLabelText(/^Sort\./));
+  };
+
+  /** The titles in draw order, read off the ordinal-and-title rows. */
+  const drawn = (view: Awaited<ReturnType<typeof open>>) =>
+    view.getAllByLabelText(/, 20\d\d/).map((node) => String(node.props.accessibilityLabel));
+
+  const three = [
+    entry({
+      mediaItemId: 'a',
+      title: 'First ranked',
+      position: 3,
+      rankedAt: '2026-01-01T00:00:00Z',
+    }),
+    entry({
+      mediaItemId: 'b',
+      title: 'Second ranked',
+      position: 1,
+      rankedAt: '2026-02-01T00:00:00Z',
+    }),
+    entry({
+      mediaItemId: 'c',
+      title: 'Third ranked',
+      position: 2,
+      rankedAt: '2026-03-01T00:00:00Z',
+    }),
+  ];
+
+  it('opens on rank, highest first, and says so', async () => {
+    mockMovies = three;
+    const view = await open();
+
+    await waitFor(() => expect(view.getByLabelText('Sort. Rank · Highest first')).toBeTruthy());
+    // Position 1 is the top of the band, so highest first is ascending position.
+    expect(drawn(view)[0]).toMatch(/Second ranked/);
+    expect(drawn(view)[2]).toMatch(/First ranked/);
+  });
+
+  it('reverses to lowest first', async () => {
+    mockMovies = three;
+    const view = await open();
+    await openSort(view);
+    await fireEvent.press(view.getByLabelText('Rank · Lowest first'));
+
+    await waitFor(() => expect(drawn(view)[0]).toMatch(/First ranked/));
+    expect(drawn(view)[2]).toMatch(/Second ranked/);
+  });
+
+  it('orders by when the title entered the ranking, newest first', async () => {
+    mockMovies = three;
+    const view = await open();
+    await openSort(view);
+    await fireEvent.press(view.getByLabelText('Recently ranked · Newest first'));
+
+    await waitFor(() => expect(drawn(view)[0]).toMatch(/Third ranked/));
+    expect(drawn(view)[2]).toMatch(/First ranked/);
+    expect(view.getByLabelText('Sort. Recently ranked · Newest first')).toBeTruthy();
+  });
+
+  it('and oldest first', async () => {
+    mockMovies = three;
+    const view = await open();
+    await openSort(view);
+    await fireEvent.press(view.getByLabelText('Recently ranked · Oldest first'));
+
+    await waitFor(() => expect(drawn(view)[0]).toMatch(/First ranked/));
+    expect(drawn(view)[2]).toMatch(/Third ranked/);
+  });
+
+  it('puts a title with no date last, whichever direction is asked for', async () => {
+    // `rankings.created_at` is `not null`, so this can only be a bundle reading a
+    // response without the column. "Last, always" is the answer that does not put an
+    // unknown at the top of a list claiming to be newest — and it is why the date test
+    // comes before the direction rather than inside it.
+    mockMovies = [
+      entry({ mediaItemId: 'a', title: 'Dated', position: 2, rankedAt: '2026-01-01T00:00:00Z' }),
+      entry({ mediaItemId: 'b', title: 'Undated', position: 1, rankedAt: null }),
+    ];
+    const view = await open();
+
+    await openSort(view);
+    await fireEvent.press(view.getByLabelText('Recently ranked · Newest first'));
+    await waitFor(() => expect(drawn(view)[1]).toMatch(/Undated/));
+
+    await openSort(view);
+    await fireEvent.press(view.getByLabelText('Recently ranked · Oldest first'));
+    await waitFor(() => expect(drawn(view)[1]).toMatch(/Undated/));
+  });
+
+  it('breaks a tie the same way every time', async () => {
+    // `position` is unique per category, so the rank orders have no ties to break. The
+    // id tiebreak is there anyway: a comparator that is total only by accident of a
+    // constraint elsewhere is one schema change from reordering itself between renders.
+    mockMovies = [
+      entry({ mediaItemId: 'zz', title: 'Later id', position: 1, rankedAt: '2026-01-01T00:00:00Z' }),
+      entry({ mediaItemId: 'aa', title: 'Earlier id', position: 2, rankedAt: '2026-01-01T00:00:00Z' }),
+    ];
+    const view = await open();
+    await openSort(view);
+    await fireEvent.press(view.getByLabelText('Recently ranked · Newest first'));
+
+    await waitFor(() => expect(drawn(view)[0]).toMatch(/Earlier id/));
+    expect(drawn(view)[1]).toMatch(/Later id/);
+  });
+
+  it('keeps the Movies and TV selection, which is a different question', async () => {
+    mockMovies = three;
+    const onChangeCategory = jest.fn();
+    const view = await open({ onChangeCategory });
+
+    await openSort(view);
+    await fireEvent.press(view.getByLabelText('Rank · Lowest first'));
+
+    // Sorting is not switching lists, and it must not behave as though it were.
+    expect(onChangeCategory).not.toHaveBeenCalled();
+    await fireEvent.press(view.getByText('TV'));
+    expect(onChangeCategory).toHaveBeenCalledWith('tv_seasons');
+  });
+
+  it('scores against the whole category, not against the order on screen', async () => {
+    // The band is measured over everything and the sort is applied to the rows, so a
+    // reordered list does not re-score anybody. `#N` is the position, which means the
+    // same thing under every order.
+    mockMovies = three;
+    const view = await open();
+    await openSort(view);
+    await fireEvent.press(view.getByLabelText('Recently ranked · Oldest first'));
+
+    await waitFor(() => expect(view.getByText('#3')).toBeTruthy());
+    expect(view.getByText('#1')).toBeTruthy();
+    expect(view.getByText('#2')).toBeTruthy();
+  });
 });

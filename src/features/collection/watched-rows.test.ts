@@ -27,6 +27,7 @@ const ranked = (over: Partial<RankedEntry> = {}): RankedEntry => ({
   bucket: 'loved',
   position: 1,
   category: 'movies',
+  rankedAt: '2026-08-01T00:00:00Z',
   ...over,
 });
 

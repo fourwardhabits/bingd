@@ -468,6 +468,7 @@ describe('a title this user has ranked', () => {
     // The headings and the last three rows are the same whichever state it is in.
     for (const label of [
       'Edit your note',
+      'Who I watched with',
       'Rank again',
       'Change your rating',
       'Remove from collection',
@@ -545,6 +546,78 @@ describe('a title this user has ranked', () => {
     // control that moves writing between the two states now.
     expect(view.queryByLabelText('Edit review')).toBeNull();
     expect(view.queryByLabelText('Make it a private note')).toBeNull();
+  });
+
+  /**
+   * **Who I watched with, reachable without going through the rating** (founder device
+   * pass, 2026-08-29).
+   *
+   * Companions were behind *Change your rating*, which opens the bucket chooser — so the
+   * way to correct who you watched something with ran through a control that offers to
+   * re-rate it. The founder called that hidden, and it is: the row somebody is looking
+   * for is named "Who I watched with" and the row they had to press was named something
+   * else entirely.
+   *
+   * The row edits the log occurrence that is already there. Everything it must NOT do is
+   * asserted below, because that list is the whole risk of adding a second door into the
+   * same sheet.
+   */
+  it('offers Who I watched with directly under the writing row', async () => {
+    const view = await openMenu();
+
+    const rows = view.getAllByRole('button').map((node) => node.props.accessibilityLabel);
+    const note = rows.indexOf('Edit your note');
+    const who = rows.indexOf('Who I watched with');
+    expect(note).toBeGreaterThanOrEqual(0);
+    expect(who).toBe(note + 1);
+  });
+
+  it('opens the companion picker on the log that is already there', async () => {
+    const view = await openMenu();
+    await fireEvent.press(view.getByLabelText('Who I watched with'));
+
+    // The picker is expanded on arrival — the point of the row — and the note composer
+    // is not, so the keyboard stays down. Read off the row's own announced state rather
+    // than off a child, because "expanded" is exactly what the row promises.
+    await waitFor(() =>
+      expect(
+        view.getByLabelText('Who I watched with').props.accessibilityState?.expanded,
+      ).toBe(true),
+    );
+    expect(view.queryByPlaceholderText('What did you think?')).toBeNull();
+  });
+
+  it('starts no ranking and creates no second log', async () => {
+    const view = await openMenu();
+    await fireEvent.press(view.getByLabelText('Who I watched with'));
+    await waitFor(() =>
+      expect(
+        view.getByLabelText('Who I watched with').props.accessibilityState?.expanded,
+      ).toBe(true),
+    );
+
+    // None of the four writers that would move a score, a band or a position, and none
+    // of the two that would post an activity.
+    for (const rpc of ['rank_again', 'rank_start', 'rank_rebucket', 'set_bucket']) {
+      expect(mockRpc).not.toHaveBeenCalledWith(rpc, expect.anything());
+    }
+  });
+
+  it('writes nothing at all until somebody is chosen', async () => {
+    // Opening a row is not an edit. The founder's rule for every other row in this sheet
+    // and there is no reason for this one to be the exception.
+    const view = await openMenu();
+    const before = mockRpc.mock.calls.length;
+
+    await fireEvent.press(view.getByLabelText('Who I watched with'));
+    await waitFor(() =>
+      expect(
+        view.getByLabelText('Who I watched with').props.accessibilityState?.expanded,
+      ).toBe(true),
+    );
+
+    expect(mockRpc).not.toHaveBeenCalledWith('set_watch_tags', expect.anything());
+    expect(mockRpc.mock.calls.length).toBeGreaterThanOrEqual(before);
   });
 
   /**

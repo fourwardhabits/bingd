@@ -79,6 +79,19 @@ export type RankedEntry = {
   bucket: 'loved' | 'fine' | 'not_for_me';
   position: number;
   category: RankingCategory;
+  /**
+   * When the title entered this ranking — `rankings.created_at`.
+   *
+   * The See all sheet's *Recently ranked* order (founder, 2026-08-29). It is the moment
+   * the placement was finalised, which is the same instant the public "ranked X" activity
+   * carries, and it is deliberately **not** the watch date: `user_media.watched_on` is
+   * always-private on every profile at every visibility (PRD §22), so a cross-profile
+   * order cannot be built on it and a control labelled "recently watched" would be
+   * promising something the schema refuses to hand over.
+   *
+   * Null only for a bundle reading a response without the column.
+   */
+  rankedAt: string | null;
 };
 
 export type LoggedEntry = {
@@ -170,7 +183,7 @@ export function useRankedCollection(
             supabase
               .from('rankings')
               .select(
-                'media_item_id, bucket, position, category, ' +
+                'media_item_id, bucket, position, category, created_at, ' +
                   'media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent_id, parent:parent_id(title, genres, original_language))',
               )
               .eq('user_id', userId)
@@ -210,6 +223,7 @@ export function useRankedCollection(
           bucket: row.bucket,
           position: row.position,
           category: row.category,
+          rankedAt: row.created_at ?? null,
         };
       });
     },

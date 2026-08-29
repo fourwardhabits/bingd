@@ -57,6 +57,38 @@ export const GOAL_UNIT: Record<GoalCategory, { one: string; many: string }> = {
   tv_seasons: { one: 'season', many: 'seasons' },
 };
 
+/**
+ * The unit a *finished* goal is congratulated in.
+ *
+ * Separate from `GOAL_UNIT` and deliberately so. Under a bar the medium is already on
+ * screen — the bar is headed "TV" — so "12 of 52 seasons" is unambiguous. A completion
+ * says its own sentence in a feed of unrelated activity and in an inbox row, where a
+ * bare "25 seasons" does not say seasons of what. So the medium travels with the noun,
+ * and "TV" keeps its capitals mid-sentence like everywhere else in the product.
+ */
+const COMPLETION_UNIT: Record<GoalCategory, { one: string; many: string }> = {
+  movies: { one: 'movie', many: 'movies' },
+  tv_seasons: { one: 'TV season', many: 'TV seasons' },
+};
+
+/**
+ * "Congrats on 25 movies" — the founder's copy for the second line of a finished goal
+ * (2026-08-29), in the feed and in the earner's own notification alike.
+ *
+ * **One function for both surfaces.** The line it replaces was assembled inline in
+ * `app/(tabs)/feed.tsx` and said only "25 movies", which is a fragment rather than a
+ * sentence; writing the celebratory version twice is how the feed and the inbox come to
+ * disagree about a number they are both reading from the same payload.
+ *
+ * The target is the one the goal was *completed against* — `goal_completions` freezes
+ * it, and the feed event carries that frozen value — so editing a goal afterwards does
+ * not rewrite what was celebrated.
+ */
+export const goalAchievement = (category: GoalCategory, target: number): string => {
+  const unit = COMPLETION_UNIT[category];
+  return `Congrats on ${target} ${target === 1 ? unit.one : unit.many}`;
+};
+
 /** One row of the viewer's own collection, reduced to what a goal looks at. */
 export type CountableWatch = {
   mediaItemId: string;

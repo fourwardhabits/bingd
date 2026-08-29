@@ -230,12 +230,15 @@ type WatchedRow = {
  * A collection row as `logged_collection` projects it for somebody else's awards.
  *
  * No `watched_on` — the date is private at every visibility level (PRD §22), so a
- * visitor's drill-down simply has no date line — and no note columns: the view carries
- * the *existence* of a public review, which is all Comment Gremlin ever counted.
+ * visitor's drill-down simply has no date line — and no note columns at all.
+ *
+ * `has_public_note` was selected here until 2026-08-29, when the founder split reviews
+ * off Comment Gremlin: the view still carries the column, and nothing on the client has
+ * a use for it any more. It is not read rather than read and discarded, so the day a
+ * review track lands it is added back deliberately.
  */
 type VisitorWatchedRow = {
   media_item_id: string;
-  has_public_note: boolean;
   media_items: MediaRow | MediaRow[] | null;
 };
 
@@ -319,12 +322,10 @@ const keyed =
  *
  * So the collection read forks on `own`, and on nothing else:
  *
- *   - **The owner reads `user_media`**, unchanged: their drill-downs show watch dates,
- *     and their public notes are derived from the same rows.
+ *   - **The owner reads `user_media`**, unchanged: their drill-downs show watch dates.
  *   - **A visitor reads `logged_collection`** (20260827000400), the PRD §22 projection:
- *     the same rows, gated by `can_i_view`, carrying the title and the *existence* of a
- *     public review and neither the date nor any note text. Same keyset, same embed,
- *     same cursor column. The two paths count the same base rows, which is what makes
+ *     the same rows, gated by `can_i_view`, carrying the title and neither the date nor
+ *     any note text. Same keyset, same embed, same cursor column. The two paths count the same base rows, which is what makes
  *     "your sheet about Ravi equals Ravi's own sheet" structural rather than luck.
  *
  * One fact has no visitor-legal read at all: `title_recommendations` is a two-party
@@ -387,7 +388,7 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
               after(
                 supabase
                   .from('logged_collection')
-                  .select(`media_item_id, has_public_note, media_items(${MEDIA})`)
+                  .select(`media_item_id, media_items(${MEDIA})`)
                   .eq('user_id', userId),
                 'media_item_id',
                 cursor,
@@ -633,11 +634,12 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
    * this: every track in `tracks.ts` declares exactly one `needs` field, so "which awards
    * does this failure cost" has an answer that needs no guessing.
    *
-   * The one thing that has to be said out loud is what *else* a failed collection read
-   * costs. Public notes are rows on `user_media`, so `written` is derived from the same
-   * read as `watched`, and letting Comment Gremlin fall back to comments-only would be a
-   * silent undercount — the exact failure this whole set exists to prevent. So the two go
-   * together, below.
+   * **`written` used to ride on the collection read and no longer does** (2026-08-29).
+   * Comment Gremlin counted comments plus public notes, and notes are rows on
+   * `user_media` — so a failed collection read had to take the written count with it or
+   * silently undercount. The founder's split makes the track comments-only, so `written`
+   * now comes from exactly one query, and a collection that could not be read costs the
+   * thirteen collection tracks and not this one.
    */
   const unavailable = new Set<keyof AwardFacts>();
   // Not read because the viewer is not a party to it — a different fact from a read
@@ -660,12 +662,8 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
   // --- The collection ------------------------------------------------------
 
   const titles: WatchedTitle[] = [];
-  const notes: WrittenContribution[] = [];
 
   const watchedRows = rowsOf<WatchedRow | VisitorWatchedRow>(watched, 'watched');
-  // Notes live on these rows, so a collection that could not be read takes the written
-  // count with it rather than quietly reporting the comments alone.
-  if (watched.error) unavailable.add('written');
 
   for (const row of watchedRows) {
     const title = titleFrom(row.media_item_id, one(row.media_items));
@@ -673,34 +671,6 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
     // A visitor's row has no date at all — the projection carries none (PRD §22) — so
     // their drill-down shows the title without a "Watched …" line, not a wrong date.
     titles.push({ ...title, watchedOn: 'watched_on' in row ? row.watched_on : null });
-
-    // A note is one row on `user_media` and appears on two surfaces — the activity row
-    // and Bingd Reviews. Counted once, here, and only when it is public: a private note
-    // is not social content, and Comment Gremlin is an award for talking to people.
-    // Deriving it from the collection read is what makes "counted once" structural.
-    // The visitor's view answers the same question as one precomputed boolean, so the
-    // two modes count the same rows. The view's predicate is `note is not null` and
-    // this one additionally trims, which looks like a gap and is not one: every note
-    // writer normalises through `nullif(btrim(coalesce(p_note, '')), '')`, so the
-    // column cannot hold a blank string for the two to disagree about. That invariant
-    // is the load-bearing one, so it is pinned in `logged-collection.test.mjs` rather
-    // than left to be re-derived here — a writer that stopped normalising fails a test
-    // instead of showing a visitor a Comment Gremlin the owner does not have.
-    const hasPublicNote =
-      'has_public_note' in row
-        ? row.has_public_note
-        : Boolean(row.note && row.note.trim() !== '' && row.note_visibility === 'public');
-    if (hasPublicNote) {
-      notes.push({
-        key: `note:${row.media_item_id}`,
-        kind: 'note',
-        title,
-        // The body is never carried. The award counts that somebody wrote, and a
-        // drill-down that reprinted the writing would be a second surface for it with
-        // none of the spoiler handling the real ones have.
-        writtenAt: null,
-      });
-    }
   }
 
   // --- Rankings ------------------------------------------------------------
@@ -842,7 +812,7 @@ async function readFacts(userId: string, own: boolean): Promise<AwardFacts> {
     watchlist: watchlistTitles,
     invitedSignups,
     invitedSignupCount,
-    written: [...commentRows, ...notes],
+    written: commentRows,
     recommendationsSent,
     reactionsReceived,
     mutualFollows,

@@ -148,6 +148,15 @@ export default function TitleScreen() {
   const [logIntent, setLogIntent] = useState<'note' | 'review'>('note');
   /** Which composer the log sheet should already be showing when it appears, if any. */
   const [openWriting, setOpenWriting] = useState<'public' | 'private' | null>(null);
+  /**
+   * Which stacked row the log sheet should arrive with open, if any.
+   *
+   * Set by *Who I watched with* and by nothing else. Its sibling `openWriting` names a
+   * piece of writing; this names a field, and both exist so a menu row that promises one
+   * thing lands the reader on that thing rather than on a sheet where they have to find
+   * the row again.
+   */
+  const [openSection, setOpenSection] = useState<'who' | null>(null);
   const [rankingSubject, setRankingSubject] = useState<RankingSubject | null>(null);
   // Top by default, which is the founder's choice: a first-time reader wants the
   // review other people found worth reacting to, not the one written most recently.
@@ -510,11 +519,16 @@ export default function TitleScreen() {
     // should land the reader inside it rather than in a sheet where they have to find
     // the row again. Null everywhere else, which is the sheet's ordinary behaviour.
     writing: 'public' | 'private' | null = null,
+    // The same idea for a row that is not writing: Who I watched with opens the
+    // companion picker. Mutually exclusive with `writing` in practice — one sheet has
+    // one row open — and `LogSheet` resolves the pair if a caller ever passes both.
+    section: 'who' | null = null,
   ) => {
     if (!rankable) return;
     setActionError(null);
     setLogIntent(intent);
     setOpenWriting(writing);
+    setOpenSection(section);
     setPlacement(null);
     setLoggingTitle(loggable);
   };
@@ -1093,6 +1107,7 @@ export default function TitleScreen() {
         surface="title"
         noteIntent={logIntent}
         openWriting={openWriting}
+        openSection={openSection}
         postRank={placement}
         onDone={() => {
           setLoggingTitle(null);
@@ -1143,6 +1158,7 @@ export default function TitleScreen() {
            * be wrong even if nothing read it.
            */
           setOpenWriting(null);
+          setOpenSection(null);
           setPlacement(result);
           setLoggingTitle(rankedTitle);
         }}
@@ -1216,6 +1232,38 @@ export default function TitleScreen() {
               onPress={() => {
                 setManaging(false);
                 openLog('note', hasReview ? 'public' : 'private');
+              }}
+            />
+
+            {/**
+              * **Directly under the writing row, because it is the other half of the
+              * same log** (founder, 2026-08-29).
+              *
+              * Companions were reachable only through *Change your rating*, which opens
+              * the bucket chooser — so the way to correct who you watched something with
+              * ran through a control that offers to re-rate it. The founder's device pass
+              * called that hidden, and it is: the row a reader is looking for is named
+              * "Who I watched with" and the row they had to press was named something
+              * else entirely.
+              *
+              * **It edits the log occurrence that is already there.** `openLog` opens
+              * the same sheet every other entry point opens, on the same `user_media`
+              * row, with the companion picker expanded — `section`, not `writing`, so
+              * the note composer stays closed and the keyboard stays down. It starts no
+              * ranking, writes no bucket, creates no second log and posts no activity;
+              * `useSetCompanions` remains the only writer, so watched-with notification
+              * is exactly as once-only as it was from every other door.
+              *
+              * In *Your log* rather than in *Ranking* for the same reason the note is:
+              * this group is what you recorded about watching it, and the group below is
+              * where it sits against everything else.
+              */}
+            <SheetRow
+              icon="people-outline"
+              label="Who I watched with"
+              onPress={() => {
+                setManaging(false);
+                openLog('note', null, 'who');
               }}
             />
 

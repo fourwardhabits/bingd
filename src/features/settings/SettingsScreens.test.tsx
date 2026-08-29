@@ -391,16 +391,22 @@ describe('follow requests', () => {
     expect(mockPush).toHaveBeenCalledWith('/u/ada');
   });
 
-  it('names the title behind a comment, so the row can be acted on', async () => {
+  it('names the title inside the sentence, so the row can be acted on', async () => {
+    // **The title moved into the clause** (founder, 2026-08-29). It used to sit on a
+    // line of its own under "Bo commented on your activity", which is two facts the
+    // reader has to join up and a vaguer noun than the row already knows.
     mockRpcResults.my_notifications = [comment];
     const view = await renderWithProviders(<NotificationsScreen />);
 
     await waitFor(() => expect(view.getByText('Bo')).toBeTruthy());
-    expect(view.getByText(' commented on your activity')).toBeTruthy();
-    // On its own line since friend recommendations arrived: "Suraj recommended a
-    // movie" and then "Inception" is the founder's shape, and it also stops a long
-    // title pushing the verb off the row.
-    expect(view.getByText('Inception')).toBeTruthy();
+    expect(view.getByText(' commented on your')).toBeTruthy();
+    expect(view.getByText(' Inception')).toBeTruthy();
+    // "activity" and not "watch": this fixture carries no `subject_activity_type`, and
+    // the neutral noun is what an unknown activity gets rather than a claimed viewing.
+    expect(view.getByText(' activity')).toBeTruthy();
+    // Once, not twice: the standalone subject line is suppressed when the title is
+    // already inside the clause.
+    expect(view.getAllByText(/Inception/)).toHaveLength(1);
   });
 
   /**

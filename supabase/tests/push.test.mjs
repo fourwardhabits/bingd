@@ -347,7 +347,6 @@ describe('the outbox is filled by notifications and by nothing else', () => {
       'recommendation',
       'recommendation_ranked',
       'invite_activated',
-      'invite_welcome',
     ]) {
       const id = await notify(reader, type);
       assert.ok(id, `${type} was not written at all`);
@@ -368,9 +367,16 @@ describe('the outbox is filled by notifications and by nothing else', () => {
    * assertion is that they were written and not queued, rather than that nothing
    * happened. (`award_earned` left this list on 20260828000100, when the unlock
    * ledger gave it a writer and a push.)
+   *
+   * `invite_welcome` joined it on 20260901000100, by founder decision: it fires the
+   * moment somebody opens Bingd for the first time, so the lock-screen copy arrives
+   * while they are already looking at the app that sent it. The inbox row is
+   * untouched and is still exempt from the preference gate — which is exactly what
+   * this test's shape asserts, since it requires the notification to have been
+   * written before it can claim it was not queued.
    */
   it('does not queue the kinds that are inbox-only', async () => {
-    for (const type of ['follow_approved', 'friendship']) {
+    for (const type of ['follow_approved', 'friendship', 'invite_welcome']) {
       const id = await notify(reader, type);
       assert.ok(id, `${type} was not written, so this proves nothing`);
       assert.equal(await outboxFor(id), null, `${type} was queued`);

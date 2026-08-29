@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { awardAnnouncement } from '@/features/awards/announcement';
 import { GOAL_LABEL } from '@/features/goals/goals';
 import type { Bucket } from '@/features/collection/score';
 import { avatarUri } from '@/lib/images';
@@ -82,12 +83,23 @@ export type FeedItem = {
   /**
    * The award, for an `award_earned` row — and only there (20260828000100).
    *
-   * Keys resolve the badge through `badgeFor`; the names are the payload's
-   * snapshot, so a row renders even if this bundle predates a future track. The
-   * award's display name rides in `title`, which is what makes the sentence read
-   * "Abisola earned Movie Muncher" through the ordinary grammar.
+   * Keys resolve the badge through `badgeFor`. **The two strings come from
+   * `awardAnnouncement` rather than from the payload** (2026-08-29): the earned tier's
+   * name, and the threshold sentence explaining what was done for it. The payload's own
+   * names are that function's fallback for a track this bundle predates, which is why
+   * they are not carried separately here — a second copy is a second thing to disagree.
+   *
+   * `title` rides the announcement's name, which is what makes the sentence read
+   * "Abisola earned the Whisper award" through the ordinary grammar.
    */
-  award: { key: string; tierKey: string; tierLabel: string | null } | null;
+  award: {
+    key: string;
+    tierKey: string;
+    /** The emphasised name: the earned tier, or the family name on a metal track. */
+    title: string;
+    /** "Wrote 20 comments" — the row's second line. Null for an unknown track. */
+    achievement: string | null;
+  } | null;
   /**
    * The goal, for a `goal_completed` row — and only there (20260829000200).
    *
@@ -140,6 +152,9 @@ type FeedRow = {
   actor_id: string;
   media_item_id: string | null;
   created_at: string;
+  /** Both 20260901000100. Optional for a bundle reading a database without them. */
+  causal_at?: string | null;
+  causal_step?: number | null;
   payload: {
     position?: number;
     category?: 'movies' | 'tv_seasons';
@@ -231,7 +246,7 @@ export function useActorActivity(actorId: string | null, limit = 5) {
  * is where that stops being safe.
  */
 const ACTIVITY_SELECT =
-  'id, type, actor_id, media_item_id, created_at, payload, ' +
+  'id, type, actor_id, media_item_id, created_at, causal_at, causal_step, payload, ' +
   // The parent series, so a season can be named — and, since the founder standardised
   // the subheading, so it can be described and rated too. A self-join through parent_id,
   // which PostgREST resolves as an embed like any other, and a left one: a movie comes
@@ -250,7 +265,34 @@ async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
     .select(ACTIVITY_SELECT)
     .in('actor_id', actorIds)
     .in('type', [...ACTIVITY_TYPES])
-    .order('created_at', { ascending: false })
+    /**
+     * **Three keys, and the last two are what make one action read in order**
+     * (20260901000100).
+     *
+     * Ranking a film can complete a goal and earn an award, and the founder's device
+     * showed the derived rows above the ranking that caused them. Two different reasons,
+     * which is why one key was not enough:
+     *
+     *   - **an award is written in the ranking's own transaction**, so `created_at` —
+     *     which defaults to `now()`, and `now()` is transaction time — is identical to
+     *     the microsecond. On a single sort key the order was then whatever the plan
+     *     returned, and it moved between refetches and across page boundaries.
+     *     `causal_step` is the writers stating it: 0 the act, 1 the goal, 2 and up the
+     *     awards, ascending inside a descending time order.
+     *   - **a goal is not.** It is completed by a watch date, `log_watched` posts no
+     *     activity of its own, and the completion commits seconds *after* the ranking.
+     *     That is a real later timestamp and no tiebreak can reach it, so the row
+     *     carries `causal_at`: its own instant, except that a completion inherits the
+     *     timestamp of the activity it belongs under. `created_at` is untouched and is
+     *     still what `relativeTime` draws.
+     *
+     * `id` last makes the sort **total** — it is a primary key — which is what
+     * pagination and refetch need. Two rows the first two keys cannot separate would
+     * otherwise be free to swap between pages and drop or duplicate an activity.
+     */
+    .order('causal_at', { ascending: false })
+    .order('causal_step', { ascending: true })
+    .order('id', { ascending: true })
     .limit(limit);
   if (error) throw error;
 
@@ -304,6 +346,34 @@ export function useActivityEvent(eventId: string | null, viewerId: string) {
   });
 }
 
+/**
+ * The award a row is about, resolved once.
+ *
+ * A named helper rather than an inline ternary because `hydrate` reads it twice — for
+ * the sentence's emphasised slot and for the row's own award object — and two inline
+ * copies of the same condition are two places for the fallback chain to drift.
+ */
+function award(row: FeedRow): FeedItem['award'] {
+  if (row.type !== 'award_earned' || !row.payload?.award || !row.payload?.tier) return null;
+  const said = awardAnnouncement(
+    {
+      key: row.payload.award,
+      tierKey: row.payload.tier,
+      name: row.payload.award_name ?? null,
+      tierLabel: row.payload.tier_label ?? null,
+    },
+    // The feed's own last resort. Its sentence is "Abisola earned the … award", where
+    // "a new Award" would read as a title nobody has heard of.
+    'bingd. Award',
+  );
+  return {
+    key: row.payload.award,
+    tierKey: row.payload.tier,
+    title: said.title,
+    achievement: said.achievement,
+  };
+}
+
 /** Rows to items: the actor rule, the season naming, the notes and the companions. */
 async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
   const items: FeedItem[] = [];
@@ -354,7 +424,10 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
             seasonNumber: media.season_number,
           })
         : row.type === 'award_earned'
-          ? (row.payload?.award_name ?? 'bingd. Award')
+          ? // The earned tier, resolved from `tracks.ts`. `awardAnnouncement` falls back
+            // to the payload's names and finally to "bingd. Award", so this slot is never
+            // a track key and never empty.
+            (award(row)?.title ?? 'bingd. Award')
           : // And for a goal it is the goal's own name, so the sentence reads
             // "Abisola hit their 2026 Movies goal" through the same three slots.
             row.type === 'goal_completed' && row.payload?.year && row.payload?.category
@@ -373,14 +446,7 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
       category: row.payload?.category ?? null,
       note: null,
       companions: [],
-      award:
-        row.type === 'award_earned' && row.payload?.award && row.payload?.tier
-          ? {
-              key: row.payload.award,
-              tierKey: row.payload.tier,
-              tierLabel: row.payload.tier_label ?? null,
-            }
-          : null,
+      award: award(row),
       goal:
         row.type === 'goal_completed' && row.payload?.year && row.payload?.category
           ? {

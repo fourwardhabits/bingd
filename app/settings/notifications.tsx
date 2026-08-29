@@ -6,12 +6,14 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useCurrentProfile } from '@/features/auth';
 import { AwardBadge } from '@/features/awards/AwardBadge';
 import { badgeFor } from '@/features/awards/badges';
-import { GOAL_LABEL } from '@/features/goals/goals';
+import { GOAL_LABEL, goalAchievement } from '@/features/goals/goals';
 import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
   canRankFromRow,
   relationshipActionFor,
   sectionFor,
+  sentenceFor,
+  spokenSentence,
   useMarkNotificationsRead,
   useNotifications,
   verbFor,
@@ -118,6 +120,65 @@ const SECTION_TITLES: Record<InboxSection, string> = {
   week: 'This week',
   earlier: 'Earlier',
 };
+
+/**
+ * The navigation bar this screen asks for, as a value so it can be looked at.
+ *
+ * `Stack.Screen` swallows its options — they are read by the navigator, not rendered —
+ * so an inline object here is unreachable from a test of anything. That is how a header
+ * control ships without an accessible name (`NotificationSettingsButton` is separate for
+ * the same reason) and, since 20260901000100, how the iOS glass opt-out below could have
+ * been added and silently lost.
+ */
+export const NOTIFICATIONS_HEADER = {
+  headerShown: true,
+  title: 'Notifications',
+  headerBackTitle: 'Back',
+  /**
+   * **The bubble behind this glyph on iOS was UIKit's, not the app's**
+   * (founder device pass, 2026-08-29; Android showed the bare icon).
+   *
+   * Audited rather than guessed at. There is no disc in this component — PR #62
+   * removed the app-owned one — and no `headerBlurEffect` or background anywhere
+   * in `rootStackScreenOptions`. What draws it is iOS 26: a custom `headerRight`
+   * element reaches `ScreenStackHeaderRightView` as a `UIBarButtonItem`
+   * `customView`, and from iOS 26 those items are given a shared glass background
+   * in the navigation bar.
+   *
+   * `hidesSharedBackground` is UIKit's own opt-out for exactly that
+   * (`UIBarButtonItem.hidesSharedBackground`), and react-native-screens 4.26 —
+   * the version already inside the installed beta binary — plumbs it through.
+   * The only way to reach it is the items form: `headerRight` renders the view
+   * with no props, while `unstable_headerRightItems` passes the flag per item
+   * (`useHeaderConfigProps`). So the same component is handed over twice: as an
+   * item on iOS, where the flag has somewhere to land, and as `headerRight`
+   * everywhere else, which is what Android and the tests read. Nothing is styled
+   * per platform and no native code changes, so this rides an OTA.
+   *
+   * Where somebody looks the moment they decide they are getting too many of
+   * these, which is here rather than back in the Settings list.
+   *
+   * A glyph rather than the word, which the founder asked for off the device —
+   * “Settings” in a navigation bar reads as a second destination competing with
+   * the title beside it. And a bell wearing a small gear rather than a bare
+   * gear, because a bare gear here claimed to be app settings when it opens
+   * notification preferences alone. The words survive for a screen reader,
+   * which is where they were doing the work.
+   *
+   * The `Pressable` is the full 44pt square and the glyph is 24 inside it. Not
+   * `hitSlop`: Android clips touches outside a parent's box, so slop around an
+   * icon is a target that measures right on iOS and is a 24pt tap on Android
+   * (`ActivityRow`, review 29a).
+   */
+  headerRight: () => <NotificationSettingsButton />,
+  unstable_headerRightItems: () => [
+    {
+      type: 'custom' as const,
+      element: <NotificationSettingsButton />,
+      hidesSharedBackground: true,
+    },
+  ],
+} as const;
 
 export default function NotificationsScreen() {
   const profile = useCurrentProfile();
@@ -336,30 +397,7 @@ export default function NotificationsScreen() {
      * bar — the header is still there, at its own height, doing that job.
      */
     <Screen includeBottomInset edges={['left', 'right']}>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          title: 'Notifications',
-          headerBackTitle: 'Back',
-          /**
-           * Where somebody looks the moment they decide they are getting too many of
-           * these, which is here rather than back in the Settings list.
-           *
-           * A glyph rather than the word, which the founder asked for off the device —
-           * “Settings” in a navigation bar reads as a second destination competing with
-           * the title beside it. And a bell wearing a small gear rather than a bare
-           * gear, because a bare gear here claimed to be app settings when it opens
-           * notification preferences alone. The words survive for a screen reader,
-           * which is where they were doing the work.
-           *
-           * The `Pressable` is the full 44pt square and the glyph is 24 inside it. Not
-           * `hitSlop`: Android clips touches outside a parent's box, so slop around an
-           * icon is a target that measures right on iOS and is a 24pt tap on Android
-           * (`ActivityRow`, review 29a).
-           */
-          headerRight: () => <NotificationSettingsButton />,
-        }}
-      />
+      <Stack.Screen options={NOTIFICATIONS_HEADER} />
 
       {notifications.isPending ? (
         <LoadingScreen />
@@ -437,6 +475,9 @@ export default function NotificationsScreen() {
                       seriesTitle: row.seriesTitle,
                     })
                   : null;
+                // How the row reads, decided once and rendered twice — emphasised on
+                // screen, said whole to a screen reader. See `sentenceFor`.
+                const sentence = sentenceFor(row, subject);
                 const relationshipAction = relationshipActionFor(
                   row,
                   relationships.data?.get(row.actorId ?? ''),
@@ -464,26 +505,20 @@ export default function NotificationsScreen() {
                           row.kind === 'invite_welcome' ? 'Welcome to bingd. ' : ''
                         }${
                           row.kind === 'award_earned'
-                            ? `You earned ${row.award?.name ?? 'a new Award'}`
+                            ? // The earned tier, from the same function the row's own
+                              // sentence and the Awards sheet read.
+                              `You earned ${row.award?.title ?? 'a new Award'}`
                             : row.kind === 'goal_completed'
                               ? // The second actorless sentence. `verbFor` returns the
                                 // whole clause here, so there is no name to template in
                                 // and no "null" to read aloud.
                                 verbFor(row.kind, row.mediaKind, row.goal)
-                              : // The watched-with sentence puts the title in the middle
-                                // — "Suraj watched 100 Meters with you" — so it is spoken
-                                // whole rather than assembled with the subject appended,
-                                // which would say the film's name twice.
-                                row.kind === 'watch_tag' && subject
-                                ? `${row.actorName} watched ${subject} with you`
-                                : `${row.actorName} ${verbFor(
-                                    row.kind,
-                                    row.mediaKind,
-                                    row.goal,
-                                    row.mentionInReply,
-                                  )}`
+                              : `${row.actorName} ${spokenSentence(sentence)}`
                         }${
-                          subject && row.kind !== 'watch_tag' ? `, ${subject}` : ''
+                          /* Only when the title is *not* already inside the clause.
+                             Appending it to "watched 100 Meters with you" is how a
+                             screen reader comes to say the film's name twice. */
+                          subject && !sentence.subject ? `, ${subject}` : ''
                         }${
                           /* The preview is drawn inside this Pressable, and a label on a
                              Pressable replaces its children rather than joining them —
@@ -547,15 +582,22 @@ export default function NotificationsScreen() {
                               </Text>
                             </Text>
                           ) : row.kind === 'award_earned' ? (
-                            /* The congratulations, named: "You earned Movie Muncher 🎉"
-                             — the founder's copy. The award takes the emphasis every
-                             other row gives the actor, because it is the subject; the
-                             emoji stays out of the spoken label, same as the welcome's. */
+                            /* The congratulations, named: "You earned Whisper 🎉" — the
+                             founder's copy. The award takes the emphasis every other row
+                             gives the actor, because it is the subject; the emoji stays
+                             out of the spoken label, same as the welcome's.
+
+                             **The name is the tier that was earned** (2026-08-29), from
+                             `awardAnnouncement` — the same function the feed post and the
+                             Awards sheet row read. It was `payload.award_name`, the
+                             track's family name, which is how the founder came to be
+                             congratulated for "Comment Gremlin" and then find a row
+                             headed "Whisper". */
                             <Text variant="callout" numberOfLines={2}>
                               <Text variant="callout" tone="secondary">
                                 You earned{' '}
                               </Text>
-                              <Text variant="callout">{row.award?.name ?? 'a new Award'}</Text>
+                              <Text variant="callout">{row.award?.title ?? 'a new Award'}</Text>
                               <Text variant="callout" tone="secondary">
                                 {' '}
                                 🎉
@@ -597,57 +639,32 @@ export default function NotificationsScreen() {
                                 are now friends
                               </Text>
                             </Text>
-                          ) : row.kind === 'recommendation_ranked' && subject ? (
-                            /* The founder's copy, with the title inline: "Suraj ranked
-                             The Martian from your recommendation". The title takes the
-                             same emphasis the actor does — the sentence is about the
-                             two of them — and the subject line below stays out of it,
-                             because saying the title twice is the clutter this pass is
-                             removing. Two lines, so a long season name wraps rather
-                             than eating the tail of the sentence. When the ranking
-                             post is gone the title goes with it, and the row falls
-                             through to `verbFor`'s "ranked your recommendation". */
-                            <Text variant="callout" numberOfLines={2}>
-                              <Text variant="callout">{row.actorName}</Text>
-                              <Text variant="callout" tone="secondary">
-                                {' '}
-                                ranked{' '}
-                              </Text>
-                              <Text variant="callout">{subject}</Text>
-                              <Text variant="callout" tone="secondary">
-                                {' '}
-                                from your recommendation
-                              </Text>
-                            </Text>
-                          ) : row.kind === 'watch_tag' && subject ? (
-                            /* "Suraj watched 100 Meters with you" — the founder's copy,
-                             with the title inline, because "watched something with you"
-                             and then the name on the next line reads as two facts a
-                             reader has to join up. The title carries the same emphasis
-                             the actor does: the sentence is about the two of them and
-                             the film. `compactName` supplies the season form, so a TV
-                             season says which show it belongs to.
-
-                             The subject line below is suppressed for this kind, the way
-                             it already is for a fulfilment — saying the title twice is
-                             exactly the clutter this pass removes. When the title has
-                             left the catalogue there is no `subject`, and the row falls
-                             through to `verbFor`'s "watched something with you". */
-                            <Text variant="callout" numberOfLines={2}>
-                              <Text variant="callout">{row.actorName}</Text>
-                              <Text variant="callout" tone="secondary"> watched </Text>
-                              <Text variant="callout">{subject}</Text>
-                              <Text variant="callout" tone="secondary"> with you</Text>
-                            </Text>
                           ) : (
+                            /**
+                             * The ordinary shape, and since 2026-08-29 it is what draws
+                             * every row that names a title: "Suraj commented on your
+                             * Marty Supreme watch", "Suraj watched 100 Meters with you",
+                             * "Suraj ranked The Martian from your recommendation".
+                             *
+                             * Four inline special cases used to live here, two of them
+                             * with matching branches in the accessibility label above.
+                             * `sentenceFor` is those cases as data, so the emphasis and
+                             * the spoken string cannot disagree — the title takes the
+                             * same weight the actor does, because the sentence is about
+                             * the two of them and the thing.
+                             *
+                             * Two lines, so a long season name wraps rather than eating
+                             * the tail of the sentence.
+                             */
                             <Text variant="callout" numberOfLines={2}>
                               <Text variant="callout">{row.actorName}</Text>
-                              <Text variant="callout" tone="secondary">{` ${verbFor(
-                                row.kind,
-                                row.mediaKind,
-                                row.goal,
-                                row.mentionInReply,
-                              )}`}</Text>
+                              <Text variant="callout" tone="secondary">{` ${sentence.lead}`}</Text>
+                              {sentence.subject ? (
+                                <Text variant="callout">{` ${sentence.subject}`}</Text>
+                              ) : null}
+                              {sentence.tail ? (
+                                <Text variant="callout" tone="secondary">{` ${sentence.tail}`}</Text>
+                              ) : null}
                             </Text>
                           )}
                           {/* The title on its own line rather than after a separator.
@@ -655,9 +672,7 @@ export default function NotificationsScreen() {
                             founder's shape, and it is also what stops a long name
                             pushing the verb off the row. Not on a fulfilment, whose
                             sentence already carries the title inline. */}
-                          {subject &&
-                          row.kind !== 'recommendation_ranked' &&
-                          row.kind !== 'watch_tag' ? (
+                          {subject && !sentence.subject ? (
                             <Text variant="callout" tone="secondary" numberOfLines={1}>
                               {subject}
                             </Text>
@@ -685,6 +700,30 @@ export default function NotificationsScreen() {
                             * Caption rather than callout, so it sits under the sentence
                             * as context and does not compete with it.
                             */}
+                          {/**
+                            * **What was actually achieved**, on the two actorless rows
+                            * (founder, 2026-08-29).
+                            *
+                            * "You earned Whisper 🎉" does not say what Whisper was for,
+                            * and the feed row beside it used to answer with "Bronze",
+                            * which says less. Both lines now come from the same two
+                            * functions the feed reads — `awardAnnouncement` off the
+                            * canonical thresholds, `goalAchievement` off the target the
+                            * completion froze — so the inbox and the feed cannot quote
+                            * different numbers for one event.
+                            *
+                            * Caption and secondary, in the slot a comment preview uses
+                            * on the rows that have one: these two never do.
+                            */}
+                          {row.kind === 'award_earned' && row.award?.achievement ? (
+                            <Text variant="caption" tone="secondary" numberOfLines={1}>
+                              {row.award.achievement}
+                            </Text>
+                          ) : row.kind === 'goal_completed' && row.goal ? (
+                            <Text variant="caption" tone="secondary" numberOfLines={1}>
+                              {goalAchievement(row.goal.category, row.goal.target)}
+                            </Text>
+                          ) : null}
                           {row.preview ? (
                             <Text variant="caption" tone="secondary" numberOfLines={1}>
                               {row.preview}

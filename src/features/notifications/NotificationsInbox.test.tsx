@@ -771,9 +771,80 @@ describe('the comment preview', () => {
     mockNotifications.push(commentRow());
 
     const view = await renderWithProviders(<NotificationsScreen />);
-    await waitFor(() => expect(view.getByText(/commented on your activity/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/commented on your/)).toBeTruthy());
 
     expect(view.getByText('Pretty good')).toBeTruthy();
+  });
+
+  it('names the activity as a watch when the server says it was one', async () => {
+    // **The noun comes from the activity, not from the title** (founder, 2026-08-29).
+    // `my_notifications` returns the subject event's type since 20260901000100, so
+    // "your Sinners watch" is a claim the row can actually support.
+    mockNotifications.length = 0;
+    mockNotifications.push(commentRow({ subject_activity_type: 'title_ranked' }));
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() =>
+      expect(
+        view.getByLabelText('Unread. Ada commented on your Sinners watch. Pretty good'),
+      ).toBeTruthy(),
+    );
+    expect(view.getByText(' watch')).toBeTruthy();
+    // Once, not twice: the standalone subject line is suppressed when the title is
+    // already inside the clause.
+    expect(view.getAllByText(/Sinners/)).toHaveLength(1);
+  });
+
+  it('keeps the neutral noun for an activity that is not a watch claim', async () => {
+    // A comment under a watchlist addition is not a watch, and saying so would be the
+    // app asserting a viewing that never happened.
+    mockNotifications.length = 0;
+    mockNotifications.push(commentRow({ subject_activity_type: 'watchlist_added' }));
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() =>
+      expect(
+        view.getByLabelText('Unread. Ada commented on your Sinners activity. Pretty good'),
+      ).toBeTruthy(),
+    );
+  });
+
+  it('says a reply is a reply, and says what it is a reply to', async () => {
+    // Both rows `add_comment` writes are `type = 'comment'`; `payload.reply_to` is the
+    // server's own way of telling "somebody talked under your activity" from "somebody
+    // answered your comment". It has always been written and nothing read it.
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      commentRow({
+        subject_activity_type: 'title_ranked',
+        payload: { reply_to: 'parent-1' },
+      }),
+    );
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() =>
+      expect(
+        view.getByLabelText('Unread. Ada replied to your comment on Sinners. Pretty good'),
+      ).toBeTruthy(),
+    );
+  });
+
+  it('says a reaction was to the watch it was left on', async () => {
+    mockNotifications.length = 0;
+    mockNotifications.push(
+      commentRow({
+        id: 'r1',
+        kind: 'reaction',
+        type: 'reaction',
+        comment_excerpt: null,
+        subject_activity_type: 'title_ranked',
+      }),
+    );
+
+    const view = await renderWithProviders(<NotificationsScreen />);
+    await waitFor(() =>
+      expect(view.getByLabelText('Unread. Ada reacted to your Sinners watch')).toBeTruthy(),
+    );
   });
 
   it('does the same for a mention, with the mention’s own sentence', async () => {
@@ -846,7 +917,7 @@ describe('the comment preview', () => {
     mockNotifications.push(commentRow({ comment_excerpt: null, comment_spoilers: false }));
 
     const view = await renderWithProviders(<NotificationsScreen />);
-    await waitFor(() => expect(view.getByText(/commented on your activity/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/commented on your/)).toBeTruthy());
 
     expect(view.queryByText('Contains spoilers')).toBeNull();
     expect(view.queryByText('Pretty good')).toBeNull();
@@ -958,7 +1029,7 @@ describe('the watched-with row', () => {
     mockNotifications.push(commentRow());
 
     const view = await renderWithProviders(<NotificationsScreen />);
-    await waitFor(() => expect(view.getByText(/commented on your activity/)).toBeTruthy());
+    await waitFor(() => expect(view.getByText(/commented on your/)).toBeTruthy());
 
     expect(view.queryByRole('button', { name: 'Rank' })).toBeNull();
   });

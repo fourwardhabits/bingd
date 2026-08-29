@@ -1,4 +1,5 @@
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
+import { Keyboard } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -320,17 +321,184 @@ describe('The code screen', () => {
     expect(mockNav.pushed).toEqual([]);
   });
 
-  it('resends through the one endpoint there is', async () => {
+  /**
+   * **Resending, and the cooldown that keeps it usable** (founder, 2026-08-29).
+   *
+   * The control existed and had no bound at all, so an impatient double-tap earned
+   * `over_email_send_rate_limit` — a dead end the reader cannot act on. Arriving on this
+   * screen *is* the moment a code was sent, so the cooldown is armed on mount and the
+   * button says how long is left rather than sitting greyed and unexplained.
+   *
+   * The clock is faked here and nowhere else in this file: real time cannot be waited
+   * out in a unit test, and the countdown is arithmetic on `Date.now()` rather than an
+   * effect that could be nudged.
+   */
+  it('holds the resend for a cooldown and says how long is left', async () => {
     mockParams = { email: 'ada@bingd.app' };
-    mockAuth.sendCode.mockResolvedValue({ ok: true });
     const view = await renderWithProviders(<VerifyScreen />);
 
-    await act(async () => {
-      fireEvent.press(view.getByText('Send a new code'));
-    });
+    // Named with the wait in it: a disabled button with no explanation is
+    // indistinguishable from a broken one.
+    expect(view.getByText(/^Resend code in 0:\d\d$/)).toBeTruthy();
 
-    expect(mockAuth.sendCode).toHaveBeenCalledWith('ada@bingd.app');
-    await waitFor(() => expect(view.getByText(/Sent again/)).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(view.getByText(/^Resend code in/));
+    });
+    expect(mockAuth.sendCode).not.toHaveBeenCalled();
+  });
+
+  it('resends through the one endpoint there is, once the cooldown is out', async () => {
+    jest.useFakeTimers();
+    try {
+      mockParams = { email: 'ada@bingd.app' };
+      mockAuth.sendCode.mockResolvedValue({ ok: true });
+      const view = await renderWithProviders(<VerifyScreen />);
+
+      await act(async () => {
+        jest.advanceTimersByTime(31_000);
+      });
+
+      await act(async () => {
+        fireEvent.press(view.getByText('Resend code'));
+      });
+
+      expect(mockAuth.sendCode).toHaveBeenCalledWith('ada@bingd.app');
+      expect(mockAuth.sendCode).toHaveBeenCalledTimes(1);
+      expect(view.getByText(/New code sent/)).toBeTruthy();
+      // And straight back into a cooldown, so the next tap cannot be immediate.
+      expect(view.getByText(/^Resend code in/)).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('sends exactly one code however fast the button is pressed twice', async () => {
+    jest.useFakeTimers();
+    try {
+      mockParams = { email: 'ada@bingd.app' };
+      mockAuth.sendCode.mockResolvedValue({ ok: true });
+      const view = await renderWithProviders(<VerifyScreen />);
+
+      await act(async () => {
+        jest.advanceTimersByTime(31_000);
+      });
+
+      // Two presses inside one frame. Both read the same render's state, which is why
+      // the guard is a ref rather than the `busy` flag the buttons are drawn from.
+      const button = view.getByText('Resend code');
+      await act(async () => {
+        fireEvent.press(button);
+        fireEvent.press(button);
+      });
+
+      expect(mockAuth.sendCode).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('clears the stale rejection and the stale digits when a new code goes out', async () => {
+    jest.useFakeTimers();
+    try {
+      mockParams = { email: 'ada@bingd.app' };
+      mockAuth.verifyCode.mockResolvedValue({ ok: false, cancelled: false, message: 'x' });
+      mockAuth.sendCode.mockResolvedValue({ ok: true });
+      const view = await renderWithProviders(<VerifyScreen />);
+
+      await act(async () => {
+        fireEvent.changeText(view.getByLabelText('Six-digit code'), '000000');
+      });
+      await act(async () => {
+        fireEvent.press(view.getByText('Continue'));
+      });
+      expect(view.getByText(/That code did not work/)).toBeTruthy();
+
+      await act(async () => {
+        jest.advanceTimersByTime(31_000);
+      });
+      await act(async () => {
+        fireEvent.press(view.getByText('Resend code'));
+      });
+
+      // The rejection was about a code that has just been superseded, so it goes with
+      // it — and the digits go too, because they belong to that code.
+      expect(view.queryByText(/That code did not work/)).toBeNull();
+      expect(view.getByLabelText('Six-digit code').props.value).toBe('');
+      expect(view.getByText(/New code sent/)).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('says what went wrong on a refused resend, and comes back', async () => {
+    jest.useFakeTimers();
+    try {
+      mockParams = { email: 'ada@bingd.app' };
+      mockAuth.sendCode.mockResolvedValue({
+        ok: false,
+        cancelled: false,
+        message: 'Too many emails just now. Wait a minute and try again.',
+      });
+      const view = await renderWithProviders(<VerifyScreen />);
+
+      await act(async () => {
+        jest.advanceTimersByTime(31_000);
+      });
+      await act(async () => {
+        fireEvent.press(view.getByText('Resend code'));
+      });
+
+      // Whatever GoTrue said, as `sendEmailCode` maps it — and nothing about whether
+      // this address has an account.
+      expect(view.getByText(/Too many emails/)).toBeTruthy();
+      expect(view.queryByText(/no account/i)).toBeNull();
+
+      // The screen is not permanently disabled by one failure: the same countdown runs
+      // and the control comes back.
+      expect(view.getByText(/^Resend code in/)).toBeTruthy();
+      await act(async () => {
+        jest.advanceTimersByTime(31_000);
+      });
+      expect(view.getByText('Resend code')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  /**
+   * **The keyboard can be put away** (founder, iOS device pass, 2026-08-29).
+   *
+   * `number-pad` has no return key, so on iOS this screen had no gesture that dismissed
+   * it at all. Two answers, and the test is the same for both: the native dismissal is
+   * what is called, not a blur on a ref, which is the ornamental version that leaves the
+   * pad on screen.
+   */
+  it('dismisses the keyboard when the screen outside the field is tapped', async () => {
+    mockParams = { email: 'ada@bingd.app' };
+    const dismiss = jest.spyOn(Keyboard, 'dismiss');
+    try {
+      const view = await renderWithProviders(<VerifyScreen />);
+      await act(async () => {
+        fireEvent.press(view.getByText('Check your email').parent as never);
+      });
+      expect(dismiss).toHaveBeenCalled();
+    } finally {
+      dismiss.mockRestore();
+    }
+  });
+
+  it('offers a Done accessory the number pad does not come with', async () => {
+    mockParams = { email: 'ada@bingd.app' };
+    const dismiss = jest.spyOn(Keyboard, 'dismiss');
+    try {
+      const view = await renderWithProviders(<VerifyScreen />);
+      await act(async () => {
+        fireEvent.press(view.getByLabelText('Done. Hides the keyboard'));
+      });
+      expect(dismiss).toHaveBeenCalled();
+    } finally {
+      dismiss.mockRestore();
+    }
   });
 
   it('says a bad code is bad without saying which kind of bad', async () => {

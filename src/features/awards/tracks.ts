@@ -74,7 +74,7 @@ export type PersonRef = {
   avatarPath: string | null;
 };
 
-export type ContributionKind = 'comment' | 'note';
+export type ContributionKind = 'comment';
 
 /** One thing the reader wrote. The body is deliberately not carried. */
 export type WrittenContribution = {
@@ -138,7 +138,7 @@ export type AwardFacts = {
    * people for the owner, one aggregate row for a visitor, both summing to this.
    */
   invitedSignupCount: number;
-  /** Comments the reader has written, plus the notes they have made public. */
+  /** Comments the reader has written. Public notes left this track on 2026-08-29. */
   written: WrittenContribution[];
   /** Rows in `title_recommendations` the reader sent. */
   recommendationsSent: RecommendationSent[];
@@ -508,15 +508,29 @@ export const AWARD_TRACKS: AwardTrack[] = [
     needs: 'written',
     displayName: 'Comment Gremlin',
     /**
-     * What the reader wrote, and where.
+     * The comments the reader wrote, and what they were under.
+     *
+     * ---------------------------------------------------------------------------
+     * **COMMENTS ONLY, SINCE THE FOUNDER SPLIT THEM FROM REVIEWS (2026-08-29).**
+     *
+     * This counted comments *plus* public notes, and said so: "Write 100 comments or
+     * reviews". The founder's ruling is that the two are different behaviours and must
+     * not share one track — a review is a considered thing you publish about a title you
+     * ranked, a comment is talking to somebody under their activity, and one counter
+     * that adds them together rewards neither.
+     *
+     * So this is the comment track, keeping the names and the artwork it already had —
+     * Whisper, Chatterbox, Megaphone — and the thresholds it already had. **Review
+     * awards are deferred**, deliberately and to their own pass rather than invented
+     * here; `docs/product/deferred-roadmap.md` carries the deferral.
+     *
+     * The server metric (`_award_metric`, 20260901000100) drops the public-note term in
+     * exactly the same change, and `awards-server-parity.test.ts` is what holds the two
+     * to each other.
      *
      * **Never the writing itself.** The award counts that somebody talked; reprinting a
-     * note here would be a third surface for it with none of the spoiler masking the
-     * other two have, and a comment's body belongs under the activity it answers.
-     *
-     * One canonical contribution is one row: a public note is one `user_media` row even
-     * though it appears on the activity row and in Bingd Reviews, and it is counted
-     * where it is stored rather than where it is displayed.
+     * comment here would be a surface for it with none of the spoiler masking the real
+     * ones have, and a comment's body belongs under the activity it answers.
      */
     contributions: (facts) => ({
       sections: [
@@ -524,9 +538,9 @@ export const AWARD_TRACKS: AwardTrack[] = [
           rows: facts.written.map((entry) => ({
             key: entry.key,
             label: entry.title ? compactLabel(entry.title) : 'A bingd. activity',
-            detail: [entry.kind === 'note' ? 'Review' : 'Comment', on(entry.writtenAt)]
-              .filter(Boolean)
-              .join(' · '),
+            // "Comment" unconditionally now: `written` carries nothing else. It was a
+            // branch on `entry.kind` while notes shared this track.
+            detail: ['Comment', on(entry.writtenAt)].filter(Boolean).join(' · '),
             posterPath: entry.title?.posterPath ?? null,
             year: entry.title?.year ?? null,
             link: entry.title?.mediaItemId
@@ -537,10 +551,8 @@ export const AWARD_TRACKS: AwardTrack[] = [
       ],
       emptyLabel: 'Nothing written yet.',
     }),
-    next: (n) =>
-      `Write ${count(n)} ${plural(n, 'comment or review', 'comments or reviews')}`,
-    earned: (n) =>
-      `Wrote ${count(n)} ${plural(n, 'comment or review', 'comments or reviews')}`,
+    next: (n) => `Write ${count(n)} ${plural(n, 'comment', 'comments')}`,
+    earned: (n) => `Wrote ${count(n)} ${plural(n, 'comment', 'comments')}`,
     tiers: tiers(
       ['whisper', 'Whisper', 20],
       ['chatterbox', 'Chatterbox', 100],

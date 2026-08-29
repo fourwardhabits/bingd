@@ -45,6 +45,8 @@ const row = (over: Partial<Notification> & { kind: NotificationKind }): Notifica
   preview: null,
   previewHidden: false,
   viewerRanked: false,
+  subjectActivityType: null,
+  commentIsReply: false,
   ...over,
 });
 

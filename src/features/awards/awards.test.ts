@@ -835,13 +835,15 @@ describe('Heart Magnet', () => {
 });
 
 describe('Comment Gremlin', () => {
-  it('counts one canonical contribution once, however many surfaces show it', () => {
-    // A public note is one `user_media` row that appears on the activity row and in
-    // Bingd Reviews. It is counted where it is stored, so there is one row for it.
+  it('counts comments and nothing else', () => {
+    // **Reviews left this track on 2026-08-29.** It counted comments plus published
+    // notes and said so — "Write 100 comments or reviews" — and the founder's ruling is
+    // that the two are different behaviours which one counter rewards neither of. The
+    // fact type carries comments alone now, so this is the shape as well as the count.
     const input = facts({
       written: [
-        { key: 'note:m1', kind: 'note', title: title({ title: 'Arrival' }), writtenAt: null },
         { key: 'comment:c1', kind: 'comment', title: title({ title: 'Heat' }), writtenAt: '2026-01-02T00:00:00Z' },
+        { key: 'comment:c2', kind: 'comment', title: title({ title: 'Arrival' }), writtenAt: '2026-01-03T00:00:00Z' },
       ],
     });
     const { progress, rows } = rowsFor('comment-gremlin', input);
@@ -849,19 +851,28 @@ describe('Comment Gremlin', () => {
     expect(new Set(rows.map((row) => row.key)).size).toBe(2);
   });
 
-  it('distinguishes the kind of contribution and where it was', () => {
+  it('says what a contribution was and where', () => {
     const { rows } = rowsFor(
       'comment-gremlin',
-      facts({ written: [{ key: 'note:m1', kind: 'note', title: title({ title: 'Arrival' }), writtenAt: null }] }),
+      facts({
+        written: [
+          { key: 'comment:c1', kind: 'comment', title: title({ title: 'Arrival' }), writtenAt: null },
+        ],
+      }),
     );
     expect(rows[0]?.label).toBe('Arrival');
-    expect(rows[0]?.detail).toBe('Review');
+    expect(rows[0]?.detail).toBe('Comment');
+  });
+
+  it('asks for comments, in the copy as well as in the count', () => {
+    const { progress } = rowsFor('comment-gremlin', facts({ written: [] }));
+    expect(progress.detailLine).toBe('Next: Write 20 comments');
   });
 
   it('never reprints what was written', () => {
-    // The award counts that somebody wrote. A note's body belongs where its spoiler
+    // The award counts that somebody wrote. A comment's body belongs where its spoiler
     // masking lives, and the fact type has no field to carry one.
-    const contribution = { key: 'k', kind: 'note' as const, title: null, writtenAt: null };
+    const contribution = { key: 'k', kind: 'comment' as const, title: null, writtenAt: null };
     expect(Object.keys(contribution)).not.toContain('body');
     const { rows } = rowsFor('comment-gremlin', facts({ written: [contribution] }));
     expect(rows[0]?.label).toBe('A bingd. activity');
