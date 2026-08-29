@@ -9,8 +9,8 @@ import { badgeFor } from '@/features/awards/badges';
 import { GOAL_LABEL } from '@/features/goals/goals';
 import { hintFor, hrefFor, targetFor } from '@/features/notifications/routing';
 import {
-  canFollowBack,
   canRankFromRow,
+  relationshipActionFor,
   sectionFor,
   useMarkNotificationsRead,
   useNotifications,
@@ -231,17 +231,24 @@ export default function NotificationsScreen() {
    * so it reports the caller's own edges and nothing else, but a list of ids is still
    * a list of ids and there is no reason to send the ones no control depends on.
    *
-   * **This list and `canFollowBack` have to agree.** Found by independent review of
-   * `20260823000100`: `invite_welcome` was added to `canFollowBack` and not here, so
-   * the inviter's state was never asked for, `relationships` had nothing under their
-   * id, and "nobody has looked" was read as "there is no edge" — which offered Follow
-   * on every welcome row, including the overwhelmingly common one where the redemption
-   * had already created the follow a second earlier.
+   * **This list and `relationshipActionFor` have to agree.** Found by independent
+   * review of `20260823000100`: `invite_welcome` was added to the follow gate and not
+   * here, so the inviter's state was never asked for, `relationships` had nothing under
+   * their id, and "nobody has looked" was read as "there is no edge" — which offered
+   * Follow on every welcome row, including the overwhelmingly common one where the
+   * redemption had already created the follow a second earlier.
+   *
+   * The two invite rows now *depend* on that answer rather than merely being gated by
+   * it: they draw Following or Requested from it, so an id missing here would show a
+   * blank where the state should be instead of a wrong offer.
    */
   const CAN_OFFER_FOLLOW: readonly Notification['kind'][] = [
     'follow',
     'invite_welcome',
-    // 20260827000200 — and added here in the same change as `canFollowBack`, which
+    // 20260831000100 — the inviter's half of the same acceptance, and it draws the
+    // same three states from the same read.
+    'invite_joined',
+    // 20260827000200 — and added here in the same change as the follow gate, which
     // is the agreement the paragraph above exists to enforce.
     'friendship',
   ];
@@ -430,9 +437,10 @@ export default function NotificationsScreen() {
                       seriesTitle: row.seriesTitle,
                     })
                   : null;
-                const offerFollowBack = canFollowBack(
+                const relationshipAction = relationshipActionFor(
                   row,
-                  relationships.data?.get(row.actorId ?? '')?.following,
+                  relationships.data?.get(row.actorId ?? ''),
+                  Boolean(relationships.data),
                 );
 
                 return (
@@ -697,31 +705,48 @@ export default function NotificationsScreen() {
                         </View>
                         <UnreadDot show={!row.readAt} />
                       </Pressable>
-                      {/* Follow, on the two rows that name somebody worth following and
-                        nowhere else. Absent once the reader follows them, because a
-                        control for a relationship that already exists is a control
-                        that can only mislead.
-                        
-                        **"Follow back" is wrong on a welcome**: the inviter never
-                        followed them, so there is nothing to return. It is also the
-                        rarer of the two rows in practice — `redeem_invite` already
-                        creates the invitee's follow, so this appears only if they
-                        later unfollow and come back to the row. That it appears at
-                        all then is the point.
+                      {/* The relationship control, on the rows that name somebody the
+                        reader has an edge to or could have one to, and nowhere else.
 
-                        A *pending* request shows no control either, by the same rule:
-                        the state is not "not following". Tapping through to the
-                        profile is where `FollowControl` says "Requested", which is the
-                        one place in the app that draws that state. */}
-                      {offerFollowBack ? (
+                        **On `follow` and `friendship` it is still an offer that
+                        disappears once taken**, because a control for a relationship
+                        that already exists is a control that can only mislead.
+
+                        **On the two invite rows it is a statement.** Those rows exist
+                        to introduce two accounts, and `redeem_invite` creates the
+                        follow as part of acceptance — so a control that hides itself
+                        once an edge exists hid itself on essentially every welcome ever
+                        drawn, and the row that is *about* a connection said nothing
+                        about it. It now reads Following or Requested from
+                        `follow_state_with`, which is the same truth `FollowControl`
+                        draws on the profile.
+
+                        Settled states wear the maroon outline and the offer keeps the
+                        secondary fill, which is the hierarchy `FollowControl` and the
+                        recommendation requests sheet already share. They are not dead
+                        controls: they open the profile the row opens, which is where
+                        unfollowing and withdrawing live — deliberately not here, since
+                        an inbox row is a bad place to end a relationship by mis-tap.
+
+                        **"Follow back" is wrong on a welcome**: the inviter never
+                        followed them, so there is nothing to return. It is right on a
+                        join, where the invitee has just followed the inviter. */}
+                      {relationshipAction ? (
                         <View style={styles.rowAction}>
                           <Button
-                            label={row.kind === 'invite_welcome' ? 'Follow' : 'Follow back'}
-                            kind="secondary"
+                            label={relationshipAction.label}
+                            kind={relationshipAction.actionable ? 'secondary' : 'outline'}
                             size="sm"
                             hitSlop={theme.space[2]}
-                            onPress={() => void followBack(row)}
-                            disabled={busy}
+                            accessibilityHint={
+                              relationshipAction.actionable
+                                ? `Follow ${row.actorName ?? 'them'}`
+                                : hintFor(row)
+                            }
+                            onPress={() =>
+                              relationshipAction.actionable ? void followBack(row) : openRow(row)
+                            }
+                            disabled={busy && relationshipAction.actionable}
                             disabledReason="One at a time"
                           />
                         </View>

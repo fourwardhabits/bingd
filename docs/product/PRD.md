@@ -416,6 +416,66 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 > rank position). The read is `rankings` under `rankings_read`, the same policy that
 > produced the counts, so the sheet can never show a title the counts did not admit;
 > logged-but-unranked titles, notes and watch dates stay owner-only (§22).
+>
+> *(Superseded in part on 2026-08-29: the sheet is still what the counts open, and the
+> privacy sentence stands, but it lists **rank order** rather than newest-first and is
+> also reached from a **See all** beside Top ranked. See the block below.)*
+
+> ### As built — 2026-08-29: **See all**, and browsing somebody's ranking in their order
+>
+> A profile showed the best of a collection — Top ranked's wall of six — and nothing
+> beyond it. Browsing the rest of somebody's ranking is the social use that wall implies,
+> and the founder's decision is to answer it in the app: an authenticated, **read-only**
+> ranked list. It is not a public web page, not an SEO route, not a second Collection, and
+> not access to anybody's watchlist, notes, reviews, companions or watch dates.
+>
+> **One surface, not a new one.** The ranked-count sheet above already listed a person's
+> whole ranked collection with the right privacy; what it had wrong for this purpose was
+> the order. So See all opens **that** sheet rather than a parallel screen, and the sheet
+> now lists in **canonical rank order within the category**, with the ordinal drawn —
+> without it a rank-ordered list is indistinguishable from an arbitrary one — and the
+> owner's score in the badge every other list uses. Recency ordering is gone rather than
+> kept beside it.
+>
+> **See all appears only where there is more to see**, which is more ranked titles in that
+> category than the wall of six already shows; otherwise no control is drawn, because one
+> that opens a list of exactly the titles above it is a dead end. It follows the wall's own
+> Movies / TV filter, and under **All** — which is deliberately not one ordered list,
+> since a position only means anything inside its category (§11) — it opens whichever half
+> has more to show, Movies first.
+>
+> **On the reader's own profile tab, See all goes to the Collection**, which is the
+> editable screen and already exists. A read-only sheet over their own ranking could only
+> ever do less, and two self-collection surfaces is the outcome this decision exists to
+> avoid. The ranked *stat* still opens the sheet there, because that control is explaining
+> a number rather than offering somewhere to go.
+>
+> **It costs no new request while the profile's own read is fresh.** The sheet reads
+> `useRankedCollection` — the query the profile behind it already ran to build the wall,
+> same key and same cache entry — and the second, sheet-only read of `rankings` it
+> replaced is gone rather than left beside it. It is not free for ever: the global
+> `staleTime` is 60s, so a reader who spends a minute on a profile before opening the list
+> pays one refetch. Only the category actually on screen is enabled, so that is one and
+> not two; the other loads when it is switched to.
+>
+> **The render is capped at 200 rows** and says so when it cuts. The read is not capped —
+> the whole category is what the bands and the scores are computed from — but this is a
+> `ScrollView` and every row it holds is mounted at once, which is what the 200-row server
+> page it replaced was already bounding. A virtualised list is not available here:
+> `FollowListSheet` records that a `FlatList` inside a `maxHeight: 90%` container measures
+> to zero.
+> That query is keyset-paginated on `media_item_id` rather than on `position`, because
+> inserting a ranking shifts every position below it and a position cursor can be moved
+> out from under the read by a concurrent ranking session; pages therefore cannot
+> duplicate or drop a row, and rank order is applied to the assembled list. Scores are the
+> profile owner's, computed against their whole band rather than the slice on screen, and
+> nothing on the screen reads the viewer's own collection — so one person's number can
+> never be drawn beside another person's name. Seasons carry the canonical compact name.
+>
+> **Privacy is the reading, unchanged**: `rankings_read` decides, the profile above refuses
+> first for an unapproved viewer of a private account, and a block overrides everything.
+> No filters beyond Movies / TV were added — no genre, language, decade, score range,
+> sorting or search — because rank order is the point of the screen.
 
 > ### As built — 2026-08-27 (second pass): Search is one list under its own header row, and the visible category is **TV**
 >
@@ -609,6 +669,26 @@ This is the mechanism that keeps ranking cheap: comparisons only ever search wit
 - After **3 skips** on a single insertion, the title is placed at the midpoint of the remaining uncertainty range, and the user is told the position is adjustable from Rankings.
 - **No ties.** Two titles never share a position. They may round to the same displayed score, which is fine and expected in a long band — but the underlying order is always total, because ties would contaminate match calculation, share cards, and every ranking query.
 
+> **The control is labelled "Too tough" inside onboarding** (founder, 2026-08-28), and
+> "Skip" everywhere else. One control, one call, one `rank_skip`: the mechanism, the
+> three-skip midpoint fallback, the accessibility hint and the session are identical, and
+> onboarding has no placement algorithm of its own — its comparisons are the real
+> `RankingSheet` driving the real `rank_start`/`rank_answer` session.
+>
+> Only the word differs, because the two readers are different people. A beta tester
+> ranked two films, met a comparison they could not call, and abandoned onboarding.
+> "Skip" reads as *skip ahead*, and in the middle of a five-film first run that sounds
+> like abandoning the flow rather than asking for a different opponent — so the one
+> control that would have kept them went unused. "Too tough" names what that person
+> actually felt, which is the whole reason the affordance exists.
+>
+> Somebody ranking their two-hundredth title in the Log tab has long since learnt what
+> the button does and is better served by the shorter, broader word, which is the
+> 2026-08-24 rename's reasoning and stands. The divergence is deliberate, it is one word
+> on one surface, and it was **not** implemented as a second control: the sheet already
+> receives `surface`, and a second button calling the same thing is a decision the reader
+> would have to make for no reason.
+
 ### Display — Decided 2026-08-15
 
 Show a **0–10 score with one decimal**, for example `8.7`. It is the primary ranking output everywhere a title appears: collection rows, the title page, the feed, the ranking reveal, and share cards.
@@ -636,6 +716,44 @@ Three properties this is required to keep:
 > **Required.** Do **not** display a 0–100 score or a percentile anywhere. The exact ordinal remains available as secondary detail on a title page, in the form `#18 of 142 in Movies` — with the denominator, because a bare ordinal is unreadable without it.
 >
 > **History.** Public alpha was specified as ordinal-only, and this section forbade a 0–10 score outright. Reversed by the founder on 2026-08-15; the reasoning is in §4.
+
+> ### As built — 2026-08-29: the hero shows **at most one** rank line, and only for a top ten
+>
+> The founder's device showed `#17 in English`, and it was two mistakes in one line.
+>
+> **Language competed as a ranking dimension.** `heroRankFor` treated it as one more facet
+> — "where does this sit among the titles sharing the attribute" — which is a true
+> sentence and a useless one: the reader's own language is shared by almost everything
+> they rank, so the line was a restatement of the overall ranking wearing a different
+> noun. **Language is now not a dimension of this label at all**, and neither is release
+> year, decade, runtime, certification or country. Genre is the only fallback.
+>
+> **And a placement outside the top ten was printed anyway.** The old third rule fell back
+> to the bare overall position on the reasoning that hiding a real number was worse than
+> showing it. That is what put a 17 on a hero: seventeenth out of everything is a
+> statement about how much somebody has used the app, not about the film.
+>
+> The canonical rule, which is the founder's:
+>
+> 1. **Top ten overall** — `#4 in Movies`, `#2 in TV`. Movies and TV are separate rankings
+>    (§11) and the label follows the one the title is actually in.
+> 2. Otherwise the **best top-ten genre** — `#3 in Drama`.
+> 3. Otherwise **nothing**, and no reserved gap: `PersonalState` draws no row for a null
+>    ordinal.
+>
+> **Overall always beats genre, even when the genre number is smaller** — `#4 in Movies`
+> wins over `#1 in Drama`, because the two are not comparable claims and a rule preferring
+> the smaller number would show the narrower fact exactly when the broader one is
+> strongest. Between genres the plain ordinal decides rather than the proportional
+> strength the reveal's genre lines sort by, and ties break on the genre name ascending —
+> the order `CANONICAL_GENRES` is already written in — so the label cannot flicker between
+> two true answers across renders. `MIN_GENRE_SIZE` still applies underneath, so
+> "#1 of 2 Westerns" never reaches the hero.
+>
+> This is a **display** rule and changes no ranking arithmetic: nothing here touches
+> `rankings.position`, the score, the bands or the comparison session. The Collection's
+> language filter is untouched — the reader asked for that slice — as are the reveal's
+> genre lines, the leaderboard and analytics.
 
 > ### As built — 2026-08-26: **Rank again** is another watch; **Change your rating** is a correction
 >
@@ -1696,7 +1814,7 @@ The canonical contract: **an award milestone newly earned produces exactly one s
 
 **The server counts for itself, and the sheet stays the client's.** The trigger metrics are owner-truth reproductions of `tracks.ts` — `award_tiers` seeds 60 threshold rows and `award_genre_patterns` 18 POSIX patterns, both held to the TypeScript by `src/features/awards/awards-server-parity.test.ts`. Two deliberate divergences from the client's viewer-relative counts (`comments_read` filtering; Mutual Mania's `can_i_view`) are documented in the migration header. The Awards **sheet** remains purely client-derived; the ledger drives only the social loop. A count can fall after an unlock — unranking — and the two tell the truth separately: the achievement stands, the sheet honestly shows lower progress.
 
-**In the feed**, `award_earned` renders through the ordinary grammar — "Abisola **earned** Movie Muncher", award name in the title slot, tier label as the metadata line — with the real award badge (`AwardActivityLead`, `AwardBadge` at 40pt in the poster's 40×60 box) where the poster would be. Comments and reactions work on it because the writers are type-agnostic; `feed_events_read` applies unchanged (`can_i_view(actor)`); `remove_from_collection` and `unlog` never touch award events. Tapping the row opens the earner's Awards — `/profile?awards=1` for your own, `/u/[username]?awards=1` for anybody else's (the public profile gained that param).
+**In the feed**, `award_earned` renders through the ordinary grammar — "Abisola **earned the** Movie Muncher **award**", award name in the title slot, tier label as the metadata line — with the real award badge (`AwardActivityLead`, `AwardBadge` at 40pt in the poster's 40×60 box) where the poster would be. Comments and reactions work on it because the writers are type-agnostic; `feed_events_read` applies unchanged (`can_i_view(actor)`); `remove_from_collection` and `unlog` never touch award events. Tapping the row opens the earner's Awards — `/profile?awards=1` for your own, `/u/[username]?awards=1` for anybody else's (the public profile gained that param).
 
 **In the inbox**, the row reads "You earned Movie Muncher 🎉" with the award badge in place of the avatar, and a tap routes to the reader's own Awards through the existing chain. **As a push**: `award_earned` joined `_push_eligible` (ten of the twelve types), `claim_push_batch` was rebuilt to let actorless jobs through and to carry `award_name`, and the copy is title "bingd. Awards", body "You earned Movie Muncher" — no emoji in the notification centre, `invite_welcome`'s rule. The `awards` category default flipped **on** by the `20260820000100` mechanism — no data migration, explicit choices preserved — and the settings screen's `pending` badge and its "not being sent yet" explainer are gone. When push is off, or the category is, the inbox row still exists and no push sends: the `BEFORE`-trigger preference gate and the `AFTER`-trigger enqueue make that structural rather than checked.
 
@@ -2003,7 +2121,7 @@ Never request push permission at first launch. Request after the user's first su
 
 Reviewed at 23f PASS. Where this block and the v1 event set above disagree, this block is what ships.
 
-**Twelve notification types.** The canonical names are `follow`, `follow_request`, `follow_approved`, `comment`, `reaction`, `watch_tag`, `recommendation`, `recommendation_ranked`, `invite_activated`, `invite_welcome`, `friendship`, `award_earned`.
+**Twelve notification types**, at the time this paragraph was written. The canonical names are `follow`, `follow_request`, `follow_approved`, `comment`, `reaction`, `watch_tag`, `recommendation`, `recommendation_ranked`, `invite_activated`, `invite_welcome`, `friendship`, `award_earned` — since joined by `goal_completed` (2026-08-29), `mention` (2026-08-30) and `invite_joined` (2026-08-31), each recorded in its own block below. `_push_eligible` is the list of which may reach a lock screen and is the one place a new type has to be added deliberately.
 
 > **`recommendation_ranked` added 2026-08-27** (`20260827000600`). The other end of a recommendation: when the recipient first reaches a completed **ranking** for the title, each outstanding delivered recommendation is fulfilled and its sender is told — "Suraj ranked The Martian from your recommendation" — with the notification pointing at the recipient's exact `title_ranked` feed event. See the second 2026-08-27 As-built block below for the lifecycle and the once-only semantics.
 
@@ -2014,6 +2132,15 @@ Reviewed at 23f PASS. Where this block and the v1 event set above disagree, this
 > **Exempt from the category gate, like `follow_request`**, and for a related reason: it fires once, at account creation, for somebody who has never opened the settings screen and has nothing there to have chosen. A preference that could silence it could only ever be silenced by accident.
 >
 > **Exactly one per account, for ever.** The mechanism is the insert's position inside `redeem_invite` — it is reachable only when the `invite_attributions` row was genuinely new, and `invitee_id` is that table's primary key. A partial unique index backs it up. **It is an inbox row.** As of 2026-08-24 it is also a push: `invite_welcome` is one of the eight eligible types, and like every other it is pushed only because the inbox row was written first.
+
+> **`invite_joined` added 2026-08-31** (`20260831000100`), and it is the inviter's half of
+> the row above. It **replaces** the generic `follow` notification acceptance used to
+> file rather than arriving beside it — one act, one row — and it says the thing that
+> was previously only said at activation, days later or never. It shares the `invites`
+> category with `invite_activated`, is push-eligible because the row it replaced already
+> was, and survives the invitee unfollowing because joining stayed true. A **private**
+> inviter keeps `follow_request` instead, since that row is the only Approve and Decline
+> in the app. §17 carries the full reasoning and the relationship-state table.
 
 **Eight categories, one per kind, each with its own default.** `recommendation` had been in no category at all, so the trigger's `case` returned null, the unmapped-type rule delivered the row unconditionally, and **a recommendation could not be switched off** — by accident rather than by decision. That is the defect the settings screen would otherwise have shipped on top of.
 
@@ -2060,6 +2187,28 @@ Each type has an ordered chain whose last link always resolves. Staleness is rea
 | `award_earned` | the reader's own Awards sheet | — |
 
 ~~**Comment and reaction route to the title rather than to the exact feed event, deliberately.**~~ **Superseded 2026-08-26**: the per-event route exists (`app/activity/[id].tsx`, reading one event by id through `feed_events_read`), and comment, reaction and — since `20260827000600` — `recommendation_ranked` all open the exact activity, with the title as the surviving parent when the event is gone. The deferral in [`deferred-roadmap.md`](./deferred-roadmap.md) §6 is closed.
+
+> **The post on that screen shows its reactions** (founder, 2026-08-29). It did not, and
+> the cause was neither caching nor a slow query: the screen fetched no reaction data at
+> all and drew no control, deliberately, alongside the comment, watchlist and recommend
+> controls it still omits — "a row of actions at the top turns a message into a post to be
+> worked on".
+>
+> That reasoning holds for the other three and they remain absent. It does not hold for
+> reactions, because a count is not an action offered — it is part of what the post *is*,
+> the way the score and the note are, and the same post reading "6" in the Feed and blank
+> here is the app disagreeing with itself about a fact.
+>
+> **Parity, through the shared implementation rather than a second one.** The same
+> `useReactions` (against one id instead of a page), the same `ReactionPill` picker, the
+> same `ReactionDetail` reactor list, and the same `ActivityRow` control — so the viewer's
+> own reaction sits in the action slot and is subtracted from the cluster beside it, the
+> tap toggles the default, the long press opens the picker and the cluster opens the
+> people, all by the Feed's rules and not a copy of them. No count is ever computed on
+> this screen. Privacy needs no separate argument: `reactions_read` gates every row on
+> `can_i_view` for the event *and* for the reactor, which is the policy the Feed's
+> identical query already meets, and the id list stays empty until the event resolves so a
+> hidden activity is never probed.
 
 #### What is **not** built
 
@@ -2147,7 +2296,10 @@ joining them.
 crash: the sentence stands and the tap resolves through the ordinary chain — the
 conversation, then the title, then the existing unavailable state. In practice such a row
 is usually gone, because `delete_comment` sweeps the notifications it wrote.
+
 ---
+
+## 16. Sharing, deep links, and web fallback
 
 ### Objective
 
@@ -2344,6 +2496,80 @@ Any future reward must count **activated** invitees only, so it cannot be farmed
 > **What is still not built, and it is one thing:** a **live `bingd.app` deployment**. The site builds, its tests pass, and the two `.well-known` files are generated from one config — but nothing is hosted yet, so **Universal Links and App Links cannot verify and have never been tested on a physical device**. Until that happens the invitation link opens a browser that 404s. This is the one remaining gap between the resolver being written and the resolver working, and it is a founder action rather than an engineering one.
 >
 > The **Required** half of Rewards above still stands: any future reward must count activated invitees only, which is now a number that exists.
+
+> ### As built — 2026-08-29: acceptance says so, at the moment it happens
+>
+> **The inviter was being told the wrong thing.** Acceptance filed them a plain `follow`
+> row — "Ada Lovelace started following you" — with nothing in it saying this person came
+> through their invitation. The sentence that *does* say so, "joined bingd. from your
+> invite", belonged to `invite_activated`, which `_maybe_activate_invite` files only once
+> the invitee has ranked ten titles. So the interesting fact arrived days late or never,
+> and the moment it actually happened was reported as something duller.
+>
+> That is the redemption/activation confusion as a defect rather than a naming problem,
+> and the fix keeps both events rather than merging them:
+>
+> | | when | who is told | row |
+> |---|---|---|---|
+> | **Acceptance** | the tap on `app/i/[token].tsx` | invitee **and** inviter | `invite_welcome` + `invite_joined` |
+> | **Activation** | the invitee's tenth ranking (§28) | inviter | `invite_activated` |
+>
+> **`invite_joined` replaces the generic follower row rather than joining it.** Two rows
+> naming the same person for the same act is the redundancy §15 exists to prevent, and the
+> invite framing is strictly the more informative of the two. The follow itself is
+> unchanged — clause 2 still creates it — so what moved is the sentence and nothing else.
+>
+> **A private inviter still receives `follow_request`, and that is deliberate.** Their
+> invitee's follow is `pending` under clause 3, and that row is not an announcement: it
+> carries Approve and Decline and is the only place in the app they exist. Replacing it
+> would strand the request; adding `invite_joined` beside it would be the redundant pair
+> the paragraph above refuses. The invite framing reaches that inviter at activation, as
+> it always has.
+>
+> `invite_joined` answers to the **`invites`** preference category — the switch
+> `invite_activated` already uses, because the two rows are two halves of one story — and
+> is push-eligible, inheriting the eligibility of the `follow` row it replaced so that a
+> copy change cannot silently take a push away. It is **not** deleted when the invitee
+> later unfollows: `unfollow` clears `follow` and `follow_request` because those announce
+> an edge that has stopped existing, where this announces that somebody joined, which
+> stays true. A block still removes it in both directions.
+>
+> **Exactly once, by position.** Both rows sit after the `invite_attributions` insert,
+> which `invitee_id`'s primary key allows to succeed once per account for ever: a replay
+> stops at the operation ledger, a second inviter stops at `on conflict do nothing`, and
+> there is never a third caller. `notifications_one_welcome_per_account` and
+> `notifications_one_join_per_pair` are the backstops for a future writer, not the
+> mechanism. Concurrent acceptance is covered by the real-PostgreSQL race suite.
+>
+> #### The relationship action on both rows
+>
+> **The welcome row's control was hidden on essentially every welcome ever drawn.** It was
+> gated on "no edge exists", and `redeem_invite` creates the invitee's follow as part of
+> acceptance — so the row that exists to introduce two accounts said nothing about whether
+> they were connected. Both invite rows now **state** the relationship instead of offering
+> one conditionally, read from `follow_state_with` at draw time:
+>
+> | state | welcome row (invitee → inviter) | join row (inviter → invitee) |
+> |---|---|---|
+> | no edge | **Follow** | **Follow back** |
+> | pending | **Requested** | **Requested** |
+> | approved | **Following** | **Following** |
+>
+> "Follow back" is wrong on a welcome — the inviter never followed them, so there is
+> nothing to return — and right on a join. **Requested keeps its own word**, for
+> `FollowControl`'s reason: collapsing it into Following would tell somebody they have
+> access they have not been granted. The two settled states are statements rather than
+> offers and lead to the profile the row already opens, where unfollowing and withdrawing
+> live; ending a relationship from an inbox row is one mis-tap from a follow nobody meant
+> to lose. Nothing is drawn until `follow_state_with` has answered, so the row most likely
+> to be Following never flashes Follow first.
+>
+> **The fresh-install limitation is unchanged and is restated here because this block
+> makes acceptance more visible, not more reachable.** Universal Links and App Links carry
+> a token only when the app is already installed. Somebody who taps an invitation, installs
+> from the App Store and launches from there arrives unattributed — no welcome, no join
+> row, no follow — and the recovery is the landing page's *I already have Bingd*. Invite
+> analytics remain a **floor**.
 
 ---
 

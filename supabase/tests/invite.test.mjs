@@ -451,7 +451,11 @@ describe('acceptance semantics (PRD §17)', () => {
     const publicInvitee = (
       await t.sql(`select id from profiles where username = 'accepter_public'`)
     ).rows[0].id;
-    assert.deepEqual(await noticesTo(publicInviter, publicInvitee), ['follow']);
+    // `invite_joined`, not `follow` (20260831000100). The row says the useful thing —
+    // "joined bingd. from your invite" — rather than the incidental half of it, and it
+    // is **one** row: the generic follower notice is replaced rather than joined, so
+    // one acceptance never produces two notifications about the same act.
+    assert.deepEqual(await noticesTo(publicInviter, publicInvitee), ['invite_joined']);
 
     const privateInviter = (
       await t.sql(`select id from profiles where username = 'accept_private'`)

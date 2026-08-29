@@ -107,6 +107,52 @@ jest.mock('@/lib/supabase', () => ({
 
 jest.mock('expo-crypto', () => ({ randomUUID: () => 'operation-1' }));
 
+/**
+ * **Reactions, mocked at the shared hook rather than at the table.**
+ *
+ * The point of the 2026-08-29 change is that this screen reads reactions through exactly
+ * the hook the Feed reads them through, so the seam worth faking is that hook — a fake
+ * `from('reactions')` would prove only that a query was shaped, not that the canonical
+ * summary reaches the canonical control. `REACTION_GLYPH` and `DEFAULT_REACTION` stay
+ * real, so the glyphs asserted below are the ones the product draws.
+ */
+const mockReactions = {
+  /** The summary the shared hook resolves to, or null for an activity with none. */
+  summary: null as Record<string, unknown> | null,
+  /** Which event ids the screen actually asked about, most recent call last. */
+  askedAbout: [] as string[][],
+  /** Every `setReaction(eventId, kind)` the screen made. */
+  set: [] as [string, string | null][],
+  /** Whether the read has landed. A `Map` with no entry cannot say this by itself. */
+  settled: true,
+  failed: false,
+};
+
+jest.mock('@/features/feed/use-reactions', () => {
+  const actual = jest.requireActual('@/features/feed/use-reactions');
+  return {
+    ...actual,
+    useReactions: (ids: string[]) => {
+      mockReactions.askedAbout.push(ids);
+      const data = new Map<string, unknown>();
+      if (ids[0] && mockReactions.summary) data.set(ids[0], mockReactions.summary);
+      return {
+        data,
+        isSuccess: mockReactions.settled && !mockReactions.failed,
+        isError: mockReactions.failed,
+        isPending: !mockReactions.settled,
+        refetch: jest.fn(),
+      };
+    },
+    useSetReaction: () => ({
+      setReaction: async (eventId: string, kind: string | null) => {
+        mockReactions.set.push([eventId, kind]);
+        return { ok: true };
+      },
+    }),
+  };
+});
+
 import ActivityScreen from '../../../app/activity/[id]';
 
 const event = (over: Record<string, unknown> = {}) => ({
@@ -161,6 +207,163 @@ beforeEach(() => {
   mockEventError = false;
   mockComments = [];
   mockAuth.status = 'ready';
+  mockReactions.summary = null;
+  mockReactions.askedAbout = [];
+  mockReactions.set = [];
+  mockReactions.settled = true;
+  mockReactions.failed = false;
+});
+
+/**
+ * **The post's reactions, which this screen used not to show at all** (founder,
+ * 2026-08-29).
+ *
+ * The founder opened a comment notification, looked at the post above the thread and
+ * could not find reactions they knew were on it. The cause was not caching and not a
+ * false zero: the screen fetched no reaction data and rendered no control, deliberately,
+ * alongside the comment, watchlist and recommend controls it still omits.
+ *
+ * These pin the parity that replaced it — same hook, same control, same grammar — and
+ * the omissions that survive it.
+ */
+describe('the reactions on the post above the conversation', () => {
+  const summary = (over: Record<string, unknown> = {}) => ({
+    total: 6,
+    mine: null,
+    kinds: ['love', 'mind_blown'],
+    byKind: { love: 5, mind_blown: 1 },
+    people: [],
+    ...over,
+  });
+
+  /** The control, by the label `ActivityRow` gives it in each of its two states. */
+  const control = (view: { getByLabelText: (m: RegExp) => unknown }, reacted: boolean) =>
+    view.getByLabelText(reacted ? /^You reacted to Sinners/ : /^React to Anna's activity/);
+
+  it('asks about the activity on screen, and about nothing else', async () => {
+    mockReactions.summary = summary();
+    await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(mockReactions.askedAbout.at(-1)).toEqual(['event-1']));
+  });
+
+  it('shows the count the shared summary carries, not one it worked out', async () => {
+    mockReactions.summary = summary({ total: 6 });
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByText('6')).toBeTruthy());
+  });
+
+  /**
+   * The viewer's own reaction goes in the action slot and is subtracted from the cluster
+   * beside it — `ActivityRow`'s rule, and the reason this screen must not draw its own
+   * control: the no-self-duplication behaviour is in the shared component.
+   */
+  it('puts the viewer’s own reaction in its own slot', async () => {
+    mockReactions.summary = summary({ mine: 'love', total: 6 });
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    // The label the control uses only when the reader has reacted.
+    await waitFor(() => expect(control(view, true)).toBeTruthy());
+  });
+
+  it('sets the default reaction on a tap, and clears it on the next one', async () => {
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+
+    fireEvent.press(control(view, false) as never);
+    await waitFor(() => expect(mockReactions.set).toEqual([['event-1', 'love']]));
+
+    // Now with the heart already set, the same tap removes it — the Feed's rule, not a
+    // second one written for this screen.
+    mockReactions.set = [];
+    mockReactions.summary = summary({ mine: 'love' });
+    const again = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(again.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+
+    fireEvent.press(control(again, true) as never);
+    await waitFor(() => expect(mockReactions.set).toEqual([['event-1', null]]));
+  });
+
+  it('opens the picker on a long press', async () => {
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+
+    fireEvent(control(view, false) as never, 'longPress');
+
+    // The shared pill, by the label it gives its own default choice.
+    await waitFor(() => expect(view.getByLabelText(/Love/i)).toBeTruthy());
+  });
+
+  /**
+   * A genuinely unreacted activity is clean rather than empty-looking: the control is
+   * there to react with, and nothing claims a count.
+   */
+  it('stays quiet on an activity nobody has reacted to', async () => {
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+    expect(control(view, false)).toBeTruthy();
+    expect(view.queryByText('6')).toBeNull();
+  });
+
+  /**
+   * An activity the viewer may not see resolves to no row at all, so there is nothing to
+   * ask about — a hidden post is never probed for the reactions `reactions_read` would
+   * refuse anyway.
+   */
+  it('asks for nothing when the activity itself is unavailable', async () => {
+    mockEvent = null;
+    await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() =>
+      expect(mockReactions.askedAbout.every((ids) => ids.length === 0)).toBe(true),
+    );
+  });
+
+  /**
+   * **A read that has not landed is not a zero** (Codex review of 2026-08-29).
+   *
+   * `useReactions` resolves to a `Map`, and an activity nobody has reacted to is simply
+   * absent from it — so "no entry" means either nobody reacted or nobody has looked.
+   * Collapsing the two drew a confident `0` on a post the Feed was showing with six, and
+   * a timed-out request kept drawing it while the detail sheet opened empty against it.
+   *
+   * So the control appears only once the query has settled. Absent is honest; wrong is
+   * not, and the row is still the sentence and the face it always was.
+   */
+  it('draws no reaction control while the read is still in flight', async () => {
+    mockReactions.settled = false;
+    mockReactions.summary = summary({ total: 6 });
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+    expect(view.queryByLabelText(/^React to Anna's activity/)).toBeNull();
+    expect(view.queryByLabelText(/^You reacted to Sinners/)).toBeNull();
+    // And above all: no count claimed.
+    expect(view.queryByText('0')).toBeNull();
+  });
+
+  it('draws no reaction control when the read failed, rather than a zero', async () => {
+    mockReactions.settled = true;
+    mockReactions.failed = true;
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+    expect(view.queryByLabelText(/^React to Anna's activity/)).toBeNull();
+    expect(view.queryByText('0')).toBeNull();
+  });
+
+  /** The three controls that were omitted with reactions and stay omitted. */
+  it('still offers no comments, watchlist or recommend control', async () => {
+    mockReactions.summary = summary();
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+    expect(view.queryByLabelText(/watchlist/i)).toBeNull();
+    expect(view.queryByLabelText(/Recommend/i)).toBeNull();
+    expect(view.queryByLabelText(/comments on/i)).toBeNull();
+  });
 });
 
 describe('the activity above the conversation', () => {

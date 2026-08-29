@@ -279,6 +279,26 @@ export default function suite() {
           [invitee],
         );
         assert.equal(rows[0].n, 1);
+
+        // **And exactly one of each notification** (20260831000100). Both rows hang off
+        // the attribution insert above, so this follows from it — but it is the property
+        // the founder's contract is actually about, and a future writer that moved either
+        // insert out from under that guard would leave the count above still passing
+        // while greeting somebody twice.
+        const notices = await db.rows(
+          `select type, count(*)::int as n from notifications
+            where (recipient_id = $1 and type = 'invite_welcome')
+               or (recipient_id = $2 and actor_id = $1 and type = 'invite_joined')
+            group by type order by type`,
+          [invitee, inviter],
+        );
+        assert.deepEqual(
+          notices.map((row) => [row.type, row.n]),
+          [
+            ['invite_joined', 1],
+            ['invite_welcome', 1],
+          ],
+        );
       } finally {
         await t1.end();
         await t2.end();

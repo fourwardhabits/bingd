@@ -25,6 +25,7 @@ import { TopRanked } from '@/features/profile/TopRanked';
 import { useProfileStats } from '@/features/profile/use-public-profile';
 import { posterUri } from '@/lib/images';
 import { queryKeys } from '@/lib/query';
+import { TAB_ROUTES } from '@/lib/routes';
 import { theme } from '@/ui/tokens';
 import {
   ActivityRow,
@@ -276,7 +277,29 @@ export default function ProfileScreen() {
           onPressTitle={(id) => router.push(`/title/${id}`)}
         />
 
-        <TopRanked userId={profile.id} onPressTitle={(id) => router.push(`/title/${id}`)} />
+        {/**
+         * **See all goes to the Collection tab, not to a second list of the same
+         * titles** (founder, 2026-08-29).
+         *
+         * The reader's own ranked collection already has a screen, and it is the
+         * editable one -- rank, re-rank, log, filter. Opening a read-only sheet over
+         * their own profile would be a second self-collection surface that can only
+         * ever do less, which is the thing the founder's brief ruled out by name. The
+         * ranked *stat* above still opens the sheet, because that control is explaining
+         * a number rather than offering somewhere to go.
+         */}
+        <TopRanked
+          userId={profile.id}
+          onPressTitle={(id) => router.push(`/title/${id}`)}
+          onSeeAll={(category) =>
+            // **Carrying the side they chose.** The Collection tab remembers a medium per
+            // device, so arriving without saying which one meant tapping See all under
+            // Movies and landing on TV. The param is read there as an expressed intent
+            // and overrules the stored preference for that arrival — the same precedence
+            // a tap on the selector itself already has.
+            router.push({ pathname: TAB_ROUTES.collection, params: { medium: category } })
+          }
+        />
 
         {/* Immediately after Top Ranked, and that order is the product decision rather
             than a layout one: what somebody loves, then what they want to watch next. */}
@@ -318,7 +341,7 @@ export default function ProfileScreen() {
                 // finished season "ranked" here and "finished" in the feed — one
                 // event saying two things on two screens.
                 verb={verbFor(event.type)}
-                tail={tailFor(event.type)}
+                tail={tailFor(event.type, event.title)}
                 companions={event.companions}
                 title={event.title}
                 year={event.year}
@@ -405,9 +428,9 @@ export default function ProfileScreen() {
       />
       <RankedTitlesSheet
         category={titleList}
+        onChangeCategory={setTitleList}
         userId={profile.id}
         name={profile.display_name || profile.username}
-        viewerId={profile.id}
         isSelf
         onPressTitle={(id) => {
           setTitleList(null);

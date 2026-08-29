@@ -345,7 +345,10 @@ describe('an award in the feed (20260828000100)', () => {
     ];
 
     const item = await only();
-    expect(item.title).toBe('a bingd. Award');
+    // No leading article: the sentence supplies one now ("earned the …"), and
+    // `tailFor` drops its trailing "award" for a name that already says it — so this
+    // row reads "Abisola earned the bingd. Award" rather than stacking either word.
+    expect(item.title).toBe('bingd. Award');
     expect(item.award?.tierLabel).toBeNull();
   });
 });

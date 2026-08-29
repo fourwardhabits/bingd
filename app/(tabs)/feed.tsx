@@ -592,7 +592,7 @@ export default function FeedScreen() {
                   : () => router.push(`/u/${event.actorUsername}`)
               }
               verb={verbFor(event.type)}
-              tail={tailFor(event.type)}
+              tail={tailFor(event.type, event.title)}
               companions={event.companions}
               title={event.title}
               year={event.year}

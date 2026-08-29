@@ -208,6 +208,18 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
       return [...profile, unavailable('That account is no longer available.')];
 
     /**
+     * The same person, at the earlier of the two moments: `redeem_invite` files this
+     * the instant the invitation is accepted (`20260831000100`), where
+     * `invite_activated` waits for their tenth ranking.
+     *
+     * Same destination, and that is not an oversight — both rows are about the account
+     * that joined, and the useful thing to do with either is look at them. The row's
+     * own Follow back is beside the tap, not instead of it.
+     */
+    case 'invite_joined':
+      return [...profile, unavailable('That account is no longer available.')];
+
+    /**
      * The inviter, which is the whole point of the row.
      *
      * A new reader's inbox holds this and nothing else, and the one useful thing to do
@@ -407,6 +419,7 @@ export const ROUTED_KINDS: readonly NotificationKind[] = [
   'recommendation',
   'recommendation_ranked',
   'invite_activated',
+  'invite_joined',
   'invite_welcome',
   'award_earned',
   'goal_completed',

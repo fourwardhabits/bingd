@@ -49,7 +49,13 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
-jest.mock('expo-router', () => ({ useRouter: () => ({ push: jest.fn() }) }));
+/** Mutable so a test can arrive with `?medium=` the way See all does. */
+const mockParams: { medium?: string } = {};
+
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: jest.fn() }),
+  useLocalSearchParams: () => mockParams,
+}));
 
 /** Mutable so a test can sign one reader out and another in without unmounting. */
 const mockProfile = { id: 'user-1' };
@@ -122,6 +128,7 @@ const ranked = (id: string, category: 'movies' | 'tv_seasons') => ({
 
 beforeEach(() => {
   mockProfile.id = 'user-1';
+  delete mockParams.medium;
   for (const key of Object.keys(mockPrefStore)) delete mockPrefStore[key];
   mockPrefWrites.length = 0;
   mockPrefFailing.clear();
@@ -299,6 +306,56 @@ describe('the remembered category', () => {
     await waitFor(() =>
       expect(mockPrefWrites).toContainEqual({ name: MEDIUM_KEY, value: 'tv_seasons' }),
     );
+  });
+
+  /**
+   * **See all carries the side it was pressed under** (Codex review of 2026-08-29).
+   *
+   * The control computes Movies or TV from the wall the reader is looking at, and the
+   * own-profile route sends them here. Without the param that choice was dropped and the
+   * device habit answered instead — tap See all under Movies, arrive on TV.
+   */
+  it('opens on the side a navigation asked for', async () => {
+    mockParams.medium = 'tv_seasons';
+    mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+    const view = await open();
+
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+  });
+
+  /**
+   * The precedence that matters: the stored preference is read asynchronously and would
+   * otherwise land a moment later and overrule the control the reader just pressed. The
+   * param sets `chosenMedium`, which is the same guard a tap on the selector sets.
+   */
+  it('is not overruled by the remembered side landing afterwards', async () => {
+    mockPrefStore[MEDIUM_KEY] = 'movies';
+    mockParams.medium = 'tv_seasons';
+    mockTables.user_media = [watched('m1', 'movie'), watched('s1', 'season')];
+    const view = await open();
+
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+    // And still TV after the preference read has certainly resolved.
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+  });
+
+  /** Arriving from a control is a choice about this visit, not a new device habit. */
+  it('does not rewrite the remembered side just because it was navigated to', async () => {
+    mockParams.medium = 'tv_seasons';
+    mockTables.user_media = [watched('s1', 'season')];
+    const view = await open();
+
+    await waitFor(() => expect(showing(view)).toBe('Showing TV'));
+    expect(mockPrefWrites).not.toContainEqual({ name: MEDIUM_KEY, value: 'tv_seasons' });
+  });
+
+  /** A stale or hand-typed link must not put the selector in a state it cannot draw. */
+  it('ignores a medium it has no tab for', async () => {
+    mockParams.medium = 'books';
+    mockTables.user_media = [watched('m1', 'movie')];
+    const view = await open();
+
+    expect(showing(view)).toBe('Showing Movies');
   });
 
   it('goes back to Movies when the reader does, rather than remembering only TV', async () => {

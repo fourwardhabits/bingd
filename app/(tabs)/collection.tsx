@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -103,6 +103,8 @@ const VIEW_MODE_PREF_KEY = 'collection.view-mode';
  */
 export default function CollectionScreen() {
   const profile = useCurrentProfile();
+  /** The side a navigation asked for, if any. See the effect that applies it. */
+  const { medium: mediumParam } = useLocalSearchParams<{ medium?: string }>();
   const { data: loggedSummary } = useLoggedCollection(profile.id);
   const [segment, setSegment] = useState<Segment>('watched');
   /**
@@ -113,10 +115,21 @@ export default function CollectionScreen() {
    * to clean up: a preference belongs to whoever it was read for, so one that does not
    * name the current reader is simply not theirs and the default stands.
    */
-  const [mediumPref, setMediumPref] = useState<{ profileId: string; medium: Medium }>({
+  const [mediumPref, setMediumPref] = useState<{ profileId: string; medium: Medium }>(() => ({
     profileId: profile.id,
-    medium: 'movies',
-  });
+    /**
+     * **A side asked for by whoever navigated here**, which today is See all on the
+     * profile's Top ranked (2026-08-29).
+     *
+     * Seeded rather than applied in an effect, because it is known on the first render:
+     * an effect would paint Movies and then correct itself, and setting state
+     * synchronously inside one is the cascading render the lint rule exists to stop.
+     *
+     * Validated rather than trusted, like the stored value below, so a stale or
+     * hand-typed link cannot put the selector in a state it has no tab for.
+     */
+    medium: isMedium(mediumParam) ? mediumParam : 'movies',
+  }));
   const medium: Medium = mediumPref.profileId === profile.id ? mediumPref.medium : 'movies';
   const [nudgePref, setNudgePref] = useState<UnrankedNudgePref | null>(null);
   /**
@@ -158,14 +171,18 @@ export default function CollectionScreen() {
     chosenMedium.current = false;
     readPref<unknown>(`${profile.id}.${MEDIUM_PREF_KEY}`)
       .then((stored) => {
-        if (cancelled || chosenMedium.current) return;
+        // **A side asked for by the navigation outranks the remembered one**, the same
+        // way a tap on the selector does — see the seed in `useState` above. Without
+        // this, See all under Movies opened Movies and then a slow preference read
+        // moved it to TV, which is the defect from the other direction.
+        if (cancelled || chosenMedium.current || isMedium(mediumParam)) return;
         if (isMedium(stored)) setMediumPref({ profileId: profile.id, medium: stored });
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [profile.id]);
+  }, [profile.id, mediumParam]);
 
   /**
    * The remembered view mode, applied when it arrives.

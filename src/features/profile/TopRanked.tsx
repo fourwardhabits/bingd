@@ -15,6 +15,14 @@ export type TopRankedProps = {
   /** Somebody else's name, for the empty state. Null on the viewer's own profile. */
   otherName?: string | null;
   onPressTitle: (mediaItemId: string) => void;
+  /**
+   * Opens the whole ranked list for one category (founder, 2026-08-29).
+   *
+   * Omitted by a caller with nowhere to send the reader, in which case no control is
+   * drawn and the wall stays exactly what it was. Where it is supplied it still appears
+   * only when there is genuinely more to see — see `seeAll`.
+   */
+  onSeeAll?: (category: 'movies' | 'tv_seasons') => void;
 };
 
 /**
@@ -35,7 +43,7 @@ export type TopRankedProps = {
  * Scores are computed per category against that category's whole band, never against
  * the slice on screen. Scoring six titles against themselves would give all six a 10.
  */
-export function TopRanked({ userId, otherName, onPressTitle }: TopRankedProps) {
+export function TopRanked({ userId, otherName, onPressTitle, onSeeAll }: TopRankedProps) {
   const [filter, setFilter] = useState<Filter>('all');
 
   const movies = useRankedCollection(userId, 'movies');
@@ -93,9 +101,37 @@ export function TopRanked({ userId, otherName, onPressTitle }: TopRankedProps) {
   const failed = movies.isError || seasons.isError;
   const hasBoth = (movies.data?.length ?? 0) > 0 && (seasons.data?.length ?? 0) > 0;
 
+  /**
+   * **See all, and only where there is more than the wall already shows.**
+   *
+   * A control that opens a list of exactly the six titles above it is a dead end, so the
+   * category has to hold more than `WALL` before it is offered — which is the founder's
+   * rule and also the honest one: the wall *is* the whole collection for most new
+   * accounts.
+   *
+   * Which category it opens follows the filter the reader is already looking at. Under
+   * **All** there is no single answer, because All is deliberately not one ordered list
+   * (movies and seasons are separate rankings and a position only means anything inside
+   * its own category), so it opens whichever half actually has more to show — Movies
+   * first when both qualify, which is the order the tabs themselves are in.
+   */
+  const seeAll = (() => {
+    if (!onSeeAll || failed || loading) return null;
+    const movieCount = movies.data?.length ?? 0;
+    const seasonCount = seasons.data?.length ?? 0;
+    if (filter === 'movies') return movieCount > WALL ? ('movies' as const) : null;
+    if (filter === 'tv_seasons') return seasonCount > WALL ? ('tv_seasons' as const) : null;
+    if (movieCount > WALL) return 'movies' as const;
+    return seasonCount > WALL ? ('tv_seasons' as const) : null;
+  })();
+
   return (
     <View style={styles.section}>
-      <SectionHeader title="Top ranked" />
+      <SectionHeader
+        title="Top ranked"
+        actionLabel={seeAll ? 'See all' : undefined}
+        onPressAction={seeAll ? () => onSeeAll?.(seeAll) : undefined}
+      />
 
       {/* Offered only where both halves have something. Somebody who has ranked only
           films is not asked to choose between Movies and TV — the same rule the

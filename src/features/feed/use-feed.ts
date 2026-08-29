@@ -354,7 +354,7 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
             seasonNumber: media.season_number,
           })
         : row.type === 'award_earned'
-          ? (row.payload?.award_name ?? 'a bingd. Award')
+          ? (row.payload?.award_name ?? 'bingd. Award')
           : // And for a goal it is the goal's own name, so the sentence reads
             // "Abisola hit their 2026 Movies goal" through the same three slots.
             row.type === 'goal_completed' && row.payload?.year && row.payload?.category

@@ -66,6 +66,25 @@ export type NotificationKind =
    */
   | 'invite_activated'
   /**
+   * The inviter's own half of an acceptance, filed by `redeem_invite` at the moment an
+   * invitation is redeemed (`20260831000100`).
+   *
+   * **It replaces the `follow` row that acceptance used to file, rather than joining
+   * it.** The follow is still created; what changed is the sentence. "Ada Lovelace
+   * joined bingd. from your invite" is the fact worth telling, and "started following
+   * you" was the incidental half of it — two rows for one act is the redundancy PRD §15
+   * refuses.
+   *
+   * **Not to be confused with `invite_activated` above.** That is the analytics
+   * milestone at the tenth ranking and is unchanged; this is the social event at
+   * acceptance. Two moments, two rows, and neither stands in for the other.
+   *
+   * Filed only when the invitee's follow was auto-approved. A **private** inviter still
+   * gets `follow_request`, because that row carries Approve and Decline and is the only
+   * place in the app they exist.
+   */
+  | 'invite_joined'
+  /**
    * The invitee's own welcome, filed by `redeem_invite` at the moment an invitation
    * is accepted (`20260823000100`).
    *
@@ -210,6 +229,7 @@ const KINDS = new Set<string>([
   'recommendation',
   'recommendation_ranked',
   'invite_activated',
+  'invite_joined',
   'invite_welcome',
   'friendship',
   'award_earned',
@@ -501,6 +521,17 @@ export function verbFor(
     case 'invite_activated':
       return 'joined bingd. from your invite';
     /**
+     * The same sentence as `invite_activated`, deliberately, because it is the same
+     * fact — and this is the row that says it at the moment it becomes true.
+     *
+     * The two are not duplicates in an inbox: acceptance files this one and only this
+     * one; activation files the other, later, and only if the invitee ranks ten titles.
+     * An inviter can see both over a fortnight, describing two different milestones of
+     * the same person, which is what the invite funnel actually has to say.
+     */
+    case 'invite_joined':
+      return 'joined bingd. from your invite';
+    /**
      * No emoji here, on purpose. The row draws one; a screen reader would say "party
      * popper" in the middle of the only sentence that tells a new reader who brought
      * them, and the celebration is the part that survives being dropped.
@@ -537,27 +568,83 @@ export function verbFor(
   }
 }
 
+/** What the row's relationship control says, and whether pressing it does anything. */
+export type RelationshipAction = {
+  label: 'Follow' | 'Follow back' | 'Requested' | 'Following';
+  /** `Requested` and `Following` are statements of fact, not offers. */
+  actionable: boolean;
+};
+
+/** The reader's own outgoing edge to a row's actor, as `follow_state_with` reports it. */
+export type OutgoingEdge = {
+  following?: 'approved' | 'pending' | null;
+  blocked?: boolean;
+};
+
 /**
- * Whether this row should offer Follow back.
+ * The two rows that are *about* a relationship, and therefore always state one.
  *
- * Only on `follow`, and only where the reader does not already have an edge going the
- * other way. Not on `follow_request`: that row has Approve and Decline, and a third
- * control that quietly starts a relationship in the opposite direction beside them is
- * one mis-tap from a follow nobody meant. Not on `follow_approved` either — that row
- * exists because the reader followed *them*, so there is nothing to follow back.
+ * Everywhere else in this inbox a follow control is an offer that disappears once it
+ * has been taken. On these two it is the point of the row, so it reports the state
+ * instead of vanishing — see `relationshipActionFor`.
  */
-export function canFollowBack(
+const INVITE_ROWS = new Set<string>(['invite_welcome', 'invite_joined']);
+
+/**
+ * The relationship control for a row, or nothing.
+ *
+ * **This replaced `canFollowBack`, which could only answer yes or no.** That was right
+ * for `follow` and wrong for the two invite rows, and the reason is what those rows
+ * are for. `redeem_invite` creates the invitee's follow as part of acceptance, so by
+ * the time the welcome is ever drawn the edge already exists — and a boolean gate meant
+ * the control was hidden on essentially every welcome ever rendered. The row that
+ * exists to introduce two accounts said nothing about whether they were connected.
+ *
+ * So on `invite_welcome` and `invite_joined` the control always appears and names the
+ * truth: **Following**, **Requested**, or an offer to start. The first two are inert —
+ * they are statements, and the place to undo a follow is the profile the row already
+ * opens, where `FollowControl` has always drawn that state and its confirmation.
+ *
+ * **`Follow` on a welcome, `Follow back` on a join.** The inviter never followed the
+ * invitee, so there is nothing for the invitee to return; the inviter, receiving a join,
+ * is being followed and can return it.
+ *
+ * Everything else keeps the old rule exactly. `follow` and `friendship` offer Follow
+ * back only where no edge goes the other way; `follow_request` is excluded because it
+ * has Approve and Decline, and a third control that quietly starts a relationship in the
+ * opposite direction beside them is one mis-tap from a follow nobody meant.
+ * `follow_approved` is excluded because the reader followed *them*.
+ *
+ * `resolved` is not the same question as "is there an edge". Until `follow_state_with`
+ * has answered, an absent entry means nobody has looked — and drawing `Follow` on that
+ * would flash the wrong word on the row most likely to already be Following.
+ */
+export function relationshipActionFor(
   row: Notification,
-  outgoing: 'approved' | 'pending' | null | undefined,
-): boolean {
-  return (
-    // `friendship` joins the pair (20260827000200): a one-way acceptance is exactly
-    // "somebody now follows you", and the relationship gate below hides the control
-    // by itself whenever the friendship was mutual.
-    (row.kind === 'follow' || row.kind === 'invite_welcome' || row.kind === 'friendship') &&
-    Boolean(row.actorId) &&
-    !outgoing
-  );
+  edge: OutgoingEdge | undefined,
+  resolved: boolean,
+): RelationshipAction | null {
+  if (!row.actorId) return null;
+  // A block in either direction removes the rows themselves server-side; this is the
+  // window before the next refetch, and an offer to follow somebody the reader has
+  // blocked is not one of the states this control is allowed to draw.
+  if (edge?.blocked) return null;
+
+  if (INVITE_ROWS.has(row.kind)) {
+    if (!resolved) return null;
+    if (edge?.following === 'approved') return { label: 'Following', actionable: false };
+    if (edge?.following === 'pending') return { label: 'Requested', actionable: false };
+    return { label: row.kind === 'invite_welcome' ? 'Follow' : 'Follow back', actionable: true };
+  }
+
+  // `friendship` joins the pair (20260827000200): a one-way acceptance is exactly
+  // "somebody now follows you", and the edge check hides the control by itself
+  // whenever the friendship was mutual.
+  if (row.kind === 'follow' || row.kind === 'friendship') {
+    return edge?.following ? null : { label: 'Follow back', actionable: true };
+  }
+
+  return null;
 }
 
 /**

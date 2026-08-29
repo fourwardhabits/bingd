@@ -462,6 +462,19 @@ export default function PublicProfileScreen() {
             userId={subjectId}
             otherName={isSelf ? null : profile.data.name}
             onPressTitle={(id: string) => router.push(`/title/${id}`)}
+            /**
+             * See all, into the same sheet the ranked stat opens (founder, 2026-08-29).
+             *
+             * One surface rather than two: the stat above explains a number and this
+             * explains a wall, and both questions are answered by the same rank-ordered
+             * list. A reader looking at their **own** profile through this screen is a
+             * real case -- `/u/<their own username>` resolves here -- and it still opens
+             * the sheet rather than the Collection tab, because the tab is a different
+             * screen in a different stack and jumping there from somebody's profile is
+             * navigation the reader did not ask for. The own-profile tab sends them to
+             * the editable Collection instead, which is where that question belongs.
+             */
+            onSeeAll={(next) => setTitleList(next)}
           />
 
           {/* Same position as the own profile, deliberately: the founder pass that made
@@ -553,7 +566,7 @@ export default function PublicProfileScreen() {
                   actorName={event.actorName}
                   actorAvatarUri={event.actorAvatarUri}
                   verb={verbFor(event.type)}
-                  tail={tailFor(event.type)}
+                  tail={tailFor(event.type, event.title)}
                   companions={event.companions}
                   title={event.title}
                   year={event.year}
@@ -647,9 +660,9 @@ export default function PublicProfileScreen() {
       {profile.data ? (
         <RankedTitlesSheet
           category={titleList}
+          onChangeCategory={setTitleList}
           userId={profile.data.id}
           name={profile.data.name}
-          viewerId={viewer.id}
           isSelf={profile.data.id === viewer.id}
           onPressTitle={(id) => {
             setTitleList(null);
