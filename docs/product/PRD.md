@@ -450,9 +450,20 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 > avoid. The ranked *stat* still opens the sheet there, because that control is explaining
 > a number rather than offering somewhere to go.
 >
-> **It costs no new request.** The sheet reads `useRankedCollection` — the query the
-> profile behind it already ran to build the wall, same key and same cache entry — and the
-> second, sheet-only read of `rankings` it replaced is gone rather than left beside it.
+> **It costs no new request while the profile's own read is fresh.** The sheet reads
+> `useRankedCollection` — the query the profile behind it already ran to build the wall,
+> same key and same cache entry — and the second, sheet-only read of `rankings` it
+> replaced is gone rather than left beside it. It is not free for ever: the global
+> `staleTime` is 60s, so a reader who spends a minute on a profile before opening the list
+> pays one refetch. Only the category actually on screen is enabled, so that is one and
+> not two; the other loads when it is switched to.
+>
+> **The render is capped at 200 rows** and says so when it cuts. The read is not capped —
+> the whole category is what the bands and the scores are computed from — but this is a
+> `ScrollView` and every row it holds is mounted at once, which is what the 200-row server
+> page it replaced was already bounding. A virtualised list is not available here:
+> `FollowListSheet` records that a `FlatList` inside a `maxHeight: 90%` container measures
+> to zero.
 > That query is keyset-paginated on `media_item_id` rather than on `position`, because
 > inserting a ranking shifts every position below it and a position cursor can be moved
 > out from under the read by a concurrent ranking session; pages therefore cannot

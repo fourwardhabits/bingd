@@ -216,6 +216,97 @@ it('asks for nothing at all while it is closed', async () => {
   expect(mockAsked.every((call) => call.enabled === false)).toBe(true);
 });
 
+/**
+ * **The render is bounded** (Codex review of 2026-08-29).
+ *
+ * This is a `ScrollView` and every row it holds is mounted at once — `FollowListSheet`
+ * records why it cannot be a virtualised list here: a `FlatList` inside a
+ * `maxHeight: 90%` container measures to zero. The read it replaced was capped at 200 by
+ * the server; `useRankedCollection` reads to exhaustion, so the cap moved to the render
+ * and is said out loud rather than discovered by counting.
+ */
+describe('a collection larger than the sheet will draw', () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      entry({ mediaItemId: `m${i}`, title: `Film ${i}`, position: i + 1 }),
+    );
+
+  it('mounts at most two hundred rows', async () => {
+    mockMovies = many(260);
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText(/Film 0/)).toBeTruthy());
+    expect(view.getAllByLabelText(/Film \d+, 2019/).length).toBe(200);
+    // The two-hundredth is drawn and the two-hundred-and-first is not.
+    expect(view.getByText('#200')).toBeTruthy();
+    expect(view.queryByText('#201')).toBeNull();
+  });
+
+  it('says it was cut, and how much of it there is', async () => {
+    mockMovies = many(260);
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Showing their top 200 of 260.')).toBeTruthy());
+  });
+
+  it('says nothing of the sort when the whole list fits', async () => {
+    mockMovies = many(12);
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText(/Film 0/)).toBeTruthy());
+    expect(view.queryByText(/Showing their top/)).toBeNull();
+  });
+
+  /**
+   * **The band is the whole category; the cap is only what gets drawn.**
+   *
+   * The discriminator is the last drawn row. Scored against 260 titles, #200 sits some
+   * way above the floor of its band; scored against the 200 on screen it would *be* the
+   * floor — which is what applying the cap before `bandSizes` would produce, and the rule
+   * `TopRanked` already records ("scoring six titles against themselves gives all six a
+   * 10").
+   */
+  it('scores against the whole category rather than the drawn slice', async () => {
+    const scoreOfLastDrawn = async (n: number) => {
+      mockMovies = many(n);
+      const view = await open();
+      await waitFor(() => expect(view.getByText(/Film 0/)).toBeTruthy());
+      const badges = view.getAllByLabelText(/out of 10/);
+      return badges[199]?.props.accessibilityLabel as string;
+    };
+
+    const inA260Band = await scoreOfLastDrawn(260);
+    const inA200Band = await scoreOfLastDrawn(200);
+
+    // Same row, same position, different band — so a different number. Equal here would
+    // mean the cap had been applied before the band was measured.
+    expect(inA260Band).not.toBe(inA200Band);
+  });
+});
+
+/**
+ * Only the category on screen is read. Both were enabled at first, on the reasoning that
+ * the profile behind the sheet had already asked for both — true only while those entries
+ * are fresh, and the global `staleTime` is 60s. A reader who lingers then opens Movies was
+ * refetching TV as well, which is not drawn.
+ */
+it('reads only the category it is showing', async () => {
+  await open({ category: 'movies' });
+
+  const enabled = mockAsked.filter((call) => call.enabled).map((call) => call.category);
+  expect(enabled).toEqual(['movies']);
+});
+
+it('reads the other category once it is switched to', async () => {
+  await open({ category: 'tv_seasons' });
+
+  const enabled = mockAsked.filter((call) => call.enabled).map((call) => call.category);
+  expect(enabled).toEqual(['tv_seasons']);
+});
+
 it('names whose collection it is', async () => {
   mockMovies = [entry()];
 

@@ -291,7 +291,14 @@ export default function ProfileScreen() {
         <TopRanked
           userId={profile.id}
           onPressTitle={(id) => router.push(`/title/${id}`)}
-          onSeeAll={() => router.push(TAB_ROUTES.collection)}
+          onSeeAll={(category) =>
+            // **Carrying the side they chose.** The Collection tab remembers a medium per
+            // device, so arriving without saying which one meant tapping See all under
+            // Movies and landing on TV. The param is read there as an expressed intent
+            // and overrules the stored preference for that arrival — the same precedence
+            // a tap on the selector itself already has.
+            router.push({ pathname: TAB_ROUTES.collection, params: { medium: category } })
+          }
         />
 
         {/* Immediately after Top Ranked, and that order is the product decision rather

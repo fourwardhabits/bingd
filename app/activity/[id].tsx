@@ -142,6 +142,22 @@ export default function ActivityScreen() {
   const reactions = useReactions(event && viewerId ? [event.id] : [], viewerId ?? '');
   const { setReaction } = useSetReaction(viewerId ?? '');
   const summary = event ? (reactions.data?.get(event.id) ?? null) : null;
+  /**
+   * **A read that has not landed is not a zero**, which is the whole hazard of putting a
+   * count on this screen at all.
+   *
+   * `useReactions` resolves to a `Map`, and an event with no reactions is simply absent
+   * from it — so "no entry" means *either* nobody has reacted *or* nobody has looked, and
+   * collapsing the two would draw a confident `0` on a post the Feed shows with six. A
+   * timed-out request would keep drawing it, and the detail sheet would open empty
+   * against it.
+   *
+   * So the control is drawn only once the query has actually settled. While it is
+   * pending, and after an error, the row is the sentence and the face it always was —
+   * absent rather than wrong. The next refetch fills it in; nothing here has to be
+   * invalidated by hand.
+   */
+  const reactionsResolved = reactions.isSuccess && !reactions.isError;
 
   const choose = async (kind: ReactionKind | null) => {
     if (!event) return;
@@ -298,21 +314,25 @@ export default function ActivityScreen() {
              * been — see the hook above for the founder's report and why this one is a
              * different kind of thing. Every value here comes from the shared summary.
              */
-            reaction={{
-              count: summary?.total ?? 0,
-              mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
-              glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
-              onPress: () => void toggleDefault(),
-              onLongPress: () => setPickerOpen(true),
-              onPressSummary: () => setDetailOpen(true),
-              picker: pickerOpen ? (
-                <ReactionPill
-                  current={summary?.mine ?? null}
-                  onChoose={(kind) => void choose(kind)}
-                  onDismiss={() => setPickerOpen(false)}
-                />
-              ) : null,
-            }}
+            reaction={
+              reactionsResolved
+                ? {
+                    count: summary?.total ?? 0,
+                    mineGlyph: summary?.mine ? REACTION_GLYPH[summary.mine] : null,
+                    glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
+                    onPress: () => void toggleDefault(),
+                    onLongPress: () => setPickerOpen(true),
+                    onPressSummary: () => setDetailOpen(true),
+                    picker: pickerOpen ? (
+                      <ReactionPill
+                        current={summary?.mine ?? null}
+                        onChoose={(kind) => void choose(kind)}
+                        onDismiss={() => setPickerOpen(false)}
+                      />
+                    ) : null,
+                  }
+                : undefined
+            }
           />
 
           <View style={styles.divider} />

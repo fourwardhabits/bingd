@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -103,6 +103,8 @@ const VIEW_MODE_PREF_KEY = 'collection.view-mode';
  */
 export default function CollectionScreen() {
   const profile = useCurrentProfile();
+  /** The side a navigation asked for, if any. See the effect that applies it. */
+  const { medium: mediumParam } = useLocalSearchParams<{ medium?: string }>();
   const { data: loggedSummary } = useLoggedCollection(profile.id);
   const [segment, setSegment] = useState<Segment>('watched');
   /**
@@ -166,6 +168,26 @@ export default function CollectionScreen() {
       cancelled = true;
     };
   }, [profile.id]);
+
+  /**
+   * **A medium asked for by whoever navigated here**, which today is See all on the
+   * profile's Top ranked (2026-08-29).
+   *
+   * Treated as the reader's own tap rather than as a hint: it sets `chosenMedium`, so the
+   * stored preference read above cannot land a moment later and overrule the side they
+   * were looking at when they pressed the control. That is the precedence the selector
+   * itself has, and it is the reason that ref exists.
+   *
+   * Validated rather than trusted, like the stored value, so a stale or hand-typed link
+   * cannot put the selector in a state it has no tab for. It deliberately does **not**
+   * write the preference: arriving from one control is a choice about this visit, and
+   * rewriting a device habit as a side effect of navigation is not what that habit is.
+   */
+  useEffect(() => {
+    if (!isMedium(mediumParam)) return;
+    chosenMedium.current = true;
+    setMediumPref({ profileId: profile.id, medium: mediumParam });
+  }, [mediumParam, profile.id]);
 
   /**
    * The remembered view mode, applied when it arrives.

@@ -123,6 +123,9 @@ const mockReactions = {
   askedAbout: [] as string[][],
   /** Every `setReaction(eventId, kind)` the screen made. */
   set: [] as [string, string | null][],
+  /** Whether the read has landed. A `Map` with no entry cannot say this by itself. */
+  settled: true,
+  failed: false,
 };
 
 jest.mock('@/features/feed/use-reactions', () => {
@@ -133,7 +136,13 @@ jest.mock('@/features/feed/use-reactions', () => {
       mockReactions.askedAbout.push(ids);
       const data = new Map<string, unknown>();
       if (ids[0] && mockReactions.summary) data.set(ids[0], mockReactions.summary);
-      return { data, refetch: jest.fn() };
+      return {
+        data,
+        isSuccess: mockReactions.settled && !mockReactions.failed,
+        isError: mockReactions.failed,
+        isPending: !mockReactions.settled,
+        refetch: jest.fn(),
+      };
     },
     useSetReaction: () => ({
       setReaction: async (eventId: string, kind: string | null) => {
@@ -201,6 +210,8 @@ beforeEach(() => {
   mockReactions.summary = null;
   mockReactions.askedAbout = [];
   mockReactions.set = [];
+  mockReactions.settled = true;
+  mockReactions.failed = false;
 });
 
 /**
@@ -308,6 +319,39 @@ describe('the reactions on the post above the conversation', () => {
     await waitFor(() =>
       expect(mockReactions.askedAbout.every((ids) => ids.length === 0)).toBe(true),
     );
+  });
+
+  /**
+   * **A read that has not landed is not a zero** (Codex review of 2026-08-29).
+   *
+   * `useReactions` resolves to a `Map`, and an activity nobody has reacted to is simply
+   * absent from it — so "no entry" means either nobody reacted or nobody has looked.
+   * Collapsing the two drew a confident `0` on a post the Feed was showing with six, and
+   * a timed-out request kept drawing it while the detail sheet opened empty against it.
+   *
+   * So the control appears only once the query has settled. Absent is honest; wrong is
+   * not, and the row is still the sentence and the face it always was.
+   */
+  it('draws no reaction control while the read is still in flight', async () => {
+    mockReactions.settled = false;
+    mockReactions.summary = summary({ total: 6 });
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+    expect(view.queryByLabelText(/^React to Anna's activity/)).toBeNull();
+    expect(view.queryByLabelText(/^You reacted to Sinners/)).toBeNull();
+    // And above all: no count claimed.
+    expect(view.queryByText('0')).toBeNull();
+  });
+
+  it('draws no reaction control when the read failed, rather than a zero', async () => {
+    mockReactions.settled = true;
+    mockReactions.failed = true;
+    const view = await renderWithProviders(<ActivityScreen />);
+
+    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+    expect(view.queryByLabelText(/^React to Anna's activity/)).toBeNull();
+    expect(view.queryByText('0')).toBeNull();
   });
 
   /** The three controls that were omitted with reactions and stay omitted. */
