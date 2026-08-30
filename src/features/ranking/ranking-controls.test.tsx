@@ -168,7 +168,7 @@ describe('undo and skip are buttons', () => {
     await sheet.ready('Film P');
     return {
       undo: sheet.getByLabelText('Undo the last comparison'),
-      skip: sheet.getByLabelText('Too tough to call. Skip this comparison'),
+      skip: sheet.getByLabelText('Too tough to call'),
       sheet,
     };
   };
@@ -213,16 +213,23 @@ describe('undo and skip are buttons', () => {
     expect(a.backgroundColor).toBe(b.backgroundColor);
   });
 
-  it('says Undo and Too tough, and never Skip', async () => {
-    const { sheet } = await controls();
+  it('says Undo and Too tough, and never Skip — to a screen reader as well', async () => {
+    const { sheet, skip } = await controls();
 
     // The words are the founder's. "Too tough" everywhere since 2026-08-30, replacing
     // the per-surface split that had onboarding saying one thing and the Log tab
-    // another. Asserted apart from the accessible labels above, which are longer on
-    // purpose.
+    // another.
     expect(sheet.getByText('Undo')).toBeTruthy();
     expect(sheet.getByText('Too tough')).toBeTruthy();
     expect(sheet.queryByText('Skip')).toBeNull();
+
+    // **The accessible label is a surface too** (independent review 76). It read
+    // "Too tough to call. Skip this comparison" — the new label with the old one still
+    // attached — so the control went on saying Skip to anybody who could not see it.
+    // The effect is not lost with the word: it moves to the hint, which is where an
+    // effect belongs and where it already was.
+    expect(skip.props.accessibilityLabel).not.toMatch(/skip/i);
+    expect(skip.props.accessibilityHint).toMatch(/different title/i);
   });
 
   /**
@@ -248,7 +255,7 @@ describe('undo and skip are buttons', () => {
       expect(sheet.getByText('Too tough')).toBeTruthy();
       expect(sheet.queryByText('Skip')).toBeNull();
 
-      const escape = sheet.getByLabelText('Too tough to call. Skip this comparison');
+      const escape = sheet.getByLabelText('Too tough to call');
       const undo = sheet.getByLabelText('Undo the last comparison');
       const a = StyleSheet.flatten(undo.props.style);
       const b = StyleSheet.flatten(escape.props.style);

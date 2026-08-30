@@ -571,6 +571,215 @@ describe('a causal group reads in the order it happened', () => {
     assert.equal(inbox.rows.length, 0, 'and must put nothing in the inbox either');
   });
 
+  /**
+   * **The Log sheet's own flow, which is the one the founder actually taps.**
+   *
+   * Independent review 76 found the first two assertions in this block were about the
+   * wrong flow. Ranking a title straight from search writes the collection row inside
+   * `_rank_finalize`, so the award and the activity share a transaction and
+   * `causal_step` orders them. **The Log sheet does not**: its first tap is
+   * `set_bucket` -- "bucketing implies logging" -- the collection award triggers fire
+   * there, and `title_ranked` is posted a minute later when the comparisons finish. Two
+   * different `causal_at`, so `causal_step` is never consulted, and the feed showed
+   *
+   *     Suraj ranked Whiplash            <- the later row, on top
+   *     Suraj earned Movie Muncher       <- the award it looks like it earned
+   *
+   * which is founder acceptance A failing through the commonest path in the app.
+   * `_rank_finalize` now adopts it (20260902000100 §2b).
+   */
+  const crossMovieMuncher = async (username) => {
+    const user = await t.createUser({ username });
+    // Forty-nine written straight in, so no award is announced getting there; the
+    // fiftieth is the crossing and the only announcement in the fixture.
+    for (let i = 0; i < 49; i += 1) {
+      await t.sql(
+        `insert into user_media (user_id, media_item_id, bucket) values ($1, $2, 'loved')`,
+        [user, await movie(`${username} filler ${i}`)],
+      );
+    }
+    return user;
+  };
+
+  const feedOf = async (user) =>
+    (
+      await t.sql(
+        `select type, payload ->> 'award' as award from feed_events
+          where actor_id = $1 order by causal_at desc, causal_step desc, id asc`,
+        [user],
+      )
+    ).rows;
+
+  it('puts an award earned by the bucket tap above the ranking that followed it', async () => {
+    const user = await crossMovieMuncher('causal_logfirst');
+    await t.actAs(user);
+    const film = await movie('causal_logfirst_film');
+
+    // The Log sheet, in its two steps and in its own order.
+    await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved')`, [film]);
+    const announced = await feedOf(user);
+    assert.deepEqual(
+      announced.map((r) => r.type),
+      ['award_earned'],
+      'fixture: the bucket tap is what announces the award, before any ranking exists',
+    );
+
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+
+    assert.deepEqual(
+      (await feedOf(user)).map((r) => r.type),
+      ['award_earned', 'title_ranked'],
+      'the award belongs above the ranking, even though it was written a minute earlier',
+    );
+  });
+
+  it('does the same for a goal the log sheet completed with its date stamp', async () => {
+    // **The Log sheet fires twice**, which is why the adoption is a range and not an
+    // equality. The bucket tap creates the collection row and the award announces
+    // there; the sheet then stamps the watch date in its own call, and a goal crossing
+    // announces at *that* instant instead -- a different timestamp again, still before
+    // the ranking, still unclaimed by any activity.
+    const user = await t.createUser({ username: 'causal_goal_logfirst' });
+    const year = new Date().getUTCFullYear();
+    await t.sql(
+      `insert into watch_goals (user_id, year, category, target) values ($1, $2, 'movies', 1)`,
+      [user, year],
+    );
+    await t.actAs(user);
+
+    const film = await movie('causal_goal_logfirst_film');
+
+    // Step one: the bucket. No date yet, so no goal.
+    await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved')`, [film]);
+    // Step two: the sheet's own date stamp, in its own statement and its own instant.
+    await t.sql(`select log_watched(gen_random_uuid(), $1, make_date($2, 6, 1))`, [film, year]);
+
+    const beforeRanking = (
+      await t.sql(
+        `select type from feed_events where actor_id = $1 order by causal_at desc`,
+        [user],
+      )
+    ).rows;
+    assert.deepEqual(
+      beforeRanking.map((r) => r.type),
+      ['goal_completed'],
+      'fixture: the goal is announced by the date stamp, before any ranking exists',
+    );
+
+    // Step three: the comparisons.
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+
+    assert.deepEqual(
+      (await feedOf(user)).map((r) => r.type),
+      ['goal_completed', 'title_ranked'],
+      'the celebration belongs above the ranking, whichever of the log sheet calls announced it',
+    );
+  });
+
+  it('leaves an old award where it is when unrelated activity happened in between', async () => {
+    // The guard, and the reason it is a fact rather than an interval. A film logged in
+    // March and ranked today must not haul a five-month-old award to the top of the
+    // feed -- which is the defect `_maybe_goal_completion` avoids from the other side.
+    const user = await crossMovieMuncher('causal_stale_award');
+    await t.actAs(user);
+
+    const logged = await movie('causal_stale_award_logged');
+    await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved')`, [logged]);
+
+    // Something else entirely, ranked in between.
+    const other = await movie('causal_stale_award_other');
+    await t.rankToCompletion(other, 'loved', async (pivot) => pivot);
+
+    const before = (
+      await t.sql(
+        `select causal_at from feed_events where actor_id = $1 and type = 'award_earned'`,
+        [user],
+      )
+    ).rows[0].causal_at;
+
+    // And only now the first film is ranked.
+    await t.rankToCompletion(logged, 'loved', async (pivot) => pivot);
+
+    const after = (
+      await t.sql(
+        `select causal_at from feed_events where actor_id = $1 and type = 'award_earned'`,
+        [user],
+      )
+    ).rows[0].causal_at;
+
+    assert.equal(
+      new Date(after).getTime(),
+      new Date(before).getTime(),
+      'an award with activity between it and this ranking keeps its own moment',
+    );
+  });
+
+  it('adopts nothing when the ranking wrote the collection row itself', async () => {
+    // The straight-from-search flow. One transaction, one `causal_at`, and
+    // `causal_step` is what orders it -- the adoption's strict inequality is what keeps
+    // it from touching a row it shares an instant with.
+    const user = await crossMovieMuncher('causal_ranked_first');
+    await t.actAs(user);
+    const film = await movie('causal_ranked_first_film');
+
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+
+    const rows = (
+      await t.sql(
+        `select type, causal_at, created_at from feed_events
+          where actor_id = $1 order by causal_at desc, causal_step desc, id asc`,
+        [user],
+      )
+    ).rows;
+
+    assert.deepEqual(rows.map((r) => r.type), ['award_earned', 'title_ranked']);
+    assert.equal(
+      new Date(rows[0].causal_at).getTime(),
+      new Date(rows[1].causal_at).getTime(),
+      'one transaction, one instant',
+    );
+    for (const row of rows) {
+      assert.equal(
+        new Date(row.causal_at).getTime(),
+        new Date(row.created_at).getTime(),
+        'nothing was adopted, so nothing moved',
+      );
+    }
+  });
+
+  it('leaves created_at alone when it adopts, so the row still says how long ago', async () => {
+    // Only the sort key moves. `relativeTime` draws `created_at`, and an award that
+    // suddenly claimed to have been earned a minute later than it was would be a
+    // different kind of lie from the one being fixed.
+    const user = await crossMovieMuncher('causal_created_at');
+    await t.actAs(user);
+    const film = await movie('causal_created_at_film');
+
+    await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved')`, [film]);
+    const before = (
+      await t.sql(
+        `select created_at from feed_events where actor_id = $1 and type = 'award_earned'`,
+        [user],
+      )
+    ).rows[0].created_at;
+
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+
+    const row = (
+      await t.sql(
+        `select causal_at, created_at from feed_events
+          where actor_id = $1 and type = 'award_earned'`,
+        [user],
+      )
+    ).rows[0];
+
+    assert.equal(new Date(row.created_at).getTime(), new Date(before).getTime());
+    assert.ok(
+      new Date(row.causal_at).getTime() > new Date(row.created_at).getTime(),
+      'the sort key moved and the timestamp did not',
+    );
+  });
+
   it('creates the inbox row and its push in the same transaction as the act', async () => {
     // "After the causal completion" is the founder's phrasing and one transaction is how
     // it is met: there is no moment at which the congratulations exists and the act does

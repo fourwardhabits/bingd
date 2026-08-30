@@ -2351,6 +2351,65 @@ The feed reads `causal_at desc, causal_step desc, id asc`. The third key makes t
 > is what `causal_at` exists for; the correction above is what puts it at the top of its
 > group instead of the bottom.
 
+> #### And the half `causal_step` cannot reach: the Log sheet buckets before it ranks
+>
+> `causal_step` orders rows that **share** a `causal_at`. Ranking a title straight from
+> search produces exactly that: `_rank_finalize` writes the collection row and posts the
+> activity in one transaction, and the award trigger fires in between.
+>
+> **The Log sheet does not.** Its first tap is `set_bucket` — "bucketing implies logging",
+> so it creates the `user_media` row — and the collection award triggers fire *there*. The
+> sheet then stamps the watch date in a second call, where a goal crossing announces. Only
+> after that do the comparisons run and `title_ranked` post, a minute later. So the award
+> is genuinely the older row, by a real timestamp no tiebreak can reach, and the feed read:
+>
+> ```
+> Suraj ranked Whiplash                  the later row, on top
+> Suraj earned Movie Muncher             the award it looks like it earned
+> ```
+>
+> which is founder acceptance A failing through the commonest path in the app. Found by
+> independent review 76.
+>
+> **The fix is the goal's own instrument, pointed the other way.** A goal commits *after*
+> its cause and looks backwards to adopt its timestamp; an award earned at log time commits
+> *before* its cause, so the cause reaches back and adopts the award. `_rank_finalize`
+> does it when it posts the activity, under one rule stated as two facts and no interval —
+> **a derived announcement that no activity has claimed belongs to the next one**:
+>
+> - **nothing of the reader's happened in between**, which is the guard
+>   `_maybe_goal_completion` already applies from the other side, and what keeps a film
+>   logged in March and ranked today from hauling a five-month-old award to the top of the
+>   feed; and
+> - **it is not older than this title's own place in the collection**
+>   (`user_media.created_at`, exact because it and `causal_at` are both `now()` in their
+>   own transaction) — the floor that stops a first ranking sweeping up the whole history of
+>   somebody who logs without ranking.
+>
+> A range rather than an equality, because the Log sheet fires twice and the award and the
+> goal land at different instants. When the ranking wrote the collection row itself the two
+> are the same instant, the strict inequality is false, nothing is adopted, and
+> `causal_step` does the work as before.
+>
+> **Only `causal_at` moves.** `created_at`, the id, the payload, the reactions and the
+> comments are untouched, so a feed that has already shown the award re-sorts it rather
+> than being handed a second one, and the row still says how long ago it happened.
+>
+> #### Logging posts no feed activity, and that is why this was needed
+>
+> `title_logged` is a permitted event type and **nothing has ever written one**; only a
+> ranking, a season completion and a watchlist add become activity. So an award earned at
+> log time has no activity of its own to sit above, and when a ranking follows, that
+> ranking is the activity the act produced.
+>
+> **The announcement is not withheld and must not be.** The canonical cause of an award
+> earned at log time is the log, which is a completed, durable act: the title is in the
+> collection with a bucket and a watch date, it counts toward every collection metric, and
+> it stays counted whether or not a ranking follows. Withholding would mean somebody who
+> logs without ever ranking earns awards they are never told about — the watch-only
+> semantics the founder's brief explicitly forbids breaking.
+
+
 ## 15. Notifications and activity awareness
 
 **New in v0.6.** This resolves a structural absence in v0.5, where the brand system referenced notifications but no notification feature existed anywhere in scope, information architecture, entities, tests, or metrics.

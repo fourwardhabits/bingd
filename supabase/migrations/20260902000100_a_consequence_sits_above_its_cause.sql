@@ -62,29 +62,74 @@
 -- the writer commits and never before. There is no queue, no deferred job and no second
 -- statement that could land early.
 --
--- That gives two flows and both are correct:
+-- That gives two flows. **Both are correct about timing and only one of them was
+-- correct about order**, which is what §2b below fixes.
 --
---   * **Ranking a title the reader has not logged.** `_rank_finalize` inserts the
---     `rankings` row and the `user_media` row and then posts `title_ranked`. The award
---     trigger fires at the end of the `user_media` statement, so the announcement is
---     written *before* the activity in insertion order -- and that is precisely why the
---     order is declared by `causal_step` rather than taken from a serial. If the
---     ranking session is abandoned, `_rank_finalize` never runs, no `user_media` row is
---     written by it, and nothing is announced.
+--   * **Ranking a title straight from search.** `_rank_finalize` inserts the `rankings`
+--     row and the `user_media` row and then posts `title_ranked`. The award trigger
+--     fires at the end of the `user_media` statement, so the announcement is written
+--     *before* the activity in insertion order -- and that is precisely why the order is
+--     declared by `causal_step` rather than taken from a serial. One transaction, one
+--     `causal_at`, and `causal_step DESC` puts the award on top. If the session is
+--     abandoned, `_rank_finalize` never runs, no row is written by it, and nothing is
+--     announced.
 --
---   * **Logging a watch and then ranking it.** `log_watched` creates the `user_media`
---     row itself, so the award is earned and announced by the *log*, which is a
---     completed act with a `title_logged` activity of its own to sit above. A ranking
---     that follows is a second act; abandoning it changes nothing that was already
---     true. This is the "legitimate flow that records a watch without ranking" the
---     brief asks to be documented rather than guessed at: **the canonical cause of an
---     award earned at log time is the log**, and it is a real, visible, completed
---     event.
+--   * **Logging from the Log sheet and then ranking.** The first tap is `set_bucket` --
+--     "bucketing implies logging", so it creates the `user_media` row -- and the award
+--     triggers fire there. `log_watched` creates the row on the same terms. The
+--     comparisons follow and `title_ranked` is posted a minute later, so the award is
+--     genuinely the OLDER row and a newest-first feed showed the ranking above it. That
+--     is a real later timestamp on the activity, exactly as the goal case is a real
+--     later timestamp on the celebration, and §2b is the fix.
+--
+-- **The canonical cause of an award earned at log time is the log**, and that is the
+-- "legitimate flow that records a watch without ranking" the brief asks to be documented
+-- rather than guessed at. It is a completed, durable act: the title is in the collection
+-- with a bucket and a watch date, it counts toward every collection metric, and it stays
+-- counted whether or not a ranking follows. So the announcement is not withheld and must
+-- not be -- withholding it would mean somebody who logs without ever ranking earns
+-- awards they are never told about, which is the watch-only semantics the brief forbids
+-- breaking.
+--
+-- **Stated plainly because it is easy to misread: logging posts no feed activity.**
+-- `title_logged` is a permitted type and nothing has ever written one; only ranking, a
+-- season completion and a watchlist add become activity. So an award earned at log time
+-- has no activity of its own to sit above, and when a ranking follows, that ranking is
+-- the activity the act produced -- which is exactly what §2b hands it.
 --
 -- A goal is the one derived event whose cause is a watch *date* rather than a write, so
 -- it commits seconds after the ranking that carried its count over and posts under a
 -- `causal_at` inherited from that activity. That inheritance is what keeps it in the
 -- group; the reversal above is what puts it at the top of the group.
+--
+-- ===========================================================================
+-- 2b. AND THE ADOPTION THAT MAKES THE SECOND FLOW READ RIGHT
+--
+-- `causal_step` orders rows that share a `causal_at`. The Log-sheet flow produces two
+-- rows that do not: the award at bucket time, the ranking a minute later. So the fix
+-- for it is the same instrument the goal needed and pointed the other way -- the later
+-- writer reaches back and adopts the earlier derived event into its own group.
+--
+-- `_rank_finalize` does it, under one rule stated as two facts and no interval: **a
+-- derived announcement that no activity has claimed belongs to the next one.**
+--
+--   * nothing of the reader's happened between that announcement and this activity --
+--     the guard `_maybe_goal_completion` already applies from the other side, and what
+--     keeps a film logged in March and ranked today from hauling a five-month-old award
+--     to the top of the feed; and
+--   * the announcement is not older than this title's own place in the collection
+--     (`user_media.created_at`, exact because it and `causal_at` are both `now()` in
+--     their own transaction) -- the floor that stops a first ranking sweeping up a whole
+--     history of announcements from somebody who logs without ranking.
+--
+-- A range and not an equality, because the Log sheet fires twice: the bucket tap creates
+-- the collection row and the award announces there, then the sheet stamps the watch date
+-- in its own call and a goal crossing announces at *that* instant. Both are one act to
+-- the person doing it.
+--
+-- Only `causal_at` moves. `created_at`, the id, the payload, the reactions and the
+-- comments are all untouched, so a feed that has already shown the award re-sorts it
+-- rather than being handed a second one.
 --
 -- Push follows the notification and cannot precede it: `_apply_notification_preference`
 -- is a BEFORE trigger on `notifications` and the `push_outbox` row is written by an
@@ -148,7 +193,257 @@ comment on column feed_events.causal_step is
 
 
 -- ---------------------------------------------------------------------------
--- 2. The board's population
+-- 2. The ranking adopts the award its own act announced early
+--
+-- `_rank_finalize`, rebuilt from 20260827000600. Three edits and nothing else moves:
+-- two locals, a read of `user_media.created_at`, and the adoption `update` beside the
+-- `title_ranked` insert. The drop-inside-the-lock, the band recomputation, the
+-- placement guard, the recommendation fulfilment and the invite activation are all
+-- 20260827000600's, carried whole.
+-- ---------------------------------------------------------------------------
+
+create or replace function _rank_finalize(
+  target uuid,
+  item uuid,
+  cat ranking_category,
+  b taste_bucket,
+  pos integer,
+  session uuid,
+  was_adjusted boolean default false,
+  p_replaces boolean default false,
+  p_new_watch boolean default false
+) returns jsonb
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_band      record;
+  v_size      integer;
+  v_rank      integer;
+  v_score     numeric;
+  v_activated boolean;
+  v_replaced  boolean := false;
+  v_event_id  uuid;
+  -- 20260902000100. The instant this activity sits at, and the instant the collection
+  -- row for this title first appeared. Equal when this transaction created the row;
+  -- different when the reader logged the title first, which is the case the adoption
+  -- below exists for.
+  v_causal_at timestamptz;
+  v_logged_at timestamptz;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(target::text || cat::text, 0));
+
+  -- The old position, dropped at the last possible moment rather than at the
+  -- first (20260826000500). Everything above this line in the reader's session --
+  -- opening the sheet, every comparison, every skip, closing it and coming back --
+  -- left the ranking they already had exactly where it was.
+  if p_replaces and exists (
+    select 1 from rankings where user_id = target and media_item_id = item
+  ) then
+    perform _rank_unrank_impl(target, item);
+    v_replaced := true;
+  end if;
+
+  -- Recomputed inside the lock, so it reflects the ranking this insert is about
+  -- to happen against rather than the one the caller saw. With the drop above, that
+  -- is now also the numbering the session's offsets were computed in.
+  select * into v_band from band_bounds(target, cat, b);
+
+  -- Valid insertion points run from the top of the band to one past its end. An
+  -- empty band yields hi = lo - 1, so the only valid point is lo, which is what
+  -- this reduces to.
+  if pos < v_band.lo or pos > v_band.hi + 1 then
+    raise exception
+      'refusing to place a % title at position %, outside the % band (% to %)',
+      b, pos, b, v_band.lo, v_band.hi + 1
+      using errcode = '22023';
+  end if;
+
+  update rankings
+     set position = position + 1
+   where user_id = target and category = cat and position >= pos;
+
+  insert into rankings (user_id, media_item_id, category, bucket, position)
+  values (target, item, cat, b, pos);
+
+  -- The collection row this ranking is a claim about, re-asserted from the ranking
+  -- itself (20260825000200 §3). It closes I1 and I3 against anything that committed in
+  -- the gap between the session opening and this transaction -- and it is the *only*
+  -- writer of a provisional band change: `rank_rebucket` does not move
+  -- `user_media.bucket` up front (20260826000500).
+  insert into user_media (user_id, media_item_id, bucket)
+  values (target, item, b)
+  on conflict (user_id, media_item_id) do update
+    set bucket = excluded.bucket, updated_at = now()
+   where user_media.bucket is distinct from excluded.bucket;
+
+  -- **When this title entered the collection**, which is not always now.
+  --
+  -- `created_at` defaults to `now()` and no writer touches it on conflict, so this is
+  -- the transaction instant of whichever statement first put the row there:
+  -- `_rank_finalize`'s own insert above for a title ranked straight from search, or
+  -- `set_bucket` / `log_watched` minutes earlier for one logged from the Log sheet.
+  -- The award triggers hang off that same insert, so it is also the instant any award
+  -- this title earned was announced at. See the adoption below (20260902000100).
+  select um.created_at into v_logged_at
+    from user_media um
+   where um.user_id = target and um.media_item_id = item;
+
+  if session is not null then
+    delete from ranking_sessions where id = session;
+  end if;
+
+  v_size  := v_band.size + 1;
+  v_rank  := pos - v_band.lo + 1;
+  v_score := score_for(b, v_rank, v_size);
+
+  -- The founder's four War Dogs (20260826000500). A correction to an opinion already
+  -- recorded is not a thing that happened to anybody else, so it does not become an
+  -- activity. A first ranking always is one; another watch always is one. The id is
+  -- kept now, because the fulfilment below points at it.
+  if p_new_watch or not v_replaced then
+    insert into feed_events (actor_id, type, media_item_id, payload)
+    values (
+      target,
+      'title_ranked',
+      item,
+      jsonb_build_object(
+        'position', pos,
+        'bucket',   b,
+        'category', cat,
+        'score',    v_score
+      )
+    )
+    returning id, causal_at into v_event_id, v_causal_at;
+
+    /**
+     * **The award that was announced before its own activity existed**
+     * (20260902000100, and it is the mirror of the goal case).
+     *
+     * The Log sheet's first tap is `set_bucket`, which creates the `user_media` row --
+     * "bucketing implies logging" -- and the collection award triggers fire on that
+     * insert. The comparisons follow, and `title_ranked` is posted here, seconds or a
+     * minute later. So the award is genuinely the OLDER row, by a real timestamp no
+     * tiebreak can reach, and a newest-first feed put the ranking above the award it
+     * looks like it earned. `causal_step` cannot help: it only orders rows that share a
+     * `causal_at`, and these do not.
+     *
+     * That is the same shape as the goal completion `causal_at` was added for, pointing
+     * the other way. A goal commits AFTER its cause and looks backwards to adopt it;
+     * an award earned at log time commits BEFORE its cause, so the cause reaches back
+     * and adopts the award.
+     *
+     * **The rule: a derived announcement no activity has claimed belongs to the next
+     * one.** Two facts decide it and neither is an interval.
+     *
+     *   **Nothing of the reader's happened in between.** That is the `not exists`, and
+     *   it is `_maybe_goal_completion`'s own guard -- "is this the post it would sit
+     *   directly under" -- asked from the other side. An award earned when a film was
+     *   logged in March and ranked for the first time today has twenty activities
+     *   between the two: it belongs where it is, and hauling it to the top of the feed
+     *   would be the bug that guard was written to avoid, in a new place.
+     *
+     *   **and it is not older than this title's own place in the collection.** Without
+     *   a floor, somebody who logs for months without ranking anything would have their
+     *   whole history of announcements swept up by their first ranking.
+     *   `user_media.created_at` is that floor and is exact: it and `causal_at` are both
+     *   `now()` in their own transaction.
+     *
+     * A range rather than an equality, because the Log sheet fires **twice**. The bucket
+     * tap creates the collection row and the award triggers announce there; the sheet
+     * then stamps the watch date in its own call, and a goal crossing announces at
+     * *that* instant instead. Both are the same act to the person doing it and both are
+     * unclaimed until this ranking posts.
+     *
+     * When this transaction created the collection row itself, `v_logged_at` IS
+     * `v_causal_at`, the strict inequality is false, and nothing is updated: that case
+     * shares a timestamp already and is `causal_step`'s.
+     *
+     * Only `causal_at` moves. `created_at` is untouched, so the row still says how long
+     * ago it happened, and its id, payload, reactions and comments are all unchanged --
+     * a feed that has already shown it re-sorts it rather than seeing a new event.
+     */
+    update feed_events fe
+       set causal_at = v_causal_at
+     where fe.actor_id = target
+       and fe.type in ('award_earned', 'goal_completed')
+       and fe.causal_at >= v_logged_at
+       and fe.causal_at <  v_causal_at
+       and not exists (
+         select 1
+           from feed_events act
+          where act.actor_id = target
+            and act.type in ('title_ranked', 'season_completed', 'watchlist_added')
+            and act.id <> v_event_id
+            and act.causal_at > fe.causal_at
+            and act.causal_at < v_causal_at
+       );
+  end if;
+
+  -- NEW (20260827000600). A first ranking settles the recommendations that asked
+  -- for it. `not v_replaced` is the same fact that just decided the feed event, so
+  -- a fulfilling rank always has an event to point at -- and a Rank Again or a
+  -- bucket change, being `v_replaced`, settles nothing and notifies nobody.
+  --
+  -- Fulfilment and notification are decided separately, in one statement: every
+  -- outstanding delivered recommendation gets its timestamp -- once, ever, by the
+  -- `fulfilled_at is null` guard -- and only senders the feed itself would answer
+  -- get a row. `can_view_profile(sender, ranker)` refuses a block either way, a
+  -- suspended sender's view of nothing, and a private ranker the sender does not
+  -- follow; the active-status join refuses a suspended or half-deleted sender. A
+  -- sender refused now is not queued for later: the moment passed.
+  --
+  -- One notification per sender because there is one recommendation row per
+  -- sender (`unique (sender_id, recipient_id, media_item_id)`), each carrying its
+  -- own id in the payload -- which is what the backstop index measures.
+  if not v_replaced then
+    with fulfilled as (
+      update title_recommendations tr
+         set fulfilled_at = now()
+       where tr.recipient_id = target
+         and tr.media_item_id = item
+         and tr.state = 'delivered'
+         and tr.fulfilled_at is null
+      returning tr.id, tr.sender_id
+    )
+    insert into notifications (recipient_id, type, actor_id, subject_type, subject_id, payload)
+    select f.sender_id,
+           'recommendation_ranked',
+           target,
+           'feed_event',
+           v_event_id,
+           jsonb_build_object('recommendation_id', f.id)
+      from fulfilled f
+      join profiles sp
+        on sp.id = f.sender_id
+       and sp.status = 'active'
+     where can_view_profile(f.sender_id, target)
+    on conflict (((payload ->> 'recommendation_id')::uuid))
+      where type = 'recommendation_ranked'
+      do nothing;
+  end if;
+
+  -- PRD §28's activation, from the one place a ranking is created.
+  v_activated := _maybe_activate_invite(target);
+
+  return jsonb_build_object(
+    'done', true,
+    'position', pos,
+    'category', cat,
+    'bucket', b,
+    'score', v_score,
+    'adjustable', was_adjusted,
+    'activated', v_activated
+  );
+end;
+$$;
+
+comment on function _rank_finalize(uuid, uuid, ranking_category, taste_bucket, integer, uuid, boolean, boolean, boolean) is
+  'The one moment in the schema where a ranking is created. Carries 20260826000500''s behaviour whole: the drop happens inside the category lock, the band is recomputed there, and the title_ranked event posts iff p_new_watch or the placement created a position where there was none. Since 20260827000600 a first ranking also fulfils every outstanding delivered recommendation for the title -- once each, by the fulfilled_at guard -- and notifies the senders the feed itself would answer, pointing at the exact event it just posted. Since 20260902000100 it also adopts any award or goal announced by the insert that first put this title in the collection, when nothing of the reader''s happened in between: the Log sheet buckets before it ranks, so that announcement is a real minute older than the activity it belongs to, and a newest-first feed would otherwise show the ranking above the award it earned. Internal.';
+
+
+-- ---------------------------------------------------------------------------
+-- 3. The board's population
 --
 -- One CTE renamed and one predicate widened. Everything else in this function --
 -- the four metrics, the two timeframes, the date semantics, the review state-vs-event
@@ -253,7 +548,7 @@ comment on function _leaderboard_counts(text, text) is
 
 
 -- ---------------------------------------------------------------------------
--- 3. The board
+-- 4. The board
 --
 -- Dropped and recreated rather than replaced: the return table gains a column, and
 -- `create or replace function` cannot change a return type. Nothing depends on it
@@ -347,7 +642,7 @@ comment on function leaderboard(text, text, integer) is
 
 
 -- ---------------------------------------------------------------------------
--- 4. The old name, still delegating
+-- 5. The old name, still delegating
 --
 -- Restated because the function it wraps was dropped and recreated, and because the
 -- 20260827000900 rule has not expired: a phone that has not taken this update still
@@ -389,7 +684,7 @@ comment on function monthly_leaderboard(text, integer) is
 
 
 -- ---------------------------------------------------------------------------
--- 5. Where the caller stands
+-- 6. Where the caller stands
 --
 -- Not rewritten -- `my_leaderboard_standing` reads `_leaderboard_counts`, so its
 -- population widened with the board's and its `entrants` denominator is the board's

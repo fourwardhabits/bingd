@@ -791,10 +791,22 @@ function Comparison({
         <View style={styles.control}>
           <Button
             label="Too tough"
-            // Spelled out, because the two words on the button are a *reason* and a
-            // screen reader user needs the effect too: this compares something else, it
-            // does not leave the ranking. Leaving is the X above.
-            accessibilityLabel="Too tough to call. Skip this comparison"
+            /**
+             * **The word the button uses, and no other** (independent review 76).
+             *
+             * It read "Too tough to call. Skip this comparison", which is the older
+             * label with the newer one prefixed -- so the control still said Skip to
+             * anybody using VoiceOver or TalkBack, on the one surface where the founder
+             * asked for the word to be gone. A screen reader is a surface.
+             *
+             * The effect has not been dropped with it: it moves to the hint, which is
+             * where an effect belongs and where it already was. Label says what the
+             * control is, hint says what pressing it does -- and "Compares against a
+             * different title instead" answers the ambiguity the old spelled-out label
+             * existed for, which was that "Skip" alone could be heard as skipping the
+             * whole ranking. "Too tough to call" cannot be heard that way.
+             */
+            accessibilityLabel="Too tough to call"
             accessibilityHint="Compares against a different title instead."
             testID="ranking-too-tough"
             kind="secondary"

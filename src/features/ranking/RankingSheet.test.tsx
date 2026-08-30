@@ -273,7 +273,7 @@ describe('the comparison', () => {
     const sheet = await openSheet();
 
     await sheet.ready('Film P');
-    await fireEvent.press(sheet.getByLabelText('Too tough to call. Skip this comparison'));
+    await fireEvent.press(sheet.getByLabelText('Too tough to call'));
 
     await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
     expect(callsTo('rank_skip')[0][1]).toMatchObject({ p_session_id: SESSION });
@@ -299,7 +299,7 @@ describe('the comparison', () => {
     const sheet = await openSheet({ surface: 'onboarding' });
 
     await sheet.ready('Film P');
-    await fireEvent.press(sheet.getByLabelText('Too tough to call. Skip this comparison'));
+    await fireEvent.press(sheet.getByLabelText('Too tough to call'));
 
     await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
     expect(callsTo('rank_skip')[0][1]).toMatchObject({ p_session_id: SESSION });
