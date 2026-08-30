@@ -1,6 +1,6 @@
 # App Store submission pack — bingd.
 
-**Written 2026-08-29 against `54e32fd`.** Everything App Store Connect will ask for, drafted
+**Written 2026-08-29 against `54e32fd`; reconciled 2026-08-30 against `95fd4d7`.** Everything App Store Connect will ask for, drafted
 from the application and the canonical documents, with the answers that cannot be derived
 marked `FOUNDER INPUT REQUIRED` or `FOUNDER CONFIRM`.
 
@@ -577,9 +577,11 @@ and none of it is submitted by entering it.
 - `web/distribution.config.json` → `mode: "public"` and the iOS `storeUrl` filled in. **The
   build refuses `public` while either `storeUrl` is null**, so this happens after the App
   Store URL exists — on release day, not before.
-- `bingd.app/support` currently states *"Bingd sends no push notifications"*, which stopped
-  being true when push shipped. Fix before launch — see
-  [`founder-input-worksheet.md`](./founder-input-worksheet.md).
+- ~~`bingd.app/support` states *"Bingd sends no push notifications"*~~ — **fixed in the
+  tracked source on 2026-08-30** (`95fd4d7`). The page now says notifications may be sent
+  when enabled, that everything also appears in the in-app inbox, and where to change or
+  turn them off. **The deployed site still carries the old wording**: the fix ships with
+  the next site deployment, which is a launch-day step and was not taken.
 - HG-2 (Android developer verification), HG-3 (name and trademark), HG-5 (Play production
   access) — PRD §27.
 

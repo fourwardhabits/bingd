@@ -1,6 +1,6 @@
 # Founder input worksheet — public release
 
-**Written 2026-08-29 against `54e32fd`.** Only the things that are genuinely unresolved and
+**Written 2026-08-29 against `54e32fd`; reconciled 2026-08-30 against `95fd4d7`.** Only the things that are genuinely unresolved and
 that only the founder can settle. Everything already decided lives in the documents this one
 links to; nothing is repeated here for completeness.
 
@@ -176,9 +176,12 @@ not merely recommended.
 Neither is a founder *decision* — both are facts the site currently states that stopped being
 true. They are here because they are easy to miss and a reviewer reads them.
 
-- [ ] **`bingd.app/support` says "Bingd sends no push notifications."** Push shipped. The
-      bullet in `web/build.mjs`'s `SUPPORT_BODY` must go or be rewritten before the site
-      flips to `mode: "public"`.
+- [x] **~~`bingd.app/support` says "Bingd sends no push notifications."~~** Rewritten in
+      `web/build.mjs` on 2026-08-30 (`95fd4d7`) and pinned by a test that fails if the old
+      sentence returns. It now says Bingd *may* send a notification when the reader allowed
+      them, that everything also appears in the in-app inbox, and where to change the
+      categories or turn them off. **The deployed site still shows the old copy** — the fix
+      reaches it with the next site deployment, which is a launch-day step.
 - [ ] **The deployed site is dated "20 August 2026"** and still says "Bingd is in closed
       testing" — it predates `main`. Redeploy with the launch change, and check the date
       stamp afterwards.

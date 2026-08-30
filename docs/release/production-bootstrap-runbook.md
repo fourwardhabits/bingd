@@ -1,6 +1,6 @@
 # Production bootstrap runbook — click by click
 
-**Written 2026-08-29 against `54e32fd`.** The operational companion to
+**Written 2026-08-29 against `54e32fd`; reconciled 2026-08-30 against `95fd4d7`.** The operational companion to
 [`production-bootstrap.md`](./production-bootstrap.md), which holds the *reasoning*. This
 page holds the *keystrokes*: every dashboard path, every command, in the order they have to
 happen, with each step marked as something only the founder can decide or something Claude
@@ -43,7 +43,9 @@ BINGD_LANE=beta APP_VARIANT=production npx expo-updates fingerprint:generate --p
 On 2026-08-29 this returned `d3b308f74a08926ee02303180d171d38c106ca55` — **byte-identical
 to the runtime version of the installed iOS beta** — and Android returned
 `41a907174ba3b6349b89049fb015406e5e525e7a`, identical to build 7. So `54e32fd` has **no
-native delta** against the binaries testers are holding, and the beta lane can still be
+native delta** against the binaries testers are holding — **and neither does `95fd4d7`,
+measured the same way on 2026-08-30: both platforms hash to exactly the same values in a
+second checkout with its own `npm ci`** — and the beta lane can still be
 served over the air.
 
 Two further measurements, taken the same day, are what make a production binary

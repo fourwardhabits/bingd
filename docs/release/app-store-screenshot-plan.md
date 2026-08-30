@@ -1,6 +1,6 @@
 # App Store screenshot plan — bingd.
 
-**Written 2026-08-29 against `54e32fd`.** The shot list, the exact navigation for each
+**Written 2026-08-29 against `54e32fd`; reconciled 2026-08-30 against `95fd4d7`.** The shot list, the exact navigation for each
 frame, the demo state each one needs, and what must never appear in one.
 
 **No screenshots were captured in the pass that produced this document, and the reason is
@@ -69,8 +69,8 @@ Read from Apple's *Screenshot specifications* on 2026-08-29.
 
 | Display size | Portrait | Required? |
 |---|---|---|
-| **6.9"** | **1260 × 2736** — also accepts **1290 × 2796** and **1320 × 2868** | **REQUIRED if the app runs on iPhone.** This is the only size that must be supplied |
-| 6.5" | 1284 × 2778, or 1242 × 2688 | Required **only if** no 6.9" set is provided |
+| **6.9"** | **1260 × 2736** — also accepts **1290 × 2796** and **1320 × 2868** | **The set to supply.** Apple requires *a* qualifying iPhone set, and 6.9" is the one this plan targets |
+| 6.5" | 1284 × 2778, or 1242 × 2688 | **The accepted fallback**, and it is a real one: supply this set if an eligible 6.9" capture cannot be produced |
 | 6.3" | 1179 × 2556, or 1206 × 2622 | Optional |
 | 6.1" | 1170 × 2532, 1125 × 2436, or 1080 × 2340 | Optional |
 | 5.5" | 1242 × 2208 | Optional |
@@ -80,7 +80,14 @@ Read from Apple's *Screenshot specifications* on 2026-08-29.
   without scrolling, so they carry the argument.
 - **Formats:** `.png`, `.jpg`, `.jpeg`. **No alpha channel, no transparency.** A PNG straight
   off an iPhone has no alpha and is fine.
-- **Portrait only** for this app — `app.config.ts` sets `orientation: 'portrait'`.
+- **Portrait, because this app is portrait** — `app.config.ts` sets
+  `orientation: 'portrait'`, so a landscape capture would be of a layout the app never
+  presents. Apple accepts landscape screenshots for apps that run that way; **portrait is
+  Bingd's choice, not Apple's only option**, and the distinction matters if the app ever
+  gains a landscape mode.
+- **One qualifying iPhone set is what Apple requires**, and this plan supplies 6.9". If an
+  eligible 6.9" set cannot be produced, an accepted **6.5"** set satisfies the requirement
+  — see the table above. What is not acceptable is upscaling a smaller capture to 6.9".
 
 ### iPad — **not required**
 

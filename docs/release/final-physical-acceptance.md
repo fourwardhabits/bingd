@@ -1,6 +1,6 @@
 # Final physical acceptance — A to T
 
-**Written 2026-08-29 against `54e32fd`.** The last founder run on a real phone before the
+**Written 2026-08-29 against `54e32fd`; reconciled 2026-08-30 against `95fd4d7`.** The last founder run on a real phone before the
 release candidate. Everything below is a behaviour that shipped in the tranches from PR #63
 to PR #75 and that **only a physical device can confirm** — nothing here is covered by the
 test suite, and nothing here needs a production environment.
@@ -14,16 +14,43 @@ test suite, and nothing here needs a production environment.
 **Budget: 30–45 minutes.** Run it in order; the sections are arranged so setup done early is
 reused later.
 
+> ## Reconciled 2026-08-30 — and most of this list is not what the next run is for
+>
+> This list was written for a full pass. **The tranche merged as `95fd4d7` needs a much
+> shorter one**, because everything in it is either covered by the test suite or is a
+> change to something this list already checks. The founder's own short retest is:
+>
+> | | |
+> |---|---|
+> | **A** | Complete a rating that earns an award → the award appears **above** the rating in the feed; its inbox row and push arrive only after the rating completed |
+> | **B** | Every comparison surface says **Too tough** and uses the same control |
+> | **C** | Too tough → the pair does not return in that session; no fake tie; **no end-of-session message about skipping** |
+> | **D** | An anime title shows **Anime** and not Animation; a non-anime animated title still shows **Animation** |
+> | **E** | Genres and Languages alphabetical; Decades oldest first |
+> | **F** | An unearned award track is grey, **title included**; ink after the first tier |
+> | **G** | Open a comment activity from a notification → **no bar or strip** between the activity and its comments |
+> | **H** | A private unapproved account appears on the leaderboard as a **minimal row**; tap opens the private shell with Follow request |
+> | **I** | Blocked / private / suspended behaviour still safe |
+> | **J** | No crash, heat or hang |
+>
+> Items A, C, O, P-ii, P-iii and Q below carry those checks. The rest of the list stands as
+> the fuller pass to run against the **production release candidate**.
+>
+> **Explicitly deferred to the RC** by founder decision, and *not* part of the short retest:
+> the full invite and new-account acceptance (items M, N, O's OTP half), the full iOS
+> push and deep-link pass (R-i, R-ii), the broad UGC report and block retest, and the
+> destructive account deletion (T). Nothing in those features changed in this tranche.
+
 ---
 
 ## Before you start
 
 | | |
 |---|---|
-| **Build** | The installed **friend beta** — iOS build 5 or Android build 7, both from `89631bf` |
+| **Build** | The installed **friend beta** — iOS build 5 or Android build 7, both from `89631bf`. **Unchanged**: this tranche has no native delta, so there is no new binary to install |
 | **Update** | Background the app, wait, foreground it, and let it reload. Settings → bottom must show an update id, not `embedded` |
-| **The right update** | iOS group `5f14b9a4-51bf-4ffe-a2aa-495068233717` · Android group `ac3cf88c-1369-405f-856d-9b31ab1f503f` — both messaged *"Anime is a genre, not a type…"* |
-| **Runtime** | iOS `d3b308f74a08…` · Android `41a907174ba3…`. `54e32fd` fingerprints to exactly these, so **no new build is needed for this run** |
+| **The right update** | iOS group `20b53358-4f04-434a-98ce-84d191be89f3` · Android group `cc44e72f-b46c-4021-9a90-30a4bd6dc8b0` — both published from `95fd4d7` and messaged *"a consequence above its cause…"* |
+| **Runtime** | iOS `d3b308f74a08…` · Android `41a907174ba3…`. `95fd4d7` fingerprints to exactly these — measured against `54e32fd` in a second checkout with its own `npm ci` — so the native delta is **NONE** and **no new build is needed for this run** |
 | **Accounts** | Your own (**A**) and a second one (**B**) on another device or another install. Several items need both |
 | **Backend** | nonprod, and that is correct for this run |
 
@@ -40,7 +67,7 @@ reused later.
 |---|---|
 | **Setup** | An account with at least 10 ranked films |
 | **Actions** | Rank a new film. When a comparison appears, tap **Too tough**. Keep answering. Then rank another new film and keep going for a few comparisons |
-| **Expected** | The pair you called *Too tough* is **never offered again in this session**, and neither is any title already offered. When the walk runs dry the title is placed at the midpoint and the screen says it is an estimate. No comparison is recorded for a pair you did not call |
+| **Expected** | The pair you called *Too tough* is **never offered again in this session**, and neither is any title already offered. When the walk runs dry the title is placed at the midpoint — and **the reveal says nothing about it**: no "you skipped a few", no estimate paragraph, nothing about Too tough at all. It states the score and the placement, as it does for every other ranking. No comparison is recorded for a pair you did not call |
 | **Evidence** | 📷 the *Too tough* screen and the placement that follows |
 | PASS / FAIL | ☐ |
 | Notes | |
@@ -63,8 +90,8 @@ reused later.
 | | |
 |---|---|
 | **Setup** | Collection tab |
-| **Actions** | Open the filter sheet. Look for a **Type** section. Then find **Anime** in **Genre**. Select Anime **and** another genre, e.g. Horror. Switch Movies → TV with Anime still selected |
-| **Expected** | There is **no Type section**. Anime sits in **Genre**. Anime + Horror returns *either* (union within the facet), not the intersection. Movies + Anime returns anime films; TV + Anime returns anime seasons. The count beside Anime matches what selecting it returns |
+| **Actions** | Open the filter sheet. Look for a **Type** section. Then find **Anime** in **Genre**. Select Anime **and** another genre, e.g. Horror. Switch Movies → TV with Anime still selected. Then **open an anime title** and read its genre pills. Then open a non-anime animated one — a Pixar film — and read its pills. Then look at the order of the Genre, Language and Decade lists |
+| **Expected** | There is **no Type section**. Anime sits in **Genre**. Anime + Horror returns *either* (union within the facet), not the intersection. Movies + Anime returns anime films; TV + Anime returns anime seasons. The count beside Anime matches what selecting it returns. **The anime title shows `Anime` and not `Animation`** — never both — and keeps its other genres, e.g. *Action · Adventure · Anime*. **The Pixar film still shows `Animation`** and never `Anime`. **Genres and Languages are alphabetical** by the word shown, and **Decades run oldest first** — Earlier, 1990s, 2000s, 2010s, 2020s |
 | PASS / FAIL | ☐ |
 | Notes | |
 
@@ -189,17 +216,21 @@ Do §I–§M in one sitting; each builds on the last.
 | PASS / FAIL | ☐ |
 | Notes | |
 
-### O. Onboarding — the word for a comparison you cannot call
+### O. Every comparison surface — the word for one you cannot call
 
 | | |
 |---|---|
-| **Actions** | As **C**, go through first-run taste onboarding. Reach a comparison and look at the control that is not either poster. Then dismiss the OTP screen and request another code |
-| **Expected** | The control reads **Too tough** — not *Skip*. The OTP screen **can be dismissed**, and *Send a new code* delivers a second usable code |
+| **Actions** | As **C**, go through first-run taste onboarding. Reach a comparison and look at the control that is not either poster. Then dismiss the OTP screen and request another code. **Then, as A, rank a title from the Log tab and look at the same control** — and once more through **Rank again** on a title you have already ranked |
+| **Expected** | The control reads **Too tough** on **every one of those surfaces** — never *Skip* — and looks the same on each: the same size as Undo, the same fill, the same border. The OTP screen **can be dismissed**, and *Send a new code* delivers a second usable code |
 | PASS / FAIL | ☐ |
 | Notes | |
 
 > "Skip" reads as *skip ahead* in the middle of a five-film first run. A tester met a
 > comparison they could not call and left.
+>
+> **Amended 2026-08-30.** The word was onboarding-only and the Log tab still said *Skip*, so
+> the same control under the same two posters had two names. It is **Too tough everywhere**
+> now — and the accessible label says it too, which is where the old word survived longest.
 
 ---
 
@@ -217,12 +248,36 @@ These need an account that **already has history** — use A, not C.
 | PASS / FAIL | ☐ |
 | Notes | |
 
+### P-ii. A consequence sits above the act that caused it
+
+| | |
+|---|---|
+| **Actions** | As **A**, rank a title from the **Log tab** — bucket first, then the comparisons — and pick one that will earn an award or finish a goal. Read the Feed top to bottom afterwards. Then check the inbox and the lock screen |
+| **Expected** | The **award or goal sits ABOVE the ranking that earned it**, because the feed is newest-first and the award happened after. Never below it. Two awards from one action hold a fixed order. Pull to refresh and open a second page: **the order does not change**. The congratulations arrives in the inbox and as a push **only after the ranking completed** — and a ranking you abandon halfway congratulates you for nothing |
+| **Evidence** | 📷 the feed showing the award above the ranking, and the inbox row |
+| PASS / FAIL | ☐ |
+| Notes | |
+
+> This is the item most worth doing carefully. The Log tab's first tap creates the
+> collection row, so the award is announced a minute before the ranking activity exists —
+> and the fix is what puts the two back together. Ranking straight from search is the
+> easier case and was already right.
+
+### P-iii. A locked award track is grey, title and all
+
+| | |
+|---|---|
+| **Actions** | Open **Awards** and find a track with no tier earned. Then find one with at least one |
+| **Expected** | The unearned track's **title is muted as well as its badge** — the two read as one locked row rather than a black title beside a grey picture. Its progress and its "Next: …" line stay fully readable. The earned track's title is **ink** |
+| PASS / FAIL | ☐ |
+| Notes | |
+
 ### Q. Goals, leaderboard timeframes, and what another viewer may see
 
 | | |
 |---|---|
-| **Actions** | Complete a watch goal. Open the **Leaderboard** and switch timeframes and metric. Then open A's profile **from B's device**, and again after A sets the account to **private** |
-| **Expected** | Completing the goal announces **once** — it cannot be announced twice and it cannot be missed by a batch update. The leaderboard's default metric is **titles**; every timeframe returns a board rather than an error or a blank. From B's device, an award A has withheld or that B is not entitled to see shows as **withheld** — **never as somebody else's award, and never as an error** |
+| **Actions** | Complete a watch goal. Open the **Leaderboard** and switch timeframes and metric. Then open A's profile **from B's device**, and again after A sets the account to **private**. With A private and B **not** an approved follower, look for **A's row on B's leaderboard** and tap it |
+| **Expected** | Completing the goal announces **once** — it cannot be announced twice and it cannot be missed by a batch update. The leaderboard's default metric is **titles**; every timeframe returns a board rather than an error or a blank. From B's device, an award A has withheld or that B is not entitled to see shows as **withheld** — **never as somebody else's award, and never as an error**. **A's private row IS on B's board**, with a rank, a name, a handle, an avatar, a small lock and the metric count — and **no Match, no shared count, nothing else**. Tapping it opens the **locked profile shell** with the Follow request, exactly as it always did |
 | **Evidence** | 📷 the leaderboard at two timeframes, and A's profile as seen by B |
 | PASS / FAIL | ☐ |
 | Notes | |
@@ -237,6 +292,16 @@ These need an account that **already has history** — use A, not C.
 |---|---|
 | **Actions** | Sign out (*Use a different account*), then **Sign in with Apple** |
 | **Expected** | The sheet appears and completes. **If Apple offers a Google address, that is Apple's account picker and not a bug** — it is which Apple ID is signed into the device. Confirm against the backend which identity was actually created before treating it as a fault |
+| PASS / FAIL | ☐ |
+| Notes | |
+
+### R-i-b. A conversation opened from a notification reads as one surface
+
+| | |
+|---|---|
+| **Actions** | Have **B** comment on one of **A**'s activities. On A's device, open the notification. Then reach the same conversation by tapping the activity in the Feed. Look at the seam between the post and the comments, on an activity with comments and on one with none |
+| **Expected** | **One rule** between the post and the conversation, and **no band of empty page** — the founder's "small bar" was two hairlines with a gap trapped between them. Both routes look identical, because both draw the same screen. The first comment sits the same distance below the rule as later ones sit below each other |
+| **Evidence** | 📷 the seam, from the notification route |
 | PASS / FAIL | ☐ |
 | Notes | |
 
