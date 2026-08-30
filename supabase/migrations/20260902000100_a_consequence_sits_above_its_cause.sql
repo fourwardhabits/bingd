@@ -112,7 +112,7 @@
 --
 -- `_rank_finalize` does it, under two facts and no interval:
 --
---   * **the announcement names this title** -- `causal_media_item_id`, §2 above, written
+--   * **the announcement names this title** -- `feed_event_causes`, §2 above, written
 --     by the writer that announced it rather than guessed at from a clock; and
 --   * **nothing of the reader's happened in between** -- the guard
 --     `_maybe_goal_completion` already applies from the other side, and what keeps a film
@@ -214,15 +214,49 @@ comment on column feed_events.causal_step is
 -- the announcement stands at its own moment, which is where it stood before.
 -- ---------------------------------------------------------------------------
 
-alter table feed_events
-  add column causal_media_item_id uuid references media_items(id) on delete set null;
+-- **A side table and not a column on `feed_events`**, and independent review 76c is why.
+--
+-- It was a column, which is the obvious shape. `feed_events_read` authorises **whole
+-- rows** on `can_i_view(actor_id)` -- there is no column-level projection anywhere in
+-- this schema -- so a modified PostgREST client could have selected the causal title off
+-- any award it was allowed to see. That is a disclosure the award row is specifically
+-- built to refuse: `media_item_id` is left null on `award_earned` precisely so the row
+-- does not name a title, and the payload is exactly `{award, tier, award_name,
+-- tier_label}`. Adding a hidden title to a readable row would have quietly undone that
+-- for an internal bookkeeping reason.
+--
+-- The sharpest case is the one 76c built: earn an award on a title and then remove it
+-- from the collection. The award event survives -- `remove_from_collection` deliberately
+-- does not touch it -- so the link would have told a viewer about a title the collection
+-- itself no longer shows them.
+--
+-- So the fact lives where nothing can read it. `push_outbox`'s shape exactly
+-- (20260825000300): RLS on, no policy, and the grant revoked as belt and braces -- "a
+-- table with no client surface is better expressed by not granting one than by describing
+-- what may be seen". The three writers and the one reader are all `security definer`.
 
-comment on column feed_events.causal_media_item_id is
-  'The title whose collection write announced this derived event -- set on award_earned and goal_completed, null everywhere else and null on every row written before 20260902000100. It exists so _rank_finalize can adopt an announcement its own act produced early into the group of the activity that act finally posts: the Log sheet buckets, stamps a date and only then ranks, so those announcements are minutes older than the ranking they belong to, and no timestamp bound can tell one title''s unclaimed award from another''s. Deliberately NOT media_item_id, which is what an activity is *about* and decides where a tap goes -- an award row must keep routing to the Awards sheet. On delete set null rather than cascade: losing a catalogue row must not delete the record that somebody earned something.';
+create table feed_event_causes (
+  -- The primary key is the event's, so a cause cannot exist without its announcement and
+  -- cannot survive one. A Comment Gremlin revocation deleting the feed event takes this
+  -- with it, and so does an account deletion through `feed_events`' own cascade.
+  feed_event_id uuid primary key references feed_events(id) on delete cascade,
+  -- Cascade rather than set null: a row that has forgotten which title it names is not a
+  -- cause, and the adoption's `= item` would never match it again.
+  media_item_id uuid not null references media_items(id) on delete cascade
+);
 
--- Index deliberately absent. The one reader is `_rank_finalize`'s adoption, which is
--- already filtering by `actor_id` -- `feed_events_actor_created` serves it, and the
--- residual is a handful of that actor's rows.
+alter table feed_event_causes enable row level security;
+
+-- No policy, so no client role reaches it under RLS. The revoke is belt and braces on the
+-- reasoning `push_outbox` records, and it matters more here than there: the default
+-- privileges Supabase sets would otherwise grant this to `authenticated` on creation.
+revoke all on feed_event_causes from public, anon, authenticated;
+
+comment on table feed_event_causes is
+  'The title whose collection write announced a derived feed event -- one row per award_earned or goal_completed that a single title caused, and nothing else. It exists so _rank_finalize can adopt an announcement its own act produced early into the group of the activity that act finally posts: the Log sheet buckets, stamps a date and only then ranks, so those announcements are minutes older than the ranking they belong to, and no timestamp bound can tell one title''s unclaimed award from another''s when both were logged seconds apart. A table rather than a column on feed_events because feed_events_read authorises whole rows and an award row is built not to name a title -- media_item_id is null on it deliberately. No client surface at all: RLS on with no policy, and the grants revoked (push_outbox''s pattern). Absent is the ordinary state -- a comment or a follow earned the award, several titles crossed the goal at once, or the row predates 20260902000100 -- and it means no ranking may adopt that announcement.';
+
+-- Index deliberately absent. The one reader is `_rank_finalize`'s adoption, which drives
+-- from that actor's own derived events and probes this by primary key.
 
 create or replace function _maybe_award_unlocks(
   p_user  uuid,
@@ -297,9 +331,9 @@ begin
 
     if v_top is not null then
       if v_top.social then
-        insert into feed_events (actor_id, type, causal_step, causal_media_item_id, payload)
+        insert into feed_events (actor_id, type, causal_step, payload)
         values (
-          p_user, 'award_earned', v_step, p_media_item_id,
+          p_user, 'award_earned', v_step,
           jsonb_build_object(
             'award',      v_top.award_key,
             'tier',       v_top.tier_key,
@@ -311,6 +345,15 @@ begin
           where type = 'award_earned'
           do nothing
         returning id into v_event_id;
+
+        -- The cause, when the caller named one (20260902000100). `v_event_id` is null
+        -- when the conflict gate above swallowed the insert -- another device announced
+        -- the same tier first -- and the insert is skipped rather than guarded, because
+        -- that event already has its own cause row from whoever won.
+        if v_event_id is not null and p_media_item_id is not null then
+          insert into feed_event_causes (feed_event_id, media_item_id)
+          values (v_event_id, p_media_item_id);
+        end if;
       end if;
 
       -- The congratulations, to the earner, actorless — nobody did this to them.
@@ -355,7 +398,7 @@ drop function if exists _maybe_award_unlocks(uuid, text[]);
 
 revoke execute on function _maybe_award_unlocks(uuid, text[], uuid) from public, anon, authenticated;
 comment on function _maybe_award_unlocks(uuid, text[], uuid) is
-  'The award transition: for each named track, walk the tiers ascending, record every newly-passed one on the ledger, and announce the highest -- one feed event (social tracks only) and one congratulations notification, both hanging off the insert that reported a row, so two devices crossing together announce once. Feed events carry causal_step 2 and up since 20260901000100, one step per announced track in p_awards order. Since 20260902000100 they also carry causal_media_item_id when the caller names the title whose collection write announced them, which is what lets the ranking that follows adopt them; the eight call sites with no title pass nothing and their announcements are never adopted. Directly callable by nobody: a client that could invoke this could probe another account''s counts. Internal.';
+  'The award transition: for each named track, walk the tiers ascending, record every newly-passed one on the ledger, and announce the highest -- one feed event (social tracks only) and one congratulations notification, both hanging off the insert that reported a row, so two devices crossing together announce once. Feed events carry causal_step 2 and up since 20260901000100, one step per announced track in p_awards order. Since 20260902000100 a feed_event_causes row records the title whose collection write announced it when the caller names one, which is what lets the ranking that follows adopt it; the eight call sites with no title pass nothing and their announcements are never adopted. Directly callable by nobody: a client that could invoke this could probe another account''s counts. Internal.';
 
 
 -- The collection trigger, rebuilt to name the title it is about. It is a per-row
@@ -402,6 +445,9 @@ declare
   v_rows   integer;
   v_source record;
   v_at     timestamptz := now();
+  -- The announcement's id, so its cause can be recorded (20260902000100). Null when the
+  -- conflict gate below swallows the insert, which is the concurrent-crossing case.
+  v_event_id uuid;
 begin
   if p_user is null or p_year is null or p_category is null or coalesce(p_added, 0) < 1 then
     return;
@@ -504,16 +550,11 @@ begin
     v_at := v_source.created_at;
   end if;
 
-  insert into feed_events (actor_id, type, causal_step, causal_at, causal_media_item_id, payload)
+  insert into feed_events (actor_id, type, causal_step, causal_at, payload)
   values (
     -- Step 1: after the ranking that carried the count over, before any award the
     -- same ranking earned. See the migration header.
     p_user, 'goal_completed', 1, v_at,
-    -- The title this completion belongs to, when exactly one carried the count over
-    -- (20260902000100). A batch that crossed the goal with several titles at once has
-    -- no single cause, and null there means no ranking adopts it -- which is correct:
-    -- there is no one ranking it belongs under.
-    case when array_length(p_media_items, 1) = 1 then p_media_items[1] end,
     jsonb_build_object(
       'year',     p_year,
       'category', p_category,
@@ -522,7 +563,19 @@ begin
   )
   on conflict (actor_id, ((payload ->> 'year')), ((payload ->> 'category')))
     where type = 'goal_completed'
-    do nothing;
+    do nothing
+  returning id into v_event_id;
+
+  -- The title this completion belongs to, when exactly one carried the count over
+  -- (20260902000100). A batch that crossed the goal with several titles at once has no
+  -- single cause, and no row here means no ranking adopts it -- which is correct: there
+  -- is no one ranking it belongs under. `v_event_id` is null when the conflict gate
+  -- swallowed the insert, which is the concurrent-crossing case and already has its
+  -- cause from whoever won.
+  if v_event_id is not null and array_length(p_media_items, 1) = 1 then
+    insert into feed_event_causes (feed_event_id, media_item_id)
+    values (v_event_id, p_media_items[1]);
+  end if;
 
   -- The congratulations, to the earner, actorless — nobody did this to them, which is
   -- the `award_earned` shape (20260828000100) and the reason `claim_push_batch` already
@@ -674,7 +727,7 @@ begin
      *
      * **Two facts decide it, and the first is stated rather than inferred.**
      *
-     *   **The announcement names this title.** `causal_media_item_id` (§2) is written by
+     *   **The announcement names this title.** `feed_event_causes` (§2) is written by
      *   the collection award trigger and by a single-title goal crossing, and it is what
      *   makes this exact. It replaced a timestamp window, and independent review 76b is
      *   why: log A, log B and have B cross a tier, then rank A, and every timestamp
@@ -709,8 +762,11 @@ begin
        set causal_at = v_causal_at
      where fe.actor_id = target
        and fe.type in ('award_earned', 'goal_completed')
-       and fe.causal_media_item_id = item
        and fe.causal_at < v_causal_at
+       and exists (
+         select 1 from feed_event_causes fc
+          where fc.feed_event_id = fe.id and fc.media_item_id = item
+       )
        and not exists (
          select 1
            from feed_events act

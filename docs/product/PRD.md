@@ -2376,15 +2376,16 @@ The feed reads `causal_at desc, causal_step desc, id asc`. The third key makes t
 > *before* its cause, so the cause reaches back and adopts the award. `_rank_finalize`
 > does it when it posts the activity, under two facts and no interval:
 >
-> - **the announcement names this title.** `feed_events.causal_media_item_id` is written
->   by the collection award trigger and by a single-title goal crossing — the writer says
->   which title announced it rather than a reader guessing from a clock; and
+> - **the announcement names this title.** `feed_event_causes` — one row per derived
+>   event a single title caused — is written by the collection award trigger and by a
+>   single-title goal crossing, so the writer says which title announced it rather than a
+>   reader guessing from a clock; and
 > - **nothing of the reader's happened in between**, which is the guard
 >   `_maybe_goal_completion` already applies from the other side, and what keeps a film
 >   logged in March and ranked today from hauling a five-month-old award to the top of the
 >   feed.
 >
-> **The title link is a column because no timestamp could do it**, and independent review
+> **The title link is recorded because no timestamp could do it**, and independent review
 > 76b is why. The first version bounded the adoption by time — at or after this title's
 > `user_media.created_at`, before this activity, with nothing in between — and every one
 > of those bounds is satisfied by a *different* title's award: log A, log B, have B cross a
@@ -2393,11 +2394,22 @@ The feed reads `causal_at desc, causal_step desc, id asc`. The third key makes t
 > activity, are indistinguishable by *when*. So the writer says *which*, which is the same
 > move `causal_step` is.
 >
-> **Null means "no ranking may adopt this", and that is the right default** — for the eight
-> award call sites that are about a comment, a reaction, a follow or an invite and have no
-> title; for a goal crossed by several titles at once, which has no single cause; and for
-> every row written before the column existed. In each case the announcement stands at its
+> **A missing row means "no ranking may adopt this", and that is the right default** — for
+> the eight award call sites that are about a comment, a reaction, a follow or an invite and
+> have no title; for a goal crossed by several titles at once, which has no single cause;
+> and for every announcement written before the table existed. In each case it stands at its
 > own moment, which is where it stood before.
+>
+> **It is a side table and not a column on `feed_events`, and independent review 76c is
+> why.** `feed_events_read` authorises **whole rows** on `can_i_view(actor_id)` — there is
+> no column-level projection anywhere in this schema — so a column would have been readable
+> by any client allowed to see the award. That is a disclosure the award row exists to
+> refuse: `media_item_id` is left null on `award_earned` precisely so the row does not name
+> a title, and its payload is exactly `{award, tier, award_name, tier_label}`. The sharpest
+> case: earn an award on a title and then remove it from the collection — the award event
+> survives, deliberately, so the link would have named a title the collection itself no
+> longer shows. `feed_event_causes` has **no client surface at all**: RLS on with no policy,
+> and the grants revoked, which is `push_outbox`'s pattern and its reasoning.
 >
 > Both the award and the goal are reached, though they land at different instants: the
 > bucket tap creates the collection row and the award announces there, then the sheet stamps

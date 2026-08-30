@@ -372,12 +372,22 @@ end; $$;`;
  * Mutant 12. `_maybe_award_unlocks` without its conflict protection: the existence
  * probe at the top of the tier walk is the only guard left, the insert carries no
  * `on conflict`, and the announcement follows every insert instead of hanging off one
- * that reported a row. The signature is the current two-argument form — `(p_user uuid,
- * p_awards text[])` — copied exactly, for the reason the header records about stale
- * signatures.
+ * that reported a row. The signature is the current **three**-argument form —
+ * `(p_user uuid, p_awards text[], p_media_item_id uuid default null)` — copied exactly,
+ * for the reason the header records about stale signatures, and this is that reason
+ * demonstrating itself: `20260902000100` added the third parameter and dropped the
+ * two-argument arity, and a mutant still declaring the old shape does not replace the
+ * real function, it *overloads* it. Every call then fails `42725` — function is not
+ * unique — so the mutant proves nothing and the whole run dies on the first one.
+ *
+ * The parameter is carried but unused: this mutant is about the conflict protection,
+ * and recording a `feed_event_causes` row would be a second difference
+ * from the real function for the assertion to trip over.
  */
 const UNGUARDED_UNLOCK = `
-create or replace function _maybe_award_unlocks(p_user uuid, p_awards text[])
+create or replace function _maybe_award_unlocks(
+  p_user uuid, p_awards text[], p_media_item_id uuid default null
+)
 returns void language plpgsql security definer set search_path = public as $$
 declare
   v_award text; v_tier record; v_metric bigint; v_top record; v_top_val bigint; v_event_id uuid;

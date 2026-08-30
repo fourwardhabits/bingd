@@ -690,7 +690,7 @@ describe('a causal group reads in the order it happened', () => {
      *   3. rank A.
      *
      * B's award was adopted into A's group and shown to A's followers as the consequence
-     * of ranking A. `causal_media_item_id` is the fix: the writer says which title
+     * of ranking A. `feed_event_causes` is the fix: the writer says which title
      * announced it, so nothing about *when* has to be inferred.
      */
     const user = await t.createUser({ username: 'causal_crosstitle' });
@@ -713,13 +713,15 @@ describe('a causal group reads in the order it happened', () => {
 
     const award = (
       await t.sql(
-        `select id, causal_at, causal_media_item_id from feed_events
-          where actor_id = $1 and type = 'award_earned'`,
+        `select fe.id, fe.causal_at, fc.media_item_id as cause
+           from feed_events fe
+           left join feed_event_causes fc on fc.feed_event_id = fe.id
+          where fe.actor_id = $1 and fe.type = 'award_earned'`,
         [user],
       )
     ).rows;
     assert.equal(award.length, 1, 'fixture: exactly one award, and B is what earned it');
-    assert.equal(award[0].causal_media_item_id, b, 'and the writer said so');
+    assert.equal(award[0].cause, b, 'and the writer said so');
 
     // Now A is ranked. Nothing of the reader's has happened in between, and the award
     // is newer than A's own collection row -- every timestamp bound the first version
@@ -778,13 +780,72 @@ describe('a causal group reads in the order it happened', () => {
 
     const rows = (
       await t.sql(
-        `select causal_media_item_id from feed_events
-          where actor_id = $1 and type = 'award_earned'`,
+        `select fe.id, fc.media_item_id as cause
+           from feed_events fe
+           left join feed_event_causes fc on fc.feed_event_id = fe.id
+          where fe.actor_id = $1 and fe.type = 'award_earned'`,
         [author],
       )
     ).rows;
     assert.ok(rows.length > 0, 'fixture: the comment track announced');
-    for (const row of rows) assert.equal(row.causal_media_item_id, null);
+    for (const row of rows) assert.equal(row.cause, null);
+  });
+
+  it('lets no client read which title an award came from', async () => {
+    /**
+     * **Independent review 76c**, and it is why the link is a side table rather than a
+     * column on `feed_events`.
+     *
+     * `feed_events_read` authorises **whole rows** on `can_i_view(actor_id)` — there is
+     * no column-level projection anywhere in this schema — so a column would have been
+     * readable by any client allowed to see the award. That is a disclosure the award row
+     * exists to refuse: `media_item_id` is left null on `award_earned` precisely so the
+     * row does not name a title.
+     *
+     * The sharpest case is 76c's own: earn an award on a title and then remove it from
+     * the collection. The award event survives — `remove_from_collection` deliberately
+     * does not touch it — so the link would have named a title the collection itself no
+     * longer shows.
+     */
+    const earner = await crossMovieMuncher('causal_cause_private');
+    await t.actAs(earner);
+    const film = await movie('causal_cause_private_film');
+    await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved')`, [film]);
+
+    // The cause was recorded, so the assertion below is about reachability rather than
+    // about an empty table.
+    const rows = (await t.sql(`select * from feed_event_causes`)).rows;
+    assert.ok(
+      rows.some((r) => r.media_item_id === film),
+      'fixture: the bucket tap recorded which title announced the award',
+    );
+
+    // And no client role can reach it. Two independent refusals, which is the shape
+    // `push_outbox` uses: the grant is revoked, and RLS is on with no policy behind it.
+    const viewer = await t.createUser({ username: 'causal_cause_reader' });
+    const denied = await t.asRole('authenticated', viewer, () =>
+      t.errorFrom(`select * from feed_event_causes`),
+    );
+    assert.ok(denied, 'an authenticated client must not be able to select from it');
+
+    const anon = await t.asAnon(() => t.errorFrom(`select * from feed_event_causes`));
+    assert.ok(anon, 'nor anon');
+
+    // The award itself is still readable, and still says nothing about a title — which
+    // is the property the side table was written to preserve.
+    const event = (
+      await t.sql(
+        `select media_item_id, payload from feed_events
+          where actor_id = $1 and type = 'award_earned'`,
+        [earner],
+      )
+    ).rows[0];
+    assert.equal(event.media_item_id, null, 'an award row names no title, as before');
+    assert.deepEqual(
+      Object.keys(event.payload).sort(),
+      ['award', 'award_name', 'tier', 'tier_label'],
+      'and its payload is the four keys it has always been',
+    );
   });
 
   it('leaves an old award where it is when unrelated activity happened in between', async () => {
