@@ -572,9 +572,21 @@ describe('a private identity, across every surface the founder named', () => {
     assert.ok(rows[0].min_common > 0, 'the row is real; only the evidence is thin');
   });
 
-  it('still refuses a monthly leaderboard count', async () => {
-    // §26, at the surface rather than in `leaderboard.test.mjs`'s own fixtures: an
-    // account the viewer can find by name must not arrive on the board with a number.
+  /**
+   * **Amended 2026-08-30 (`20260902000100`): the board is discovery, not content.**
+   *
+   * This asserted §26 — an account the viewer can find by name must not arrive on the
+   * board with a number. The founder reversed it, on the reasoning that made the account
+   * findable in the first place: privacy is about what somebody wrote, not about whether
+   * they can be found. And a board that silently omits people lies about where the reader
+   * stands.
+   *
+   * So the row appears, and what this file now asserts is the line it appears *at*: the
+   * identity and the one aggregate that explains the position, with everything derived
+   * from ranking data still refused — which is the same boundary the two Match assertions
+   * above draw, at a second entry point.
+   */
+  it('puts them on the board, as identity and a count and nothing else', async () => {
     await t.sql(
       `insert into user_media (user_id, media_item_id, bucket, watched_on)
        select $1, id, 'loved', current_date from media_items limit 1
@@ -582,8 +594,36 @@ describe('a private identity, across every surface the founder named', () => {
       [shy],
     );
 
-    const rows = await asViewer(`select username from monthly_leaderboard('titles', 50)`);
-    assert.ok(!rows.some((r) => r.username === 'shy_one'));
+    const row = (
+      await asViewer(`select * from leaderboard('titles', 'month', 50)`)
+    ).find((r) => r.username === 'shy_one');
+
+    assert.ok(row, 'a private account the viewer can find is on the board');
+    assert.equal(row.visibility, 'private');
+    assert.equal(row.viewable, false, 'and the row says the viewer may not read it');
+    // Greater than zero rather than exactly one: earlier tests in this file log for
+    // the same account, and what matters is that the number is real and present, not
+    // that this fixture is the only one that touched it.
+    assert.ok(row.metric_count > 0, 'the number that explains the position');
+
+    // The content half, unchanged: Match and its evidence are the same private ranking
+    // data the assertions above refuse, and they are null here rather than hidden.
+    assert.equal(row.match_percent, null);
+    assert.equal(row.shared_count, null);
+  });
+
+  it('reaches an un-relaunched client through the old name without a private field', async () => {
+    // `monthly_leaderboard` is the eight-column shape the 2026-08-28 beta OTA calls, and
+    // those eight columns are exactly the minimal row — it has never had the Match
+    // columns. So a phone that has not taken this update shows the row without a lock
+    // rather than showing something it should not.
+    const rows = await asViewer(`select * from monthly_leaderboard('titles', 50)`);
+    const row = rows.find((r) => r.username === 'shy_one');
+
+    assert.ok(row, 'the old name reaches the same board');
+    assert.equal(row.visibility, 'private');
+    assert.ok(!('match_percent' in row), 'and carries no Match column at all');
+    assert.ok(!('shared_count' in row));
   });
 
   it('still refuses their ranked collection through the list they now appear in', async () => {
