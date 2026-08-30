@@ -848,6 +848,127 @@ describe('a causal group reads in the order it happened', () => {
     );
   });
 
+  it('drops the cause when the title leaves the collection, so a later log cannot reuse it', async () => {
+    /**
+     * **Independent review 76d**, and the reason the cause is keyed to the collection row
+     * rather than to the title.
+     *
+     * A cause is about one **tenure** of a title in one collection. 76d's sequence: log A
+     * and earn an award, unlog A -- which `unlog` implements as a delete of the
+     * `user_media` row, and `remove_from_collection` likewise -- then months later log
+     * A again and rank it. The award event survives both, deliberately. Keyed to the
+     * title, the cause survived too, and with no activity in between the months-old award
+     * was adopted into the new ranking's group and presented as its consequence: the row
+     * had become a reusable adoption token across collection lifetimes.
+     */
+    const user = await crossMovieMuncher('causal_tenure');
+    await t.actAs(user);
+    const film = await movie('causal_tenure_film');
+
+    // Tenure one: the bucket tap crosses the tier and announces.
+    await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved')`, [film]);
+    const award = (
+      await t.sql(
+        `select id, causal_at from feed_events where actor_id = $1 and type = 'award_earned'`,
+        [user],
+      )
+    ).rows[0];
+    assert.ok(award, 'fixture: the bucket tap announced');
+    assert.equal(
+      (await t.sql(`select count(*)::int as n from feed_event_causes where feed_event_id = $1`, [
+        award.id,
+      ])).rows[0].n,
+      1,
+      'fixture: and recorded which title announced it',
+    );
+
+    // The tenure ends. The announcement survives -- it is a past-tense fact about an act.
+    await t.sql(`select unlog(gen_random_uuid(), $1)`, [film]);
+    assert.equal(
+      (await t.sql(`select count(*)::int as n from feed_events where id = $1`, [award.id]))
+        .rows[0].n,
+      1,
+      'the award itself is never taken back by an unlog',
+    );
+    assert.equal(
+      (await t.sql(`select count(*)::int as n from feed_event_causes where feed_event_id = $1`, [
+        award.id,
+      ])).rows[0].n,
+      0,
+      'but the cause went with the collection row',
+    );
+
+    // Tenure two, much later, with nothing of the reader's in between.
+    await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved')`, [film]);
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+
+    const after = (
+      await t.sql(`select causal_at from feed_events where id = $1`, [award.id])
+    ).rows[0];
+    assert.equal(
+      new Date(after.causal_at).getTime(),
+      new Date(award.causal_at).getTime(),
+      'a months-old award must not become the consequence of a later ranking',
+    );
+  });
+
+  it('leaves a goal alone when the ranking it already sits under is ranked again', async () => {
+    /**
+     * The narrower second route, found by probing the guard rather than reported.
+     *
+     * A goal completed by a date taken **after** a ranking inherits that ranking's own
+     * `causal_at` (`_maybe_goal_completion`) -- so it sits at the same instant as the
+     * activity that already claimed it. A strict `>` in the intervening test did not see
+     * that activity as intervening at all, so Rank again on the same title, months later
+     * with nothing else between, moved the old celebration up to the new ranking. An
+     * activity **at** the announcement's instant has claimed it just as surely as one
+     * after it, which is what `>=` says.
+     */
+    const user = await t.createUser({ username: 'causal_again' });
+    const year = new Date().getUTCFullYear();
+    await t.sql(
+      `insert into watch_goals (user_id, year, category, target) values ($1, $2, 'movies', 1)`,
+      [user, year],
+    );
+    await t.actAs(user);
+    const film = await movie('causal_again_film');
+
+    // Rank first, then the date -- which is the flow the backwards inheritance is for.
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+    await t.sql(
+      `update user_media set watched_on = make_date($3, 6, 1)
+        where user_id = $1 and media_item_id = $2`,
+      [user, film, year],
+    );
+
+    const goal = (
+      await t.sql(
+        `select id, causal_at from feed_events where actor_id = $1 and type = 'goal_completed'`,
+        [user],
+      )
+    ).rows[0];
+    assert.ok(goal, 'fixture: the goal completed and inherited the ranking it sits under');
+
+    // Rank again, as a new watch. Nothing else of the reader's has happened.
+    let step = (
+      await t.sql(`select rank_again($1, 'loved', gen_random_uuid(), true) as r`, [film])
+    ).rows[0].r;
+    let guard = 0;
+    while (!step.done && guard++ < 64) {
+      step = (await t.sql(`select rank_answer($1, $2) as r`, [step.session_id, step.pivot]))
+        .rows[0].r;
+    }
+
+    const after = (
+      await t.sql(`select causal_at from feed_events where id = $1`, [goal.id])
+    ).rows[0];
+    assert.equal(
+      new Date(after.causal_at).getTime(),
+      new Date(goal.causal_at).getTime(),
+      'a celebration an activity has already claimed stays where it is',
+    );
+  });
+
   it('leaves an old award where it is when unrelated activity happened in between', async () => {
     // The guard, and the reason it is a fact rather than an interval. A film logged in
     // March and ranked today must not haul a five-month-old award to the top of the

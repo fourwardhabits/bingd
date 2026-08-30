@@ -2394,6 +2394,15 @@ The feed reads `causal_at desc, causal_step desc, id asc`. The third key makes t
 > activity, are indistinguishable by *when*. So the writer says *which*, which is the same
 > move `causal_step` is.
 >
+> **The cause lasts exactly as long as the title's tenure in that collection.**
+> `feed_event_causes` is keyed to the `user_media` row, and `unlog` and
+> `remove_from_collection` both delete that row, so the cascade takes the cause with it.
+> Without it, logging a title, earning an award, unlogging, then logging and ranking the
+> same title months later would let the old award be adopted into the new ranking's group —
+> the row acting as a reusable adoption token across collection lifetimes (independent
+> review 76d). The announcement itself is never taken back: it is a past-tense fact about
+> an act, and only the link that would let a later act claim it goes.
+>
 > **A missing row means "no ranking may adopt this", and that is the right default** — for
 > the eight award call sites that are about a comment, a reaction, a follow or an invite and
 > have no title; for a goal crossed by several titles at once, which has no single cause;

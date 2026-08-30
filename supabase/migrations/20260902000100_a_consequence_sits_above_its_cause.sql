@@ -240,9 +240,26 @@ create table feed_event_causes (
   -- cannot survive one. A Comment Gremlin revocation deleting the feed event takes this
   -- with it, and so does an account deletion through `feed_events`' own cascade.
   feed_event_id uuid primary key references feed_events(id) on delete cascade,
-  -- Cascade rather than set null: a row that has forgotten which title it names is not a
-  -- cause, and the adoption's `= item` would never match it again.
-  media_item_id uuid not null references media_items(id) on delete cascade
+
+  -- **The pair, and it references `user_media` rather than `media_items`** -- which is
+  -- the whole of independent review 76d's finding, expressed as a key rather than as a
+  -- guard somebody has to remember.
+  --
+  -- A cause is about one **tenure** of a title in one collection, not about the title.
+  -- 76d's sequence: log A and earn an award, unlog A -- which `unlog` implements as
+  -- `delete from user_media`, and `remove_from_collection` likewise -- then months later
+  -- log A again and rank it. The award event survives both, deliberately. Against
+  -- `media_items` the cause survived too, and with no activity in between the old award
+  -- was adopted into the new ranking's group and presented as its consequence: the row
+  -- had become a reusable adoption token across collection lifetimes.
+  --
+  -- Keyed to the collection row, the cascade ends the tenure and the token with it. There
+  -- is nothing to remember and nothing for a future writer to get wrong, which is the
+  -- same reason `push_outbox` keys to the notification it cannot exist without.
+  user_id       uuid not null,
+  media_item_id uuid not null,
+  foreign key (user_id, media_item_id)
+    references user_media (user_id, media_item_id) on delete cascade
 );
 
 alter table feed_event_causes enable row level security;
@@ -253,7 +270,7 @@ alter table feed_event_causes enable row level security;
 revoke all on feed_event_causes from public, anon, authenticated;
 
 comment on table feed_event_causes is
-  'The title whose collection write announced a derived feed event -- one row per award_earned or goal_completed that a single title caused, and nothing else. It exists so _rank_finalize can adopt an announcement its own act produced early into the group of the activity that act finally posts: the Log sheet buckets, stamps a date and only then ranks, so those announcements are minutes older than the ranking they belong to, and no timestamp bound can tell one title''s unclaimed award from another''s when both were logged seconds apart. A table rather than a column on feed_events because feed_events_read authorises whole rows and an award row is built not to name a title -- media_item_id is null on it deliberately. No client surface at all: RLS on with no policy, and the grants revoked (push_outbox''s pattern). Absent is the ordinary state -- a comment or a follow earned the award, several titles crossed the goal at once, or the row predates 20260902000100 -- and it means no ranking may adopt that announcement.';
+  'The collection row whose write announced a derived feed event -- one row per award_earned or goal_completed that a single title caused, and nothing else. Keyed to (user_id, media_item_id) in user_media with on delete cascade, so a cause lasts exactly as long as that title''s tenure in that collection: unlog and remove_from_collection both delete the user_media row, and without the cascade the cause survived them and could be adopted by a ranking of the same title months later (independent review 76d). It exists so _rank_finalize can adopt an announcement its own act produced early into the group of the activity that act finally posts: the Log sheet buckets, stamps a date and only then ranks, so those announcements are minutes older than the ranking they belong to, and no timestamp bound can tell one title''s unclaimed award from another''s when both were logged seconds apart. A table rather than a column on feed_events because feed_events_read authorises whole rows and an award row is built not to name a title -- media_item_id is null on it deliberately. No client surface at all: RLS on with no policy, and the grants revoked (push_outbox''s pattern). Absent is the ordinary state -- a comment or a follow earned the award, several titles crossed the goal at once, or the row predates 20260902000100 -- and it means no ranking may adopt that announcement.';
 
 -- Index deliberately absent. The one reader is `_rank_finalize`'s adoption, which drives
 -- from that actor's own derived events and probes this by primary key.
@@ -351,8 +368,8 @@ begin
         -- the same tier first -- and the insert is skipped rather than guarded, because
         -- that event already has its own cause row from whoever won.
         if v_event_id is not null and p_media_item_id is not null then
-          insert into feed_event_causes (feed_event_id, media_item_id)
-          values (v_event_id, p_media_item_id);
+          insert into feed_event_causes (feed_event_id, user_id, media_item_id)
+          values (v_event_id, p_user, p_media_item_id);
         end if;
       end if;
 
@@ -573,8 +590,8 @@ begin
   -- swallowed the insert, which is the concurrent-crossing case and already has its
   -- cause from whoever won.
   if v_event_id is not null and array_length(p_media_items, 1) = 1 then
-    insert into feed_event_causes (feed_event_id, media_item_id)
-    values (v_event_id, p_media_items[1]);
+    insert into feed_event_causes (feed_event_id, user_id, media_item_id)
+    values (v_event_id, p_user, p_media_items[1]);
   end if;
 
   -- The congratulations, to the earner, actorless — nobody did this to them, which is
@@ -765,16 +782,26 @@ begin
        and fe.causal_at < v_causal_at
        and exists (
          select 1 from feed_event_causes fc
-          where fc.feed_event_id = fe.id and fc.media_item_id = item
+          where fc.feed_event_id = fe.id
+            and fc.user_id = target
+            and fc.media_item_id = item
        )
+       -- `>=` and not `>`, which is a second and narrower way an old announcement could
+       -- be hauled forward. A goal completed by a date taken AFTER a ranking inherits
+       -- that ranking's own `causal_at` (`_maybe_goal_completion`), so it sits at the
+       -- same instant as the activity that already claimed it -- and a strict `>` did
+       -- not see that activity as intervening at all. Rank the same title again months
+       -- later, with nothing else in between, and the old celebration moved up to the new
+       -- ranking. An activity AT the announcement's instant has claimed it just as surely
+       -- as one after it.
        and not exists (
          select 1
            from feed_events act
           where act.actor_id = target
             and act.type in ('title_ranked', 'season_completed', 'watchlist_added')
             and act.id <> v_event_id
-            and act.causal_at > fe.causal_at
-            and act.causal_at < v_causal_at
+            and act.causal_at >= fe.causal_at
+            and act.causal_at <  v_causal_at
        );
   end if;
 

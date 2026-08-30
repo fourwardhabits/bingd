@@ -29,11 +29,16 @@ Three differences from the SQL sketched below, all deliberate:
 > ```
 > feed_event_causes (
 >   feed_event_id uuid primary key references feed_events(id) on delete cascade,
->   media_item_id uuid not null            references media_items(id) on delete cascade
+>   user_id       uuid not null,
+>   media_item_id uuid not null,
+>   foreign key (user_id, media_item_id)
+>     references user_media (user_id, media_item_id) on delete cascade
 > )
 > ```
 >
 > **The title whose collection write announced a derived event** — one row per `award_earned` or `goal_completed` a single title caused, and nothing else. Absent is the ordinary state: a comment or a follow earned the award, several titles crossed the goal at once, or the announcement predates `20260902000100`. It exists because no timestamp bound can tell one title's unclaimed award from another's when both were logged seconds apart in one sitting.
+>
+> **It is keyed to the collection row, not to the title.** A cause is about one *tenure* of a title in one collection: `unlog` and `remove_from_collection` both delete the `user_media` row, and the cascade takes the cause with it. Without that, logging a title, earning an award, unlogging, then logging and ranking the same title months later would let the old award be adopted into the new ranking's group — the cause row acting as a reusable adoption token across collection lifetimes (independent review 76d). The intervening-activity guard tests `>=` rather than `>` for the narrower second route: a goal that inherited a ranking's own `causal_at` sits at the same instant as the activity that already claimed it.
 >
 > **A table and not a column on `feed_events`.** `feed_events_read` authorises whole rows on `can_i_view(actor_id)` and there is no column-level projection in this schema, so a column would have been readable by any client allowed to see the award — and an award row is built *not* to name a title, which is why `media_item_id` is null on it. This has no client surface: RLS on with no policy, and the grants revoked, which is `push_outbox`'s pattern. The primary key is the event's, so a cause cannot exist without its announcement or survive one. `causal_at` is the other half: a goal completion is caused by a watch date, `log_watched` posts no activity of its own, and the celebration therefore commits seconds *after* its cause — a real later timestamp no tiebreak can reach. A completion inherits the timestamp of the reader's newest activity when that activity is one of the titles that carried the count over, and keeps its own otherwise. `created_at` is untouched and is still what a row's relative time is drawn from. The third key makes the sort total, which is what pagination needs.
 
