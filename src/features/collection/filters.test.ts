@@ -12,6 +12,9 @@ import {
   sortOptionsFor,
   type CollectionItem,
 } from './filters';
+import { resolveMetadata } from '@/lib/media-metadata';
+import { genreRanksFor } from './genre-rank';
+import { heroRankFor } from './hero-rank';
 
 const item = (over: Partial<CollectionItem> = {}): CollectionItem => ({
   mediaItemId: 'a',
@@ -219,14 +222,100 @@ describe('the options offered', () => {
 
   it('offers only what the collection actually contains', () => {
     const options = facetOptions(rows);
-    expect(options.genres.map((g) => g.value)).toEqual(['Drama', 'Crime']);
-    expect(options.genres[0]?.count).toBe(2);
+    expect(options.genres.map((g) => g.value)).toEqual(['Crime', 'Drama']);
     expect(options.languages.map((l) => l.value).sort()).toEqual(['en', 'ja']);
   });
 
-  it('keeps decades in calendar order rather than by count', () => {
-    // A decade list that reorders itself as the collection grows is unreadable.
-    expect(facetOptions(rows).decades.map((d) => d.value)).toEqual(['2020s', 'earlier']);
+  it('keeps the count beside the option it belongs to, not beside its neighbour', () => {
+    // The ordering change is where a count and a label come apart, and a filter that
+    // says "Crime 2" and returns one film is worse than one that is unsorted.
+    const options = facetOptions(rows);
+    expect(options.genres).toEqual([
+      { value: 'Crime', count: 1 },
+      { value: 'Drama', count: 2 },
+    ]);
+  });
+
+  it('orders genres alphabetically rather than by count', () => {
+    // Founder, 2026-08-30. By count, the position of an option moved every time
+    // something was logged, so a reader had to re-scan a section to find an entry they
+    // already knew was in it. Crime has one title here and Drama has two.
+    const options = facetOptions([
+      item({ genres: ['Western'], language: 'en' }),
+      item({ genres: ['Action', 'Western'], language: 'en' }),
+      item({ genres: ['Action', 'Western'], language: 'en' }),
+      item({ genres: ['Comedy', 'Western'], language: 'en' }),
+    ]);
+    expect(options.genres.map((g) => g.value)).toEqual(['Action', 'Comedy', 'Western']);
+    // Western is first by count and last by name, which is what makes this a real test.
+    expect(options.genres.at(-1)).toEqual({ value: 'Western', count: 4 });
+  });
+
+  it('places Anime alphabetically among the genres, like any other entry', () => {
+    // It is a genre now, so it takes part in the alphabet rather than being pinned
+    // anywhere. Between Action and Comedy, and after Animation where both exist.
+    const options = facetOptions([
+      item({ mediaItemId: 'a', genres: ['Western'], language: 'en' }),
+      item({ mediaItemId: 'b', genres: ['Action'], language: 'en' }),
+      item({ mediaItemId: 'c', genres: ['Anime'], language: 'ja' }),
+      item({ mediaItemId: 'd', genres: ['Animation'], language: 'en' }),
+      item({ mediaItemId: 'e', genres: ['Comedy'], language: 'en' }),
+    ]);
+    expect(options.genres.map((g) => g.value)).toEqual([
+      'Action',
+      'Animation',
+      'Anime',
+      'Comedy',
+      'Western',
+    ]);
+  });
+
+  it('orders languages by the English word the sheet draws, not by the ISO code', () => {
+    // `el` sorts under E and Greek under G. The reader is looking at the word, so
+    // the word is what decides — and the sheet's own fallback for an unknown code is
+    // repeated in the sort key, so a label and its position cannot disagree.
+    const options = facetOptions([
+      item({ mediaItemId: 'a', language: 'ja', genres: ['Drama'] }),
+      item({ mediaItemId: 'b', language: 'el', genres: ['Drama'] }),
+      item({ mediaItemId: 'c', language: 'en', genres: ['Drama'] }),
+      item({ mediaItemId: 'd', language: 'ko', genres: ['Drama'] }),
+    ]);
+    // English, Greek, Japanese, Korean.
+    expect(options.languages.map((l) => l.value)).toEqual(['en', 'el', 'ja', 'ko']);
+  });
+
+  it('keeps decades in calendar order, oldest first', () => {
+    // A decade list that reorders itself as the collection grows is unreadable, and
+    // ascending since 2026-08-30: a decade list is a timeline and a timeline starts at
+    // the beginning (founder).
+    expect(facetOptions(rows).decades.map((d) => d.value)).toEqual(['earlier', '2020s']);
+
+    const spread = facetOptions([
+      item({ mediaItemId: 'a', year: 2021, genres: ['Drama'], language: 'en' }),
+      item({ mediaItemId: 'b', year: 1975, genres: ['Drama'], language: 'en' }),
+      item({ mediaItemId: 'c', year: 2015, genres: ['Drama'], language: 'en' }),
+      item({ mediaItemId: 'd', year: 1994, genres: ['Drama'], language: 'en' }),
+      item({ mediaItemId: 'e', year: 2003, genres: ['Drama'], language: 'en' }),
+    ]);
+    expect(spread.decades.map((d) => d.value)).toEqual([
+      'earlier',
+      '1990s',
+      '2000s',
+      '2010s',
+      '2020s',
+    ]);
+  });
+
+  it('gives the same order twice for the same rows, whatever order they arrive in', () => {
+    // The founder checks this by eye across two visits to the sheet. The comparison is
+    // deliberately not `localeCompare` — see `compareLabels` — so Hermes, Node and a
+    // browser cannot disagree about it.
+    const forwards = [
+      item({ mediaItemId: 'a', genres: ['Drama', 'Crime'], language: 'en', year: 2021 }),
+      item({ mediaItemId: 'b', genres: ['Action'], language: 'ja', year: 1985 }),
+    ];
+    const backwards = [...forwards].reverse();
+    expect(facetOptions(forwards)).toEqual(facetOptions(backwards));
   });
 
   it('offers Anime among the genres, and only when there is any', () => {
@@ -354,5 +443,125 @@ describe('which sorts are offered', () => {
     const keys = sortOptionsFor('watched').map((option) => option.key);
     expect(keys).toContain('score-desc');
     expect(keys).toContain('recent');
+  });
+});
+
+/**
+ * **One title, one genre list, on every surface that names one.**
+ *
+ * The founder's report was a divergence rather than a single wrong label: the collection
+ * filter had offered Anime since 2026-08-29 and the title page still printed TMDB's
+ * `Animation`, so filtering to Anime and opening a result contradicted the filter that
+ * found it. Fixing the pill alone would have moved the seam rather than closed it —
+ * Animation would still have matched the same title, the counts would still have been
+ * computed one way and the labels drawn another, and the genre ranks under a reveal
+ * would still have said Animation.
+ *
+ * So these start from `resolveMetadata` — the shared read every genre-bearing query
+ * goes through — and follow one anime title into the filter, into the counts, and into
+ * the two ranking surfaces. What is being asserted is **agreement**, not any one label.
+ */
+describe('the same genre downstream of the shared resolver', () => {
+  /** A collection row exactly as `use-collection` builds one, resolver included. */
+  const resolved = (
+    mediaItemId: string,
+    raw: string[],
+    language: string | null,
+    over: Partial<CollectionItem> = {},
+  ): CollectionItem => {
+    const meta = resolveMetadata({
+      kind: 'movie',
+      genres: raw,
+      original_language: language,
+      parent: null,
+    });
+    return item({ mediaItemId, genres: meta.genres, language: meta.language, ...over });
+  };
+
+  const cowboyBebop = resolved('bebop', ['Animation', 'Action'], 'ja');
+  const toyStory = resolved('toy-story', ['Animation', 'Family'], 'en');
+  const ikiru = resolved('ikiru', ['Drama'], 'ja');
+
+  it('gives the title page Anime where the filter offers Anime', () => {
+    // The pill and the filter entry are now the same string from the same resolver, so
+    // there is nothing left to keep in step by hand.
+    expect(cowboyBebop.genres).toContain(ANIME_GENRE);
+    expect(cowboyBebop.genres).not.toContain('Animation');
+    expect(toyStory.genres).toEqual(['Animation', 'Family']);
+    expect(ikiru.genres).toEqual(['Drama']);
+  });
+
+  it('returns exactly the titles the Anime count promised', () => {
+    // An option whose number does not match what selecting it returns is worse than an
+    // option that is missing, and this is the pair that could come apart: the count is
+    // computed by the predicate and the results by the label.
+    const rows = [cowboyBebop, toyStory, ikiru];
+    const option = facetOptions(rows).genres.find((g) => g.value === ANIME_GENRE);
+
+    expect(option?.count).toBe(1);
+    expect(
+      applyFilters(rows, { ...emptyFilters(), genres: [ANIME_GENRE] }).map((r) => r.mediaItemId),
+    ).toEqual(['bebop']);
+    expect(option?.count).toBe(
+      applyFilters(rows, { ...emptyFilters(), genres: [ANIME_GENRE] }).length,
+    );
+  });
+
+  it('reserves Animation for animated titles that are not anime', () => {
+    // The other half of the partition, and the founder's explicit pin. Filtering to
+    // Animation must no longer return the anime it used to.
+    const rows = [cowboyBebop, toyStory, ikiru];
+    expect(
+      applyFilters(rows, { ...emptyFilters(), genres: ['Animation'] }).map((r) => r.mediaItemId),
+    ).toEqual(['toy-story']);
+
+    const option = facetOptions(rows).genres.find((g) => g.value === 'Animation');
+    expect(option?.count).toBe(1);
+  });
+
+  it('never offers a title under both labels', () => {
+    // The visible symptom the founder photographed: `Animation · Anime` on one row.
+    for (const row of [cowboyBebop, toyStory, ikiru]) {
+      const both = row.genres.includes('Animation') && row.genres.includes(ANIME_GENRE);
+      expect(both).toBe(false);
+    }
+  });
+
+  it('labels a genre rank Anime, because it ranks over the same list', () => {
+    // `genreRanksFor` reads `genres` off the ranked rows, which come through the same
+    // resolver — so a reveal that said "#2 Animation" under a title page that said
+    // Anime is not a second place to fix, it is the same list read twice.
+    const ranked = Array.from({ length: 6 }, (_, index) =>
+      resolved(index === 1 ? 'bebop' : `anime-${index}`, ['Animation', 'Action'], 'ja'),
+    ).map((row, index) => ({
+      mediaItemId: row.mediaItemId,
+      position: index + 1,
+      genres: row.genres,
+    }));
+
+    const ranks = genreRanksFor('bebop', ranked, 5);
+    expect(ranks.map((r) => r.genre)).toContain(ANIME_GENRE);
+    expect(ranks.map((r) => r.genre)).not.toContain('Animation');
+  });
+
+  it('puts Anime in the hero line for a top-ten genre placement', () => {
+    // The title page's own "#3 in ..." line, which is the last genre-bearing surface
+    // and the one a reader meets after tapping a filter result.
+    const ranked = [
+      ...Array.from({ length: 12 }, (_, index) => ({
+        mediaItemId: `filler-${index}`,
+        position: index + 1,
+        genres: ['Drama'],
+      })),
+      ...Array.from({ length: 6 }, (_, index) => ({
+        mediaItemId: index === 2 ? 'bebop' : `anime-${index}`,
+        position: 13 + index,
+        // Animation alone, so Anime is the only genre that qualifies: `heroRankFor`
+        // breaks a tie on the genre name ascending, and Action would win it.
+        genres: resolved(`x-${index}`, ['Animation'], 'ja').genres,
+      })),
+    ];
+
+    expect(heroRankFor('bebop', ranked, 'movies')?.label).toBe(`#3 in ${ANIME_GENRE}`);
   });
 });

@@ -54,10 +54,12 @@ type RecallRow = {
   overview: string | null;
   poster_path: string | null;
   genres: string[] | null;
+  original_language: string | null;
   certification: string | null;
   parent: {
     title: string | null;
     genres: string[] | null;
+    original_language: string | null;
     certification: string | null;
   } | null;
 };
@@ -84,7 +86,7 @@ function useTitleRecall(mediaItemId: string | null) {
         // its genres from the series, and because "Season 2" is not a name — the
         // series' title is half of what `compactName` prints.
         .select(
-          'id, kind, title, season_number, release_date, runtime_minutes, episode_count, overview, poster_path, genres, certification, parent:parent_id(title, genres, certification)',
+          'id, kind, title, season_number, release_date, runtime_minutes, episode_count, overview, poster_path, genres, original_language, certification, parent:parent_id(title, genres, original_language, certification)',
         )
         .eq('id', mediaItemId ?? '')
         .single();
@@ -107,6 +109,9 @@ export function TitleRecallSheet({ mediaItemId, onClose }: TitleRecallSheetProps
     ? activityMetadata({
         kind: row.kind,
         genres: row.genres,
+        // The language, so a title recalled mid-ranking says Anime where the title page
+        // says Anime. `activityMetadata` normalises; it needs both halves to.
+        language: row.original_language,
         certification: row.certification,
         runtimeMinutes: row.runtime_minutes,
         episodeCount: row.episode_count,

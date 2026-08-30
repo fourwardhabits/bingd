@@ -421,6 +421,108 @@ describe('the activity above the conversation', () => {
   });
 });
 
+/**
+ * **One rule between the post and the conversation, and no band of empty page.**
+ *
+ * The founder's physical report, 2026-08-30: "a small bar of empty space between the
+ * activity and the comments", opening a comment notification. It reproduced from the
+ * direct Feed tap as well, which is the fact that named the cause -- both routes render
+ * this one subtree, so it was never route-specific and never a loading state.
+ *
+ * It was two rules with a gap trapped between them. `ActivityRow` ends in a
+ * `borderBottomWidth` of its own -- the separator the Feed draws between cards -- and
+ * this screen added a second `View` with a `borderTopWidth` and `marginTop` beneath it.
+ * The removed one is the second; the row's own is the legitimate divider and stays.
+ *
+ * Asserted structurally rather than by measuring a gap. A pixel assertion would pass on
+ * a rewrite that reintroduced the strip with different numbers, and it would fail on an
+ * unrelated spacing change that was fine; what has to stay true is that **nothing sits
+ * between the post and the thread**, which is a fact about the tree.
+ */
+describe('the seam between the post and the conversation', () => {
+  /**
+   * Every element in the tree, flat, with its resolved style.
+   *
+   * `toJSON` rather than a query, because what is being looked for is a view nothing
+   * can address: the removed spacer had no text, no label and no role. A findable
+   * element is not the failure mode.
+   */
+  const nodes = (tree: unknown): { style: ViewStyle; children: unknown[] }[] => {
+    const out: { style: ViewStyle; children: unknown[] }[] = [];
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      const element = node as { props?: Record<string, unknown>; children?: unknown[] };
+      out.push({
+        style: (StyleSheet.flatten(element.props?.style) ?? {}) as ViewStyle,
+        children: element.children ?? [],
+      });
+      (element.children ?? []).forEach(walk);
+    };
+    walk(tree);
+    return out;
+  };
+
+  it('draws no empty ruled strip anywhere on the page', async () => {
+    mockComments = [comment()];
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByText(/recontextualises/)).toBeTruthy());
+
+    // The exact signature of what was removed: a childless box whose only content is a
+    // border. Nothing else in this screen is drawn that way, and nothing should be --
+    // a separator belongs to the row it separates, which is where `ActivityRow` keeps
+    // its own.
+    const strips = nodes(view.toJSON()).filter(
+      (n) => n.children.length === 0 && Number(n.style.borderTopWidth ?? 0) > 0,
+    );
+    expect(strips).toEqual([]);
+  });
+
+  it('keeps the post own bottom rule, which is the divider that belongs there', async () => {
+    // The fix must not have been "delete the line". The canonical feed card carries its
+    // own separator and this screen draws the canonical card, so the seam is still a
+    // rule -- it is simply one rule instead of two with a gap between them.
+    mockComments = [comment()];
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByText(/recontextualises/)).toBeTruthy());
+
+    const ruled = nodes(view.toJSON()).filter(
+      (n) => Number(n.style.borderBottomWidth ?? 0) > 0 && n.children.length > 0,
+    );
+    expect(ruled.length).toBeGreaterThan(0);
+  });
+
+  it('reads the same with no comments on the activity at all', async () => {
+    // The empty case is where a reserved container would show: a thread with nothing in
+    // it draws an empty state, and a screen that held space open for a list it does not
+    // have would look exactly like the founder's bar.
+    mockComments = [];
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByLabelText(/Sinners, 2025/)).toBeTruthy());
+
+    const strips = nodes(view.toJSON()).filter(
+      (n) => n.children.length === 0 && Number(n.style.borderTopWidth ?? 0) > 0,
+    );
+    expect(strips).toEqual([]);
+  });
+
+  it('uses no negative margin to close the gap', async () => {
+    // The other way this could have been "fixed". A negative margin pulls the thread up
+    // over the rule rather than removing the thing that opened the gap, and it breaks
+    // the moment the row's padding changes.
+    mockComments = [comment()];
+    const view = await renderWithProviders(<ActivityScreen />);
+    await waitFor(() => expect(view.getByText(/recontextualises/)).toBeTruthy());
+
+    for (const { style } of nodes(view.toJSON())) {
+      for (const key of ['margin', 'marginTop', 'marginBottom', 'marginVertical'] as const) {
+        const value = style[key];
+        if (typeof value === 'number') expect(value).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+});
+
 describe('arriving before the session has resolved', () => {
   /**
    * The cold start, which is how this screen is *usually* reached: a tap on a

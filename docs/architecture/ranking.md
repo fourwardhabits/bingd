@@ -165,9 +165,21 @@ This is why bands matter beyond correctness. A user with 400 ranked movies split
 
 ---
 
-## 5. Skip and Back
+## 5. Too tough and Back
 
-**Skip** re-anchors to a different pivot without narrowing the range (PRD §10):
+**`Too tough` is the label on every comparison surface** since 2026-08-30 — onboarding,
+a first ranking, the Log tab, Rank again, and every re-bucketing path that shows a
+comparison. They are all the same component (`RankingSheet`), the label was
+`surface === 'onboarding' ? 'Too tough' : 'Skip'`, and the founder met the divergence on
+the device: one control under two posters with two names. The word that survives is the
+one that says *why* you are pressing it.
+
+**The schema keeps the name `rank_skip`**, deliberately. This is a copy and interaction
+contract, not a reason to rename a function nine call sites and one un-relaunched beta
+build depend on.
+
+**Skip** — the mechanism, whatever the button says — re-anchors to a different pivot
+without narrowing the range (PRD §10):
 
 ```
 skips = skips + 1
@@ -186,7 +198,20 @@ The replacement pivot is chosen by stepping away from the midpoint — `mid + 1`
 
 **When the walk runs dry**, which is a band where every remaining opponent has been declined, the title is placed at the midpoint of the surviving range with `adjustable: true` — the same resolution as the skip cap, reached the same way, and **no comparison row is written**: a skipped pair is an absence of evidence, not a tie.
 
-After three skips the title is placed at the midpoint of the surviving range and **the response carries `adjustable: true`**, which the client uses to show PRD §10's "you can change this from Rankings" message. The flag comes from the server so the message cannot appear in the wrong circumstances.
+After three skips the title is placed at the midpoint of the surviving range and **the response carries `adjustable: true`**. The flag is unchanged and is still the server's.
+
+**Nothing is drawn from it any more** (founder, 2026-08-30). The reveal used to say "You
+skipped a few, so this is an estimate. You can move it from Rankings." That sentence
+appeared only for the people who used the affordance, which turned the one control that
+keeps a ranking honest into something the reward screen apologised for. Pressing Too
+tough is a legitimate answer, not a confession.
+
+The placement is untouched: the midpoint resolution, the three-skip cap, the dry-walk
+fallback and the refusal to write a comparison row all behave exactly as described above.
+The reveal simply states the score and the placement, as it does for a ranking that met
+no Too tough at all, and the title is as movable from Rankings as every other one. The
+flag stays on the response because it is a true fact about the placement and because
+removing it would be a schema change for a copy decision.
 
 **Back** pops `history`:
 
@@ -469,8 +494,9 @@ A score depends on the *sizes of all three bands* for that user and category, no
 | Comparisons only within a bucket | §1, §3 |
 | Bands partition the ranking (INF-3) | I2, §1, §8 |
 | Bucket change re-runs comparisons in the new band | §7 |
-| Skip re-anchors | §5 |
-| Three skips places at the midpoint and says so | §5 |
+| Too tough re-anchors | §5 |
+| Three skips places at the midpoint, and says nothing about it | §5 |
+| A pair is never offered twice in one session | §5 |
 | Back restores the previous comparison | §5 |
 | No ties | I4 |
 | 0–10 score display, derived from position | `rankings.position` plus `band_bounds` are the only inputs; see §11 |

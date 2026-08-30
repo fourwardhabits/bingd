@@ -146,6 +146,18 @@ Semantics are in [`ranking.md`](./ranking.md).
 
 `block` does substantial work in one transaction: delete both `follows` rows, void any `invite_attributions` between the pair that have not been accepted, and insert the `blocks` row. Everything else — feed, leaderboard, match, tagging, public pages — follows automatically, because they all read through `can_view_profile`.
 
+> **The leaderboard is the one surface whose population is wider than `can_view_profile`,
+> and a block still removes it** (`20260902000100`). `leaderboard` admits
+> `can_view_profile(viewer, subject) OR can_discover_profile(viewer, subject)`, so an
+> unapproved private account appears as a minimal row — rank, handle, name, avatar,
+> `visibility`, and the metric count, with `viewable = false` and `match_percent` and
+> `shared_count` **null at the server**. `can_discover_profile` refuses a block in either
+> direction and refuses a non-active account ahead of everything else, which is why the
+> sentence above still holds without qualification for blocks and suspension: the widened
+> branch is about *finding* people and inherits both refusals. Everything the account
+> wrote stays behind `can_view_profile` unchanged, and a tap lands on the same locked
+> profile shell it always did.
+
 `unblock` deliberately does not restore follows. Restoring a relationship the user severed would be surprising, and the follow is one tap to recreate.
 
 ---

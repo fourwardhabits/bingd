@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CollectionItem } from '@/features/collection/filters';
 import { track, type MediaKind } from '@/lib/analytics';
 import { avatarUri } from '@/lib/images';
-import { effectiveGenres, effectiveLanguage, parentOf, type EmbeddedParent } from '@/lib/media-metadata';
+import { effectiveLanguage, parentOf, productGenres, type EmbeddedParent } from '@/lib/media-metadata';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -148,7 +148,7 @@ async function inheritedMetadata(
       parent: parent ? { genres: parent.genres, language: parent.original_language } : null,
     };
     resolved.set(season.id, {
-      genres: effectiveGenres(subject),
+      genres: productGenres(subject),
       language: effectiveLanguage(subject),
     });
   }

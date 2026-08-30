@@ -8,6 +8,17 @@ let mockFeedRows: unknown[] = [];
 let mockNoteRows: unknown[] = [];
 let mockNoteError: unknown = null;
 const rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
+/**
+ * Every `.order()` the feed asks for, per table.
+ *
+ * Recorded rather than discarded, because the ordering **is** the contract here. The
+ * rows come back from a stub in whatever order the fixture wrote them, so no assertion
+ * over the returned array could tell a correct sort from a missing one -- the sort
+ * happens in PostgreSQL. What this file can prove is which clause was requested, and
+ * `supabase/tests/physical-qa.test.mjs` proves what that clause does to real rows.
+ * Together they are the property; on its own neither is.
+ */
+const orderCalls: Record<string, { column: string; ascending: boolean }[]> = {};
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -17,6 +28,7 @@ jest.mock('@/lib/supabase', () => ({
     },
     from: (table: string) => {
       const chain: Record<string, unknown> = {};
+      orderCalls[table] ??= [];
       const result = () =>
         Promise.resolve({
           data: table === 'follows' ? [{ followee_id: 'friend' }] : mockFeedRows,
@@ -26,7 +38,10 @@ jest.mock('@/lib/supabase', () => ({
         select: () => chain,
         eq: () => chain,
         in: () => chain,
-        order: () => chain,
+        order: (column: string, options?: { ascending?: boolean }) => {
+          orderCalls[table]?.push({ column, ascending: options?.ascending !== false });
+          return chain;
+        },
         limit: () => result(),
         then: (resolve: (value: unknown) => unknown) => result().then(resolve),
       });
@@ -471,5 +486,59 @@ describe('the fields the subheading needs', () => {
     const item = await only();
     expect(item.certification).toBeNull();
     expect(item.episodeCount).toBeNull();
+  });
+});
+
+/**
+ * **The causal order, as the query asks for it** (20260902000100).
+ *
+ * The founder's report: ranking a film that earns an award showed the ranking above the
+ * award, and this feed is newest-first. The award is the later event.
+ *
+ * The fix is one word in the ORDER BY and deliberately **not** a reverse of the array
+ * the hook returns. A client-side reversal would fix the screen and break pagination:
+ * the second page is fetched by the server in server order, so a list assembled by
+ * reversing each page would interleave the two wrongly at the seam. So what is asserted
+ * here is the clause, on the exact query every one of the three activity surfaces runs.
+ */
+describe('the feed asks for its rows newest-first, consequences above causes', () => {
+  const clause = () => orderCalls['feed_events'] ?? [];
+
+  // Module-level, and every other suite in this file also loads the feed. Cleared
+  // here so an assertion is about this load rather than about every load so far.
+  beforeEach(() => {
+    orderCalls['feed_events'] = [];
+  });
+
+  it('orders by causal_at descending, then causal_step descending, then id', async () => {
+    mockFeedRows = [event()];
+    await load();
+
+    expect(clause()).toEqual([
+      // The group's own instant. A goal completion inherits the timestamp of the
+      // activity it belongs under, which is what holds a causal group together.
+      { column: 'causal_at', ascending: false },
+      // **Descending**, which is the correction. 0 is the act, 1 the goal it completed,
+      // 2 and up the awards it earned; a higher step is a later event, so newest-first
+      // puts the award above the ranking that produced it.
+      { column: 'causal_step', ascending: false },
+      // Total, because it is a primary key. Without it two rows the first two keys
+      // cannot separate are free to swap between pages, which drops or duplicates an
+      // activity at a page boundary.
+      { column: 'id', ascending: true },
+    ]);
+  });
+
+  it('asks for the same clause on every fetch, so a refetch cannot reorder the list', async () => {
+    // One reader, `activityBy`, serves the feed, a profile's activity and a paginated
+    // page alike. Two loads therefore have to produce two identical clauses -- and a
+    // per-call ordering, or a sort applied only on first paint, is what this refuses.
+    mockFeedRows = [event()];
+    await load();
+    const first = [...clause()];
+    orderCalls['feed_events'] = [];
+    await load();
+
+    expect(clause()).toEqual(first);
   });
 });

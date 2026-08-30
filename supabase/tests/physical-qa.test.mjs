@@ -22,6 +22,13 @@ import { createTestDb, createTestDbBefore } from './harness.mjs';
  *      `log_watched` posts no activity, and the celebration commits seconds after the
  *      ranking — a real later timestamp that no tiebreak can reach, so it carries a
  *      `causal_at` naming the activity it belongs under.
+ *
+ *      **The direction was corrected on 2026-08-30** (20260902000100). `causal_step`
+ *      ascended, which put a ranking above the award it earned; this feed is reverse
+ *      chronological and the award is the later event, so the canonical clause is
+ *      `causal_at desc, causal_step DESC, id asc` and every reader in this file states
+ *      it. The mechanism, the column and its writers are untouched — only the direction
+ *      the group is read in.
  *   3. **The invitee's welcome stays in the app.** The inbox row is untouched; the
  *      lock-screen copy of it is gone.
  *   4. **The inbox knows what kind of activity a row is about**, so it can say "your
@@ -280,7 +287,7 @@ describe('the historical award reconciliation', () => {
 // ---------------------------------------------------------------------------
 
 describe('a causal group reads in the order it happened', () => {
-  it('puts a goal completed by a later write under the ranking that earned it', async () => {
+  it('puts a goal completed by a later write above the ranking that earned it', async () => {
     // The founder's flow exactly: rank the film, then give it a watch date from the
     // post-rank sheet. `log_watched` posts no activity, so the completion commits
     // SECONDS AFTER the ranking and is genuinely the newer row — which is why a
@@ -307,7 +314,7 @@ describe('a causal group reads in the order it happened', () => {
     const rows = (
       await t.sql(
         `select type, causal_step, causal_at, created_at from feed_events
-          where actor_id = $1 order by causal_at desc, causal_step asc, id asc`,
+          where actor_id = $1 order by causal_at desc, causal_step desc, id asc`,
         [user],
       )
     ).rows;
@@ -333,8 +340,8 @@ describe('a causal group reads in the order it happened', () => {
 
     assert.deepEqual(
       rows.map((r) => r.type),
-      ['title_ranked', 'goal_completed'],
-      'the ranking must come first under the canonical order',
+      ['goal_completed', 'title_ranked'],
+      'the celebration is the later event and belongs above its cause',
     );
   });
 
@@ -416,15 +423,33 @@ describe('a causal group reads in the order it happened', () => {
       await t.sql(
         `select payload ->> 'award' as award, causal_step from feed_events
           where actor_id = $1 and type = 'award_earned'
-          order by causal_at desc, causal_step asc, id asc`,
+          order by causal_at desc, causal_step desc, id asc`,
         [earner],
       )
     ).rows;
 
+    // The steps are assigned in the order `_maybe_award_unlocks` walks `p_awards`, and
+    // the feed reads them back newest-first — so the last track announced is the first
+    // one seen. That is the same "later above" rule applied inside the group rather than
+    // a second convention: an action that earns two awards announced them in sequence,
+    // and a reverse-chronological list shows the sequence in reverse.
     assert.deepEqual(rows, [
-      { award: 'mutual-mania', causal_step: 2 },
       { award: 'invite-instigator', causal_step: 3 },
+      { award: 'mutual-mania', causal_step: 2 },
     ]);
+
+    // Deterministic is the property, not the direction: read twice, same answer. This is
+    // what pagination and refetch depend on, and it is why the steps exist at all —
+    // without them these two rows share a timestamp and the plan decides.
+    const again = (
+      await t.sql(
+        `select payload ->> 'award' as award, causal_step from feed_events
+          where actor_id = $1 and type = 'award_earned'
+          order by causal_at desc, causal_step desc, id asc`,
+        [earner],
+      )
+    ).rows;
+    assert.deepEqual(again, rows);
   });
 
   it('orders a tied group the same way however the rows were written', async () => {
@@ -446,19 +471,134 @@ describe('a causal group reads in the order it happened', () => {
     const rows = (
       await t.sql(
         `select type, causal_step from feed_events
-          where actor_id = $1 order by causal_at desc, causal_step asc, id asc`,
+          where actor_id = $1 order by causal_at desc, causal_step desc, id asc`,
+        [user],
+      )
+    ).rows;
+
+    // Newest downwards: the awards the action earned, then the goal it completed, then
+    // the act itself at the foot of its own group.
+    assert.deepEqual(
+      rows.map((r) => r.type),
+      ['award_earned', 'award_earned', 'goal_completed', 'title_ranked'],
+    );
+    assert.deepEqual(
+      rows.map((r) => r.causal_step),
+      [3, 2, 1, 0],
+    );
+  });
+
+  /**
+   * **The whole shape, from the act that produces it.**
+   *
+   * The three assertions above each pin one mechanism. This one runs the founder's
+   * acceptance case end to end -- rank a film, have it finish a goal and earn an award,
+   * read the feed the way the client reads it -- because the ordering is a property of
+   * the three together and each of them is correct in isolation today.
+   */
+  it('reads award, then goal, then the ranking that caused both', async () => {
+    const user = await t.createUser({ username: 'causal_whole' });
+    const year = new Date().getUTCFullYear();
+    await t.sql(
+      `insert into watch_goals (user_id, year, category, target) values ($1, $2, 'movies', 1)`,
+      [user, year],
+    );
+    await t.actAs(user);
+
+    const film = await movie('causal_whole_film');
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+
+    // Movie Muncher's first tier, earned by the same collection row the ranking wrote.
+    // Announced inside the ranking's transaction, so it shares `causal_at` with it.
+    await t.sql(
+      `insert into feed_events (actor_id, type, causal_step, payload, created_at, causal_at)
+       select $1, 'award_earned', 2, '{"award":"movie-muncher","tier":"bronze"}',
+              fe.created_at, fe.causal_at
+         from feed_events fe
+        where fe.actor_id = $1 and fe.type = 'title_ranked'`,
+      [user],
+    );
+
+    // The watch date, in its own statement and therefore its own instant. This is the
+    // goal's cause and it posts no activity of its own.
+    await t.sql(
+      `update user_media set watched_on = make_date($3, 6, 1)
+        where user_id = $1 and media_item_id = $2`,
+      [user, film, year],
+    );
+
+    const rows = (
+      await t.sql(
+        `select type, causal_step from feed_events
+          where actor_id = $1 order by causal_at desc, causal_step desc, id asc`,
         [user],
       )
     ).rows;
 
     assert.deepEqual(
       rows.map((r) => r.type),
-      ['title_ranked', 'goal_completed', 'award_earned', 'award_earned'],
+      ['award_earned', 'goal_completed', 'title_ranked'],
+      'the founder acceptance order: consequences above the act, newest first',
     );
-    assert.deepEqual(
-      rows.map((r) => r.causal_step),
-      [0, 1, 2, 3],
+  });
+
+  /**
+   * **Nothing is congratulated before the act that earns it has finished.**
+   *
+   * The founder's requirement, and the schema meets it structurally rather than by
+   * timing: every announcement is written by an AFTER-ROW trigger inside the writer's
+   * own transaction, so it commits when the writer commits or not at all. These two
+   * assert the two halves that could be got wrong.
+   */
+  it('announces nothing for a ranking session that is opened and abandoned', async () => {
+    const user = await t.createUser({ username: 'causal_abandoned' });
+    await t.actAs(user);
+    const film = await movie('causal_abandoned_film');
+
+    // A session, and no finalise. `rank_start` writes a `ranking_sessions` row and
+    // nothing else -- no `rankings`, no `user_media`, so no trigger fires.
+    await t.sql(`select rank_start($1, 'loved', gen_random_uuid())`, [film]);
+
+    const posts = await t.sql(
+      `select 1 from feed_events where actor_id = $1 and type in ('award_earned','goal_completed')`,
+      [user],
     );
+    const inbox = await t.sql(
+      `select 1 from notifications where recipient_id = $1 and type in ('award_earned','goal_completed')`,
+      [user],
+    );
+    assert.equal(posts.rows.length, 0, 'an abandoned session must congratulate nobody');
+    assert.equal(inbox.rows.length, 0, 'and must put nothing in the inbox either');
+  });
+
+  it('creates the inbox row and its push in the same transaction as the act', async () => {
+    // "After the causal completion" is the founder's phrasing and one transaction is how
+    // it is met: there is no moment at which the congratulations exists and the act does
+    // not. Asserted through the outbox, because push is the surface where an early
+    // announcement would be irreversible -- a lock-screen banner cannot be recalled.
+    const user = await t.createUser({ username: 'causal_push' });
+    await t.actAs(user);
+    const film = await movie('causal_push_film');
+    await t.rankToCompletion(film, 'loved', async (pivot) => pivot);
+
+    const rows = (
+      await t.sql(
+        `select n.created_at as told, fe.created_at as acted
+           from notifications n
+           join feed_events fe
+             on fe.actor_id = n.recipient_id and fe.type = 'title_ranked'
+          where n.recipient_id = $1 and n.type = 'award_earned'`,
+        [user],
+      )
+    ).rows;
+
+    for (const row of rows) {
+      assert.equal(
+        new Date(row.told).getTime(),
+        new Date(row.acted).getTime(),
+        'the congratulations and its cause share a transaction timestamp',
+      );
+    }
   });
 });
 

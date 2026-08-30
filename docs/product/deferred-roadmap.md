@@ -1444,6 +1444,36 @@ placeholder artwork backlog (§14) is being worked rather than grown.
 
 ---
 
+## 29. A leaderboard opt-out
+
+**Status: deferred by founder decision, 2026-08-30. Not built, and the implementation did
+not argue for it.**
+
+On 2026-08-30 a private account became visible on the leaderboard as a minimal row: rank,
+display name, handle, avatar, a lock, and the count for the selected metric. Everything
+that account wrote stays behind `can_view_profile` — the collection, the reviews, the
+activity, the awards, Match and the shared-title count are all null or absent at the
+server, not hidden at the client.
+
+The obvious next question is whether somebody should be able to leave the board while
+staying private. The founder deferred it, and this entry exists so the deferral is a
+recorded decision rather than a gap.
+
+**What it would take**, if it is ever wanted: one boolean on `profiles`, a settings
+toggle, and one predicate in `_leaderboard_counts` — the population is already a single
+CTE, which is what makes this cheap to add later and why nothing needed to be shaped for
+it now. `my_leaderboard_standing` reads the same CTE, so the reader's own denominator
+would follow without a second change. The one real design question is whether opting out
+also hides *the opter's own* board position from themselves; the honest answer is
+probably not, on the same reasoning that a suspended account can still load its own
+profile.
+
+**What would make it materially necessary**: a report from a real user that the count
+itself is the exposure. The disclosure today is one aggregate — how many titles, films,
+seasons or reviews — which names nothing and dates nothing, and is the same order as the
+follower count a private profile shell has always shown. If that turns out to be wrong,
+it is wrong for a reason worth reading before building the toggle.
+
 ## Carried forward from earlier decisions
 
 Still deferred, still agreed, recorded so that nothing is lost between documents:

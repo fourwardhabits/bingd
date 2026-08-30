@@ -244,13 +244,17 @@ describe('the comparison', () => {
    * because `rank_back` genuinely reverses the last answer — it restores `lo`, `hi` and
    * `pivot` from the history entry it pops (20260813001600) — and `Too tough to call`
    * became `Skip` because the founder's case for it is "I do not remember this one",
-   * which the old wording excluded and the same `rank_skip` has always served. These
-   * assert the pairing so a future rename cannot quietly point a word at a new call.
+   * which the old wording excluded and the same `rank_skip` has always served.
    *
-   * **They are addressed by accessible label now, and so is Skip.** On 2026-08-25 Undo
-   * gained "Undo the last comparison" for the same reason Skip has always carried
-   * "Skip this comparison": on a screen whose other exit is a Close, a bare "Undo" is
-   * ambiguous about what it undoes. The visible words are asserted separately, below.
+   * **The escape is `Too tough` again, on every surface, since 2026-08-30**, and the
+   * mechanism has still never moved: one control, one `rank_skip`, no win, no loss and
+   * no tie. That is what these assert — a rename that quietly pointed a word at a new
+   * call would pass a copy test and fail here.
+   *
+   * **They are addressed by accessible label.** On 2026-08-25 Undo gained "Undo the last
+   * comparison" for the same reason the escape has always carried "Skip this
+   * comparison": on a screen whose other exit is a Close, a bare "Undo" is ambiguous
+   * about what it undoes. The visible words are asserted separately, below.
    */
   it('undoes the last comparison through rank_back', async () => {
     answering(comparison(), comparison({ pivot: 'film-q' }));
@@ -264,19 +268,42 @@ describe('the comparison', () => {
     expect(callsTo('rank_answer')).toHaveLength(0);
   });
 
-  it('skips to a different opponent through rank_skip, and places nothing', async () => {
+  it('sends Too tough to rank_skip, and places nothing', async () => {
     answering(comparison(), comparison({ pivot: 'film-q', skipped: true }));
     const sheet = await openSheet();
 
     await sheet.ready('Film P');
-    await fireEvent.press(sheet.getByLabelText('Skip this comparison'));
+    await fireEvent.press(sheet.getByLabelText('Too tough to call. Skip this comparison'));
 
     await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
     expect(callsTo('rank_skip')[0][1]).toMatchObject({ p_session_id: SESSION });
     // The comparison is replaced, not answered — no judgement is recorded for a pair
-    // the reader declined to judge.
+    // the reader declined to judge. No fabricated tie, no fabricated preference: the
+    // server writes a comparison row only from `rank_answer`, and this never calls it.
     expect(callsTo('rank_answer')).toHaveLength(0);
     await waitFor(() => expect(sheet.getByText('Try this one instead')).toBeTruthy());
+  });
+
+  /**
+   * **The same call from the onboarding surface**, which is the half the founder could
+   * not check by eye once both surfaces printed the same word.
+   *
+   * The label converged on 2026-08-30; this is what says the *mechanism* converged with
+   * it rather than onboarding keeping a path of its own. `rank_skip` is where the
+   * server's per-session `seen_items` guarantee lives (20260901000100), so a surface
+   * that reached the escape any other way would be a surface without the no-repeat
+   * invariant.
+   */
+  it('sends Too tough to the same rank_skip from onboarding', async () => {
+    answering(comparison(), comparison({ pivot: 'film-q', skipped: true }));
+    const sheet = await openSheet({ surface: 'onboarding' });
+
+    await sheet.ready('Film P');
+    await fireEvent.press(sheet.getByLabelText('Too tough to call. Skip this comparison'));
+
+    await waitFor(() => expect(callsTo('rank_skip')).toHaveLength(1));
+    expect(callsTo('rank_skip')[0][1]).toMatchObject({ p_session_id: SESSION });
+    expect(callsTo('rank_answer')).toHaveLength(0);
   });
 
   it('says nothing about progress it cannot measure', async () => {
@@ -572,19 +599,40 @@ describe('the reveal', () => {
     expect(keys).toContain(JSON.stringify(queryKeys.collection('user-1')));
   });
 
-  it('only says a position is an estimate when the server says so', async () => {
+  /**
+   * **The reveal says nothing about Too tough, in either direction** (founder,
+   * 2026-08-30).
+   *
+   * It drew "You skipped a few, so this is an estimate" whenever the server came back
+   * `adjustable`. The founder's ruling is that pressing Too tough is a legitimate
+   * answer rather than a confession, and a paragraph that appears only for the people
+   * who used the affordance turns the one control keeping a ranking honest into
+   * something the reward screen apologises for.
+   *
+   * Both cases are asserted, because "removed" has to mean removed rather than moved:
+   * the flag still arrives, and neither value may produce copy about skipping.
+   */
+  it('says nothing about skipping when the server did not flag the placement', async () => {
     answering(placement);
     const sheet = await openSheet();
 
     await sheet.findByLabelText(REVEAL);
-    expect(sheet.queryByText(/estimate/)).toBeNull();
+    expect(sheet.queryByText(/estimate/i)).toBeNull();
+    expect(sheet.queryByText(/skip/i)).toBeNull();
   });
 
-  it('admits a skipped placement is an estimate', async () => {
+  it('says nothing about skipping when the server does flag the placement', async () => {
     answering({ ...placement, data: { ...placement.data, adjustable: true } });
     const sheet = await openSheet();
 
-    await waitFor(() => expect(sheet.getByText(/estimate/)).toBeTruthy());
+    await sheet.findByLabelText(REVEAL);
+    // The placement itself is unchanged — `adjustable` still comes back and the
+    // uncertainty-safe midpoint still produces it. What went is the sentence.
+    expect(sheet.queryByText(/estimate/i)).toBeNull();
+    expect(sheet.queryByText(/skipped/i)).toBeNull();
+    expect(sheet.queryByText(/too tough/i)).toBeNull();
+    // And the reveal still says the two things it is for.
+    expect(sheet.getByText(/#3 Movies/, { includeHiddenElements: true })).toBeTruthy();
   });
 });
 

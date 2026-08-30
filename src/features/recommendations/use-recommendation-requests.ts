@@ -4,6 +4,7 @@ import { useMemo, useRef } from 'react';
 import { invalidateAwards } from '@/features/awards/invalidate';
 import { newOperationId } from '@/features/collection/writes';
 import { avatarUri } from '@/lib/images';
+import { productGenres } from '@/lib/media-metadata';
 import { supabase } from '@/lib/supabase';
 import { classifyWrite, mustReconcile } from '@/lib/write-outcome';
 
@@ -72,6 +73,7 @@ type Row = {
   poster_path: string | null;
   release_date: string | null;
   genres: string[] | null;
+  original_language: string | null;
   runtime_minutes: number | null;
   recommended_at: string;
   total_pending: number | string;
@@ -148,7 +150,14 @@ export function useRecommendationRequests(viewerId: string) {
           seriesTitle: row.series_title,
           posterPath: row.poster_path,
           year: yearOf(row.release_date),
-          genres: row.genres ?? [],
+          // Product genres, so a recommendation for an anime names it the way every
+          // other surface does (2026-08-30). `recommendation_requests` already
+          // returned the language; nothing here was reading it.
+          genres: productGenres({
+            kind: row.media_kind,
+            genres: row.genres,
+            language: row.original_language,
+          }),
           runtimeMinutes: row.runtime_minutes,
           recommendedAt: row.recommended_at,
         });

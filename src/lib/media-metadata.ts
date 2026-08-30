@@ -122,6 +122,103 @@ export function effectiveCertification(subject: MetadataSubject): string | null 
   return null;
 }
 
+/**
+ * The label bingd. gives a Japanese animated title, in place of `Animation`.
+ *
+ * Synthetic: there is no genre called Anime in TMDB's vocabulary, and none in
+ * Wikidata's either. It is a *product* genre — what this app calls the thing — which is
+ * why {@link productGenres} produces it at read time and nothing ever writes it to a
+ * catalogue row. `media_items.genres` stays exactly as the provider published it.
+ */
+export const ANIME_GENRE = 'Anime';
+
+/**
+ * What counts as an animation label, in both of the catalogue's vocabularies.
+ *
+ * `/anim/i` and not a word-boundary pattern, because the Wikidata seed spells it
+ * `animated film` where TMDB spells it `Animation` — and because this is the exact
+ * test the Anime predicate has used since it lived in `collection/filters.ts`.
+ * Widening or narrowing it here would reclassify titles, which is not what this pass
+ * is for.
+ *
+ * It is also what makes normalisation **idempotent**: `Anime` matches it too, so
+ * running the rule over an already-normalised list removes the label and puts it back
+ * rather than accumulating a second copy.
+ */
+const ANIMATION_LABEL = /anim/i;
+
+/**
+ * Anime, from the metadata the catalogue actually has: **Japanese original language and
+ * an animation genre.**
+ *
+ * The predicate is unchanged and deliberately conservative — each half alone is badly
+ * wrong, every Japanese live-action film on one side and every Pixar film on the other
+ * — and its honest limits are recorded at {@link isAnime} in `collection/filters.ts`,
+ * which now delegates here. What moved on 2026-08-30 is *where it lives*: the title
+ * page, the feed, the recommendation lists and the collection filter all have to agree
+ * about which titles are anime, and a predicate defined inside the filter model was
+ * reachable by exactly one of them.
+ *
+ * Deliberately **not** widened to all Animation, to all Japanese-language titles, or to
+ * everything produced in Japan. Those are three different sets and only one is anime.
+ */
+export function isAnimeLabels(
+  language: string | null | undefined,
+  genres: readonly string[] | null | undefined,
+): boolean {
+  if (language !== 'ja') return false;
+  return (genres ?? []).some((genre) => ANIMATION_LABEL.test(genre));
+}
+
+/** {@link isAnimeLabels} against a resolved subject, so a season inherits its show's. */
+export const isAnimeSubject = (subject: MetadataSubject): boolean =>
+  isAnimeLabels(effectiveLanguage(subject), effectiveGenres(subject));
+
+/**
+ * **The canonical product genres for a title** — what every surface that names, filters,
+ * counts or ranks by genre reads.
+ *
+ * ---------------------------------------------------------------------------
+ * THE RULE (founder, 2026-08-30)
+ *
+ * A title satisfying the Anime predicate is **Anime and not Animation**. Its other
+ * genres are untouched, so Fullmetal Alchemist: Brotherhood reads
+ *
+ *     Action · Adventure · Anime
+ *
+ * and never `Animation · Anime` — which is the state the title page was in. Anime
+ * became a genre in the collection filter on 2026-08-29 while the title page went on
+ * printing TMDB's raw `Animation` beside it, so one title was two things depending on
+ * which screen you were looking at.
+ *
+ * Animation is kept for animated content that is *not* anime — every Pixar and Disney
+ * film, every Western cartoon — so the two labels now partition the drawn shelf rather
+ * than overlapping across part of it. Japanese live action is untouched by both, since
+ * the predicate needs an animation label as well as the language.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A LAYER AND NOT A MIGRATION
+ *
+ * The alternative was rewriting `media_items.genres`, and it is refused for the reason
+ * this module refuses to copy a series' genres onto its seasons: the catalogue is a
+ * **cache of what a provider published**, re-enrichment overwrites it
+ * (`tmdb_upsert_titles`), and a product opinion written into a provider column is one
+ * `catalogue:enrich` away from being silently reverted. Resolving at read time cannot
+ * drift, needs no backfill, and leaves the raw metadata intact for the day the robust
+ * signal — TMDB's own `anime` keyword, 210024 — becomes available.
+ *
+ * Appended rather than substituted in place, because TMDB lists `Animation` first on
+ * most anime and the founder's example ends on the word.
+ */
+export function productGenres(subject: MetadataSubject): string[] {
+  const genres = effectiveGenres(subject);
+  if (!isAnimeLabels(effectiveLanguage(subject), genres)) return genres;
+
+  const kept = genres.filter((genre) => !ANIMATION_LABEL.test(genre));
+  kept.push(ANIME_GENRE);
+  return kept;
+}
+
 /** The original language to reason about this title with, or null when unknown. */
 export function effectiveLanguage(subject: MetadataSubject): string | null {
   if (hasOwnLanguage(subject.language)) return subject.language!.trim();
@@ -204,7 +301,13 @@ export function resolveMetadata(row: {
       : null,
   };
   return {
-    genres: effectiveGenres(subject),
+    /**
+     * **Product genres, not raw ones** (2026-08-30). This is the shared resolver every
+     * genre-bearing read already goes through — the title page, the collection, the
+     * awards breakdown — so normalising here is what makes one title one genre list
+     * everywhere, rather than nine call sites each remembering to ask.
+     */
+    genres: productGenres(subject),
     language: effectiveLanguage(subject),
     // Null for every caller that does not select the column, which is all of them but
     // the feed. An absent field and an absent rating are the same answer.

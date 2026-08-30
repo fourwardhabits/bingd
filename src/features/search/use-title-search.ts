@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
 import { queryKeys } from '@/lib/query';
+import { productGenres } from '@/lib/media-metadata';
 import { supabase } from '@/lib/supabase';
 import { AdapterError, searchProvider } from '@/lib/tmdb-adapter';
 
@@ -117,7 +118,13 @@ export function useTitleSearch(input: string) {
 
       const [{ data: metaRows, error: metaError }, { data: seasonRows, error: seasonError }] =
         await Promise.all([
-          supabase.from('media_items').select('id, genres, runtime_minutes').in('id', ids),
+          // `original_language` rides along for the product genre: an anime result
+          // has to read Anime here for the same reason it does on the title page it
+          // leads to (2026-08-30). `search_titles` returns neither column.
+          supabase
+            .from('media_items')
+            .select('id, kind, genres, original_language, runtime_minutes')
+            .in('id', ids),
           seriesIds.length
             ? supabase
                 .from('media_items')
@@ -141,7 +148,11 @@ export function useTitleSearch(input: string) {
         const meta = metaById.get(row.id);
         return {
           ...row,
-          genres: meta?.genres ?? [],
+          // A search result is a movie or a series, never a season, so there is no
+          // parent to inherit from and the subject is the row itself.
+          genres: meta
+            ? productGenres({ kind: meta.kind, genres: meta.genres, language: meta.original_language })
+            : [],
           runtime_minutes: meta?.runtime_minutes ?? null,
           season_count: row.kind === 'series' ? seasonCountBySeries.get(row.id) ?? 0 : undefined,
         };

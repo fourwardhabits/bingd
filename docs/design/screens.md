@@ -123,7 +123,11 @@ Bingd's version is barer. Two `poster.xl` cards, **"Which did you like more?"** 
 
 `rank_back` restores `lo`, `hi` and `pivot` from the history entry it pops, and decrements the skip count (20260813001600). It genuinely reverses the previous answer, so **Undo** is the accurate word and **Back** was the weaker one — and on a screen with no navigation stack, "Back" also invited the reading "leave this sheet", which is the close control in the corner. At the first comparison there is nothing to reverse and the server ends the session instead; the title keeps its bucket and stays Logged, which is the same promise kept.
 
-**Skip** replaces **Too tough to call** because that wording named only half of what `rank_skip` is for. The founder's case is the other half: the poster is familiar and the memory is not, and "too tough to call" is the wrong sentence for "I do not remember this one well enough to say". Both want a different opponent and both always got one — the mechanism is unchanged and the word is the fix. It is also the shortest label in a row that has to fit under two posters on a 375pt screen. Its accessibility label is "Skip this comparison", because "Skip" alone could be heard as skipping the whole ranking, which is a different act with a different control.
+**Skip** replaced **Too tough to call** on 2026-08-24 because that wording named only half of what `rank_skip` is for. The founder's case is the other half: the poster is familiar and the memory is not, and "too tough to call" is the wrong sentence for "I do not remember this one well enough to say". Both want a different opponent and both always got one — the mechanism is unchanged and the word was the fix.
+
+**Renamed again 2026-08-30, and this one is final: the control is `Too tough` on every surface.** Onboarding took the words back on 2026-08-28 while every other surface said Skip, and the founder met the result on the device — one control under two posters with two names. A control the app cannot name consistently is one whose meaning the reader re-derives each time; "Too tough" is the half that survives alone, because it says *why* you are pressing it. The two-word label costs nothing: the control row divides into equal halves rather than hugging its labels, so Undo and Too tough are the same physical size either way.
+
+The accessibility label stays "Too tough to call. Skip this comparison" — the two words on the button are a reason, and a screen-reader user needs the effect as well: this compares something else, it does not leave the ranking. Leaving is the close control in the corner. The RPC keeps the name `rank_skip`; this is a copy contract, not a rename.
 
 Both are `sm` and secondary-toned since the same date. At `md` they were 48pt tall, `headline` weight and full ink — physically the control the app uses for the primary act of a screen, sitting directly under the two posters that *are* the act, so they read as the question rather than as the way out of it.
 
@@ -146,6 +150,8 @@ It adds no new data path: the row comes from `media_items`, which the comparison
 ### Reveal
 
 The composition in [`design-system.md`](./design-system.md) §9: an Amber panel, the **score** in Ink at display size, title and bucket below. The score counts up from the low end of its own band rather than from zero, so the animation reads as placing the title inside the bucket the user just chose.
+
+**Nothing on the reveal mentions Too tough (2026-08-30).** The panel used to be followed by "You skipped a few, so this is an estimate. You can move it from Rankings." whenever the server reported an `adjustable` placement. It appeared only for the people who used the affordance, which turned the one control that keeps a ranking honest into something the reward screen apologised for — and it landed on somebody who had just finished their first ranking. Removed and not replaced: the reveal states the score and the placement, exactly as it does for a ranking that met no Too tough at all. The placement itself is unchanged, and the title is as movable from Rankings as any other.
 
 Below the panel, three actions: **Share**, **Rank another**, and **Done**. **Share is absent as built (2026-08-14)** — share cards do not exist, and an action that does nothing is worse than one that has not arrived. Beli celebrates the first rank specifically ([`references/beli-229-first-rank-celebration.jpg`](./references/beli-229-first-rank-celebration.jpg)) and Bingd should too — the first reveal is the moment the product explains itself, and it is worth a distinct line of copy.
 
@@ -187,6 +193,35 @@ The compact row from [`design-system.md`](./design-system.md) §8, which is Lett
 **The bucket label is gone from the subtitle** for the same reason. `I liked it · 148m · Action` next to a badge reading `8.7` spends the most valuable line on the row restating the badge.
 
 No progress bar toward 100% and no "380 remaining" (PRD §5). Someone importing 800 films must not open this tab and feel behind.
+
+### Filter options are in a fixed, readable order — 2026-08-30
+
+| Section | Order |
+| --- | --- |
+| Genre | Alphabetical, by the label drawn |
+| Language | Alphabetical, by the **English word** — Greek under G, not `el` under E |
+| Decade | Chronological, **oldest first**: Earlier · 1990s · 2000s · 2010s · 2020s |
+
+Genres and languages were ordered by count, descending. That is a defensible order for a
+list somebody is *browsing* and the wrong one for a list somebody is *looking something up
+in*: the position of Horror moved every time another horror film was logged, so a reader
+had to re-scan the section on every visit to find an option they already knew was there.
+The count is still printed beside each entry for whoever wanted the popularity signal — it
+just no longer decides where the entry sits, and it stays attached to its own option.
+
+Anime takes part in the alphabet like any other genre, which puts it after Animation
+(the two agree for four letters and then `a` precedes `e`).
+
+Decades were newest-first. Ascending because a decade list is a timeline and a timeline
+starts at the beginning; it was already in calendar order rather than by count, for the
+reason that still holds — a decade list that reorders itself as the collection grows is
+unreadable.
+
+**The comparison is code-point on a lower-cased label, not `localeCompare`.** This app has
+three collators — Hermes on the phone, Node's full ICU under Jest, a browser's on the web
+— and `lib/language.ts` exists because a rule that passed on Node and behaved differently
+on the device shipped once already. Every label in both facets is ASCII English, so the
+two orders agree; what this buys is that they cannot stop agreeing on somebody's phone.
 
 **Lists is still absent**, deliberately: there is no list UI yet, and an empty tab that cannot be filled is worse than one that has not arrived.
 

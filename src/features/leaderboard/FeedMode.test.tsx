@@ -576,6 +576,165 @@ describe('the row', () => {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * **A private account on the board, as a row and not as a profile** (20260902000100).
+ *
+ * The board used to omit an unapproved private account entirely, count and all. The
+ * founder reversed that: a board that silently drops people also lies about where the
+ * reader stands, and the account somebody cannot see is often the one they most want to
+ * ask to follow.
+ *
+ * **The privacy is the server's**, and these tests are deliberately written so that they
+ * would still fail if it were not. The fixtures carry `viewable: false` with
+ * `match_percent` and `shared_count` null, which is exactly what `leaderboard` returns —
+ * so what is asserted here is that the screen **draws the absence honestly**, not that it
+ * conceals something it was handed. A client that received a real Match for such a row
+ * would be reading a server that had stopped enforcing the rule, and no test on this
+ * side could tell.
+ */
+describe('a private account on the board', () => {
+  const privateEntry = (over: Record<string, unknown> = {}) =>
+    entry({
+      user_id: 'u-9',
+      username: 'kit',
+      display_name: 'Kit',
+      visibility: 'private',
+      viewable: false,
+      match_percent: null,
+      shared_count: null,
+      ...over,
+    });
+
+  it('shows the row, with its position and its count', async () => {
+    mockBoard['titles|month'] = [privateEntry({ rank: 2, metric_count: 7 })];
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('Kit')).toBeTruthy());
+    expect(view.getByText('@kit')).toBeTruthy();
+    // The metric that explains the ranking, which is the one aggregate the founder
+    // allowed: a position without a number would already imply a band.
+    expect(view.getByText('7')).toBeTruthy();
+    expect(view.getByLabelText(/^Number 2, Kit/)).toBeTruthy();
+  });
+
+  it('says Private to a screen reader and draws no Match line', async () => {
+    mockBoard['titles|month'] = [privateEntry()];
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('Kit')).toBeTruthy());
+    expect(view.getByLabelText(/Number 1, Kit, @kit, Private/)).toBeTruthy();
+
+    // Neither form. `Match TBD` would be the wrong sentence as well as the wrong
+    // number: it means "not enough overlap yet", which is a fact about two catalogues,
+    // and it would invite somebody to wait for a figure that is never coming.
+    expect(view.queryByText(/Match/)).toBeNull();
+    expect(view.queryByText(/shared/)).toBeNull();
+  });
+
+  it('never draws a shared count of zero for a row it cannot see', async () => {
+    // The specific defect the hook used to have: `shared_count ?? 0`. Harmless while
+    // every row was readable, and a claim about a collection this reader has never been
+    // let into once they are not.
+    mockBoard['titles|month'] = [privateEntry()];
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('Kit')).toBeTruthy());
+    expect(view.queryByText('0 shared')).toBeNull();
+  });
+
+  it('routes a tap to the profile, where the locked shell and Follow live', async () => {
+    // The same destination as any other row. The shell is what refuses — nothing here
+    // decides privacy, and a special case would be a second place for it to be wrong.
+    mockBoard['titles|month'] = [privateEntry()];
+    const view = await open();
+    await toBoard(view);
+    await waitFor(() => expect(view.getByText('Kit')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Kit'));
+    expect(mockPush).toHaveBeenCalledWith('/u/kit');
+  });
+
+  it('tells the reader where the tap goes before they take it', async () => {
+    mockBoard['titles|month'] = [privateEntry()];
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('Kit')).toBeTruthy());
+    const row = view.getByLabelText(/Number 1, Kit/);
+    expect(row.props.accessibilityHint).toMatch(/private profile/i);
+    expect(row.props.accessibilityHint).toMatch(/follow/i);
+  });
+
+  it('gives an approved follower of a private account the ordinary row', async () => {
+    // Private and viewable: the distinction the two flags exist for. Same visibility as
+    // the rows above, opposite treatment, because approval is what Match is computed
+    // across — and a client keying off `visibility` alone would get this one wrong.
+    mockBoard['titles|month'] = [
+      privateEntry({ viewable: true, match_percent: 74, shared_count: 21 }),
+    ];
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('74% Match · 21 shared')).toBeTruthy());
+    // The lock stays: the account is still private and the profile still asks.
+    expect(view.getByLabelText(/Number 1, Kit, @kit, Private/)).toBeTruthy();
+  });
+
+  it('marks no lock on a public account, and none on the reader themselves', async () => {
+    mockBoard['titles|month'] = [
+      entry({ user_id: 'u-1', username: 'ada', display_name: 'Ada', rank: 1 }),
+      entry({
+        user_id: 'user-1',
+        username: 'sai',
+        display_name: 'Sai',
+        is_you: true,
+        visibility: 'private',
+        viewable: true,
+        rank: 2,
+      }),
+    ];
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('Ada')).toBeTruthy());
+    expect(view.queryByLabelText(/Ada, @ada, Private/)).toBeNull();
+    // Somebody with a private account knows it is private; a lock on their own row is
+    // a label rather than information.
+    expect(view.queryByLabelText(/Sai, @sai, Private/)).toBeNull();
+  });
+
+  it('counts the private row in the board the pinned standing is measured against', async () => {
+    // `entrants` comes from the same population, so the denominator and the list agree.
+    // They disagreed in the other direction before and were consistent; both moved.
+    mockBoard['titles|month'] = [entry({ rank: 1 }), privateEntry({ rank: 2 })];
+    mockStanding['titles|month'] = { metric_count: 1, rank: 3, entrants: 3 };
+
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('Kit')).toBeTruthy());
+    expect(view.getByLabelText('You are number 3 of 3, 1 title')).toBeTruthy();
+  });
+
+  it('keeps every row ordinary against a server that has not taken the migration', async () => {
+    // The un-relaunched-server case, which is the mirror of the un-relaunched-phone rule
+    // this project already follows: no `viewable` column means "as readable as it always
+    // was", never "mute the whole board".
+    mockBoard['titles|month'] = [entry({ match_percent: 88, shared_count: 12 })];
+    delete (mockBoard['titles|month'][0] as Record<string, unknown>).viewable;
+
+    const view = await open();
+    await toBoard(view);
+
+    await waitFor(() => expect(view.getByText('88% Match · 12 shared')).toBeTruthy());
+  });
+});
+
+// ---------------------------------------------------------------------------
+
 describe('an empty and sparse beta', () => {
   it('says what is true and invites the reader, per metric', async () => {
     const view = await open();

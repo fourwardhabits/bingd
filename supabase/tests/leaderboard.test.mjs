@@ -525,7 +525,33 @@ describe('ordering, ties and the caller’s own row', () => {
 
 // ---------------------------------------------------------------------------
 
-describe('viewer-relative: the founder’s §26', () => {
+/**
+ * **Who is on the board, and what a row is allowed to say about them.**
+ *
+ * The founder's §26 made the population `can_view_profile`, so an unapproved private
+ * account was absent from the board entirely. **That was reversed on 2026-08-30**
+ * (20260902000100) for the reason 20260819000100 gave when it made a private account
+ * discoverable by name: privacy is about what somebody wrote, not about whether they can
+ * be found -- and a board that silently omits people also lies about where the reader
+ * stands.
+ *
+ * So the question this suite asks changed shape. It is no longer "is the row there"; it
+ * is **"which fields is the row allowed to carry"**, and it is asked once per relationship:
+ *
+ *   public                  full row, Match included
+ *   private + approved      full row, Match included -- approval is what Match needs
+ *   private + unapproved    minimal row: rank, handle, name, avatar, visibility, count
+ *   self                    full row, always, whatever the account's own visibility
+ *   blocked either way      no row at all
+ *   suspended               no row at all
+ *   deleted                 no row at all
+ *
+ * The distinction that matters is between *private* and *unreadable*, and the function
+ * returns both -- `visibility` for the lock the client draws, `viewable` for whether
+ * there is anything else to draw. An approved follower of a private account is
+ * `private` and `viewable`, which is why one flag could not carry it.
+ */
+describe('viewer-relative: the founder’s §26, as amended', () => {
   let viewer;
   let open;
   let hidden;
@@ -564,23 +590,95 @@ describe('viewer-relative: the founder’s §26', () => {
     assert.ok(names(await board(viewer)).includes('lb_open'));
   });
 
-  it('does not show a private account the viewer has not been approved by', async () => {
-    // The whole of §26. `lb_hidden` has watched two things and is a real entrant on
-    // somebody else's board; on this viewer's it does not exist, count and all.
-    assert.ok(!names(await board(viewer)).includes('lb_hidden'));
+  it('shows a private account the viewer has not been approved by', async () => {
+    // The 2026-08-30 reversal. `lb_hidden` has watched two things and is a real entrant;
+    // it is now on this viewer's board too, so the ranking is not quietly wrong.
+    assert.ok(names(await board(viewer)).includes('lb_hidden'));
   });
 
-  it('is not merely hiding the name — the count is absent too', async () => {
+  it('gives that account a minimal row and nothing more', async () => {
+    const row = (await board(viewer)).find((r) => r.username === 'lb_hidden');
+    assert.ok(row, 'the row must be present to be minimal');
+
+    // What the founder allowed: position, identity, the private flag, and the one number
+    // that explains the position.
+    assert.equal(row.visibility, 'private');
+    assert.equal(row.viewable, false);
+    assert.equal(row.metric_count, 2);
+    assert.ok(Number.isInteger(row.rank));
+    assert.equal(row.username, 'lb_hidden');
+
+    // What it must not carry. Null and not zero: `0 shared` is a claim about a
+    // collection this viewer has never been let into, and it is indistinguishable from
+    // a real answer -- which is why the projection nulls both columns rather than
+    // relying on `taste_match` returning its insufficient-overlap shape.
+    assert.equal(row.match_percent, null);
+    assert.equal(row.shared_count, null);
+  });
+
+  it('returns no field the client would have to conceal', async () => {
+    // The founder's rule: "do not solve this by fetching private data and hiding it in
+    // React Native". Asserted over the row's own values rather than over a list of
+    // column names, so a column added later cannot smuggle a value through.
+    const row = (await board(viewer)).find((r) => r.username === 'lb_hidden');
+    const allowed = new Set([
+      'user_id',
+      'username',
+      'display_name',
+      'avatar_path',
+      'visibility',
+      'metric_count',
+      'rank',
+      'is_you',
+      'viewable',
+    ]);
+    for (const [column, value] of Object.entries(row)) {
+      if (allowed.has(column)) continue;
+      assert.equal(value, null, `${column} carries a value on an unreadable row`);
+    }
+  });
+
+  it('counts the private entrant in the denominator, because it is on the board', async () => {
+    // `entrants` and the page must agree. They disagreed in the other direction before:
+    // the row was absent and the count excluded it, which was consistent. Both moved
+    // together, which is the property, and a reader who scrolls must not be able to
+    // reach a different total than the one pinned under the list.
     const rows = await board(viewer);
-    assert.equal(
-      rows.filter((r) => r.username === 'lb_hidden').length,
-      0,
-      'a masked row with a real count is the leak this test exists for',
-    );
-    // And the denominator agrees: a viewer must not be able to infer a hidden entrant by
-    // counting the board against `entrants`.
     const mine = await standing(viewer);
     assert.equal(mine.entrants, rows.length);
+    assert.ok(names(rows).includes('lb_hidden'));
+  });
+
+  it('replays the RPC directly and gets the same minimal row', async () => {
+    // The projection is the privacy rule, so it has to hold for a caller who is not the
+    // app -- a modified client, or somebody with the anon key and a session, calling
+    // `leaderboard` by hand with a different limit.
+    const rows = await t.asUser(viewer, async () => {
+      const { rows } = await t.sql(`select * from leaderboard('titles', 'month', 100)`);
+      return rows;
+    });
+    const row = rows.find((r) => r.username === 'lb_hidden');
+    assert.ok(row);
+    assert.equal(row.viewable, false);
+    assert.equal(row.match_percent, null);
+    assert.equal(row.shared_count, null);
+  });
+
+  it('gives an approved follower the full row, Match included', async () => {
+    // Private is not the same question as unreadable, and this is the row that proves
+    // it: same visibility as `lb_hidden`, opposite treatment, because approval is what
+    // Match is computed across.
+    const row = (await board(viewer)).find((r) => r.username === 'lb_approver');
+    assert.ok(row);
+    assert.equal(row.visibility, 'private');
+    assert.equal(row.viewable, true);
+    assert.notEqual(row.shared_count, null);
+  });
+
+  it('shows a public account as viewable', async () => {
+    const row = (await board(viewer)).find((r) => r.username === 'lb_open');
+    assert.equal(row.visibility, 'public');
+    assert.equal(row.viewable, true);
   });
 
   it('shows a private account that approved the viewer', async () => {
@@ -589,6 +687,64 @@ describe('viewer-relative: the founder’s §26', () => {
 
   it('does not show somebody who blocked the viewer', async () => {
     assert.ok(!names(await board(viewer)).includes('lb_blocker'));
+  });
+
+  it('does not show somebody the viewer blocked, either', async () => {
+    // A block is symmetrical here and the widened population must not have opened one
+    // direction of it. `can_discover_profile` refuses both, ahead of everything else,
+    // which is the property being asserted rather than assumed.
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [viewer, open]);
+    try {
+      assert.ok(!names(await board(viewer)).includes('lb_open'));
+      // And the private row is unaffected by an unrelated block.
+      assert.ok(names(await board(viewer)).includes('lb_hidden'));
+    } finally {
+      await t.sql(`delete from blocks where blocker_id = $1 and blocked_id = $2`, [viewer, open]);
+    }
+  });
+
+  it('does not show a suspended private account', async () => {
+    // Suspension outranks discoverability. The widened population is the one place this
+    // could have been lost, because the new branch is about *finding* people.
+    await t.sql(`update profiles set status = 'suspended' where id = $1`, [hidden]);
+    try {
+      assert.ok(!names(await board(viewer)).includes('lb_hidden'));
+    } finally {
+      await t.sql(`update profiles set status = 'active' where id = $1`, [hidden]);
+    }
+  });
+
+  it('shows nothing for an account that no longer exists', async () => {
+    // A deleted account has no `profiles` row, so it cannot be found by either branch
+    // and its `user_media` went with it through the cascade.
+    const gone = await t.createUser({ username: 'lb_gone', visibility: 'private' });
+    await watch(gone, film, thisMonth(2));
+    assert.ok(names(await board(viewer)).includes('lb_gone'));
+
+    await t.sql(`delete from profiles where id = $1`, [gone]);
+    assert.ok(!names(await board(viewer)).includes('lb_gone'));
+  });
+
+  it('gives the private account the minimal treatment on every metric', async () => {
+    // Four chips, one projection. A metric that computed its own population -- or a
+    // fifth added later reading `can_view_profile` directly -- is what this refuses.
+    await t.sql(
+      `update user_media set note = 'A review', note_visibility = 'public',
+              note_first_published_at = now()
+        where user_id = $1`,
+      [hidden],
+    );
+    for (const metric of ['titles', 'movies', 'tv', 'reviews']) {
+      for (const timeframe of ['month', 'all_time']) {
+        const row = (await board(viewer, metric, timeframe)).find(
+          (r) => r.username === 'lb_hidden',
+        );
+        if (!row) continue; // TV is zero here, and a zero is absent for everybody.
+        assert.equal(row.viewable, false, `${metric}/${timeframe} leaked viewable`);
+        assert.equal(row.match_percent, null, `${metric}/${timeframe} leaked Match`);
+        assert.equal(row.shared_count, null, `${metric}/${timeframe} leaked shared`);
+      }
+    }
   });
 
   it('does not show a suspended account', async () => {
@@ -634,6 +790,10 @@ describe('viewer-relative: the founder’s §26', () => {
       'shared_count',
       'user_id',
       'username',
+      // Whether the caller may read this account, which is not the same question as
+      // whether it is private (20260902000100). It is a boolean about permission and
+      // says nothing about the account beyond what `visibility` already did.
+      'viewable',
       'visibility',
     ]);
   });
@@ -814,13 +974,30 @@ describe('the all-time board', () => {
     assert.deepEqual(rows.map((r) => r.username), [], 'the default view is this month');
   });
 
-  it('keeps the all-time board viewer-relative too', async () => {
-    // §26 holds in both timeframes; there is one population filter and both views use it.
+  it('applies the same minimal-row rule to the all-time board', async () => {
+    // One population filter and one projection; both timeframes use them, so a private
+    // account is listed-but-minimal in All time exactly as it is in This month. The
+    // all-time view is where a divergence would be least likely to be noticed, because
+    // it is the tab a reader visits least.
     const hidden = await t.createUser({ username: 'at_hidden', visibility: 'private' });
     await watch(hidden, movieA, `date_trunc('month', current_date)::date - 500`);
 
-    assert.ok(!names(await board(alice, 'titles', 'all_time')).includes('at_hidden'));
-    assert.ok(names(await board(hidden, 'titles', 'all_time')).includes('at_hidden'));
+    const seen = (await board(alice, 'titles', 'all_time')).find(
+      (r) => r.username === 'at_hidden',
+    );
+    assert.ok(seen, 'a private account is on the all-time board');
+    assert.equal(seen.viewable, false);
+    assert.equal(seen.match_percent, null);
+    assert.equal(seen.shared_count, null);
+    assert.ok(seen.metric_count > 0);
+
+    // And their own board is unchanged: nobody's own numbers are minimal to themselves.
+    const own = (await board(hidden, 'titles', 'all_time')).find(
+      (r) => r.username === 'at_hidden',
+    );
+    assert.ok(own);
+    assert.equal(own.viewable, true);
+    assert.equal(own.is_you, true);
   });
 });
 

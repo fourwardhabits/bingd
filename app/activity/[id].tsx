@@ -352,8 +352,27 @@ export default function ActivityScreen() {
             }
           />
 
-          <View style={styles.divider} />
-
+          {/**
+            * **No divider here, and that is the fix** (founder physical report,
+            * 2026-08-30: "a small bar of empty space between the post and the comments",
+            * on the notification route and on the direct Feed tap alike).
+            *
+            * It was `<View style={styles.divider} />` -- a second hairline rule with
+            * `marginTop: theme.space[2]` above it. `ActivityRow` already ends in a
+            * `borderBottomWidth` of its own, because that is the separator the Feed
+            * draws between cards, so this screen was stacking **two** rules with a band
+            * of empty page trapped between them. That band is the bar: not padding, not
+            * a reserved container, not a loading state, and not route-specific -- both
+            * routes render this same subtree, which is why it reproduced from either.
+            *
+            * The legitimate divider is kept and is the row's own. The unintended one is
+            * simply gone: no negative margin pulling the thread up over it, no collapsed
+            * touch target, and `CommentThread` keeps its own vertical rhythm --
+            * `styles.flow` has no top padding and each comment carries
+            * `paddingVertical: theme.space[3]`, so the first comment sits the same
+            * distance below the rule as every later one sits below its neighbour. One
+            * post, one rule, one conversation.
+            */}
           <CommentThread
             eventId={event.id}
             // The exact media item the activity is about — a season, never its parent
@@ -395,9 +414,6 @@ function relativeTime(value: string) {
 const styles = StyleSheet.create({
   page: { paddingBottom: theme.space[6] },
   pad: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[5] },
-  divider: {
-    borderTopWidth: StyleSheet.hairlineWidth * 2,
-    borderTopColor: theme.border.hairline,
-    marginTop: theme.space[2],
-  },
+  // `divider` used to live here. See the note above `CommentThread`: it was the
+  // second of two rules and the gap it opened between them was the founder's bar.
 });

@@ -877,8 +877,13 @@ const SUPPORT_BODY = `      <p class="lede">
 
       <h2>Things that are not faults</h2>
       <ul>
-        <li><strong>Bingd sends no push notifications.</strong> Notifications appear in the
-          app&rsquo;s own inbox and nowhere else. That is deliberate for this beta.</li>
+        <li><strong>Notifications are off until you turn them on.</strong> Bingd may send
+          you a notification &mdash; someone commenting on your activity, a follow request,
+          an award you earned &mdash; but only if you allowed notifications when the app
+          asked. Everything also appears in the app&rsquo;s own inbox, so nothing is missed
+          by declining. You can change which kinds are sent in Settings &rsaquo;
+          Notifications, and turn them off entirely in your phone&rsquo;s own settings for
+          Bingd.</li>
         <li><strong>An invitation link does not follow you through an install.</strong> If
           you install Bingd from a store or from TestFlight and open it from your home
           screen, the invitation is not carried across. Go back to the link you were sent
