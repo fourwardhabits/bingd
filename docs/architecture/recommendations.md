@@ -494,3 +494,69 @@ No memory of what was shown **in a previous session** — exposure dies with the
 no novelty or recency term in the score, no learning from what an explored title did, and
 no widening of the candidate pool itself. Those are
 `docs/product/deferred-roadmap.md` §17, with the reasoning for each.
+
+---
+
+## 9. Freshness — the third audit, 2026-08-30, and why nothing changed
+
+Founder acceptance: *"Jobs and Creed have appeared repeatedly since early use."* The
+audit was run against **deployed nonprod data** rather than against the code alone,
+because the question is empirical — a wall that repeats is either a defect or arithmetic,
+and only the data says which.
+
+### What was measured
+
+For the founder's own account, on 2026-08-30:
+
+| | |
+|---|---|
+| Anchors with a live `similar` facet | 7 of the top 8 ranked films |
+| Union of those lists, less the reader's own collection | ~130 eligible candidates |
+| `recommendation_impressions` rows, three days | 621 |
+| Distinct titles among them | **154** |
+| Most-shown single title | **6**, and eleven titles tie at 6 |
+
+The distribution is flat. Jobs and Creed III sit at 6 alongside Antitrust, Wall Street,
+American Psycho, Batman Begins and six others — which is what a 20-tile wall drawn
+repeatedly from a ~150-title pool looks like when the exposure penalty is working.
+
+### Where those two titles come from
+
+Both are in TMDB's `similar` list for **The Social Network** *and* for **Good Will
+Hunting**, two of the reader's highest-ranked films. A candidate reached by two anchors
+scores against both, so it is genuinely near the top of a personalised wall — and it is
+neither a fallback pin nor a stale row. Neither title is in the reader's collection, so
+nothing consumed is being re-offered.
+
+### Every hypothesis the brief named, and its answer
+
+| Suspected defect | Finding |
+|---|---|
+| Stale slate not invalidated after user activity | **No.** The query key carries `rankingFingerprint` over *both* media and a fingerprint of the watched set; a ranking or a log changes the key. |
+| Incomplete refresh | **No.** `cachedSimilar` filters on `expires_at` and re-warms every anchor it did not get back, then re-reads. |
+| A fixed fallback suppressing personalised results | **No.** The trending fallback is 20 ids and contains neither title; the anchored half dominates the pool. |
+| Consumed or ineligible titles returned | **No.** `watched` is subtracted in the query and dismissals are re-applied in `select`, so they hold against an already-cached slate. |
+| Deterministic order pinning the same titles | **No.** 154 distinct titles over 621 impressions, ceiling 6. |
+
+**So no code changed.** The behaviour is the expected result of a small anchor set and a
+provider-derived candidate pool, not a correctness defect, and changing scoring weights or
+adding randomness on this evidence would be tuning against a sample of one.
+
+### One operational finding, recorded rather than fixed
+
+`trendingFallback` reads `provider_list_cache` **without checking `expires_at`**, while
+its sibling `cachedSimilar` does check. On 2026-08-30 the four trending lists had been
+expired since 2026-08-25, because nothing schedules `npm run trending:refresh` (TREND-1 in
+`docs/product/open-questions.md`). The asymmetry is currently load-bearing in the reader's
+favour — respecting the expiry today would empty the cold-start half of the wall rather
+than refresh it — so it is deliberately left alone until the refresh is scheduled. **Do
+not "fix" the expiry check before the job exists.**
+
+### The post-launch experiment this defers to
+
+The honest way to answer the founder's report is more pool, not different maths, and the
+measurement to take first is *pool size per reader*: distinct eligible candidates against
+distinct titles shown per week. If the ratio stays near 1 the wall is exhausting its pool
+and the fix is a wider source (§17 of the deferred roadmap); if it falls well below 1 the
+fix is in rotation. Nothing in the current instrumentation distinguishes those two, which
+is precisely why no change was made on the strength of one account's impression.

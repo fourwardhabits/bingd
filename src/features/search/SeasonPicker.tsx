@@ -1,7 +1,7 @@
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useSeasonEnrichment } from '@/features/title/use-enrichment';
+import { seasonListIsStale, useSeasonEnrichment } from '@/features/title/use-enrichment';
 import { theme } from '@/ui/tokens';
 import { EmptyState, Poster, Text } from '@/ui/components';
 import { posterUri } from '@/lib/images';
@@ -33,7 +33,15 @@ export function SeasonPicker({ series, onClose, onPick }: SeasonPickerProps) {
   // A series found through search has no season rows yet, and this is the first
   // moment they are needed. `isFetched` matters: without it the empty array that
   // exists before the first read looks identical to a series with no seasons.
-  const { enriching } = useSeasonEnrichment(series?.id ?? null, isFetched && seasons.length === 0);
+  //
+  // The third argument is the 2026-08-30 correction: a list written once and never
+  // revisited leaves a series permanently short of any season published since. See
+  // `seasonListIsStale`.
+  const { enriching } = useSeasonEnrichment(
+    series?.id ?? null,
+    isFetched && seasons.length === 0,
+    isFetched && seasonListIsStale(seasons),
+  );
 
   if (!series) return null;
 

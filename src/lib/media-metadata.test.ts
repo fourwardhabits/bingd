@@ -185,9 +185,10 @@ describe('the Anime product genre', () => {
   });
 
   it('replaces Animation with Anime and keeps everything else', () => {
-    // The founder's own example, in the founder's own order: the label they see reads
-    // "Action · Adventure · Anime", and never "Animation · Anime".
-    expect(productGenres(anime())).toEqual(['Action', 'Adventure', ANIME_GENRE]);
+    // The founder's decision of 2026-08-30: Anime leads. Most surfaces draw two genres
+    // and no more, so a label at the end of a five-genre list is one usually not drawn at
+    // all. The rest keep the order the provider published them in.
+    expect(productGenres(anime())).toEqual([ANIME_GENRE, 'Action', 'Adventure']);
   });
 
   it('never exposes both labels for the same title', () => {
@@ -216,8 +217,8 @@ describe('the Anime product genre', () => {
     // The alpha catalogue is Wikidata-seeded and spells it `animated film`; an enriched
     // row carries TMDB's `Animation`. Both are in the same column at the same time.
     expect(productGenres(anime({ genres: ['animated film', 'drama film'] }))).toEqual([
-      'drama film',
       ANIME_GENRE,
+      'drama film',
     ]);
   });
 
@@ -226,7 +227,7 @@ describe('the Anime product genre', () => {
     // normalisation has to be idempotent for the same reason: several surfaces resolve
     // a title more than once on its way to the screen.
     const once = productGenres(anime({ genres: ['Anime', 'Action'] }));
-    expect(once).toEqual(['Action', ANIME_GENRE]);
+    expect(once).toEqual([ANIME_GENRE, 'Action']);
     expect(productGenres({ kind: 'movie', language: 'ja', genres: once })).toEqual(once);
   });
 
@@ -241,7 +242,7 @@ describe('the Anime product genre', () => {
       parent: { genres: ['Animation', 'Action'], language: 'ja' },
     };
     expect(isAnimeSubject(season)).toBe(true);
-    expect(productGenres(season)).toEqual(['Action', ANIME_GENRE]);
+    expect(productGenres(season)).toEqual([ANIME_GENRE, 'Action']);
   });
 
   it('says nothing about a title with no genres at all', () => {
@@ -272,7 +273,7 @@ describe('the Anime product genre', () => {
         parent: null,
       }),
     ).toEqual({
-      genres: ['Action', ANIME_GENRE],
+      genres: [ANIME_GENRE, 'Action'],
       language: 'ja',
       certification: null,
       seriesTitle: null,

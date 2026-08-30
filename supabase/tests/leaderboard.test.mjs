@@ -182,16 +182,98 @@ describe('the month, and what falls inside it', () => {
     }
   });
 
-  it('counts nothing for a watch with no date', async () => {
-    // `20260824000100` made "I watched this and I do not remember when" a first-class
-    // state. A memory without a date cannot be attributed to a month, and inventing one
-    // is the only alternative.
+  /**
+   * The founder's report of 2026-08-30, and the correction `20260903000100` makes.
+   *
+   * `20260824000100` made "I watched this and I do not remember when" a first-class
+   * state, and `set_bucket` creates a collection row with no date at all -- so on nonprod
+   * five of twelve accounts had no dated row and could not appear on the monthly board
+   * whatever they did. The month a watch belongs to is now the watch date, or failing
+   * that the day the title entered the collection: a fact about the reader that the
+   * writer recorded and no later edit moves.
+   */
+  it('counts an undated watch in the month it was logged', async () => {
     await t.sql(
       `insert into user_media (user_id, media_item_id, bucket, watched_on)
        values ($1, $2, 'loved', null)`,
       [alice, film],
     );
+    assert.deepEqual(names(await board(alice)), ['lb_alice']);
+    assert.equal((await board(alice))[0].metric_count, 1);
+  });
+
+  it('counts an undated watch logged in a previous month in that month, not this one', async () => {
+    // The fallback is a fallback and not a licence: one row is in one month, and the
+    // month is when the reader actually did the thing.
+    await t.sql(
+      `insert into user_media (user_id, media_item_id, bucket, watched_on, created_at)
+       values ($1, $2, 'loved', null,
+               (date_trunc('month', (now() at time zone 'UTC')) - interval '1 day'))`,
+      [alice, film],
+    );
     assert.deepEqual(names(await board(alice)), []);
+  });
+
+  it('lets the watch date override the logging date, in both directions', async () => {
+    // A film logged today and dated last month counts last month, which is the whole
+    // point of `watched_on` being the first half of the coalesce.
+    await t.sql(
+      `insert into user_media (user_id, media_item_id, bucket, watched_on)
+       values ($1, $2, 'loved', date_trunc('month', current_date)::date - 1)`,
+      [alice, film],
+    );
+    assert.deepEqual(names(await board(alice)), []);
+
+    // And a film logged last month but dated this one counts this month.
+    await t.sql(
+      `update user_media set watched_on = ${thisMonth(2)},
+              created_at = (date_trunc('month', (now() at time zone 'UTC')) - interval '1 day')
+        where user_id = $1 and media_item_id = $2`,
+      [alice, film],
+    );
+    assert.deepEqual(names(await board(alice)), ['lb_alice']);
+  });
+
+  /**
+   * The invariant that *is* promised, and the one that is not.
+   *
+   * Review 77 pointed out that an undated row counted in the month it was logged can be
+   * given a later watch date and count again in that later month. True, and deliberately
+   * not fixed: `log_watched` has always upserted `watched_on`, so a dated row re-dated to
+   * a different month did exactly this before the coalesce existed. Pinning a row to the
+   * first month it ever scored in needs a ledger, and the alternative to that ledger is a
+   * product that refuses to believe a reader correcting a date.
+   *
+   * What holds, and what this asserts: a row is in exactly **one** month at a time and
+   * counts **once** on any board, whatever it is touched with.
+   */
+  it('counts one row once, however many times it is written', async () => {
+    await t.sql(
+      `insert into user_media (user_id, media_item_id, bucket, watched_on)
+       values ($1, $2, 'loved', null)`,
+      [alice, film],
+    );
+    assert.equal((await board(alice))[0].metric_count, 1);
+
+    // Re-bucketing, dating inside the same month, and re-noting are all one row still.
+    await t.sql(
+      `update user_media set bucket = 'fine' where user_id = $1 and media_item_id = $2`,
+      [alice, film],
+    );
+    await t.sql(
+      `update user_media set watched_on = ${thisMonth(9)}
+        where user_id = $1 and media_item_id = $2`,
+      [alice, film],
+    );
+    assert.equal((await board(alice))[0].metric_count, 1);
+
+    // And the fallback never adds to the date: a dated row is counted by its date alone.
+    await t.sql(
+      `update user_media set created_at = (now() at time zone 'UTC') - interval '400 days'
+        where user_id = $1 and media_item_id = $2`,
+      [alice, film],
+    );
+    assert.equal((await board(alice))[0].metric_count, 1);
   });
 });
 
@@ -383,9 +465,23 @@ describe('Reviews, and the four ways it must not be inflated', () => {
     assert.deepEqual(names(await board(alice, 'reviews')), []);
   });
 
-  it('does not let a watch count as a review, or a review as a watch', async () => {
+  it('does not let a watch count as a review, or a review add a second title', async () => {
+    /**
+     * The half that has always mattered is the second: a watch is not a review, and a
+     * board that counted it would be measuring the wrong thing entirely.
+     *
+     * The first half is restated for `20260903000100`. It used to read "a review with no
+     * watch date counts nothing for Titles", which was true only because the monthly
+     * metric refused an undated row — the gap that kept whole accounts off the board. A
+     * review can only exist on a title already in the collection (`save_note` raises
+     * P0002 otherwise), so that row is a logged title and counts as one. What must not
+     * happen is that writing about it counts *again*: the metrics are separate, and
+     * `user_media` is keyed by title.
+     */
     await publish(alice, film, 'Words, no date.');
-    assert.deepEqual(names(await board(alice, 'titles')), []);
+    assert.equal((await board(alice, 'titles'))[0].metric_count, 1);
+    await publish(alice, film, 'Words, revised.');
+    assert.equal((await board(alice, 'titles'))[0].metric_count, 1);
 
     await clearAll();
     await watch(alice, film, thisMonth(2));
@@ -841,22 +937,24 @@ describe('the all-time board', () => {
   });
 
   /**
-   * The one place all-time is *more* inclusive than monthly, and it is deliberate.
+   * The two boards agree about an undated watch, and since `20260903000100` they agree
+   * that it counts.
    *
    * `20260824000100` made "I watched this and I do not remember when" a first-class
-   * state. A dateless row cannot be attributed to a month without inventing one, so
-   * monthly refuses it — but all-time has no month to be wrong about, and refusing it
-   * there would mean an onboarding collection of historical favourites counted for
-   * nothing at all.
+   * state, and monthly used to refuse such a row outright — which excluded a whole class
+   * of account from the board rather than applying a stricter metric to it. All-time has
+   * no month to be wrong about and always counted it; monthly now attributes it to the
+   * month the title entered the collection. What remains different between the two
+   * boards is only the window.
    */
-  it('counts a watch with no date, which the monthly board cannot', async () => {
+  it('counts a watch with no date on both boards', async () => {
     await t.sql(
       `insert into user_media (user_id, media_item_id, bucket, watched_on)
        values ($1, $2, 'loved', null)`,
       [alice, movieA],
     );
 
-    assert.deepEqual(names(await board(alice, 'titles', 'month')), []);
+    assert.equal((await board(alice, 'titles', 'month'))[0].metric_count, 1);
     assert.equal((await board(alice, 'titles', 'all_time'))[0].metric_count, 1);
   });
 
@@ -1057,5 +1155,81 @@ describe('Match beside the name', () => {
     const theirs = rows.find((r) => r.username === 'lm_other');
     assert.equal(theirs.shared_count, 0);
     assert.equal(theirs.match_percent, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The founder's report of 2026-08-30, reproduced as a fixture.
+ *
+ * A followed public account with two ranked films this month was absent from the Titles
+ * board while accounts with counts of one and two were on it. Privacy was not the cause
+ * and the account was not hidden: its rows carry no `watched_on`, because `set_bucket`
+ * creates a collection row without one and the reader never opened the Log sheet to
+ * stamp a date. `20260903000100` gives every collection row a month.
+ *
+ * The point of doing it this way round — a whole board rather than one count — is that
+ * the defect was never only about the missing row. A board that omits an entrant is also
+ * a board that lies to everyone below them about where they stand.
+ */
+describe('an account that ranks without dating anything', () => {
+  let viewer;
+  let dated;
+  let undated;
+  let films;
+
+  before(async () => {
+    viewer = await t.createUser({ username: 'lb_silky_view' });
+    dated = await t.createUser({ username: 'lb_silky_dated' });
+    undated = await t.createUser({ username: 'lb_silky_plain' });
+    films = [];
+    for (let i = 0; i < 3; i += 1) films.push(await t.createMovie(`Silky ${i}`, seq++));
+  });
+
+  beforeEach(clearAll);
+
+  /** What `set_bucket` writes: a collection row with a band and no date at all. */
+  const bucketOnly = (user, item) =>
+    t.sql(
+      `insert into user_media (user_id, media_item_id, bucket)
+       values ($1, $2, 'loved')
+       on conflict (user_id, media_item_id) do update set bucket = excluded.bucket`,
+      [user, item],
+    );
+
+  it('competes on the monthly board with the people who dated theirs', async () => {
+    await watch(dated, films[0], thisMonth(3));
+    await bucketOnly(undated, films[1]);
+    await bucketOnly(undated, films[2]);
+
+    const rows = await board(viewer, 'titles', 'month');
+    const theirs = rows.find((row) => row.username === 'lb_silky_plain');
+
+    assert.ok(theirs, 'an account whose rows carry no watch date must still be on the board');
+    assert.equal(theirs.metric_count, 2);
+    // And it is above the dated account with one, which is the half of the defect that
+    // was invisible: the board had been telling that reader they were first.
+    assert.deepEqual(names(rows), ['lb_silky_plain', 'lb_silky_dated']);
+    assert.deepEqual(
+      rows.map((row) => row.rank),
+      [1, 2],
+    );
+  });
+
+  it('says the same thing to the reader about their own standing', async () => {
+    await bucketOnly(undated, films[0]);
+    await bucketOnly(undated, films[1]);
+
+    const mine = await standing(undated, 'titles', 'month');
+    assert.equal(mine.metric_count, 2);
+    assert.equal(mine.rank, 1);
+  });
+
+  it('counts both boards the same way for an account that dates nothing', async () => {
+    await bucketOnly(undated, films[0]);
+
+    assert.equal((await board(viewer, 'titles', 'month')).length, 1);
+    assert.equal((await board(viewer, 'titles', 'all_time')).length, 1);
   });
 });

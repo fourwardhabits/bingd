@@ -1496,3 +1496,273 @@ Still deferred, still agreed, recorded so that nothing is lost between documents
   in the PRD's own staging; as of 2026-08-23 it is **no longer a gate for the friend beta
   or for either initial store release**, and it has its own entry at **§20** above, which
   is where the reasoning and the surviving policy now live.
+
+---
+
+# Added 2026-08-30 — the launch-blocking correction pass
+
+Twelve entries, all recorded during the final pre-RC tranche. None is built and none is a
+gate for the production RC. They are here so that each is a *decision* with its reasoning
+attached rather than a gap somebody rediscovers.
+
+---
+
+## 30. Recommendation diversity and personalisation experiments
+
+**Status: deferred, 2026-08-30, on evidence rather than on principle.**
+
+The third freshness audit (`docs/architecture/recommendations.md` §9) measured the
+founder's own wall against deployed data and found no correctness defect: 154 distinct
+titles over 621 impressions in three days, a ceiling of 6 for any single title, and the
+two titles in the report reachable from two of the reader's top anchors each. Nothing
+changed in the code, deliberately.
+
+**What is deferred**, and it is one question rather than a feature: is a repeat a rotation
+failure or an exhausted pool? Today nothing distinguishes them. The first thing to build
+is not a diversity term but a **measurement** — distinct eligible candidates per reader
+against distinct titles shown per week. A ratio near 1 says the pool is the constraint and
+the answer is §17's wider sources; a ratio well below 1 says rotation is the constraint.
+
+**Explicitly not deferred-and-then-guessed**: no ML infrastructure, no uncontrolled
+randomness, and no taste-weight tuning without behavioural evidence. A wall that shuffles
+is not a wall that recommends, and one account's impression of two films is not a signal
+to tune against. §18 holds the engine-scale version of this.
+
+**Revisit when.** There are enough accounts with enough rankings for the pool/exposure
+ratio to be read per-cohort rather than per-person.
+
+---
+
+## 31. The Anime / Animation counting-vocabulary boundary
+
+**Status: deferred by founder decision, 2026-08-30. Deliberately left inconsistent, and
+this entry is why.**
+
+Two vocabularies now name the same shelf and they do not agree, on purpose:
+
+| | Vocabulary | Anime |
+|---|---|---|
+| **Product genres** (`lib/media-metadata.ts`) | What a title *is called* on screen | Replaces Animation, and leads the list |
+| **Award counting** (`features/awards/genres.ts`) | Eighteen canonical genres a tier is measured against | No such genre; its Animation pattern already matches `anime`, `animated`, `cartoon` |
+
+So Toon Bloom counts an anime film as animation, while the film's own row says Anime. That
+is coherent — Toon Bloom is a track about drawn things and anime is drawn — but it is a
+seam, and a reader who notices it is not wrong to ask.
+
+**What making them agree would cost, and why it is not free.** Adding Anime to the awards
+vocabulary as its own genre would split the Animation population, which changes two
+things a schema cannot undo quietly: Toon Bloom tiers already earned on anime-heavy
+collections could fail their new metric, and Genre Gremlin — "watch N *different* genres"
+— would find one more genre in the same collection and mint tiers nobody did anything to
+earn. The comments-only Comment Gremlin change of 2026-08-29 is the precedent for
+revocation, and it was narrow, deterministic and founder-approved by name. This one is
+neither narrow nor obviously right.
+
+**Revisit when.** There is a product reason to count anime separately — an anime award
+track, or a founder decision that Genre Gremlin should see nineteen genres — at which
+point the historical-unlock treatment is the *first* question rather than a consequence to
+be discovered.
+
+---
+
+## 32. Shared-title landing pages, and an SEO evaluation after them
+
+**Status: deferred, 2026-08-30.**
+
+A shared title today resolves through the deep-link web build to a redirect. A **landing
+page** — the title, its artwork, and whatever Bingd's own readers have publicly said about
+it — is the obvious next thing, and it is deferred for two reasons that are worth keeping
+separate.
+
+The first is that it is a *product* surface and not a marketing one: it has to decide what
+a stranger sees of somebody's public review, which is the same visibility question the
+public profile answered and would have to answer again with different defaults.
+
+The second is that SEO is an **evaluation that comes after**, not a reason to build. Pages
+that exist for crawlers and not for people are the shape of thing this product should not
+ship; the honest order is a page worth landing on, then measurement of whether anybody
+lands on it.
+
+**Revisit when.** There is enough public review volume that a landing page has something
+on it, and outbound sharing is a measured behaviour rather than an assumed one.
+
+---
+
+## 33. Social cold-start discovery
+
+**Status: deferred, 2026-08-30.**
+
+A new account with no follows sees a feed that is structurally empty and a leaderboard of
+strangers. Onboarding hands them the taste flow and the invite, both of which are about
+*them*; nothing yet is about finding the people already here.
+
+The pieces exist and are deliberately not wired into a flow: `can_discover_profile` and
+people search (2026-08-19), the leaderboard's now-wider population (2026-08-30), and
+`taste_match`. The missing thing is a **decision about what a stranger is offered first** —
+the most active accounts, the closest Match, or the people an inviter already follows —
+and each of those is a different product with the same components. §21 (contacts) is one
+answer to it and is itself deferred.
+
+**Revisit when.** Accounts are arriving without an inviter. In an invite-shaped beta the
+inviter *is* the cold-start solution, and building a second one now would be solving a
+problem the current growth model does not have.
+
+---
+
+## 34. Historical-entry anxiety, and fast entry
+
+**Status: deferred, 2026-08-30. Named by the leaderboard fix rather than by a report.**
+
+The month-attribution correction (`20260903000100`) rests on a fact worth stating: five of
+twelve nonprod accounts had **no dated collection row at all**. Logging without a date is
+not an edge case, it is what a large share of readers do — and the likeliest reason is
+that entering a history feels like being asked to remember something.
+
+Two experiments sit here, and neither should be run on intuition:
+
+- **Fast entry.** A path for putting many remembered titles in at once, with no date
+  prompt at all, distinct from the considered single log.
+- **Anxiety.** Whether the date field itself is what stops people, or whether it is the
+  ranking comparisons that follow. The two have opposite fixes and the current
+  instrumentation cannot tell them apart.
+
+**Revisit when.** Onboarding completion and first-week logging volume are measured against
+each other. Until then the correct move is the one taken: make the product count what
+people actually do, rather than pushing them to do the thing the product counts.
+
+---
+
+## 35. Capped social and watchlist digests
+
+**Status: deferred, 2026-08-30.**
+
+PRD §15 keeps friend-activity notifications out of v1 because a small cohort ranking
+heavily would fire constantly. A **digest** is the version that survives that objection —
+one message, capped, saying what happened rather than one message per thing that happened
+— and the same shape serves a watchlist reminder ("three things you saved are now
+streaming" is a different product; "three things you saved" is not).
+
+Deferred because the cap is the whole design and there is nothing yet to calibrate it
+against: how many items, how often, and what a quiet week produces are all questions that
+need real activity distributions. A digest tuned wrong is worse than no digest, because it
+is the notification people turn off first and never turn back on.
+
+**Revisit when.** §4's push foundations carry the scheduled nudge, and there is a fortnight
+of real activity to size a cap against.
+
+---
+
+## 36. A visibility preference for the last note or review
+
+**Status: deferred, 2026-08-30.**
+
+A note is private unless its author says otherwise, and `log_watched` and `save_note` both
+enforce that on every write (`NR-1`). The deferred thing is a **preference**: a reader who
+publishes everything re-answers the same question every time, and a reader who publishes
+nothing is asked a question they have already answered.
+
+Why it is not a one-line setting: a stored default is a claim about writing that does not
+exist yet, and the failure mode is one-directional and bad — somebody who set "public" in
+a confident month publishes something they meant to keep. The safer shape is probably
+*remembering the last choice and showing it*, which is a different thing from a setting and
+needs its own copy.
+
+**Revisit when.** Enough reviews exist that the repetition is a real cost, and the sharing
+rate says which default anybody would actually want.
+
+---
+
+## 37. An obvious spoiler control on comments
+
+**Status: deferred, 2026-08-30.**
+
+A review carries `note_has_spoilers` and the inbox enforces it server-side (2026-08-30,
+mentions). A **comment** does not: comments are conversation under an activity, they were
+never modelled as writing about a title, and there is no flag on them.
+
+The gap the founder named is that the control is not *obvious* — a person about to spoil
+something in a comment has nothing to reach for. Deferred rather than added because the
+minimum honest version is not a checkbox: it is a decision about whether a spoiler comment
+is hidden from everyone or only from people who have not logged the title, which is the
+same question the review flag answered and would answer differently here (a comment is
+under an activity, and the activity's own subject may not be the thing being spoiled).
+
+**Revisit when.** Comment volume makes it a real occurrence rather than a foreseeable one,
+or a reader reports it.
+
+---
+
+## 38. Helpful-review sorting
+
+**Status: deferred, 2026-08-30.**
+
+Title reviews are ordered by the sort the reader picks, and "helpful" is not one of the
+options because nothing measures helpfulness. Reactions on a review exist; treating them
+as a helpfulness signal is a modelling decision, not a sort order — the six reaction kinds
+say different things and none of them says *this was useful*.
+
+Deferred because the ranking is the easy half. The hard half is that a helpfulness sort
+concentrates attention on early reviews and makes the first published review structurally
+advantaged, which is a product decision about who gets read rather than a display option.
+§28 (review awards) touches the same incentive.
+
+**Revisit when.** There are enough reviews per title for a sort to matter, and a signal
+that means helpfulness rather than agreement.
+
+---
+
+## 39. Global iOS header-background consistency
+
+**Status: deferred, 2026-08-30. Cosmetic, and bounded.**
+
+Several screens draw their own header background rather than reading one token, so on iOS
+the treatment differs slightly between stacks — most visibly where a translucent
+navigation bar sits over a screen that paints its own ground.
+
+Deferred rather than fixed in this tranche for a specific reason: it touches every screen's
+top edge at once, which is exactly the shape of change that reintroduces the duplicated
+safe-area inset this codebase has already fixed twice. It wants its own pass, with the
+whole app screenshotted before and after on a device with a notch.
+
+**Revisit when.** The next visual pass, and not inside a correctness tranche.
+
+---
+
+## 40. TV retention experiments
+
+**Status: deferred, 2026-08-30.**
+
+Films and TV seasons are ranked in separate categories and counted separately, and the
+product's assumption is that they behave the same way. They almost certainly do not: a
+season is watched over weeks, a film in an evening, and the moment somebody logs a season
+is a different distance from the moment they watched it.
+
+The experiments deferred here are about **retention specifically** — whether a reader
+mid-season returns more often than one between films, whether a season's own progress
+state (`watching` / `completed`) predicts anything, and whether the log prompt should
+arrive at a different time for television. None of them is a feature; all of them are
+questions the current event set cannot answer.
+
+**Revisit when.** §12's retention practice exists — D1/D7/D28 by cohort — so that "TV
+readers retain differently" is a measurable claim rather than a plausible one.
+
+---
+
+## 41. Android public distribution, after the closed-testing requirement
+
+**Status: deferred, 2026-08-30, and gated on a Google policy clock rather than on work.**
+
+Google Play requires a personal developer account to run a closed test with a minimum
+number of testers for a continuous period before a production release can be applied for.
+That is elapsed time with real testers in it and no amount of engineering shortens it.
+
+So the Android lane's shape is decided and not built: the beta channel and its build are
+live, the closed test is the mechanism, and **public distribution is downstream of the
+clock**. iOS is not blocked by any of this, which is why the production RC is an iOS RC.
+
+**What this entry is protecting against**: treating the Android build's readiness as
+Android's readiness. The binary is ready; the account's eligibility is not, and the two
+are unrelated facts that look like one on a release checklist.
+
+**Revisit when.** The closed test has run its required period with its required tester
+count, at which point this becomes a submission task rather than a roadmap item.

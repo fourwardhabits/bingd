@@ -211,50 +211,42 @@ const GROUPED: readonly string[] = [
 ];
 
 /**
- * The order the sheet is in, and it is most of the reward.
+ * The order the sheet is in, and since 2026-08-30 it is **one order, always**.
  *
- * Top to bottom:
+ * Top to bottom: the pinned three in {@link PINNED} order, then the other seventeen in
+ * {@link GROUPED} order. That is the whole rule. Position is a property of the track and
+ * of nothing else — not of what has been earned, not of how close a tier is, not of what
+ * was unlocked most recently, and not of whether a number could be read this time.
  *
- *   1. The pinned three, always, in {@link PINNED} order.
- *   2. Everything else earned, in {@link GROUPED} order.
- *   3. Everything else locked, in {@link GROUPED} order.
- *   4. Anything whose number could not be read.
+ * **What this replaced, and why the founder replaced it.** Earned rows used to be
+ * promoted above locked ones within their area, and an unreadable row sank to the
+ * bottom. Both are defensible in isolation and both mean the same thing in the hand: the
+ * sheet a reader closes is not the sheet they reopen. Crossing a tier moved the row that
+ * crossed it *and* every row it passed, so the reward for an unlock was a list the
+ * reader had to re-learn — and a transient read failure did the same thing for no reason
+ * at all. A fixed order is what lets somebody find Space Brain where Space Brain was;
+ * the earned state is already said, loudly, by the badge and the tier name on the row
+ * itself, which is where a state belongs.
  *
- * **Earned rises, but only within its own area.** An earned genre track sits above the
- * locked genre tracks and below the earned activity ones, which is what "can rise"
- * means here — it is promoted past the locked rows without being teleported to the top
- * of a list it has nothing to do with.
+ * No separator and no category heading — the founder ruled on that for this tranche too.
+ * `GROUPED` is written in its three runs (activity, genres, exploration) and reads as
+ * grouped without a rule being drawn across the sheet to say so.
  *
- * **The comparator is total and depends on nothing but the track's own state**, so two
- * renders of the same data cannot disagree and no amount of scrolling reshuffles
- * anything. There is no name comparison left in it, because there is no tie left to
- * break: `GROUPED` has one position per track.
- *
- * A pinned track that could not be read stays pinned. It is the one exception to the
- * apology-sinks rule below, and it is the right one: the top of this sheet is a
- * statement about the product, not a leaderboard, and a gap at position three would be
- * more confusing than a row saying it could not load.
+ * **The comparator is total and stateless**, so two renders of the same twenty tracks
+ * produce the same list, and the own-profile sheet and a permitted other-profile sheet
+ * are ordered identically — they call this with the same twenty keys.
  */
 export function sortAwards(list: AwardProgress[]): AwardProgress[] {
-  const pinnedAt = new Map<string, number>(PINNED.map((key, index) => [key, index]));
-  const groupedAt = new Map<string, number>(GROUPED.map((key, index) => [key, index]));
+  const orderOf = new Map<string, number>(
+    [...PINNED, ...GROUPED].map((key, index) => [key, index]),
+  );
 
-  /** 0 pinned, 1 earned, 2 locked, 3 unreadable. */
-  const band = (award: AwardProgress) => {
-    if (pinnedAt.has(award.trackKey)) return 0;
-    // Last, and below even a track at zero: a row that says "could not load this one"
-    // is the app apologising, and an apology belongs at the bottom of a list somebody
-    // opened to enjoy themselves.
-    if (award.unavailable) return 3;
-    return award.earnedTier ? 1 : 2;
-  };
-
-  // A track missing from both tables sorts after everything it could be compared with,
+  // A track missing from the table sorts after everything it could be compared with,
   // rather than colliding with position zero and making the order depend on the input.
-  const within = (award: AwardProgress) =>
-    pinnedAt.get(award.trackKey) ?? groupedAt.get(award.trackKey) ?? GROUPED.length;
+  const last = PINNED.length + GROUPED.length;
+  const within = (award: AwardProgress) => orderOf.get(award.trackKey) ?? last;
 
-  return [...list].sort((a, b) => band(a) - band(b) || within(a) - within(b));
+  return [...list].sort((a, b) => within(a) - within(b));
 }
 
 /** Every track, evaluated and ordered. The one entry point a screen needs. */

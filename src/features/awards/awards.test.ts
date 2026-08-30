@@ -1017,12 +1017,18 @@ describe('sorting', () => {
     expect(list[2]?.unavailable).toBe(true);
   });
 
-  it('puts everything earned above everything locked, after the pinned three', () => {
+  it('does not promote an earned track above a locked one', () => {
+    // **The founder's decision of 2026-08-30.** Earned rows used to rise within their
+    // own area, which meant crossing a tier moved the row that crossed it and every row
+    // it passed: the reward for an unlock was a list the reader had to re-learn. The
+    // order is now a property of the track alone, and the earned state is said by the
+    // badge and the tier name on the row, where a state belongs.
     const list = awardsFor(
       facts({ rankings: ranked(100), watched: many(25, { genres: ['Horror'] }) }),
     );
-    const rest = list.slice(3);
-    expect(keys(rest).slice(0, 2)).toEqual(['rating-rascal', 'scream-snack']);
+    expect(keys(list)).toEqual(keys(awardsFor(NOTHING)));
+    // And the unlock really did happen -- this is an order test, not a scoring one.
+    expect(list.find((a) => a.trackKey === 'scream-snack')?.earnedTier).toBeTruthy();
   });
 
   it('keeps the category grouping inside each bucket', () => {
@@ -1092,11 +1098,17 @@ describe('a track whose number could not be read', () => {
     expect(unavailableCount(awardsFor(NOTHING))).toBe(0);
   });
 
-  it('sinks to the bottom, below even a track sitting at zero', () => {
+  it('stays exactly where it belongs, because a read failure is not a reorder', () => {
+    // It used to sink to the bottom. That is one more way for the sheet a reader closed
+    // to differ from the sheet they reopen -- and this one moves rows for a reason that
+    // has nothing to do with them. The row still says it could not load; it says it in
+    // its own place.
     const list = awardsFor(
       facts({ watched: many(60), unavailable: new Set<keyof AwardFacts>(['rankings']) }),
     );
-    expect(list.at(-1)?.trackKey).toBe('rating-rascal');
+    const order = (rows: AwardProgress[]) => rows.map((row) => row.trackKey);
+    expect(order(list)).toEqual(order(awardsFor(NOTHING)));
+    expect(list.find((row) => row.trackKey === 'rating-rascal')?.unavailable).toBe(true);
   });
 });
 

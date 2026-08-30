@@ -1,7 +1,7 @@
 /**
  * tmdb-adapter — the sole holder of the TMDB key and the sole caller of TMDB (AD-8).
  *
- * Seven actions, split by who may call them:
+ * Eight actions, split by who may call them:
  *
  *   search    signed-in user   Titles TMDB knows and the local catalogue does not.
  *                              Writes them through, returns them Bingd-shaped.
@@ -17,6 +17,10 @@
  *                              and no artwork; this is what gives it posters.
  *   refresh   service_role     Drains media_refresh_due, which is what keeps
  *                              provider data inside PRD §19's six-month window.
+ *   hydrate-seasons
+ *             service_role     Walks season_hydration_due behind a cursor, re-reading
+ *                              each series' whole season list. The scoped backfill for
+ *                              the counts a stale deployment never wrote.
  *
  * Errors use the BGnnn vocabulary from api.md §8 so the client can respond to a
  * class of failure rather than parse a message.
@@ -28,6 +32,7 @@ import {
   countEnrichmentBacklog,
   dueForEnrichment,
   dueForRefresh,
+  dueForSeasonHydration,
   claimFacet,
   claimPerson,
   noteRequest,
@@ -572,22 +577,46 @@ Deno.serve(async (req) => {
         return await handleTrending(db);
       }
 
-      // Maintenance. service_role only: both spend provider quota in bulk, and
-      // both are jobs rather than anything a screen asks for.
+      // Maintenance. service_role only: all three spend provider quota in bulk, and
+      // all three are jobs rather than anything a screen asks for.
+      //
+      // `hydrate-seasons` (20260903000100) is the scoped season backfill. It repairs a
+      // series the only way a season list can be repaired — re-reading the series detail
+      // and rewriting the whole list through `tmdb_upsert_seasons`, an upsert that
+      // deletes nothing, so a ranking, a watch state and a season's progress all stay
+      // attached to the row they were attached to.
+      //
+      // **It walks rather than drains.** `season_hydration_due` permanently contains a
+      // series whose provider reports a season as having zero episodes, and one whose
+      // provider has dropped a season it once named — so it never empties, and a
+      // `remaining` over it could never reach zero. The caller carries `after`, the last
+      // id of the previous page, and the pass is finished when a page comes back short.
+      // `next` is what to send back; null means the walk is done.
       case 'enrich':
-      case 'refresh': {
+      case 'refresh':
+      case 'hydrate-seasons': {
         if (caller.kind !== 'service') return fail('BG403', `${action} requires service role`, 403);
         const limit = clamp(body.limit, 25, 1, MAX_BATCH);
+        const after = typeof body.after === 'string' && body.after ? body.after : undefined;
         const due =
           action === 'enrich'
             ? await dueForEnrichment(db, limit)
-            : await dueForRefresh(db, limit);
+            : action === 'refresh'
+              ? await dueForRefresh(db, limit)
+              : await dueForSeasonHydration(db, limit, after);
         const result = await enrichBatch(db, due.map((row) => row.id));
         return json({
           action,
           attempted: due.length,
           ...result,
           remaining: action === 'enrich' ? await countEnrichmentBacklog(db) : undefined,
+          // Present only for the walk, and only while there is more of it. `due.length <
+          // limit` is the end: a short page cannot be followed by a full one over a set
+          // ordered by a key nothing renumbers.
+          next:
+            action === 'hydrate-seasons' && due.length === limit
+              ? (due[due.length - 1]?.id ?? null)
+              : undefined,
         });
       }
 

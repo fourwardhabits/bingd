@@ -116,7 +116,79 @@ export function useTitleEnrichment(
 }
 
 /**
- * Fetches a series' seasons the first time someone opens its picker.
+ * How old a season list may be before it is worth re-reading.
+ *
+ * **Seven days, and deliberately not `tmdb.metadata_max_age_days`.** That config value
+ * is 150 and governs a catalogue row's *description* — a poster, an overview, a genre
+ * list — which is stable for months. A season list is the one field on a series that
+ * **grows**, and it grows on the provider's schedule rather than on ours. Judging it by
+ * the descriptive window would mean a show that gained a season in September was still
+ * short of it in February.
+ *
+ * A constant here rather than an `app_config` row because this is a client decision and
+ * the client cannot read `app_config`. What bounds the cost is the same thing that
+ * bounds every other provider call from a screen: `useEnrichOnce` asks at most once per
+ * id per mount, so this is one request per stale series per time somebody opens it,
+ * against the `tmdb.max_requests_per_hour` ceiling every other call observes.
+ */
+export const SEASON_LIST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Whether a series' season list is old enough to be worth asking about again.
+ *
+ * **The founder's report, 2026-08-30: a series showing fewer seasons than it has.** The
+ * gate here used to be "this series has no seasons at all", which meant a season list
+ * was written exactly once — by whichever enrichment first reached the series — and
+ * never revisited. `media_refresh_due` exists for the general version of this problem
+ * and is drained by no schedule, so nothing else was going to ask either. A show that
+ * gained a season after somebody first opened it stayed short of it for good.
+ *
+ * The signal is the **newest** `fetched_at` across the season rows, and independent
+ * review 77 is why it is not the oldest. The oldest reads better as semantics — after a
+ * whole-list write every row shares an instant, so the minimum is when the list was last
+ * written *whole* — but it does not terminate. `tmdb_upsert_seasons` writes the seasons
+ * the provider named and is silent about the rest, so a season TMDB has since dropped
+ * from its answer keeps its old timestamp forever: the minimum never moves, the list is
+ * permanently stale, and every single open of that series spends a provider request that
+ * cannot change anything.
+ *
+ * The newest terminates unconditionally — any write at all moves it — at the cost of
+ * one season's own refresh vouching for the list for up to a week. That is the right
+ * trade by a wide margin: the defect being fixed is a series short of a season for
+ * *months*, and a bounded seven-day delay is not that.
+ *
+ * A series with no seasons is **not** stale — that is the other gate's question, and
+ * answering it here as well would ask twice. An unparseable or missing timestamp reads
+ * as stale: asking once more is cheap, and a rule that quietly stopped asking is the
+ * defect this replaces.
+ *
+ * **The limit of this signal, stated because review 77b named it.** A season enriched on
+ * its own also moves the maximum, so a series with one permanently thin season that
+ * somebody opens weekly could hold the whole list fresh while it is not. That is narrow
+ * — a season stops being thin the moment it is enriched, so it needs a season TMDB has
+ * no artwork or overview for at all — and the server-side reconciliation
+ * (`season_hydration_due`) is the belt to this brace. Closing it properly needs a record
+ * of when the *list* was last asked for, which is a column this table does not have and
+ * is not worth adding on the strength of that case.
+ */
+export function seasonListIsStale(
+  seasons: readonly { fetched_at?: string | null }[],
+  now: number = Date.now(),
+): boolean {
+  if (!seasons.length) return false;
+
+  let newest = -Infinity;
+  for (const season of seasons) {
+    const at = season.fetched_at ? Date.parse(season.fetched_at) : NaN;
+    if (Number.isNaN(at)) return true;
+    if (at > newest) newest = at;
+  }
+  return now - newest > SEASON_LIST_MAX_AGE_MS;
+}
+
+/**
+ * Fetches a series' seasons the first time someone opens its picker, and again once the
+ * list that was written has gone stale.
  *
  * A series that arrived through search has no season rows at all: TMDB's search
  * response does not carry them, and fetching them for every result would spend a
@@ -128,7 +200,17 @@ export function useTitleEnrichment(
  * Without this the picker offers "No seasons yet" for every series the local
  * catalogue has never seen, which is a dead end at the exact point the user is
  * trying to log something.
+ *
+ * Re-asking is safe by construction: `tmdb_upsert_seasons` is an upsert keyed on
+ * (parent, season number) that deletes nothing, so a repeat writes the same rows with
+ * the same ids and every ranking, watch state and progress stays attached to the season
+ * it was attached to. What a repeat can add is a season the provider has published
+ * since — and the episode counts, for rows written before the adapter sent them.
  */
-export function useSeasonEnrichment(seriesId: string | null, hasNoSeasons: boolean) {
-  return useEnrichOnce(seriesId, hasNoSeasons);
+export function useSeasonEnrichment(
+  seriesId: string | null,
+  hasNoSeasons: boolean,
+  seasonsAreStale = false,
+) {
+  return useEnrichOnce(seriesId, hasNoSeasons || seasonsAreStale);
 }

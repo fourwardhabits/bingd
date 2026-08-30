@@ -295,6 +295,25 @@ export function useTitleSearch(input: string) {
   };
 }
 
+/** One season of a series, as every surface that lists them reads it. */
+export type SeasonRow = {
+  id: string;
+  season_number: number;
+  title: string;
+  release_date: string | null;
+  poster_path: string | null;
+  /**
+   * When the provider last wrote this row.
+   *
+   * Selected for the season-list freshness rule in `use-enrichment.ts` rather than for
+   * anything drawn: `tmdb_upsert_seasons` stamps `fetched_at` on every row it writes, so
+   * the **oldest** value across a series' seasons is when the list was last written
+   * whole — which is the only thing that can say whether a season published since then
+   * would be here.
+   */
+  fetched_at: string;
+};
+
 /** Seasons for a series, which is how a season is reached — search returns only films
  *  and series (PRD §26.2 AC 1, AC 2). `media_items` is world-readable, so this is a plain
  *  read rather than an RPC. */
@@ -306,18 +325,12 @@ export function useSeasons(seriesId: string | null) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('media_items')
-        .select('id, season_number, title, release_date, poster_path')
+        .select('id, season_number, title, release_date, poster_path, fetched_at')
         .eq('parent_id', seriesId)
         .eq('kind', 'season')
         .order('season_number');
       if (error) throw error;
-      return (data ?? []) as {
-        id: string;
-        season_number: number;
-        title: string;
-        release_date: string | null;
-        poster_path: string | null;
-      }[];
+      return (data ?? []) as SeasonRow[];
     },
   });
 }

@@ -39,11 +39,12 @@ export type AwardsSheetProps = {
  * at the top of a shelf turns the shelf into a report card, and the rows below already
  * say what is earned, one at a time, in the only place the number means anything.
  *
- * **Every track is here, always, in the founder's order.** The three that say what Bingd
- * is for are pinned at the top and never move; the other seventeen sit in fixed
- * category groups, earned above locked. Nothing is filtered and there is no control to
- * filter with: twenty rows is a scroll, and a filter over twenty rows costs more
- * attention than the thing it organises.
+ * **Every track is here, always, in one fixed order.** The three that say what Bingd is
+ * for come first and never move; the other seventeen follow in fixed category runs. As
+ * of 2026-08-30 nothing reorders on earned state, on progress or on a recent unlock —
+ * see `sortAwards` for why the founder took that out. Nothing is filtered and there is
+ * no control to filter with: twenty rows is a scroll, and a filter over twenty rows
+ * costs more attention than the thing it organises.
  *
  * **The social loop fires server-side, and this sheet stays derived.** Since
  * 20260828000100 a newly crossed tier is recorded on the `award_unlocks` ledger by
