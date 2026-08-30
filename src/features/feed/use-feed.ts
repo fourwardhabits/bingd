@@ -4,7 +4,7 @@ import { awardAnnouncement } from '@/features/awards/announcement';
 import { GOAL_LABEL } from '@/features/goals/goals';
 import type { Bucket } from '@/features/collection/score';
 import { avatarUri } from '@/lib/images';
-import { effectiveCertification, effectiveGenres } from '@/lib/media-metadata';
+import { effectiveCertification, productGenres } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
 import { compactName, type MediaKind } from '@/lib/titles';
@@ -124,6 +124,7 @@ type Embedded<T> = T | T[] | null;
 type ParentShape = {
   title: string | null;
   genres: string[] | null;
+  original_language: string | null;
   certification: string | null;
 };
 
@@ -134,6 +135,7 @@ type MediaShape = {
   release_date: string | null;
   poster_path: string | null;
   genres: string[] | null;
+  original_language: string | null;
   certification: string | null;
   runtime_minutes: number | null;
   episode_count: number | null;
@@ -251,9 +253,13 @@ const ACTIVITY_SELECT =
   // the subheading, so it can be described and rated too. A self-join through parent_id,
   // which PostgREST resolves as an embed like any other, and a left one: a movie comes
   // back with `parent: null`.
+  // `original_language` is here for the product genre and for nothing else: a
+  // Japanese animated title is Anime rather than Animation (2026-08-30), and the
+  // predicate needs the language as well as the genres. A season inherits its show's,
+  // which is why the parent embed takes it too.
   'media_items(kind, title, season_number, release_date, poster_path, genres, ' +
-  'certification, runtime_minutes, episode_count, ' +
-  'parent:parent_id(title, genres, certification)), ' +
+  'original_language, certification, runtime_minutes, episode_count, ' +
+  'parent:parent_id(title, genres, original_language, certification)), ' +
   'profiles:actor_id(username, display_name, avatar_path)';
 
 /** The shared read. `actorIds` is a filter, never the authorisation. */
@@ -267,31 +273,45 @@ async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
     .in('type', [...ACTIVITY_TYPES])
     /**
      * **Three keys, and the last two are what make one action read in order**
-     * (20260901000100).
+     * (20260901000100, corrected 20260902000100).
      *
-     * Ranking a film can complete a goal and earn an award, and the founder's device
-     * showed the derived rows above the ranking that caused them. Two different reasons,
-     * which is why one key was not enough:
+     * Ranking a film can complete a goal and earn an award, and all three rows have to
+     * sit together in one place and in one order. Two different reasons, which is why
+     * one key was not enough:
      *
      *   - **an award is written in the ranking's own transaction**, so `created_at` —
      *     which defaults to `now()`, and `now()` is transaction time — is identical to
      *     the microsecond. On a single sort key the order was then whatever the plan
      *     returned, and it moved between refetches and across page boundaries.
-     *     `causal_step` is the writers stating it: 0 the act, 1 the goal, 2 and up the
-     *     awards, ascending inside a descending time order.
+     *     `causal_step` is the writers stating it: 0 the act, 1 the goal it
+     *     completed, 2 and up the awards it earned.
      *   - **a goal is not.** It is completed by a watch date, `log_watched` posts no
      *     activity of its own, and the completion commits seconds *after* the ranking.
      *     That is a real later timestamp and no tiebreak can reach it, so the row
      *     carries `causal_at`: its own instant, except that a completion inherits the
-     *     timestamp of the activity it belongs under. `created_at` is untouched and is
-     *     still what `relativeTime` draws.
+     *     timestamp of the activity it belongs under, which is what keeps the group
+     *     together. `created_at` is untouched and is still what `relativeTime` draws.
+     *
+     * **`causal_step` DESCENDS, and that is the 2026-08-30 correction.** It ascended,
+     * which put the ranking at the top of its own group and the award it earned beneath
+     * it. This feed is **reverse chronological**: the award happened *after* the ranking
+     * that earned it, so newest-first puts it *above*.
+     *
+     *     Suraj earned the Hitchhiker award       causal_step 2 -- the later event
+     *     Suraj ranked Fullmetal Alchemist, S1    causal_step 0 -- the act that caused it
+     *
+     * The earlier pass reasoned "cause before consequence", which is the right order for
+     * a sentence and the wrong one for a list read newest downwards. Descending states
+     * the same causal fact -- a higher step is a later event -- in the direction the list
+     * is actually read, and two awards earned by one action keep the fixed order
+     * `_maybe_award_unlocks` gave them.
      *
      * `id` last makes the sort **total** — it is a primary key — which is what
      * pagination and refetch need. Two rows the first two keys cannot separate would
      * otherwise be free to swap between pages and drop or duplicate an activity.
      */
     .order('causal_at', { ascending: false })
-    .order('causal_step', { ascending: true })
+    .order('causal_step', { ascending: false })
     .order('id', { ascending: true })
     .limit(limit);
   if (error) throw error;
@@ -390,17 +410,23 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
     const actorName = profile?.display_name || profile?.username;
     if (!actorName) continue;
 
-    // Resolved once, here, against the parent embed above. `effectiveGenres` is the
-    // same helper the awards and the collection filter use, so a season's genres mean
-    // one thing across the app rather than "whatever this query happened to select".
+    // Resolved once, here, against the parent embed above. `productGenres` is the
+    // same helper the title page and the collection filter use, so a season's genres
+    // mean one thing across the app rather than "whatever this query happened to
+    // select" -- and an anime season reads Anime on every one of them.
     const parent = media ? one(media.parent) : null;
     const subject = media
       ? {
           kind: media.kind,
           genres: media.genres,
+          language: media.original_language,
           certification: media.certification,
           parent: parent
-            ? { genres: parent.genres, certification: parent.certification }
+            ? {
+                genres: parent.genres,
+                language: parent.original_language,
+                certification: parent.certification,
+              }
             : null,
         }
       : null;
@@ -435,7 +461,7 @@ async function hydrate(rows: FeedRow[]): Promise<FeedItem[]> {
             : null,
       year: media?.release_date ? Number(media.release_date.slice(0, 4)) : null,
       posterPath: media?.poster_path ?? null,
-      genres: subject ? effectiveGenres(subject) : [],
+      genres: subject ? productGenres(subject) : [],
       certification: subject ? effectiveCertification(subject) : null,
       runtimeMinutes: media?.runtime_minutes ?? null,
       episodeCount: media?.episode_count ?? null,

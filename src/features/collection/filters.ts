@@ -1,3 +1,6 @@
+import { languageName } from '@/lib/language';
+import { ANIME_GENRE as PRODUCT_ANIME_GENRE, isAnimeLabels } from '@/lib/media-metadata';
+
 import type { Bucket } from './score';
 
 /**
@@ -77,8 +80,13 @@ export type CollectionFilters = {
  * rather than a real catalogue string, because there is no genre named "Anime" in TMDB's
  * vocabulary (it is "Animation") and inventing one on the rows would be lying to the
  * catalogue rather than filtering it.
+ *
+ * **Re-exported from `lib/media-metadata` since 2026-08-30**, where the label and the
+ * predicate now live so that the title page can agree with this sheet about which
+ * titles are anime. The name and the value are unchanged; what changed is that they
+ * have one definition instead of one per surface.
  */
-export const ANIME_GENRE = 'Anime';
+export const ANIME_GENRE = PRODUCT_ANIME_GENRE;
 
 export type SortKey =
   | 'score-desc'
@@ -144,10 +152,16 @@ export function decadeOf(year: number | null): Decade | null {
  * keywords. Adding it is a facet fetch and a schema constraint change, which is
  * backend work this pass is not doing. Recorded as the upgrade path rather than
  * approximated harder.
+ *
+ * **The rule itself now lives in `lib/media-metadata`** ({@link isAnimeLabels}) and
+ * this is the thin adapter onto a `CollectionItem`. It moved because the same question
+ * is asked by the title page's genre pills, the feed's metadata line and the
+ * recommendation lists, and a filter-local predicate could answer for none of them —
+ * which is how the app came to call one title Anime on one screen and Animation on
+ * another. Nothing about *what it decides* changed.
  */
 export function isAnime(item: Pick<CollectionItem, 'language' | 'genres'>): boolean {
-  if (item.language !== 'ja') return false;
-  return item.genres.some((genre) => /anim/i.test(genre));
+  return isAnimeLabels(item.language, item.genres);
 }
 
 /**
@@ -201,7 +215,9 @@ export function applyFilters(
  *
  * A filter sheet listing every genre TMDB knows about, most of them matching nothing
  * in this collection, is a worse control than one listing the eleven genres actually
- * present. Counts come with them so the most useful options can sort first.
+ * present. Counts come with them so the reader can see how much is behind each option —
+ * they no longer decide the order, which is alphabetical for genres and languages and
+ * chronological for decades. See `byLabel` below.
  */
 /** One genre entry's test: {@link ANIME_GENRE} is derived, everything else is stored. */
 const matchesGenre = (item: Pick<CollectionItem, 'language' | 'genres'>, genre: string): boolean =>
@@ -233,14 +249,39 @@ export function facetOptions(items: readonly CollectionItem[]) {
   if (anime > 0) genres.set(ANIME_GENRE, anime);
   else genres.delete(ANIME_GENRE);
 
-  const byCount = <T>(entries: Map<T, number>) =>
-    [...entries].sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count }));
+  /**
+   * **Alphabetical by the label the reader sees** (founder, 2026-08-30).
+   *
+   * It was by count, descending. That is a defensible order for a list somebody is
+   * *browsing* and the wrong one for a list somebody is *looking something up in*: the
+   * position of Horror moved every time another horror film was logged, so the reader
+   * had to re-scan the whole section on every visit to find an option they already knew
+   * was there. A stable alphabet is findable, and the count is still printed beside
+   * each entry for whoever wanted the popularity signal.
+   *
+   * Languages sort by `languageName` rather than by the ISO code, because `ja` under
+   * J and Japanese under J happen to agree while `el` under E and Greek under G do
+   * not, and the reader is looking at the word.
+   *
+   * Anime takes part like any other entry — it is a genre now — which puts it between
+   * Animation and Comedy on a mixed collection.
+   */
+  const byLabel = <T>(entries: Map<T, number>, label: (value: T) => string) =>
+    [...entries]
+      .map(([value, count]) => ({ value, count, key: label(value).toLowerCase() }))
+      .sort((a, b) => compareLabels(a.key, b.key) || compareLabels(String(a.value), String(b.value)))
+      .map(({ value, count }) => ({ value, count }));
 
   return {
-    genres: byCount(genres),
-    languages: byCount(languages),
-    // Newest first, and always in calendar order rather than by count: a decade
-    // list that reorders itself as the collection grows is unreadable.
+    genres: byLabel(genres, (genre) => genre),
+    // `?? code` is the sheet's own fallback for a code the table has no word for, and
+    // it is repeated here so the order is over exactly the string that gets drawn — a
+    // sort key and a label that can disagree is a list that looks unsorted.
+    languages: byLabel(languages, (code) => languageName(code) ?? code),
+    // Chronological, oldest first, and always in calendar order rather than by count: a
+    // decade list that reorders itself as the collection grows is unreadable. Ascending
+    // since 2026-08-30 — the founder reads a decade list as a timeline, and a timeline
+    // starts at the beginning.
     decades: DECADE_ORDER.filter((decade) => decades.has(decade)).map((decade) => ({
       value: decade,
       count: decades.get(decade) ?? 0,
@@ -248,7 +289,24 @@ export function facetOptions(items: readonly CollectionItem[]) {
   };
 }
 
-const DECADE_ORDER: Decade[] = ['2020s', '2010s', '2000s', '1990s', 'earlier'];
+/**
+ * Ordinary code-point comparison on a lower-cased label, and **not** `localeCompare`.
+ *
+ * `localeCompare` asks the platform's collator, and this app has three of them: Hermes
+ * on the phone, Node's full ICU under Jest, and whatever a browser brings. The same
+ * defect `lib/language.ts` was written to close — a rule that passes on Node and
+ * behaves differently on the device — applies to an ordering the founder is going to
+ * check by eye. Every label in both facets is ASCII English, so the two orders agree
+ * anyway; what this buys is that they cannot stop agreeing on somebody's phone.
+ *
+ * The tie-break on the raw value keeps the sort **total**, so two languages that
+ * resolve to the same English name (or an unknown code that resolves to itself) hold a
+ * fixed order across renders rather than one the engine's sort stability decides.
+ */
+const compareLabels = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** Oldest to newest. `earlier` is everything before 1990, so it leads. */
+const DECADE_ORDER: Decade[] = ['earlier', '1990s', '2000s', '2010s', '2020s'];
 
 /**
  * Sort, with shuffle as one of the orders rather than a separate mode.

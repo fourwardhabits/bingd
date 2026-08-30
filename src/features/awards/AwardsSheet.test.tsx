@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { AwardsSheet } from './AwardsSheet';
 
@@ -398,6 +399,60 @@ describe('what a row is called', () => {
     await open();
     expect(screen.getByLabelText(/^Season Snacker\. Bronze locked/)).toBeTruthy();
     expect(screen.getByLabelText(/^Genre Gremlin\. Dabbler locked/)).toBeTruthy();
+  });
+
+  /**
+   * **A track with nothing earned is muted, title included** (founder, 2026-08-30).
+   *
+   * The badge already dimmed. The title stayed full ink, so a locked row read as an
+   * earned one that happened to have a grey picture beside it — and a sheet of twenty is
+   * scanned for exactly one thing, which of them have been won.
+   *
+   * Asserted against the tokens rather than a hex, because the rule is "use the muted
+   * tone", not "use #5F5A56": a palette change must move these rows with everything
+   * else, and a literal here would silently stop tracking it.
+   */
+  const titleColour = (label: string) =>
+    (StyleSheet.flatten(screen.getByText(label).props.style) as { color?: string }).color;
+
+  it('draws the title of a track with no tier earned in the muted tone', async () => {
+    await open();
+
+    // Nothing seeded, so every track is at zero.
+    expect(titleColour('Movie Muncher')).toBe(theme.text.secondary);
+    expect(titleColour('Genre Gremlin')).toBe(theme.text.secondary);
+    // And it is genuinely a step down from ink rather than the same value twice.
+    expect(theme.text.secondary).not.toBe(theme.text.primary);
+  });
+
+  it('returns the title to ink at the first tier, and keeps it there after', async () => {
+    // Movie Muncher at Bronze: the family name, now earned. The threshold is the only
+    // thing that moved between this fixture and the one above.
+    seed('user_media', movies(60));
+    await open();
+    expect(titleColour('Movie Muncher')).toBe(theme.text.primary);
+
+    // A track still at zero on the same sheet stays muted, so this is the row's own
+    // state rather than a sheet-wide flag.
+    expect(titleColour('Season Snacker')).toBe(theme.text.secondary);
+  });
+
+  it('keeps the requirement readable under a muted title', async () => {
+    // The muted tone is `secondary` and not `tertiary` for this reason: a locked row
+    // still has to say what would earn it, and a title fainter than its own subtitle
+    // reads as broken rather than as locked.
+    await open();
+    const detail = screen.getByText('Next: Watch 14 different genres');
+    const colour = (StyleSheet.flatten(detail.props.style) as { color?: string }).color;
+    expect(colour).toBe(theme.text.secondary);
+    expect(titleColour('Genre Gremlin')).toBe(theme.text.secondary);
+  });
+
+  it('draws a later tier in ink too', async () => {
+    // Not "the first tier only". Every earned state is ink; only zero is muted.
+    seed('user_media', genres(SIXTEEN));
+    await open();
+    expect(titleColour('Mixer')).toBe(theme.text.primary);
   });
 });
 

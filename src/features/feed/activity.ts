@@ -35,7 +35,7 @@
 
 import {
   effectiveCertification,
-  effectiveGenres,
+  productGenres,
   type MetadataSubject,
 } from '@/lib/media-metadata';
 
@@ -174,16 +174,28 @@ export const tailFor = (type: ActivityType, name?: string | null): string | null
 export function activityMetadata(media: {
   kind: 'movie' | 'season' | 'series' | null;
   genres?: readonly string[] | null;
+  /** `media_items.original_language`. Optional; see the subject below. */
+  language?: string | null;
   certification?: string | null;
   runtimeMinutes?: number | null;
   episodeCount?: number | null;
-  parent?: { genres?: readonly string[] | null; certification?: string | null } | null;
+  parent?: {
+    genres?: readonly string[] | null;
+    language?: string | null;
+    certification?: string | null;
+  } | null;
 }): string | null {
   if (!media.kind) return null;
 
   const subject: MetadataSubject = {
     kind: media.kind,
     genres: media.genres,
+    // The original language, because the product genre for a Japanese animated title is
+    // Anime rather than Animation and the predicate needs both halves (2026-08-30). It
+    // is optional on the input for the same reason `certification` is: a caller that
+    // did not select it gets un-normalised genres rather than a crash, and the two
+    // callers that print this line both select it.
+    language: media.language ?? null,
     certification: media.certification,
     parent: media.parent ?? null,
   };
@@ -191,7 +203,9 @@ export function activityMetadata(media: {
   const parts = [
     effectiveCertification(subject),
     lengthOf(media.kind, media.runtimeMinutes, media.episodeCount),
-    ...effectiveGenres(subject).slice(0, 2),
+    // Product genres, so the sentence under a feed card says Anime where the title
+    // page says Anime (2026-08-30). Two of them, unchanged.
+    ...productGenres(subject).slice(0, 2),
   ].filter((part): part is string => Boolean(part));
 
   return parts.length ? parts.join(' · ') : null;

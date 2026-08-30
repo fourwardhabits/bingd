@@ -12,7 +12,35 @@ Three differences from the SQL sketched below, all deliberate:
 - **`pgcrypto` is not installed.** `gen_random_uuid()` has been core Postgres since 13, so the extension was dead weight.
 > **`actor_id` here and on `notifications` means the initiating bingd. *user***, and the foreign key to `profiles` is what makes that a fact rather than a convention. The word also has an obvious film meaning; cast and crew are catalogue metadata identified by a TMDB person id and are never either of these columns. PRD §23 states the distinction in full.
 
-> **The feed is ordered by `(causal_at desc, causal_step asc, id asc)`, not by `created_at`** — added `20260901000100` because one action produces several events and they were reading out of order. `causal_step` is 0 for the act, 1 for the goal it completed and 2 upward for the awards it earned: those are written in the *same transaction*, so `created_at` ties to the microsecond and one key left the order to the plan. `causal_at` is the other half: a goal completion is caused by a watch date, `log_watched` posts no activity of its own, and the celebration therefore commits seconds *after* its cause — a real later timestamp no tiebreak can reach. A completion inherits the timestamp of the reader's newest activity when that activity is one of the titles that carried the count over, and keeps its own otherwise. `created_at` is untouched and is still what a row's relative time is drawn from. The third key makes the sort total, which is what pagination needs.
+> **The feed is ordered by `(causal_at desc, causal_step desc, id asc)`, not by `created_at`** — added `20260901000100` because one action produces several events and they were reading out of order, and **corrected to descending on `causal_step` by `20260902000100`**. `causal_step` is 0 for the act, 1 for the goal it completed and 2 upward for the awards it earned, so **a higher step is a later event**: those are written in the *same transaction*, so `created_at` ties to the microsecond and one key left the order to the plan.
+>
+> **The direction is the part that was wrong.** The first pass sorted the step ascending, on "cause before consequence" — which is the right order for a sentence and the wrong one for a list read newest downwards. The feed is reverse chronological, the award happened *after* the ranking that earned it, and every other pair of rows in the feed puts the later one higher. So the causal group was the single place where an older event outranked a newer one:
+>
+> ```
+> Suraj earned the Hitchhiker award            causal_step 2   the later event
+> Watched 15 non-English titles
+> Suraj ranked Fullmetal Alchemist, S1         causal_step 0   the act that caused it
+> ```
+>
+> Two awards earned by one action keep the fixed order `_maybe_award_unlocks` assigned walking `p_awards`, read back last-announced-first — the same "later above" rule applied inside the group rather than a second convention.
+>
+> **`causal_step` only orders rows that share a `causal_at`, and the Log sheet produces rows that do not.** Its first tap is `set_bucket`, which creates the `user_media` row, so the collection award triggers announce there; the ranking posts a minute later. `_rank_finalize` therefore **adopts** derived events into its own group when it posts `title_ranked`: any `award_earned` or `goal_completed` of the same actor that **names this title** in `feed_event_causes` and that no activity has claimed (nothing of theirs between it and this one). Only `causal_at` moves — `created_at`, the id and the payload are untouched, so an already-visible row re-sorts rather than duplicating. When the ranking wrote the collection row itself both instants are equal, nothing is adopted, and `causal_step` does the work.
+>
+> ```
+> feed_event_causes (
+>   feed_event_id uuid primary key references feed_events(id) on delete cascade,
+>   user_id       uuid not null,
+>   media_item_id uuid not null,
+>   foreign key (user_id, media_item_id)
+>     references user_media (user_id, media_item_id) on delete cascade
+> )
+> ```
+>
+> **The title whose collection write announced a derived event** — one row per `award_earned` or `goal_completed` a single title caused, and nothing else. Absent is the ordinary state: a comment or a follow earned the award, several titles crossed the goal at once, or the announcement predates `20260902000100`. It exists because no timestamp bound can tell one title's unclaimed award from another's when both were logged seconds apart in one sitting.
+>
+> **It is keyed to the collection row, not to the title.** A cause is about one *tenure* of a title in one collection: `unlog` and `remove_from_collection` both delete the `user_media` row, and the cascade takes the cause with it. Without that, logging a title, earning an award, unlogging, then logging and ranking the same title months later would let the old award be adopted into the new ranking's group — the cause row acting as a reusable adoption token across collection lifetimes (independent review 76d). The intervening-activity guard tests `>=` rather than `>` for the narrower second route: a goal that inherited a ranking's own `causal_at` sits at the same instant as the activity that already claimed it.
+>
+> **A table and not a column on `feed_events`.** `feed_events_read` authorises whole rows on `can_i_view(actor_id)` and there is no column-level projection in this schema, so a column would have been readable by any client allowed to see the award — and an award row is built *not* to name a title, which is why `media_item_id` is null on it. This has no client surface: RLS on with no policy, and the grants revoked, which is `push_outbox`'s pattern. The primary key is the event's, so a cause cannot exist without its announcement or survive one. `causal_at` is the other half: a goal completion is caused by a watch date, `log_watched` posts no activity of its own, and the celebration therefore commits seconds *after* its cause — a real later timestamp no tiebreak can reach. A completion inherits the timestamp of the reader's newest activity when that activity is one of the titles that carried the count over, and keeps its own otherwise. `created_at` is untouched and is still what a row's relative time is drawn from. The third key makes the sort total, which is what pagination needs.
 
 - **Check constraints replace comments** wherever this document listed valid values in prose — `media_cache.facet`, `feed_events.type`, `import_jobs.status`, `import_rows.status`, `share_tokens.object_type`, `recommendation_feedback.kind`, and now `reactions.kind`. Same information, in a place where it cannot rot.
 - **`can_view_profile` handles a null viewer explicitly**, returning public profiles only. Unauthenticated reads happen on the public web pages in PRD §16, and leaving that case to `case` fallthrough would have returned null rather than false.

@@ -11,6 +11,7 @@ import {
   type CollectionItem,
 } from '@/features/collection/filters';
 import { useWatched } from '@/features/collection/use-watched';
+import { productGenres } from '@/lib/media-metadata';
 import { supabase } from '@/lib/supabase';
 import { AdapterError, cacheSimilar } from '@/lib/tmdb-adapter';
 
@@ -343,7 +344,16 @@ async function candidatesFor(ids: readonly string[], medium: Medium): Promise<Ca
     year: row.release_date ? Number(row.release_date.slice(0, 4)) : null,
     posterPath: row.poster_path,
     kind: row.kind === 'series' ? 'series' : 'movie',
-    genres: row.genres ?? [],
+    // Product genres, and this one is load-bearing rather than cosmetic: the taste
+    // vector is built from the reader's ranked entries, which come through
+    // `resolveMetadata` and therefore already say Anime. A candidate still saying
+    // Animation would score against a genre the vector has never heard of, so the two
+    // sides of `rank.ts` have to be normalised by the same rule (2026-08-30).
+    genres: productGenres({
+      kind: row.kind,
+      genres: row.genres,
+      language: row.original_language,
+    }),
     language: row.original_language,
     popularity: row.popularity,
   }));

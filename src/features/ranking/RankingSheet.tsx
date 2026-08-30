@@ -398,7 +398,6 @@ function Session({
             position={step.position}
             category={step.category}
             bucket={step.bucket}
-            adjustable={step.adjustable}
             subjectId={subject.id}
             title={subject.title}
             onDone={() => void close()}
@@ -742,51 +741,74 @@ function Comparison({
           />
         </View>
         {/**
-         * `Skip`, which is one control for two reasons.
+         * `Too tough`, on **every** comparison surface (founder, 2026-08-30).
          *
-         * It was "Too tough to call", which names only half of what `rank_skip` is for.
-         * The founder's case is the other half: the poster is familiar and the memory is
-         * not, and "too tough to call" is the wrong sentence for "I do not remember this
-         * one well enough to say". Both want the same thing — a different opponent — and
-         * both already got it, because this button has always called `rank_skip`.
+         * ---------------------------------------------------------------------
+         * THE HISTORY, BECAUSE THIS LABEL HAS NOW MOVED TWICE
          *
-         * So the mechanism is unchanged and the word is the fix. `Skip` covers both
-         * readings, and it is the shortest label in a row that had to fit under two
-         * posters on a 375pt screen. The accessibility label spells out what is being
-         * skipped, because "Skip" alone could be heard as skipping the whole ranking —
-         * which is the X, and is a different thing.
+         * It was "Too tough to call", which names only half of what `rank_skip` is
+         * for: the founder's other case is a familiar poster and an unreliable memory,
+         * and "too tough to call" is the wrong sentence for "I do not remember this one
+         * well enough to say". Both want a different opponent and both have always got
+         * one, because this button has always called `rank_skip`. So on 2026-08-24
+         * the word became `Skip` -- shorter, broader, and the shortest thing that fits
+         * under two posters on a 375pt screen.
+         *
+         * Then a beta tester ranked two films, met a comparison they could not call, and
+         * left. "Skip" reads as *skip ahead*, and in the middle of a five-film
+         * onboarding that sounds like abandoning the flow rather than asking for a
+         * different opponent -- so the one control that would have kept them went unused.
+         * On 2026-08-28 onboarding alone took "Too tough" back, on the reasoning that
+         * the two readers are different people.
+         *
+         * ---------------------------------------------------------------------
+         * WHY THE DIVERGENCE IS GONE
+         *
+         * The founder met it on the device: onboarding said Too tough, the Log tab said
+         * Skip, and the same control under the same two posters had two names. The
+         * per-surface argument assumed the reader who has ranked two hundred titles
+         * *learnt* the button from the shorter word -- but they learnt it in onboarding,
+         * under the other one, and every Rank again and every re-bucketing puts them back
+         * in front of it. A control the app cannot name consistently is one whose meaning
+         * the reader has to re-derive, and "Too tough" is the half that survives on its
+         * own: it says why you are pressing it, which "Skip" never did.
+         *
+         * So it is one word on every surface -- onboarding, a first ranking, the Log tab,
+         * Rank again, and every re-bucketing path that shows a comparison, all of which
+         * are this component. Two words fit: `styles.control` divides the row into equal
+         * halves rather than hugging its labels, so "Undo" and "Too tough" are the same
+         * physical size and nothing about the layout depended on the shorter word.
          *
          * Still one control and not two. Beli offers "Too tough" and "Skip" separately
          * and both call the same thing; two buttons with one effect is a decision the
          * reader has to make for no reason.
          *
-         * **In onboarding the word is "Too tough" instead** (founder, 2026-08-28).
-         * One control, one call, one `rank_skip` — only the label changes, and it
-         * changes because the two readers are different people.
-         *
-         * A beta tester ranked two films, met a comparison they could not call, and
-         * left. "Skip" reads as *skip ahead*, and in the middle of a five-film
-         * onboarding that sounds like abandoning the flow rather than asking for a
-         * different opponent — so the one control that would have kept them went
-         * unused. "Too tough" names the thing that person actually felt, which is the
-         * whole reason the affordance exists (`reference-notes.md`: without it users
-         * force a preference they do not have and the ranking degrades).
-         *
-         * Somebody ranking their two-hundredth title in the Log tab has long since
-         * learnt what this button does and is better served by the shorter, broader
-         * word — the 2026-08-24 reasoning above, which stands. So the divergence is
-         * deliberate, and it is one word on one surface: the mechanism, the hint, the
-         * session and the three-skip fallback are identical either way.
+         * **The mechanism is untouched.** `rank_skip` keeps its name in the schema, it
+         * writes no win, no loss and no tie, and the session's `seen_items` guarantee --
+         * a pair the app has offered is never offered again (20260901000100) -- is the
+         * server's, so it is the same from both surfaces.
          */}
         <View style={styles.control}>
           <Button
-            label={surface === 'onboarding' ? 'Too tough' : 'Skip'}
-            accessibilityLabel={
-              surface === 'onboarding'
-                ? 'Too tough to call. Skip this comparison'
-                : 'Skip this comparison'
-            }
+            label="Too tough"
+            /**
+             * **The word the button uses, and no other** (independent review 76).
+             *
+             * It read "Too tough to call. Skip this comparison", which is the older
+             * label with the newer one prefixed -- so the control still said Skip to
+             * anybody using VoiceOver or TalkBack, on the one surface where the founder
+             * asked for the word to be gone. A screen reader is a surface.
+             *
+             * The effect has not been dropped with it: it moves to the hint, which is
+             * where an effect belongs and where it already was. Label says what the
+             * control is, hint says what pressing it does -- and "Compares against a
+             * different title instead" answers the ambiguity the old spelled-out label
+             * existed for, which was that "Skip" alone could be heard as skipping the
+             * whole ranking. "Too tough to call" cannot be heard that way.
+             */
+            accessibilityLabel="Too tough to call"
             accessibilityHint="Compares against a different title instead."
+            testID="ranking-too-tough"
             kind="secondary"
             size="sm"
             tone="secondary"
@@ -947,7 +969,6 @@ function Reveal({
   position,
   category,
   bucket,
-  adjustable,
   subjectId,
   title,
   onDone,
@@ -958,7 +979,6 @@ function Reveal({
   position: number;
   category: string;
   bucket: string;
-  adjustable: boolean;
   subjectId: string;
   title: string;
   onDone: () => void;
@@ -1007,14 +1027,30 @@ function Reveal({
         {context}
       </Text>
 
-      {adjustable ? (
-        // Only when the server says so. It means the title landed at the midpoint after
-        // too many skips rather than by comparison, and saying it otherwise would invite
-        // people to distrust positions that were earned.
-        <Text variant="footnote" tone="secondary" style={styles.centre}>
-          You skipped a few, so this is an estimate. You can move it from Rankings.
-        </Text>
-      ) : null}
+      {/**
+        * **Nothing is said here about Too tough** (founder, 2026-08-30).
+        *
+        * This slot held "You skipped a few, so this is an estimate. You can move it from
+        * Rankings.", drawn whenever the server came back `adjustable` -- which it does
+        * when a title lands at the middle of its surviving range because the walk ran
+        * out of eligible opponents rather than because a comparison decided it.
+        *
+        * It is removed, and the reasoning is the founder's: pressing Too tough is a
+        * legitimate answer, not a confession. A paragraph that appears only for the
+        * people who used the affordance turns the one control that keeps a ranking
+        * honest into something the reveal apologises for, on the screen that is supposed
+        * to be the reward -- and it appeared at the moment somebody had just finished
+        * their first ranking.
+        *
+        * **The placement itself is unchanged, and so is the flag.** `_rank_finalize`
+        * still returns `adjustable` and `session.ts` still carries it; the
+        * uncertainty-safe midpoint still produces it, the three-skip cap still fires
+        * first, and nothing invents a comparison, a tie or a winner to fill the gap
+        * (20260901000100). What went is the sentence, not the honesty behind it: the
+        * reveal claims no more precision than it did before -- it states the score and
+        * the placement, exactly as it does for a ranking that met no Too tough at all,
+        * and the title stays as movable from Rankings as every other one.
+        */}
 
       {/**
        * **Where the reveal stopped being the end.**

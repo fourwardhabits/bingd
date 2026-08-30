@@ -70,6 +70,17 @@ export type LeaderboardEntry = {
   avatarUri: string | null;
   /** True when the account is private, so a tap lands on the locked shell. */
   isPrivate: boolean;
+  /**
+   * Whether the caller may read this account's content, which is **not** the same
+   * question as {@link isPrivate}.
+   *
+   * An approved follower of a private account is private *and* viewable and gets the
+   * ordinary row; an unapproved viewer of the same account is private and not viewable
+   * and gets the minimal one. The server decides both and returns Match as null for the
+   * second, so this flag is what the row draws from rather than what it filters by --
+   * there is nothing to filter, because there is nothing in the payload to hide.
+   */
+  viewable: boolean;
   count: number;
   /** Ties share a rank, so this is not the row's index. */
   rank: number;
@@ -82,7 +93,8 @@ export type LeaderboardEntry = {
    * match with your own catalogue is a tautology. The row draws "You" there instead.
    */
   matchPercent: number | null;
-  sharedCount: number;
+  /** Null when the caller may not read this account -- see {@link viewable}. */
+  sharedCount: number | null;
 };
 
 export type MyStanding = {
@@ -99,9 +111,12 @@ export type MyStanding = {
  * ---------------------------------------------------------------------------
  * IT IS A DIFFERENT LIST FOR EVERY READER, AND THAT IS NOT A CACHING PROBLEM
  *
- * `leaderboard` filters its population through `can_view_profile` in both timeframes, so
- * a private account the viewer has not been approved by is absent — count and all
- * (founder §26). That makes the answer *entirely* about who is asking, which is why the
+ * `leaderboard` builds its population from `can_view_profile` **or**
+ * `can_discover_profile` in both timeframes (20260902000100). A private account the
+ * viewer has not been approved by is therefore *on* the board, as a minimal row -- rank,
+ * name, handle, avatar, the private flag and the metric count -- with Match null at the
+ * server. A block in either direction, a suspension and a deletion still remove the row
+ * outright. That makes the answer *entirely* about who is asking, which is why the
  * viewer is in the query key. A key without it serves one reader another's board after an
  * account switch on a shared device, which is the defect reviews 6 and 10 each found
  * somewhere else in this app.
@@ -147,6 +162,7 @@ export function useLeaderboard(
         metric_count: number;
         rank: number;
         is_you: boolean;
+        viewable: boolean | null;
         match_percent: number | null;
         shared_count: number | null;
       }[]).map((row) => ({
@@ -158,8 +174,17 @@ export function useLeaderboard(
         count: row.metric_count,
         rank: row.rank,
         isYou: row.is_you,
+        // `!== false` rather than `Boolean(...)`: a server that has not taken this
+        // migration yet returns no such column, and undefined there must mean "the row
+        // is as readable as it always was" rather than silently muting every row on the
+        // board. The nulls that come with a minimal row are what actually decide what
+        // is drawn, and those arrive from either version.
+        viewable: row.viewable !== false,
         matchPercent: row.match_percent,
-        sharedCount: row.shared_count ?? 0,
+        // Null stays null. It was coalesced to 0, which was harmless while every row
+        // was readable and is a lie now: a minimal private row has no shared count, and
+        // "0 shared" is a claim about a collection this reader has never seen.
+        sharedCount: row.shared_count,
       }));
     },
   });

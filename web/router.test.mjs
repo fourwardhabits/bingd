@@ -501,6 +501,41 @@ describe('the built site', () => {
     }
   });
 
+  it('does not tell the reader Bingd sends no push notifications', () => {
+    /**
+     * **It said exactly that, and it stopped being true.**
+     *
+     *     "Bingd sends no push notifications. Notifications appear in the app's own
+     *      inbox and nowhere else. That is deliberate for this beta."
+     *
+     * It was accurate when it was written and it was filed under *Things that are not
+     * faults*, so it was doing real work: somebody who had allowed notifications and
+     * received none was being told not to report it. Push has since been turned on --
+     * `config/push.cjs` entitles the beta lane to the production APNs environment, the
+     * client asks for permission and writes tokens, and the sender is deployed -- so the
+     * page now tells a reader their phone is behaving correctly when it is not, on the
+     * one page they would consult before writing in.
+     *
+     * Pinned as an absence and not only as a presence. The replacement wording is one
+     * sentence somebody could rewrite; the false claim is what must never come back, and
+     * a substring assertion is what says so whatever the surrounding copy becomes.
+     */
+    const html = read('support', 'index.html');
+
+    assert.doesNotMatch(html, /sends no push notifications/i);
+    assert.doesNotMatch(html, /nowhere else/i);
+
+    // Conservative rather than promotional: what *may* happen, that the inbox is the
+    // fallback, and where the reader turns it off. Both routes are named, because the
+    // in-app preference cannot override an OS-level denial and vice versa.
+    // Plain substrings over the HTML with its whitespace collapsed, so the assertion is
+    // about the sentence rather than about where the source happens to wrap it.
+    const prose = html.replace(/\s+/g, ' ');
+    assert.ok(prose.includes('may send you a notification'), 'no honest notification sentence');
+    assert.ok(prose.includes('Settings &rsaquo; Notifications'), 'no in-app route named');
+    assert.ok(prose.includes('phone&rsquo;s own settings'), 'no OS-level route named');
+  });
+
   it('lets no store document be claimed by the app', () => {
     /**
      * The other half. These pages have no screen behind them, so a claim on any of them

@@ -669,25 +669,57 @@ This is the mechanism that keeps ranking cheap: comparisons only ever search wit
 - After **3 skips** on a single insertion, the title is placed at the midpoint of the remaining uncertainty range, and the user is told the position is adjustable from Rankings.
 - **No ties.** Two titles never share a position. They may round to the same displayed score, which is fine and expected in a long band — but the underlying order is always total, because ties would contaminate match calculation, share cards, and every ranking query.
 
-> **The control is labelled "Too tough" inside onboarding** (founder, 2026-08-28), and
-> "Skip" everywhere else. One control, one call, one `rank_skip`: the mechanism, the
-> three-skip midpoint fallback, the accessibility hint and the session are identical, and
-> onboarding has no placement algorithm of its own — its comparisons are the real
-> `RankingSheet` driving the real `rank_start`/`rank_answer` session.
+> ### Corrected 2026-08-30: **"Too tough" is the label on every comparison surface**
 >
-> Only the word differs, because the two readers are different people. A beta tester
-> ranked two films, met a comparison they could not call, and abandoned onboarding.
-> "Skip" reads as *skip ahead*, and in the middle of a five-film first run that sounds
-> like abandoning the flow rather than asking for a different opponent — so the one
-> control that would have kept them went unused. "Too tough" names what that person
-> actually felt, which is the whole reason the affordance exists.
+> Onboarding took the words "Too tough" back on 2026-08-28 while every other surface said
+> "Skip", on the reasoning that the two readers are different people. The founder met the
+> result on the device: onboarding said one thing, the Log tab said another, and the same
+> control under the same two posters had two names.
 >
-> Somebody ranking their two-hundredth title in the Log tab has long since learnt what
-> the button does and is better served by the shorter, broader word, which is the
-> 2026-08-24 rename's reasoning and stands. The divergence is deliberate, it is one word
-> on one surface, and it was **not** implemented as a second control: the sheet already
-> receives `surface`, and a second button calling the same thing is a decision the reader
-> would have to make for no reason.
+> **The per-surface argument assumed something that is not true.** It held that a reader
+> who has ranked two hundred titles *learnt* the button from the shorter word — but they
+> learnt it in onboarding, under the other one, and every Rank again and every
+> re-bucketing puts them back in front of it. A control the app cannot name consistently
+> is one whose meaning the reader re-derives each time, and "Too tough" is the half that
+> survives alone: it says why you are pressing it, which "Skip" never did.
+>
+> So the word is **Too tough** on onboarding, a first ranking, the normal Log ranking,
+> Rank again, and every re-bucketing path that shows a comparison. All of them are the
+> one `RankingSheet`, so this is one label rather than five. The longer word costs
+> nothing: the control row divides into equal halves rather than hugging its labels, so
+> Undo and Too tough are the same physical size either way.
+>
+> **One control, one call, one `rank_skip`.** The mechanism, the accessibility hint, the
+> three-skip midpoint fallback, the session and the server-owned no-repeat guarantee are
+> identical from every surface, and onboarding has no placement algorithm of its own —
+> its comparisons are the real `RankingSheet` driving the real
+> `rank_start`/`rank_answer` session. The RPC keeps the name `rank_skip`: this is a copy
+> contract, not a reason to rename a function an un-relaunched build still calls.
+>
+> It was **not** implemented as a second control. Beli offers "Too tough" and "Skip"
+> separately and both call the same thing; two buttons with one effect is a decision the
+> reader has to make for no reason.
+>
+> **Nothing is said about it at the end.** The reveal drew "You skipped a few, so this is
+> an estimate. You can move it from Rankings." whenever the placement came back
+> `adjustable`. That sentence appeared only for the people who used the affordance,
+> turning the one control that keeps a ranking honest into something the reward screen
+> apologised for — and it landed on somebody who had just finished their first ranking.
+> It is removed and not replaced.
+>
+> The placement itself is unchanged: `adjustable` still comes back, the uncertainty-safe
+> midpoint still produces it, the three-skip cap still fires first, and nothing invents a
+> comparison, a tie or a winner to fill the gap. The reveal claims no more precision than
+> it did — it states the score and the placement, as it does for every other ranking, and
+> the title is as movable from Rankings as any other.
+>
+> **A pair is never offered twice in one session**, which is the server's guarantee and
+> not the label's: `_rank_offer` refuses every title the session has already shown
+> (`ranking_sessions.seen_items`, `20260901000100`), so Too tough removes an opponent for
+> the rest of that session from either surface. Back may re-display the comparison it is
+> explicitly undoing, and a resume restores the one question that was on screen — both are
+> the reader asking rather than being asked. A new session may reconsider the pair, which
+> is what makes Rank again a real second opinion.
 
 ### Display — Decided 2026-08-15
 
@@ -1374,6 +1406,53 @@ Filtered search is intentional exploration, not recommendation. It supports comb
 > **Other-profile collections are consistent by construction**: the See-all sheet has no
 > filter sheet at all — Movies / TV and the four sort orders — so there is no third
 > medium to remove there and none to add.
+>
+> #### Corrected 2026-08-30: Anime **replaces** Animation on the titles it applies to
+>
+> The 2026-08-29 correction made Anime a genre in the filter and left the title page
+> printing TMDB's raw `Animation`. So one title was two things depending on the screen:
+> a reader who filtered to Anime and opened a result was told it was Animation, and a row
+> could read `Animation · Anime` at once.
+>
+> **For a title satisfying the existing Anime predicate, Anime is the product genre and
+> Animation is not.** Its other genres are untouched:
+>
+> ```
+> Action · Adventure · Anime          and never   Animation · Anime
+> ```
+>
+> Animation is kept for animated content that is **not** anime — every Pixar and Disney
+> film, every Western cartoon — so the two labels now partition the drawn shelf instead of
+> overlapping across part of it. Japanese live action is untouched by both, because the
+> predicate needs an animation label as well as the language.
+>
+> **The predicate is unchanged**: Japanese original language *and* an animation genre.
+> Not all Animation, not all Japanese-language titles, not everything made in Japan.
+> Those are three different sets and one of them is anime.
+>
+> **It is a read-time normalisation layer, not a rewrite of the catalogue.**
+> `productGenres` in `src/lib/media-metadata.ts` resolves it, `resolveMetadata` returns
+> it, and `media_items.genres` keeps exactly what the provider published. The catalogue
+> is a cache: `tmdb_upsert_titles` overwrites it on re-enrichment, so a product opinion
+> written into a provider column is one `catalogue:enrich` away from being silently
+> reverted. Resolving at read time cannot drift, needs no backfill, and leaves the raw
+> metadata intact for the day TMDB's `anime` keyword (210024) becomes cacheable.
+>
+> **It applies everywhere the app names, filters, counts or ranks by genre**: the title
+> page's pills and its Genres detail row, the collection wall's metadata line, the
+> Collection filter's results *and* its counts, the genre filter options, genre ranks on
+> the reveal, the title page's top-ten hero line, the feed's activity metadata, search
+> results, the recall sheet, the recommendation lists, and the For You taste vector —
+> which is the load-bearing one, since the vector is built from ranked entries and a
+> candidate still labelled Animation would score against a genre it has never heard of.
+>
+> **The awards vocabulary is deliberately not this list, and does not move.**
+> `src/features/awards/genres.ts` is a *counting* vocabulary of eighteen canonical genres
+> whose Animation pattern already matches `anime`, `animated` and `cartoon` — Toon Bloom
+> is a track about drawn things and anime is drawn. So award counts are unchanged in both
+> directions by this correction, no earned tier is revoked and none is newly minted. That
+> boundary is stated rather than left implicit: an award that *claimed* to count product
+> genres would have to follow this rule, and Genre Gremlin claims its own eighteen.
 
 ### As built — 2026-08-28: Match and its evidence, side by side
 
@@ -1899,6 +1978,19 @@ The canonical contract: **an award milestone newly earned produces exactly one s
 
 **Before the first tier the row is the family name and the badge is dim**, never the next tier's name: handing over the reward before it is earned leaves nothing to arrive later. After a tier, the row is titled by it and its badge is drawn earned, in colour.
 
+> **Amended 2026-08-30: the title is muted too, until a tier is earned.** The badge
+> dimmed and the title stayed full ink, so a locked row read as an earned one that
+> happened to have a grey picture beside it — and a sheet of twenty is scanned for exactly
+> one thing, which of them have been won. Both halves of the row's identity now move
+> together: muted while the track is at zero, ink from the first tier onward and at every
+> tier after it.
+>
+> The muted tone is the palette's `text.secondary`, from the tokens rather than a hex, and
+> deliberately not `text.tertiary` — the lighter of the two greys is what the detail line
+> beneath would then outweigh, and a title fainter than its own subtitle reads as broken
+> rather than as locked. **The progress and the next-tier requirement stay fully
+> readable**, which is the whole point of a locked row: it has to say what would earn it.
+
 **The second line explains the achievement.** A feed row's subtitle was the metal — *Bronze* — which is not product copy. It is now the threshold sentence `tracks.ts` already holds for a finished track: *Watched 50 movies*, *Wrote 20 comments*, *Brought 3 people to bingd.* The inbox row gains the same line under *You earned … 🎉*. Derived in one place from the award and tier keys, so the feed and the inbox cannot quote different numbers for one event; a track a bundle has never heard of falls back to the payload's names and drops the second line rather than guessing a number.
 
 **Comment Gremlin counts comments, and nothing else.** It counted comments *plus* published reviews and said so — "Write 100 comments or reviews". The founder's ruling is that a review is a considered thing you publish about a title you ranked, a comment is talking to somebody under their activity, and one counter rewards neither. The track keeps its names, its artwork and its thresholds; the copy is now *Write 20 comments*. The client fact and the server metric both dropped the note term in the same change, held together by the parity test, and the `award_on_note` trigger is gone with the reason it existed.
@@ -1989,6 +2081,54 @@ and conflating them is the easy mistake:
 
 So a fresh launch opens Feed, and tapping the trophy opens the board on the timeframe
 they last chose.
+
+#### The leaderboard is not an exception to discoverability — amended 2026-08-30
+
+A private account the reader has not been approved by **is on the board**, as a minimal
+row. It used to be absent, count and all.
+
+The reversal is the 2026-08-19 reasoning applied one surface further on: privacy is about
+what somebody wrote, not about whether they can be found. And a board that silently omits
+people does a second thing — it **lies about where the reader stands**. Fourth of ten is
+reported as third of nine, and the account the reader cannot see is often the one they
+would most want to ask to follow.
+
+**What an unapproved viewer gets for that row, and nothing else:**
+
+| Shown | Withheld |
+| --- | --- |
+| Leaderboard position | Match percentage |
+| Display name, `@handle`, avatar | Shared-title count |
+| A restrained private marker (a lock beside the handle; the word to a screen reader) | Which titles are ranked, and their scores |
+| The selected metric's count — Titles, Movies, TV or Reviews | Collection, reviews, feed activity, awards, watch dates, goals |
+
+**The metric count is the disclosure, and it is a deliberate decision.** A leaderboard is
+a ranking, and a ranking with the number removed is not one — the position alone already
+implies a band. So one aggregate becomes visible: how many titles, films, seasons or
+reviews. It names nothing and dates nothing, and it is the same order of disclosure as
+the follower count a private profile shell has always shown.
+
+**The projection is the privacy rule.** `leaderboard` returns `viewable` alongside
+`visibility` and nulls `match_percent` and `shared_count` at the server for a row the
+caller may not read. The client is not trusted to conceal anything, because a client that
+is handed a private field is one modified build away from showing it. `viewable` and
+`visibility` are two questions and both are needed: an approved follower of a private
+account is private *and* viewable and gets the ordinary row.
+
+**Tapping is unchanged.** It opens the same profile route as any other row, which is the
+existing locked shell with its Follow / Requested control. Nothing here decides privacy;
+a special case would be a second place for it to be wrong.
+
+**Blocks, suspension and deletion still remove the row entirely**, in both directions.
+Eligibility is `can_view_profile OR can_discover_profile`, and the second is
+`20260819000100`'s identity gate: it refuses a block either way, refuses a non-active
+account, and refuses the caller themselves — whom the first admits. A deleted account has
+no `profiles` row to be found. `entrants` comes from the same population, so the pinned
+standing's denominator and the list agree.
+
+**There is no leaderboard opt-out**, and the founder deferred one rather than the
+implementation arguing for it: the row is the identity `search_users` and the follower
+lists have returned since 2026-08-19, plus one number.
 
 ### The four metrics
 
@@ -2150,12 +2290,160 @@ left goal congratulations arriving would be the more confusing outcome.
 
 **The goal's second line.** It was `25 movies` — a fragment under a sentence that had already said *hit their 2026 Movies goal*, and nothing at all in the inbox. It is now *Congrats on 25 movies*, from one function, in the feed and in the earner's own notification alike. The medium travels with the noun (*Congrats on 25 TV seasons*) because a completion says its own sentence in a feed of unrelated activity, where a bare "25 seasons" does not say seasons of what. The year, the medium and the threshold are the configured ones, and the threshold is the value `goal_completions` froze at the crossing, so editing a goal afterwards does not rewrite what was celebrated.
 
-**Top to bottom, one action reads: the ranking, then the goal it completed, then the awards it earned.** The founder found the derived rows above their own cause. There were two reasons and one key could not fix both.
+**Top to bottom, one action reads: the awards it earned, then the goal it completed, then the ranking that caused both.** *(This block originally specified the opposite order and was corrected on 2026-08-30 — see the amendment below it.)* The rows one action writes were reading in no fixed order at all. There were two reasons and one key could not fix both.
 
 - **An award is written in the ranking's own transaction.** `feed_events.created_at` defaults to `now()`, which is transaction time, so the rows carry the same timestamp to the microsecond and `order by created_at desc` alone returns them in whatever order the plan chooses — unstable across a refetch and across a page boundary. A serial column would have been worse than nothing: `_rank_finalize` writes `rankings` and `user_media` *before* it posts `title_ranked`, and the award and goal triggers fire at the end of those statements, so insertion order puts the derived events first. **`causal_step`** is the writers stating the order instead: 0 the act, 1 the goal, 2 and up the awards, one step per announced track in the detector's own argument order.
 - **A goal completion is not.** A goal is completed by a watch *date*, `log_watched` posts no activity of its own, and the celebration commits seconds after the ranking — a real later timestamp that no tiebreak can reach. So a completion carries **`causal_at`**: its own instant, except that it inherits the timestamp of the reader's newest activity when that activity is about one of the titles that carried the count over. The guard is a fact rather than an interval — *is this the post it would sit directly under* — so correcting the date on a film ranked last year completes the goal at its own moment, at the top, alone, instead of being buried a year down the feed. `created_at` is untouched and is still what a row's relative time is drawn from.
 
-The feed reads `causal_at desc, causal_step asc, id asc`. The third key makes the sort **total** — `id` is a primary key — which is what pagination and refetch need: two rows the first two keys cannot separate would otherwise be free to swap between pages and drop or duplicate an activity. Unrelated activity is unaffected, because different transactions have different timestamps; a causal group sits together because its members share one.
+The feed reads `causal_at desc, causal_step desc, id asc`. The third key makes the sort **total** — `id` is a primary key — which is what pagination and refetch need: two rows the first two keys cannot separate would otherwise be free to swap between pages and drop or duplicate an activity. Unrelated activity is unaffected, because different transactions have different timestamps; a causal group sits together because its members share one.
+
+> #### Corrected 2026-08-30: the consequence sits **above** its cause (`20260902000100`)
+>
+> The mechanism above is right and is untouched. **The direction it was read in was
+> wrong.** `causal_step` was specified ascending, on "cause before consequence" — which
+> is the right order for a sentence and the wrong one for a list read newest downwards.
+>
+> This feed is reverse chronological. Earning the award happened *after* the ranking that
+> earned it, and every other pair of rows in the feed puts the later one higher. The
+> causal group was the one place where an older event outranked a newer one:
+>
+> ```
+> Suraj earned the Hitchhiker award            causal_step 2   the later event
+> Watched 15 non-English titles
+> Suraj ranked Fullmetal Alchemist, S1         causal_step 0   the act that caused it
+> ```
+>
+> **A higher step is a later event**, which is what the column always recorded and is now
+> what the sort says. Two awards earned by one action keep the fixed order
+> `_maybe_award_unlocks` assigned walking `p_awards`, read back last-announced-first — the
+> same "later above" rule applied inside the group rather than a second convention. The
+> clause is stated in one place per reader: the PostgREST order in
+> `src/features/feed/use-feed.ts`, which serves the feed, a profile's activity and the
+> comment-thread page alike, so live insertion, a fresh launch, a refetch and a page
+> boundary all produce the same list. It is emphatically **not** a reversal of the array
+> the hook returns: a client-side reverse would fix the screen and break pagination at the
+> seam between two server-ordered pages.
+>
+> #### When a congratulations is allowed to exist
+>
+> The founder's requirement is that nothing congratulates an act that has not finished.
+> The schema meets it **structurally rather than by timing**: every award and goal
+> announcement is written by an AFTER-ROW trigger on `user_media` inside the writer's own
+> transaction, so the feed event, the inbox row and its `push_outbox` job commit exactly
+> when the writer commits, or not at all. There is no queue and no deferred job that could
+> land early, and a transaction that rolls back takes all three with it.
+>
+> Two flows, both correct:
+>
+> - **Ranking a title that was not already logged.** `_rank_finalize` writes `rankings`
+>   and `user_media` and then posts `title_ranked`; the award trigger fires at the end of
+>   the `user_media` statement, which is why the order is *declared* by `causal_step`
+>   rather than taken from insertion order. An abandoned session never reaches
+>   `_rank_finalize`, writes no collection row, and announces nothing.
+> - **Logging a watch and then ranking it.** `log_watched` creates the `user_media` row,
+>   so the award is earned and announced by **the log** — a completed act with its own
+>   `title_logged` activity to sit above. A ranking that follows is a second act, and
+>   abandoning it changes nothing that was already true. **This is the canonical cause for
+>   an award earned on a watch-only path**, stated rather than left to be guessed at:
+>   watch-only logging is a first-class state (2026-08-24) and its awards are the log's.
+>
+> A goal is the one derived event whose cause is a watch *date* rather than a write, which
+> is what `causal_at` exists for; the correction above is what puts it at the top of its
+> group instead of the bottom.
+
+> #### And the half `causal_step` cannot reach: the Log sheet buckets before it ranks
+>
+> `causal_step` orders rows that **share** a `causal_at`. Ranking a title straight from
+> search produces exactly that: `_rank_finalize` writes the collection row and posts the
+> activity in one transaction, and the award trigger fires in between.
+>
+> **The Log sheet does not.** Its first tap is `set_bucket` — "bucketing implies logging",
+> so it creates the `user_media` row — and the collection award triggers fire *there*. The
+> sheet then stamps the watch date in a second call, where a goal crossing announces. Only
+> after that do the comparisons run and `title_ranked` post, a minute later. So the award
+> is genuinely the older row, by a real timestamp no tiebreak can reach, and the feed read:
+>
+> ```
+> Suraj ranked Whiplash                  the later row, on top
+> Suraj earned Movie Muncher             the award it looks like it earned
+> ```
+>
+> which is founder acceptance A failing through the commonest path in the app. Found by
+> independent review 76.
+>
+> **The fix is the goal's own instrument, pointed the other way.** A goal commits *after*
+> its cause and looks backwards to adopt its timestamp; an award earned at log time commits
+> *before* its cause, so the cause reaches back and adopts the award. `_rank_finalize`
+> does it when it posts the activity, under two facts and no interval:
+>
+> - **the announcement names this title.** `feed_event_causes` — one row per derived
+>   event a single title caused — is written by the collection award trigger and by a
+>   single-title goal crossing, so the writer says which title announced it rather than a
+>   reader guessing from a clock; and
+> - **nothing of the reader's happened in between**, which is the guard
+>   `_maybe_goal_completion` already applies from the other side, and what keeps a film
+>   logged in March and ranked today from hauling a five-month-old award to the top of the
+>   feed.
+>
+> **The title link is recorded because no timestamp could do it**, and independent review
+> 76b is why. The first version bounded the adoption by time — at or after this title's
+> `user_media.created_at`, before this activity, with nothing in between — and every one
+> of those bounds is satisfied by a *different* title's award: log A, log B, have B cross a
+> tier, rank A, and B's award was adopted into A's group and shown to A's followers as the
+> consequence of ranking A. Two writes seconds apart in one sitting, neither producing
+> activity, are indistinguishable by *when*. So the writer says *which*, which is the same
+> move `causal_step` is.
+>
+> **The cause lasts exactly as long as the title's tenure in that collection.**
+> `feed_event_causes` is keyed to the `user_media` row, and `unlog` and
+> `remove_from_collection` both delete that row, so the cascade takes the cause with it.
+> Without it, logging a title, earning an award, unlogging, then logging and ranking the
+> same title months later would let the old award be adopted into the new ranking's group —
+> the row acting as a reusable adoption token across collection lifetimes (independent
+> review 76d). The announcement itself is never taken back: it is a past-tense fact about
+> an act, and only the link that would let a later act claim it goes.
+>
+> **A missing row means "no ranking may adopt this", and that is the right default** — for
+> the eight award call sites that are about a comment, a reaction, a follow or an invite and
+> have no title; for a goal crossed by several titles at once, which has no single cause;
+> and for every announcement written before the table existed. In each case it stands at its
+> own moment, which is where it stood before.
+>
+> **It is a side table and not a column on `feed_events`, and independent review 76c is
+> why.** `feed_events_read` authorises **whole rows** on `can_i_view(actor_id)` — there is
+> no column-level projection anywhere in this schema — so a column would have been readable
+> by any client allowed to see the award. That is a disclosure the award row exists to
+> refuse: `media_item_id` is left null on `award_earned` precisely so the row does not name
+> a title, and its payload is exactly `{award, tier, award_name, tier_label}`. The sharpest
+> case: earn an award on a title and then remove it from the collection — the award event
+> survives, deliberately, so the link would have named a title the collection itself no
+> longer shows. `feed_event_causes` has **no client surface at all**: RLS on with no policy,
+> and the grants revoked, which is `push_outbox`'s pattern and its reasoning.
+>
+> Both the award and the goal are reached, though they land at different instants: the
+> bucket tap creates the collection row and the award announces there, then the sheet stamps
+> the watch date and a goal crossing announces at that moment. When the ranking wrote the
+> collection row itself the award shares a `causal_at` with the activity already, the
+> strict inequality is false, nothing is adopted, and `causal_step` does the work as before.
+>
+> **Only `causal_at` moves.** `created_at`, the id, the payload, the reactions and the
+> comments are untouched, so a feed that has already shown the award re-sorts it rather
+> than being handed a second one, and the row still says how long ago it happened.
+>
+> #### Logging posts no feed activity, and that is why this was needed
+>
+> `title_logged` is a permitted event type and **nothing has ever written one**; only a
+> ranking, a season completion and a watchlist add become activity. So an award earned at
+> log time has no activity of its own to sit above, and when a ranking follows, that
+> ranking is the activity the act produced.
+>
+> **The announcement is not withheld and must not be.** The canonical cause of an award
+> earned at log time is the log, which is a completed, durable act: the title is in the
+> collection with a bucket and a watch date, it counts toward every collection metric, and
+> it stays counted whether or not a ranking follows. Withholding would mean somebody who
+> logs without ever ranking earns awards they are never told about — the watch-only
+> semantics the founder's brief explicitly forbids breaking.
+
 
 ## 15. Notifications and activity awareness
 
@@ -2286,6 +2574,23 @@ Each type has an ordered chain whose last link always resolves. Staleness is rea
 
 ~~**Comment and reaction route to the title rather than to the exact feed event, deliberately.**~~ **Superseded 2026-08-26**: the per-event route exists (`app/activity/[id].tsx`, reading one event by id through `feed_events_read`), and comment, reaction and — since `20260827000600` — `recommendation_ranked` all open the exact activity, with the title as the surviving parent when the event is gone. The deferral in [`deferred-roadmap.md`](./deferred-roadmap.md) §6 is closed.
 
+> **One rule between the post and the conversation** (founder, 2026-08-30). The physical
+> report was "a small bar of empty space between the activity and the comments", opening a
+> comment notification — and it reproduced from a direct Feed tap too, which is the fact
+> that named the cause: both routes render the same subtree, so it was never
+> route-specific, never a loading state, and never platform-specific.
+>
+> It was **two rules with a band of empty page trapped between them**. `ActivityRow` ends
+> in a `borderBottomWidth` of its own — the separator the Feed draws between cards — and
+> this screen added a second `View` carrying a `borderTopWidth` and a `marginTop`
+> beneath it. That gap is the bar.
+>
+> The second rule is removed. The row's own is kept, because it is the divider that
+> belongs there and every other card in the app has it. No negative margin was used to
+> close the gap, no touch target was collapsed, and the thread's own rhythm is untouched:
+> the first comment sits the same distance below the rule as every later one sits below
+> its neighbour. One post, one rule, one conversation.
+>
 > **The post on that screen shows its reactions** (founder, 2026-08-29). It did not, and
 > the cause was neither caching nor a slow query: the screen fetched no reaction data at
 > all and drew no control, deliberately, alongside the comment, watchlist and recommend
@@ -3223,8 +3528,14 @@ already supports it.
 
 Everything else stays behind `can_view_profile`, and none of it moved: rankings, the
 Movies/TV collection, scores, notes and reviews, watchlist, feed activity, awards and
-progress, **Match**, **the shared-title count**, **monthly leaderboard activity**, goals,
-and the underlying taste data. Approved followers retain full access.
+progress, **Match**, **the shared-title count**, goals, and the underlying taste data.
+Approved followers retain full access.
+
+> **Amended 2026-08-30: a private account appears on the leaderboard, as a minimal row.**
+> "Monthly leaderboard activity" was in the withheld list above and has moved out of it —
+> see *The leaderboard is not an exception to discoverability* below for the row, the
+> reasoning and what is still refused. Nothing else in this section changed, and the
+> collection, the reviews, the awards and Match all remain withheld.
 
 #### Where private identities appear
 

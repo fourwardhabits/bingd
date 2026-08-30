@@ -157,9 +157,9 @@ const openSheet = async (props: Partial<RankingSheetProps> = {}) => {
  * assert that this is now that control rather than a description of one.
  *
  * The *mechanism* is asserted in `RankingSheet.test.tsx`, which pins Undo to `rank_back`
- * and Skip to `rank_skip`. A restyle that quietly repointed a word at a different call
- * is exactly what this change must not have been, and the two suites together are what
- * say so.
+ * and Too tough to `rank_skip`. A restyle that quietly repointed a word at a different
+ * call is exactly what this change must not have been, and the two suites together are
+ * what say so.
  */
 describe('undo and skip are buttons', () => {
   const controls = async () => {
@@ -168,7 +168,7 @@ describe('undo and skip are buttons', () => {
     await sheet.ready('Film P');
     return {
       undo: sheet.getByLabelText('Undo the last comparison'),
-      skip: sheet.getByLabelText('Skip this comparison'),
+      skip: sheet.getByLabelText('Too tough to call'),
       sheet,
     };
   };
@@ -205,21 +205,71 @@ describe('undo and skip are buttons', () => {
 
     const a = StyleSheet.flatten(undo.props.style);
     const b = StyleSheet.flatten(skip.props.style);
-    // Two controls of the same rank. Letting each hug its own label made Skip visibly
-    // the smaller button, which is a hierarchy nobody chose.
+    // Two controls of the same rank. Letting each hug its own label made the escape
+    // visibly the smaller button, which is a hierarchy nobody chose — and it is what
+    // makes the longer word cost nothing.
     expect(a.minHeight).toBe(b.minHeight);
     expect(a.borderWidth).toBe(b.borderWidth);
     expect(a.backgroundColor).toBe(b.backgroundColor);
   });
 
-  it('still says Undo and Skip', async () => {
-    const { sheet } = await controls();
+  it('says Undo and Too tough, and never Skip — to a screen reader as well', async () => {
+    const { sheet, skip } = await controls();
 
-    // The words are the founder's and are not what changed. Asserted apart from the
-    // accessible labels above, which are longer on purpose.
+    // The words are the founder's. "Too tough" everywhere since 2026-08-30, replacing
+    // the per-surface split that had onboarding saying one thing and the Log tab
+    // another.
     expect(sheet.getByText('Undo')).toBeTruthy();
-    expect(sheet.getByText('Skip')).toBeTruthy();
+    expect(sheet.getByText('Too tough')).toBeTruthy();
+    expect(sheet.queryByText('Skip')).toBeNull();
+
+    // **The accessible label is a surface too** (independent review 76). It read
+    // "Too tough to call. Skip this comparison" — the new label with the old one still
+    // attached — so the control went on saying Skip to anybody who could not see it.
+    // The effect is not lost with the word: it moves to the hint, which is where an
+    // effect belongs and where it already was.
+    expect(skip.props.accessibilityLabel).not.toMatch(/skip/i);
+    expect(skip.props.accessibilityHint).toMatch(/different title/i);
   });
+
+  /**
+   * **The same control, whichever surface asked for it.**
+   *
+   * The label used to be `surface === 'onboarding' ? 'Too tough' : 'Skip'`, so a reader
+   * met one word in onboarding and the other in the Log tab — which is the divergence
+   * the founder found on the device. Every surface this component serves is one of these
+   * four values, so asserting across all of them is asserting across the whole product:
+   * a future per-surface exception has to break this test to exist.
+   *
+   * The structure is asserted with the word, because "make onboarding say Too tough"
+   * could have been met by giving onboarding its own control — and two controls that
+   * look different while doing the same thing is the defect one word further on.
+   */
+  it.each(['search', 'collection', 'onboarding', 'title'] as const)(
+    'draws one Too tough control with the same structure on the %s surface',
+    async (surface) => {
+      answering(comparison);
+      const sheet = await openSheet({ surface });
+      await sheet.ready('Film P');
+
+      expect(sheet.getByText('Too tough')).toBeTruthy();
+      expect(sheet.queryByText('Skip')).toBeNull();
+
+      const escape = sheet.getByLabelText('Too tough to call');
+      const undo = sheet.getByLabelText('Undo the last comparison');
+      const a = StyleSheet.flatten(undo.props.style);
+      const b = StyleSheet.flatten(escape.props.style);
+
+      // The canonical structure: a raised fill, a hairline, equal halves of the row,
+      // and the same compact height as Undo — `theme.surface.raised` is what the
+      // founder's "restrained" reference control is drawn with.
+      expect(b.backgroundColor).toBe(theme.surface.raised);
+      expect(b.borderWidth).toBeGreaterThan(0);
+      expect(b.minHeight).toBe(a.minHeight);
+      expect(b.borderColor).toBe(a.borderColor);
+      expect(escape.props.hitSlop).toBe(undo.props.hitSlop);
+    },
+  );
 });
 
 /**

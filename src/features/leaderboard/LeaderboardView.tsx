@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Avatar, Chip, Divider, EmptyState, SkeletonRow, Text } from '@/ui/components';
@@ -145,12 +146,22 @@ function LeaderboardRow({
         `Number ${entry.rank}`,
         entry.name,
         `@${entry.username}`,
+        // The word, where the row shows a glyph. Same treatment as `FollowListSheet`.
+        entry.isPrivate && !entry.isYou ? 'Private' : null,
         countLabel(metric, entry.count),
         entry.isYou ? 'You' : secondary,
       ]
         .filter(Boolean)
         .join(', ')}
-      accessibilityHint={entry.isYou ? 'Opens your profile' : 'Opens their profile'}
+      accessibilityHint={
+        entry.isYou
+          ? 'Opens your profile'
+          : entry.viewable
+            ? 'Opens their profile'
+            : // Named, because the destination is genuinely different: a locked shell
+              // with a Follow request on it rather than a collection.
+              'Opens their private profile, where you can ask to follow'
+      }
       onPress={() => onPress(entry.username)}
       style={({ pressed }) => [
         styles.row,
@@ -186,6 +197,27 @@ function LeaderboardRow({
           <Text variant="caption" tone="tertiary" numberOfLines={1} style={styles.handle}>
             @{entry.username}
           </Text>
+          {/**
+            * **The lock, and it is the same one the follower lists draw.**
+            *
+            * A private account is on this board since 20260902000100, and without a
+            * marker the tap is a surprise -- a row that looks like every other one and
+            * opens to a locked shell. `FollowListSheet` met exactly this when
+            * `followers_of` started including private accounts, and settled on a glyph
+            * beside the handle rather than the word: the row is already carrying a rank,
+            * a name, a handle, a second line and a count, and "Private" spelled out in
+            * it competes with all five. The screen reader gets the word, above.
+            *
+            * Not on the reader's own row. Somebody with a private account knows.
+            */}
+          {entry.isPrivate && !entry.isYou ? (
+            <Ionicons
+              name="lock-closed"
+              size={theme.layout.icon.sm - 8}
+              color={theme.text.tertiary}
+              accessibilityElementsHidden
+            />
+          ) : null}
         </View>
 
         {/**
@@ -227,13 +259,27 @@ function LeaderboardRow({
  * `91% Match · 37 shared`, or `Match TBD · 3 shared`.
  *
  * The same two forms the profile uses, in the same order, from the same `taste_match`
- * row — so a reader who has met one has met both, and the two surfaces cannot come to
+ * row -- so a reader who has met one has met both, and the two surfaces cannot come to
  * disagree about what "shared" counts.
  *
  * Null for the reader's own row, where the caller draws "You" instead.
+ *
+ * **Null for a row the caller may not read**, which is a private account they have not
+ * been approved by. There is nothing to say: the server sent no Match and no shared
+ * count for that row, because Match is computed over two collections and this reader has
+ * not been let into one of them. `Match TBD` would be the wrong sentence -- it means
+ * "not enough overlap yet", which is a fact about two catalogues rather than about
+ * permission, and drawing it here would invite somebody to wait for a number that is
+ * never coming. The row is a name and a count, and the lock beside the handle is what
+ * explains why.
+ *
+ * Checked on `sharedCount` as well as on `viewable`: the two are set by the same
+ * server projection, and a line that read `Match TBD · null shared` because one of them
+ * was missed is the kind of defect that only appears on somebody else's phone.
  */
 export function secondLine(entry: LeaderboardEntry): string | null {
   if (entry.isYou) return null;
+  if (!entry.viewable || entry.sharedCount === null) return null;
   const shared = `${entry.sharedCount} shared`;
   return entry.matchPercent === null
     ? `Match TBD · ${shared}`

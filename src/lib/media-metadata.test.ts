@@ -1,7 +1,10 @@
 import {
+  ANIME_GENRE,
   effectiveGenres,
   effectiveLanguage,
+  isAnimeSubject,
   parentOf,
+  productGenres,
   resolveMetadata,
   type MetadataSubject,
 } from './media-metadata';
@@ -156,5 +159,126 @@ describe('resolving a PostgREST row', () => {
     expect(
       resolveMetadata({ kind: 'movie', certification: null, parent: null }).certification,
     ).toBeNull();
+  });
+});
+
+/**
+ * **Anime is the product genre for a Japanese animated title** (founder, 2026-08-30).
+ *
+ * The state this corrects: Anime became an entry in the collection's Genre filter on
+ * 2026-08-29, and the title page went on printing TMDB's raw `Animation` — so one
+ * title was two things depending on which screen you were on, and a reader who filtered
+ * to Anime and opened a result was told it was Animation.
+ *
+ * The predicate is unchanged and deliberately conservative: **Japanese original language
+ * AND an animation genre**. It is not "all Animation", not "all Japanese titles", and
+ * not "made in Japan" — three different sets, one of which is anime. What changed is
+ * that the rule lives here, where every genre-bearing read passes through it, instead of
+ * inside the filter model where exactly one surface could reach it.
+ */
+describe('the Anime product genre', () => {
+  const anime = (over: Partial<MetadataSubject> = {}): MetadataSubject => ({
+    kind: 'movie',
+    genres: ['Animation', 'Action', 'Adventure'],
+    language: 'ja',
+    ...over,
+  });
+
+  it('replaces Animation with Anime and keeps everything else', () => {
+    // The founder's own example, in the founder's own order: the label they see reads
+    // "Action · Adventure · Anime", and never "Animation · Anime".
+    expect(productGenres(anime())).toEqual(['Action', 'Adventure', ANIME_GENRE]);
+  });
+
+  it('never exposes both labels for the same title', () => {
+    const genres = productGenres(anime());
+    expect(genres).toContain(ANIME_GENRE);
+    expect(genres).not.toContain('Animation');
+  });
+
+  it('leaves a non-anime animated title as Animation', () => {
+    // Every Pixar and Disney film. Widening Anime to all Animation is the mistake the
+    // predicate exists to refuse, and this is the row that would be swept in.
+    expect(productGenres(anime({ language: 'en', genres: ['Animation', 'Family'] }))).toEqual([
+      'Animation',
+      'Family',
+    ]);
+  });
+
+  it('leaves Japanese live action alone', () => {
+    // Language is half the predicate and never the whole of it. A Kurosawa film is not
+    // anime and must not gain the label by being Japanese.
+    expect(productGenres(anime({ genres: ['Drama', 'History'] }))).toEqual(['Drama', 'History']);
+    expect(isAnimeSubject(anime({ genres: ['Drama'] }))).toBe(false);
+  });
+
+  it('reads both of the catalogue vocabularies the app actually holds', () => {
+    // The alpha catalogue is Wikidata-seeded and spells it `animated film`; an enriched
+    // row carries TMDB's `Animation`. Both are in the same column at the same time.
+    expect(productGenres(anime({ genres: ['animated film', 'drama film'] }))).toEqual([
+      'drama film',
+      ANIME_GENRE,
+    ]);
+  });
+
+  it('adds no second Anime to a row that already carries the word', () => {
+    // A row labelled Anime by a provider must not come back with it twice, and the
+    // normalisation has to be idempotent for the same reason: several surfaces resolve
+    // a title more than once on its way to the screen.
+    const once = productGenres(anime({ genres: ['Anime', 'Action'] }));
+    expect(once).toEqual(['Action', ANIME_GENRE]);
+    expect(productGenres({ kind: 'movie', language: 'ja', genres: once })).toEqual(once);
+  });
+
+  it('gives a season the answer its show has, so the two agree', () => {
+    // A season carries no genres and no language at all — TMDB publishes both on the
+    // series — so without inheritance an anime season is not anime, which is exactly
+    // the class of bug `effectiveGenres` was written for.
+    const season: MetadataSubject = {
+      kind: 'season',
+      genres: null,
+      language: null,
+      parent: { genres: ['Animation', 'Action'], language: 'ja' },
+    };
+    expect(isAnimeSubject(season)).toBe(true);
+    expect(productGenres(season)).toEqual(['Action', ANIME_GENRE]);
+  });
+
+  it('says nothing about a title with no genres at all', () => {
+    expect(productGenres({ kind: 'movie', genres: [], language: 'ja' })).toEqual([]);
+    expect(productGenres({ kind: 'movie', genres: null, language: null })).toEqual([]);
+  });
+
+  it('leaves the raw metadata untouched, because the catalogue is a cache', () => {
+    // The reason this is a read-time layer rather than a migration: re-enrichment
+    // overwrites `media_items.genres`, so a product opinion written into a provider
+    // column is one `catalogue:enrich` away from being reverted.
+    const subject = anime();
+    productGenres(subject);
+    expect(effectiveGenres(subject)).toEqual(['Animation', 'Action', 'Adventure']);
+    expect(subject.genres).toEqual(['Animation', 'Action', 'Adventure']);
+  });
+
+  it('is what the shared resolver returns, so every surface gets the same list', () => {
+    // `resolveMetadata` is the one adapter the title page, the collection, the awards
+    // breakdown and the feed all read through. Normalising there is what makes the
+    // answer the same on all of them rather than the same on the ones somebody
+    // remembered.
+    expect(
+      resolveMetadata({
+        kind: 'movie',
+        genres: ['Animation', 'Action'],
+        original_language: 'ja',
+        parent: null,
+      }),
+    ).toEqual({
+      genres: ['Action', ANIME_GENRE],
+      language: 'ja',
+      certification: null,
+      seriesTitle: null,
+    });
+
+    // And the language is untouched by any of it — `ja` is still `ja`.
+    expect(effectiveLanguage(anime())).toBe('ja');
   });
 });

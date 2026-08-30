@@ -21,7 +21,7 @@ somebody's phone.
 | `environment_name()` | nonprod | nonprod | nonprod | **prod** |
 | Sentry `environment` | development | preview | **beta** | **production** |
 | Bundle id | `app.bingd.dev` | `app.bingd.preview` | `app.bingd` | `app.bingd` |
-| `aps-environment` | development | development | development | **production** |
+| `aps-environment` | development | development | **production** | **production** |
 | Backend required at build time | no | no | no | **yes** |
 
 Two rows are the ones that catch people out.
@@ -99,10 +99,17 @@ provider credentials against the EAS project; the Edge Function only ever talks 
 - [ ] Push Notifications capability enabled on App ID `app.bingd`
 - [ ] APNs auth key (`.p8`), Key ID, Team ID (`98729PG8GD`)
 - [ ] Uploaded to EAS: `eas credentials --platform ios`
-- [ ] The production binary carries `aps-environment: production` — `config/push.cjs` writes
-      it for the production lane only. **Every binary before this one carried
-      `development`**, which is the APNs *sandbox*, and is why an RC is required rather than
-      an over-the-air update.
+- [ ] The production binary carries `aps-environment: production` — `config/push.cjs`
+      writes it for the **production and beta** lanes, and `push.test.mjs` pins both.
+      Beta is named because a TestFlight build is signed with an App Store distribution
+      profile and its notifications come from the production APNs environment; a beta
+      binary entitled to the sandbox would register against a service nothing ever sends
+      to, receive nothing, and report no error.
+- [ ] **Every binary built before that rule existed carried `development`**, which is the
+      APNs *sandbox*: the `expo-notifications` plugin defaults `mode` to `development` and
+      `app.config.ts` passed only `{ color }`. An entitlement is a native input and cannot
+      be changed over the air, which is why turning push on cost a new beta build rather
+      than an update — and why production will cost an RC rather than a channel switch.
 
 **Google**
 
