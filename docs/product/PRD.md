@@ -1415,11 +1415,35 @@ Filtered search is intentional exploration, not recommendation. It supports comb
 > could read `Animation · Anime` at once.
 >
 > **For a title satisfying the existing Anime predicate, Anime is the product genre and
-> Animation is not.** Its other genres are untouched:
+> Animation is not.** Its other genres are untouched, and **Anime is drawn first**:
 >
 > ```
-> Action · Adventure · Anime          and never   Animation · Anime
+> Anime · Action · Adventure          and never   Animation · Anime
 > ```
+>
+> *Position amended 2026-08-30, second pass.* It was appended, and the founder's decision
+> after seeing it on a device is that it leads. Most surfaces draw two genres and no more
+> — the collection's metadata line, a feed card's subheading, a recommendation row — so a
+> label at the end of a five-genre list is one that is usually not drawn at all, and the
+> single thing this normalisation exists to say was invisible on exactly the screens that
+> report it. Leading also makes the two labels read as the partition they are: `Anime ·
+> Action` and `Animation · Adventure` are answers to the same question. Every other genre
+> keeps the order the provider published it in, so the only thing that moves is the one
+> label whose position is a product decision.
+>
+> **This is about a title's own genre list and not about the filter sheet.** The Genre
+> options in the Collection filter stay alphabetical: that list is a control rather than a
+> description, and a reader looking for Anime among eleven options wants it where the
+> alphabet says it is.
+>
+> **The provider half of search is normalised too**, as of the same date. Founder
+> acceptance photographed a title page reading Anime beside a search row reading Animation
+> for the same film. Search runs two passes — a local one over `media_items` and a provider
+> one through the adapter — and only the local one resolved product genres; the merge
+> prefers the remote copy for a title in both, because the adapter has just refreshed it,
+> so the moment a search reached TMDB every row on screen reverted to raw labels.
+> `searchProvider` now normalises at the adapter boundary rather than at the screen, which
+> is the one place every present and future caller passes through.
 >
 > Animation is kept for animated content that is **not** anime — every Pixar and Disney
 > film, every Western cartoon — so the two labels now partition the drawn shelf instead of
@@ -1999,6 +2023,69 @@ The canonical contract: **an award milestone newly earned produces exactly one s
 
 **The historical treatment, which is the founder's explicit call.** A tier already on the ledger that the comments-only count no longer supports is **revoked**, along with the feed post and the congratulations that hang off it — so the ledger tells the truth about the rule in force, and no surface goes on claiming an award the Awards sheet no longer shows. It is narrow (one track, and only tiers that fail the new metric), deterministic (the metric is a pure function of `comments`), and it leaves every legitimately-earned tier alone. A revoked tier can be earned again later and announces then, once, through the ordinary ledger. This is the one place this schema has taken an achievement back, and the reason is that the achievement was measuring something the product no longer counts.
 
+### As built — 2026-08-30: the Awards sheet has one order, and it never changes
+
+**Twenty rows, in one fixed sequence: the three that say what Bingd is for — Movie
+Muncher, Season Snacker, Invite Instigator — and then the other seventeen in their three
+category runs (activity, genres, exploration).** Position is a property of the track and
+of nothing else: not of what has been earned, not of how close a tier is, not of what was
+unlocked most recently, and not of whether a number could be read this time.
+
+What this replaces: earned rows were promoted above locked ones within their own area,
+and a row whose count could not be read sank to the bottom. Both are defensible in
+isolation and both do the same thing in the hand — **the sheet a reader closes is not the
+sheet they reopen**. Crossing a tier moved the row that crossed it *and* every row it
+passed, so the reward for an unlock was a list to re-learn; a transient read failure did
+the same for no reason at all. A fixed order is what lets somebody find Space Brain where
+Space Brain was.
+
+The earned state is not lost by this — it is said, loudly, by the badge and by the tier
+name on the row itself, which is where a state belongs. **No separator and no category
+heading** in this pass: the three runs read as grouped without a rule drawn across the
+sheet to say so. Locked/earned styling and tier naming are unchanged. The reader's own
+sheet and a permitted other-profile sheet are ordered identically, because both call the
+same comparator over the same twenty keys.
+
+### As built — 2026-08-30: every legitimate season, and a recommendation audit that changed nothing
+
+**Seasons.** Acceptance reported a series showing fewer seasons than it has. Three things
+came out of tracing it and they are different in kind, so they are stated separately.
+
+1. **The show in the report is the provider's own doing.** TMDB models JUJUTSU KAISEN as a
+   single 59-episode Season 1 under `/tv/95479` and publishes no Season 2 there. Bingd
+   shows Specials and Season 1 because that is the season list TMDB serves, and no
+   ingestion rule can produce a season the provider does not have. Recorded rather than
+   worked around: inventing a season boundary the provider does not publish would put a
+   claim in the catalogue that nothing backs.
+2. **A season list was written once and never revisited** — a real defect and the generic
+   version of the report. The client only re-read a series that had *no* seasons at all,
+   and `media_refresh_due`, which exists for exactly this, is drained by no schedule. A
+   show that gained a season after somebody first opened it stayed short of it for good.
+   The season list now has its own seven-day freshness window, separate from the 150-day
+   descriptive one, because the season list is the one field on a series that grows.
+3. **No season row had an episode count**, because the running edge function predated the
+   payload that sends one. That is a deployment gap, not a code defect, and the lesson is
+   recorded in [`api.md`](../architecture/api.md): an edge function is covered by neither
+   the OTA, CI, nor the release gate. A scoped `hydrate-seasons` backfill repairs the
+   existing rows.
+
+Nothing here can lose data: `tmdb_upsert_seasons` upserts on `(parent, season number)` and
+has no delete in it, so a re-read keeps season ids stable — rankings, watch state and
+progress stay attached — and a short or failed provider answer cannot replace a more
+complete cached set. Episode-level tracking is **not** part of this and remains where it
+was: [`deferred-roadmap.md`](./deferred-roadmap.md) §22.
+
+**Recommendations: audited, unchanged.** "Jobs and Creed keep appearing" was measured
+against deployed data rather than reasoned about — 154 distinct titles across 621
+impressions in three days, a ceiling of 6 for any one title, and both named films
+reachable from two of the reader's top-ranked anchors each. Every hypothesis worth having
+was checked and each came back negative: invalidation, refresh completeness, fallback
+pinning, consumed titles, deterministic order. So **no code changed**, and the experiment
+that would answer the question properly is written down at
+[`recommendations.md`](../architecture/recommendations.md) §9 and
+[`deferred-roadmap.md`](./deferred-roadmap.md) §30. Tuning taste weights or adding
+randomness on one account's impression would have been guessing with a straight face.
+
 ### As built — 2026-08-28: the Feed ↔ Leaderboard toggle
 
 A compact two-state control sits in the Feed header, immediately beside the notification
@@ -2054,6 +2141,49 @@ in **UTC** — stated rather than inherited, because `current_date` reads the co
 timezone and PostgREST does not pin it. A per-viewer timezone would make two people
 disagree about who is winning, which is worse than a boundary that moves at UTC midnight
 for somebody in Auckland.
+
+#### Which month a watch belongs to — corrected 2026-08-30
+
+**The watch date, or failing that the day the title entered the collection.**
+
+The monthly metrics used to require `user_media.watched_on`, and that column is optional
+by design: `set_bucket` creates a collection row without one, the Log sheet stamps a date
+in a second call the reader may never make, and "I watched this and I do not remember
+when" has been a first-class state since 2026-08-24. Founder acceptance found a followed
+public account with two ranked films absent from a board that was listing accounts with
+one and two — and on nonprod five of twelve accounts had no dated row at all, so five
+people could not appear on the monthly board whatever they did.
+
+That is not a stricter metric. It is a board that excludes a class of user for using an
+affordance the product offers them, and — the half that is invisible in the app — it
+misreports where everybody below them stands.
+
+So `coalesce(watched_on, created_at)`, UTC on both halves so the fallback cannot disagree
+with the month boundary. It is a **fallback and never an override**: a dated row counts
+exactly where it counted before, a film logged in March with no date counts in March, and
+one dated later moves to the month it was actually watched. `created_at` is written once
+by the writer and no later edit moves it, so nothing here can be gamed by re-touching a
+row.
+
+Rejected: stamping a date at write time (it puts a claim in the column that the reader
+declined to make, and repairs nothing already written) and counting an undated row in
+every month (one row, twelve points).
+
+**What is not promised, and it is not new.** A row is attributed to one month at a time
+and counts once on any board — `user_media` is keyed by title, so there is nothing to
+double — but that month can **move**, because a watch date is editable and correcting one
+is the point of having it. A title logged undated in March and dated to April in April
+scores on March's board and then on April's. `log_watched` has always upserted
+`watched_on`, so a March-dated row re-dated to April did exactly this before today.
+Pinning a row to the first month it ever scored in needs a ledger of "already counted
+in", which is a real mechanism against a marginal vector: the boards are consecutive, the
+earlier one is no longer readable by anybody, and the alternative is a product that
+refuses to believe a reader who corrects a date. Recorded rather than left to be
+discovered.
+
+All time is unchanged — it has no date test, because there is no month to get wrong. The
+Reviews metric is unchanged: `note_first_published_at` is stamped whenever a review
+becomes public, so it has no gap of this kind.
 
 #### This month and All time — added 2026-08-29
 

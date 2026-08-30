@@ -1,5 +1,6 @@
 import { FunctionsHttpError } from '@supabase/supabase-js';
 
+import { productGenres } from './media-metadata';
 import { supabase } from './supabase';
 
 /**
@@ -69,11 +70,69 @@ async function invoke<T>(body: Record<string, unknown>): Promise<T> {
 }
 
 /**
+ * The product genres for adapter results, resolved here rather than at a screen.
+ *
+ * **The founder's photograph, 2026-08-30: the title page said Anime and the search row
+ * for the same film said Animation.** The local half of search already normalised — it
+ * reads `media_items` itself and goes through `productGenres` — but the provider half
+ * returns the adapter's own rows, whose `genres` are the catalogue column verbatim, and
+ * the merge in `useTitleSearch` prefers the remote copy for a title present in both. So
+ * the moment a search reached TMDB, every row on the screen reverted to raw labels.
+ *
+ * Fixed at the adapter boundary and not at the screen, because that is the one place
+ * every present and future caller of {@link searchProvider} passes through. The rule
+ * itself is unchanged and lives where it already lived: `lib/media-metadata`.
+ *
+ * The extra input is `original_language`, which the adapter's payload does not carry and
+ * the predicate needs, so this reads it back from `media_items` — a table read against
+ * ids the adapter has just written, on a path that has already spent a provider request.
+ * A failed or partial lookup leaves that row's genres exactly as they arrived: a search
+ * result missing one label is a worse row, and a search that fails because a genre could
+ * not be decorated is a worse product.
+ */
+async function withProductGenres(rows: AdapterSearchResult[]): Promise<AdapterSearchResult[]> {
+  if (!rows.length) return rows;
+
+  const { data, error } = await supabase
+    .from('media_items')
+    .select('id, kind, genres, original_language')
+    .in(
+      'id',
+      rows.map((row) => row.id),
+    );
+  if (error || !data) return rows;
+
+  const metaById = new Map(
+    (data as { id: string; kind: string; genres: string[] | null; original_language: string | null }[]).map(
+      (row) => [row.id, row],
+    ),
+  );
+
+  return rows.map((row) => {
+    const meta = metaById.get(row.id);
+    if (!meta) return row;
+    return {
+      ...row,
+      // A search result is a film or a series, never a season, so there is no parent to
+      // inherit from and the subject is the row itself — the same reasoning the local
+      // pass states.
+      genres: productGenres({
+        kind: meta.kind as 'movie' | 'series' | 'season',
+        genres: meta.genres,
+        language: meta.original_language,
+      }),
+    };
+  });
+}
+
+/**
  * Titles TMDB knows about, written into the catalogue as a side effect.
  *
  * Every result already exists in `media_items` by the time this resolves, which is
  * what lets the caller push straight to `/title/{id}` — there is no "import this
  * title" step, and no id that means something only to TMDB.
+ *
+ * Genres come back as **product** genres — see {@link withProductGenres}.
  */
 export async function searchProvider(query: string, limit = 10) {
   const data = await invoke<{ results: AdapterSearchResult[] }>({
@@ -81,7 +140,7 @@ export async function searchProvider(query: string, limit = 10) {
     query,
     limit,
   });
-  return data.results ?? [];
+  return withProductGenres(data.results ?? []);
 }
 
 /**

@@ -111,6 +111,10 @@ jest.mock('@/features/title/use-enrichment', () => ({
     mockEnrichmentArgs.push(args);
     return { enriching: false };
   },
+  // **The real freshness rule**, not a stub. The screen's job is to decide *whether* to
+  // ask, and since 2026-08-30 a stale season list is one of the reasons — so a mock that
+  // always said "fresh" would make the one assertion below vacuous.
+  seasonListIsStale: jest.requireActual('@/features/title/use-enrichment').seasonListIsStale,
 }));
 
 // Opening a trailer and opening a review are both handovers to the operating system,
@@ -182,6 +186,7 @@ beforeEach(() => {
   alertSpy.mockClear();
   mockOpenURL.mockReset();
   mockEnrichmentArgs.length = 0;
+
   mockRpcResults = {};
   mockRpcErrors = {};
   for (const key of Object.keys(mockReads)) delete mockReads[key];
@@ -1141,7 +1146,7 @@ describe('a series', () => {
     runtime_minutes: null,
   };
 
-  const season = (n: number) => ({
+  const season = (n: number, fetchedAt = new Date().toISOString()) => ({
     id: `season-${n}`,
     parent_id: 'series-1',
     kind: 'season',
@@ -1149,6 +1154,10 @@ describe('a series', () => {
     title: `Season ${n}`,
     release_date: `${2007 + n}-01-20`,
     poster_path: null,
+    // When the provider last wrote this row. The season-list freshness rule reads it, and
+    // the default is "written just now" so that every test above is about the screen
+    // rather than about the clock.
+    fetched_at: fetchedAt,
   });
 
   beforeEach(() => {
@@ -1220,6 +1229,47 @@ describe('a series', () => {
     // shape the Following-score block was corrected for in #74.
     await waitFor(() => expect(view.getByText('Seasons are still loading')).toBeTruthy());
     expect(view.getByRole('tab', { name: 'Seasons' })).toBeTruthy();
+  });
+
+  /**
+   * The founder's report of 2026-08-30: a series short of a season.
+   *
+   * The screen used to ask the provider about a series only when the row looked *thin* —
+   * no artwork, no overview — which a series acquires once and keeps. So a season list
+   * was written by whichever enrichment first reached the series and then never revisited,
+   * and `media_refresh_due` is drained by no schedule, so nothing else was going to ask.
+   *
+   * These assert the **decision** rather than the request: `useTitleEnrichment` is mocked,
+   * and what is checked is the second argument the screen hands it.
+   */
+  const askedToEnrich = () => mockEnrichmentArgs.some((args) => args[1] === true);
+
+  it('asks the provider again when the season list has gone stale', async () => {
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    tableRows.media_items = [series, season(1, old), season(2, old)];
+
+    const view = await openSeries();
+    await waitFor(() => expect(view.getByText(/Season 2/)).toBeTruthy());
+
+    expect(askedToEnrich()).toBe(true);
+  });
+
+  it('asks once, for this series, and not once per reason', async () => {
+    // One reason, one call. Two hooks watching the same series would each spend a
+    // provider request on it, which is why the season rule rides on `alsoWhen` rather
+    // than on a second `useSeasonEnrichment`.
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    tableRows.media_items = [series, season(1, old)];
+
+    const view = await openSeries();
+    await waitFor(() => expect(view.getByText(/Season 1/)).toBeTruthy());
+
+    const asked = new Set(
+      mockEnrichmentArgs
+        .filter((args) => args[1] === true)
+        .map((args) => (args[0] as { id?: string } | null)?.id),
+    );
+    expect([...asked]).toEqual(['series-1']);
   });
 });
 

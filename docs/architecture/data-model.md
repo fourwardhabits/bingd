@@ -351,6 +351,56 @@ Nothing viewer-relative is stored in it. Whether the reader has ranked, watched 
 >
 > Added: an index on `fetched_at`, and a `media_refresh_due` view listing rows past `tmdb.metadata_max_age_days` (currently 150, giving a 30-day margin on the six-month limit) that a user collection still references. `tmdb-adapter` drains it. Rows nobody references are pruned rather than refreshed, which reaches the same compliance for less provider quota. **The quota cost of that refresh belongs in the PRD §19 cost model**, because it scales with the number of distinct titles the user base has ever touched rather than with current activity.
 
+> **A season list has a second, shorter clock — 2026-08-30 (`20260903000100`).**
+>
+> `tmdb.metadata_max_age_days` is 150 and governs a row's *description*: poster, overview,
+> genres, all stable for months. A series' **season list** is the one field on a catalogue
+> row that grows, and it grows on the provider's schedule. Judged by the descriptive
+> window, a show that gained a season in September would still be short of it in February.
+>
+> Two things follow, and they sit on opposite sides of the client boundary.
+>
+> On the **client**, the season list is re-read when its newest row is more than seven days
+> old (`SEASON_LIST_MAX_AGE_MS`, `features/title/use-enrichment.ts`). The gate used to be
+> "this series has no seasons at all", which meant a list was written exactly once and
+> never revisited — and `media_refresh_due`, which exists for the general version of the
+> problem, **is drained by no schedule**, so nothing else was going to ask either.
+>
+> The *newest* and not the oldest, which independent review 77 corrected. The oldest reads
+> better as semantics — after a whole-list write every row shares an instant, so the
+> minimum is when the list was last written whole — and it does not terminate:
+> `tmdb_upsert_seasons` writes the seasons the provider named and is silent about the rest,
+> so a season TMDB has since dropped keeps its old timestamp forever, the minimum never
+> moves, and every open of that series spends a request that cannot change anything. The
+> newest terminates unconditionally, at the cost of one season's own refresh vouching for
+> the list for up to a week — a good trade against a defect measured in months.
+>
+> On the **server**, `season_hydration_due` lists series carrying at least one season row
+> with no `episode_count` — the set the `hydrate-seasons` maintenance action walks
+> (`api.md`). It offers neither a series with no seasons at all (that is
+> `tmdb_enrich_due`'s question) nor a CC0 row (no provider to ask).
+>
+> **Membership is deliberately not a proof of progress**, which reviews 77 and 77b found
+> from two directions. Two kinds of row stay in it however many times the series is
+> hydrated: a season the provider reports as having zero episodes, which
+> `tmdb_upsert_seasons` stores as null (`nullif(count, 0)`) forever, and a season the
+> provider has *dropped* from its answer, which no later write names at all — the JUJUTSU
+> KAISEN shape exactly. So the view never empties, and a `remaining` count over it could
+> never reach zero. An earlier attempt bounded the population by a stored instant instead;
+> that fixed the first row and not the second, and added a failure of its own — a missing
+> config row makes the comparison null and reports an empty backlog while the work is
+> outstanding.
+>
+> The drain therefore **walks** the list once in `id` order behind a cursor the caller
+> carries, and reports no remaining count. Termination is a property of the walk — a
+> finite ordered set, visited once — rather than of the set shrinking, and re-running the
+> reconciliation is starting the walk again.
+>
+> Neither path can lose data. `tmdb_upsert_seasons` inserts and updates and has no delete
+> in it, so a short or failed provider answer is a write about the seasons it names and
+> silence about the rest — a partial response can never replace a more complete cached set,
+> and a season's id never moves out from under a ranking.
+
 
 
 > **Read access is public** on `media_items`, `media_cache`, `provider_list_cache` and `person_cache`. Catalog metadata is not user data. These are the only unrestricted reads in the schema.

@@ -38,7 +38,7 @@ import { useCommunityScore } from '@/features/title/use-community-score';
 import { useFollowingScore } from '@/features/title/use-following-score';
 import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
 import { useCredits } from '@/features/title/use-credits';
-import { useTitleEnrichment } from '@/features/title/use-enrichment';
+import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
 import { TitleReviews } from '@/features/title/TitleReviews';
 import { useTitleVideos } from '@/features/title/use-title-extras';
 import { useTitleReviews, type ReviewSort } from '@/features/title/use-title-reviews';
@@ -280,7 +280,30 @@ export default function TitleScreen() {
   // adapter learned to store them, which is true of every row enriched before
   // 2026-08-17 and of nothing else. `useTitleVideos` explains why null and empty are
   // different answers.
-  const { enriching } = useTitleEnrichment(data?.title ?? null, videos.data === null);
+  /**
+   * The third reason to ask, added 2026-08-30: **this series' season list has gone
+   * stale.**
+   *
+   * `isThin` asks about artwork, an overview and a runtime, all of which a series
+   * acquires once and keeps — so a series page never re-enriched, and its season list
+   * stayed whatever was true the day somebody first opened it. This is the screen the
+   * founder was looking at when a show turned out to be short of a season, so it is the
+   * screen that has to be able to ask again.
+   *
+   * It rides on `alsoWhen` rather than on a second hook, and that is not a tidiness
+   * preference: `useEnrichOnce` de-duplicates by id **within one hook instance**, so two
+   * hooks looking at the same series would each spend a provider request on it. One
+   * reason, one call, one request. `useSeasonEnrichment` still exists for `SeasonPicker`,
+   * which reaches a series this screen never mounted.
+   */
+  const seasonListNeedsReading =
+    data?.title?.kind === 'series' &&
+    seasons.isFetched &&
+    ((seasons.data ?? []).length === 0 || seasonListIsStale(seasons.data ?? []));
+  const { enriching } = useTitleEnrichment(
+    data?.title ?? null,
+    videos.data === null || seasonListNeedsReading,
+  );
   // The score is derived from the band, so this needs the whole category's
   // bucket counts — not just this title's row (ranking.md §11).
   const rankCategory: RankingCategory =

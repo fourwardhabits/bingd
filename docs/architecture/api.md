@@ -157,6 +157,17 @@ Semantics are in [`ranking.md`](./ranking.md).
 > branch is about *finding* people and inherits both refusals. Everything the account
 > wrote stays behind `can_view_profile` unchanged, and a tap lands on the same locked
 > profile shell it always did.
+>
+> **And the *month* is wider than `watched_on`** (`20260903000100`). The monthly watched
+> metrics attribute a `user_media` row to `coalesce(watched_on, created_at at UTC)` — the
+> watch date where the reader gave one, and otherwise the day the title entered their
+> collection. `watched_on` is optional by design (`set_bucket` writes no date, and the Log
+> sheet stamps one in a second call), so requiring it kept whole accounts off the board:
+> five of twelve on nonprod had no dated row at all. It is a fallback and never an
+> override, and `created_at` is written once and moved by no writer, so a dated row counts
+> exactly where it counted before and nothing here can be re-touched into a second point.
+> All-time has no date test; Reviews reads `note_first_published_at`, which the writer
+> always stamps.
 
 `unblock` deliberately does not restore follows. Restoring a relationship the user severed would be surprising, and the follow is one tap to recreate.
 
@@ -366,7 +377,7 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 
 `nudge-scheduler` is worth calling out. PRD §15 makes the nudge conditional on real content, so the function's first action is a query for qualifying activity, and its most common outcome is to send nothing. That is the intended behavior, not a failure mode, and the metric to watch is the ratio of evaluations to sends.
 
-### `tmdb-adapter` — the seven actions
+### `tmdb-adapter` — the eight actions
 
 Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may call it.
 
@@ -379,6 +390,34 @@ Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may
 | `trending` | `service_role` | Refreshes the four `provider_list_cache` lists. Added 2026-08-16 |
 | `enrich` | `service_role` | Drains `tmdb_enrich_due` — rows carrying a tmdb id that have never been fetched |
 | `refresh` | `service_role` | Drains `media_refresh_due` — the retention window in §AD-8 |
+| `hydrate-seasons` | `service_role` | Walks `season_hydration_due` behind an `after` cursor — series whose season rows have no episode count. Added 2026-08-30 |
+
+**`hydrate-seasons` is the scoped season backfill, and it is the same act as `detail`.**
+A series detail call rewrites the whole season list through `tmdb_upsert_seasons`, which
+upserts on `(parent_id, season_number)` and has no delete in it — so a repeat writes the
+same rows with the same ids, and every ranking, watch state and progress stays attached to
+the season it was attached to. What a repeat can *add* is a season the provider has
+published since the list was written, and the `episode_count` for rows written before the
+adapter sent one.
+
+**It walks rather than drains, and returns `next` rather than `remaining`.** The view
+permanently contains a series whose provider reports a season as having zero episodes,
+and one whose provider has dropped a season it once named — neither can ever acquire a
+count — so waiting for it to empty is waiting for something that will not happen, and a
+backlog number over it could never reach zero. The caller sends `after`, the last id of
+the previous page; the pass is finished when a page comes back short, at which point
+`next` is absent. Termination is a property of the walk: a finite set, ordered by a key
+nothing renumbers, visited once. `data-model.md` carries the two rows and the attempt
+that got this wrong.
+
+It exists because of a **deployment gap** rather than a code defect, and that is the more
+useful thing to record. `episode_count` entered `normalize.ts` on 2026-08-21; the function
+running on nonprod had last been deployed on 2026-08-17. The SQL had been correct since
+`20260820000400` and had nothing to receive, so every season row carried a null count and
+the metadata line that should read "24 episodes" was blank on every season in the app,
+with no error anywhere to notice. **An edge function is not covered by the OTA, by CI, or
+by the release gate.** Merging a change under `supabase/functions/` and not deploying it
+is silent, and the silence lasted thirteen days.
 
 **`detail` fetches its appended responses in one request.** `credits`, `videos` and the
 certification source (`release_dates` for a movie, `content_ratings` for a series) all arrive

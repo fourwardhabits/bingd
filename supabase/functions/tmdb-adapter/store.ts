@@ -258,6 +258,35 @@ export async function dueForRefresh(db: Db, limit: number) {
   return (data ?? []) as { id: string; kind: 'movie' | 'series' | 'season'; tmdb_id: number }[];
 }
 
+/**
+ * The next page of series that may be owed a season re-read, in id order.
+ *
+ * The drain for the scoped season backfill (`20260903000100`). One detail call per
+ * series rewrites the whole season list through `tmdb_upsert_seasons`, so the pass
+ * repairs two things at once: the counts that never arrived, and any season the provider
+ * has published since the list was last written.
+ *
+ * **A cursor, and not a queue that empties.** Two kinds of season row stay in
+ * `season_hydration_due` however many times they are hydrated — one the provider reports
+ * as having zero episodes, and one the provider has dropped from its answer entirely —
+ * so waiting for the view to go empty is waiting for something that will not happen, and
+ * a `remaining` count over it can never reach zero. Termination is a property of the
+ * *walk* instead: a finite set, ordered by id, visited once. `after` is the last id of
+ * the previous page.
+ *
+ * A view rather than a filter written here, for the reason `media_refresh_due` is one —
+ * the definition of "owed" belongs beside the schema it is about, where the DB suite can
+ * assert it.
+ */
+export async function dueForSeasonHydration(db: Db, limit: number, after?: string) {
+  let query = db.from('season_hydration_due').select('id, kind, tmdb_id').order('id').limit(limit);
+  if (after) query = query.gt('id', after);
+
+  const { data, error } = await query;
+  if (error) throw new Error(`season_hydration_due: ${error.message}`);
+  return (data ?? []) as { id: string; kind: 'series'; tmdb_id: number }[];
+}
+
 export async function countEnrichmentBacklog(db: Db) {
   const { count, error } = await db
     .from('tmdb_enrich_due')

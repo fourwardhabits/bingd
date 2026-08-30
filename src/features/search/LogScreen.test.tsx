@@ -86,6 +86,10 @@ jest.mock('@/lib/tmdb-adapter', () => {
   return {
     AdapterError: MockAdapterError,
     searchProvider: (...args: unknown[]) => mockSearchProvider(...args),
+    // The season picker may ask for a series to be re-read when its season list has gone
+    // stale (2026-08-30). Stubbed to "nothing was written" so the screen tests stay about
+    // the screen; the freshness rule itself is asserted in `use-enrichment.test.ts`.
+    enrichTitle: () => Promise.resolve({ enriched: false }),
   };
 });
 
@@ -142,6 +146,7 @@ beforeEach(() => {
       release_date: '2008-01-20',
       poster_path: null,
       kind: 'season',
+      fetched_at: new Date().toISOString(),
     },
     {
       id: 'season-2',
@@ -151,6 +156,7 @@ beforeEach(() => {
       release_date: '2009-03-08',
       poster_path: null,
       kind: 'season',
+      fetched_at: new Date().toISOString(),
     },
   ];
 });

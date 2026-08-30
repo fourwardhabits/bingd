@@ -207,16 +207,26 @@ export const isAnimeSubject = (subject: MetadataSubject): boolean =>
  * drift, needs no backfill, and leaves the raw metadata intact for the day the robust
  * signal — TMDB's own `anime` keyword, 210024 — becomes available.
  *
- * Appended rather than substituted in place, because TMDB lists `Animation` first on
- * most anime and the founder's example ends on the word.
+ * ---------------------------------------------------------------------------
+ * ANIME COMES FIRST (founder, 2026-08-30)
+ *
+ * It was appended, on the reasoning that TMDB lists `Animation` first and the founder's
+ * example ended on the word. The founder's decision after seeing it on the device is the
+ * other way round: **Anime leads the list.** Most surfaces draw two genres and no more —
+ * `TitleMetadata` slices to two, a feed card's subheading to two — so a label at the end
+ * of a five-genre list is a label that is usually not drawn at all, and the one thing
+ * this normalisation exists to say would be invisible on exactly the screens that report
+ * it. Leading also makes the two labels read as the partition they are: `Anime · Action`
+ * and `Animation · Adventure` are answers to the same question.
+ *
+ * Every other genre keeps the order the provider published it in, so the only movement
+ * is the one label whose position is a product decision.
  */
 export function productGenres(subject: MetadataSubject): string[] {
   const genres = effectiveGenres(subject);
   if (!isAnimeLabels(effectiveLanguage(subject), genres)) return genres;
 
-  const kept = genres.filter((genre) => !ANIMATION_LABEL.test(genre));
-  kept.push(ANIME_GENRE);
-  return kept;
+  return [ANIME_GENRE, ...genres.filter((genre) => !ANIMATION_LABEL.test(genre))];
 }
 
 /** The original language to reason about this title with, or null when unknown. */
