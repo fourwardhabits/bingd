@@ -110,22 +110,21 @@
 -- for it is the same instrument the goal needed and pointed the other way -- the later
 -- writer reaches back and adopts the earlier derived event into its own group.
 --
--- `_rank_finalize` does it, under one rule stated as two facts and no interval: **a
--- derived announcement that no activity has claimed belongs to the next one.**
+-- `_rank_finalize` does it, under two facts and no interval:
 --
---   * nothing of the reader's happened between that announcement and this activity --
---     the guard `_maybe_goal_completion` already applies from the other side, and what
---     keeps a film logged in March and ranked today from hauling a five-month-old award
---     to the top of the feed; and
---   * the announcement is not older than this title's own place in the collection
---     (`user_media.created_at`, exact because it and `causal_at` are both `now()` in
---     their own transaction) -- the floor that stops a first ranking sweeping up a whole
---     history of announcements from somebody who logs without ranking.
+--   * **the announcement names this title** -- `causal_media_item_id`, §2 above, written
+--     by the writer that announced it rather than guessed at from a clock; and
+--   * **nothing of the reader's happened in between** -- the guard
+--     `_maybe_goal_completion` already applies from the other side, and what keeps a film
+--     logged in March and ranked today from hauling a five-month-old award to the top of
+--     the feed.
 --
--- A range and not an equality, because the Log sheet fires twice: the bucket tap creates
--- the collection row and the award announces there, then the sheet stamps the watch date
--- in its own call and a goal crossing announces at *that* instant. Both are one act to
--- the person doing it.
+-- Both the award and the goal are reached even though they land at different instants:
+-- the bucket tap creates the collection row and the award announces there, then the sheet
+-- stamps the watch date in its own call and a goal crossing announces at *that* moment.
+-- Both name this title. That is why §2 exists at all -- the first version of this bounded
+-- the adoption by timestamps, and review 76b showed a second title's award slipping
+-- inside every bound there was.
 --
 -- Only `causal_at` moves. `created_at`, the id, the payload, the reactions and the
 -- comments are all untouched, so a feed that has already shown the award re-sorts it
@@ -193,7 +192,362 @@ comment on column feed_events.causal_step is
 
 
 -- ---------------------------------------------------------------------------
--- 2. The ranking adopts the award its own act announced early
+-- 2. A derived event names the title whose write announced it
+--
+-- The adoption below has to know that an announcement belongs to *this* title, and
+-- until now nothing recorded it: an `award_earned` payload carries an award and a tier,
+-- a `goal_completed` payload a year and a target, and `feed_events.media_item_id` is
+-- null on both. Independent review 76b built the failure out of exactly that gap --
+-- log A, log B and have B cross a tier, rank A, and B's award is adopted into A's group
+-- and presented to A's followers as the consequence of ranking A.
+--
+-- Timestamps cannot close it. Every bound available -- the collection row's creation,
+-- its last update, "nothing happened in between" -- is satisfied by B's award as
+-- readily as by A's, because the two writes are seconds apart in one sitting and
+-- neither produces activity. So the writers declare the fact instead, which is the same
+-- move `causal_step` is: a serial could not say which post belonged where either.
+--
+-- **Null means "no ranking may adopt this", and that is the right default.** Eight of
+-- the nine award call sites are about a comment, a reaction, a follow or an invite and
+-- have no title; a goal crossed by several titles at once has no single cause; and
+-- every row written before this migration keeps a null it will never lose. In each case
+-- the announcement stands at its own moment, which is where it stood before.
+-- ---------------------------------------------------------------------------
+
+alter table feed_events
+  add column causal_media_item_id uuid references media_items(id) on delete set null;
+
+comment on column feed_events.causal_media_item_id is
+  'The title whose collection write announced this derived event -- set on award_earned and goal_completed, null everywhere else and null on every row written before 20260902000100. It exists so _rank_finalize can adopt an announcement its own act produced early into the group of the activity that act finally posts: the Log sheet buckets, stamps a date and only then ranks, so those announcements are minutes older than the ranking they belong to, and no timestamp bound can tell one title''s unclaimed award from another''s. Deliberately NOT media_item_id, which is what an activity is *about* and decides where a tap goes -- an award row must keep routing to the Awards sheet. On delete set null rather than cascade: losing a catalogue row must not delete the record that somebody earned something.';
+
+-- Index deliberately absent. The one reader is `_rank_finalize`'s adoption, which is
+-- already filtering by `actor_id` -- `feed_events_actor_created` serves it, and the
+-- residual is a handful of that actor's rows.
+
+create or replace function _maybe_award_unlocks(
+  p_user  uuid,
+  p_awards text[],
+  -- The title whose collection write is announcing this, when there is one
+  -- (20260902000100). Defaulted, because eight of the nine call sites are about a
+  -- comment, a reaction, a follow or an invite and have no title to name -- and a null
+  -- here means "no ranking may adopt this", which is the right answer for all of them.
+  p_media_item_id uuid default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_award    text;
+  v_tier     record;
+  v_metric   bigint;
+  v_count    integer;
+  v_top      record;
+  v_top_val  bigint;
+  v_event_id uuid;
+  -- Which derived post this is within one causal action. See the migration
+  -- header: 2 is the first award, and a second award in the same breath is 3.
+  v_step     smallint := 2;
+begin
+  -- A deleted inviter, a null actor: nothing to record and nobody to tell.
+  if p_user is null then
+    return;
+  end if;
+
+  foreach v_award in array p_awards loop
+    v_top := null;
+
+    for v_tier in
+      select t.award_key, t.tier_key, t.tier_label, t.display_name, t.threshold, t.social
+        from award_tiers t
+       where t.award_key = v_award
+       order by t.tier_index
+    loop
+      -- One index probe answers the common path — the tier is already on the
+      -- ledger — before any counting happens (_maybe_activate_invite's shape).
+      if exists (
+        select 1 from award_unlocks u
+         where u.user_id = p_user
+           and u.award_key = v_tier.award_key
+           and u.tier_key = v_tier.tier_key
+      ) then
+        continue;
+      end if;
+
+      v_metric := _award_metric(p_user, v_award, v_tier.threshold);
+
+      -- Thresholds ascend, and every metric is monotone in its own cap, so a
+      -- tier that fails settles every tier above it.
+      exit when v_metric < v_tier.threshold;
+
+      insert into award_unlocks (user_id, award_key, tier_key, value_at_unlock)
+      values (p_user, v_tier.award_key, v_tier.tier_key, v_metric)
+      on conflict (user_id, award_key, tier_key) do nothing;
+
+      get diagnostics v_count = row_count;
+      if v_count = 1 then
+        -- Ours to announce — but only the HIGHEST tier this call crossed. Two
+        -- tiers crossed in one sync (rare: a whole tier span between actions)
+        -- would otherwise post twice in one breath.
+        v_top := v_tier;
+        v_top_val := v_metric;
+      end if;
+    end loop;
+
+    if v_top is not null then
+      if v_top.social then
+        insert into feed_events (actor_id, type, causal_step, causal_media_item_id, payload)
+        values (
+          p_user, 'award_earned', v_step, p_media_item_id,
+          jsonb_build_object(
+            'award',      v_top.award_key,
+            'tier',       v_top.tier_key,
+            'award_name', v_top.display_name,
+            'tier_label', v_top.tier_label
+          )
+        )
+        on conflict (actor_id, ((payload ->> 'award')), ((payload ->> 'tier')))
+          where type = 'award_earned'
+          do nothing
+        returning id into v_event_id;
+      end if;
+
+      -- The congratulations, to the earner, actorless — nobody did this to them.
+      -- The awards preference (default on as of this migration) gates it in the
+      -- BEFORE trigger; push eligibility rides the ordinary pipeline.
+      insert into notifications (recipient_id, type, payload)
+      values (
+        p_user, 'award_earned',
+        jsonb_build_object(
+          'award',      v_top.award_key,
+          'tier',       v_top.tier_key,
+          'award_name', v_top.display_name,
+          'tier_label', v_top.tier_label
+        )
+      )
+      on conflict (recipient_id, ((payload ->> 'award')), ((payload ->> 'tier')))
+        where type = 'award_earned'
+        do nothing;
+
+      update award_unlocks
+         set announced = true
+       where user_id = p_user
+         and award_key = v_top.award_key
+         and tier_key = v_top.tier_key;
+
+      -- Incremented per announced track, so two awards crossed by one action have
+      -- a fixed order rather than whichever one a reader's page happens to return
+      -- first. The order is p_awards' own, which is a literal array at every one
+      -- of the nine call sites.
+      v_step := v_step + 1;
+    end if;
+  end loop;
+end;
+$$;
+
+-- The two-argument arity is gone: `create or replace` above added a defaulted
+-- parameter, which overloads rather than replaces, and a two-argument call against both
+-- would be ambiguous. The same treatment `_maybe_goal_completion` had on 20260901000100.
+-- Dropped after the new one exists; the nine trigger functions call it positionally with
+-- two arguments and resolve to the new one unchanged.
+drop function if exists _maybe_award_unlocks(uuid, text[]);
+
+revoke execute on function _maybe_award_unlocks(uuid, text[], uuid) from public, anon, authenticated;
+comment on function _maybe_award_unlocks(uuid, text[], uuid) is
+  'The award transition: for each named track, walk the tiers ascending, record every newly-passed one on the ledger, and announce the highest -- one feed event (social tracks only) and one congratulations notification, both hanging off the insert that reported a row, so two devices crossing together announce once. Feed events carry causal_step 2 and up since 20260901000100, one step per announced track in p_awards order. Since 20260902000100 they also carry causal_media_item_id when the caller names the title whose collection write announced them, which is what lets the ranking that follows adopt them; the eight call sites with no title pass nothing and their announcements are never adopted. Directly callable by nobody: a client that could invoke this could probe another account''s counts. Internal.';
+
+
+-- The collection trigger, rebuilt to name the title it is about. It is a per-row
+-- trigger, so `new.media_item_id` is exact rather than an aggregate.
+create or replace function _award_touch_user_media()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform _maybe_award_unlocks(new.user_id,
+    array['movie-muncher','season-snacker','scream-snack','lol-mode',
+          'softie-hours','space-brain','boom-club','toon-bloom',
+          'truth-worm','passport-mode','time-hopper','genre-gremlin',
+          'two-screen-life'],
+    new.media_item_id);
+  return null;
+end;
+$$;
+
+revoke execute on function _award_touch_user_media() from public, anon, authenticated;
+
+
+create or replace function _maybe_goal_completion(
+  p_user     uuid,
+  p_year     integer,
+  p_category ranking_category,
+  p_added    integer,
+  -- The titles whose watch dates carried the count over, so the completion can find
+  -- the activity that caused it (20260901000100). Defaulted, because a caller that
+  -- does not know produces a completion timed at its own moment, which is the
+  -- behaviour this function had before.
+  p_media_items uuid[] default '{}'
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_target integer;
+  v_count  integer;
+  v_rows   integer;
+  v_source record;
+  v_at     timestamptz := now();
+begin
+  if p_user is null or p_year is null or p_category is null or coalesce(p_added, 0) < 1 then
+    return;
+  end if;
+
+  -- **The goal must already exist.** Founder §9: "user had a goal configured BEFORE the
+  -- qualifying watch". No row, nothing to cross.
+  select target into v_target
+    from watch_goals
+   where user_id = p_user and year = p_year and category = p_category;
+
+  if v_target is null then
+    return;
+  end if;
+
+  -- ---------------------------------------------------------------------------
+  -- Serialised per (account, year, medium), and this is the correctness of the whole
+  -- function rather than an optimisation.
+  --
+  -- **The ledger's primary key gives at-most-once. It does not give at-least-once**, and
+  -- independent review found the gap: without this lock two devices can lose a crossing
+  -- *permanently*, which is a worse failure than the duplicate the key prevents.
+  --
+  --   goal is 2, count is 0
+  --   A inserts its film; B inserts a different film, concurrently
+  --   under READ COMMITTED neither sees the other's uncommitted row, so both count 1
+  --   1 < 2, so both return without inserting, and both commit
+  --   the count is now 2 and nothing was ever announced
+  --   every later watch finds `count - added >= target` and stays silent for ever
+  --
+  -- Taking the lock *before* counting is what closes it. The second transaction waits for
+  -- the first to commit, and its `select count(*)` is a new statement under READ
+  -- COMMITTED — so it takes a fresh snapshot, sees the committed row, counts 2, and
+  -- correctly recognises itself as the crossing. The first transaction counted 1 and was
+  -- honestly not the one that crossed.
+  --
+  -- Same idiom `_rank_finalize` uses to serialise a user's category (20260813000700).
+  perform pg_advisory_xact_lock(
+    hashtextextended('goal:' || p_user::text || ':' || p_year::text || ':' || p_category::text, 0)
+  );
+
+  v_count := _goal_qualifying_count(p_user, p_year, p_category);
+
+  -- The crossing, and both halves are load-bearing. `v_count >= v_target` alone would
+  -- fire on every subsequent watch for the rest of the year; `v_count - p_added <
+  -- v_target` is what makes it a *transition* and what makes an account that was already
+  -- past its goal when this shipped produce nothing.
+  if v_count < v_target or (v_count - p_added) >= v_target then
+    return;
+  end if;
+
+  insert into goal_completions (user_id, year, category, target_at_completion, count_at_completion)
+  values (p_user, p_year, p_category, v_target, v_count)
+  on conflict (user_id, year, category) do nothing;
+
+  get diagnostics v_rows = row_count;
+  -- Not ours: a concurrent transaction crossed the same goal first, or this year's
+  -- completion already happened and the goal has since been edited upward and re-crossed.
+  -- Either way there is exactly one celebration and it is not this one.
+  if v_rows <> 1 then
+    return;
+  end if;
+
+  -- The social half. `payload` carries what the row needs to render a sentence without
+  -- reading `watch_goals`, which is owner-only — a viewer must be able to draw
+  -- "Suraj hit their 2026 Movies goal" without being entitled to Suraj's goals table.
+  -- ---------------------------------------------------------------------------
+  -- WHICH ACTIVITY THIS COMPLETION BELONGS UNDER
+  --
+  -- A goal is completed by a watch DATE, and `log_watched` posts no activity of its
+  -- own -- so unlike an award, a completion is never in the same transaction as the
+  -- thing that caused it. In the founder's flow the ranking commits, the post-rank
+  -- sheet takes the date a few seconds later, and the completion is genuinely the
+  -- LATER row: newest-first then puts it above the ranking that earned it, which is
+  -- the founder's report and is not a tie a sort key could break.
+  --
+  -- So a completion says where it belongs rather than where it happened.
+  -- `causal_at` is the ranking's own timestamp when the ranking is the reader's
+  -- NEWEST activity and is about one of the titles that carried this count over --
+  -- which is exactly the case where the two are one act. `created_at` is untouched
+  -- and is still what the row's "2m ago" is drawn from.
+  --
+  -- **The newest-activity test is the guard, and it is a fact rather than an
+  -- interval.** Correcting the date on a film ranked last year can also complete a
+  -- goal; inheriting that film's timestamp would bury the celebration a year down
+  -- the feed. That ranking is not the reader's newest activity, so nothing is
+  -- inherited and the completion stands at its own moment, at the top, alone. No
+  -- arithmetic on timestamps anywhere: the question asked is "is this the post it
+  -- would sit directly under", and the answer is yes or no.
+  select fe.created_at, fe.media_item_id
+    into v_source
+    from feed_events fe
+   where fe.actor_id = p_user
+     and fe.type in ('title_ranked', 'title_logged', 'season_completed')
+   order by fe.created_at desc, fe.id desc
+   limit 1;
+
+  if v_source.media_item_id is not null
+     and v_source.media_item_id = any (coalesce(p_media_items, '{}'::uuid[])) then
+    v_at := v_source.created_at;
+  end if;
+
+  insert into feed_events (actor_id, type, causal_step, causal_at, causal_media_item_id, payload)
+  values (
+    -- Step 1: after the ranking that carried the count over, before any award the
+    -- same ranking earned. See the migration header.
+    p_user, 'goal_completed', 1, v_at,
+    -- The title this completion belongs to, when exactly one carried the count over
+    -- (20260902000100). A batch that crossed the goal with several titles at once has
+    -- no single cause, and null there means no ranking adopts it -- which is correct:
+    -- there is no one ranking it belongs under.
+    case when array_length(p_media_items, 1) = 1 then p_media_items[1] end,
+    jsonb_build_object(
+      'year',     p_year,
+      'category', p_category,
+      'target',   v_target
+    )
+  )
+  on conflict (actor_id, ((payload ->> 'year')), ((payload ->> 'category')))
+    where type = 'goal_completed'
+    do nothing;
+
+  -- The congratulations, to the earner, actorless — nobody did this to them, which is
+  -- the `award_earned` shape (20260828000100) and the reason `claim_push_batch` already
+  -- tolerates a null actor.
+  insert into notifications (recipient_id, type, payload)
+  values (
+    p_user, 'goal_completed',
+    jsonb_build_object(
+      'year',     p_year,
+      'category', p_category,
+      'target',   v_target
+    )
+  )
+  on conflict (recipient_id, ((payload ->> 'year')), ((payload ->> 'category')))
+    where type = 'goal_completed'
+    do nothing;
+end;
+$$;
+
+revoke execute on function _maybe_goal_completion(uuid, integer, ranking_category, integer, uuid[])
+  from public, anon, authenticated;
+
+
+-- ---------------------------------------------------------------------------
+-- 3. The ranking adopts the award its own act announced early
 --
 -- `_rank_finalize`, rebuilt from 20260827000600. Three edits and nothing else moves:
 -- two locals, a read of `user_media.created_at`, and the adoption `update` beside the
@@ -224,12 +578,9 @@ declare
   v_activated boolean;
   v_replaced  boolean := false;
   v_event_id  uuid;
-  -- 20260902000100. The instant this activity sits at, and the instant the collection
-  -- row for this title first appeared. Equal when this transaction created the row;
-  -- different when the reader logged the title first, which is the case the adoption
-  -- below exists for.
+  -- 20260902000100. The instant this activity sits at, which is what the adoption
+  -- below moves an earlier announcement of this same act up to.
   v_causal_at timestamptz;
-  v_logged_at timestamptz;
 begin
   perform pg_advisory_xact_lock(hashtextextended(target::text || cat::text, 0));
 
@@ -277,18 +628,6 @@ begin
     set bucket = excluded.bucket, updated_at = now()
    where user_media.bucket is distinct from excluded.bucket;
 
-  -- **When this title entered the collection**, which is not always now.
-  --
-  -- `created_at` defaults to `now()` and no writer touches it on conflict, so this is
-  -- the transaction instant of whichever statement first put the row there:
-  -- `_rank_finalize`'s own insert above for a title ranked straight from search, or
-  -- `set_bucket` / `log_watched` minutes earlier for one logged from the Log sheet.
-  -- The award triggers hang off that same insert, so it is also the instant any award
-  -- this title earned was announced at. See the adoption below (20260902000100).
-  select um.created_at into v_logged_at
-    from user_media um
-   where um.user_id = target and um.media_item_id = item;
-
   if session is not null then
     delete from ranking_sessions where id = session;
   end if;
@@ -333,31 +672,34 @@ begin
      * an award earned at log time commits BEFORE its cause, so the cause reaches back
      * and adopts the award.
      *
-     * **The rule: a derived announcement no activity has claimed belongs to the next
-     * one.** Two facts decide it and neither is an interval.
+     * **Two facts decide it, and the first is stated rather than inferred.**
      *
-     *   **Nothing of the reader's happened in between.** That is the `not exists`, and
-     *   it is `_maybe_goal_completion`'s own guard -- "is this the post it would sit
+     *   **The announcement names this title.** `causal_media_item_id` (§2) is written by
+     *   the collection award trigger and by a single-title goal crossing, and it is what
+     *   makes this exact. It replaced a timestamp window, and independent review 76b is
+     *   why: log A, log B and have B cross a tier, then rank A, and every timestamp
+     *   bound available -- the row's creation, its last update, "nothing happened in
+     *   between" -- is satisfied by B's award as readily as by A's. B's award was being
+     *   adopted into A's group and shown to A's followers as the consequence of ranking
+     *   A. Two writes seconds apart in one sitting, neither producing activity: nothing
+     *   about *when* could tell them apart, so the writer says *which*.
+     *
+     *   **and nothing of the reader's happened in between.** That is the `not exists`,
+     *   and it is `_maybe_goal_completion`'s own guard -- "is this the post it would sit
      *   directly under" -- asked from the other side. An award earned when a film was
      *   logged in March and ranked for the first time today has twenty activities
      *   between the two: it belongs where it is, and hauling it to the top of the feed
      *   would be the bug that guard was written to avoid, in a new place.
      *
-     *   **and it is not older than this title's own place in the collection.** Without
-     *   a floor, somebody who logs for months without ranking anything would have their
-     *   whole history of announcements swept up by their first ranking.
-     *   `user_media.created_at` is that floor and is exact: it and `causal_at` are both
-     *   `now()` in their own transaction.
+     * Both the award and the goal are reached, and they arrive at different instants:
+     * the Log sheet's bucket tap creates the collection row and the award triggers
+     * announce there, then the sheet stamps the watch date in its own call and a goal
+     * crossing announces at *that* moment. Both name this title, and both are unclaimed
+     * until this ranking posts.
      *
-     * A range rather than an equality, because the Log sheet fires **twice**. The bucket
-     * tap creates the collection row and the award triggers announce there; the sheet
-     * then stamps the watch date in its own call, and a goal crossing announces at
-     * *that* instant instead. Both are the same act to the person doing it and both are
-     * unclaimed until this ranking posts.
-     *
-     * When this transaction created the collection row itself, `v_logged_at` IS
-     * `v_causal_at`, the strict inequality is false, and nothing is updated: that case
-     * shares a timestamp already and is `causal_step`'s.
+     * When this transaction created the collection row itself the award shares
+     * `causal_at` with the activity already, the strict inequality is false, nothing is
+     * updated, and `causal_step` does the ordering as before.
      *
      * Only `causal_at` moves. `created_at` is untouched, so the row still says how long
      * ago it happened, and its id, payload, reactions and comments are all unchanged --
@@ -367,8 +709,8 @@ begin
        set causal_at = v_causal_at
      where fe.actor_id = target
        and fe.type in ('award_earned', 'goal_completed')
-       and fe.causal_at >= v_logged_at
-       and fe.causal_at <  v_causal_at
+       and fe.causal_media_item_id = item
+       and fe.causal_at < v_causal_at
        and not exists (
          select 1
            from feed_events act
@@ -443,7 +785,7 @@ comment on function _rank_finalize(uuid, uuid, ranking_category, taste_bucket, i
 
 
 -- ---------------------------------------------------------------------------
--- 3. The board's population
+-- 4. The board's population
 --
 -- One CTE renamed and one predicate widened. Everything else in this function --
 -- the four metrics, the two timeframes, the date semantics, the review state-vs-event
@@ -548,7 +890,7 @@ comment on function _leaderboard_counts(text, text) is
 
 
 -- ---------------------------------------------------------------------------
--- 4. The board
+-- 5. The board
 --
 -- Dropped and recreated rather than replaced: the return table gains a column, and
 -- `create or replace function` cannot change a return type. Nothing depends on it
@@ -642,7 +984,7 @@ comment on function leaderboard(text, text, integer) is
 
 
 -- ---------------------------------------------------------------------------
--- 5. The old name, still delegating
+-- 6. The old name, still delegating
 --
 -- Restated because the function it wraps was dropped and recreated, and because the
 -- 20260827000900 rule has not expired: a phone that has not taken this update still
@@ -684,7 +1026,7 @@ comment on function monthly_leaderboard(text, integer) is
 
 
 -- ---------------------------------------------------------------------------
--- 6. Where the caller stands
+-- 7. Where the caller stands
 --
 -- Not rewritten -- `my_leaderboard_standing` reads `_leaderboard_counts`, so its
 -- population widened with the board's and its `entrants` denominator is the board's

@@ -24,7 +24,13 @@ Three differences from the SQL sketched below, all deliberate:
 >
 > Two awards earned by one action keep the fixed order `_maybe_award_unlocks` assigned walking `p_awards`, read back last-announced-first — the same "later above" rule applied inside the group rather than a second convention.
 >
-> **`causal_step` only orders rows that share a `causal_at`, and the Log sheet produces rows that do not.** Its first tap is `set_bucket`, which creates the `user_media` row, so the collection award triggers announce there; the ranking posts a minute later. `_rank_finalize` therefore **adopts** derived events into its own group when it posts `title_ranked`: any `award_earned` or `goal_completed` of the same actor that no activity has claimed (nothing of theirs between it and this one) and that is not older than this title's `user_media.created_at`. Only `causal_at` moves — `created_at`, the id and the payload are untouched, so an already-visible row re-sorts rather than duplicating. When the ranking wrote the collection row itself both instants are equal, nothing is adopted, and `causal_step` does the work. `causal_at` is the other half: a goal completion is caused by a watch date, `log_watched` posts no activity of its own, and the celebration therefore commits seconds *after* its cause — a real later timestamp no tiebreak can reach. A completion inherits the timestamp of the reader's newest activity when that activity is one of the titles that carried the count over, and keeps its own otherwise. `created_at` is untouched and is still what a row's relative time is drawn from. The third key makes the sort total, which is what pagination needs.
+> **`causal_step` only orders rows that share a `causal_at`, and the Log sheet produces rows that do not.** Its first tap is `set_bucket`, which creates the `user_media` row, so the collection award triggers announce there; the ranking posts a minute later. `_rank_finalize` therefore **adopts** derived events into its own group when it posts `title_ranked`: any `award_earned` or `goal_completed` of the same actor that **names this title** in `causal_media_item_id` and that no activity has claimed (nothing of theirs between it and this one). Only `causal_at` moves — `created_at`, the id and the payload are untouched, so an already-visible row re-sorts rather than duplicating. When the ranking wrote the collection row itself both instants are equal, nothing is adopted, and `causal_step` does the work.
+>
+> ```
+> causal_media_item_id uuid references media_items(id) on delete set null
+> ```
+>
+> **The title whose collection write announced this derived event** — set on `award_earned` and `goal_completed`, null everywhere else and null on every row written before `20260902000100`. Deliberately *not* `media_item_id`, which is what an activity is *about* and decides where a tap goes: an award row must keep routing to the Awards sheet. `on delete set null` rather than cascade, because losing a catalogue row must not delete the record that somebody earned something. It exists because no timestamp bound can tell one title's unclaimed award from another's when both were logged seconds apart in one sitting. `causal_at` is the other half: a goal completion is caused by a watch date, `log_watched` posts no activity of its own, and the celebration therefore commits seconds *after* its cause — a real later timestamp no tiebreak can reach. A completion inherits the timestamp of the reader's newest activity when that activity is one of the titles that carried the count over, and keeps its own otherwise. `created_at` is untouched and is still what a row's relative time is drawn from. The third key makes the sort total, which is what pagination needs.
 
 - **Check constraints replace comments** wherever this document listed valid values in prose — `media_cache.facet`, `feed_events.type`, `import_jobs.status`, `import_rows.status`, `share_tokens.object_type`, `recommendation_feedback.kind`, and now `reactions.kind`. Same information, in a place where it cannot rot.
 - **`can_view_profile` handles a null viewer explicitly**, returning public profiles only. Unauthenticated reads happen on the public web pages in PRD §16, and leaving that case to `case` fallthrough would have returned null rather than false.
@@ -552,7 +558,8 @@ create table feed_events (
   created_at    timestamptz not null default now(),
   -- 20260901000100. The two keys the feed is ordered by; see below.
   causal_at     timestamptz not null default now(),
-  causal_step   smallint not null default 0
+  causal_step   smallint not null default 0,
+  causal_media_item_id uuid references media_items(id) on delete set null
 );
 
 create index on feed_events (actor_id, created_at desc);

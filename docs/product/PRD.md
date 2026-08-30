@@ -2374,22 +2374,36 @@ The feed reads `causal_at desc, causal_step desc, id asc`. The third key makes t
 > **The fix is the goal's own instrument, pointed the other way.** A goal commits *after*
 > its cause and looks backwards to adopt its timestamp; an award earned at log time commits
 > *before* its cause, so the cause reaches back and adopts the award. `_rank_finalize`
-> does it when it posts the activity, under one rule stated as two facts and no interval —
-> **a derived announcement that no activity has claimed belongs to the next one**:
+> does it when it posts the activity, under two facts and no interval:
 >
+> - **the announcement names this title.** `feed_events.causal_media_item_id` is written
+>   by the collection award trigger and by a single-title goal crossing — the writer says
+>   which title announced it rather than a reader guessing from a clock; and
 > - **nothing of the reader's happened in between**, which is the guard
 >   `_maybe_goal_completion` already applies from the other side, and what keeps a film
 >   logged in March and ranked today from hauling a five-month-old award to the top of the
->   feed; and
-> - **it is not older than this title's own place in the collection**
->   (`user_media.created_at`, exact because it and `causal_at` are both `now()` in their
->   own transaction) — the floor that stops a first ranking sweeping up the whole history of
->   somebody who logs without ranking.
+>   feed.
 >
-> A range rather than an equality, because the Log sheet fires twice and the award and the
-> goal land at different instants. When the ranking wrote the collection row itself the two
-> are the same instant, the strict inequality is false, nothing is adopted, and
-> `causal_step` does the work as before.
+> **The title link is a column because no timestamp could do it**, and independent review
+> 76b is why. The first version bounded the adoption by time — at or after this title's
+> `user_media.created_at`, before this activity, with nothing in between — and every one
+> of those bounds is satisfied by a *different* title's award: log A, log B, have B cross a
+> tier, rank A, and B's award was adopted into A's group and shown to A's followers as the
+> consequence of ranking A. Two writes seconds apart in one sitting, neither producing
+> activity, are indistinguishable by *when*. So the writer says *which*, which is the same
+> move `causal_step` is.
+>
+> **Null means "no ranking may adopt this", and that is the right default** — for the eight
+> award call sites that are about a comment, a reaction, a follow or an invite and have no
+> title; for a goal crossed by several titles at once, which has no single cause; and for
+> every row written before the column existed. In each case the announcement stands at its
+> own moment, which is where it stood before.
+>
+> Both the award and the goal are reached, though they land at different instants: the
+> bucket tap creates the collection row and the award announces there, then the sheet stamps
+> the watch date and a goal crossing announces at that moment. When the ranking wrote the
+> collection row itself the award shares a `causal_at` with the activity already, the
+> strict inequality is false, nothing is adopted, and `causal_step` does the work as before.
 >
 > **Only `causal_at` moves.** `created_at`, the id, the payload, the reactions and the
 > comments are untouched, so a feed that has already shown the award re-sorts it rather

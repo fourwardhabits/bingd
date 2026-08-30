@@ -676,6 +676,117 @@ describe('a causal group reads in the order it happened', () => {
     );
   });
 
+  it('never adopts an award another title earned in the same sitting', async () => {
+    /**
+     * **Independent review 76b, and it is why the link is a column rather than a clock.**
+     *
+     * The first version of the adoption bounded itself by timestamps: at or after this
+     * title's `user_media.created_at`, before this activity, with nothing of the
+     * reader's in between. Every one of those is satisfied by a *different* title's
+     * award, because two logs seconds apart in one sitting produce no activity at all:
+     *
+     *   1. log A -- no crossing;
+     *   2. log B -- B crosses a tier and an award is announced;
+     *   3. rank A.
+     *
+     * B's award was adopted into A's group and shown to A's followers as the consequence
+     * of ranking A. `causal_media_item_id` is the fix: the writer says which title
+     * announced it, so nothing about *when* has to be inferred.
+     */
+    const user = await t.createUser({ username: 'causal_crosstitle' });
+    // Forty-eight, so the FIFTIETH crosses Movie Muncher -- and the fiftieth is B.
+    for (let i = 0; i < 48; i += 1) {
+      await t.sql(
+        `insert into user_media (user_id, media_item_id, bucket) values ($1, $2, 'loved')`,
+        [user, await movie(`causal_crosstitle filler ${i}`)],
+      );
+    }
+    await t.actAs(user);
+
+    const a = await movie('causal_crosstitle_a');
+    const b = await movie('causal_crosstitle_b');
+
+    // A is the forty-ninth and crosses nothing.
+    await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved')`, [a]);
+    // B is the fiftieth and is what earns the award.
+    await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved')`, [b]);
+
+    const award = (
+      await t.sql(
+        `select id, causal_at, causal_media_item_id from feed_events
+          where actor_id = $1 and type = 'award_earned'`,
+        [user],
+      )
+    ).rows;
+    assert.equal(award.length, 1, 'fixture: exactly one award, and B is what earned it');
+    assert.equal(award[0].causal_media_item_id, b, 'and the writer said so');
+
+    // Now A is ranked. Nothing of the reader's has happened in between, and the award
+    // is newer than A's own collection row -- every timestamp bound the first version
+    // had is satisfied here.
+    await t.rankToCompletion(a, 'loved', async (pivot) => pivot);
+
+    const after = (
+      await t.sql(`select causal_at from feed_events where id = $1`, [award[0].id])
+    ).rows[0];
+    assert.equal(
+      new Date(after.causal_at).getTime(),
+      new Date(award[0].causal_at).getTime(),
+      "B's award must not be presented as the consequence of ranking A",
+    );
+
+    // And the feed says the same thing the other way round: the award is below A's
+    // ranking, because it genuinely happened before it and belongs to neither.
+    assert.deepEqual(
+      (await feedOf(user)).map((r) => r.type),
+      ['title_ranked', 'award_earned'],
+    );
+  });
+
+  it('adopts B\'s own award when B is the title being ranked', async () => {
+    // The control, and it is what stops the assertion above from passing for the wrong
+    // reason -- an adoption that had simply stopped working would satisfy it too.
+    const user = await t.createUser({ username: 'causal_crosstitle_ctl' });
+    for (let i = 0; i < 49; i += 1) {
+      await t.sql(
+        `insert into user_media (user_id, media_item_id, bucket) values ($1, $2, 'loved')`,
+        [user, await movie(`causal_ctl filler ${i}`)],
+      );
+    }
+    await t.actAs(user);
+
+    const b = await movie('causal_ctl_b');
+    await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved')`, [b]);
+    await t.rankToCompletion(b, 'loved', async (pivot) => pivot);
+
+    assert.deepEqual(
+      (await feedOf(user)).map((r) => r.type),
+      ['award_earned', 'title_ranked'],
+      'the title that earned it does adopt it',
+    );
+  });
+
+  it('names no title on an award that no collection write announced', async () => {
+    // Eight of the nine call sites have no title to name -- a comment, a reaction, a
+    // follow, an invite. Null there is not an oversight: it is what stops a ranking
+    // adopting an award that had nothing to do with a title at all.
+    const author = await t.createUser({ username: 'causal_no_title' });
+    const other = await t.createUser({ username: 'causal_no_title_host' });
+    const film = await movie('causal_no_title_film');
+    const event = await eventOf(t, other, film);
+    await writeComments(t, author, event, 20, 'no_title');
+
+    const rows = (
+      await t.sql(
+        `select causal_media_item_id from feed_events
+          where actor_id = $1 and type = 'award_earned'`,
+        [author],
+      )
+    ).rows;
+    assert.ok(rows.length > 0, 'fixture: the comment track announced');
+    for (const row of rows) assert.equal(row.causal_media_item_id, null);
+  });
+
   it('leaves an old award where it is when unrelated activity happened in between', async () => {
     // The guard, and the reason it is a fact rather than an interval. A film logged in
     // March and ranked today must not haul a five-month-old award to the top of the
