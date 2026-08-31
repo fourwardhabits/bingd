@@ -204,6 +204,18 @@ jobs:
       - name: A lane pointed at the wrong backend fails the build
         run: |
           set -e
+
+          # The non-production project, read from the mapping rather than written here.
+          #
+          # This step used to name `abheeqyjzekiowkztfxv` as "nonprod". On 2026-08-31 that
+          # project was promoted to production and the empty one became staging, so the
+          # literal turned this check into "production must refuse itself" and the gate
+          # failed while every rule it names was still correct. The sibling step above
+          # already derives from `LANE_BACKENDS`; this one does now too, so neither needs
+          # editing in the middle of a release the next time a project moves.
+          STAGING=$(node -p "require('./config/backends.cjs').LANE_BACKENDS.beta[0]")
+          echo "non-production backend, from config/backends.cjs: $STAGING"
+
           if EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
              EXPO_PUBLIC_SUPABASE_URL=https://someotherproject.supabase.co \
              EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
@@ -214,13 +226,27 @@ jobs:
           echo "beta + unlisted project: refused, as it must be"
 
           if EAS_BUILD=true BINGD_LANE=production APP_VARIANT=production \
-             EXPO_PUBLIC_SUPABASE_URL=https://abheeqyjzekiowkztfxv.supabase.co \
+             EXPO_PUBLIC_SUPABASE_URL=https://$STAGING.supabase.co \
              EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
              npx expo config --type public --json > /dev/null 2>&1; then
-            echo "The production lane resolved against bingd-nonprod. The lane mapping is inert."
+            echo "The production lane resolved against the staging project. The lane mapping is inert."
             exit 1
           fi
-          echo "production + nonprod: refused, as it must be"
+          echo "production + staging: refused, as it must be"
+
+          # The mirror, and the half that would strand real people: since production is now
+          # a populated database, a beta build reaching it is the failure that matters most.
+          PRODUCTION=$(node -p "require('./config/backends.cjs').LANE_BACKENDS.production[0] || ''")
+          if [ -n "$PRODUCTION" ]; then
+            if EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
+               EXPO_PUBLIC_SUPABASE_URL=https://$PRODUCTION.supabase.co \
+               EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
+               npx expo config --type public --json > /dev/null 2>&1; then
+              echo "The beta lane resolved against production. Beta testers would write to real user data."
+              exit 1
+            fi
+            echo "beta + production: refused, as it must be"
+          fi
 
           # And the case the guard used to say nothing about, which is the state the
           # production EAS environment is actually in today: **no Supabase variables at all.**
@@ -265,10 +291,10 @@ jobs:
           # `assertBackendIsAllowed` runs before `pushNative()`, so each of them still fails
           # for the backend reason it is named after, with or without the file.
           if ! EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
-             EXPO_PUBLIC_SUPABASE_URL=https://abheeqyjzekiowkztfxv.supabase.co \
+             EXPO_PUBLIC_SUPABASE_URL=https://$STAGING.supabase.co \
              EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
              npx expo config --type public --json > /dev/null 2>&1; then
-            echo "The beta lane no longer resolves against nonprod. Every refusal above is meaningless."
+            echo "The beta lane no longer resolves against its own backend. Every refusal above is meaningless."
             exit 1
           fi
-          echo "beta + nonprod: resolved, as it must"
+          echo "beta + staging: resolved, as it must"
