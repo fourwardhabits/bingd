@@ -141,7 +141,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: current.name,
   slug: 'bingd',
   owner: 'fourward',
-  version: '0.1.0',
+  // 1.0.0 for the first public release — founder decision, 2026-08-31. It was 0.1.0,
+  // which is permitted and honest but reads as a preview to anybody looking at a store
+  // listing. `eas.json` sets `appVersionSource: "remote"`, so the BUILD number
+  // auto-increments and this marketing version does not: changing it is this line and
+  // nothing else. It moves the fingerprint, which is why it belongs in the same window as
+  // the production ref rather than afterwards.
+  version: '1.0.0',
   orientation: 'portrait',
   scheme: current.scheme,
   userInterfaceStyle: 'light',

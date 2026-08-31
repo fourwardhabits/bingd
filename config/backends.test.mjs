@@ -90,13 +90,28 @@ describe('assertBackendIsAllowed', () => {
     }
   });
 
-  it('refuses the production lane outright, because there is no production backend', () => {
+  it('gives the production lane exactly one backend, and it is not nonprod', () => {
     /**
-     * The state this has to encode is "not yet", not "anything". A `--profile production`
-     * build against nonprod would otherwise succeed and look exactly like a real release.
+     * **This test used to assert the opposite**, and the assertion it made was
+     * `LANE_BACKENDS.production` is empty — "not yet", so that a `--profile production`
+     * build against nonprod could not succeed and look exactly like a real release.
+     *
+     * `bingd-production` was created on 2026-08-31 and its ref went into the three places
+     * `production-lane.test.mjs` holds together. So the "not yet" half is spent, and what
+     * replaces it is the half that was always the point: the production lane names **one**
+     * project, and pointing it at nonprod is still a refusal rather than a warning.
+     *
+     * The ref is not written literally here. `production-lane.test.mjs` is where the three
+     * declarations are required to agree; duplicating the string into a fourth place would
+     * be one more thing to edit on the day it changes.
      */
-    assert.deepEqual(LANE_BACKENDS.production, []);
-    assert.throws(() => assertBackendIsAllowed(NONPROD, 'production'), /this lane has no backend yet/);
+    assert.equal(LANE_BACKENDS.production.length, 1);
+    assert.notEqual(LANE_BACKENDS.production[0], NONPROD);
+    assert.throws(
+      () => assertBackendIsAllowed(NONPROD, 'production'),
+      /production/,
+      'a production build pointed at nonprod is the failure this allowlist exists for',
+    );
   });
 
   it('refuses a cross-lane swap once a second project exists', () => {

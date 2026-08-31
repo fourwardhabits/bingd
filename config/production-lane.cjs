@@ -59,6 +59,7 @@ const { LANE_BACKENDS, REF_NAMES, supabaseProjectRef } = require('./backends.cjs
  */
 const REF_ENVIRONMENTS = {
   abheeqyjzekiowkztfxv: 'nonprod',
+  fjxhcbowoxuzulwirzyr: 'prod',
 };
 
 /** The production project's ref, or null while there is not one. */

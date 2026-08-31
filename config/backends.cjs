@@ -46,12 +46,13 @@ const LANE_BACKENDS = {
   development: ['abheeqyjzekiowkztfxv'],
   preview: ['abheeqyjzekiowkztfxv'],
   beta: ['abheeqyjzekiowkztfxv'],
-  production: [],
+  production: ['fjxhcbowoxuzulwirzyr'],
 };
 
 /** Human names, for the error message. A ref is 20 characters of nothing. */
 const REF_NAMES = {
   abheeqyjzekiowkztfxv: 'bingd-nonprod',
+  fjxhcbowoxuzulwirzyr: 'bingd-production',
 };
 
 /**
