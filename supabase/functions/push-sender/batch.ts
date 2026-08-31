@@ -22,6 +22,51 @@ export type Addressed = {
   message: ExpoMessage;
 };
 
+/**
+ * The messages whose queue row still exists, at the last moment before dispatch.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A SECOND CHECK, AFTER THE CLAIM ALREADY SUCCEEDED
+ *
+ * `claim_push_batch` leases a row for five minutes and hands over its payload. In that
+ * window the notification behind a job can be deleted, and since `20260904000100` that is
+ * not hypothetical: revoking a collection-derived award tier deletes the congratulations,
+ * and `push_outbox` cascades from it. The queue row is gone; the sender is holding a copy
+ * of what used to be in it.
+ *
+ * Independent review 78 found this and was right to call it MAJOR: the migration's own
+ * header claimed an already-*delivered* push was the only thing that could not be stopped,
+ * and it was wrong by one step.
+ *
+ * So the ids go back to the database — `live_push_jobs` — and anything without a row is
+ * dropped rather than sent. **It is not award-specific**: any notification deleted inside
+ * the lease is caught by the same filter.
+ *
+ * ---------------------------------------------------------------------------
+ * WHERE THE CHECK SITS, AND WHAT IS HONESTLY LEFT
+ *
+ * It filters `Addressed` and not `PushJob`, which is the whole reason it is worth
+ * having: review 78b pointed out that a check run *before* the messages are built leaves
+ * the entire message-building phase inside the window, and that calling the remainder
+ * "already in flight" was too generous. So the caller builds every message first and
+ * narrows the list immediately before the first `sendChunk`.
+ *
+ * **The residual window is between this call returning and the HTTP request leaving**, and
+ * it cannot be closed: there is no way to make a database read and a network send one
+ * atomic act, and neither Apple nor Google offers a recall afterwards. What this buys is
+ * that the window is a few milliseconds of dispatch rather than the whole of the sender's
+ * work, which is the difference between a race somebody could actually hit and one that
+ * needs the send itself to be interrupted.
+ *
+ * **Nothing is settled for a dropped message.** Its `push_outbox` row is already gone, so
+ * there is nothing to mark delivered or failed — settling it would be an update against no
+ * row, and reporting it as sent would be a lie in the summary.
+ */
+export function stillQueued(addressed: Addressed[], live: readonly string[]): Addressed[] {
+  const alive = new Set(live);
+  return addressed.filter((entry) => alive.has(entry.notificationId));
+}
+
 export function messagesFor(jobs: PushJob[]): Addressed[] {
   const out: Addressed[] = [];
 

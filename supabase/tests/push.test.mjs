@@ -475,6 +475,59 @@ describe('claim_push_batch', () => {
     assert.deepEqual(jobs[0].tokens, [{ token: TOKEN(30), platform: 'ios' }]);
   });
 
+  /**
+   * **An actorless job survives the batch, and this is the assertion that was missing.**
+   *
+   * The award congratulations is the only notification with no actor. `claim_push_batch`
+   * ends with a filter that was `p.id is not null` — a left join on `profiles` by
+   * `actor_id` — which drops every actorless row while *reading* as "the actor has gone".
+   * 20260828000100 wrote the escape (`or n.actor_id is null`); the 20260830000100
+   * rebuild, which added the mention branch to the join two lines above it, was assembled
+   * from an ancestor that predated the escape and reverted it. 20260904000100 restored it.
+   *
+   * **Nothing observable said so**, which is why this test exists rather than a comment:
+   * the notification was filed, the outbox row was enqueued — a test one describe up
+   * already asserted both — the row was claimed, dropped from the returned batch, and
+   * then deleted by the reap at the end of the function. No failure count, no
+   * `last_error`, no backlog. It simply never arrived, for a fortnight.
+   *
+   * So the assertion is on the whole path, not on the enqueue: claimed, returned, named,
+   * addressed, and the queue row still leased afterwards rather than reaped.
+   */
+  it('returns the actorless award congratulations rather than reaping it', async () => {
+    await register(reader, TOKEN(33), 'ios');
+    const congrats = await notify(reader, 'award_earned', { actorId: null });
+    assert.ok(await outboxFor(congrats), 'fixture: it was queued');
+
+    const jobs = await claim();
+
+    assert.equal(jobs.length, 1, 'an actorless job must survive the batch');
+    assert.equal(jobs[0].notification_id, congrats);
+    assert.equal(jobs[0].type, 'award_earned');
+    assert.equal(jobs[0].actor_username, null, 'and it genuinely has no actor');
+    assert.deepEqual(jobs[0].tokens, [{ token: TOKEN(33), platform: 'ios' }]);
+
+    const row = await outboxFor(congrats);
+    assert.ok(row, 'the queue row is leased, not reaped');
+    assert.equal(row.state, 'claimed');
+  });
+
+  it('still reaps a job whose actor has genuinely gone', async () => {
+    // The other half of the same predicate, so restoring the escape cannot be mistaken
+    // for removing the check. An actor that no longer resolves is a job with nothing to
+    // say, and it leaves the queue.
+    await register(reader, TOKEN(34), 'ios');
+    const orphan = await notify(reader, 'follow');
+    await t.sql(`update profiles set status = 'suspended' where id = $1`, [actor]);
+
+    try {
+      assert.equal((await claim()).length, 0, 'a job with no live actor is not returned');
+      assert.equal(await outboxFor(orphan), null, 'and its queue row is reaped');
+    } finally {
+      await t.sql(`update profiles set status = 'active' where id = $1`, [actor]);
+    }
+  });
+
   it('resolves the title behind a recommendation', async () => {
     await register(reader, TOKEN(31), 'android');
     const movie = await t.createMovie('Stalker', -4242);

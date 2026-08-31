@@ -110,6 +110,16 @@ export type LoggedEntry = {
   language: string | null;
   bucket: 'loved' | 'fine' | 'not_for_me' | null;
   watchedOn: string | null;
+  /**
+   * `user_media.created_at` / `watchlist.created_at` — when the title joined this list.
+   *
+   * The column was already being read and already being sorted on, and then thrown away
+   * before anything downstream could see it: both queries below order their rows by it
+   * and neither carried it out. That is why the Collection's Recently-added order had to
+   * be built on the watch date, which is nullable and, for a ranked title, was never
+   * even in hand. See `filters.ts`.
+   */
+  addedAt: string | null;
 };
 
 export type RankingCategory = 'movies' | 'tv_seasons';
@@ -313,6 +323,7 @@ export function useLoggedCollection(userId: string) {
             language: meta.language,
             bucket: row.bucket,
             watchedOn: row.watched_on,
+            addedAt: row.created_at ?? null,
           } satisfies LoggedEntry,
           ranked: hasPosition.has(row.media_item_id),
         };
@@ -380,6 +391,7 @@ export function useWatchlist(userId: string) {
           language: meta.language,
           bucket: null,
           watchedOn: null,
+          addedAt: row.created_at ?? null,
         };
       });
     },

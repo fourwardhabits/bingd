@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { bandSizes, scoreFor } from '@/features/collection/score';
 import { useRankedCollection } from '@/features/collection/use-collection';
@@ -8,14 +8,16 @@ import { compactName } from '@/lib/titles';
 import {
   Button,
   EmptyState,
-  FilterChip,
   ScoreBadge,
   SegmentedTabs,
   Sheet,
   SkeletonRow,
+  SortChip,
+  SortMenu,
   Text,
   TitleRow,
 } from '@/ui/components';
+import type { SortAxisSpec, SortState } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
 export type RankedCategory = 'movies' | 'tv_seasons';
@@ -33,7 +35,7 @@ export type RankedCategory = 'movies' | 'tv_seasons';
 const VISIBLE_CAP = 200;
 
 /**
- * The four orders this sheet offers, and there are deliberately only four.
+ * The two axes this sheet offers, and there are deliberately only two.
  *
  * ---------------------------------------------------------------------------
  * WHY "RECENTLY RANKED" AND NOT "RECENTLY WATCHED"
@@ -50,28 +52,48 @@ const VISIBLE_CAP = 200;
  * label says so. Same order, same rows, nothing private crossing a boundary. Founder
  * decision, 2026-08-29.
  *
+ * **The Collection tab reached the same answer from the other side** on 2026-08-30, and
+ * for a different reason — its Recently-watched axis was ordering by nothing at all —
+ * so the two surfaces now agree that a recency label names the fact it actually reads:
+ * *Recently added* over a collection's membership time, *Recently ranked* over a
+ * ranking's. Neither of them names a watch date, and one of them could not.
+ *
+ * ---------------------------------------------------------------------------
+ * TWO AXES, NOT FOUR ORDERS
+ *
+ * It listed `Highest first`, `Lowest first`, `Newest first`, `Oldest first` — four rows
+ * for two axes, with the direction spent on the label. It is now one row per axis with
+ * the direction on an arrow, which is `ui/sort.ts`'s contract and the same control the
+ * Collection tab draws. Nothing about *which orders exist* changed; what changed is that
+ * the label names the axis, so it cannot drift away from the direction beside it.
+ *
  * ---------------------------------------------------------------------------
  * WHY RANK IS STILL THE DEFAULT
  *
- * Unchanged from the note below: the wall above this sheet shows the best six, and the
- * question a reader has after seeing it is what comes seventh.
+ * Unchanged: the wall above this sheet shows the best six, and the question a reader has
+ * after seeing it is what comes seventh.
  */
-export type CollectionSort = 'rank-desc' | 'rank-asc' | 'ranked-newest' | 'ranked-oldest';
+export type CollectionSortAxis = 'rank' | 'ranked';
 
-const SORTS: readonly { key: CollectionSort; label: string }[] = [
-  { key: 'rank-desc', label: 'Highest first' },
-  { key: 'rank-asc', label: 'Lowest first' },
-  { key: 'ranked-newest', label: 'Newest first' },
-  { key: 'ranked-oldest', label: 'Oldest first' },
+export type CollectionSort = SortState<CollectionSortAxis>;
+
+export const SORT_AXES: readonly SortAxisSpec<CollectionSortAxis>[] = [
+  {
+    axis: 'rank',
+    label: 'Rank',
+    directions: { desc: 'highest first', asc: 'lowest first' },
+    defaultDirection: 'desc',
+  },
+  {
+    axis: 'ranked',
+    label: 'Recently ranked',
+    directions: { desc: 'newest first', asc: 'oldest first' },
+    defaultDirection: 'desc',
+  },
 ];
 
-/** What the chip says while a menu is closed, so the current order is always on screen. */
-const SORT_CHIP: Record<CollectionSort, string> = {
-  'rank-desc': 'Rank · Highest first',
-  'rank-asc': 'Rank · Lowest first',
-  'ranked-newest': 'Recently ranked · Newest first',
-  'ranked-oldest': 'Recently ranked · Oldest first',
-};
+/** Where the sheet opens: the best of the list, which is the question the wall leaves. */
+export const INITIAL_SORT: CollectionSort = { axis: 'rank', direction: 'desc' };
 
 /**
  * The comparator for one order, **total in every case**.
@@ -92,16 +114,17 @@ export function compareBySort(sort: CollectionSort) {
           b: { position: number; rankedAt: string | null; mediaItemId: string }): number => {
     const tiebreak = a.mediaItemId.localeCompare(b.mediaItemId);
 
-    // Position 1 is the top of the band, so "highest first" is ascending.
-    if (sort === 'rank-desc') return a.position - b.position || tiebreak;
-    if (sort === 'rank-asc') return b.position - a.position || tiebreak;
+    // Position 1 is the top of the band, so "highest first" is ascending in `position`.
+    if (sort.axis === 'rank') {
+      return (sort.direction === 'desc' ? a.position - b.position : b.position - a.position) || tiebreak;
+    }
 
     if (!a.rankedAt && !b.rankedAt) return tiebreak;
     if (!a.rankedAt) return 1;
     if (!b.rankedAt) return -1;
 
     const byDate =
-      sort === 'ranked-newest'
+      sort.direction === 'desc'
         ? b.rankedAt.localeCompare(a.rankedAt)
         : a.rankedAt.localeCompare(b.rankedAt);
     return byDate || tiebreak;
@@ -207,7 +230,7 @@ export function RankedTitlesSheet({
   });
   const list = category === 'tv_seasons' ? seasons : movies;
 
-  const [sort, setSort] = useState<CollectionSort>('rank-desc');
+  const [sort, setSort] = useState<CollectionSort>(INITIAL_SORT);
   const [sortOpen, setSortOpen] = useState(false);
   const scroll = useRef<ScrollView>(null);
 
@@ -285,42 +308,22 @@ export function RankedTitlesSheet({
         * it is doing is the subtitle again with a chevron on it.
         */}
       <View style={styles.sortRow}>
-        <FilterChip
-          icon="swap-vertical-outline"
-          label={SORT_CHIP[sort]}
-          accessibilityLabel={`Sort. ${SORT_CHIP[sort]}`}
-          onPress={() => setSortOpen((open) => !open)}
-        />
+        <SortChip axes={SORT_AXES} value={sort} onPress={() => setSortOpen((open) => !open)} />
       </View>
 
       {sortOpen ? (
-        <View style={styles.sortMenu}>
-          {SORTS.map((option) => (
-            <Pressable
-              key={option.key}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: option.key === sort }}
-              accessibilityLabel={SORT_CHIP[option.key]}
-              onPress={() => {
-                setSortOpen(false);
-                setSort(option.key);
-                // **Back to the top on every change.** A `ScrollView` keeps its offset
-                // when its children are replaced, so a reader two hundred rows down would
-                // be dropped into the middle of an order they have not seen the start of.
-                scroll.current?.scrollTo({ y: 0, animated: false });
-              }}
-              style={({ pressed }) => [
-                styles.sortOption,
-                option.key === sort && styles.sortSelected,
-                pressed && styles.sortPressed,
-              ]}
-            >
-              <Text variant="callout" tone={option.key === sort ? 'inverse' : 'primary'}>
-                {option.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <SortMenu
+          axes={SORT_AXES}
+          value={sort}
+          onChange={(next) => {
+            setSort(next);
+            // **Back to the top on every change.** A `ScrollView` keeps its offset when
+            // its children are replaced, so a reader two hundred rows down would be
+            // dropped into the middle of an order they have not seen the start of.
+            scroll.current?.scrollTo({ y: 0, animated: false });
+          }}
+          onClose={() => setSortOpen(false)}
+        />
       ) : null}
 
       <ScrollView ref={scroll} style={styles.list} contentContainerStyle={styles.listContent}>
@@ -415,20 +418,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     paddingBottom: theme.space[3],
   },
-  // The Collection tab's own menu, to the point: a raised card of radio rows under the
-  // chip that opened it, rather than a sheet inside a sheet.
-  sortMenu: {
-    marginHorizontal: theme.layout.gutter,
-    marginBottom: theme.space[3],
-    borderRadius: theme.radius.card,
-    backgroundColor: theme.surface.raised,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.border.hairline,
-    overflow: 'hidden',
-  },
-  sortOption: { paddingHorizontal: theme.space[3], paddingVertical: theme.space[2] },
-  sortSelected: { backgroundColor: theme.semantic.action },
-  sortPressed: { opacity: 0.6 },
+  // The menu's own styles left with the menu, which is `ui/components/SortControl`
+  // now — this sheet and the Collection tab draw the identical control.
   // Wide enough for "#100" so the posters keep an unbroken left edge however deep the
   // list goes — a column that resizes per row is the ragged one.
   ordinal: { minWidth: 34 },

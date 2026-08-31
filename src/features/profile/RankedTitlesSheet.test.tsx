@@ -325,8 +325,8 @@ it('names whose collection it is', async () => {
 /**
  * **The sort control that replaced "In rank order."** (founder, 2026-08-29).
  *
- * A subtitle stating the order is a subtitle nobody can act on. Four orders and no more:
- * two directions on rank, two on when the title entered the ranking.
+ * A subtitle stating the order is a subtitle nobody can act on. Two axes and no more:
+ * rank, and when the title entered the ranking. Each reverses in place.
  *
  * **Why the second axis is "Recently ranked" and not "Recently watched".** The founder
  * asked for recency, and the watch date cannot carry it: PRD §22 makes watch dates
@@ -335,6 +335,11 @@ it('names whose collection it is', async () => {
  * labelled *Recently watched* over somebody else's list would either sort by something
  * else or reverse that rule in passing. So the axis is when the title entered their
  * ranking, which is the same instant their public "ranked X" activity already carries.
+ *
+ * **Two axes, not four orders** (2026-08-30). It listed four labels, each carrying its
+ * own direction; it now lists two, and pressing the one already on flips it. That is
+ * `ui/sort.ts`'s contract, shared with the Collection tab, and it is what keeps a label
+ * from being able to drift away from the order beside it.
  */
 describe('the sort control', () => {
   const openSort = async (view: Awaited<ReturnType<typeof open>>) => {
@@ -344,6 +349,12 @@ describe('the sort control', () => {
   /** The titles in draw order, read off the ordinal-and-title rows. */
   const drawn = (view: Awaited<ReturnType<typeof open>>) =>
     view.getAllByLabelText(/, 20\d\d/).map((node) => String(node.props.accessibilityLabel));
+
+  /** Open the menu and press one axis's row. Pressing the one already on reverses it. */
+  const choose = async (view: Awaited<ReturnType<typeof open>>, label: RegExp) => {
+    await openSort(view);
+    await fireEvent.press(view.getByLabelText(label));
+  };
 
   const three = [
     entry({
@@ -370,41 +381,57 @@ describe('the sort control', () => {
     mockMovies = three;
     const view = await open();
 
-    await waitFor(() => expect(view.getByLabelText('Sort. Rank · Highest first')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('Sort. Rank, highest first')).toBeTruthy());
     // Position 1 is the top of the band, so highest first is ascending position.
     expect(drawn(view)[0]).toMatch(/Second ranked/);
     expect(drawn(view)[2]).toMatch(/First ranked/);
   });
 
-  it('reverses to lowest first', async () => {
+  it('reverses to lowest first when Rank is pressed again', async () => {
     mockMovies = three;
     const view = await open();
-    await openSort(view);
-    await fireEvent.press(view.getByLabelText('Rank · Lowest first'));
+    await choose(view, /^Rank,/);
 
     await waitFor(() => expect(drawn(view)[0]).toMatch(/First ranked/));
     expect(drawn(view)[2]).toMatch(/Second ranked/);
+    // Rule 4: the label is the axis and does not move with the direction.
+    expect(view.getByLabelText('Sort. Rank, lowest first')).toBeTruthy();
   });
 
   it('orders by when the title entered the ranking, newest first', async () => {
     mockMovies = three;
     const view = await open();
-    await openSort(view);
-    await fireEvent.press(view.getByLabelText('Recently ranked · Newest first'));
+    await choose(view, /^Recently ranked$/);
 
     await waitFor(() => expect(drawn(view)[0]).toMatch(/Third ranked/));
     expect(drawn(view)[2]).toMatch(/First ranked/);
-    expect(view.getByLabelText('Sort. Recently ranked · Newest first')).toBeTruthy();
+    expect(view.getByLabelText('Sort. Recently ranked, newest first')).toBeTruthy();
   });
 
-  it('and oldest first', async () => {
+  it('and oldest first, on a second press of the same row', async () => {
     mockMovies = three;
     const view = await open();
-    await openSort(view);
-    await fireEvent.press(view.getByLabelText('Recently ranked · Oldest first'));
+    await choose(view, /^Recently ranked$/);
+    await choose(view, /^Recently ranked,/);
 
     await waitFor(() => expect(drawn(view)[0]).toMatch(/First ranked/));
     expect(drawn(view)[2]).toMatch(/Third ranked/);
+    expect(view.getByLabelText('Sort. Recently ranked, oldest first')).toBeTruthy();
+  });
+
+  it('starts a new axis in its own direction rather than inheriting the last one', async () => {
+    // Rank reversed to lowest-first, then Recently ranked chosen: recency must open at
+    // *newest* first, not inherit the ascending direction rank was left in.
+    mockMovies = three;
+    const view = await open();
+    await choose(view, /^Rank,/);
+    await waitFor(() => expect(view.getByLabelText('Sort. Rank, lowest first')).toBeTruthy());
+
+    await choose(view, /^Recently ranked$/);
+    await waitFor(() =>
+      expect(view.getByLabelText('Sort. Recently ranked, newest first')).toBeTruthy(),
+    );
+    expect(drawn(view)[0]).toMatch(/Third ranked/);
   });
 
   it('puts a title with no date last, whichever direction is asked for', async () => {
@@ -418,12 +445,10 @@ describe('the sort control', () => {
     ];
     const view = await open();
 
-    await openSort(view);
-    await fireEvent.press(view.getByLabelText('Recently ranked · Newest first'));
+    await choose(view, /^Recently ranked$/);
     await waitFor(() => expect(drawn(view)[1]).toMatch(/Undated/));
 
-    await openSort(view);
-    await fireEvent.press(view.getByLabelText('Recently ranked · Oldest first'));
+    await choose(view, /^Recently ranked,/);
     await waitFor(() => expect(drawn(view)[1]).toMatch(/Undated/));
   });
 
@@ -436,11 +461,21 @@ describe('the sort control', () => {
       entry({ mediaItemId: 'aa', title: 'Earlier id', position: 2, rankedAt: '2026-01-01T00:00:00Z' }),
     ];
     const view = await open();
-    await openSort(view);
-    await fireEvent.press(view.getByLabelText('Recently ranked · Newest first'));
+    await choose(view, /^Recently ranked$/);
 
     await waitFor(() => expect(drawn(view)[0]).toMatch(/Earlier id/));
     expect(drawn(view)[1]).toMatch(/Later id/);
+  });
+
+  it('never offers a watch-date order over somebody else\'s collection', async () => {
+    // PRD §22: watch dates are private on any profile, at any visibility, to anybody.
+    // The menu is the one place a reversal of that would be easy to make in passing.
+    mockMovies = three;
+    const view = await open();
+    await openSort(view);
+
+    expect(view.queryByLabelText(/watched/i)).toBeNull();
+    expect(view.queryByText(/watched/i)).toBeNull();
   });
 
   it('keeps the Movies and TV selection, which is a different question', async () => {
@@ -448,8 +483,7 @@ describe('the sort control', () => {
     const onChangeCategory = jest.fn();
     const view = await open({ onChangeCategory });
 
-    await openSort(view);
-    await fireEvent.press(view.getByLabelText('Rank · Lowest first'));
+    await choose(view, /^Rank,/);
 
     // Sorting is not switching lists, and it must not behave as though it were.
     expect(onChangeCategory).not.toHaveBeenCalled();
@@ -463,8 +497,8 @@ describe('the sort control', () => {
     // same thing under every order.
     mockMovies = three;
     const view = await open();
-    await openSort(view);
-    await fireEvent.press(view.getByLabelText('Recently ranked · Oldest first'));
+    await choose(view, /^Recently ranked$/);
+    await choose(view, /^Recently ranked,/);
 
     await waitFor(() => expect(view.getByText('#3')).toBeTruthy());
     expect(view.getByText('#1')).toBeTruthy();

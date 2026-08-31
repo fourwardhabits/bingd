@@ -58,11 +58,41 @@ jest.mock('@/lib/supabase', () => ({
 }));
 
 const mockPush = jest.fn();
+
+/**
+ * **The tab bar, captured rather than mounted.**
+ *
+ * The screen subscribes to its navigator's `tabPress`, which under this runner has no
+ * navigator to come from — mounting a real `Tabs` to press one cell would be mounting
+ * four other screens to test this one. So the mock records what the screen subscribed
+ * with and `pressFeedTab` calls it, which is exactly what React Navigation does with it.
+ *
+ * `focused` is mutable because "already-selected" is the whole of the contract: the same
+ * event fires when the reader arrives from another tab, and the screen must tell those
+ * two apart.
+ */
+const tabPressHandlers: (() => void)[] = [];
+const mockNavigation = {
+  focused: true,
+  addListener: (event: string, handler: () => void) => {
+    if (event === 'tabPress') tabPressHandlers.push(handler);
+    return () => {};
+  },
+  isFocused: () => mockNavigation.focused,
+};
+
+const pressFeedTab = () => {
+  const handler = tabPressHandlers.at(-1);
+  if (!handler) throw new Error('the screen subscribed to no tabPress');
+  handler();
+};
+
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
   // The trending shelf refetches on focus. Called immediately here, which is what a
   // focused screen does.
   useFocusEffect: (callback: () => void) => callback(),
+  useNavigation: () => mockNavigation,
 }));
 
 /** Mutable so a test can sign one reader out and another in. */
@@ -137,6 +167,8 @@ const entry = (over: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   backHandlers.length = 0;
+  tabPressHandlers.length = 0;
+  mockNavigation.focused = true;
   jest
     .spyOn(BackHandler, 'addEventListener')
     .mockImplementation(((_event: string, handler: () => boolean) => {
@@ -829,6 +861,83 @@ describe('the hardware back button', () => {
 
     await toBoard(view, 'All time');
     expect(view.getByLabelText('Showing All time')).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **Re-tapping the Feed tab while the board is showing** (founder, 2026-08-30).
+ *
+ * The other half of the complaint the hardware-Back handler answers, and the half iOS
+ * has: every other tab in this app is its own root, so "press the tab you are on to get
+ * back to the top of it" is a habit only this one broke — Leaderboard is a mode of the
+ * route, so the press had nothing to pop and left the reader on the board.
+ *
+ * Both directions are asserted, because the second is what keeps this bounded: a press
+ * that arrives while the reader is on *another* tab must change nothing, or coming back
+ * to Feed would stop returning you to the board you left.
+ */
+describe('re-tapping the Feed tab', () => {
+  it('returns to the Feed root from the board', async () => {
+    const view = await open();
+    await toBoard(view);
+
+    pressFeedTab();
+
+    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    expect(view.queryByLabelText('Showing This month')).toBeNull();
+  });
+
+  it('changes nothing when the reader is already on the Feed root', async () => {
+    const view = await open();
+    expect(view.getByLabelText('Activity')).toBeTruthy();
+
+    pressFeedTab();
+
+    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+    expect(view.getByLabelText('Feed')).toBeTruthy();
+  });
+
+  it('does not leave the board when the press arrives from another tab', async () => {
+    // `tabPress` fires for the Feed tab whether or not it was the one showing. Only the
+    // already-selected case is this feature; the other is somebody navigating here.
+    const view = await open();
+    await toBoard(view);
+    mockNavigation.focused = false;
+
+    pressFeedTab();
+
+    await waitFor(() => expect(view.getByLabelText('Showing This month')).toBeTruthy());
+  });
+
+  it('keeps the remembered timeframe, exactly as Back does', async () => {
+    const view = await open();
+    await toBoard(view);
+    await chooseTimeframe(view, 'This month', 'All time');
+
+    pressFeedTab();
+    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+
+    await toBoard(view, 'All time');
+    expect(view.getByLabelText('Showing All time')).toBeTruthy();
+  });
+
+  it('does not record a second leaderboard view for the return trip', async () => {
+    // Leaving the board is not a decision to look at it, whichever way the reader
+    // leaves — the same rule the Back handler follows by calling setMode directly.
+    const view = await open();
+    await toBoard(view);
+    const views = () =>
+      mockTrack.mock.calls.filter(
+        ([event]) => (event as { name: string }).name === 'leaderboard_viewed',
+      ).length;
+    expect(views()).toBe(1);
+
+    pressFeedTab();
+    await waitFor(() => expect(view.getByLabelText('Activity')).toBeTruthy());
+
+    expect(views()).toBe(1);
   });
 });
 

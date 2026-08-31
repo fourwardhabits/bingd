@@ -220,6 +220,29 @@ export function invalidateAfterWatchlistChange(queryClient: QueryClient, userId:
   });
 
   /**
+   * **The feed and the inbox, because a watchlist write can now delete a post.**
+   *
+   * Queue Dragon counts the watchlist, and since `20260904000100` a collection-derived
+   * award is held only while the collection still supports it — so removing a title can
+   * revoke a tier, and the revocation takes that tier's `award_earned` feed event and
+   * its congratulations with it. Neither key was here, so the badge went and the post
+   * announcing it sat in a cached feed for the rest of the minute, above a notification
+   * for an award the reader no longer had.
+   *
+   * The same two keys are what `invalidateAfterCollectionChange` already invalidates
+   * for exactly this reason on the watched side, and `actor-activity` joins them
+   * because the profile's Recent activity is the same rows under a different key.
+   *
+   * **An add moves them too**, and always did: `set_watchlist(true)` writes the
+   * reader's durable `watchlist_added` event (20260820000300), and nothing here said
+   * so — a bookmark pressed from the Feed did not show up in it. That was a real gap
+   * before this tranche and it is closed by the same three lines.
+   */
+  void queryClient.invalidateQueries({ queryKey: ['feed', userId] });
+  void queryClient.invalidateQueries({ queryKey: ['actor-activity', userId] });
+  void queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
+
+  /**
    * The profile shelf, which is a *second read of the same table* rather than a second
    * copy of the state (`profile/use-public-profile.ts`).
    *

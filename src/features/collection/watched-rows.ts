@@ -93,16 +93,34 @@ export function mergeWatched(
  * `WatchedRow` predates the filter model and carries what a list row draws;
  * `CollectionItem` is what List, Wall and the filter sheet all agree on. Rather than
  * widen one into the other and have two names for one thing, the merge stays as it is
- * and this converts — which also keeps the language and watch date, which the rows
- * never needed and the filters do.
+ * and this converts — which also keeps the language, the watch date and the collection
+ * timestamp, which the rows never needed and the filters do.
+ *
+ * ---------------------------------------------------------------------------
+ * THE SECOND ARGUMENT IS THE WHOLE LOGGED COLLECTION, NOT THE UNRANKED PART OF IT
+ *
+ * **This is the founder's photograph.** The chip said *Recently watched* and the wall
+ * was plainly in rating order, and the cause was here: this function looked up a ranked
+ * title's collection facts in a map built from its second argument, and the only caller
+ * passed `logged.data.unranked` — a list from which every ranked title is, by
+ * definition, absent. So the lookup missed on every ranked row, `watchedOn` came back
+ * null for all of them, the recency comparator returned 0 for every pair, and
+ * `Array.prototype.sort` left the rows in the order they arrived in. Which is score
+ * order, because {@link mergeWatched}'s ranked half comes from the position query.
+ *
+ * A truthful label would not have fixed it and a working comparator would not have
+ * fixed it: the rows genuinely had no date on them. So the argument is now the whole
+ * logged collection and the name says so. The ranked/unranked split it used to carry is
+ * recovered here for free — `seen` already skips anything the ranked half supplied — so
+ * the appended rows are the same ones as before.
  */
 export function watchedItems(
   ranked: readonly RankedEntry[],
-  unranked: readonly LoggedEntry[],
+  logged: readonly LoggedEntry[],
   medium: RankingCategory,
 ): CollectionItem[] {
   const sizes = bandSizes(ranked);
-  const byId = new Map(unranked.map((entry) => [entry.mediaItemId, entry]));
+  const byId = new Map(logged.map((entry) => [entry.mediaItemId, entry]));
 
   const items: CollectionItem[] = ranked.map((entry) => ({
     mediaItemId: entry.mediaItemId,
@@ -117,14 +135,16 @@ export function watchedItems(
     runtimeMinutes: entry.runtimeMinutes,
     score: scoreFor(entry.bucket, entry.position, sizes),
     bucket: entry.bucket,
-    // A ranked title's watch date lives on `user_media`, which the logged query
-    // holds — so it is read across from there when both are in hand.
+    // A ranked title's watch date and collection timestamp live on `user_media`, which
+    // the logged query holds — so they are read across from there. See the note above
+    // for what happens when the caller hands over a list this cannot find them in.
     watchedOn: byId.get(entry.mediaItemId)?.watchedOn ?? null,
+    addedAt: byId.get(entry.mediaItemId)?.addedAt ?? null,
   }));
 
   const seen = new Set(items.map((item) => item.mediaItemId));
 
-  for (const entry of filterByMedium(unranked, medium)) {
+  for (const entry of filterByMedium(logged, medium)) {
     if (seen.has(entry.mediaItemId)) continue;
     items.push({ ...toItem(entry), score: null, bucket: null });
   }
@@ -152,4 +172,5 @@ const toItem = (entry: LoggedEntry): CollectionItem => ({
   score: null,
   bucket: entry.bucket,
   watchedOn: entry.watchedOn,
+  addedAt: entry.addedAt,
 });

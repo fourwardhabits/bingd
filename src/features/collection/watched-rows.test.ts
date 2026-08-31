@@ -1,5 +1,6 @@
 import type { LoggedEntry, RankedEntry } from './use-collection';
-import { filterByMedium, mergeWatched } from './watched-rows';
+import { sortItems } from './filters';
+import { filterByMedium, mergeWatched, watchedItems } from './watched-rows';
 
 /**
  * "Encountered two children with the same key."
@@ -43,6 +44,7 @@ const logged = (over: Partial<LoggedEntry> = {}): LoggedEntry => ({
   language: null,
   bucket: null,
   watchedOn: null,
+  addedAt: '2026-08-01T00:00:00Z',
   ...over,
 });
 
@@ -141,5 +143,96 @@ describe('filterByMedium', () => {
 
     expect(ids(filterByMedium(entries, 'movies'))).toEqual(['a']);
     expect(ids(filterByMedium(entries, 'tv_seasons'))).toEqual(['b', 'c']);
+  });
+});
+
+/**
+ * **The founder's photograph, at its source.**
+ *
+ * The Collection chip said *Recently watched* and the wall was in rating order. The
+ * cause was not the label and not the comparator: `watchedItems` read a ranked title's
+ * collection facts out of a map built from its second argument, and its one caller
+ * passed the *unranked* list — which by construction contains no ranked title. So every
+ * ranked row arrived with a null date, the recency comparator answered 0 for every pair,
+ * and the rows kept the order they came in, which is score order.
+ *
+ * These pin the fix at the level it happened: the facts have to be *on the rows*. A
+ * truthful label over dateless rows would have been a different lie.
+ */
+describe('a ranked title carries its collection facts', () => {
+  const heat = ranked({ mediaItemId: 'film-1', title: 'Heat', position: 1 });
+
+  it('finds the watch date and the collection timestamp of a ranked title', () => {
+    const items = watchedItems(
+      [heat],
+      [logged({ mediaItemId: 'film-1', watchedOn: '2011-06-02', addedAt: '2026-08-30T09:00:00Z' })],
+      'movies',
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.watchedOn).toBe('2011-06-02');
+    expect(items[0]?.addedAt).toBe('2026-08-30T09:00:00Z');
+  });
+
+  it('does not duplicate a title that is both ranked and logged', () => {
+    // The whole logged collection now goes in, so the dedup that used to be implicit in
+    // the caller's `unranked` slice has to hold here — and it does, on `seen`.
+    const items = watchedItems(
+      [heat],
+      [logged({ mediaItemId: 'film-1' }), logged({ mediaItemId: 'film-2' })],
+      'movies',
+    );
+
+    expect(ids(items)).toEqual(['film-1', 'film-2']);
+  });
+
+  it('still appends the logged titles that have no ranking', () => {
+    const items = watchedItems([heat], [logged({ mediaItemId: 'film-9' })], 'movies');
+
+    expect(ids(items)).toEqual(['film-1', 'film-9']);
+    expect(items[1]?.score).toBeNull();
+  });
+
+  it('still keeps the other medium out', () => {
+    const items = watchedItems(
+      [heat],
+      [logged({ mediaItemId: 'season-1', kind: 'season' })],
+      'movies',
+    );
+
+    expect(ids(items)).toEqual(['film-1']);
+  });
+
+  it('leaves the facts null when the logged read has not landed yet', () => {
+    // The two queries settle independently. A ranked row with no collection row in hand
+    // is honest about it rather than inventing a date — and `compareItems` sinks it.
+    const items = watchedItems([heat], [], 'movies');
+
+    expect(items[0]?.watchedOn).toBeNull();
+    expect(items[0]?.addedAt).toBeNull();
+  });
+
+  /**
+   * The end-to-end shape of the defect: rows that arrive in rating order must not stay
+   * in rating order under a Recently-added sort.
+   */
+  it('orders by collection time rather than by the order the queries returned', () => {
+    const items = watchedItems(
+      [
+        ranked({ mediaItemId: 'best', title: 'Best', position: 1 }),
+        ranked({ mediaItemId: 'worst', title: 'Worst', position: 2 }),
+      ],
+      [
+        logged({ mediaItemId: 'best', addedAt: '2020-01-01T00:00:00Z' }),
+        logged({ mediaItemId: 'worst', addedAt: '2026-01-01T00:00:00Z' }),
+      ],
+      'movies',
+    );
+
+    // As merged: rating order, best first — the order the old code left standing.
+    expect(ids(items)).toEqual(['best', 'worst']);
+    // Sorted by when they were added: the later addition leads, whatever it scored.
+    expect(ids(sortItems(items, { axis: 'added', direction: 'desc' }))).toEqual(['worst', 'best']);
+    expect(ids(sortItems(items, { axis: 'added', direction: 'asc' }))).toEqual(['best', 'worst']);
   });
 });

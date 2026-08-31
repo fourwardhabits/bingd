@@ -525,6 +525,7 @@ describe('the collection filters see an inherited season', () => {
     score: null,
     bucket: null,
     watchedOn: null,
+    addedAt: '2026-08-01T00:00:00Z',
   };
 
   it('keeps it under a genre it inherited', () => {

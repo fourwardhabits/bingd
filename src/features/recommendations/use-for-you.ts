@@ -86,6 +86,10 @@ export const asCollectionItem = (candidate: Candidate): CollectionItem => ({
   score: null,
   bucket: null,
   watchedOn: null,
+  // These rows are candidates rather than collection members: nothing here has an
+  // entry in user_media or watchlist, so there is no membership time to carry. The
+  // filter model needs the field; the Recently-added axis is not offered over them.
+  addedAt: null,
 });
 
 /**
@@ -227,6 +231,10 @@ const rankedAsItem = (entry: RankedEntry): CollectionItem => ({
   score: null,
   bucket: entry.bucket,
   watchedOn: null,
+  // These rows are candidates rather than collection members: nothing here has an
+  // entry in user_media or watchlist, so there is no membership time to carry. The
+  // filter model needs the field; the Recently-added axis is not offered over them.
+  addedAt: null,
 });
 
 /**
