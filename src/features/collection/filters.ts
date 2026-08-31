@@ -160,19 +160,29 @@ export const COLLECTION_SORT_AXES = {
   },
   added: {
     axis: 'added',
-    label: 'Recently added',
+    // "Date added" rather than "Recently added" (founder, post-RC). The axis is unchanged
+    // and still orders by collection membership time; what changed is that the label names
+    // the *field* rather than one of its two directions. "Recently" leans on the default
+    // direction, and the control's whole rule is that the label names the axis and the
+    // arrow names the direction.
+    label: 'Date added',
     directions: { desc: 'newest first', asc: 'oldest first' },
     defaultDirection: 'desc',
   },
   year: {
     axis: 'year',
-    label: 'Release year',
+    // "Release date" rather than "Release year". Same field, same comparator — the row
+    // reads as a date to a reader, and the two neighbouring labels are dates too.
+    label: 'Release date',
     directions: { desc: 'newest first', asc: 'oldest first' },
     defaultDirection: 'desc',
   },
   title: {
     axis: 'title',
-    label: 'Title',
+    // "Alphabetical" rather than "Title". Every row on this screen is a title, so the old
+    // label named the noun rather than the ordering; this names the ordering. The
+    // direction words below are unchanged and still say A–Z and Z–A.
+    label: 'Alphabetical',
     directions: { desc: 'Z–A', asc: 'A–Z' },
     defaultDirection: 'asc',
   },

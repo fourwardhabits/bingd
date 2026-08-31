@@ -27,10 +27,19 @@ export type GoalBarProps = {
  * accessibility rule that colour and length are never the only signal, and a bar at
  * 23% means nothing without "12 of 52" next to it.
  *
- * The fill is Sage while the goal is open and Amber once it is met. Amber is the
- * milestone colour in design-system.md §3 and this is the one milestone the app has;
- * Sage is "watched, completed, progress" and is what the bar is measuring until then.
- * Neither is ever text.
+ * **The fill is Amber while the goal is open and Maroon once it is met** (founder,
+ * post-RC). It was Sage-then-Amber, and the swap is about which colour means *arrival*.
+ *
+ * Amber is the palette's yellow and reads as effort under way — a bar filling up. Maroon
+ * is the brand colour and the one this app spends on the things that matter most: the
+ * action button, a score, a loved bucket. Ending on Amber meant the finished state was
+ * the same warm yellow as the unfinished one, only longer, so a completed goal and a
+ * nearly-completed goal were the same picture at a glance. Ending on Maroon makes
+ * completion a change of colour rather than a change of length.
+ *
+ * Sage leaves this component; it stays "watched, completed, progress" everywhere else.
+ * Neither colour is ever text, and the count is still stated in words beside the bar —
+ * PRD's rule that colour and length are never the only signal.
  */
 export function GoalBar({ status, onPress }: GoalBarProps) {
   const sentence = goalSentence(status);
@@ -130,7 +139,9 @@ const styles = StyleSheet.create({
   fill: {
     height: '100%',
     borderRadius: theme.radius.full,
-    backgroundColor: theme.semantic.progress,
+    // Amber — the palette's yellow, and the token the milestone language already uses.
+    backgroundColor: theme.semantic.emphasis,
   },
-  fillComplete: { backgroundColor: theme.semantic.emphasis },
+  // Maroon, so arriving is a different colour and not just a longer bar.
+  fillComplete: { backgroundColor: theme.semantic.action },
 });
