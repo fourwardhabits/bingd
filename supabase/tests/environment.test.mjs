@@ -169,3 +169,122 @@ describe('the invite stamp follows the environment', () => {
     assert.equal(rows[0].env, 'prod');
   });
 });
+
+// ---------------------------------------------------------------------------
+
+/**
+ * **Promotion — `20260905000100`, and the founder's 2026-08-31 decision.**
+ *
+ * The refusal above is right about the harm and wrong about the remedy for one case: the
+ * friend-Beta project became production, with fourteen real accounts in it, because the
+ * alternative was asking real people to register again. What the guard protects is not the
+ * rename itself — it is the invite-token stamps left pointing at the old environment. So
+ * `p_promote => true` moves the stamps *in the same call*, and a plpgsql body is one
+ * transaction: the name and the tokens are never observably out of step.
+ *
+ * These pin both halves. The default must keep refusing, because that is what every
+ * existing caller relies on and what stops a mis-pointed bootstrap promoting a live
+ * database by accident.
+ */
+describe('promoting a populated database', () => {
+  it('still refuses by default, with people present', async () => {
+    await t.createUser({ username: 'promo_default' });
+    const error = await t.errorFrom(`select set_environment_name('prod')`);
+    assert.ok(error, 'the default path promoted a live database');
+    assert.match(String(error.message ?? error), /already in use/i);
+    assert.equal(await envName(), 'nonprod');
+  });
+
+  it('promotes when asked, and carries every invite token with it', async () => {
+    // One owner per LIVE token: `invite_tokens_one_live` is a partial unique index on
+    // the rows that have not been revoked, so a second live link for one person is
+    // refused — which is the invariant, not a fixture inconvenience.
+    const first = await t.createUser({ username: 'promo_owner_a' });
+    const second = await t.createUser({ username: 'promo_owner_b' });
+    await t.sql(
+      `insert into invite_tokens (owner_id, token, short_code, env)
+       values ($1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'PROMOAA1', 'nonprod')`,
+      [first],
+    );
+    await t.sql(
+      `insert into invite_tokens (owner_id, token, short_code, env)
+       values ($1, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'PROMOBB2', 'nonprod')`,
+      [second],
+    );
+    // A revoked token migrates too: `resolve_invite_token` reads `env` before it reads
+    // `revoked_at`, so a revoked link left behind becomes *unknown* rather than staying
+    // revoked — a worse answer, and a different one. It may share an owner precisely
+    // because it is revoked.
+    await t.sql(
+      `insert into invite_tokens (owner_id, token, short_code, env, revoked_at)
+       values ($1, 'cccccccccccccccccccccccccccccccc', 'PROMOCC3', 'nonprod', now())`,
+      [first],
+    );
+
+    const result = (await t.sql(`select set_environment_name('prod', true) as r`)).rows[0].r;
+
+    assert.equal(result.status, 'ok');
+    assert.equal(result.environment, 'prod');
+    assert.equal(result.was, 'nonprod');
+    assert.equal(result.promoted, true);
+    assert.equal(Number(result.invite_tokens_moved), 3, 'the revoked one counts');
+
+    assert.equal(await envName(), 'prod');
+    const left = (
+      await t.sql(`select count(*)::int as n from invite_tokens where env = 'nonprod'`)
+    ).rows[0].n;
+    assert.equal(left, 0, 'a token left stamped nonprod resolves as the wrong environment');
+  });
+
+  it('leaves a token that already carries the target name alone', async () => {
+    // Two owners, for `invite_tokens_one_live` — see the note above.
+    const already = await t.createUser({ username: 'promo_mixed_a' });
+    const behind = await t.createUser({ username: 'promo_mixed_b' });
+    await t.sql(
+      `insert into invite_tokens (owner_id, token, short_code, env)
+       values ($1, 'dddddddddddddddddddddddddddddddd', 'PROMODD4', 'prod')`,
+      [already],
+    );
+    await t.sql(
+      `insert into invite_tokens (owner_id, token, short_code, env)
+       values ($1, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'PROMOEE5', 'nonprod')`,
+      [behind],
+    );
+
+    const result = (await t.sql(`select set_environment_name('prod', true) as r`)).rows[0].r;
+    assert.equal(Number(result.invite_tokens_moved), 1, 'only the one being left behind moves');
+  });
+
+  it('is idempotent: promoting a database that is already prod changes nothing', async () => {
+    await t.createUser({ username: 'promo_twice' });
+    await t.sql(`select set_environment_name('prod', true)`);
+    const again = (await t.sql(`select set_environment_name('prod', true) as r`)).rows[0].r;
+    assert.equal(again.status, 'unchanged');
+    assert.equal(await envName(), 'prod');
+  });
+
+  it('is still service_role only, with the new arity', async () => {
+    const anyone = await t.createUser({ username: 'promo_probe' });
+    assert.equal(
+      (await t.asAnon(() => t.errorFrom(`select set_environment_name('prod', true)`)))?.code,
+      '42501',
+    );
+    assert.equal(
+      (await t.asUser(anyone, () => t.errorFrom(`select set_environment_name('prod', true)`)))?.code,
+      '42501',
+    );
+  });
+
+  it('has no one-argument arity left to be ambiguous against', async () => {
+    // `create or replace` with a new defaulted parameter overloads rather than replaces.
+    // The old arity is dropped, so `bootstrap-production.mjs`'s one-argument call resolves
+    // to the default rather than failing as ambiguous — which is the whole reason it is
+    // dropped, and is why this asserts a COUNT rather than that the call works.
+    const n = (
+      await t.sql(
+        `select count(*)::int as n from pg_proc where proname = 'set_environment_name'`,
+      )
+    ).rows[0].n;
+    assert.equal(n, 1, 'two arities of set_environment_name would make a 1-arg call ambiguous');
+  });
+});

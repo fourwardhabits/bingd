@@ -12,7 +12,21 @@ const { LANE_BACKENDS, supabaseProjectRef, assertBackendIsAllowed } = backends;
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 
-const NONPROD = 'https://abheeqyjzekiowkztfxv.supabase.co';
+/**
+ * A real project URL, for the parsing tests. Deliberately NOT named for a lane.
+ *
+ * It was `NONPROD`, and on 2026-08-31 that stopped being true — the populated friend-Beta
+ * project was promoted to production and the empty one became staging. A constant named
+ * for a role it no longer holds is how a test comes to assert the opposite of what it
+ * reads. The parsing tests never cared which role it played; the role tests below derive
+ * theirs from `LANE_BACKENDS`, so neither needs editing the next time a project moves.
+ */
+const A_PROJECT_URL = 'https://abheeqyjzekiowkztfxv.supabase.co';
+
+/** Whatever the mapping currently calls production, and whatever it calls everything else. */
+const urlFor = (ref) => `https://${ref}.supabase.co`;
+const PRODUCTION_URL = urlFor(LANE_BACKENDS.production[0]);
+const NON_PRODUCTION_URL = urlFor(LANE_BACKENDS.beta[0]);
 
 /**
  * The lane-to-backend rule, tested directly.
@@ -29,8 +43,8 @@ const NONPROD = 'https://abheeqyjzekiowkztfxv.supabase.co';
 
 describe('supabaseProjectRef', () => {
   it('reads the ref out of a Supabase URL', () => {
-    assert.equal(supabaseProjectRef(NONPROD), 'abheeqyjzekiowkztfxv');
-    assert.equal(supabaseProjectRef(`${NONPROD}/`), 'abheeqyjzekiowkztfxv');
+    assert.equal(supabaseProjectRef(A_PROJECT_URL), 'abheeqyjzekiowkztfxv');
+    assert.equal(supabaseProjectRef(`${A_PROJECT_URL}/`), 'abheeqyjzekiowkztfxv');
     assert.equal(supabaseProjectRef('https://ABHEEQYJZEKIOWKZTFXV.supabase.co'), 'abheeqyjzekiowkztfxv');
   });
 
@@ -106,11 +120,18 @@ describe('assertBackendIsAllowed', () => {
      * be one more thing to edit on the day it changes.
      */
     assert.equal(LANE_BACKENDS.production.length, 1);
-    assert.notEqual(LANE_BACKENDS.production[0], NONPROD);
+    assert.notEqual(LANE_BACKENDS.production[0], LANE_BACKENDS.beta[0]);
     assert.throws(
-      () => assertBackendIsAllowed(NONPROD, 'production'),
+      () => assertBackendIsAllowed(NON_PRODUCTION_URL, 'production'),
       /production/,
-      'a production build pointed at nonprod is the failure this allowlist exists for',
+      'a production build pointed at the non-production backend is what this refuses',
+    );
+    // And the mirror, which is the half that would strand real users: a beta build must
+    // not be able to reach the promoted production database.
+    assert.throws(
+      () => assertBackendIsAllowed(PRODUCTION_URL, 'beta'),
+      /beta/,
+      'a beta build pointed at production is the other half of the same rule',
     );
   });
 
@@ -129,9 +150,11 @@ describe('assertBackendIsAllowed', () => {
       if (!withProduction[lane].includes(ref)) throw new Error('refused');
     };
 
+    // The beta side is the mapping's own non-production backend rather than a literal:
+    // which project that is changed on 2026-08-31, and the rule did not.
     assert.throws(() => check('https://prodprojectrefxxxxx.supabase.co', 'beta'));
-    assert.throws(() => check(NONPROD, 'production'));
-    assert.doesNotThrow(() => check(NONPROD, 'beta'));
+    assert.throws(() => check(NON_PRODUCTION_URL, 'production'));
+    assert.doesNotThrow(() => check(NON_PRODUCTION_URL, 'beta'));
     assert.doesNotThrow(() => check('https://prodprojectrefxxxxx.supabase.co', 'production'));
   });
 
@@ -155,7 +178,7 @@ describe('assertBackendIsAllowed', () => {
   it('refuses a lane name that is not a lane', () => {
     // The typo case. `"BINGD_LANE": "previev"` must not resolve to "no lane, allow
     // anything" — which is exactly what an `undefined` lookup would have meant.
-    assert.throws(() => assertBackendIsAllowed(NONPROD, 'previev'), /not a Bingd release lane/);
+    assert.throws(() => assertBackendIsAllowed(A_PROJECT_URL, 'previev'), /not a Bingd release lane/);
   });
 
   it('gives an undeclared lane the development lane, not the union of every lane', () => {
@@ -166,7 +189,11 @@ describe('assertBackendIsAllowed', () => {
      * `eas update`, which supplies no `BINGD_LANE` because it does not read a build
      * profile) could compile production credentials and publish them to any channel.
      */
-    assert.doesNotThrow(() => assertBackendIsAllowed(NONPROD, undefined));
+    assert.doesNotThrow(() =>
+      assertBackendIsAllowed(urlFor(LANE_BACKENDS.development[0]), undefined),
+    );
+    // The trap this test is named for: a lane-less resolution must NOT reach production.
+    assert.throws(() => assertBackendIsAllowed(PRODUCTION_URL, undefined), /development/);
     assert.throws(
       () => assertBackendIsAllowed('https://someotherproject.supabase.co', undefined),
       /development permissions/,
@@ -389,15 +416,28 @@ describe('the lanes this file knows about, and the ones eas.json builds', () => 
   it('keeps every non-production lane off any future production backend', () => {
     /**
      * Stated as an invariant rather than as a review comment, so that adding a production
-     * ref to the wrong line fails here. `production` is the only lane permitted to grow a
-     * second entry, and the day it does, the three lanes below must still hold nothing
-     * but nonprod.
+     * ref to the wrong line fails here.
+     *
+     * **Written against the production entry rather than against a literal ref**, since
+     * 2026-08-31: the populated friend-Beta project was promoted to production and the
+     * empty one became staging, so a test naming `abheeqyjzekiowkztfxv` as "the
+     * non-production backend" asserted the old topology rather than the rule. The rule is
+     * that no non-production lane may reach whatever production currently is, and that
+     * the three of them agree with each other.
      */
+    const productionRefs = LANE_BACKENDS.production;
     for (const lane of ['development', 'preview', 'beta']) {
+      assert.equal(LANE_BACKENDS[lane].length, 1, `${lane} must name exactly one backend`);
+      for (const ref of LANE_BACKENDS[lane]) {
+        assert.ok(
+          !productionRefs.includes(ref),
+          `${lane} may not reach the production backend`,
+        );
+      }
       assert.deepEqual(
         LANE_BACKENDS[lane],
-        ['abheeqyjzekiowkztfxv'],
-        `${lane} may only ever reach bingd-nonprod`,
+        LANE_BACKENDS.development,
+        `${lane} must name the same non-production backend as every other non-production lane`,
       );
     }
   });
@@ -409,6 +449,8 @@ describe('the lanes this file knows about, and the ones eas.json builds', () => 
     assert.equal(beta.env.APP_VARIANT, 'production');
     assert.equal(beta.environment, 'preview');
     assert.equal(beta.channel, 'beta');
-    assert.deepEqual(LANE_BACKENDS.beta, ['abheeqyjzekiowkztfxv']);
+    // The point is that beta is NOT production's backend, whichever project that is.
+    assert.equal(LANE_BACKENDS.beta.length, 1);
+    assert.ok(!LANE_BACKENDS.production.includes(LANE_BACKENDS.beta[0]));
   });
 });
