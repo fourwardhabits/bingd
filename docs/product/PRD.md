@@ -941,15 +941,56 @@ show.
 
 ### As built — 2026-08-29: the See all sheet sorts, and what it will not sort by
 
-The static subtitle *In rank order.* is replaced by a control, because a subtitle stating the order is one nobody can act on. Four orders and no more — **Rank: Highest first** (the default) and **Lowest first**; **Recently ranked: Newest first** and **Oldest first**. No filters, no third axis. It is the chip-and-radio-menu the Collection tab has used since it had sorting, rather than a second grammar for the same idea on a second screen, and the chip names the whole order ("Rank · Highest first") because the direction is half the answer.
+The static subtitle *In rank order.* is replaced by a control, because a subtitle stating the order is one nobody can act on. Two axes and no more — **Rank** (the default, highest first) and **Recently ranked** (newest first). No filters, no third axis. It is the chip-and-menu the Collection tab uses, and since 2026-08-30 it is literally the same component.
+
+> **Restated 2026-08-30 in the shared sort contract.** It listed four rows — *Highest first*, *Lowest first*, *Newest first*, *Oldest first* — one per direction, and the chip named the whole order (*Rank · Highest first*). It now lists one row per axis and the direction lives on an arrow, which is [the contract below](#as-built--2026-08-30-one-sort-contract-for-every-list). Which orders exist did not change; what changed is that the label names the axis, so it cannot drift away from the direction beside it.
 
 **The recency axis is "Recently ranked" and not "Recently watched", and that is a privacy decision rather than a naming one.** The founder asked for recency on somebody else's collection. [§22](#22-privacy-safety-and-moderation) makes watch dates private *on any profile, at any visibility, to anybody*, and `logged_collection` — the projection a visitor's read of a collection goes through — omits the column deliberately. A control labelled *Recently watched* over another person's list would either sort by something else while claiming otherwise, or reverse that rule in passing. So the axis is `rankings.created_at`: the moment the title entered their ranking, which is the same instant their public *ranked X* activity already carries. Nothing private crosses a boundary and the label says what it sorts by.
 
 **The comparators are total.** `position` is unique per category, so the rank orders have no ties; the id tiebreak is there anyway, because a comparator that is total only by accident of a constraint elsewhere is one schema change from reordering itself between renders. A title with no date sorts **last in both directions** — the date test comes before the direction rather than inside it — which can only arise for a bundle reading a response without the column, and is the answer that does not put an unknown at the top of a list claiming to be newest.
 
-**Sorted before the cap, never after.** A cap applied first would make each order a rearrangement of the same two hundred titles rather than the first two hundred of that order, so *Oldest first* would silently mean "oldest of their most recent two hundred". Changing the order returns the list to the top, because a `ScrollView` keeps its offset when its children are replaced and a reader two hundred rows down would otherwise be dropped into the middle of an order they have not seen the start of. The Movies / TV selection is a different question and is untouched by sorting. Scores and the `#N` ordinal are computed over the whole category, so no order re-scores anybody.
+**Sorted before the cap, never after.** A cap applied first would make each order a rearrangement of the same two hundred titles rather than the first two hundred of that order, so *oldest first* would silently mean "oldest of their most recent two hundred". Changing the order returns the list to the top, because a `ScrollView` keeps its offset when its children are replaced and a reader two hundred rows down would otherwise be dropped into the middle of an order they have not seen the start of. The Movies / TV selection is a different question and is untouched by sorting. Scores and the `#N` ordinal are computed over the whole category, so no order re-scores anybody.
 
 **The fixed Close button stays, and the comparison is the reason.** The founder asked whether it could go. Of the comparable read-only sheets, `GoalTitlesSheet` and `AwardBreakdownSheet` have exactly this shape — a bounded list over a fixed footer action — and `AwardsSheet` ends on *Done*; only `FollowListSheet` puts Close in its header, and it has a reason this sheet does not share (a search field directly under the heading, and a footer that would sit under a keyboard). `Sheet` also records that its backdrop is hidden from the accessibility tree *because* every sheet carries its own labelled Close, so removing this one would leave a screen-reader user on iOS with no accessible dismissal at all. The canonical pattern requires it; the view is unchanged.
+
+---
+
+### As built — 2026-08-30: one sort contract for every list
+
+The Collection's sort chip said **Recently watched** over a wall that was plainly in rating order. It was not a rendering bug and it was not one mistake:
+
+- `watchedItems` looked a ranked title's collection facts up in a map built from its second argument, and the only caller passed the **unranked** list — from which every ranked title is absent by construction. So every ranked row arrived with a null watch date.
+- The recency comparator therefore answered *equal* for every pair, and `Array.prototype.sort` left the rows in the order they arrived in — which is **score order**, because that is how the ranked half comes back from the position query.
+- The label was truthful about its intent and false about the rows, and nothing could see the difference: the control, the comparator, the query and the list were each defensible alone.
+
+**The data half.** `CollectionItem` now carries `addedAt` — `user_media.created_at` for a watched row, `watchlist.created_at` for a saved one — and `watchedItems` takes the whole logged collection rather than the unranked slice of it. Membership time is written by the database on every row of both tables and cannot be absent, which is the difference from the watch date: that is a nullable calendar date the reader may decline to give.
+
+**The contract**, in `src/ui/sort.ts`, and both surfaces draw the same control:
+
+1. **A label names its axis and nothing else** — Rating, Rank, Recently added, Recently ranked, Release year, Title. Never a direction, never a fact the surface does not order by.
+2. **Choosing a new axis starts in that axis's intuitive direction** — best first, newest first, A–Z. It never inherits the previous axis's direction.
+3. **Choosing the axis already in use flips its direction.** One row per axis, two states behind it — not *Highest Rated* and *Lowest Rated* as separate choices.
+4. **The label does not change when the direction does.** The arrow changes.
+5. **The arrow is the ordering of the underlying value**: down is descending (10 → 1, newest → oldest, Z → A), up is ascending. Every control also carries a spoken label that says it in words — *Sort. Rating, highest first*.
+
+**The axes, and the one that is gone.**
+
+| Surface | Axes | Default |
+| --- | --- | --- |
+| Collection · Watched | Rating, Recently added, Release year, Title, Shuffle | Rating, highest first |
+| Collection · Watchlist and Unranked | Recently added, Release year, Title, Shuffle | Recently added, newest first |
+| Profile · See all | Rank, Recently ranked | Rank, highest first |
+
+- **Recently added** is collection *membership* time and is offered on all three collection lists, because all three are backed by a table that stamps `created_at` on insert.
+- **Recently ranked** is `rankings.created_at`, and it is the See-all sheet's axis for the privacy reason above.
+- **A watch date is neither**, and there is **no watch-date axis anywhere**. A title logged today and watched in 2011 is a recent *addition* and an old *watch*; conflating them is what produced the photograph. Sorting a collection by watch date is a real thing to want and is on the deferred roadmap — what it needs first is a date on every row, which is a product decision about the Log sheet rather than a comparator.
+- **Release year** was two rows reading *Newest* and *Oldest*, sitting directly under a recency axis, with nothing to say whether they meant the film or the library.
+- **Rating is Watched's alone**: nothing on a watchlist has been ranked, so a rating order there would sort by a column that is null on every row. Carrying Rating into the watchlist falls back to Recently added *in its own default direction*, so the chip, the arrow and the rows agree the moment the tab changes.
+
+**Every comparator is total.** A comparator that answers *equal* leaves the incoming order standing, and the incoming order is the one that told the lie — so every axis ends at a media-item-id tiebreaker. Missing values sink in **both** directions: an unranked title has no rating and an undated one has no year, and putting either at the top of a list claiming to show the highest or the newest is answering a question with a blank.
+
+**Nothing about persistence changed.** The view mode is the only stored preference; filters and sort live in the Collection screen's state, so they survive Watched ↔ Watchlist, Movies ↔ TV and grid ↔ list, and reset on relaunch — exactly as before.
+
 
 ## 12. Letterboxd import
 
@@ -1959,7 +2000,7 @@ v0.6 listed Achievements under §8 **Deferred** and specified them in [`backlog.
 **Twenty tracks, thirty badges, and no table behind any of it.**
 
 - Reached from **Profile → Awards**, as a sheet. A grid where locked and unlocked sit together, because the locked slots are the reason to come back and they only read that way beside the unlocked ones.
-- **Every award is derived from canonical tables** — `user_media`, `rankings`, `watchlist`, `follows`, `title_recommendations`, `invite_attributions`, notes. There is no award table, no event log and no stored progress. An achievement system with its own event log is a second source of truth about somebody's collection, free to disagree with the first. *(2026-08-28: one table now exists — `award_unlocks`, the crossing ledger behind the social loop. It stores no progress and the sheet never reads it; the sheet stays derived, which is why it can honestly fall while an announced achievement stands.)*
+- **Every award is derived from canonical tables** — `user_media`, `rankings`, `watchlist`, `follows`, `title_recommendations`, `invite_attributions`, notes. There is no award table, no event log and no stored progress. An achievement system with its own event log is a second source of truth about somebody's collection, free to disagree with the first. *(2026-08-28: one table now exists — `award_unlocks`, the crossing ledger behind the social loop. It stores no progress and the sheet never reads it; the sheet stays derived.)* *(2026-08-30: and where the two could disagree, they no longer do — a **collection**-derived tier is revoked when the collection stops supporting it, so the ledger and the derived sheet agree about the fifteen tracks that count what is in the collection right now. The five **history** tracks are permanent, and there the ledger can honestly stand while a count falls. See the As-built block for `20260904000100`.)*
 - Tiered, with progress shown on anything countable, and each track states what earns it.
 - **No social surface**: no comparison, no leaderboard, and nothing is told to anybody else. *(Since the profile unification, another person's sheet is viewable from their profile — see the visibility note below — which is still not a comparison: it is their sheet, read under the viewer's ordinary visibility. And since 2026-08-28 "nothing is told to anybody else" is no longer the whole truth: crossing a tier is announced, once — see the As-built block dated 2026-08-28 below. Still no comparison and no leaderboard.)*
 - **Ten of the twenty tracks still render an emoji placeholder** rather than drawn art, asserted by test so the number cannot drift silently. [`deferred-roadmap.md`](./deferred-roadmap.md) §14.
@@ -1988,7 +2029,9 @@ The canonical contract: **an award milestone newly earned produces exactly one s
 
 **Two exceptions, both from the visibility contract above.** **Hype Courier** is the one `social = false` track — its progress is withheld from visitors — so it earns the private congratulations and **no feed post**: a public post would disclose the crossing of a count the product refuses to show. **Invite Instigator** participates fully — its count became public achievement data on `20260827001100` — and its payload names no invitee, token, or timestamp.
 
-**The server counts for itself, and the sheet stays the client's.** The trigger metrics are owner-truth reproductions of `tracks.ts` — `award_tiers` seeds 60 threshold rows and `award_genre_patterns` 18 POSIX patterns, both held to the TypeScript by `src/features/awards/awards-server-parity.test.ts`. Two deliberate divergences from the client's viewer-relative counts (`comments_read` filtering; Mutual Mania's `can_i_view`) are documented in the migration header. The Awards **sheet** remains purely client-derived; the ledger drives only the social loop. A count can fall after an unlock — unranking — and the two tell the truth separately: the achievement stands, the sheet honestly shows lower progress.
+**The server counts for itself, and the sheet stays the client's.** The trigger metrics are owner-truth reproductions of `tracks.ts` — `award_tiers` seeds 60 threshold rows and `award_genre_patterns` 18 POSIX patterns, both held to the TypeScript by `src/features/awards/awards-server-parity.test.ts`. Two deliberate divergences from the client's viewer-relative counts (`comments_read` filtering; Mutual Mania's `can_i_view`) are documented in the migration header. The Awards **sheet** remains purely client-derived; the ledger drives only the social loop.
+
+> **Amended 2026-08-30.** The sentence that stood here said a falling count leaves the achievement standing while the sheet honestly shows lower progress. That is now true of the five **history** tracks only. For the fifteen **collection** tracks the tier is revoked when the collection stops supporting it, precisely so the ledger and the derived sheet cannot disagree about a claim the app can see is false. `20260904000100`, below.
 
 **In the feed**, `award_earned` renders through the ordinary grammar — "Abisola **earned the** Movie Muncher **award**", award name in the title slot, tier label as the metadata line — with the real award badge (`AwardActivityLead`, `AwardBadge` at 40pt in the poster's 40×60 box) where the poster would be. Comments and reactions work on it because the writers are type-agnostic; `feed_events_read` applies unchanged (`can_i_view(actor)`); `remove_from_collection` and `unlog` never touch award events. Tapping the row opens the earner's Awards — `/profile?awards=1` for your own, `/u/[username]?awards=1` for anybody else's (the public profile gained that param).
 
@@ -2022,6 +2065,48 @@ The canonical contract: **an award milestone newly earned produces exactly one s
 **Review awards are deferred to their own pass**, deliberately and not invented here. [`deferred-roadmap.md`](./deferred-roadmap.md) carries it.
 
 **The historical treatment, which is the founder's explicit call.** A tier already on the ledger that the comments-only count no longer supports is **revoked**, along with the feed post and the congratulations that hang off it — so the ledger tells the truth about the rule in force, and no surface goes on claiming an award the Awards sheet no longer shows. It is narrow (one track, and only tiers that fail the new metric), deterministic (the metric is a pure function of `comments`), and it leaves every legitimately-earned tier alone. A revoked tier can be earned again later and announces then, once, through the ordinary ledger. This is the one place this schema has taken an achievement back, and the reason is that the achievement was measuring something the product no longer counts.
+
+### As built — 2026-08-30: an award the collection still supports (`20260904000100`)
+
+The founder earned a Softie Hours tier, removed the titles that earned it, and the badge stayed — over an Awards sheet that was, correctly, showing a count below the bar. The ledger and the sheet were each telling the truth and the pair was incoherent.
+
+**The founder's decision: a tier whose requirement is a claim about the CURRENT collection is held only while the current collection satisfies it.** The distinction is not a matter of taste, it is what the requirement *says*:
+
+- *Watch 25 dramas* is a claim about a collection. Delete the dramas and there is nothing it is true of; the badge is then asserting a state the app itself can see is absent, on a screen listing the very titles it counted.
+- *You invited three people who joined* is a claim about events. Nothing later makes it untrue — and neither does deleting a comment un-write it, nor does somebody removing their reaction un-react it.
+
+**The classification is a table, not a list somebody typed.** `award_tracks (award_key, metric_kind)` is seeded from `AwardTrack.needs` in `tracks.ts`, the field that already names the fact each track counts: `needs` in `watched`, `watchlist` or `rankings` is a **collection** metric, and the other five are **histories**. `awards-server-parity.test.ts` holds the seed to the TypeScript exactly as it already holds the thresholds, and `award_tiers_track_fk` means a twenty-first track cannot be seeded without being classified — it fails the migration rather than defaulting quietly to permanent.
+
+| Kind | Tracks | Behaviour |
+| --- | --- | --- |
+| **collection** (15) | Movie Muncher, Season Snacker, the seven genre tracks, Passport Mode, Time Hopper, Genre Gremlin, Two-Screen Life, Queue Dragon, Rating Rascal | Held while the threshold is met; revoked and re-earnable |
+| **history** (5) | Invite Instigator, Comment Gremlin, Hype Courier, Heart Magnet, Mutual Mania | Permanent, whatever any count later does |
+
+**Mutual Mania is the one argued rather than derived.** Its count *can* fall — an unfollow, a block — so the shape of the metric would allow revocation. It is deliberately not made reversible: it is a claim about other people's standing relationships, and revoking on it would mean one person's unfollow silently deletes another person's badge, feed post and notification with no act of their own involved. That is a different product decision; it is on the [deferred roadmap](./deferred-roadmap.md), not in this migration, and the parity test pins the boundary so widening it is a deliberate edit in two files rather than a slip in one.
+
+**What revoking takes, and the one thing it cannot.** The tier's ledger row, its `award_earned` feed event and its `award_earned` notification, keyed on `(award, tier)` exactly as the partial unique indexes that guarantee one of each are. `push_outbox` cascades from the notification, so a push still queued never leaves the server; `feed_event_causes`, reactions and comments cascade from the event. **A push already delivered to a phone cannot be retracted** — the platforms have no such call — so a reader told about Sob Lord ten minutes before deleting the titles keeps that lock-screen line until they clear it. Everything the server owns is removed; the notification centre is the operating system's.
+
+**Only the unsupported tier.** Each tier is measured against its own threshold, which is also what makes Two-Screen Life's per-tier cap correct: losing Chaos Collector at 17 genres leaves Mixer at 16 and Dabbler at 14 standing, and their announcements — which are true statements about tiers still held — stand with them.
+
+**Re-earning is a fresh attainment cycle, and exactly one of each.** Crossing again writes a new ledger row with a new `value_at_unlock` and `earned_at`, one new feed announcement, one new congratulations, and one push if the account is eligible. That is only possible because the revocation took the old announcement out of those permanent partial unique indexes with it — an announcement outliving its unlock would refuse the next one in silence.
+
+**Every destructive path reaches it, by construction.** Deferred constraint triggers on `delete` from `user_media`, `watchlist` and `rankings` — the three tables — so *Remove from collection* (which is `rank_unrank` then `unlog`), `unlog`, `set_watchlist(false)`, the watchlist invariant that clears a saved title when it is logged, `rank_unrank`, and the next writer somebody adds all arrive at the same place.
+
+**Deferred, and that is the load-bearing word.** `rank_rebucket` and `rank_again` end at `_rank_finalize`, which deletes the old `rankings` row and inserts the new one in one transaction. An immediate trigger fires between those two statements, sees one ranking fewer, revokes Rating Rascal and deletes its post — and the insert that follows re-earns it and posts again. **Moving a title between bands would have announced an award the reader already had, every time.** `deferrable initially deferred` moves the check to COMMIT, where the transaction's final state is the only state there is; a removal and a re-addition in one transaction likewise revoke nothing. Both properties are pinned, and both fail if the deferral is removed.
+
+**Concurrency, stated rather than overclaimed.** Two removals landing together serialise on `_award_lock`, the account's advisory lock, taken by the revocation at commit and by nothing else — so a tier is revoked once and no orphan post or notification survives. The unlock detector deliberately does **not** take that lock: it runs from `AFTER INSERT` triggers on `user_media`, so taking it there put it ahead of the ranking band lock and turned one account's award lock into a coarse write lock over every collection write it makes — which two of this repo's own race suites caught within a single run. One window is therefore left open and named: an addition whose detector has already run, followed by a removal that commits before it does, revokes a tier the final count supports. That is a **missing** unlock, never a stale one — nothing unsupported survives and nothing is duplicated — and the account's next collection write earns it back with exactly one announcement.
+
+**The reconciliation.** Existing unsupported collection-derived unlocks are removed by the same rule at the bottom of the migration, the shape `20260901000100` used for Comment Gremlin: the set is frozen into a temporary table so the three deletes cannot disagree, and only tiers whose metric is below their own threshold are touched. Supported tiers and every history track are untouched.
+
+**Two push corrections came out of the same work.**
+
+*The claim-to-send window* (independent review 78, MAJOR; narrowed again by 78b). `push_outbox` cascading from the notification stops a *queued* push leaving the server, and the migration header originally claimed an already-**delivered** push was the only thing that could not be stopped. That was wrong by one step: `claim_push_batch` hands the sender a payload and leases the row for five minutes, so a revocation committing while the sender is still working deletes a row nobody is reading any more, and the push goes out for a tier that no longer exists.
+
+The sender now asks `live_push_jobs` which of its claimed ids still have a queue row and drops the rest — **after** it has built every message, which is where 78b insisted it belong: a check run earlier leaves the whole of the message-building phase inside the window it is meant to be closing. It also **fails closed**: if the database cannot answer, nothing is sent and nothing is settled, the lease expires, and the batch is claimed again. Sending is the direction that cannot be taken back.
+
+**What is honestly left is the dispatch itself** — the milliseconds between that answer and the request leaving. A database read and a network send cannot be made one atomic act and no platform offers a recall, so the boundary is stated at its true width rather than at "already in flight".
+
+*An award push that had never been sent.* Writing the test above found something older. `claim_push_batch` ends with a filter on the actor's profile that was `p.id is not null` — which reads as "the actor has gone" and behaves as "there is no actor". The award congratulations is the only actorless notification in the schema, and `20260828000100` added the escape (`or n.actor_id is null`) for exactly that reason. The `20260830000100` rebuild, which added a `mention` branch to the join two lines above it, was assembled from an ancestor that predated the escape and reverted it. **Every award congratulations since then was claimed, dropped from the returned batch, and then reaped** — no failure count, no `last_error`, no backlog, nothing to notice. It is the same `create or replace`-from-the-wrong-ancestor trap that cost `add_comment` its pair lock on PR #48, and the same one `20260828000100`'s own header warns about. Restored, with a test on the whole path rather than on the enqueue, and its counterpart pinning that a job whose actor genuinely has gone is still reaped.
 
 ### As built — 2026-08-30: the Awards sheet has one order, and it never changes
 

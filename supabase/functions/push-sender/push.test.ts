@@ -22,7 +22,7 @@ import {
   sendChunk,
   type ExpoTicket,
 } from './expo.ts';
-import { summarise, type Addressed } from './batch.ts';
+import { stillQueued, summarise, type Addressed } from './batch.ts';
 
 const job = (overrides: Partial<PushJob> = {}): PushJob => ({
   notification_id: '11111111-1111-1111-1111-111111111111',
@@ -541,4 +541,68 @@ Deno.test('two notifications in one batch are settled independently', () => {
   assertEquals(results.length, 2);
   assertEquals(results.find((r) => r.notification_id === 'n1')?.delivered, true);
   assertEquals(results.find((r) => r.notification_id === 'n2')?.delivered, false);
+});
+
+// ---------------------------------------------------------------------------
+// The last look before dispatch — independent reviews 78 and 78b
+//
+// A claimed job's notification can be deleted inside the five-minute lease. Award
+// revocation (`20260904000100`) does exactly that: it deletes the congratulations, and
+// `push_outbox` cascades from it. The sender is holding the payload by then, so the row
+// being gone is not enough on its own — it has to ask again before it sends.
+//
+// It filters `Addressed` rather than `PushJob` because of where the check has to sit:
+// 78b pointed out that narrowing before the messages are built leaves the whole of
+// `messagesFor` inside the window, so the sender builds everything and drops entries
+// immediately before the first `sendChunk`.
+// ---------------------------------------------------------------------------
+
+Deno.test('stillQueued keeps a message whose queue row survives', () => {
+  const a = addressed('n-a', 'tok-a');
+  assertEquals(stillQueued([a], ['n-a']), [a]);
+});
+
+Deno.test('stillQueued drops a message whose notification was deleted inside the lease', () => {
+  const kept = addressed('n-kept', 'tok-kept');
+  const revoked = addressed('n-revoked', 'tok-revoked');
+
+  const survivors = stillQueued([kept, revoked], ['n-kept']);
+
+  assertEquals(survivors.length, 1);
+  assertEquals(survivors[0]?.notificationId, 'n-kept');
+});
+
+Deno.test('stillQueued drops everything when nothing survived', () => {
+  assertEquals(stillQueued([addressed('n-a', 'tok-a')], []), []);
+});
+
+Deno.test('stillQueued keeps every device of a surviving notification', () => {
+  // One job can address two phones, and `summarise` folds them back to one settlement by
+  // notification id. Dropping one device and keeping the other would settle an attempt
+  // that only half happened.
+  const phone = addressed('n-a', 'tok-phone');
+  const tablet = addressed('n-a', 'tok-tablet');
+
+  assertEquals(stillQueued([phone, tablet], ['n-a']), [phone, tablet]);
+});
+
+Deno.test('stillQueued preserves order, because summarise reads outcomes by index', () => {
+  const one = addressed('n-1', 'tok-1');
+  const two = addressed('n-2', 'tok-2');
+  const three = addressed('n-3', 'tok-3');
+
+  // The live set is deliberately in a different order from the batch: the answer is a
+  // membership test, and a sender that reordered its messages would map Expo's tickets
+  // onto the wrong rows.
+  assertEquals(
+    stillQueued([one, two, three], ['n-3', 'n-1']).map((entry) => entry.notificationId),
+    ['n-1', 'n-3'],
+  );
+});
+
+Deno.test('stillQueued ignores an id that was never claimed', () => {
+  // `live_push_jobs` only ever answers about ids it was given, but a filter that trusted
+  // the answer to be a subset would be trusting the wrong side of the call.
+  const a = addressed('n-a', 'tok-a');
+  assertEquals(stillQueued([a], ['n-a', 'n-elsewhere']), [a]);
 });

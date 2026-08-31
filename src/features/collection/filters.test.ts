@@ -2,16 +2,20 @@ import {
   ANIME_GENRE,
   activeFilterCount,
   applyFilters,
+  COLLECTION_SORT_AXES,
   decadeOf,
   emptyFilters,
   facetOptions,
   isAnime,
   isFiltered,
   shuffle,
+  sortAxesFor,
   sortItems,
-  sortOptionsFor,
   type CollectionItem,
+  type CollectionSortState,
+  type SortAxis,
 } from './filters';
+import type { SortDirection } from '@/ui/sort';
 import { resolveMetadata } from '@/lib/media-metadata';
 import { genreRanksFor } from './genre-rank';
 import { heroRankFor } from './hero-rank';
@@ -29,10 +33,17 @@ const item = (over: Partial<CollectionItem> = {}): CollectionItem => ({
   score: 8.5,
   bucket: 'loved',
   watchedOn: '2026-01-02',
+  addedAt: '2026-01-02T12:00:00Z',
   ...over,
 });
 
 const ids = (rows: CollectionItem[]) => rows.map((row) => row.mediaItemId);
+
+/** One sort state, spelled short, because these tests name a lot of them. */
+const at = (axis: SortAxis, direction: SortDirection): CollectionSortState => ({
+  axis,
+  direction,
+});
 
 describe('one facet at a time', () => {
   const rows = [
@@ -365,31 +376,63 @@ describe('decades', () => {
 
 describe('sorting', () => {
   const rows = [
-    item({ mediaItemId: 'mid', title: 'Beta', score: 5, year: 2005, watchedOn: '2026-02-01' }),
-    item({ mediaItemId: 'high', title: 'Alpha', score: 9, year: 2021, watchedOn: '2026-01-01' }),
-    item({ mediaItemId: 'none', title: 'Zeta', score: null, year: 1990, watchedOn: null }),
+    item({
+      mediaItemId: 'mid',
+      title: 'Beta',
+      score: 5,
+      year: 2005,
+      watchedOn: '2026-02-01',
+      addedAt: '2026-02-01T00:00:00Z',
+    }),
+    item({
+      mediaItemId: 'high',
+      title: 'Alpha',
+      score: 9,
+      year: 2021,
+      watchedOn: '2026-01-01',
+      addedAt: '2026-03-01T00:00:00Z',
+    }),
+    item({
+      mediaItemId: 'none',
+      title: 'Zeta',
+      score: null,
+      year: 1990,
+      watchedOn: null,
+      addedAt: '2026-01-01T00:00:00Z',
+    }),
   ];
 
-  it('orders by score, high first, with unranked last', () => {
-    expect(ids(sortItems(rows, 'score-desc'))).toEqual(['high', 'mid', 'none']);
+  it('orders by rating, high first, with unranked last', () => {
+    expect(ids(sortItems(rows, at('rating', 'desc')))).toEqual(['high', 'mid', 'none']);
   });
 
-  it('orders by score, low first, still with unranked last', () => {
-    // Unranked sinks in *both* directions: it has no score to be low.
-    expect(ids(sortItems(rows, 'score-asc'))).toEqual(['mid', 'high', 'none']);
+  it('orders by rating, low first, still with unranked last', () => {
+    // Unranked sinks in *both* directions: it has no rating to be low.
+    expect(ids(sortItems(rows, at('rating', 'asc')))).toEqual(['mid', 'high', 'none']);
   });
 
-  it('orders by watch date, undated last', () => {
-    expect(ids(sortItems(rows, 'recent'))).toEqual(['mid', 'high', 'none']);
+  it('orders by when the title was added, newest first', () => {
+    expect(ids(sortItems(rows, at('added', 'desc')))).toEqual(['high', 'mid', 'none']);
   });
 
-  it('orders by year both ways', () => {
-    expect(ids(sortItems(rows, 'year-desc'))).toEqual(['high', 'mid', 'none']);
-    expect(ids(sortItems(rows, 'year-asc'))).toEqual(['none', 'mid', 'high']);
+  it('orders by when the title was added, oldest first', () => {
+    expect(ids(sortItems(rows, at('added', 'asc')))).toEqual(['none', 'mid', 'high']);
   });
 
-  it('orders A–Z on what the reader sees', () => {
-    expect(ids(sortItems(rows, 'az'))).toEqual(['high', 'mid', 'none']);
+  it('puts a row with no collection timestamp last, in both directions', () => {
+    const dateless = [...rows, item({ mediaItemId: 'blank', addedAt: null })];
+    expect(ids(sortItems(dateless, at('added', 'desc'))).at(-1)).toBe('blank');
+    expect(ids(sortItems(dateless, at('added', 'asc'))).at(-1)).toBe('blank');
+  });
+
+  it('orders by release year both ways', () => {
+    expect(ids(sortItems(rows, at('year', 'desc')))).toEqual(['high', 'mid', 'none']);
+    expect(ids(sortItems(rows, at('year', 'asc')))).toEqual(['none', 'mid', 'high']);
+  });
+
+  it('orders by title A–Z and Z–A on what the reader sees', () => {
+    expect(ids(sortItems(rows, at('title', 'asc')))).toEqual(['high', 'mid', 'none']);
+    expect(ids(sortItems(rows, at('title', 'desc')))).toEqual(['none', 'mid', 'high']);
   });
 
   it('sorts a season under its show, not under "Season"', () => {
@@ -397,32 +440,99 @@ describe('sorting', () => {
       item({ mediaItemId: 'z', title: 'Season 1', seriesTitle: 'Zodiac' }),
       item({ mediaItemId: 'a', title: 'Season 9', seriesTitle: 'Alpha House' }),
     ];
-    expect(ids(sortItems(seasons, 'az'))).toEqual(['a', 'z']);
+    expect(ids(sortItems(seasons, at('title', 'asc')))).toEqual(['a', 'z']);
   });
 
   it('does not mutate the array it was given', () => {
     const original = [...rows];
-    sortItems(rows, 'az');
+    sortItems(rows, at('title', 'asc'));
     expect(rows).toEqual(original);
+  });
+
+  /**
+   * **The founder's photograph, as a test.**
+   *
+   * The chip said one thing and the wall showed another, and the mechanism was that
+   * every comparison returned 0: the axis had no data behind it, so `Array.sort` kept
+   * the incoming order — which for a watched collection is rating order, because that
+   * is how the ranked half arrives. The label was truthful about its intent and false
+   * about the rows.
+   *
+   * Both halves are pinned. Ties may no longer leave the incoming order standing, and
+   * an order must not agree with the rating order it is not.
+   */
+  describe('an order is never the order it did not ask for', () => {
+    const inRatingOrder = [
+      item({ mediaItemId: 'best', title: 'Best', score: 10, addedAt: '2020-01-01T00:00:00Z' }),
+      item({ mediaItemId: 'good', title: 'Good', score: 7, addedAt: '2024-01-01T00:00:00Z' }),
+      item({ mediaItemId: 'ok', title: 'Ok', score: 4, addedAt: '2026-01-01T00:00:00Z' }),
+    ];
+
+    it('does not fall back to rating order when the chosen axis has ties', () => {
+      // Every row shares one timestamp, which is the degenerate case the old code met
+      // on every ranked row. The order must still be decided by the axis's own
+      // tie-breaker rather than by however the rows arrived.
+      const tied = inRatingOrder.map((row) => ({ ...row, addedAt: '2026-01-01T00:00:00Z' }));
+      expect(ids(sortItems(tied, at('added', 'desc')))).toEqual(['best', 'good', 'ok']);
+      // …and reversing the direction must not silently return the same list, which is
+      // what a comparator that answers 0 everywhere does.
+      expect(ids(sortItems(tied, at('added', 'asc')))).toEqual(['best', 'good', 'ok']);
+    });
+
+    it('really orders by the collection timestamp, against the rating order', () => {
+      expect(ids(sortItems(inRatingOrder, at('added', 'desc')))).toEqual(['ok', 'good', 'best']);
+      expect(ids(sortItems(inRatingOrder, at('rating', 'desc')))).toEqual(['best', 'good', 'ok']);
+    });
+
+    it('never orders by the watch date, which is not an axis', () => {
+      // A row watched long ago and added today is a recent *addition*. The old axis
+      // would have sunk it; the new one must not.
+      const rowsByWatch = [
+        item({ mediaItemId: 'old-watch', watchedOn: '2001-01-01', addedAt: '2026-08-30T00:00:00Z' }),
+        item({ mediaItemId: 'new-watch', watchedOn: '2026-08-29', addedAt: '2020-01-01T00:00:00Z' }),
+      ];
+      expect(ids(sortItems(rowsByWatch, at('added', 'desc')))).toEqual(['old-watch', 'new-watch']);
+    });
+  });
+
+  /**
+   * Totality, over every axis and both directions, on rows that are identical in every
+   * field the comparator reads. A comparator that is total returns the same order for
+   * the same input however the input was shuffled — which is the property that stops an
+   * order from being decided by whatever the query happened to return.
+   */
+  it('is total on every axis: the same rows in any arrival order sort the same way', () => {
+    const same = ['c', 'a', 'b'].map((id) =>
+      item({ mediaItemId: id, title: 'Same', score: 5, year: 2000, addedAt: '2026-01-01T00:00:00Z' }),
+    );
+    for (const axis of ['rating', 'added', 'year', 'title'] as const) {
+      for (const direction of ['desc', 'asc'] as const) {
+        const forwards = ids(sortItems(same, { axis, direction }));
+        const backwards = ids(sortItems([...same].reverse(), { axis, direction }));
+        expect(forwards).toEqual(backwards);
+        expect(forwards).toEqual(['a', 'b', 'c']);
+      }
+    }
   });
 });
 
 describe('shuffle stability', () => {
   const rows = Array.from({ length: 20 }, (_, i) => item({ mediaItemId: `m${i}` }));
 
+  const shuffled = (seed: number) => ids(sortItems(rows, at('shuffle', 'desc'), seed));
+
   it('gives the same order for the same seed, every time', () => {
     // The defect the brief names: an order that changes on every render or
     // refetch. Same seed, same rows, same order.
-    expect(ids(sortItems(rows, 'shuffle', 7))).toEqual(ids(sortItems(rows, 'shuffle', 7)));
+    expect(shuffled(7)).toEqual(shuffled(7));
   });
 
   it('gives a different order for a different seed', () => {
-    expect(ids(sortItems(rows, 'shuffle', 1))).not.toEqual(ids(sortItems(rows, 'shuffle', 2)));
+    expect(shuffled(1)).not.toEqual(shuffled(2));
   });
 
   it('keeps every title, losing and duplicating none', () => {
-    const shuffled = ids(sortItems(rows, 'shuffle', 3));
-    expect(shuffled.sort()).toEqual(ids(rows).sort());
+    expect([...shuffled(3)].sort()).toEqual(ids(rows).sort());
   });
 
   it('is a no-op on an empty or single-item collection', () => {
@@ -431,18 +541,59 @@ describe('shuffle stability', () => {
   });
 });
 
-describe('which sorts are offered', () => {
-  it('hides score and watch-date orders on a watchlist, where both are always null', () => {
-    const keys = sortOptionsFor('watchlist').map((option) => option.key);
-    expect(keys).not.toContain('score-desc');
-    expect(keys).not.toContain('recent');
-    expect(keys).toContain('shuffle');
+describe('which axes are offered', () => {
+  it('hides Rating on a watchlist, where no row has been ranked', () => {
+    const axes = sortAxesFor('watchlist').map((option) => option.axis);
+    expect(axes).not.toContain('rating');
+    expect(axes).toContain('added');
+    expect(axes).toContain('shuffle');
   });
 
-  it('offers them on a watched list', () => {
-    const keys = sortOptionsFor('watched').map((option) => option.key);
-    expect(keys).toContain('score-desc');
-    expect(keys).toContain('recent');
+  it('hides Rating on the unranked queue, for the same reason', () => {
+    expect(sortAxesFor('unranked').map((option) => option.axis)).not.toContain('rating');
+  });
+
+  it('offers Rating on a watched list, first', () => {
+    const axes = sortAxesFor('watched').map((option) => option.axis);
+    expect(axes[0]).toBe('rating');
+    expect(axes).toContain('added');
+  });
+
+  it('never offers a watch-date axis anywhere', () => {
+    for (const segment of ['watched', 'watchlist', 'unranked'] as const) {
+      for (const spec of sortAxesFor(segment)) {
+        expect(spec.label.toLowerCase()).not.toContain('watched');
+      }
+    }
+  });
+
+  /**
+   * Rule 1 of `ui/sort.ts`, asserted over the vocabulary rather than trusted to it: a
+   * label names an axis. Both halves of the old Collection menu broke this — "Your
+   * score: high" carried a direction, and there were two rows for one axis.
+   */
+  it('gives every axis a label that names the axis and no direction', () => {
+    for (const spec of Object.values(COLLECTION_SORT_AXES)) {
+      for (const word of ['high', 'low', 'newest', 'oldest', 'first', 'a–z', 'z–a']) {
+        expect(spec.label.toLowerCase()).not.toContain(word);
+      }
+    }
+  });
+
+  it('has one entry per axis, so no direction gets a row of its own', () => {
+    const axes = sortAxesFor('watched').map((option) => option.axis);
+    expect(new Set(axes).size).toBe(axes.length);
+  });
+
+  /**
+   * The contract's rule 2, over the collection's own axes: every directional axis names
+   * the direction a fresh choice of it starts in, and the intuitive one is the default.
+   */
+  it('starts each axis in its intuitive direction', () => {
+    expect(COLLECTION_SORT_AXES.rating.defaultDirection).toBe('desc');
+    expect(COLLECTION_SORT_AXES.added.defaultDirection).toBe('desc');
+    expect(COLLECTION_SORT_AXES.year.defaultDirection).toBe('desc');
+    expect(COLLECTION_SORT_AXES.title.defaultDirection).toBe('asc');
   });
 });
 

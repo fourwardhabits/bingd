@@ -1766,3 +1766,88 @@ are unrelated facts that look like one on a release checklist.
 
 **Revisit when.** The closed test has run its required period with its required tester
 count, at which point this becomes a submission task rather than a roadmap item.
+
+---
+
+## 42. A watch-date sort axis for your own collection
+
+**Status: deferred, 2026-08-30, and blocked on data rather than on a comparator.**
+
+The Collection tab had an order labelled **Recently watched**, and it never worked — the
+2026-08-30 tranche found that a ranked title reached the comparator with no watch date at
+all, so every comparison answered *equal* and the list kept the rating order it arrived
+in under a recency label. The axis was replaced by **Recently added** on collection
+membership time, which is written by the database on every row and cannot be absent.
+
+**Ordering your own collection by when you actually watched things is a real thing to
+want**, and it is not the same question as when you added them: a film logged today and
+watched in 2011 is a recent addition and an old watch. What it needs first is a date on
+enough rows to be worth offering, and that is a product decision about the Log sheet
+rather than an engineering one — `user_media.watched_on` is nullable on purpose, and the
+sheet has a deliberate "dateless on purpose" state for a title somebody genuinely cannot
+date. An axis that silently sinks half the collection is the shape of the defect this
+entry exists because of.
+
+**Own collection only, and that half is settled.** [PRD §22](./PRD.md#22-privacy-safety-and-moderation)
+makes watch dates private on any profile, at any visibility, to anybody, and
+`logged_collection` omits the column. The See-all sheet's recency axis is **Recently
+ranked** for that reason and stays that way whatever happens here.
+
+**Revisit when.** Either the Log sheet makes a date the strong default and the founder is
+willing to see undated rows sink, or a "date unknown" bucket is designed that a sort can
+honestly show. Until one of those, Recently added is the honest recency axis.
+
+---
+
+## 43. Reversible awards beyond the collection
+
+**Status: deferred, 2026-08-30. The boundary is deliberate and it is enforced.**
+
+`20260904000100` makes a **collection**-derived award tier reversible — held only while
+the current collection satisfies its threshold. The classification lives in
+`award_tracks.metric_kind`, seeded from `AwardTrack.needs`, and is checked by
+`awards-server-parity.test.ts`, so moving a track across the line is a deliberate edit in
+two files rather than a slip in one.
+
+**Mutual Mania is the interesting one.** Its count can fall — an unfollow, a block — so
+by the shape of the metric it *could* be treated as current-state. It is not, and the
+reason is whose act it is: revoking on it would mean **one person's unfollow silently
+deletes another person's badge, their feed post and their notification**, with no act of
+their own involved. Every collection revocation is a consequence of something the earner
+did to their own collection, and that is what makes it legible. A social-graph revocation
+is not, and it is a product decision the founder has not been asked for.
+
+**The other four are settled, not pending.** Invite Instigator, Comment Gremlin, Hype
+Courier and Heart Magnet count acts that happened: a retraction does not un-say that the
+person wrote, and somebody removing a reaction does not un-react it. Nothing about the
+mechanism would change if the founder later disagreed — one column value each — but the
+argument would have to be made, and it is not made here.
+
+**Revisit when.** The founder has an opinion about Mutual Mania specifically, prompted by
+a real report rather than by symmetry with the collection rule.
+
+---
+
+## 44. Collection customisation beyond the sort contract
+
+**Status: deferred, 2026-08-30.**
+
+The 2026-08-30 sort work deliberately stopped at making the existing control truthful:
+one label per axis, a direction toggle, and comparators that are total. Everything
+adjacent that came up while doing it is recorded here rather than built, because the
+tranche was a defect fix and none of these are:
+
+- **Saved views** — a named filter-plus-sort a reader returns to. The state already
+  survives tab and medium changes; what it does not do is survive a relaunch or have a
+  name.
+- **Persisting sort across launches.** Today only the view mode is stored. Whether a
+  collection should reopen in the order you left it or in its default is a genuine
+  question and the answer is not obvious — the default is *your best first*, which is a
+  reasonable thing to be shown every time.
+- **Multi-key sorts** — rating then title, year then rating. Cheap to implement and a
+  second grammar for the reader to learn; nobody has asked.
+- **Sorting the poster wall differently from the list.** They share one state on purpose:
+  they are two drawings of one selection, not two screens.
+
+**Revisit when.** A reader asks for one of them by describing a task, rather than the
+control suggesting itself.

@@ -35,6 +35,12 @@ export {
   type MediumSelectorOption,
 } from './MediumSelector';
 export { PersonalState, type PersonalStateProps } from './PersonalState';
+export {
+  SortChip,
+  SortMenu,
+  type SortChipProps,
+  type SortMenuProps,
+} from './SortControl';
 export { Poster } from './Poster';
 export {
   PosterGrid,

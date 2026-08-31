@@ -414,7 +414,7 @@ function Watched({
   const logged = useLoggedCollection(userId);
 
   const items = useMemo(
-    () => watchedItems(ranked.data ?? [], logged.data?.unranked ?? [], medium),
+    () => watchedItems(ranked.data ?? [], logged.data?.entries ?? [], medium),
     [ranked.data, logged.data, medium],
   );
 

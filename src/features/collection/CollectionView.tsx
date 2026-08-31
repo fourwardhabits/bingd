@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { posterUri } from '@/lib/images';
 import { compactName } from '@/lib/titles';
@@ -10,24 +10,28 @@ import {
   type IconToggleOption,
   PosterGrid,
   ScoreBadge,
+  SortChip,
+  SortMenu,
   Text,
   TitleMetadata,
   TitleRow,
 } from '@/ui/components';
+import { coerceSortState } from '@/ui/sort';
 import { theme } from '@/ui/tokens';
 
 import { CollectionFilterSheet } from './CollectionFilterSheet';
 import {
   activeFilterCount,
   applyFilters,
+  COLLECTION_SORT_AXES,
   emptyFilters,
   isFiltered,
+  sortAxesFor,
   sortItems,
-  sortOptionsFor,
   type CollectionFilters,
   type CollectionItem,
   type CollectionSegment,
-  type SortKey,
+  type CollectionSortState,
 } from './filters';
 
 /**
@@ -43,7 +47,14 @@ export type CollectionViewMode = 'list' | 'poster';
 
 export type CollectionViewState = {
   filters: CollectionFilters;
-  sort: SortKey;
+  /**
+   * The axis and the direction, as one value.
+   *
+   * It was a flat `SortKey` — `'score-desc'`, `'recent'` — which could name a direction
+   * for one axis and none for another, and which the chip then had to translate back
+   * into a label. See `filters.ts` for what that cost.
+   */
+  sort: CollectionSortState;
   mode: CollectionViewMode;
   /** Bumped by Shuffle. Nothing else changes the order. */
   seed: number;
@@ -64,7 +75,9 @@ export type CollectionViewState = {
  */
 export const initialViewState = (): CollectionViewState => ({
   filters: emptyFilters(),
-  sort: 'score-desc',
+  // Rating, highest first — the same order the collection has always opened on, said
+  // in the vocabulary the control now uses.
+  sort: { axis: COLLECTION_SORT_AXES.rating.axis, direction: 'desc' },
   mode: 'poster',
   seed: 1,
 });
@@ -120,10 +133,12 @@ export function CollectionView({
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
 
-  const sorts = sortOptionsFor(segment);
-  // A sort the current segment does not offer — score on a watchlist — falls back
-  // rather than silently ordering by a field that is null on every row.
-  const sort = sorts.some((option) => option.key === state.sort) ? state.sort : sorts[0]!.key;
+  const axes = sortAxesFor(segment);
+  // A sort the current segment does not offer — Rating on a watchlist — falls back
+  // rather than silently ordering by a field that is null on every row. The fallback
+  // lands in the replacement axis's own default direction, so the chip, the arrow and
+  // the rows agree the moment the tab changes.
+  const sort = coerceSortState(state.sort, axes);
 
   // No manual `useMemo`. The React Compiler is on for this project
   // (app.config.ts `experiments.reactCompiler`), and it memoizes this itself —
@@ -144,12 +159,8 @@ export function CollectionView({
           selected={isFiltered(state.filters)}
           onPress={() => setFilterOpen(true)}
         />
-        <FilterChip
-          icon="swap-vertical-outline"
-          label={sorts.find((option) => option.key === sort)?.label ?? 'Sort'}
-          onPress={() => setSortOpen((open) => !open)}
-        />
-        {sort === 'shuffle' ? (
+        <SortChip axes={axes} value={sort} onPress={() => setSortOpen((open) => !open)} />
+        {sort.axis === 'shuffle' ? (
           <FilterChip
             icon="shuffle"
             label="Shuffle"
@@ -176,29 +187,16 @@ export function CollectionView({
       </View>
 
       {sortOpen ? (
-        <View style={styles.sortMenu}>
-          {sorts.map((option) => (
-            <Pressable
-              key={option.key}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: option.key === sort }}
-              accessibilityLabel={option.label}
-              onPress={() => {
-                setSortOpen(false);
-                onChange({ ...state, sort: option.key });
-              }}
-              style={({ pressed }) => [
-                styles.sortOption,
-                option.key === sort && styles.sortSelected,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text variant="callout" tone={option.key === sort ? 'inverse' : 'primary'}>
-                {option.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <SortMenu
+          axes={axes}
+          value={sort}
+          onChange={(next) => onChange({ ...state, sort: next })}
+          onClose={() => setSortOpen(false)}
+          // Shuffle is the one axis with no direction, so choosing it again reseeds
+          // rather than reversing anything. The reshuffle chip beside the control stays,
+          // because reseeding from a closed menu is one press instead of three.
+          onRepeatUndirected={() => onChange({ ...state, seed: state.seed + 1 })}
+        />
       ) : null}
 
       <Text variant="footnote" tone="secondary" style={styles.count}>
@@ -305,23 +303,7 @@ const styles = StyleSheet.create({
   },
   spacer: { flex: 1 },
 
-  sortMenu: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: theme.space[2],
-    paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[2],
-  },
-  sortOption: {
-    minHeight: theme.layout.control.chipHeight,
-    justifyContent: 'center',
-    paddingHorizontal: theme.space[3],
-    borderRadius: theme.radius.control,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: theme.border.hairline,
-    backgroundColor: theme.surface.raised,
-  },
-  sortSelected: { backgroundColor: theme.semantic.action, borderColor: theme.semantic.action },
+  // The sort menu's own styles moved to `ui/components/SortControl` with the menu.
   count: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[3],
@@ -330,5 +312,4 @@ const styles = StyleSheet.create({
   list: { paddingBottom: theme.space[10] },
   wall: { paddingBottom: theme.space[10], paddingTop: theme.space[2] },
   padded: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
-  pressed: { opacity: 0.7 },
 });

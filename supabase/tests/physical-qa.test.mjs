@@ -860,6 +860,21 @@ describe('a causal group reads in the order it happened', () => {
      * title, the cause survived too, and with no activity in between the months-old award
      * was adopted into the new ranking's group and presented as its consequence: the row
      * had become a reusable adoption token across collection lifetimes.
+     *
+     * ---------------------------------------------------------------------------
+     * **The spare title, added 2026-08-30, and why this test needed one.**
+     *
+     * "The award event survives the unlog" was unconditional when this was written and
+     * is not any more: `20260904000100` revokes a COLLECTION-derived tier the current
+     * collection no longer supports, and Movie Muncher is one — so unlogging the
+     * fiftieth film took the award with it and this test was asserting the old rule
+     * rather than its own subject. The subject is the *cause* row and the tenure it is
+     * keyed to, which has nothing to do with revocation.
+     *
+     * So the fixture logs a fifty-first film before the unlog. The count then falls to
+     * fifty, the tier stays supported, and the award stands exactly as 76d assumed —
+     * leaving the cause as the only thing the unlog takes, which is what is under test.
+     * Revocation itself is covered in `award-revocation.test.mjs`.
      */
     const user = await crossMovieMuncher('causal_tenure');
     await t.actAs(user);
@@ -867,6 +882,13 @@ describe('a causal group reads in the order it happened', () => {
 
     // Tenure one: the bucket tap crosses the tier and announces.
     await t.sql(`select set_bucket(gen_random_uuid(), $1, 'loved')`, [film]);
+
+    // The spare. Written straight in, so it announces nothing of its own -- the tier is
+    // already on the ledger -- and it is what keeps the count at fifty after the unlog.
+    await t.sql(
+      `insert into user_media (user_id, media_item_id, bucket) values ($1, $2, 'loved')`,
+      [user, await movie('causal_tenure_spare')],
+    );
     const award = (
       await t.sql(
         `select id, causal_at from feed_events where actor_id = $1 and type = 'award_earned'`,
@@ -882,13 +904,14 @@ describe('a causal group reads in the order it happened', () => {
       'fixture: and recorded which title announced it',
     );
 
-    // The tenure ends. The announcement survives -- it is a past-tense fact about an act.
+    // The tenure ends, and the collection still holds fifty films -- so the tier is
+    // still supported and the announcement stands. What must go is the cause.
     await t.sql(`select unlog(gen_random_uuid(), $1)`, [film]);
     assert.equal(
       (await t.sql(`select count(*)::int as n from feed_events where id = $1`, [award.id]))
         .rows[0].n,
       1,
-      'the award itself is never taken back by an unlog',
+      'an unlog that leaves the threshold met does not take the award',
     );
     assert.equal(
       (await t.sql(`select count(*)::int as n from feed_event_causes where feed_event_id = $1`, [

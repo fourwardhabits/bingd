@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, BackHandler, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -251,6 +251,43 @@ export default function FeedScreen() {
       return () => subscription.remove();
     }, [showingBoard]),
   );
+
+  /**
+   * **Re-tapping the Feed tab while the board is showing** (founder, 2026-08-30).
+   *
+   * The other half of the same complaint the hardware-Back handler above answers, and
+   * it is the half iOS has: Leaderboard is a mode of this route, so pressing the tab
+   * you are already on had nothing to pop and left the reader looking at the board they
+   * were trying to leave. Every other tab in this app is its own root, so "tap the tab
+   * to go back to the top of it" is a habit this one alone broke.
+   *
+   * **Only when this tab is already focused.** `tabPress` fires for the Feed tab
+   * whether the reader was on Feed or on Collection, and resetting the mode in the
+   * second case would be a different change — arriving from another tab would stop
+   * returning you to the board you left, which nothing asked for. `isFocused()` is the
+   * whole of "already-selected".
+   *
+   * **Nothing is prevented.** The default for a re-tap of a focused tab is
+   * pop-to-top/scroll-to-top, and this route has no nested stack for that to reach, so
+   * consuming the event would take a behaviour away in exchange for nothing. Every
+   * other tab is untouched by construction: this listener lives on this screen.
+   *
+   * `navigation` is the tab's own object and is stable, so the effect re-subscribes
+   * only when the mode it reads changes.
+   */
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    // Under the unit runner `useNavigation` is mocked to whatever the test supplies;
+    // a navigator that cannot report focus is one this screen has no business
+    // listening to, and the optional call is what keeps that from being a crash.
+    const unsubscribe = navigation.addListener?.('tabPress' as never, (() => {
+      if (!showingBoard) return;
+      if (navigation.isFocused && !navigation.isFocused()) return;
+      setMode('feed');
+    }) as never);
+    return () => unsubscribe?.();
+  }, [navigation, showingBoard]);
 
   /** Only a genuine change. Re-tapping the chip you are on would measure fidgeting. */
   const changeMetric = (next: LeaderboardMetric) => {

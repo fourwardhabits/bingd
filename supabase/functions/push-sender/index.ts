@@ -56,7 +56,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-import { messagesFor, summarise } from './batch.ts';
+import { messagesFor, stillQueued, summarise } from './batch.ts';
 import type { PushJob } from './copy.ts';
 import { chunk, isDeadToken, isRetryable, redactTokens, sendChunk } from './expo.ts';
 
@@ -180,24 +180,66 @@ Deno.serve(async (req) => {
     return json({ error: 'could not claim' }, 500);
   }
 
-  const jobs = (claimed ?? []) as PushJob[];
-  if (jobs.length === 0) {
+  const allClaimed = (claimed ?? []) as PushJob[];
+  if (allClaimed.length === 0) {
     return json(counts(caller, { claimed: 0, sent: 0, failed: 0, revoked: 0 }));
   }
 
-  const addressed = messagesFor(jobs);
-  if (addressed.length === 0) {
+  const built = messagesFor(allClaimed);
+  if (built.length === 0) {
     // Claimed but unsendable. Settled as delivered so the rows leave the queue rather
     // than being retried into the same nothing three times.
     await db.rpc('settle_push_batch', {
-      p_results: jobs.map((job) => ({
+      p_results: allClaimed.map((job) => ({
         notification_id: job.notification_id,
         attempt: job.attempt,
         delivered: true,
       })),
       p_invalid_tokens: null,
     });
-    return json(counts(caller, { claimed: jobs.length, sent: 0, failed: 0, revoked: 0 }));
+    return json(counts(caller, { claimed: allClaimed.length, sent: 0, failed: 0, revoked: 0 }));
+  }
+
+  /**
+   * **The last look, and it is the last thing before the first send** (reviews 78, 78b).
+   *
+   * A claimed job's notification can be deleted inside the five-minute lease — award
+   * revocation does exactly that (`20260904000100`) — and the payload this function is
+   * holding would otherwise still go out. `live_push_jobs` answers which claimed ids
+   * still have a queue row; `stillQueued` drops the rest.
+   *
+   * **It sits here, after the messages are built**, because 78b was right that a check
+   * run earlier leaves the whole of `messagesFor` inside the window it is supposed to be
+   * closing. `batch.ts` records what is honestly left after this: the milliseconds
+   * between this answer and the request leaving, which no database read and network send
+   * can be made atomic across.
+   *
+   * **It fails CLOSED**, which is the other half of 78b. If the database cannot say what
+   * is still queued, sending is the unrecoverable direction — a push for a tier that no
+   * longer exists cannot be taken back — and not sending is the recoverable one: nothing
+   * is settled, the five-minute lease expires, and the batch is claimed again. That is
+   * the same reasoning the `settle_push_batch` failure below already follows, and the
+   * at-least-once guarantee doing its job.
+   */
+  const { data: live, error: liveError } = await db.rpc('live_push_jobs', {
+    p_notification_ids: allClaimed.map((job) => job.notification_id),
+  });
+  if (liveError) {
+    console.error('live_push_jobs failed, sending nothing:', liveError.message);
+    return json({ error: 'could not verify the batch' }, 500);
+  }
+
+  const addressed = stillQueued(
+    built,
+    ((live ?? []) as ({ live_push_jobs: string } | string)[]).map((row) =>
+      typeof row === 'string' ? row : row.live_push_jobs,
+    ),
+  );
+
+  if (addressed.length === 0) {
+    // Every claimed notification went away inside the lease. Nothing to send and nothing
+    // to settle: those queue rows are already deleted.
+    return json(counts(caller, { claimed: allClaimed.length, sent: 0, failed: 0, revoked: 0 }));
   }
 
   /**
@@ -252,7 +294,9 @@ Deno.serve(async (req) => {
   const failed = results.filter((r) => !r.delivered).length;
   return json(
     counts(caller, {
-      claimed: jobs.length,
+      // What the claim took, not what survived the last look before dispatch. A drop is
+      // visible as claimed > sent + failed rather than by pretending it was never leased.
+      claimed: allClaimed.length,
       sent: results.length - failed,
       failed,
       revoked: (settled as { revoked?: number } | null)?.revoked ?? 0,

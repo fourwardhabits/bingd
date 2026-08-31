@@ -19,6 +19,17 @@ import type { QueryClient } from '@tanstack/react-query';
  * it, and this is a once-in-a-while write, not a per-keystroke one. The key carries the
  * account precisely so one reader's comment cannot refetch another's awards.
  */
+/**
+ * **Since 20260904000100 a badge can also go away**, which is why the writers below
+ * matter more than they did.
+ *
+ * Awards were monotone: a count only ever went up, so a stale cache showed a badge a
+ * little late and never showed one that was gone. A collection-derived tier is now held
+ * only while the collection supports it, so the same one-minute `staleTime` can leave a
+ * *revoked* badge on screen — and a revocation also deletes the tier's feed post and its
+ * congratulations, which are two other caches. Every collection writer therefore
+ * invalidates the feed and the inbox beside this (`collection/invalidate.ts`).
+ */
 export function invalidateAwards(queryClient: QueryClient, userId: string) {
   if (!userId) return;
   // Prefix over `useAwards`' `['awards', viewerId, targetId]`: everything this account
@@ -60,6 +71,11 @@ export const AWARD_SOURCES = [
     awards: 'Queue Dragon',
     // Both routes: ranking removes the title from the watchlist server-side
     // (20260815040000), and the four surfaces with a bookmark control write it directly.
+    //
+    // **A removal can now take a feed post and a notification with it** — Queue Dragon
+    // is a collection metric, and 20260904000100 revokes a tier the collection no longer
+    // supports along with its announcement. So the writer invalidates the feed and the
+    // inbox as well as the badge; see `invalidateAfterWatchlistChange`.
     mutations: 'add to or remove from the watchlist, from any of the four surfaces',
     writer: 'invalidateAfterWatchlistChange',
     invalidates: true,

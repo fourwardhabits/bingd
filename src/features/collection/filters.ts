@@ -1,4 +1,5 @@
 import { languageName } from '@/lib/language';
+import type { SortAxisSpec, SortState } from '@/ui/sort';
 import { ANIME_GENRE as PRODUCT_ANIME_GENRE, isAnimeLabels } from '@/lib/media-metadata';
 
 import type { Bucket } from './score';
@@ -27,6 +28,20 @@ export type CollectionItem = {
   score: number | null;
   bucket: Bucket | null;
   watchedOn: string | null;
+  /**
+   * When this title entered *this* collection — `user_media.created_at` for a watched
+   * row, `watchlist.created_at` for a saved one.
+   *
+   * **Not the watch date, and the difference is the reason this field exists.** The
+   * Recently-added order used to be built on `watchedOn`, which is a *nullable*
+   * calendar date the reader may decline to give (`LogSheet`'s "dateless on purpose")
+   * and which `watchedItems` could not see for a ranked title at all — so the
+   * comparator returned 0 for every pair and the rows kept the score order they
+   * arrived in, under a chip that said Recently watched. Membership time is written by
+   * the database on every row of both tables and cannot be absent, so the order it
+   * expresses is the one the reader is shown.
+   */
+  addedAt: string | null;
 };
 
 export type Decade = '2020s' | '2010s' | '2000s' | '1990s' | 'earlier';
@@ -88,14 +103,82 @@ export type CollectionFilters = {
  */
 export const ANIME_GENRE = PRODUCT_ANIME_GENRE;
 
-export type SortKey =
-  | 'score-desc'
-  | 'score-asc'
-  | 'recent'
-  | 'year-desc'
-  | 'year-asc'
-  | 'az'
-  | 'shuffle';
+/**
+ * The axes a collection can be put in order by. Directions live in `CollectionSortState`.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THESE WORDS MEAN, AND WHAT THEY DELIBERATELY DO NOT
+ *
+ *   · **rating** — the reader's own 0–10 score, derived from band and position.
+ *     Called *Rating* rather than "Your score" because the badge on every row is a
+ *     rating and the question the reader is asking is how they rated it.
+ *   · **added** — {@link CollectionItem.addedAt}, the moment the title entered this
+ *     collection. Labelled **Recently added** and never "Recently watched": those are
+ *     different facts, one of them is nullable, and conflating them is the defect this
+ *     model was rebuilt to end. A title logged today and watched in 2011 is a recent
+ *     *addition* and an old *watch*, and the chip must not claim the second.
+ *   · **year** — the title's own release year. **Release year**, so no reader has to
+ *     work out whether "Newest" is about the film or about their library; the old
+ *     labels were a bare *Newest* and *Oldest* sitting one row below a recency axis.
+ *   · **title** — alphabetical on the name drawn on the row, so a season files under
+ *     its series.
+ *   · **shuffle** — the one axis with no order to reverse. Pressing it again reseeds.
+ *
+ * **There is no watch-date axis.** There was one, it was called Recently watched, and
+ * it never worked: see {@link CollectionItem.addedAt}. Ordering a collection by watch
+ * date is a real thing to want and it is on the deferred roadmap; what it needs first
+ * is a date on every row, which is a product decision about the Log sheet rather than
+ * a comparator. Shipping the label without the data is what produced the photograph.
+ */
+export type SortAxis = 'rating' | 'added' | 'year' | 'title' | 'shuffle';
+
+/**
+ * A collection's whole sort, as one value.
+ *
+ * The axis and the direction travel together because everything that reads one reads
+ * the other: the comparator, the chip's arrow, the spoken label and the menu's selected
+ * row. Two fields that can disagree is exactly what the old flat `SortKey` union was —
+ * `'score-desc' | 'score-asc'` spent two names on one axis, and `'recent'` spent none
+ * on a direction it silently fixed.
+ */
+export type CollectionSortState = SortState<SortAxis>;
+
+/**
+ * Every axis, with its label and the direction a fresh choice of it starts in.
+ *
+ * Rule 2 of `ui/sort.ts`: best first, newest first, A–Z. The words beside each
+ * direction are what a screen reader says and what the chip's `accessibilityLabel`
+ * carries, so they are the axis's vocabulary rather than decoration — "highest first"
+ * for a rating, "newest first" for a date, "A–Z" for a name.
+ */
+export const COLLECTION_SORT_AXES = {
+  rating: {
+    axis: 'rating',
+    label: 'Rating',
+    directions: { desc: 'highest first', asc: 'lowest first' },
+    defaultDirection: 'desc',
+  },
+  added: {
+    axis: 'added',
+    label: 'Recently added',
+    directions: { desc: 'newest first', asc: 'oldest first' },
+    defaultDirection: 'desc',
+  },
+  year: {
+    axis: 'year',
+    label: 'Release year',
+    directions: { desc: 'newest first', asc: 'oldest first' },
+    defaultDirection: 'desc',
+  },
+  title: {
+    axis: 'title',
+    label: 'Title',
+    directions: { desc: 'Z–A', asc: 'A–Z' },
+    defaultDirection: 'asc',
+  },
+  // No `directions`, which is how `ui/sort.ts` knows there is nothing to reverse.
+  shuffle: { axis: 'shuffle', label: 'Shuffle' },
+} as const satisfies Record<SortAxis, SortAxisSpec<SortAxis>>;
 
 export const emptyFilters = (): CollectionFilters => ({
   genres: [],
@@ -319,40 +402,65 @@ const DECADE_ORDER: Decade[] = ['earlier', '1990s', '2000s', '2010s', '2020s'];
  */
 export function sortItems(
   items: readonly CollectionItem[],
-  sort: SortKey,
+  sort: CollectionSortState,
   seed = 0,
 ): CollectionItem[] {
-  const rows = [...items];
-
-  switch (sort) {
-    case 'score-desc':
-      return rows.sort(byScore(-1));
-    case 'score-asc':
-      return rows.sort(byScore(1));
-    case 'recent':
-      // Undated rows last: a watch date is what this order is about, and a title
-      // without one has no place in it.
-      return rows.sort((a, b) => (b.watchedOn ?? '').localeCompare(a.watchedOn ?? ''));
-    case 'year-desc':
-      return rows.sort((a, b) => (b.year ?? -Infinity) - (a.year ?? -Infinity));
-    case 'year-asc':
-      return rows.sort((a, b) => (a.year ?? Infinity) - (b.year ?? Infinity));
-    case 'az':
-      return rows.sort((a, b) => displayName(a).localeCompare(displayName(b)));
-    case 'shuffle':
-      return shuffle(rows, seed);
-  }
+  if (sort.axis === 'shuffle') return shuffle([...items], seed);
+  return [...items].sort(compareItems(sort));
 }
 
-/** Unranked titles sink in both score orders — they have no score to compare. */
-const byScore =
-  (direction: 1 | -1) =>
-  (a: CollectionItem, b: CollectionItem) => {
-    if (a.score == null && b.score == null) return 0;
-    if (a.score == null) return 1;
-    if (b.score == null) return -1;
-    return (a.score - b.score) * direction;
+/**
+ * One axis's comparator, **total in every case**, and the totality is the point.
+ *
+ * A comparator that returns 0 for a pair leaves `Array.prototype.sort` to keep the
+ * incoming order, and the incoming order of a watched collection is *score order* —
+ * which is how a list under a recency label came to be ordered by rating. Every branch
+ * below therefore ends at `byId`, so an order is what its label says it is even when
+ * every value it compares is identical or missing.
+ *
+ * **Missing values sink, in both directions.** An unranked title has no rating and an
+ * undated one has no year; putting either at the top of a list claiming to show the
+ * highest or the newest would be answering a question with a blank. So the null test
+ * comes *before* the direction rather than inside it, which is the rule
+ * `RankedTitlesSheet.compareBySort` already states for undated rows.
+ */
+export function compareItems(sort: CollectionSortState) {
+  const flip = sort.direction === 'desc' ? -1 : 1;
+
+  return (a: CollectionItem, b: CollectionItem): number => {
+    const byId = a.mediaItemId.localeCompare(b.mediaItemId);
+
+    switch (sort.axis) {
+      case 'rating': {
+        if (a.score == null && b.score == null) return byId;
+        if (a.score == null) return 1;
+        if (b.score == null) return -1;
+        return (a.score - b.score) * flip || byId;
+      }
+      case 'added': {
+        if (!a.addedAt && !b.addedAt) return byId;
+        if (!a.addedAt) return 1;
+        if (!b.addedAt) return -1;
+        return compareLabels(a.addedAt, b.addedAt) * flip || byId;
+      }
+      case 'year': {
+        if (a.year == null && b.year == null) return byId;
+        if (a.year == null) return 1;
+        if (b.year == null) return -1;
+        return (a.year - b.year) * flip || byId;
+      }
+      case 'title':
+        // Ascending is A–Z, and a forward code-point compare already reads A before Z —
+        // so `flip` applies unchanged here exactly as it does to the numeric axes.
+        return (
+          compareLabels(displayName(a).toLowerCase(), displayName(b).toLowerCase()) * flip ||
+          byId
+        );
+      case 'shuffle':
+        return byId;
+    }
   };
+}
 
 /** A–Z on what the reader sees, so a season sorts under its show. */
 const displayName = (item: CollectionItem) =>
@@ -387,32 +495,32 @@ function mulberry32(seed: number) {
 }
 
 /**
- * Which sorts make sense for the rows on screen.
+ * Which axes make sense for the rows on screen.
  *
- * A watchlist holds nothing the user has ranked or watched, so "Your score" and
- * "Recently watched" would order it by fields that are null on every row. Unranked
- * has watch dates but no scores, so it keeps one and loses the other. Offering a
- * control that cannot do anything is worse than not offering it.
+ * **Rating is Watched's alone.** Nothing on a watchlist has been ranked and nothing in
+ * Unranked has a position, so on either of them a rating order would be sorting by a
+ * column that is null on every row — and `compareItems` sinks nulls, so the whole list
+ * would sink together and hold whatever order it arrived in. Offering a control that
+ * cannot do anything is worse than not offering it; it is also, precisely, how a label
+ * comes to disagree with an order.
+ *
+ * **Recently added is offered everywhere**, because all three lists are backed by a
+ * table that stamps `created_at` on insert. That is the difference from the axis it
+ * replaced: Recently watched was offered on two of the three and worked on neither.
+ *
+ * The first entry is also the fallback `coerceSortState` lands on when a reader carries
+ * Rating from Watched into their watchlist — Recently added there, Rating on Watched.
  */
 export type CollectionSegment = 'watched' | 'watchlist' | 'unranked';
 
-export function sortOptionsFor(segment: CollectionSegment): { key: SortKey; label: string }[] {
-  const shared: { key: SortKey; label: string }[] = [
-    { key: 'year-desc', label: 'Newest' },
-    { key: 'year-asc', label: 'Oldest' },
-    { key: 'az', label: 'A–Z' },
-    { key: 'shuffle', label: 'Shuffle' },
+export function sortAxesFor(segment: CollectionSegment): SortAxisSpec<SortAxis>[] {
+  const shared: SortAxisSpec<SortAxis>[] = [
+    COLLECTION_SORT_AXES.added,
+    COLLECTION_SORT_AXES.year,
+    COLLECTION_SORT_AXES.title,
+    COLLECTION_SORT_AXES.shuffle,
   ];
 
-  // Nothing on a watchlist has been watched or ranked; nothing in Unranked has a
-  // score. Both would be ordering by a column that is null on every row.
-  if (segment === 'watchlist') return shared;
-  if (segment === 'unranked') return [{ key: 'recent', label: 'Recently watched' }, ...shared];
-
-  return [
-    { key: 'score-desc', label: 'Your score: high' },
-    { key: 'score-asc', label: 'Your score: low' },
-    { key: 'recent', label: 'Recently watched' },
-    ...shared,
-  ];
+  if (segment === 'watched') return [COLLECTION_SORT_AXES.rating, ...shared];
+  return shared;
 }

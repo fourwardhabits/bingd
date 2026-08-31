@@ -128,3 +128,79 @@ describe('the seeded genre vocabulary is genres.ts', () => {
     }
   });
 });
+
+/**
+ * The reversibility classification, held to the field that already decides it.
+ *
+ * `20260904000100_an_award_the_collection_still_supports.sql` makes a collection-derived
+ * tier reversible — remove the titles and the badge, the feed post and the notification
+ * go with them — and a history-derived one permanent. Which track is which is not a
+ * judgement made in the migration: it is `AwardTrack.needs`, the field that already
+ * names the fact each track counts, and `needs` in ('watched', 'watchlist', 'rankings')
+ * is exactly the set of metrics that read the user's current collection.
+ *
+ * So the seed is a copy, exactly as the thresholds are, and this is what keeps it one.
+ * A twenty-first track cannot be added to `tracks.ts` without the migration classifying
+ * it — the tier table's foreign key refuses that in the database — and it cannot be
+ * classified *differently* from what its own `needs` says without failing here.
+ */
+const REVOCATION_MIGRATION = readFileSync(
+  join(
+    __dirname,
+    '../../../supabase/migrations/20260904000100_an_award_the_collection_still_supports.sql',
+  ),
+  'utf8',
+);
+
+/** The seeded (award_key → metric_kind) rows, in file order. */
+function seededTrackKinds(): Map<string, string> {
+  const block = REVOCATION_MIGRATION.match(
+    /insert into award_tracks \(award_key, metric_kind\) values\s*([\s\S]*?);/,
+  );
+  if (!block) throw new Error('award_tracks seed not found in the revocation migration');
+
+  const rows = [...block[1]!.matchAll(/\('([a-z-]+)',\s*'(collection|history)'\)/g)];
+  return new Map(rows.map((row) => [row[1]!, row[2]!]));
+}
+
+/**
+ * The three facts that are the user's collection right now, and the five that are not.
+ *
+ * `watched` is `user_media`, `watchlist` is `watchlist`, `rankings` is `rankings`. The
+ * others count acts — signups attributed, comments written, recommendations sent,
+ * reactions received — or, for `mutualFollows`, other people's standing relationships,
+ * which the migration argues at length is deliberately not the founder's decision here.
+ */
+const COLLECTION_NEEDS = new Set(['watched', 'watchlist', 'rankings']);
+
+describe('the seeded reversibility classification is tracks.ts needs', () => {
+  const seeded = seededTrackKinds();
+
+  it('classifies every track, and only the tracks that exist', () => {
+    expect([...seeded.keys()].sort()).toEqual(AWARD_TRACKS.map((track) => track.key).sort());
+  });
+
+  it('marks a track collection exactly when its metric reads the collection', () => {
+    for (const track of AWARD_TRACKS) {
+      expect([track.key, seeded.get(track.key)]).toEqual([
+        track.key,
+        COLLECTION_NEEDS.has(track.needs) ? 'collection' : 'history',
+      ]);
+    }
+  });
+
+  it('is fifteen collection tracks and five histories', () => {
+    const kinds = [...seeded.values()];
+    expect(kinds.filter((kind) => kind === 'collection')).toHaveLength(15);
+    expect(kinds.filter((kind) => kind === 'history')).toHaveLength(5);
+  });
+
+  it('keeps Mutual Mania permanent, which is the one decided rather than derived', () => {
+    // Its count can fall — an unfollow, a block — so the shape of the metric would
+    // allow revocation. The migration's header is why it does not: one person's
+    // unfollow would silently delete another person's badge, feed post and
+    // notification, with no act of their own involved. Pinned here so that widening
+    // the rule to it is a deliberate edit in two files rather than a slip in one.
+    expect(seeded.get('mutual-mania')).toBe('history');
+  });
+});
