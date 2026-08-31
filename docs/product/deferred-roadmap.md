@@ -1851,3 +1851,89 @@ tranche was a defect fix and none of these are:
 
 **Revisit when.** A reader asks for one of them by describing a task, rather than the
 control suggesting itself.
+
+---
+
+## 45. An Episodes tab on a TV season
+
+**Status: specified, not implemented. Post-launch. Recorded 2026-08-31.**
+
+A season detail page gains an **Episodes** tab. This is a specification so the shape is
+settled before anybody estimates it — nothing below is built.
+
+### What it shows
+
+- Episodes in **episode-number order**, ascending. Not by air date: a season's numbering is
+  the thing a reader is navigating by, and the two disagree for specials and re-orders.
+- Each row: **episode number, title, and a still image when one exists.**
+- A missing still uses **the established fallback** — `MissingArtwork`, the same initials
+  treatment every other artless row in this app already uses. Not a grey box, and not a
+  borrowed season poster: a poster in a still's slot reads as "this is the episode's
+  picture" and is wrong on every row at once.
+- **Tapping an episode opens its description.** A sheet rather than a route, on
+  `FollowListSheet`'s rule: it is something you glance at and leave, and there is nothing
+  below it to navigate to.
+
+### The three states, named rather than left to the implementer
+
+| State | What it draws |
+|---|---|
+| **Loading** | `SkeletonRow` at the row count the season claims, so the tab does not resize under the thumb once the list lands. `episode_count` is already on `media_items`, which is what makes the count knowable before the episodes are. |
+| **Empty** | The season genuinely has no episodes the provider will name — `EmptyState kind="nothingYet"`, saying so plainly. Distinct from an error, and it happens: an unaired season is a real row with a real zero. |
+| **Provider error** | `EmptyState kind="couldNotLoad"` with a **Try again** action, the same shape the collection and the See-all sheet already use. Never a silent empty list — "no episodes" and "we could not ask" are different sentences and the reader can act on only one of them. |
+
+### Whether the adapter and the cache have to change first — **yes, both**
+
+This was the question worth answering before an estimate, and it was checked against the
+source rather than assumed:
+
+1. **The adapter has no episodes action.** `tmdb-adapter/index.ts` serves `search`,
+   `detail`, `similar`, `person`, `trending`, `enrich`, `refresh` and `hydrate-seasons`.
+   None returns an episode list. The adapter *does* already see episodes — it counts them
+   to populate `episode_count` during `hydrate-seasons` — and then discards them. So the
+   provider call exists; the persistence does not.
+2. **`media_cache` cannot hold them.** `media_cache_known_facet` is a **closed set** —
+   `credits`, `keywords`, `providers`, `similar`, `videos` — and an unknown facet is a
+   failed write by design (`20260817001000`). Adding `episodes` is a migration that widens
+   that constraint, plus a TTL key in `app_config` beside the others.
+3. **PRD §19's retention obligation follows the rows.** Cached provider data carries a
+   six-month sweep, and episode rows are provider data like any other. Whatever writes them
+   has to be reachable by the same sweep, which is a question to answer in the design and
+   not afterwards.
+
+So the estimate is **not** "a tab and a list". It is one migration, one adapter action, one
+cache facet with a TTL, a retention path, and then the tab. Ordering matters the way
+§15.1 of the bootstrap runbook records: the adapter deploys **before** a migration that
+narrows what it may write, and **after** one that adds something it reads.
+
+**Revisit when.** After the first public release has settled, and only if season pages are
+being used enough that the missing episode list is a thing readers ask for rather than a
+gap an author noticed.
+
+---
+
+## 46. A per-recommendation reason — **decided against, not missing**
+
+**Status: closed, 2026-08-31. Recorded so it is not re-raised as a defect.**
+
+A recommendation detail page shows what was recommended and who sent it. It does **not**
+show a reason, and it should not. The absence is a decision.
+
+**Why.** A recommendation from a person is already explained by the person. "Abisola sent
+you this" is the whole of the why, and it is more information than any sentence the app
+could compose — the sender knows something about the reader that no scoring function does.
+Printing a machine-written reason beside a human act would be the app talking over the
+person who did the recommending.
+
+**The schema agrees, and always has.** `title_recommendations` has no reason column, and
+`rank.ts` records the same rule from the other side: the client has no path to compose a
+reason of its own. So there is nothing to expose, nothing withheld, and no migration
+pending — which is what makes this a closed decision rather than a deferred feature.
+
+**Not to be confused with the For You slate**, which is a different surface answering a
+different question. There the app *is* the one making the suggestion, so it owes an
+account of itself; the reason lines on those cards stay exactly as they are. This entry is
+about a recommendation **a person sent**, where the account has already been given.
+
+**Revisit when.** Never, unless the founder changes their mind about it — in which case it
+is a product decision and a schema change, not a bug fix.

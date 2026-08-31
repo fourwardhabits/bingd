@@ -9,9 +9,10 @@ import { unreadCount, useNotifications } from '@/features/notifications/use-noti
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
+import { RecommendSheet } from '@/features/recommendations/RecommendSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { useReactions, useSetReaction, REACTION_GLYPH } from '@/features/feed/use-reactions';
-import { useActorActivity } from '@/features/feed/use-feed';
+import { useActorActivity, type FeedItem } from '@/features/feed/use-feed';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { GoalsSection } from '@/features/goals/GoalsSection';
 import { currentYear } from '@/features/goals/use-goals';
@@ -33,6 +34,7 @@ import {
   EmptyState,
   Screen,
   SectionHeader,
+  Text,
   SkeletonRow,
 } from '@/ui/components';
 
@@ -65,6 +67,11 @@ export default function ProfileScreen() {
   const stats = useProfileStats(profile.id);
   const notifications = useNotifications(profile.id);
   const [commentsFor, setCommentsFor] = useState<string | null>(null);
+  /** The activity being recommended, if any. The whole event, because the sheet needs its
+   *  title and kind and both are already on the row that opened it. */
+  const [recommending, setRecommending] = useState<FeedItem | null>(null);
+  /** Whom the last recommendation went to, so the confirmation names a person. */
+  const [recommendedTo, setRecommendedTo] = useState<string | null>(null);
   /**
    * Which of the two people lists is open, if either.
    *
@@ -307,6 +314,15 @@ export default function ProfileScreen() {
 
         <View style={styles.section}>
           <SectionHeader title="Recent activity" />
+          {/* The confirmation, on the screen the reader is still looking at. `RecommendSheet`
+              closes itself on success and deliberately shows nothing — it says so in its own
+              comment — so the surface that mounts it owes the reader this line. It names the
+              person, because "Sent" on its own leaves them checking. Same shape as the Feed's. */}
+          {recommendedTo ? (
+            <Text variant="footnote" tone="secondary">
+              {`Recommended to ${recommendedTo}`}
+            </Text>
+          ) : null}
           {feed.isPending ? (
             <SkeletonRow count={2} />
           ) : feed.isError ? (
@@ -375,6 +391,27 @@ export default function ProfileScreen() {
                   glyphs: (summary?.kinds ?? []).map((kind) => REACTION_GLYPH[kind]),
                   onPress: () => void setReaction(event.id, summary?.mine ? null : 'love'),
                 }}
+                /**
+                 * **Recommend, which the Feed offered here and this row did not.**
+                 *
+                 * The comment two lines above says "the same interactions the Feed
+                 * offers, because it is the same event" — and Recommend was the one it
+                 * did not pass. So a media post carried Recommend in the Feed and lost it
+                 * on a profile, which is the same row, the same event and the same person.
+                 *
+                 * The condition is the Feed's, character for character, and both halves
+                 * are load-bearing. `mediaItemId` is what keeps a non-media event — an
+                 * award, a goal, joining from an invitation — from being handed a title it
+                 * does not have; `kind !== 'series'` is not a UI preference but the
+                 * server's rule, since `recommend_title` refuses anything
+                 * `rankable_category` returns null for, on the grounds that a series is
+                 * not a thing anybody watched.
+                 */
+                onPressRecommend={
+                  event.mediaItemId && event.kind !== 'series'
+                    ? () => setRecommending(event)
+                    : undefined
+                }
                 onPressComments={() => setCommentsFor(event.id)}
                 commentCount={commentCounts.data?.get(event.id) ?? 0}
               />
@@ -382,6 +419,27 @@ export default function ProfileScreen() {
           })}
         </View>
       </ScrollView>
+
+
+      {/* Recommend, from a profile's Recent activity. Mounted only while open, like every
+          other sheet: it seeds its own draft state on mount, and one that stayed mounted
+          would keep a search somebody abandoned.
+
+          `seriesTitle` is null for the same reason the Feed passes null — `event.title`
+          is already the canonical compact form for a season, so handing the sheet a parent
+          as well would have it join a name to itself. */}
+      {recommending?.mediaItemId ? (
+        <RecommendSheet
+          viewerId={profile.id}
+          mediaItemId={recommending.mediaItemId}
+          kind={recommending.kind ?? 'movie'}
+          title={recommending.title ?? 'this title'}
+          seriesTitle={null}
+          onClose={() => setRecommending(null)}
+          onSent={setRecommendedTo}
+          surface="profile"
+        />
+      ) : null}
 
       <CommentSheet
         eventId={commentsFor}

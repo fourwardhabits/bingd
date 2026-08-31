@@ -716,3 +716,72 @@ describe('the same genre downstream of the shared resolver', () => {
     expect(heroRankFor('bebop', ranked, 'movies')?.label).toBe(`#3 in ${ANIME_GENRE}`);
   });
 });
+
+/**
+ * **The visible words on the sort control** (founder, post-RC).
+ *
+ * Only the labels moved: `Recently added → Date added`, `Release year → Release date`,
+ * `Title → Alphabetical`. The axis keys, the comparators, the default directions and the
+ * direction words behind the arrow are all untouched, and the tests above still pin them.
+ *
+ * Pinned as exact strings because that is what the change was. A label is the one part of
+ * this control a reader ever sees, and the previous set leaned on a direction — "Recently"
+ * is the descending half of an axis that has two — which is the rule the contract exists
+ * to hold: the label names the axis, the arrow names the direction.
+ */
+describe('the sort labels a reader sees', () => {
+  it('names each axis with the founder’s wording', () => {
+    expect(COLLECTION_SORT_AXES.rating.label).toBe('Rating');
+    expect(COLLECTION_SORT_AXES.added.label).toBe('Date added');
+    expect(COLLECTION_SORT_AXES.year.label).toBe('Release date');
+    expect(COLLECTION_SORT_AXES.title.label).toBe('Alphabetical');
+    expect(COLLECTION_SORT_AXES.shuffle.label).toBe('Shuffle');
+  });
+
+  it('offers exactly those five on the watched list, in order', () => {
+    expect(sortAxesFor('watched').map((axis) => axis.label)).toEqual([
+      'Rating',
+      'Date added',
+      'Release date',
+      'Alphabetical',
+      'Shuffle',
+    ]);
+  });
+
+  it('changed no axis key, so nothing stored or compared moved', () => {
+    expect(sortAxesFor('watched').map((axis) => axis.axis)).toEqual([
+      'rating',
+      'added',
+      'year',
+      'title',
+      'shuffle',
+    ]);
+  });
+
+  it('left the direction words alone, which the arrow and the screen reader use', () => {
+    expect(COLLECTION_SORT_AXES.added.directions).toEqual({
+      desc: 'newest first',
+      asc: 'oldest first',
+    });
+    expect(COLLECTION_SORT_AXES.title.directions).toEqual({ desc: 'Z–A', asc: 'A–Z' });
+    expect(COLLECTION_SORT_AXES.rating.directions).toEqual({
+      desc: 'highest first',
+      asc: 'lowest first',
+    });
+  });
+
+  it('left every default direction alone', () => {
+    expect(COLLECTION_SORT_AXES.rating.defaultDirection).toBe('desc');
+    expect(COLLECTION_SORT_AXES.added.defaultDirection).toBe('desc');
+    expect(COLLECTION_SORT_AXES.year.defaultDirection).toBe('desc');
+    expect(COLLECTION_SORT_AXES.title.defaultDirection).toBe('asc');
+  });
+
+  it('still never names a watch date', () => {
+    for (const segment of ['watched', 'watchlist', 'unranked'] as const) {
+      for (const spec of sortAxesFor(segment)) {
+        expect(spec.label.toLowerCase()).not.toContain('watched');
+      }
+    }
+  });
+});

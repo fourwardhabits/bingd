@@ -992,6 +992,25 @@ The Collection's sort chip said **Recently watched** over a wall that was plainl
 **Nothing about persistence changed.** The view mode is the only stored preference; filters and sort live in the Collection screen's state, so they survive Watched ↔ Watchlist, Movies ↔ TV and grid ↔ list, and reset on relaunch — exactly as before.
 
 
+### Specified 2026-08-31, not built: an Episodes tab on a TV season
+
+A season detail page gains an **Episodes** tab — episodes in episode-number order, each row
+carrying its number, its title and a still where one exists, with the established
+`MissingArtwork` fallback where none does, and a tap opening the episode's description in a
+sheet. Loading, empty and provider-error states are all named.
+
+**This is post-launch and deliberately not implemented.** The full specification, including
+why the estimate is not "a tab and a list", is
+[`deferred-roadmap.md`](./deferred-roadmap.md) §45.
+
+**The prerequisite worth knowing here:** it needs the TMDB adapter *and* the cache to change
+first. The adapter has no episodes action — it already sees episodes while counting them for
+`episode_count` and discards them — and `media_cache_known_facet` is a closed set that
+refuses an unknown facet by design, so `episodes` is a migration before it is a feature.
+§19's six-month retention obligation follows those rows like any other provider data.
+
+---
+
 ## 12. Letterboxd import
 
 > **Stage changed 2026-08-23 — deprioritized.** Import is **not** a requirement for the
@@ -1603,6 +1622,26 @@ your recommendations."* — instead of recycling its weakest tail.
 
 **For You gets no poster/list toggle.** The current presentation is canonical; the
 complexity budget went to freshness.
+
+---
+
+### Decided 2026-08-31: a recommendation from a person carries no machine-written reason
+
+A recommendation detail page shows **what** was recommended and **who** sent it, and does not
+show a reason. That absence is a decision and not a gap.
+
+The person *is* the reason. "Abisola sent you this" is more than any sentence the app could
+compose, because the sender knows something about the reader that no scoring function does —
+and a machine-written line beside a human act is the app talking over the person who made it.
+
+**Nothing is withheld and nothing is pending**: `title_recommendations` has no reason column,
+and `rank.ts` records the same rule from the other side — the client has no path to compose
+one. There is no migration waiting and no surface hiding a value it holds.
+
+**The For You slate is a different question and is unchanged.** There the app makes the
+suggestion, so it owes an account of itself, and those cards keep their reason lines. This
+rule is about a recommendation a *person* sent. [`deferred-roadmap.md`](./deferred-roadmap.md)
+§46.
 
 ---
 
