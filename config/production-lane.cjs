@@ -58,7 +58,8 @@ const { LANE_BACKENDS, REF_NAMES, supabaseProjectRef } = require('./backends.cjs
  * so a ref added to one and forgotten in the others fails a test rather than a release.
  */
 const REF_ENVIRONMENTS = {
-  abheeqyjzekiowkztfxv: 'nonprod',
+  abheeqyjzekiowkztfxv: 'prod',
+  fjxhcbowoxuzulwirzyr: 'nonprod',
 };
 
 /** The production project's ref, or null while there is not one. */

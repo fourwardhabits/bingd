@@ -112,12 +112,42 @@ during configuration resolution otherwise:
 
 ```js
 const LANE_BACKENDS = {
-  development: ['abheeqyjzekiowkztfxv'],
-  preview:     ['abheeqyjzekiowkztfxv'],
-  beta:        ['abheeqyjzekiowkztfxv'],
-  production:  [],                        // there is no production backend
+  development: ['fjxhcbowoxuzulwirzyr'],  // bingd-staging
+  preview:     ['fjxhcbowoxuzulwirzyr'],
+  beta:        ['fjxhcbowoxuzulwirzyr'],
+  production:  ['abheeqyjzekiowkztfxv'],  // bingd-production, promoted 2026-08-31
 };
 ```
+
+> ### The two projects swapped roles on 2026-08-31, and the reason is the users
+>
+> `abheeqyjzekiowkztfxv` was the friend-Beta backend. It is now **production**, and the
+> empty project created that morning (`fjxhcbowoxuzulwirzyr`) became **staging**.
+>
+> The alternative was shipping a public release against an empty database and asking the
+> real people already using Bingd — fourteen profiles, two hundred and forty-two collection
+> rows, two hundred and thirty-nine rankings, one collection of eighty-three titles — to
+> register again and re-enter all of it. Promotion copies nothing, so there is no restore
+> to get wrong: every Auth UUID, refresh token, follow, notification, award and avatar
+> stayed exactly where it was. Verified by a before/after comparison that came back
+> **identical on every count**, with the four invite-token environment values as the only
+> intended difference.
+>
+> **What promotion required.** `set_environment_name` deliberately refuses to rename a
+> populated database, because invite tokens carry the environment that minted them and a
+> bare rename strands every link somebody is holding. `20260905000100` adds
+> `p_promote => true`, which moves the stamps in the **same transaction** as the name — the
+> guard's reason removed rather than the guard bypassed. The default still refuses.
+>
+> **Old beta binaries keep working against production, deliberately.** They are the same
+> real people, their authorisation is their own JWT under the same RLS, and they move to
+> the store build when they install it. No key was rotated and no client-exclusion
+> mechanism was added to force them off.
+>
+> **No beta build may target staging until it reaches 103/103 and passes smoke.** It stands
+> at 53/103: `20260817001000` contains `lock table`, which the Management API applies
+> outside a transaction. That is the first post-release infrastructure task and it blocks
+> beta redistribution, not this release.
 
 This exists because the failure has no symptom. The Supabase URL is an EAS environment
 variable — a value in a web dashboard, edited by hand — and a build pointed at the wrong

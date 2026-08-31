@@ -57,7 +57,7 @@ describe('assertProductionBackend', () => {
    * `src/lib/env.ts` on somebody's phone.
    */
   it('refuses a production build with no anon key', () => {
-    const url = 'https://abheeqyjzekiowkztfxv.supabase.co';
+    const url = `https://${LANE_BACKENDS.production[0]}.supabase.co`;
     for (const missing of [undefined, '', '   ', null, 42]) {
       const error = throws(() => assertProductionBackend(url, missing));
       assert.ok(error, `${JSON.stringify(missing)} was accepted as an anon key`);
@@ -79,14 +79,19 @@ describe('assertProductionBackend', () => {
   });
 
   /**
-   * The cross-lane swap, from the production side. `LANE_BACKENDS.production` is empty, so
-   * this refuses today because nothing is permitted; it must keep refusing for the right
-   * reason once a production ref exists, which is what the second half asserts.
+   * The cross-lane swap, from the production side.
+   *
+   * **Rewritten 2026-08-31**, when the populated friend-Beta project was promoted to
+   * production and the empty one became staging. The literal ref this used to name is
+   * production's now, so naming it here asserted the opposite of the rule. The rule is
+   * that a production build refuses the *non-production* project, whichever that is, and
+   * says which project by name so the message is actionable.
    */
   it('refuses the nonproduction project', () => {
-    const error = throws(() => assertProductionBackend('https://abheeqyjzekiowkztfxv.supabase.co', KEY));
-    assert.ok(error, 'a production build resolved against bingd-nonprod');
-    assert.match(error.message, /bingd-nonprod/);
+    const staging = LANE_BACKENDS.beta[0];
+    const error = throws(() => assertProductionBackend(`https://${staging}.supabase.co`, KEY));
+    assert.ok(error, 'a production build resolved against the staging project');
+    assert.match(error.message, new RegExp(REF_NAMES[staging]));
   });
 
   it('refuses every project that is not in the production lane', () => {
@@ -239,20 +244,37 @@ describe('a production build, resolved the way EAS resolves it', () => {
    * passing its unit tests says nothing about whether `app.config.ts` calls it.
    */
   it('refuses when the production EAS environment has no Supabase URL', () => {
+    /**
+     * **Empty string, not `undefined`** — and the difference is a real one this test was
+     * getting away with by accident until 2026-08-31.
+     *
+     * `resolve` spreads over `process.env` and runs `expo config` in the project root, so
+     * deleting the variable lets Expo's dotenv fill it back in from a founder's local
+     * `.env`. That used to still throw, because `.env` held the NON-production project and
+     * production refused it — the right answer for the wrong reason. After the promotion
+     * `.env` holds production's own URL, so the fallback resolved cleanly and the test
+     * failed while the rule it names was still correct.
+     *
+     * An empty string is present-but-blank: dotenv skips a key already in `process.env`,
+     * so this asserts the absence of a URL rather than the absence of a variable, and it
+     * no longer depends on what is in anybody's `.env`.
+     */
     const error = throws(() =>
-      resolve({ BINGD_LANE: 'production', EXPO_PUBLIC_SUPABASE_URL: undefined }),
+      resolve({ BINGD_LANE: 'production', EXPO_PUBLIC_SUPABASE_URL: '' }),
     );
     assert.ok(error, 'a production config resolved with no backend at all');
   });
 
-  it('refuses when a production build is pointed at nonprod', () => {
+  it('refuses when a production build is pointed at the staging project', () => {
+    // Derived, not literal: the two projects swapped roles on 2026-08-31, and a test that
+    // named the old one would now be asserting that production refuses *itself*.
     const error = throws(() =>
       resolve({
         BINGD_LANE: 'production',
-        EXPO_PUBLIC_SUPABASE_URL: 'https://abheeqyjzekiowkztfxv.supabase.co',
+        EXPO_PUBLIC_SUPABASE_URL: `https://${LANE_BACKENDS.beta[0]}.supabase.co`,
       }),
     );
-    assert.ok(error, 'a production config resolved against bingd-nonprod');
+    assert.ok(error, 'a production config resolved against the staging project');
   });
 
   /**
@@ -265,14 +287,14 @@ describe('a production build, resolved the way EAS resolves it', () => {
    * named explicitly rather than inherited from `process.env`, so a machine that happens
    * to export `GOOGLE_SERVICES_JSON` cannot change what this asserts.
    */
-  it('still resolves the beta lane against nonprod', () => {
+  it('still resolves the beta lane against its own backend', () => {
     const dir = mkdtempSync(join(tmpdir(), 'bingd-lane-'));
     const googleServices = join(dir, 'google-services.json');
     writeFileSync(googleServices, JSON.stringify({ project_info: { project_id: 'placeholder' } }));
 
     const out = resolve({
       BINGD_LANE: 'beta',
-      EXPO_PUBLIC_SUPABASE_URL: 'https://abheeqyjzekiowkztfxv.supabase.co',
+      EXPO_PUBLIC_SUPABASE_URL: `https://${LANE_BACKENDS.beta[0]}.supabase.co`,
       GOOGLE_SERVICES_JSON: googleServices,
     });
     const config = JSON.parse(out);

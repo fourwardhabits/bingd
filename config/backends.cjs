@@ -43,15 +43,16 @@
  * nothing else**, in the same reviewed change that creates it.
  */
 const LANE_BACKENDS = {
-  development: ['abheeqyjzekiowkztfxv'],
-  preview: ['abheeqyjzekiowkztfxv'],
-  beta: ['abheeqyjzekiowkztfxv'],
-  production: [],
+  development: ['fjxhcbowoxuzulwirzyr'],
+  preview: ['fjxhcbowoxuzulwirzyr'],
+  beta: ['fjxhcbowoxuzulwirzyr'],
+  production: ['abheeqyjzekiowkztfxv'],
 };
 
 /** Human names, for the error message. A ref is 20 characters of nothing. */
 const REF_NAMES = {
-  abheeqyjzekiowkztfxv: 'bingd-nonprod',
+  abheeqyjzekiowkztfxv: 'bingd-production',
+  fjxhcbowoxuzulwirzyr: 'bingd-staging',
 };
 
 /**

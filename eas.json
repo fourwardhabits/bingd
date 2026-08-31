@@ -83,6 +83,12 @@
         "releaseStatus": "draft"
       }
     },
-    "production": {}
+    "production": {
+      "ios": {
+        "appleTeamId": "98729PG8GD",
+        "ascAppId": "6803954532",
+        "bundleIdentifier": "app.bingd"
+      }
+    }
   }
 }
