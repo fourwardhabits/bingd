@@ -110,8 +110,9 @@ Adapted from the founder-approved Candidate 1 in
 >
 > FIND WHAT'S NEXT
 > The For you tab suggests what to watch next, drawn from your rankings, from people with
-> similar taste, and from the people you follow. Every suggestion says why it is there. Send
-> one to a friend and you will know when they watch it.
+> similar taste, and from the people you follow. Get personalized suggestions shaped by what
+> you have ranked and the people you follow. Send one to a friend and you will know when they
+> watch it.
 >
 > KEEP SCORE
 > Awards mark the things you have actually done — twenty comments, a hundred titles ranked —
