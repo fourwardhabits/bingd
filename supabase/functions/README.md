@@ -11,25 +11,25 @@ devDependency, so neither needs a separate install, and CI runs both.
 
 **Read this before running any command on this page that writes.**
 
-| Environment | Project ref | Name shown in the Supabase dashboard |
+| Environment | Project ref | Supabase project name |
 |---|---|---|
-| **PRODUCTION** — real accounts, real data | `abheeqyjzekiowkztfxv` | **bingd-nonprod** |
-| **STAGING** — safe to break | `fjxhcbowoxuzulwirzyr` | **bingd-production** |
+| **PRODUCTION** — real accounts, real data | `abheeqyjzekiowkztfxv` | `bingd-production` |
+| **STAGING** — safe to break | `fjxhcbowoxuzulwirzyr` | `bingd-staging` |
 
-> **The dashboard names are inverted, and the ref is the only thing that is true.**
-> `abheeqyjzekiowkztfxv` was the friend-Beta backend and was promoted in place on
-> 2026-08-31; its dashboard name was never changed from `bingd-nonprod`.
-> `fjxhcbowoxuzulwirzyr` was created that morning to become production, then repurposed as
-> staging when the populated project was promoted instead — and its name was never changed
-> either. So the project the dashboard calls **bingd-nonprod holds every real user**.
-> `config/backends.cjs` and `config/production-lane.cjs` are the source of truth; the
-> dashboard is not.
+> **The ref is the identity; the name is a label that has moved before.** On 2026-08-31
+> the two projects swapped roles — `abheeqyjzekiowkztfxv`, the friend-Beta backend, was
+> promoted in place and now holds every real account, while `fjxhcbowoxuzulwirzyr` was
+> created that morning and became staging. For a day the dashboard names still said the
+> opposite. They were corrected on 2026-09-01 and the table above is now accurate, but
+> `config/backends.cjs` and `config/production-lane.cjs` remain the source of truth:
+> check the ref, not the name.
 
-> **Never run a write command without `--project-ref`.** The CLI on the founder's machine is
-> linked to `abheeqyjzekiowkztfxv`, so a bare `supabase db push`, `supabase functions deploy`
-> or `supabase secrets set` silently targets **PRODUCTION**. Every command below spells the
-> target as `<REF>` for that reason: substitute it deliberately, each time, and re-read the
-> table above before you do.
+> **Never run a write command without `--project-ref`.** The CLI link is machine state:
+> it is currently set to staging `fjxhcbowoxuzulwirzyr`, but it is one `supabase link`
+> away from production on any machine, and a bare `supabase db push`,
+> `supabase functions deploy` or `supabase secrets set` silently uses whatever it points
+> at. Every command below spells the target as `<REF>` so the environment is chosen
+> deliberately rather than inherited.
 
 ## `tmdb-adapter`
 

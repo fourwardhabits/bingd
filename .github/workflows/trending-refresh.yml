@@ -33,8 +33,8 @@ name: Trending refresh
 #
 # THE REFS SWAPPED ROLES ON 2026-08-31 AND THE DASHBOARD NAMES DID NOT.
 #
-#   PRODUCTION = abheeqyjzekiowkztfxv  (dashboard calls it "bingd-nonprod" -- real users)
-#   STAGING    = fjxhcbowoxuzulwirzyr  (dashboard calls it "bingd-production" -- empty)
+#   PRODUCTION = abheeqyjzekiowkztfxv  (bingd-production -- holds every real user)
+#   STAGING    = fjxhcbowoxuzulwirzyr  (bingd-staging -- empty)
 #
 # `abheeqyjzekiowkztfxv` was the friend-Beta backend, promoted in place. Until 2026-08-31
 # this block named it as the NONPROD url, which is now the production database. If the

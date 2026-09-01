@@ -54,10 +54,10 @@ secrets are absent, which is what asking for it by hand should do.
 ### Credentials
 
 > **The two projects swapped roles on 2026-08-31 and the dashboard names did not.**
-> PRODUCTION is `abheeqyjzekiowkztfxv`, which the Supabase dashboard still calls
-> **bingd-nonprod** and which holds every real user. STAGING is `fjxhcbowoxuzulwirzyr`,
-> which the dashboard still calls **bingd-production** and is empty. Trust the ref, never
-> the name; `config/backends.cjs` is the source of truth.
+> PRODUCTION is `abheeqyjzekiowkztfxv` (`bingd-production`) and holds every real user.
+> STAGING is `fjxhcbowoxuzulwirzyr` (`bingd-staging`) and is empty. The two swapped roles
+> on 2026-08-31 and the dashboard names only caught up on 2026-09-01, so check the ref
+> rather than the name; `config/backends.cjs` is the source of truth.
 
 | Secret | |
 |---|---|

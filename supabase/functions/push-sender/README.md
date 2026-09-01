@@ -216,19 +216,21 @@ enough to test iOS push on a development build today.
 
 ### Which project you are targeting
 
-| Environment | Project ref | Name shown in the Supabase dashboard |
+| Environment | Project ref | Supabase project name |
 |---|---|---|
-| **PRODUCTION** — real accounts, real data | `abheeqyjzekiowkztfxv` | **bingd-nonprod** |
-| **STAGING** — safe to break | `fjxhcbowoxuzulwirzyr` | **bingd-production** |
+| **PRODUCTION** — real accounts, real data | `abheeqyjzekiowkztfxv` | `bingd-production` |
+| **STAGING** — safe to break | `fjxhcbowoxuzulwirzyr` | `bingd-staging` |
 
-> **The dashboard names are inverted, and the ref is the only thing that is true.** The
-> project the dashboard calls `bingd-nonprod` was promoted in place on 2026-08-31 and
-> **holds every real user**. `supabase/functions/README.md` explains why;
-> `config/backends.cjs` is the source of truth and the dashboard is not.
+> **The ref is the identity; the name is a label that has moved before.**
+> `abheeqyjzekiowkztfxv` (`bingd-production`) was promoted in place on 2026-08-31 and
+> **holds every real user**; `fjxhcbowoxuzulwirzyr` (`bingd-staging`) is the empty one.
+> The dashboard names disagreed with those roles until 2026-09-01.
+> `supabase/functions/README.md` explains why; `config/backends.cjs` is the source of truth.
 
-> **Never omit `--project-ref`.** The founder machine CLI is linked to
-> `abheeqyjzekiowkztfxv`, so a bare `db push` or `functions deploy` silently targets
-> **PRODUCTION**. Substitute `<REF>` deliberately, every time.
+> **Never omit `--project-ref`.** The CLI link is machine state — currently staging
+> `fjxhcbowoxuzulwirzyr`, but one `supabase link` away from production — so a bare
+> `db push` or `functions deploy` uses whatever it happens to point at. Substitute
+> `<REF>` deliberately, every time.
 
 The migration has to be applied first, or every call answers "function does not exist":
 

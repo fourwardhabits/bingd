@@ -22,7 +22,7 @@ the implementation delivered, and both are corrected below rather than quietly s
 | **`APP_VARIANT`** | `development` | `preview` | `production` | `production` |
 | **EAS environment** | `development` | `preview` | **`preview`** | `production` |
 | **EAS channel** | `development` | `preview` | `beta` | `production` |
-| **Backend** | bingd-nonprod | bingd-nonprod | bingd-nonprod | *does not exist* |
+| **Backend** | bingd-staging | bingd-staging | bingd-staging | bingd-production |
 | **Android artifact** | APK | APK | AAB | AAB |
 | **In-app diagnostics** | shown | shown | **shown** | hidden |
 | **Exists today** | yes | yes | not built | not built |
@@ -45,8 +45,9 @@ release.
 
 **Beta reads the `preview` EAS environment.** EAS has exactly three environments and they
 are not extensible; `beta` is a build profile, not an environment. Pointing it at
-`production` would give it the Supabase URL of a project that does not exist, and pointing
-it at `preview` gives it bingd-nonprod, which is where the friend beta is meant to run.
+`production` would point it at the production project, which holds every real account, and
+pointing it at `preview` gives it bingd-staging, which is where the friend beta is meant to
+run.
 `eas.json` states `"environment": "preview"` on that profile explicitly rather than relying
 on the name-matching default, so it is a written decision rather than an accident.
 

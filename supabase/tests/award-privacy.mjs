@@ -36,7 +36,8 @@
  *
  * Three accounts, created and destroyed by this run, with a run-scoped handle. Nothing
  * touches the founder's account or any existing row. Refuses to run against anything but
- * bingd-nonprod, checked on the parsed host rather than on the string.
+ * the staging project resolved from config/backends.cjs, checked on the parsed host rather
+ * than on the string.
  */
 
 import { readFileSync } from 'node:fs';

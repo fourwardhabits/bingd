@@ -17,13 +17,13 @@ project at all — not the layout, not the keyboard, not a single Universal Link
 | Distribution | ad hoc, to the registered iPhone 11 (`00008030-00061DA202BB802E`) |
 | Build page | *created by the founder — see below* |
 
-> **The two projects swapped roles on 2026-08-31 and the Supabase dashboard names did
-> not follow.** The `preview` lane now points at STAGING `fjxhcbowoxuzulwirzyr`, which the
-> dashboard still calls **bingd-production**. PRODUCTION is `abheeqyjzekiowkztfxv`, which
-> the dashboard still calls **bingd-nonprod** and which holds every real user. If this
-> Preview build reports `backend abheeqyjzekiowkztfxv`, it is pointed at PRODUCTION —
-> stop the acceptance run and report it. Trust the ref, never the name;
-> `config/backends.cjs` is the source of truth.
+> **Check the ref, not the name.** The `preview` lane points at STAGING
+> `fjxhcbowoxuzulwirzyr` (`bingd-staging`). PRODUCTION is `abheeqyjzekiowkztfxv`
+> (`bingd-production`) and holds every real user. The two projects swapped roles on
+> 2026-08-31 and the dashboard names only caught up on 2026-09-01, so older notes may
+> disagree — `config/backends.cjs` is the source of truth. If this Preview build reports
+> `backend abheeqyjzekiowkztfxv`, it is pointed at PRODUCTION: stop the acceptance run
+> and report it.
 
 ### This build does not exist yet, and one command makes it
 
