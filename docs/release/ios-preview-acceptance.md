@@ -12,10 +12,18 @@ project at all — not the layout, not the keyboard, not a single Universal Link
 | Bundle identifier | `app.bingd.preview` |
 | App name on the home screen | **bingd preview** |
 | Channel | `preview` |
-| Backend | bingd-nonprod (`abheeqyjzekiowkztfxv`) |
+| Backend | staging (`fjxhcbowoxuzulwirzyr`) — see note below |
 | Associated domain | `applinks:bingd.app` |
 | Distribution | ad hoc, to the registered iPhone 11 (`00008030-00061DA202BB802E`) |
 | Build page | *created by the founder — see below* |
+
+> **The two projects swapped roles on 2026-08-31 and the Supabase dashboard names did
+> not follow.** The `preview` lane now points at STAGING `fjxhcbowoxuzulwirzyr`, which the
+> dashboard still calls **bingd-production**. PRODUCTION is `abheeqyjzekiowkztfxv`, which
+> the dashboard still calls **bingd-nonprod** and which holds every real user. If this
+> Preview build reports `backend abheeqyjzekiowkztfxv`, it is pointed at PRODUCTION —
+> stop the acceptance run and report it. Trust the ref, never the name;
+> `config/backends.cjs` is the source of truth.
 
 ### This build does not exist yet, and one command makes it
 
@@ -53,13 +61,13 @@ remote counter to 3 before failing on credentials. Read the real one off Setting
 Bingd 0.1.0 (4)
 preview · preview
 runtime <8 chars> · embedded
-backend abheeqyjzekiowkztfxv
+backend fjxhcbowoxuzulwirzyr
 ```
 
 The build number **must not be a dash**. It was, on every iOS build made before
 2026-08-20 — `BuildDetails` was reading the Android key — and confirming that this now
 reads a number is itself one of the things this acceptance run is for. If `backend` reads
-anything but `abheeqyjzekiowkztfxv`, stop and report it.
+anything but `fjxhcbowoxuzulwirzyr`, stop and report it — `abheeqyjzekiowkztfxv` is PRODUCTION.
 
 ## Installing
 

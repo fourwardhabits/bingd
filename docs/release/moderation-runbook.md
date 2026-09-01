@@ -41,8 +41,12 @@ two databases hold different people and only one of them has users in it.
 select current_database(), inet_server_addr();
 ```
 
-The friend beta and every non-production lane are **`bingd-nonprod`**
-(`abheeqyjzekiowkztfxv`). There is no production database yet. If a query in this document
+PRODUCTION is `abheeqyjzekiowkztfxv` — the friend-Beta backend, promoted in place on
+2026-08-31, holding every real account. **The Supabase dashboard still calls it
+`bingd-nonprod`; that name is stale and the ref is the only thing that is true.** Every
+non-production lane is now STAGING `fjxhcbowoxuzulwirzyr`, which the dashboard confusingly
+calls `bingd-production`. Moderation queries in this document act on real people, so
+confirm the ref before you run one. If a query in this document
 ever returns rows on a project you did not expect, stop and work out why before running a
 second one.
 

@@ -214,11 +214,30 @@ enough to test iOS push on a development build today.
 
 ## Deploying
 
+### Which project you are targeting
+
+| Environment | Project ref | Name shown in the Supabase dashboard |
+|---|---|---|
+| **PRODUCTION** — real accounts, real data | `abheeqyjzekiowkztfxv` | **bingd-nonprod** |
+| **STAGING** — safe to break | `fjxhcbowoxuzulwirzyr` | **bingd-production** |
+
+> **The dashboard names are inverted, and the ref is the only thing that is true.** The
+> project the dashboard calls `bingd-nonprod` was promoted in place on 2026-08-31 and
+> **holds every real user**. `supabase/functions/README.md` explains why;
+> `config/backends.cjs` is the source of truth and the dashboard is not.
+
+> **Never omit `--project-ref`.** The founder machine CLI is linked to
+> `abheeqyjzekiowkztfxv`, so a bare `db push` or `functions deploy` silently targets
+> **PRODUCTION**. Substitute `<REF>` deliberately, every time.
+
 The migration has to be applied first, or every call answers "function does not exist":
 
 ```powershell
-npx supabase db push --project-ref abheeqyjzekiowkztfxv
-npx supabase functions deploy push-sender --project-ref abheeqyjzekiowkztfxv
+# <REF>: STAGING is fjxhcbowoxuzulwirzyr. `db push` is DESTRUCTIVE — it applies migrations
+# to whichever project you name. Do not pass the PRODUCTION ref abheeqyjzekiowkztfxv
+# except as a deliberate release step, following docs/release/.
+npx supabase db push --project-ref <REF>
+npx supabase functions deploy push-sender --project-ref <REF>
 ```
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected by the platform and must not be

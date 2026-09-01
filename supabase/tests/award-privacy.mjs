@@ -43,6 +43,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { LANE_BACKENDS } = require('../../config/backends.cjs');
+const { environmentForRef } = require('../../config/production-lane.cjs');
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function loadEnv(file) {
@@ -67,7 +73,23 @@ if (!url || !anonKey || !serviceKey) {
 // On the parsed host, not on the string: `url.includes(ref)` passes for
 // `https://<ref>.example.com`, which is a hostname anybody can register — and the next
 // thing that happens is the service-role key being posted to it (independent review 15).
-const NONPROD_HOST = 'abheeqyjzekiowkztfxv.supabase.co';
+// Derived from config/backends.cjs rather than written as a literal. On 2026-08-31 the two
+// projects swapped roles: the ref this line used to name, abheeqyjzekiowkztfxv, is now
+// PRODUCTION. A hardcoded host therefore pointed every one of these account-creating,
+// service-role-bearing runs at real users, and refused to run against real staging. The
+// mapping is the single source of truth, and this resolves to nothing if it ever changes.
+const NONPROD_REF = LANE_BACKENDS.preview[0];
+if (!NONPROD_REF || environmentForRef(NONPROD_REF) !== 'nonprod') {
+  console.error(
+    'Refusing to run: the preview lane resolves to ' +
+      (NONPROD_REF ?? '(nothing)') +
+      ', which is not a project declared nonprod. Check config/backends.cjs and ' +
+      'config/production-lane.cjs. This script writes with the service-role key and must ' +
+      'never be pointed at production.',
+  );
+  process.exit(1);
+}
+const NONPROD_HOST = `${NONPROD_REF}.supabase.co`;
 {
   let host = null;
   let protocol = null;
