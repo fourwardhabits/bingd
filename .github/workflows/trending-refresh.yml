@@ -26,18 +26,33 @@ name: Trending refresh
 # environment name, which are not secrets, and `--target` makes a URL/key pair from two
 # different projects a refusal rather than a green run against the wrong shelf.
 #
-#   SUPABASE_URL_NONPROD              https://abheeqyjzekiowkztfxv.supabase.co
-#   SUPABASE_SERVICE_ROLE_KEY_NONPROD
-#   SUPABASE_URL_PRODUCTION           set when the production project exists
-#   SUPABASE_SERVICE_ROLE_KEY_PRODUCTION
+#   SUPABASE_URL_NONPROD              https://fjxhcbowoxuzulwirzyr.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY_NONPROD   staging service-role key
+#   SUPABASE_URL_PRODUCTION           https://abheeqyjzekiowkztfxv.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY_PRODUCTION  production service-role key
+#
+# THE REFS SWAPPED ROLES ON 2026-08-31 AND THE DASHBOARD NAMES DID NOT.
+#
+#   PRODUCTION = abheeqyjzekiowkztfxv  (bingd-production -- holds every real user)
+#   STAGING    = fjxhcbowoxuzulwirzyr  (bingd-staging -- empty)
+#
+# `abheeqyjzekiowkztfxv` was the friend-Beta backend, promoted in place. Until 2026-08-31
+# this block named it as the NONPROD url, which is now the production database. If the
+# repository secret SUPABASE_URL_NONPROD still holds that ref, the nightly nonprod job
+# does not corrupt anything -- refresh-trending.mjs compares the ref against the declared
+# environment in config/production-lane.cjs and REFUSES -- but it fails every night until
+# the secret is re-pointed at the staging ref above. Trust the ref, never the name.
 #
 # ---------------------------------------------------------------------------
 # WHY PRODUCTION IS BEHIND A VARIABLE
 #
-# There is no production project yet. A scheduled job that fails every night until there is
-# teaches the founder to ignore a red workflow, which is the failure mode that lets the
-# *next* one go unnoticed — the same reasoning that keeps `mode: beta` locked in
-# web/distribution.config.json.
+# Production EXISTS as of 2026-08-31: abheeqyjzekiowkztfxv, promoted in place from the
+# friend-Beta backend. What is still missing is its trending credentials, so the nightly
+# production run stays gated on the repository variable BINGD_PRODUCTION_TRENDING until
+# SUPABASE_URL_PRODUCTION and SUPABASE_SERVICE_ROLE_KEY_PRODUCTION are set. A scheduled job
+# that fails every night teaches the founder to ignore a red workflow, which is the failure
+# mode that lets the *next* one go unnoticed -- the same reasoning that keeps `mode: beta`
+# locked in web/distribution.config.json.
 #
 # So the nightly production run is gated on the repository variable
 # `BINGD_PRODUCTION_TRENDING`, set to `true` in the same session that provisions the project

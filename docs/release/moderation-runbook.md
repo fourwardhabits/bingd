@@ -41,8 +41,12 @@ two databases hold different people and only one of them has users in it.
 select current_database(), inet_server_addr();
 ```
 
-The friend beta and every non-production lane are **`bingd-nonprod`**
-(`abheeqyjzekiowkztfxv`). There is no production database yet. If a query in this document
+PRODUCTION is `abheeqyjzekiowkztfxv` (`bingd-production`) — the friend-Beta backend,
+promoted in place on 2026-08-31, holding every real account. Every non-production lane is
+STAGING `fjxhcbowoxuzulwirzyr` (`bingd-staging`). **Check the ref, not the name:** the two
+swapped roles on 2026-08-31 and the dashboard names only caught up on 2026-09-01.
+Moderation queries in this document act on real people, so confirm the ref before you run
+one. If a query in this document
 ever returns rows on a project you did not expect, stop and work out why before running a
 second one.
 

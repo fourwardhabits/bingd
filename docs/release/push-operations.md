@@ -278,7 +278,7 @@ already catches the ordinary case. Recorded in `../product/deferred-roadmap.md`.
 
 ## 10. Why the founder receives nothing outside the app — diagnosis, 2026-08-26
 
-Traced end to end on `abheeqyjzekiowkztfxv` (nonprod) rather than reasoned about, because
+Traced end to end on `abheeqyjzekiowkztfxv` rather than reasoned about, because
 every layer below is downstream of one fact.
 
 ### The measurement

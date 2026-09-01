@@ -12,10 +12,18 @@ strength of a passing test.**
 | Package | `app.bingd.preview` |
 | App name on the home screen | **bingd preview** |
 | Channel | `preview` |
-| Backend | bingd-nonprod (`abheeqyjzekiowkztfxv`) |
+| Backend | staging (`fjxhcbowoxuzulwirzyr`) — see note below |
 | Build | **`0.1.0 (4)`** — confirm in Settings, bottom of the screen |
 | Runtime | `e6c5f7da` |
 | Build page | https://expo.dev/accounts/fourward/projects/bingd/builds/ce8fc0ec-f5ec-4c85-8814-733c7c842044 |
+
+> **Check the ref, not the name.** The `preview` lane points at STAGING
+> `fjxhcbowoxuzulwirzyr` (`bingd-staging`). PRODUCTION is `abheeqyjzekiowkztfxv`
+> (`bingd-production`) and holds every real user. The two projects swapped roles on
+> 2026-08-31 and the dashboard names only caught up on 2026-09-01, so older notes may
+> disagree — `config/backends.cjs` is the source of truth. If this Preview build reports
+> `backend abheeqyjzekiowkztfxv`, it is pointed at PRODUCTION: stop the acceptance run
+> and report it.
 
 **Before anything else, open Settings and scroll to the bottom.** Four lines:
 
@@ -23,7 +31,7 @@ strength of a passing test.**
 Bingd 0.1.0 (4)
 preview · preview
 runtime e6c5f7da · embedded
-backend abheeqyjzekiowkztfxv
+backend fjxhcbowoxuzulwirzyr
 ```
 
 **All four have to match, and the build number is the one that catches the likely
@@ -31,7 +39,7 @@ mistake.** Three Preview APKs were produced on this branch — `(2)`, `(3)` and 
 per review round, because each round's changes moved the native fingerprint and an
 acceptance run against a superseded binary is an acceptance run against different code. If
 the version reads `(1)`, it is the August 14 build; anything below `(4)` is superseded. If
-`backend` reads anything but `abheeqyjzekiowkztfxv`, stop and report it — the app is
+`backend` reads anything but `fjxhcbowoxuzulwirzyr` (`abheeqyjzekiowkztfxv` is PRODUCTION), stop and report it — the app is
 talking to a database it was not meant to.
 
 ## Installing

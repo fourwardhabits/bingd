@@ -7,6 +7,30 @@ a runtime it does not target. Use `npm run functions:check` and `npm run functio
 instead, which run `deno check` and `deno lint` against `tmdb-adapter/deno.json`. Deno is a
 devDependency, so neither needs a separate install, and CI runs both.
 
+## Which project you are targeting
+
+**Read this before running any command on this page that writes.**
+
+| Environment | Project ref | Supabase project name |
+|---|---|---|
+| **PRODUCTION** — real accounts, real data | `abheeqyjzekiowkztfxv` | `bingd-production` |
+| **STAGING** — safe to break | `fjxhcbowoxuzulwirzyr` | `bingd-staging` |
+
+> **The ref is the identity; the name is a label that has moved before.** On 2026-08-31
+> the two projects swapped roles — `abheeqyjzekiowkztfxv`, the friend-Beta backend, was
+> promoted in place and now holds every real account, while `fjxhcbowoxuzulwirzyr` was
+> created that morning and became staging. For a day the dashboard names still said the
+> opposite. They were corrected on 2026-09-01 and the table above is now accurate, but
+> `config/backends.cjs` and `config/production-lane.cjs` remain the source of truth:
+> check the ref, not the name.
+
+> **Never run a write command without `--project-ref`.** The CLI link is machine state:
+> it is currently set to staging `fjxhcbowoxuzulwirzyr`, but it is one `supabase link`
+> away from production on any machine, and a bare `supabase db push`,
+> `supabase functions deploy` or `supabase secrets set` silently uses whatever it points
+> at. Every command below spells the target as `<REF>` so the environment is chosen
+> deliberately rather than inherited.
+
 ## `tmdb-adapter`
 
 The sole holder of the TMDB key and the sole caller of TMDB
@@ -39,7 +63,9 @@ and error traces; a header is not. When both are set the token wins and the key 
 configuration.
 
 ```powershell
-npx supabase secrets set TMDB_ACCESS_TOKEN="eyJhbGciOi..." --project-ref abheeqyjzekiowkztfxv
+# <REF>: see "Which project you are targeting". STAGING is fjxhcbowoxuzulwirzyr;
+# PRODUCTION is abheeqyjzekiowkztfxv and affects real users.
+npx supabase secrets set TMDB_ACCESS_TOKEN="eyJhbGciOi..." --project-ref <REF>
 ```
 
 Rotating is self-service, under **Regenerate Key** on the same TMDB page. Rotate whenever a
@@ -54,13 +80,19 @@ set by hand.
 
 ```powershell
 npx supabase login
-npx supabase functions deploy tmdb-adapter --project-ref abheeqyjzekiowkztfxv
+# <REF>: STAGING is fjxhcbowoxuzulwirzyr. Deploy there first and exercise it before
+# you ever pass the PRODUCTION ref abheeqyjzekiowkztfxv.
+npx supabase functions deploy tmdb-adapter --project-ref <REF>
 ```
 
 The migration has to be applied first, or every write returns "function does not exist":
 
 ```powershell
-npx supabase db push --project-ref abheeqyjzekiowkztfxv
+# <REF>: DESTRUCTIVE. `db push` applies migrations to whichever project you name, and
+# omitting --project-ref targets the linked project, which is PRODUCTION
+# (abheeqyjzekiowkztfxv). Use the STAGING ref fjxhcbowoxuzulwirzyr unless you are
+# deliberately releasing, and never run this against production without the runbook.
+npx supabase db push --project-ref <REF>
 ```
 
 ### Running it locally

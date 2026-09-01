@@ -22,7 +22,7 @@ the implementation delivered, and both are corrected below rather than quietly s
 | **`APP_VARIANT`** | `development` | `preview` | `production` | `production` |
 | **EAS environment** | `development` | `preview` | **`preview`** | `production` |
 | **EAS channel** | `development` | `preview` | `beta` | `production` |
-| **Backend** | bingd-nonprod | bingd-nonprod | bingd-nonprod | *does not exist* |
+| **Backend** | bingd-staging | bingd-staging | bingd-staging | bingd-production |
 | **Android artifact** | APK | APK | AAB | AAB |
 | **In-app diagnostics** | shown | shown | **shown** | hidden |
 | **Exists today** | yes | yes | not built | not built |
@@ -45,8 +45,9 @@ release.
 
 **Beta reads the `preview` EAS environment.** EAS has exactly three environments and they
 are not extensible; `beta` is a build profile, not an environment. Pointing it at
-`production` would give it the Supabase URL of a project that does not exist, and pointing
-it at `preview` gives it bingd-nonprod, which is where the friend beta is meant to run.
+`production` would point it at the production project, which holds every real account, and
+pointing it at `preview` gives it bingd-staging, which is where the friend beta is meant to
+run.
 `eas.json` states `"environment": "preview"` on that profile explicitly rather than relying
 on the name-matching default, so it is a written decision rather than an accident.
 
@@ -192,7 +193,7 @@ A URL that is not a Supabase URL at all — CI's `https://ci.invalid`, a local s
 and to nothing else,** in the same reviewed change that creates it.
 
 The second half of the same question — *which* backend did this build actually choose — is
-answered on the device: Settings shows `backend abheeqyjzekiowkztfxv` on **every lane but
+answered on the device: Settings shows `backend fjxhcbowoxuzulwirzyr` on **every lane but
 `production`**, Beta included. The URL is in the bundle already and the anon key is public
 by construction, so there is no secret in that line.
 
@@ -249,7 +250,7 @@ Every lane except `production` shows, under the version line:
 ```
 preview · preview
 runtime 5d60b7b0 · embedded
-backend abheeqyjzekiowkztfxv
+backend fjxhcbowoxuzulwirzyr
 ```
 
 lane, channel, runtime fingerprint, update state, backend ref. **No DSN, no project token,
@@ -267,7 +268,7 @@ no identifiers in anything user-facing — and it applies to a public release, n
 
 | Name | Where it lives | Reaches the client bundle | Value today |
 |---|---|---|---|
-| `EXPO_PUBLIC_SUPABASE_URL` | EAS env `development`, `preview` | yes | `https://abheeqyjzekiowkztfxv.supabase.co` |
+| `EXPO_PUBLIC_SUPABASE_URL` | EAS env `development`, `preview` | yes | `https://fjxhcbowoxuzulwirzyr.supabase.co` (staging) |
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | EAS env `development`, `preview` | yes | publishable key, bounded by RLS |
 | `EXPO_PUBLIC_SENTRY_DSN` | EAS env `development`, `preview` | yes | accepts events only |
 | `EXPO_PUBLIC_POSTHOG_KEY` | EAS env `development`, `preview` | yes | write-only project token |

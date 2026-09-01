@@ -53,11 +53,17 @@ secrets are absent, which is what asking for it by hand should do.
 
 ### Credentials
 
+> **The two projects swapped roles on 2026-08-31 and the dashboard names did not.**
+> PRODUCTION is `abheeqyjzekiowkztfxv` (`bingd-production`) and holds every real user.
+> STAGING is `fjxhcbowoxuzulwirzyr` (`bingd-staging`) and is empty. The two swapped roles
+> on 2026-08-31 and the dashboard names only caught up on 2026-09-01, so check the ref
+> rather than the name; `config/backends.cjs` is the source of truth.
+
 | Secret | |
 |---|---|
-| `SUPABASE_URL_NONPROD` | `https://abheeqyjzekiowkztfxv.supabase.co` |
+| `SUPABASE_URL_NONPROD` | `https://fjxhcbowoxuzulwirzyr.supabase.co` (staging) |
 | `SUPABASE_SERVICE_ROLE_KEY_NONPROD` | |
-| `SUPABASE_URL_PRODUCTION` | when it exists |
+| `SUPABASE_URL_PRODUCTION` | `https://abheeqyjzekiowkztfxv.supabase.co` (production) |
 | `SUPABASE_SERVICE_ROLE_KEY_PRODUCTION` | |
 
 `trending` is a `service_role` action on `tmdb-adapter` — four provider requests and eighty
@@ -93,7 +99,7 @@ workflow always passes it, which is where the mistake it catches actually happen
 Expected:
 
 ```
-Refreshing trending on abheeqyjzekiowkztfxv (nonprod)
+Refreshing trending on fjxhcbowoxuzulwirzyr (nonprod)
 trending.movie.day: 20 titles
 trending.movie.week: 20 titles
 trending.series.day: 20 titles
