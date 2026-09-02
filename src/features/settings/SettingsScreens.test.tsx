@@ -215,6 +215,119 @@ describe('the legal group in Settings', () => {
   });
 });
 
+/**
+ * Help & Support, which is the only place in the app that offers a way to say something
+ * back.
+ *
+ * Two rows, one mailbox, and the reason they are asserted from the screen as well as from
+ * `lib/support.test.ts` is the wiring: the unit tests prove the draft is right, and these
+ * prove the row a person actually taps is the one that builds it.
+ */
+describe('Help & Support in Settings', () => {
+  const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+
+  beforeEach(() => openURL.mockClear());
+
+  it('offers both rows under their own heading', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    expect(view.getByText('HELP & SUPPORT')).toBeTruthy();
+    expect(view.getByLabelText('Send feedback')).toBeTruthy();
+    expect(view.getByLabelText('Report a problem')).toBeTruthy();
+  });
+
+  it('sends feedback to support@bingd.app under its own subject', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    await fireEvent.press(view.getByLabelText('Send feedback'));
+
+    const url = openURL.mock.calls.at(-1)?.[0] as string;
+    expect(url.startsWith('mailto:support@bingd.app?')).toBe(true);
+    expect(url).toContain('subject=bingd.%20feedback');
+    expect(decodeURIComponent(url)).toContain('[Share your feedback here]');
+  });
+
+  it('sends a problem report to the same mailbox, with the build it happened on', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    await fireEvent.press(view.getByLabelText('Report a problem'));
+
+    const url = openURL.mock.calls.at(-1)?.[0] as string;
+    expect(url.startsWith('mailto:support@bingd.app?')).toBe(true);
+    expect(url).toContain('subject=bingd.%20support');
+    const body = decodeURIComponent(url);
+    expect(body).toContain('[Describe what happened here]');
+    expect(body).toContain('App version:');
+    expect(body).toContain('Platform:');
+  });
+
+  /**
+   * The draft is written by the app and sent by the person. What is in it travels, so
+   * nothing about the signed-in account is allowed in — the profile mocked at the top of
+   * this file is `@sai`, and neither row may carry a trace of them.
+   */
+  it('puts nothing about the signed-in person into either draft', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    for (const label of ['Send feedback', 'Report a problem'] as const) {
+      await fireEvent.press(view.getByLabelText(label));
+      const decoded = decodeURIComponent(openURL.mock.calls.at(-1)?.[0] as string);
+      expect(decoded).not.toContain('sai');
+      expect(decoded).not.toContain('Sai');
+      expect(decoded).not.toContain('user-1');
+      // The support mailbox and no second address, so nothing is filled in as the sender.
+      expect(decoded.match(/@/g)).toEqual(['@']);
+    }
+  });
+
+  /**
+   * A row that opens the mail client is not a row that opens Safari, and the hint is what
+   * a screen-reader user hears before they commit to leaving the app.
+   */
+  it('announces them as leaving for the mail app rather than the browser', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    const row = view.getByLabelText('Report a problem');
+    expect(row.props.accessibilityRole).toBe('link');
+    expect(row.props.accessibilityHint).toBe('Opens your email app');
+    // And the web links still say the browser, so the distinction says something.
+    expect(view.getByLabelText('Terms of Use').props.accessibilityHint).toBe(
+      'Opens in your browser',
+    );
+  });
+
+  /**
+   * A simulator with no Mail account, and a phone whose mail app has been removed. Unlike
+   * the legal links, this failure is not swallowed: somebody who has just decided to tell
+   * you something has to be left with a way to.
+   */
+  it('names the address when no mail client answers', async () => {
+    openURL.mockRejectedValueOnce(new Error('no handler'));
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    await fireEvent.press(view.getByLabelText('Send feedback'));
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'Could not open your email app',
+        expect.stringContaining('support@bingd.app'),
+      ),
+    );
+  });
+
+  /**
+   * No persistent feedback button anywhere else. A support channel somebody goes looking
+   * for in Settings reads as a normal app; one that follows them around reads as a beta,
+   * and this is the shipped store build.
+   */
+  it('reads as a support section rather than a beta feedback banner', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    expect(view.queryByText(/beta/i)).toBeNull();
+    expect(view.queryByText(/tell us what you think/i)).toBeNull();
+  });
+});
+
 describe('the Settings hub', () => {
   it('offers the four destinations rather than an apology', async () => {
     const view = await renderWithProviders(<SettingsScreen />);

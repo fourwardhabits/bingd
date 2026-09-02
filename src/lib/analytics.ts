@@ -277,7 +277,32 @@ export type AnalyticsEvent =
    * whether the set stays at four. Only a *change* — re-tapping the chip you are on
    * emits nothing, or the count would measure fidgeting.
    */
-  | { name: 'leaderboard_metric_selected'; props: { metric: LeaderboardMetricName } };
+  | { name: 'leaderboard_metric_selected'; props: { metric: LeaderboardMetricName } }
+
+  // --- Help & Support -------------------------------------------------------
+  /**
+   * A Help & Support row was tapped, and a mail draft to support@bingd.app was asked for.
+   *
+   * **The tap, not a message received.** Everything after this happens in somebody
+   * else's app: the draft may be abandoned, edited beyond recognition or never sent, and
+   * this app is not told which. So the name says `opened`, and the number it produces is
+   * *how many people reached for the support channel* — an upper bound on mail received,
+   * never a count of it. It is emitted even when the mail client fails to launch, because
+   * a person who tried and could not is the single most important reading this event has.
+   *
+   * `type` and nothing else. The subject is a constant, the body is a template, and the
+   * only part of either that is a person's own words is the part they type after the
+   * draft opens — which this app never sees and would not be allowed to send if it did.
+   * There is no address, no account and no free text in this event.
+   */
+  | { name: 'settings_support_email_opened'; props: { type: SupportTopicName } };
+
+/**
+ * Which of the two support rows. Spelled here rather than imported from `lib/support`,
+ * so the analytics vocabulary does not acquire a dependency on the feature that emits
+ * it — `support.ts` is checked against this by the compiler at the call site.
+ */
+export type SupportTopicName = 'feedback' | 'problem';
 
 /** The emittable names, for tests and for the spec to be checked against. */
 export const ANALYTICS_EVENTS = [
@@ -294,6 +319,7 @@ export const ANALYTICS_EVENTS = [
   'invite_link_created',
   'invite_redeemed',
   'invite_activated',
+  'settings_support_email_opened',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
@@ -347,6 +373,7 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'state',
   'position',
   'has_title',
+  'type',
   // Release identity (`lib/release.ts`).
   'environment',
   'platform',

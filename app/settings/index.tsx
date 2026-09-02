@@ -14,6 +14,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { signOut, useCurrentProfile } from '@/features/auth';
 import { env, isRelease, lane } from '@/lib/env';
 import { openLegal } from '@/lib/legal';
+import { openSupportEmail } from '@/lib/support';
 import { Button, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -99,6 +100,41 @@ export default function SettingsScreen() {
           />
         </View>
 
+        {/* Help & Support, which is the section this screen did not have.
+
+            The store copy of `bingd.app/support` below is a page: it answers the
+            questions that have already been asked. These two rows are the other
+            direction — a way to say something that is not on it — and they are the only
+            place in the app that offers one. There is deliberately no floating feedback
+            button on the Feed or the Profile: a support channel a person goes looking
+            for in Settings reads as a normal app; one that follows them around reads as
+            a beta.
+
+            Both open the device's mail client on a draft. `lib/support.ts` has the
+            reasoning, and the sentence worth repeating here is that the draft carries a
+            version, a build number and a platform, and carries no account, no
+            identifier and no address of the person sending it. */}
+        <View style={styles.section}>
+          <SectionHeader title="Help & Support" />
+          <View style={[styles.group, styles.sectionGroup]}>
+            <Row
+              icon="chatbubble-ellipses-outline"
+              label="Send feedback"
+              onPress={() => void openSupportEmail('feedback')}
+              external
+              hint="Opens your email app"
+            />
+            <Row
+              icon="alert-circle-outline"
+              label="Report a problem"
+              onPress={() => void openSupportEmail('problem')}
+              external
+              hint="Opens your email app"
+              last
+            />
+          </View>
+        </View>
+
         {/* Its own group, one gap below the rest.
             The founder's correction: signing out was inside Account & Data, beside
             permanent deletion, and the two are not the same kind of thing at all — one
@@ -164,6 +200,7 @@ function Row({
   detail,
   last = false,
   external = false,
+  hint,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
@@ -177,13 +214,20 @@ function Row({
    * promises and the chevron only makes the first one.
    */
   external?: boolean;
+  /**
+   * Overrides what leaving the app means for this row. The default names the browser,
+   * because every external row was a web link until Help & Support; a mail draft leaves
+   * the app just as surely and does not open Safari, and a hint that says the wrong
+   * destination is worse for a screen-reader user than no hint at all.
+   */
+  hint?: string;
   onPress: () => void;
 }) {
   return (
     <Pressable
       accessibilityRole={external ? 'link' : 'button'}
       accessibilityLabel={detail ? `${label}, ${detail}` : label}
-      accessibilityHint={external ? 'Opens in your browser' : undefined}
+      accessibilityHint={hint ?? (external ? 'Opens in your browser' : undefined)}
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
@@ -465,6 +509,10 @@ const styles = StyleSheet.create({
   // controls can actually be pressed.
   diagnosticsAction: { minHeight: theme.layout.minTapTarget },
   page: { paddingBottom: theme.space[10] },
+  // A group under its own SectionHeader. The header owns the gap above it, so the
+  // group directly beneath must not add a second one.
+  section: { marginTop: theme.space[6], gap: theme.space[1] },
+  sectionGroup: { marginTop: 0 },
   group: {
     marginTop: theme.space[3],
     marginHorizontal: theme.layout.gutter,
