@@ -301,6 +301,32 @@ Domain secured. Before public launch: App Store and Google Play name availabilit
 4. The recipient opens the installed app through a verified link, or reaches a useful web page.
 5. Bingd measures link opens and downstream activation, never claiming a post was published.
 
+> **As built — 2026-09-02. A content share carries one link, and it is the content's.**
+>
+> Sharing a title off Bingd used to mint the sharer's reusable invitation link and append
+> `Join me on bingd. https://bingd.app/i/<token>` underneath the title URL. It was two
+> loops in one message: F above, with G stapled to it.
+>
+> **That is removed, and the rule is now explicit: loop F and loop G never share a
+> payload.** A title share sends `https://bingd.app/title/<id>` and a profile share sends
+> `https://bingd.app/u/<handle>`, each on its own, with no invitation URL, no referral
+> token, no second call to action and no sender identity. An invitation link appears in
+> exactly one place — a deliberate tap on **Invite friends** (loop G, `InviteFriendsButton`).
+>
+> The reasoning is a product principle rather than a tidiness one. Somebody sending a
+> friend a film is vouching for the film; a recruitment link they did not choose to attach
+> turns their recommendation into an advertisement sent in their name, and the person who
+> notices that is the person who stops sharing. Trust in the sender **is** the loop.
+>
+> The acquisition step is not lost — it moves one step later and to the person it is
+> actually for. A recipient without the app taps the title link, `bingd.app` serves the
+> generic install page, and they install and tap the same link again. See
+> [`../architecture/web-deployment.md`](../architecture/web-deployment.md).
+>
+> **What this costs, stated plainly:** an ordinary title or profile share is not
+> attributable to its sender. That is accepted. No first-party referral token is attached
+> to content links and no attribution model exists for them.
+
 ### G. Direct invitation loop
 
 1. User taps Invite Friends from onboarding completion, People, Profile, Settings, or the tagging flow.
@@ -630,6 +656,26 @@ See §12 for the full specification.
 3. If not, a lightweight web page shows permitted content and store actions.
 4. A first-party referral token records the origin without exposing private data.
 5. After install, the recipient reopens the link or enters the short code.
+
+> **As built — 2026-09-02.** Steps 1, 2, 3 and 5 are what happens. **Step 4 is not built
+> and is not planned**, and the specification text above is stale rather than pending.
+>
+> Only `/i/<token>` carries an origin, because only an invitation *is* an origin: the
+> token is in the path the sender chose to send, `record_invite_open` counts the page view,
+> and redemption inside the app writes the attribution. Title and profile links carry no
+> referral token at all — see the As-built block at §6F for why that is a decision and not
+> an omission.
+>
+> Step 3 is deliberately thin. The page is generic for every route: the Bingd mark, one
+> line of positioning, an *Open in Bingd* button and the install action for the visitor's
+> platform. It shows **no** permitted content — no film name, no poster, no handle beyond
+> the one already in the URL the visitor typed or tapped, and nothing read from any table.
+> A `/u/<handle>` page that resolved a profile would be a way to read an account from
+> outside every visibility rule in the app; a `/title/<id>` page that resolved a title
+> would be the film database this product is not.
+>
+> Step 5 is the manual continuation, and it is the only one there is: the token does not
+> survive a store install. See `deferred-roadmap.md` §7.
 
 ---
 

@@ -246,6 +246,21 @@ await mkdir(join(dist, '.well-known'), { recursive: true });
 // `_headers` and `index.html` — and both had to become mode-aware, which a directory
 // copied verbatim cannot be. They are generated below. `src/` still copies, because
 // `page.mjs` and `router.mjs` are shipped as-is and are run directly by the tests.
+//
+// `src/` is also where the site keeps its one image, `bingd-icon.png` — the app icon,
+// served so that a pasted bingd.app link unfurls as a card with a mark on it rather
+// than as a bare URL somebody is not sure about. It sits here rather than being copied
+// out of `assets/brand/` because the whole site must build from `web/` alone:
+// `router.test.mjs` proves the launch-mode build by copying exactly `build.mjs`, the
+// two config files and `src/` into a temp directory and running it there, and a step
+// reaching up into the repo would pass locally and fail in the one place the public
+// build is ever exercised before launch day.
+//
+// **It is the icon and never a poster.** A `/title/<id>` card carries the Bingd mark
+// and the words "A title on Bingd"; it does not name or picture the film, because the
+// site holds no reader for `media_items` and a generic image where a poster belongs is
+// a card that lies about what is behind the link. Real per-title cards need a server, a
+// TMDB lookup and image generation, and are deferred (docs/architecture/web-deployment.md).
 await cp(join(here, 'src'), dist, { recursive: true });
 
 /**
@@ -527,6 +542,53 @@ const styles = `
 const ROBOTS = isPublic ? '' : '\n    <meta name="robots" content="noindex, nofollow" />';
 
 /**
+ * The site origin, for the absolute URLs Open Graph requires.
+ *
+ * og:image and og:url are the two tags no unfurler resolves relatively — a path-only
+ * image is dropped silently, which is how a broken card comes to look identical to a
+ * card nobody wrote. The domain is already the one deep-links.config.json publishes
+ * and the entitlement claims, so it is read from there rather than typed again.
+ */
+const ORIGIN = `https://${config.domain}`;
+
+/**
+ * One sentence, on every card, for every route.
+ *
+ * Deliberately the same sentence for an invitation, a profile and a title. The
+ * alternative is a description that varies with what is behind the link, and what is
+ * behind the link is exactly what this site does not read: a profile the viewer may
+ * not be allowed to see, and a title the site holds no row for.
+ */
+const SOCIAL_DESCRIPTION =
+  'Rank what you have watched, see what your friends are watching, and find your next watch.';
+
+/**
+ * The Open Graph and Twitter block for one page.
+ *
+ * Static text with nothing in it from the visitor: the title is a literal from ROUTES,
+ * the description is a constant, and the image and url are built from the configured
+ * domain. There is nothing here a URL can reach, which is the rule router.mjs keeps
+ * for destinations, kept here for markup.
+ *
+ * **og:url is the route prefix, not the visited URL.** The token, handle or id in the
+ * path is the one part of a bingd.app link that should not be copied into a card that
+ * messaging services fetch, log and cache on the sender behalf. A preview is a thing
+ * a third party keeps; the identifier stays in the message.
+ */
+const social = ({ title, path }) => `
+    <meta property="og:site_name" content="Bingd" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="${title}" />
+    <meta property="og:description" content="${SOCIAL_DESCRIPTION}" />
+    <meta property="og:image" content="${ORIGIN}/bingd-icon.png" />
+    <meta property="og:image:alt" content="The Bingd app icon" />
+    <meta property="og:url" content="${ORIGIN}${path}" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="${title}" />
+    <meta name="twitter:description" content="${SOCIAL_DESCRIPTION}" />
+    <meta name="twitter:image" content="${ORIGIN}/bingd-icon.png" />`;
+
+/**
  * One page.
  *
  * `noindex` while the test is closed, by founder decision (decision log §3) — a
@@ -534,13 +596,14 @@ const ROBOTS = isPublic ? '' : '\n    <meta name="robots" content="noindex, nofo
  * which is a thing no privacy setting in the app would then be able to take back. It
  * lifts with the release mode and not before.
  */
-const page = ({ title, kind, heading, tagline, body }) => `<!doctype html>
+const page = ({ dir, title, kind, heading, tagline, body }) => `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${title}</title>${ROBOTS}
     <meta name="referrer" content="no-referrer" />
+${social({ title, path: `/${dir}/` })}
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1341,6 +1404,7 @@ await writeFile(
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Bingd</title>
     <meta name="description" content="Rank what you have watched, and see what your friends really think." />${ROBOTS}
+${social({ title: 'Bingd', path: '/' })}
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

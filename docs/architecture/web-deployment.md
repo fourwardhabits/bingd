@@ -223,22 +223,79 @@ the upload key is still what an EAS-distributed production APK carries.
 
 ---
 
-## The two beta destinations, still absent
+## The install destinations
 
-`web/distribution.config.json` has `ios.betaUrl`, `android.optInUrl`, `android.betaUrl`
-and both `storeUrl`s at `null`. That is correct today and every route says so honestly:
-*the Bingd beta is not open for this device yet*. `build.mjs` refuses any value that is
-not an absolute `https://` URL, which is the open-redirect gate.
+> **Updated 2026-09-02.** This section used to be headed *"the two beta destinations,
+> still absent"* and said both were `null`. Two of the four are filled in now.
 
-Filling them in is **one file, no app rebuild, and no reissued invitation**. What a person
-pastes into a group chat is `https://bingd.app/i/<token>` and it is permanent; only the
-destination behind it moves.
+`web/distribution.config.json` today:
 
-- `ios.betaUrl` ← the public TestFlight link, `https://testflight.apple.com/join/XXXXXXXX`
-- `android.optInUrl` ← the closed-test opt-in page, `https://play.google.com/apps/testing/app.bingd`
+| key | value | what a visitor gets |
+|---|---|---|
+| `ios.storeUrl` | `null` | — |
+| `ios.betaUrl` | `https://testflight.apple.com/join/kkgaYsqx` | *Get the Bingd beta for iPhone* |
+| `android.storeUrl` | `null` | — |
+| `android.optInUrl` | `https://play.google.com/apps/testing/app.bingd` | *Join the Bingd beta on Android* |
+| `android.betaUrl` | `null` | — |
 
-The Android ordering is the easy thing to get wrong: a closed test is unreachable from the
-store listing until the tester has opted in, so `optInUrl` leads while it is set.
+`build.mjs` refuses any value that is not an absolute `https://` URL, which is the
+open-redirect gate. Changing any of them is **one file, no app rebuild, and no reissued
+invitation**. What a person pastes into a group chat is `https://bingd.app/i/<token>` and
+it is permanent; only the destination behind it moves.
+
+**The App Store swap, when the URL exists.** `destinationFor` prefers `storeUrl` over
+`betaUrl` on both platforms, so setting `ios.storeUrl` alone changes every iOS visitor's
+button from *Get the Bingd beta for iPhone* to *Get Bingd for iPhone*, pointing at the
+public listing. It is a config edit plus a Cloudflare deploy — **no OTA, no app rebuild,
+no change to any link already sent**. Do not invent the URL: it is
+`https://apps.apple.com/app/id<id>` and the `id` comes from App Store Connect once the app
+is approved. The separate `"mode": "public"` flag is a bigger switch and is not this one —
+it lifts `noindex` site-wide and rewrites the closed-testing copy, and the build refuses it
+while either `storeUrl` is null.
+
+**Android is still Closed Testing and the copy must keep saying so.** `optInUrl` leads
+while it is set, and the ordering is the easy thing to get wrong: a closed test is
+unreachable from the store listing until the tester has opted in, so sending somebody to
+the plain listing first shows them *this app is not available for your device*, which
+reads as *Bingd is broken* rather than as *you have not joined yet*. The opt-in page also
+only works for an account already on the tester list — a Google Group membership the
+founder maintains by hand. Nothing on the site automates that and nothing on the site
+claims Bingd is publicly available on Google Play.
+
+---
+
+## What a shared link carries, and what the page says back
+
+**One link per share, and it is the content's.** As of 2026-09-02 a title share sends
+`https://bingd.app/title/<id>` alone and a profile share sends `https://bingd.app/u/<handle>`
+alone. Neither carries an invitation URL, a referral token or a second call to action;
+`https://bingd.app/i/<token>` appears only when somebody taps **Invite friends**. PRD §6F's
+As-built block carries the reasoning. The consequence for this site is that
+`/title/*` and `/u/*` have no sender and no origin to know about, and their pages are
+identical for every visitor.
+
+**The page resolves nothing.** Every route paints the Bingd mark, one line of positioning,
+an *Open in Bingd* button built from an already-validated identifier, and the install
+action for the visitor's platform. No table is read, on any route. That is what keeps a
+private profile private when its URL is opened from outside the app, and it is why there
+is no film name or poster on a `/title/<id>` page.
+
+**The preview card is generic, and honestly so.** Each page carries `og:site_name`,
+`og:title`, `og:description`, `og:image` and the Twitter equivalents, all static text plus
+one image — `bingd-icon.png`, the app icon, shipped from `web/src/`. The card is
+`summary`, not `summary_large_image`: the large card frames its picture as *the* subject,
+and an app icon presented that way reads as a poster that failed to load. `og:url` is the
+**route prefix** and never the visited URL, so the token, handle or id in a link is not
+copied into a card that messaging services fetch, log and cache.
+
+Real per-title cards — the film's name and its poster — need a server, a TMDB lookup and
+image generation. They are deferred; see `deferred-roadmap.md`.
+
+**The site still has no analytics of its own.** The one measurement it takes is
+`record_invite_open`, called from the invitation page only, and the published privacy
+policy says the website carries no analytics. Counting title- and profile-fallback views
+would mean either a new Supabase RPC and migration or a third-party script, and either
+would need that policy sentence changed first. Deferred deliberately, not overlooked.
 
 ---
 

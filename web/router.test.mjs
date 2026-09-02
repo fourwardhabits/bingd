@@ -384,6 +384,64 @@ describe('the built site', () => {
     assert.doesNotMatch(rewrites, /^\/\*\s/m);
   });
 
+  /**
+   * The preview card, which is the only thing about a bingd.app link most people ever
+   * see before deciding whether to tap it.
+   *
+   * Every route unfurled as a bare URL until this pass, and a bare URL in a group chat
+   * reads as a link the sender is not sure about. What the card says is deliberately
+   * generic — the site holds no reader for a profile or a title and is not getting one
+   * — so these tests pin the two halves of that: the card exists, and it claims nothing
+   * it cannot know.
+   */
+  it('gives every share route a preview card with an absolute image', () => {
+    for (const route of ['i', 'u', 'title', 'lists']) {
+      const html = read(`${route}.html`);
+      assert.ok(html.includes('<meta property="og:site_name" content="Bingd" />'), route);
+      // Absolute, because a relative og:image is dropped silently by every unfurler —
+      // a card with no picture is indistinguishable from a card nobody wrote.
+      assert.ok(
+        html.includes('<meta property="og:image" content="https://bingd.app/bingd-icon.png" />'),
+        route,
+      );
+      assert.ok(html.includes('<meta property="og:url" content="https://bingd.app/'), route);
+      assert.ok(html.includes('<meta name="twitter:card" content="summary" />'), route);
+    }
+    // And the image is actually served, at exactly the path the tag names.
+    assert.ok(readFileSync(join(dist, 'bingd-icon.png')).length > 0);
+  });
+
+  it('claims nothing in a card that the site cannot know', () => {
+    // The title route is the one under pressure: the obvious next edit is a poster and
+    // a film name, and both need a server this site does not have. Until then the card
+    // says the one thing that is true — that a Bingd title is behind the link.
+    const title = read('title.html');
+    assert.ok(title.includes('<meta property="og:title" content="A title on Bingd" />'));
+    assert.ok(title.includes('<meta property="og:image:alt" content="The Bingd app icon" />'));
+    assert.ok(!title.includes('image.tmdb.org'));
+    assert.ok(!title.includes('themoviedb'));
+    // summary, not summary_large_image: the large card frames its picture as *the*
+    // subject, and an app icon presented that way reads as a poster that failed to load.
+    assert.ok(!title.includes('summary_large_image'));
+  });
+
+  it('keeps the identifier out of the card, because a preview is fetched by strangers', () => {
+    // og:url is the route prefix. A token, handle or media id copied into it would be
+    // handed to whichever messaging service unfurls the link, logged and cached there —
+    // on behalf of a sender who pasted the link into one conversation. The pages are
+    // static files, identical for every visitor, so there is nowhere for one to arrive
+    // from; this is the assertion that keeps it that way.
+    for (const [route, prefix] of [
+      ['i', '/i/'],
+      ['u', '/u/'],
+      ['title', '/title/'],
+    ]) {
+      const html = read(`${route}.html`);
+      const url = /<meta property="og:url" content="([^"]+)"/.exec(html)[1];
+      assert.equal(url, `https://bingd.app${prefix}`);
+    }
+  });
+
   it('ships the router the tests just exercised, unmodified', () => {
     assert.equal(read('router.mjs'), readFileSync(join(here, 'src', 'router.mjs'), 'utf8'));
   });

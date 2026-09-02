@@ -375,12 +375,16 @@ instrumentation can now actually answer.
 **Never** by fingerprinting, IP-and-timestamp matching or clipboard reading. That is a
 privacy position, not a cost trade-off, and it is not open for revisiting.
 
-**2. The distribution destinations themselves.** `web/distribution.config.json` has a slot
+**2. The distribution destinations themselves.** ~~`web/distribution.config.json` has a slot
 for a public TestFlight URL and a Play closed-test opt-in URL, and both are `null` — so
 every route currently shows *the Bingd beta is not open for this device yet*, which is
-true. Filling them in changes no invitation link anybody has already sent, and needs no
-app rebuild. **A live `bingd.app` deployment is the harder prerequisite**: until the site
-is hosted, Universal Links and App Links cannot verify at all.
+true.~~ **Superseded — both beta URLs are filled in**; the current table is in
+[`../architecture/web-deployment.md`](../architecture/web-deployment.md). What is still
+`null` is the pair that matters for launch: `ios.storeUrl` and `android.storeUrl`, because
+neither store listing is public yet. Filling any of them in changes no invitation link
+anybody has already sent, and needs no app rebuild. **A live `bingd.app` deployment is the
+harder prerequisite**: until the site is hosted, Universal Links and App Links cannot
+verify at all.
 
 **Revisit when.** The hosting and the two URLs are founder actions on the beta-release
 path, not roadmap work. The vendor question is genuinely deferred.
@@ -1851,3 +1855,47 @@ tranche was a defect fix and none of these are:
 
 **Revisit when.** A reader asks for one of them by describing a task, rather than the
 control suggesting itself.
+
+---
+
+## 45. Rich browser pages for a shared title or profile
+
+**Status: deferred, 2026-09-02.**
+
+The launch-hardening pass on the sharing loop separated the loops — a title share now
+carries the title link and nothing else (PRD §6F As-built) — and gave every `bingd.app`
+route a generic preview card: the Bingd mark, the site name and one line of positioning,
+static, identical on every route. That is the whole of what was built, and it was built
+that way on purpose. What follows is everything adjacent that was *not*.
+
+**What is deferred, and each of these is a project rather than an edit.**
+
+- **A browser page for a title.** The film's name, its poster, where friends placed it.
+  Needs a public reader for `media_items`, which today is reachable only through the app's
+  authenticated client, and a decision about what a signed-out stranger may see about a
+  title other people have ranked.
+- **A browser page for a profile.** The same, with a privacy contract attached: `/u/<handle>`
+  must not become a way to read an account from outside `can_view_profile`, and an indexed
+  profile page cannot be un-published by any setting in the app afterwards.
+- **Per-title Open Graph cards.** The poster as `og:image` and the film's name as
+  `og:title`. This is the one people ask for first and it is not a metadata change: a
+  static host cannot vary a `<meta>` tag by path, so it needs a Cloudflare Worker or Pages
+  Function, a TMDB lookup on the request path with its rate limit and its caching, and a
+  fallback for the lookup failing. The generic card is deliberately `summary` rather than
+  `summary_large_image` so that nothing about today's card implies a poster is coming.
+- **Dynamic social-image generation** — a rendered card with the poster, the ranking and
+  the handle on it. A step beyond the above: an image pipeline, a font, and a cache.
+- **Any web reader at all.** Today the site holds none, on any route, and that single fact
+  is what makes every privacy question above answerable with *the web cannot see it*.
+  The first reader added is the one that has to answer them all.
+
+**Not deferred — decided against.** Attaching a referral token to ordinary title and
+profile shares, so the sender could be credited for an install. It was in the code until
+2026-09-02 and was removed: see PRD §6F. Sender trust is worth more than the attribution,
+and the two cannot both be had on the same link.
+
+**Revisit when.** There is a public App Store listing and enough traffic on
+`/title/<id>` fallbacks to say what the pages would be worth. Note that nothing currently
+counts those fallbacks — see the note on web analytics in
+[`../architecture/web-deployment.md`](../architecture/web-deployment.md), which is its own
+small prerequisite.

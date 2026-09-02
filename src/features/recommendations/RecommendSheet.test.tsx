@@ -548,100 +548,73 @@ describe('sending', () => {
   });
 });
 
+/**
+ * The share that stopped recruiting.
+ *
+ * This block used to assert the opposite of what it asserts now: that an off-platform
+ * title share carried the sender's reusable invite link underneath the title, and that
+ * pressing Share held one operation id across the retries a failed mint invites. All of
+ * that machinery is gone, because the message it protected was one the sender did not
+ * choose to send — a recommendation of a film with a recruitment link stapled to it.
+ *
+ * What is left is the contract worth pinning: one link, the title's, and no second
+ * acquisition CTA anywhere in the payload. The growth loop moved to bingd.app, where the
+ * install page answers a recipient who does not have the app (`web/src/page.mjs`).
+ */
 describe('sharing with somebody who is not on bingd.', () => {
-  it('carries the reader’s invite link and records that it was created', async () => {
+  it('sends the title link and nothing else', async () => {
+    const view = await renderWithProviders(<RecommendSheet {...props} />);
+
+    await fireEvent.press(view.getByText('Share off bingd.'));
+
+    await waitFor(() => expect(Share.share as jest.Mock).toHaveBeenCalled());
+    const shared = (Share.share as jest.Mock).mock.calls[0][0] as { message: string; url: string };
+
+    expect(shared.message).toContain('https://bingd.app/title/film-1');
+    expect(shared.url).toBe('https://bingd.app/title/film-1');
+    // The three shapes of the old second link, each named so a reinstatement cannot pass
+    // by changing the wording.
+    expect(shared.message).not.toContain('/i/');
+    expect(shared.message).not.toMatch(/join me on bingd/i);
+    expect(shared.message).not.toMatch(/invite/i);
+  });
+
+  it('mints no invite link, so a title share is not an invitation', async () => {
+    // `create_invite_link` writes an `invite_link_creations` row and offers the push
+    // permission prompt. Neither belongs to somebody sharing a film: the row would
+    // inflate the one funnel the founder watches for growth with shares that invited
+    // nobody, and the prompt would arrive on a tap that was not about joining.
     mockRpcResults.create_invite_link = { status: 'ok', token: 'abc123' };
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
     await fireEvent.press(view.getByText('Share off bingd.'));
 
-    await waitFor(() =>
-      expect(mockRpc).toHaveBeenCalledWith(
-        'create_invite_link',
-        expect.objectContaining({ p_media_item_id: 'film-1' }),
-      ),
-    );
-
-    const shared = (Share.share as jest.Mock).mock.calls[0][0] as { message: string };
-    expect(shared.message).toContain('https://bingd.app/title/film-1');
-    expect(shared.message).toContain('https://bingd.app/i/abc123');
+    await waitFor(() => expect(Share.share as jest.Mock).toHaveBeenCalled());
+    expect(mockRpc).not.toHaveBeenCalledWith('create_invite_link', expect.anything());
   });
 
-  it('still shares the title when the link could not be minted', async () => {
-    // The invite link is instrumentation; the share is the point. Failing the whole
-    // share because the growth record was unavailable would be the tail wagging the dog.
-    mockRpcErrors.create_invite_link = { code: '53400', message: 'too many' };
+  it('carries no sender identity in the payload', async () => {
+    // The recipient is being told about a film, not about an account. The viewer's
+    // handle, id and name are all absent from the message by construction, and this is
+    // the assertion that keeps them absent.
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
     await fireEvent.press(view.getByText('Share off bingd.'));
 
     await waitFor(() => expect(Share.share as jest.Mock).toHaveBeenCalled());
     const shared = (Share.share as jest.Mock).mock.calls[0][0] as { message: string };
-    expect(shared.message).toContain('https://bingd.app/title/film-1');
-    expect(shared.message).not.toContain('/i/');
+    expect(shared.message).not.toContain('user-1');
+    expect(shared.message).not.toContain('@');
   });
 
-  /**
-   * **The degradation above is what invites the retry, and the retry used to be counted.**
-   *
-   * `create_invite_link` reuses the caller's token but inserts an `invite_link_creations`
-   * row unconditionally. So: the insert commits, the reply is lost, this returns null, the
-   * share goes out without the link — and pressing Share again *because that is not what
-   * they wanted* minted a fresh operation id, walked past `_claim_operation`, and recorded
-   * a second creation for one intent. One wrong number, no exception, plausible state.
-   *
-   * Independent review 21h, after 21g's PASS: it was the last writer minting its own id
-   * whose RPC is not idempotent by shape.
-   */
-  it('claims the same slot when a link mint went unanswered', async () => {
-    // No SQLSTATE: never answered, so the creation may well be recorded already.
-    mockRpcErrors.create_invite_link = { code: '', message: 'TypeError: Network request failed' };
+  it('reports a share that could not be opened, and stays open', async () => {
+    // The one failure path left now that nothing is minted first.
+    (Share.share as jest.Mock).mockRejectedValueOnce(new Error('Sharing failed.'));
     const view = await renderWithProviders(<RecommendSheet {...props} />);
 
     await fireEvent.press(view.getByText('Share off bingd.'));
-    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(1));
 
-    await fireEvent.press(view.getByText('Share off bingd.'));
-    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(2));
-
-    const [first, second] = idsSentTo('create_invite_link');
-    expect(typeof first).toBe('string');
-    // The server's ledger can only refuse a replay it recognises.
-    expect(second).toBe(first);
-  });
-
-  it('takes a fresh slot once a link has actually been minted', async () => {
-    // Released on the *mint*, not on the share: a minted link means the creation is
-    // definitely recorded, so the next press is a second creation and should say so.
-    mockRpcResults.create_invite_link = { status: 'ok', token: 'abc123' };
-    const view = await renderWithProviders(<RecommendSheet {...props} />);
-
-    await fireEvent.press(view.getByText('Share off bingd.'));
-    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(1));
-
-    await fireEvent.press(view.getByText('Share off bingd.'));
-    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(2));
-
-    const [first, second] = idsSentTo('create_invite_link');
-    expect(second).not.toBe(first);
-  });
-
-  it('still claims the same slot when the share sheet itself was dismissed', async () => {
-    // The release cannot hang off `Share.share`. Dismissing the OS sheet resolves rather
-    // than throwing, so tying it there would free the id on exactly the path where the
-    // creation is still in doubt.
-    mockRpcErrors.create_invite_link = { code: '08007', message: 'transaction resolution unknown' };
-    (Share.share as jest.Mock).mockResolvedValue({ action: 'dismissedAction' } as never);
-    const view = await renderWithProviders(<RecommendSheet {...props} />);
-
-    await fireEvent.press(view.getByText('Share off bingd.'));
-    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(1));
-
-    await fireEvent.press(view.getByText('Share off bingd.'));
-    await waitFor(() => expect(idsSentTo('create_invite_link')).toHaveLength(2));
-
-    const [first, second] = idsSentTo('create_invite_link');
-    expect(second).toBe(first);
+    await waitFor(() => expect(view.getByText('Sharing failed.')).toBeTruthy());
   });
 });
 
