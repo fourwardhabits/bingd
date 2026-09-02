@@ -1858,44 +1858,115 @@ control suggesting itself.
 
 ---
 
-## 45. Rich browser pages for a shared title or profile
+## 45. Rich browser previews, and the sharing loop's remaining half
 
-**Status: deferred, 2026-09-02.**
+**Status: partly built 2026-09-03. The rest is deferred.**
 
-The launch-hardening pass on the sharing loop separated the loops — a title share now
-carries the title link and nothing else (PRD §6F As-built) — and gave every `bingd.app`
-route a generic preview card: the Bingd mark, the site name and one line of positioning,
-static, identical on every route. That is the whole of what was built, and it was built
-that way on purpose. What follows is everything adjacent that was *not*.
+> **Superseded in part.** This item was written on 2026-09-02 saying a browser page for a
+> title or a profile "needs a public reader for `media_items`, which today is reachable
+> only through the app's authenticated client". **That was wrong**, and the correction is
+> worth more than the item: `media_items_read` has been `using (true)` since
+> `20260813000400`, and `can_view_profile` has always answered a null viewer with public,
+> active accounts. Both public read paths already existed. The fallback page now uses them
+> and needed no migration, no new backend and no change to any policy. See
+> [`../architecture/web-deployment.md`](../architecture/web-deployment.md).
 
-**What is deferred, and each of these is a project rather than an edit.**
+**What is built.** `/title/<id>` names the film or season, its year and its poster.
+`/u/<handle>` names a public account, its handle and its avatar. Both resolve in the
+browser, one request each, under the RLS the app already obeys, so a private account
+returns zero rows and the page keeps its generic line. The page also carries two real app
+screenshots and a 1200x630 brand social card.
 
-- **A browser page for a title.** The film's name, its poster, where friends placed it.
-  Needs a public reader for `media_items`, which today is reachable only through the app's
-  authenticated client, and a decision about what a signed-out stranger may see about a
-  title other people have ranked.
-- **A browser page for a profile.** The same, with a privacy contract attached: `/u/<handle>`
-  must not become a way to read an account from outside `can_view_profile`, and an indexed
-  profile page cannot be un-published by any setting in the app afterwards.
+**What is still deferred, and each of these is a project rather than an edit.**
+
 - **Per-title Open Graph cards.** The poster as `og:image` and the film's name as
-  `og:title`. This is the one people ask for first and it is not a metadata change: a
-  static host cannot vary a `<meta>` tag by path, so it needs a Cloudflare Worker or Pages
-  Function, a TMDB lookup on the request path with its rate limit and its caching, and a
-  fallback for the lookup failing. The generic card is deliberately `summary` rather than
-  `summary_large_image` so that nothing about today's card implies a poster is coming.
-- **Dynamic social-image generation** — a rendered card with the poster, the ranking and
-  the handle on it. A step beyond the above: an image pipeline, a font, and a cache.
-- **Any web reader at all.** Today the site holds none, on any route, and that single fact
-  is what makes every privacy question above answerable with *the web cannot see it*.
-  The first reader added is the one that has to answer them all.
+  `og:title`, so the *unfurled preview in the message* names the film rather than saying
+  "Open on bingd." This is the one people ask for first and it is the one thing the
+  2026-09-03 work could not do: these files are static, one per route, so a `<meta>` tag
+  is the same bytes for every visitor. It needs a Cloudflare Worker or Pages Function, a
+  TMDB or `media_items` lookup on the request path with its rate limit and its caching,
+  and a fallback for the lookup failing. **The page resolving the title does not make the
+  card able to**, and the difference is worth stating because it looks like an
+  inconsistency and is not.
+- **Dynamic social-image generation.** A rendered card with the poster, the score and the
+  handle drawn on it. A step beyond the above: an image pipeline, a font, and a cache.
+- **Anything about what people did with a title.** Where friends placed it, its average
+  score, how many have watched it. Every one of those is a read of `rankings` or
+  `user_media`, both of which are `can_i_view`-bounded and correctly return nothing to a
+  signed-out reader. Showing them would mean a privileged read path, which is the line
+  this page has not crossed and should not.
+- **Browser accounts, ranking, feed or navigation.** Not deferred so much as declined. The
+  page is an install fallback, not a web product.
 
-**Not deferred — decided against.** Attaching a referral token to ordinary title and
-profile shares, so the sender could be credited for an install. It was in the code until
+**Decided against, not deferred.** Attaching a referral token to ordinary title and
+profile shares so the sender could be credited for an install. It was in the code until
 2026-09-02 and was removed: see PRD §6F. Sender trust is worth more than the attribution,
 and the two cannot both be had on the same link.
 
-**Revisit when.** There is a public App Store listing and enough traffic on
-`/title/<id>` fallbacks to say what the pages would be worth. Note that nothing currently
-counts those fallbacks — see the note on web analytics in
+**Revisit when.** There is a public App Store listing, and enough traffic on
+`/title/<id>` fallbacks to say what a richer card would be worth. Nothing currently counts
+those fallbacks; see the note on web analytics in
 [`../architecture/web-deployment.md`](../architecture/web-deployment.md), which is its own
 small prerequisite.
+
+---
+
+## 46. Deferred deep linking across an install, and what would have to be true first
+
+**Status: deferred, 2026-09-03. Unchanged in substance from §7, restated here because the
+sharing work keeps arriving at it.**
+
+Today a link opens the right screen **only when the app is already installed**. Somebody
+who taps `/title/<id>`, installs from the fallback, and opens the app from their home
+screen lands on the feed. The title is not recovered. Neither is an invitation.
+
+The honest continuation is the one the page already offers: go back to the message and tap
+the same link again, which now opens the app at the right place. That works, it costs one
+tap, and it is the whole of what this product supports.
+
+**What closing it would take**, so the size is on the record: Play Install Referrer on
+Android, and on iOS a deferred deep-link vendor, which today means Branch, AppsFlyer or
+Adjust. Each is an SDK, a privacy review, a native rebuild, a store-listing disclosure and
+a data-sharing relationship. **Never** by fingerprinting, IP-and-timestamp matching or
+clipboard reading; that is a privacy position rather than a cost trade-off.
+
+**Related and also deferred:** content-share to signup attribution, which is the same
+mechanism pointed at a different question. Ordinary title and profile shares deliberately
+carry no sender, so even with deferred linking there would be nothing to attribute them to
+without reintroducing the referral token PRD §6F removed.
+
+**Revisit when** the fallback page's own numbers show how many people reach it and do not
+come back, which is a question the current instrumentation cannot answer.
+
+---
+
+## 47. Awards for sharing
+
+**Status: deferred, 2026-09-03. Design constraint recorded now so the obvious version does
+not get built later.**
+
+There is no Award for sharing and there should not be one that counts share-button taps.
+
+**Why the obvious version is wrong.** Opening the OS share sheet is not a share: the sheet
+can be dismissed, the message deleted unsent, and the app is never told which. An Award
+that rewards the tap therefore rewards *the tap*, and the rational way to earn it is to
+open and dismiss the sheet repeatedly. That is a badge for spamming yourself, and it would
+sit in the same sheet as Awards that are derived from a real collection.
+
+This is the same rule `invite_link_created` already follows, for the same reason, and it is
+written down in [`analytics.md`](./analytics.md): name the stage that is actually measured.
+
+**What a real one would need**, in rough order of how much it is worth:
+
+- **Distinct recipients or distinct titles**, not repetitions of one.
+- **A cap per day and per year**, so the ceiling is reached by using the product normally
+  rather than by grinding.
+- **Recipient opens**, once those are measurable. `record_invite_open` already does this
+  for invitations; content links have no equivalent and would need the fallback analytics
+  noted in §45.
+- **Recipient activation**, which is the only version that measures the thing the founder
+  actually wants, and which needs the deferred attribution in §46.
+
+So the honest sequence is §46 and the §45 analytics first, and the Award last. Until then
+the invitation Awards that already exist (Invite Instigator, which counts *activated*
+invitees rather than links created) are the model to copy, not the share sheet.

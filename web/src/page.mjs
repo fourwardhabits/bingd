@@ -2,22 +2,38 @@
  * The browser half: read the URL, ask `router.mjs`, paint the answer.
  *
  * Everything with a decision in it lives in `router.mjs` and is tested there. What is
- * left here is DOM writing and one network call, kept deliberately thin because it is
+ * left here is DOM writing and two network calls, kept deliberately thin because it is
  * the part no test observes.
  *
- * No framework, no bundler, no dependency. The whole site is four HTML files and two
- * modules, and it is served from a static host — which is also the security story: a
- * page with no server cannot be made to fetch, redirect or render anything an attacker
- * puts in a URL.
+ * No framework, no bundler, no dependency. The whole site is a handful of HTML files
+ * and two modules, served from a static host, which is also the security story: a page
+ * with no server cannot be made to fetch, redirect or render anything an attacker puts
+ * in a URL.
+ *
+ * ---------------------------------------------------------------------------
+ * Nothing here writes markup
+ * ---------------------------------------------------------------------------
+ *
+ * Every value that reaches the page goes through `textContent` or through `img.src`
+ * with a URL `router.mjs` built from a pattern. There is no `innerHTML` in this file
+ * and there must not be one: the moment a title from the catalogue or a display name
+ * from a profile is concatenated into markup, this page becomes the one place in Bingd
+ * where somebody else's text is executed.
  */
 
 import {
   allDestinations,
   appLinkFor,
+  avatarUrl,
   detectPlatform,
   destinationFor,
   handleFromPath,
   installLabel,
+  posterUrl,
+  profileContextRequest,
+  profileDisplay,
+  titleContextRequest,
+  titleDisplay,
   titleIdFromPath,
   tokenFromPath,
 } from './router.mjs';
@@ -62,7 +78,7 @@ const link = (id, href, label) => {
 
 // The button's wording is `installLabel` in router.mjs — a decision, so it lives with
 // the tests. What stays here is the desktop pair, which is platform-keyed already.
-const PLATFORM_LABEL = { ios: 'Get Bingd for iPhone', android: 'Get Bingd for Android' };
+const PLATFORM_LABEL = { ios: 'Get bingd. for iPhone', android: 'Get bingd. for Android' };
 
 /**
  * Reports that the invitation page was opened.
@@ -92,6 +108,62 @@ function recordOpen(cfg, token, platform) {
     }).catch(() => {});
   } catch {
     /* no network, no metric, no problem */
+  }
+}
+
+/**
+ * One row from PostgREST, or null.
+ *
+ * Every failure is one answer: null, and the page keeps the generic copy it was built
+ * with. A visitor who is offline, or who arrives at a handle that does not resolve, or
+ * whose request is refused, sees a page that still says what Bingd is and still offers
+ * the install. The context is an improvement on that page, never a precondition for it.
+ *
+ * **Zero rows is the ordinary answer, not an error.** A private profile, a suspended
+ * one and a handle nobody has are indistinguishable from here by design: RLS filters
+ * rather than refuses, so the page cannot tell them apart and has no business trying.
+ */
+async function readOne(url, anonKey) {
+  if (!url || !anonKey) return null;
+  try {
+    const response = await fetch(url, {
+      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}`, Accept: 'application/json' },
+    });
+    if (!response.ok) return null;
+    const rows = await response.json();
+    return Array.isArray(rows) && rows.length ? rows[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Paints the resolved context, or leaves the generic copy alone.
+ *
+ * The artwork is loaded rather than reserved: `img` stays hidden until it decodes, so a
+ * poster TMDB no longer serves leaves a page with a name on it instead of a broken
+ * image frame. That is also why the name is written before the picture is asked for.
+ */
+function paintContext({ name, detail, art, artAlt, note, round = false }) {
+  // A profile picture is a circle and a poster is not, which is a styling fact rather
+  // than a rendering one, so it travels as a class.
+  if (round) document.getElementById('context')?.classList.add('is-profile');
+
+  text('context-name', name);
+  if (detail) text('context-detail', detail);
+  else show('context-detail', false);
+  if (note) text('context-note', note);
+
+  show('generic-subject', false);
+  show('context', true);
+
+  const img = document.getElementById('context-art');
+  if (img && art) {
+    img.alt = artAlt ?? '';
+    img.addEventListener('load', () => {
+      img.hidden = false;
+    });
+    img.src = art;
   }
 }
 
@@ -127,6 +199,9 @@ function paintInstall(cfg, platform) {
   else show('no-destination');
 }
 
+const platformNow = () =>
+  detectPlatform(navigator.userAgent, { maxTouchPoints: navigator.maxTouchPoints ?? 0 });
+
 /**
  * The invitation page, `/i/<token>`.
  *
@@ -136,8 +211,10 @@ function paintInstall(cfg, platform) {
  *
  * It does not name the inviter. PRD §17 permits an allowlisted display name and avatar
  * **or** neutral Bingd copy, and neutral is what a static page can say without holding
- * a reader for the `profiles` table — which is the one thing that would make an
- * invitation link a way to learn about an account from outside the app.
+ * a reader for the `profiles` table keyed on a token. That is a different question from
+ * `/u/<handle>`, where the visitor already has the handle in their hand: here the token
+ * is the only input, and turning a token into a person is exactly the lookup an
+ * invitation link must not offer.
  *
  * It does not validate the token. Doing so would need an answer from the server about
  * whether a token is real, and a page that gives that answer is a token oracle for
@@ -155,15 +232,11 @@ function paintInstall(cfg, platform) {
  *
  * So the continuation is manual and honest: install, come back to this page, tap the
  * button. The URL is in the visitor's history and in the message that brought them
- * here, and it is the same link either way. Somebody who instead launches Bingd
- * straight from TestFlight or Play arrives with no token and no attribution, and the
- * copy says so rather than implying the invitation is still attached.
+ * here, and it is the same link either way.
  */
 function invitePage(cfg) {
   const token = tokenFromPath(location.pathname);
-  const platform = detectPlatform(navigator.userAgent, {
-    maxTouchPoints: navigator.maxTouchPoints ?? 0,
-  });
+  const platform = platformNow();
 
   if (!token) {
     // A malformed link, which is overwhelmingly a truncated paste. Not an error page:
@@ -176,45 +249,79 @@ function invitePage(cfg) {
 
   recordOpen(cfg, token, platform);
 
-  const scheme = cfg.distribution?.app?.scheme;
-  link('open-app', appLinkFor(scheme, 'i', token), 'I already have Bingd');
+  link('open-app', appLinkFor(cfg.distribution?.app?.scheme, 'i', token), 'I already have bingd.');
 
   paintInstall(cfg, platform);
 }
 
-/** `/u/<handle>` — a profile, named and not read. */
+/**
+ * `/u/<handle>` — a public profile, confirmed and not opened up.
+ *
+ * The name and picture come from `profiles` under `profiles_read`, which answers a
+ * signed-out reader with public, active accounts and nothing else. So the page can say
+ * *this is who your friend sent you* for the accounts that are already public, and says
+ * the generic line for every account that is not, without knowing which it was looking
+ * at. Nothing about what they have watched, ranked or written is read here.
+ */
 function profilePage(cfg) {
   const handle = handleFromPath(location.pathname);
-  const platform = detectPlatform(navigator.userAgent, {
-    maxTouchPoints: navigator.maxTouchPoints ?? 0,
-  });
+  const platform = platformNow();
 
-  // Written with textContent, so a handle that somehow passed the regex still cannot
-  // become markup. Belt over the braces `handleFromPath` already provides.
-  if (handle) text('handle', `@${handle}`);
-  else show('handle', false);
-
-  link('open-app', appLinkFor(cfg.distribution?.app?.scheme, 'u', handle), 'Open in Bingd');
+  link('open-app', appLinkFor(cfg.distribution?.app?.scheme, 'u', handle), 'Open in bingd.');
   paintInstall(cfg, platform);
+
+  if (!handle) return;
+
+  void readOne(profileContextRequest(cfg.supabaseUrl, handle), cfg.supabaseAnonKey).then((row) => {
+    const display = profileDisplay(row);
+    if (!display) return;
+    paintContext({
+      name: display.name,
+      detail: display.handle,
+      art: avatarUrl(cfg.supabaseUrl, row.avatar_path),
+      artAlt: '',
+      note: 'Shared from bingd.',
+      round: true,
+    });
+  });
 }
 
-/** `/title/<id>` — a film or season, identified and not described. */
+/**
+ * `/title/<id>` — a film or a season, named so the visitor knows the link worked.
+ *
+ * `media_items` is world readable and has been since the catalogue was built: it is
+ * TMDB's data about films, with nobody attached to it. Naming the title here is
+ * therefore not a disclosure, it is the difference between a page that reassures
+ * somebody and a page that makes them wonder whether they tapped the right thing.
+ *
+ * What is still not shown is anyone's *opinion* of it. No rating, no ranking, no who
+ * shared it. Those live behind an account, and this page has none.
+ */
 function titlePage(cfg) {
   const id = titleIdFromPath(location.pathname);
-  const platform = detectPlatform(navigator.userAgent, {
-    maxTouchPoints: navigator.maxTouchPoints ?? 0,
-  });
+  const platform = platformNow();
 
-  link('open-app', appLinkFor(cfg.distribution?.app?.scheme, 'title', id), 'Open in Bingd');
+  link('open-app', appLinkFor(cfg.distribution?.app?.scheme, 'title', id), 'Open in bingd.');
   paintInstall(cfg, platform);
+
+  if (!id) return;
+
+  void readOne(titleContextRequest(cfg.supabaseUrl, id), cfg.supabaseAnonKey).then((row) => {
+    const display = titleDisplay(row);
+    if (!display) return;
+    paintContext({
+      name: display.name,
+      detail: display.detail,
+      art: posterUrl(row.poster_path),
+      artAlt: `Poster for ${display.name}`,
+      note: 'Shared from bingd.',
+    });
+  });
 }
 
 /** Everything else that reached a Bingd route: install, and nothing to open. */
 function genericPage(cfg) {
-  paintInstall(
-    cfg,
-    detectPlatform(navigator.userAgent, { maxTouchPoints: navigator.maxTouchPoints ?? 0 }),
-  );
+  paintInstall(cfg, platformNow());
 }
 
 const PAGES = {
