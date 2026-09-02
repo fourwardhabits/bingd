@@ -1,4 +1,5 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { Share } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -224,6 +225,34 @@ describe('the profile controls', () => {
 
     await waitFor(() => expect(view.getByText('Share Profile')).toBeTruthy());
     expect(view.queryByText('Edit Profile')).toBeNull();
+  });
+
+  /**
+   * One link, and it is the profile's.
+   *
+   * Asserted as an exact call rather than with `toContain`, because what this test is
+   * really guarding is what is *absent*. Sharing a profile is an act of identity, and
+   * the sender chose to hand somebody their page — a recruitment link appended
+   * underneath would make it an advertisement they did not agree to send. The same rule
+   * the off-platform title share was corrected to follow (`RecommendSheet.tsx`).
+   *
+   * Inviting is a separate, deliberate tap on this same screen: `InviteFriendsButton`
+   * is the only place `create_invite_link` is reached from, and it is the only share in
+   * the product whose payload carries `/i/<token>`.
+   */
+  it('shares the profile URL alone, with no invitation stapled to it', async () => {
+    const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' });
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Share Profile')).toBeTruthy());
+    await fireEvent.press(view.getByText('Share Profile'));
+
+    await waitFor(() => expect(share).toHaveBeenCalled());
+    expect(share).toHaveBeenCalledWith({
+      message: 'https://bingd.app/u/sai',
+      url: 'https://bingd.app/u/sai',
+    });
+    share.mockRestore();
   });
 
   it('offers Invite friends beneath the pair', async () => {

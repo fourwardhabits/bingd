@@ -179,6 +179,19 @@ never sent.** Neither is the handle or the display name.
 > nothing in this app will ever know either way. Any metric named `invite_sent` that
 > counts share-sheet opens is a number that will be believed and is wrong.
 
+> **Its two properties both went constant on 2026-09-02, and the reason is a product
+> decision rather than a bug.** Sharing a title off Bingd used to mint an invitation link
+> and append it to the message; it no longer does (PRD §6F As-built), so `create_invite_link`
+> is now reached from exactly one place — **Invite friends** on the own profile. Every
+> event from that day forward therefore carries `surface: 'profile'` and
+> `has_title: false`.
+>
+> The properties are kept rather than dropped. They are what makes the series before and
+> after the change readable as one series: a query that groups by `surface` shows the
+> title-share source ending on a date, which is the fact, instead of showing a schema that
+> changed underneath it. **Expect the raw count to fall**, and do not read the fall as a
+> growth regression — it is the removal of link creations nobody deliberately asked for.
+
 **`invite_redeemed`** is an attribution row, not a link opened and not an install. It is
 emitted only on `redeem_invite`'s `ok`, which is the one answer meaning *this call wrote
 the row*. `already_applied` is a replay of a redemption already counted; every refusal

@@ -16,7 +16,6 @@ import { Avatar, Button, EmptyState, SearchField, Sheet, Text } from '@/ui/compo
 import { theme } from '@/ui/tokens';
 
 import {
-  createInviteLink,
   filterRecipients,
   useRecommendRecipients,
   useRecommendTitle,
@@ -147,15 +146,6 @@ export function RecommendSheet({
    */
   const sentSoFar = useRef<string[]>([]);
   /**
-   * The operation id for the off-platform share, held across attempts.
-   *
-   * A ref rather than state because it is machinery and nothing renders from it, and
-   * because it has to be right in the same tick as the press. Keyed to the sheet
-   * instance, which is keyed to the title — a share of a different film mounts a new
-   * one. See `shareOffPlatform` for the sequence it exists for.
-   */
-  const shareIntent = useRef<string | null>(null);
-  /**
    * The operation id for a send, per recipient, held across attempts.
    *
    * Keyed by person because the sheet can be tapped down a list and each name is its own
@@ -275,32 +265,27 @@ export function RecommendSheet({
     setSharing(true);
     setError(null);
 
-    // The invite link is the growth instrumentation and the title link is the point of
-    // the share, so a link that could not be minted degrades to sharing the title
-    // alone rather than failing the share.
-    //
-    // **One id for the share, held across the retries that degradation invites.** A
-    // creation that commits and loses its reply returns null here, the share goes out
-    // without the link, and pressing Share again is the natural next move — with a fresh
-    // id that would record a second creation for one intent (`use-recommend.ts`).
-    // `??=` is what makes the second attempt carry the first one's id.
-    //
-    // **Released when the link is minted, not when the share goes out**, because the row
-    // being protected is the *creation*. A minted link means the creation is definitely
-    // recorded and the next press is a new one; a null means it may or may not be, and
-    // the next press has to be able to claim the same slot. Tying it to `Share.share`
-    // instead would release the id on the very path this exists for — the share still
-    // goes out, without the link, and that is the case Codex named.
-    //
-    // The ref lives with the sheet, so closing it and opening it again mints a fresh id.
-    // That is deliberate: a person who has left the sheet and come back has made a second
-    // decision, and the creation log should say two. What it must not count twice is one
-    // decision the client told them had failed.
-    const operationId = (shareIntent.current ??= newOperationId());
-    const invite = await createInviteLink(mediaItemId, operationId, surface);
-    if (invite) shareIntent.current = null;
     /**
-     * One segment, and it used to be two.
+     * One share, and it is the one the person asked for.
+     *
+     * This used to mint the sharer's reusable invite link and append
+     * `Join me on bingd. https://bingd.app/i/<token>` underneath the title — the growth
+     * loop taking a ride on a message about a film. It is gone, and the reason is not
+     * tidiness. Somebody sending a friend a film is vouching for the film; a second
+     * link that recruits for Bingd turns their recommendation into an advertisement
+     * they did not agree to send, and the person who notices that is the person who
+     * stops sharing. Trust in the sender is the growth loop.
+     *
+     * The recruitment still happens, one step later and to the right person: a
+     * recipient without the app taps the title link, and bingd.app answers with the
+     * install page (`web/src/page.mjs`). Nothing is lost by taking the invite URL out
+     * of this message except the pretence that the sender chose to send it.
+     *
+     * Inviting deliberately is still one tap, on the profile — `InviteFriendsButton` —
+     * and that path is where `create_invite_link` and `invite_link_created` now live
+     * exclusively.
+     *
+     * **The URL itself is one segment, and it used to be two.**
      *
      * This built `/title/<kind>/<id>`, and **no route serves that** — not
      * `app/title/[id].tsx`, which matches a single segment, and not the web router. So
@@ -314,9 +299,7 @@ export function RecommendSheet({
      * been sent; the fix is the segment that was wrong, and nothing else.
      */
     const titleUrl = `https://bingd.app/title/${mediaItemId}`;
-    const message = invite
-      ? `${name} on bingd.\n${titleUrl}\n\nJoin me on bingd. ${invite}`
-      : `${name} on bingd.\n${titleUrl}`;
+    const message = `${name} on bingd.\n${titleUrl}`;
 
     try {
       await Share.share({ message, url: titleUrl });
