@@ -1,7 +1,13 @@
 # Series watchlist invariant — production preflight and release plan
 
 **Migration:** `supabase/migrations/20260906000100_a_series_you_have_finished_leaves.sql`
-**Written:** 2026-09-03 · applied nowhere yet.
+**Written:** 2026-09-03 · **Applied to PRODUCTION (`abheeqyjzekiowkztfxv`) 2026-09-03** from
+`main` @ `a558088` via the step-5 path (`migration list` showed exactly the one pending
+migration; `db push` applied it alone). Founder preflight and the post-apply re-run of the
+same query both returned `watchlist_rows_deleted = 0, users_affected = 0,
+series_affected = 0`; the backfill therefore removed nothing. `_leave_series_watchlist()`
+and its three triggers are live, EXECUTE is revoked from `anon`/`authenticated`, no RLS
+policy changed, no edge function deployed, staging untouched (still not a gate).
 
 This is the one migration in PR #87. It adds `_leave_series_watchlist()`, three
 triggers, and a backfill that **deletes** watchlist rows for series whose released
