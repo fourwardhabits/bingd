@@ -1,26 +1,14 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useRef, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  Share,
-  StyleSheet,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import { Share, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { newOperationId } from '@/features/collection/writes';
+import { PeoplePicker } from '@/features/people/PeoplePicker';
 import { track, type Surface } from '@/lib/analytics';
 import { compactName, type MediaKind } from '@/lib/titles';
-import { Avatar, Button, EmptyState, SearchField, Sheet, Text } from '@/ui/components';
+import { Button, EmptyState, Sheet, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
-import {
-  filterRecipients,
-  useRecommendRecipients,
-  useRecommendTitle,
-  type Recipient,
-} from './use-recommend';
+import { useRecommendRecipients, useRecommendTitle, type Recipient } from './use-recommend';
 
 export type RecommendSheetProps = {
   viewerId: string;
@@ -35,14 +23,6 @@ export type RecommendSheetProps = {
   /** Where this sheet was opened from, for `recommendation_sent` and `invite_link_created`. */
   surface: Surface;
 };
-
-/**
- * Above this many people the search field appears. Zero, after the physical
- * pass: even a short list is faster to type into than to scan, and a field
- * that appears only past a hidden threshold reads as a missing feature on the
- * device where the list happens to be short.
- */
-const SEARCH_THRESHOLD = 0;
 
 /**
  * The width one of the two footer actions needs before the pair may sit side by side.
@@ -132,7 +112,6 @@ export function RecommendSheet({
   const sideBySide =
     width - theme.layout.gutter * 2 >= ACTION_MIN_WIDTH * fontScale * 2 + theme.space[3];
 
-  const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,7 +133,6 @@ export function RecommendSheet({
   const sendIntents = useRef(new Map<string, string>());
 
   const people = recipients.data ?? [];
-  const shown = filterRecipients(people, query);
   const name = compactName({ kind, title, seriesTitle, seasonNumber }) ?? title;
 
   const toggle = (personId: string) => {
@@ -347,63 +325,17 @@ export function RecommendSheet({
           />
         </View>
       ) : (
-        <>
-          {people.length > SEARCH_THRESHOLD ? (
-            <View style={styles.search}>
-              <SearchField
-                value={query}
-                onChangeText={setQuery}
-                onClear={() => setQuery('')}
-                placeholder="Search your friends"
-                autoCorrect={false}
-                autoCapitalize="none"
-                returnKeyType="search"
-              />
-            </View>
-          ) : null}
-
-          <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-            {shown.length === 0 ? (
-              <Text variant="footnote" tone="tertiary" style={styles.status}>
-                Nobody by that name.
-              </Text>
-            ) : (
-              shown.map((person) => {
-                const checked = selected.has(person.id);
-                return (
-                  // The whole row is the checkbox — one target, not a row plus a
-                  // control that happen to agree. The glyph sits at the far right,
-                  // exactly where the per-row paper-plane used to: the same reach
-                  // now marks a person instead of firing a send.
-                  <Pressable
-                    key={person.id}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked }}
-                    accessibilityLabel={`${person.name}, @${person.username}`}
-                    disabled={sending}
-                    onPress={() => toggle(person.id)}
-                    style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-                  >
-                    <Avatar size="sm" uri={person.avatarUri} name={person.name} />
-                    <View style={styles.copy}>
-                      <Text variant="callout" numberOfLines={1}>
-                        {person.name}
-                      </Text>
-                      <Text variant="caption" tone="tertiary" numberOfLines={1}>
-                        @{person.username}
-                      </Text>
-                    </View>
-                    <Ionicons
-                      name={checked ? 'checkbox' : 'square-outline'}
-                      size={theme.layout.icon.md}
-                      color={checked ? theme.semantic.action : theme.text.secondary}
-                    />
-                  </Pressable>
-                );
-              })
-            )}
-          </ScrollView>
-        </>
+        // The picker itself lives in `features/people/PeoplePicker` since 2026-09-03,
+        // extracted so Group Picks could reuse it. Neither optional addition — the
+        // pinned self row, the cap — is passed here, so this sheet's behaviour is the
+        // behaviour it always had.
+        <PeoplePicker
+          people={people}
+          selected={selected}
+          onToggle={toggle}
+          disabled={sending}
+          searchPlaceholder="Search your friends"
+        />
       )}
 
       {error ? (
@@ -471,18 +403,6 @@ export function RecommendSheet({
 
 const styles = StyleSheet.create({
   header: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[3] },
-  search: { paddingHorizontal: theme.layout.gutter, paddingBottom: theme.space[2] },
-  // Bounded, so a long list of friends does not turn the sheet into a page.
-  list: { maxHeight: 300 },
-  listContent: { paddingHorizontal: theme.layout.gutter },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.space[3],
-    minHeight: theme.layout.rowMinHeight,
-  },
-  copy: { flex: 1, gap: 2 },
-  pressed: { opacity: 0.6 },
   status: { paddingHorizontal: theme.layout.gutter, paddingVertical: theme.space[2] },
   actions: {
     gap: theme.space[3],
