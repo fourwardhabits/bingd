@@ -644,6 +644,14 @@ describe('the guard is wired in, not merely present', () => {
     // add rows to `recommendation_impressions`.
     'recommendation_exposure',
     'social_candidates',
+
+    // 20260907000100. Group Picks, a pure read and security invoker: the caller's own
+    // RLS is the whole reach it has. The suspension question resolves in both
+    // directions without the guard — a suspended *member* fails `can_i_view` and
+    // contributes nothing, and a suspended *caller* reading a list of ids and counts
+    // reaches nobody: every act a pick leads to (log, rank, save, recommend) calls
+    // the guard itself.
+    'group_picks',
   ];
 
   /** Client-executable functions whose body does not call the guard. */

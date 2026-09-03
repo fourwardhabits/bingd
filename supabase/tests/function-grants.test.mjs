@@ -374,6 +374,17 @@ const ALLOWED = {
   'recommendation_exposure()': ['authenticated'],
   'social_candidates(integer)': ['authenticated'],
 
+  // Added 2026-09-03 (20260907000100). Group Picks. **Security invoker**, which is the
+  // argument for the grant in one word: it runs as the caller, so every cross-member
+  // read is one RLS already admits to that caller row by row — visible watchlists,
+  // visible rankings — and the private tables answer empty by construction. Members
+  // are re-checked through `can_i_view` from the caller's own side; the answer is
+  // aggregates (counts, flags, scores) and never a member id, an anchor, or anybody's
+  // ranking. Takes member ids, but they can only *narrow* what the caller may already
+  // read — an id the caller does not follow contributes nothing — so it is not the
+  // viewer-argument oracle 20260813001900 forbids.
+  'group_picks(uuid[],text,integer)': ['authenticated'],
+
   // Added 2026-08-17 with Settings (20260817000600). Every one of these is about the
   // caller's own account and none takes a target, which is 20260813001900's rule in
   // its strongest form: there is nothing to point at anybody else.
