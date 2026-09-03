@@ -13,7 +13,7 @@
 > **Do people activate, run the core loop, use the social side — and which build were
 > they on when they did it?**
 
-That is the whole brief. Thirteen events. Everything a mature analytics practice would add
+That is the whole brief. Fourteen events. Everything a mature analytics practice would add
 — retention cohorts, an activation funnel with D1/D7/D28, paid attribution, sponsorship
 reporting, an experimentation platform — is in [`deferred-roadmap.md`](./deferred-roadmap.md)
 §9–§12 with the reason it is not here.
@@ -38,8 +38,8 @@ secret: a PostHog project token is write-only and a Sentry DSN only accepts even
 
 ## 2. The canonical event set
 
-Thirteen events, eleven of them since 2026-08-18 and two added on 2026-08-19 when the
-invitation resolver gave them writers. The union in `src/lib/analytics.ts` is the
+Fourteen events: eleven since 2026-08-18, two added on 2026-08-19 when the invitation
+resolver gave them writers, and one added on 2026-09-03 with Help & Support. The union in `src/lib/analytics.ts` is the
 enforcement — there is no
 `track(name: string, props: object)` to reach for, so inventing an event is a compile
 error rather than a decision somebody makes at 2am before a demo.
@@ -105,6 +105,20 @@ and `recommendation_feedback` records what was dismissed. Emitting a client even
 slate would be a second, worse copy of a server-side fact — and would put a stream of
 writes on a screen the founder asked to keep quiet (PRD §13).
 
+### Help & Support — added 2026-09-03
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `settings_support_email_opened` | a Help & Support row in Settings was tapped and a mail draft was asked for | the sender | `type` (`feedback` \| `problem`) |
+
+One event for two rows, separated by `type`, because the question is *does anybody reach
+for the support channel* and the follow-up is *which of the two ways*. A second event name
+would split the denominator for nothing.
+
+`type` is the only property. The subject is a constant and the body is a template, so the
+only part of the mail that is a person's own words is what they type after the draft
+opens — which this app never sees. No address, no account, no free text.
+
 ---
 
 ## 3. What each event does **not** mean
@@ -168,6 +182,12 @@ error and at most once per row per process. The write stays fire-and-forget for 
 *person* — a failure must not stand between somebody and the title they were told to watch
 — but a failure is not an open, so it emits nothing. The residual is a reinstall or a
 second device reporting one more open for a row already opened elsewhere.
+
+**`settings_support_email_opened`** is a **tap, not a message received**. Everything
+after it happens in the mail client: the draft may be abandoned, rewritten or never sent,
+and this app is not told which. It is an upper bound on support mail, never a count of it —
+and it is emitted even when the mail client fails to launch, because somebody who tried and
+could not is the most important reading it has.
 
 **`member_search_result_opened`** carries `position` and nothing else. **The query text is
 never sent.** Neither is the handle or the display name.

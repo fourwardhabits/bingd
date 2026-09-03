@@ -85,8 +85,8 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the thirteen canonical names and nothing else', () => {
-    // Pinned deliberately. Adding a twelfth is a product decision that has to be made in
+  it('is the fourteen canonical names and nothing else', () => {
+    // Pinned deliberately. Adding a fifteenth is a product decision that has to be made in
     // `docs/product/analytics.md` as well as here, and this failing is the reminder.
     expect([...ANALYTICS_EVENTS].sort()).toEqual(
       [
@@ -101,6 +101,7 @@ describe('the event vocabulary', () => {
         'recommendation_sent',
         'sign_in_completed',
         'signup_completed',
+        'settings_support_email_opened',
         'title_logged',
         'watchlist_added',
       ].sort(),

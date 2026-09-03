@@ -14,6 +14,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { signOut, useCurrentProfile } from '@/features/auth';
 import { env, isRelease, lane } from '@/lib/env';
 import { openLegal } from '@/lib/legal';
+import { openSupportEmail } from '@/lib/support';
 import { Button, Screen, SectionHeader, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
@@ -99,19 +100,71 @@ export default function SettingsScreen() {
           />
         </View>
 
+        {/* Help & Support, which is the section this screen did not have.
+
+            Three rows in one place, and the order is the order of effort. Help Center is
+            `bingd.app/support`, a page that answers the questions already asked, and it
+            is first because reading is cheaper than writing. The two below it are the
+            other direction, a way to say something the page does not cover, and they are
+            the only place in the app that offers one.
+
+            Help Center used to sit in the legal group beside Privacy and Terms, on the
+            grounds that all three were `openLegal` web links. That grouped them by their
+            mechanism rather than by what somebody is looking for: a person hunting for
+            help does not think of it as a document. It moved here on 2026-09-03.
+
+            There is deliberately no floating feedback button on the Feed or the Profile.
+            A support channel a person goes looking for in Settings reads as a normal app;
+            one that follows them around reads as a beta.
+
+            The two mail rows open the device's mail client on a draft. `lib/support.ts`
+            has the reasoning, and the sentence worth repeating here is that the draft
+            carries a version, a build number and a platform, and carries no account, no
+            identifier and no address of the person sending it. */}
+        <View style={styles.section}>
+          <SectionHeader title="Help & Support" />
+          <View style={[styles.group, styles.sectionGroup]}>
+            <Row
+              icon="help-circle-outline"
+              label="Help Center"
+              onPress={() => openLegal('support')}
+              external
+            />
+            <Row
+              icon="chatbubble-ellipses-outline"
+              label="Send feedback"
+              onPress={() => void openSupportEmail('feedback')}
+              external
+              hint="Opens your email app"
+            />
+            <Row
+              icon="alert-circle-outline"
+              label="Report a problem"
+              onPress={() => void openSupportEmail('problem')}
+              external
+              hint="Opens your email app"
+              last
+            />
+          </View>
+        </View>
+
         {/* Its own group, one gap below the rest.
             The founder's correction: signing out was inside Account & Data, beside
             permanent deletion, and the two are not the same kind of thing at all — one
             is how you finish for the day and the other cannot be undone. Separating
             them visually says that without dressing sign-out up as destructive, which
             it also is not. */}
-        {/* Privacy, Terms and Support, in that order.
+        {/* Privacy and Terms.
 
             **Links out rather than screens**, which is `lib/legal.ts`'s reasoning: a
             policy rendered in the binary can only be corrected by shipping a build,
             and until that build reaches everybody two versions of the same document
             are live at once. The web copies are canonical, both stores already require
             a URL for the privacy policy, and one template generates all three.
+
+            It was three rows until 2026-09-03. The support page left for the Help &
+            Support section above, where somebody looking for help would actually go;
+            what is left here is the two documents, which is what this group was for.
 
             Here rather than inside About, because About is an attribution block —
             TMDB's notice, quoted in their words — and a legal document is not a
@@ -129,12 +182,6 @@ export default function SettingsScreen() {
             icon="document-text-outline"
             label="Terms of Use"
             onPress={() => openLegal('terms')}
-            external
-          />
-          <Row
-            icon="help-circle-outline"
-            label="Support"
-            onPress={() => openLegal('support')}
             external
             last
           />
@@ -164,6 +211,7 @@ function Row({
   detail,
   last = false,
   external = false,
+  hint,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
@@ -177,13 +225,20 @@ function Row({
    * promises and the chevron only makes the first one.
    */
   external?: boolean;
+  /**
+   * Overrides what leaving the app means for this row. The default names the browser,
+   * because every external row was a web link until Help & Support; a mail draft leaves
+   * the app just as surely and does not open Safari, and a hint that says the wrong
+   * destination is worse for a screen-reader user than no hint at all.
+   */
+  hint?: string;
   onPress: () => void;
 }) {
   return (
     <Pressable
       accessibilityRole={external ? 'link' : 'button'}
       accessibilityLabel={detail ? `${label}, ${detail}` : label}
-      accessibilityHint={external ? 'Opens in your browser' : undefined}
+      accessibilityHint={hint ?? (external ? 'Opens in your browser' : undefined)}
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
@@ -465,6 +520,10 @@ const styles = StyleSheet.create({
   // controls can actually be pressed.
   diagnosticsAction: { minHeight: theme.layout.minTapTarget },
   page: { paddingBottom: theme.space[10] },
+  // A group under its own SectionHeader. The header owns the gap above it, so the
+  // group directly beneath must not add a second one.
+  section: { marginTop: theme.space[6], gap: theme.space[1] },
+  sectionGroup: { marginTop: 0 },
   group: {
     marginTop: theme.space[3],
     marginHorizontal: theme.layout.gutter,
