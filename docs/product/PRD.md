@@ -1686,6 +1686,97 @@ your recommendations."* — instead of recycling its weakest tail.
 **For You gets no poster/list toggle.** The current presentation is canonical; the
 complexity budget went to freshness.
 
+### As built — 2026-09-03: Group Picks (`20260907000100`)
+
+**The question it answers: what should this group of people watch together.** The reader
+taps the **Group Picks** action chip in For You's chip row — a chip, deliberately not a
+fourth `MediumSelector` segment, not a tab, and not a navigation item — picks up to five
+people from their approved follows, and gets a ranked list for the whole group. The chip
+belongs to the title categories; People has no medium for a group to pick over.
+
+**The group is ephemeral, and that is the entire lifecycle.** No named groups, no saved
+or recent groups, no invitations, no voting, no shared session. The member selection is
+the sheet's own state; closing the sheet discards it. Selection is the reader plus up to
+five, through the same picker `RecommendSheet` uses — extracted to
+`features/people/PeoplePicker` rather than cloned — with the reader pinned into seat one
+and the unselected rows disabling at the cap of six. Six is a product cap, not a capacity
+claim.
+
+**Scoring is server-side, which §13's own rule requires.** The moment a recommendation
+family reads other people's data, the client can no longer be trusted to hold the inputs
+(`docs/architecture/recommendations.md` §0). One new RPC, `group_picks`, **security
+invoker**: every cross-member read is one the caller's own RLS already admits row by row
+— visible watchlists, visible rankings — so the privacy model is the policy layer rather
+than a definer body's discipline. Membership is re-checked per member at query time
+through `can_i_view`; a block, a suspension, or a flip to private silently removes the
+member and shrinks the effective count the arithmetic runs over. The answer is
+aggregates only: `saved_count`, `watched_count`, a rewatch flag, an internal group
+score, the community score, the effective member count. Never which member saved or
+watched anything, never an anchor title, never anybody's ranking.
+
+**Candidate families, strongest first.** The union of members' visible watchlists
+(explicit intent); novel titles near each member's strongest loved rankings, through the
+same `media_cache` facet `similar` rows For You reads (discovery — the anchors stay
+server-side); titles some members already loved that others have not met (the rewatch
+family); and the trending week list as a capped last-resort fill that can never outrank
+anything group-derived. One accepted asymmetry, recorded rather than worked around:
+another member's unranked logs live in owner-only `user_media`, so a title they merely
+logged cannot be excluded on their behalf — their rankings are the watch evidence the
+engine can see.
+
+**The scoring principles, in order.** Explicit saves dominate (a title saved by several
+members gets a major boost). Consensus beats a high mean: the score carries the group's
+*minimum* predicted fit as well as its average, so an 8-for-everybody outranks a
+10-for-two-4-for-the-rest, and one member's evidenced poor fit cannot be hidden by the
+average. A member with little history contributes a neutral prior, not a drag, and is
+never named or singled out. Popularity is an ordering tie-break only — Group Picks must
+not decay into Trending.
+
+**Rewatches clear a positive floor or do not appear.** Using the app's own buckets:
+every known watcher in `loved` keeps a title eligible, flagged and penalised behind an
+equally good first watch; one `fine`, one `not_for_me`, or a caller log with no bucket
+excludes it — "it was fine" is not a reason to watch it again, and an unknown opinion
+does not clear a floor. A title every effective member has met is excluded outright,
+even loved by all. No "include rewatches" toggle in v1.
+
+**TV answers are series.** Season rankings and season watchlist rows roll up to their
+parent — the same rollup `anchorsFrom` performs — and a season row can never appear as a
+pick. A row reads *The Last of Us*, never *The Last of Us, S2*; opening it lands on the
+existing title page.
+
+**The results are a list, not a wall**, because the reason is the row's second fact.
+Each row gives exactly one: `4 people saved this`, `Someone here saved this`, `Worth a
+rewatch`, `Fits the group`, `Trending now`. Counts are real counts; nothing claims
+social proof that was not measured, and "Match" stays out of the vocabulary because it
+already means Taste Match. The trailing number is the community bingd. score, or the
+same empty circle the title page shows below its sample floor — never the internal
+group score, and never a fabricated "group match" percentage.
+
+**Up to twenty, honestly.** The server returns a scored pool (~200); the client shows up
+to twenty above a quality floor, fills only toward ten with credible fallback and then
+trending, and pads with nothing. Thirteen strong picks show as thirteen. The franchise
+(≤2) and leading-genre (≤40%) ceilings from the For You wall apply here through the same
+`franchiseKey` / `maxPerGenre` rules.
+
+**Filters are the collection sheet with its own state.** Genre (Anime included, as a
+genre), decade, language — whatever the shared sheet offers — over the returned pool,
+client-side, so changing filters never re-runs the multi-user RPC. Group Picks' filters
+are deliberately not the For You wall's: tonight's group deciding on comedy is not the
+reader's standing mood. Filters that leave four picks show four; the existing
+nothing-matches empty state and Clear all apply.
+
+**Caching is React Query only**: five minutes, keyed by viewer, sorted member selection
+and medium. Nothing persisted, no new table, no new policy, no caching infrastructure.
+
+**Analytics**: `group_picks_opened`, `group_picks_generated` (effective group size,
+result count, a source tally string, filter count), `group_picks_result_opened`
+(position), and `watchlist_added` with `surface: 'group_picks'` for saves made from a
+pick. No member, no title, no filter value travels (§28, `analytics.md` §2).
+
+**Deferred, with the feature's name on it** (`deferred-roadmap.md` §48): selecting
+people beyond approved follows, saved and recent groups, voting and shared sessions,
+deep-link integration, and collaborative learning from group outcomes.
+
 ---
 
 ## 14. Social interaction: feed, reactions, and tagging

@@ -1970,3 +1970,47 @@ written down in [`analytics.md`](./analytics.md): name the stage that is actuall
 So the honest sequence is §46 and the §45 analytics first, and the Award last. Until then
 the invitation Awards that already exist (Invite Instigator, which counts *activated*
 invitees rather than links created) are the model to copy, not the share sheet.
+---
+
+## 48. Group Picks beyond an ephemeral group of six
+
+**Status: deferred, 2026-09-03. V1 shipped the same day (PRD §13, "As built: Group
+Picks"); everything here is what it deliberately does not do.**
+
+V1 is one ephemeral selection: the reader plus up to five approved follows, one
+security-invoker RPC, a ranked list, and nothing persisted. Each deferral below has a
+reason stronger than scope-cutting.
+
+**Selecting people beyond approved follows.** The picker's population is the same edge
+the recommend sheet trusts and the server re-checks. Widening it to public-user search
+means a stranger's id in the argument array, and the current answer to that -- silently
+contributing nothing -- would read as breakage in a picker that offered them. Needs its
+own consent thinking, not just a wider query.
+
+**Saved, named, and recent groups.** Persistence is the moment groups need a table, RLS,
+a lifecycle, deletion semantics, and an answer to "can the others see they are in my
+group". V1's answer is that no group exists to be seen. Revisit when repeated re-selection
+of the same people is measurably annoying (`group_picks_generated.group_size` against
+open counts is the signal).
+
+**Voting and shared sessions.** A shared session is presence plus notifications plus
+consent from every member, none of which exist for a feature whose members may not even
+know they were picked. The v1 stance: the person holding the phone decides.
+
+**Deferred-link integration.** Sharing a Group Picks list off-platform inherits every
+finding of §45/§46 (rich previews, deferred deep linking) and adds a privacy one: a
+shared list names titles derived from other people's taste.
+
+**Collaborative recommendation learning.** V1 scores from watchlists and rankings at
+call time and learns nothing from what the group then watched. Learning needs an outcome
+signal (did the group log the pick?) that watch-tagging could supply, and it belongs to
+the same evaluation framework as §18 (Engine V2), not ahead of it.
+
+**A pre-existing analytics gap recorded here so it is not bundled into the feature:**
+`leaderboard_viewed` and `leaderboard_metric_selected` declare a `metric` property that
+never reaches the vendor -- the key is missing from `ALLOWED_PROPERTY_KEYS`, and both
+names are absent from `ANALYTICS_EVENTS` and its pinned test, so the sanitizer strips the
+one dimension the events exist to answer. Found during the Group Picks audit of
+2026-09-03; the fix is three lines plus the pinned-list update and belongs in its own
+small change, because widening the analytics allowlist inside a feature PR is how
+allowlists erode.
