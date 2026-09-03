@@ -10,7 +10,7 @@ import { describe, it } from 'node:test';
 const require = createRequire(import.meta.url);
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-const { LANE_BACKENDS, REF_NAMES } = require('./backends.cjs');
+const { LANE_BACKENDS, REF_NAMES, STAGING_REF } = require('./backends.cjs');
 const {
   REF_ENVIRONMENTS,
   productionRef,
@@ -88,7 +88,7 @@ describe('assertProductionBackend', () => {
    * says which project by name so the message is actionable.
    */
   it('refuses the nonproduction project', () => {
-    const staging = LANE_BACKENDS.beta[0];
+    const staging = STAGING_REF;
     const error = throws(() => assertProductionBackend(`https://${staging}.supabase.co`, KEY));
     assert.ok(error, 'a production build resolved against the staging project');
     assert.match(error.message, new RegExp(REF_NAMES[staging]));
@@ -167,8 +167,17 @@ describe('the three places a project ref has to be named', () => {
         [ref],
         'the production project is not the production lane\'s only backend',
       );
+      /**
+       * Beta is exempt as of 2026-09-03, and only beta.
+       *
+       * The closed test and the production app are the same package, and the promotion of
+       * 2026-08-31 moved those testers onto the production project without any build
+       * changing. Sending a new beta build to staging would move them off their own data,
+       * so beta shares the backend deliberately. Development and preview are still held
+       * off it here, which is the part of this rule that still protects something.
+       */
       for (const [lane, refs] of Object.entries(LANE_BACKENDS)) {
-        if (lane === 'production') continue;
+        if (lane === 'production' || lane === 'beta') continue;
         assert.ok(!refs.includes(ref), `the ${lane} lane may use the production project`);
       }
     }
@@ -271,7 +280,7 @@ describe('a production build, resolved the way EAS resolves it', () => {
     const error = throws(() =>
       resolve({
         BINGD_LANE: 'production',
-        EXPO_PUBLIC_SUPABASE_URL: `https://${LANE_BACKENDS.beta[0]}.supabase.co`,
+        EXPO_PUBLIC_SUPABASE_URL: `https://${STAGING_REF}.supabase.co`,
       }),
     );
     assert.ok(error, 'a production config resolved against the staging project');

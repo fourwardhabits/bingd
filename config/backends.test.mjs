@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 import backends from './backends.cjs';
 
-const { LANE_BACKENDS, supabaseProjectRef, assertBackendIsAllowed } = backends;
+const { LANE_BACKENDS, PRODUCTION_REF, STAGING_REF, supabaseProjectRef, assertBackendIsAllowed } =
+  backends;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -26,7 +27,7 @@ const A_PROJECT_URL = 'https://abheeqyjzekiowkztfxv.supabase.co';
 /** Whatever the mapping currently calls production, and whatever it calls everything else. */
 const urlFor = (ref) => `https://${ref}.supabase.co`;
 const PRODUCTION_URL = urlFor(LANE_BACKENDS.production[0]);
-const NON_PRODUCTION_URL = urlFor(LANE_BACKENDS.beta[0]);
+const NON_PRODUCTION_URL = urlFor(STAGING_REF);
 
 /**
  * The lane-to-backend rule, tested directly.
@@ -120,19 +121,26 @@ describe('assertBackendIsAllowed', () => {
      * be one more thing to edit on the day it changes.
      */
     assert.equal(LANE_BACKENDS.production.length, 1);
-    assert.notEqual(LANE_BACKENDS.production[0], LANE_BACKENDS.beta[0]);
     assert.throws(
       () => assertBackendIsAllowed(NON_PRODUCTION_URL, 'production'),
       /production/,
       'a production build pointed at the non-production backend is what this refuses',
     );
-    // And the mirror, which is the half that would strand real users: a beta build must
-    // not be able to reach the promoted production database.
-    assert.throws(
-      () => assertBackendIsAllowed(PRODUCTION_URL, 'beta'),
-      /beta/,
-      'a beta build pointed at production is the other half of the same rule',
-    );
+
+    /**
+     * **The mirror used to be here and was deliberately removed on 2026-09-03.**
+     *
+     * It asserted that a beta build pointed at production throws, on the grounds that
+     * beta testers must not reach real user data. That reasoning was right when beta and
+     * production were different populations. They are not: the Android closed test and
+     * the production app are the same `app.bingd` package, and the testers were moved to
+     * the production project by the 2026-08-31 promotion rather than by any build.
+     *
+     * Refusing the pair now would not protect anybody. It would force the next beta build
+     * onto staging, which is empty and 53 of 103 migrations behind, and every tester would
+     * sign in to a missing collection. So the pair is permitted, and what guards it is the
+     * dedicated contract test below rather than this one.
+     */
   });
 
   it('refuses a cross-lane swap once a second project exists', () => {
@@ -150,11 +158,17 @@ describe('assertBackendIsAllowed', () => {
       if (!withProduction[lane].includes(ref)) throw new Error('refused');
     };
 
-    // The beta side is the mapping's own non-production backend rather than a literal:
-    // which project that is changed on 2026-08-31, and the rule did not.
-    assert.throws(() => check('https://prodprojectrefxxxxx.supabase.co', 'beta'));
+    /**
+     * Tested through `preview` rather than `beta` as of 2026-09-03.
+     *
+     * Beta shares production's backend on purpose now, so it is the one lane for which
+     * "reaches the production project" is not a swap. `preview` is the lane this rule was
+     * always really about: a non-production lane that must never compile production
+     * credentials, whichever project production happens to be.
+     */
+    assert.throws(() => check('https://prodprojectrefxxxxx.supabase.co', 'preview'));
     assert.throws(() => check(NON_PRODUCTION_URL, 'production'));
-    assert.doesNotThrow(() => check(NON_PRODUCTION_URL, 'beta'));
+    assert.doesNotThrow(() => check(NON_PRODUCTION_URL, 'preview'));
     assert.doesNotThrow(() => check('https://prodprojectrefxxxxx.supabase.co', 'production'));
   });
 
@@ -426,7 +440,16 @@ describe('the lanes this file knows about, and the ones eas.json builds', () => 
      * the three of them agree with each other.
      */
     const productionRefs = LANE_BACKENDS.production;
-    for (const lane of ['development', 'preview', 'beta']) {
+    /**
+     * **Beta left this list on 2026-09-03 and the omission is the point.** The closed
+     * testers have been on the production project since it was promoted in place on
+     * 2026-08-31, so beta reaching production is continuity. Development and preview are
+     * still genuinely non-production, and this is still the rule for them.
+     *
+     * Beta's own contract is pinned separately, below, including the half that stops it
+     * drifting back to staging while staging is empty.
+     */
+    for (const lane of ['development', 'preview']) {
       assert.equal(LANE_BACKENDS[lane].length, 1, `${lane} must name exactly one backend`);
       for (const ref of LANE_BACKENDS[lane]) {
         assert.ok(
@@ -442,15 +465,54 @@ describe('the lanes this file knows about, and the ones eas.json builds', () => 
     }
   });
 
-  it('has a beta profile that builds the production variant against a nonproduction backend', () => {
+  it('has a beta profile that builds the production variant on the production backend', () => {
     // The lane's whole reason for existing, asserted rather than explained. If somebody
     // "tidies" beta to APP_VARIANT=beta, testers cannot upgrade to the store release.
     const beta = eas.build.beta;
     assert.equal(beta.env.APP_VARIANT, 'production');
-    assert.equal(beta.environment, 'preview');
     assert.equal(beta.channel, 'beta');
-    // The point is that beta is NOT production's backend, whichever project that is.
-    assert.equal(LANE_BACKENDS.beta.length, 1);
-    assert.ok(!LANE_BACKENDS.production.includes(LANE_BACKENDS.beta[0]));
+    assert.equal(beta.env.BINGD_LANE, 'beta');
+    // Its own channel is what makes it a beta. Not its bundle id, and no longer its
+    // database.
+    assert.notEqual(beta.channel, eas.build.production.channel);
+  });
+
+  /**
+   * THE CONTRACT, AND THE ONE TEST THAT WOULD CATCH IT BEING UNDONE BY HALVES.
+   *
+   * Beta and production share a backend as of 2026-09-03. Two declarations have to agree
+   * for that to actually happen, in two different files:
+   *
+   *   - `LANE_BACKENDS.beta` decides what the guard permits.
+   *   - `eas.json`'s `build.beta.environment` decides which values EAS actually supplies.
+   *
+   * Editing one and not the other is the failure this exists for, and it is silent in the
+   * worse direction: leave `environment` on `preview` and the build resolves staging's URL,
+   * the guard refuses it, and the build fails loudly, which is survivable. Leave
+   * `LANE_BACKENDS` on staging and point `environment` at production and the guard refuses
+   * too. Both halves together are the only combination that ships.
+   *
+   * **When beta goes back to staging**, both lines change in one commit, and this test is
+   * what says so. The preconditions are written down in `docs/release/release-lanes.md`:
+   * staging at 103/103, its smoke tests passing, and the founder saying yes.
+   */
+  it('keeps beta on production in both places, or fails', () => {
+    assert.deepEqual(LANE_BACKENDS.beta, [PRODUCTION_REF]);
+    assert.deepEqual(LANE_BACKENDS.production, [PRODUCTION_REF]);
+    assert.equal(eas.build.beta.environment, 'production');
+
+    // The half that protects the testers: beta must not be able to reach staging while
+    // staging is the empty, half-migrated project.
+    assert.throws(
+      () => assertBackendIsAllowed(urlFor(STAGING_REF), 'beta'),
+      /may not use/,
+      'a beta build pointed at staging would move every closed tester off their data',
+    );
+
+    // And staging is still staging for the lanes that develop against it, so this is a
+    // carve-out for one lane rather than a redefinition of the project.
+    assert.deepEqual(LANE_BACKENDS.development, [STAGING_REF]);
+    assert.deepEqual(LANE_BACKENDS.preview, [STAGING_REF]);
+    assert.notEqual(PRODUCTION_REF, STAGING_REF);
   });
 });
