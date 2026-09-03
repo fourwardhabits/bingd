@@ -23,6 +23,7 @@ import {
   useSweepIntent,
 } from '@/features/recommendations/use-recommendation-requests';
 import { PeopleDiscovery } from '@/features/people/PeopleDiscovery';
+import { GroupPicksSheet } from '@/features/recommendations/GroupPicksSheet';
 import { SentToYouList } from '@/features/recommendations/SentToYouList';
 import { refreshRecommendations } from '@/features/recommendations/session-seed';
 import { useDismissTitle } from '@/features/recommendations/use-dismissed';
@@ -122,6 +123,12 @@ export default function RecommendationsScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [filters, setFilters] = useState<CollectionFilters>(emptyFilters());
   const [filtering, setFiltering] = useState(false);
+  /**
+   * The Group Picks sheet. Mounted only while open, which is what makes the group
+   * ephemeral: the member selection is the sheet's own state, so closing discards it
+   * and reopening starts clean. The sheet owns its own filters for the same reason.
+   */
+  const [groupPicking, setGroupPicking] = useState(false);
   /** The Requests sheet. Nothing else on this screen knows it exists. */
   const [reviewingRequests, setReviewingRequests] = useState(false);
   /**
@@ -428,6 +435,19 @@ export default function RecommendationsScreen() {
               selected={sentOnly}
               onPress={() => setSentOnly((on) => !on)}
             />
+            {/* An action chip rather than a filter: it opens the flow that answers "what
+            should this group watch together". Deliberately not a fourth MediumSelector
+            segment and not a tab — a group is a momentary question, and this row is
+            where the screen keeps its questions. The wall the chip sits on decides the
+            medium the picks answer for. */}
+            <FilterChip
+              icon="people-outline"
+              label="Group Picks"
+              onPress={() => {
+                track({ name: 'group_picks_opened' });
+                setGroupPicking(true);
+              }}
+            />
             {/* The collection's own sheet, which its header always intended this screen to
             reuse rather than growing a second one. Genre, Language, Decade and Anime
             come with it. Rating filters are off: nothing on either list has been ranked
@@ -607,6 +627,14 @@ export default function RecommendationsScreen() {
                 setFiltering(false);
               }}
               onClose={() => setFiltering(false)}
+            />
+          ) : null}
+
+          {groupPicking ? (
+            <GroupPicksSheet
+              viewerId={profile.id}
+              medium={medium}
+              onClose={() => setGroupPicking(false)}
             />
           ) : null}
 

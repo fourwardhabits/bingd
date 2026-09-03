@@ -85,12 +85,16 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the fourteen canonical names and nothing else', () => {
-    // Pinned deliberately. Adding a fifteenth is a product decision that has to be made in
-    // `docs/product/analytics.md` as well as here, and this failing is the reminder.
+  it('is the seventeen canonical names and nothing else', () => {
+    // Pinned deliberately. Adding an eighteenth is a product decision that has to be made
+    // in `docs/product/analytics.md` as well as here, and this failing is the reminder.
+    // The three group_picks names arrived 2026-09-03 with the feature.
     expect([...ANALYTICS_EVENTS].sort()).toEqual(
       [
         'follow_created',
+        'group_picks_generated',
+        'group_picks_opened',
+        'group_picks_result_opened',
         'invite_activated',
         'invite_link_created',
         'invite_redeemed',
