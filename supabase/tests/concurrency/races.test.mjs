@@ -16,6 +16,7 @@ import awardUnlock from './races/award-unlock.mjs';
 import awardRevocation from './races/award-revocation.mjs';
 import goalCompletion from './races/goal-completion.mjs';
 import commentMention from './races/comment-mention.mjs';
+import seriesWatchlist from './races/series-watchlist.mjs';
 import stress from './races/stress.mjs';
 
 /**
@@ -52,4 +53,5 @@ awardUnlock();
 awardRevocation();
 goalCompletion();
 commentMention();
+seriesWatchlist();
 stress();

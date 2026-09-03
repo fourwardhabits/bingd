@@ -734,6 +734,29 @@ export function fixtures(db) {
       return rows[0].id;
     },
 
+    async createSeries(title = 'Fixture Series', tmdbId = (movieSeq += 1)) {
+      const { rows } = await db.sql(
+        `insert into media_items (kind, tmdb_id, title, provenance)
+         values ('series', $1, $2, 'manual') returning id`,
+        [-Math.abs(tmdbId), title],
+      );
+      return rows[0].id;
+    },
+
+    /**
+     * A season under a fixture series, released by default because the series
+     * watchlist rule (20260906000100) only reads dated, past seasons. Pass
+     * `release: null` for a season the catalogue has not dated.
+     */
+    async createSeason(parentId, seasonNumber, release = '2020-01-01') {
+      const { rows } = await db.sql(
+        `insert into media_items (kind, parent_id, season_number, title, release_date, provenance)
+         values ('season', $1, $2, $3, $4, 'manual') returning id`,
+        [parentId, seasonNumber, `Season ${seasonNumber}`, release],
+      );
+      return rows[0].id;
+    },
+
     /** A mutual, approved follow — the precondition for recommending and tagging. */
     async mutualFollow(a, b) {
       await db.sql(
