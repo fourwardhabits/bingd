@@ -20,12 +20,12 @@ the implementation delivered, and both are corrected below rather than quietly s
 | **Bundle / package** | `app.bingd.dev` | `app.bingd.preview` | `app.bingd` | `app.bingd` |
 | **URL scheme** | `bingd-dev` | `bingd-preview` | `bingd` | `bingd` |
 | **`APP_VARIANT`** | `development` | `preview` | `production` | `production` |
-| **EAS environment** | `development` | `preview` | **`preview`** | `production` |
+| **EAS environment** | `development` | `preview` | **`production`** | `production` |
 | **EAS channel** | `development` | `preview` | `beta` | `production` |
-| **Backend** | bingd-staging | bingd-staging | bingd-staging | bingd-production |
+| **Backend** | bingd-staging | bingd-staging | **bingd-production** | bingd-production |
 | **Android artifact** | APK | APK | AAB | AAB |
 | **In-app diagnostics** | shown | shown | **shown** | hidden |
-| **Exists today** | yes | yes | not built | not built |
+| **Exists today** | yes | yes | yes | yes |
 
 ### Two rows that look like mistakes and are not
 
@@ -43,13 +43,44 @@ the people best placed to notice a wrong backend were the only ones who could no
 `isRelease` in `src/lib/env.ts` is the gate now, and only a real `production` lane is a
 release.
 
-**Beta reads the `preview` EAS environment.** EAS has exactly three environments and they
-are not extensible; `beta` is a build profile, not an environment. Pointing it at
-`production` would point it at the production project, which holds every real account, and
-pointing it at `preview` gives it bingd-staging, which is where the friend beta is meant to
-run.
-`eas.json` states `"environment": "preview"` on that profile explicitly rather than relying
-on the name-matching default, so it is a written decision rather than an accident.
+**Beta reads the `production` EAS environment, and talks to the production database.**
+Changed on 2026-09-03, and it is the row most likely to be read as a mistake.
+
+EAS has exactly three environments and they are not extensible; `beta` is a build profile,
+not an environment. It read `preview`, which supplies bingd-staging, on the reasoning that
+a beta has no business in real user data.
+
+That reasoning assumed beta testers and production users are different people. They are
+not. The closed test and the App Store release are the same `app.bingd` package by design,
+and on 2026-08-31 the friend-beta project was **promoted in place** into production. Nobody
+migrated and no build changed: the testers simply woke up on what is now the production
+database, with every account, ranking and collection row exactly where it was.
+
+So a new beta build pointed at staging would not keep those testers where they are. It
+would move them, to an empty project, and the move has no symptom. They sign in and their
+collection is gone.
+
+**Staging is also not able to receive them yet.** It stands at 53 of 103 migrations, and
+`award_unlocks` and `invite_link_opens` do not exist in it. Awards and the invitation
+funnel would fail against it.
+
+`eas.json` states `"environment": "production"` on that profile explicitly, and
+`config/backends.cjs` grants the beta lane the production ref. **Both are required**, and
+`backends.test.mjs` fails if only one of them is edited, because either half alone produces
+a build that the guard refuses.
+
+**How beta goes back to staging**, which is still where it belongs once staging works:
+
+1. staging reaches 103 of 103 migrations,
+2. its smoke tests pass,
+3. the founder explicitly approves moving beta traffic.
+
+Then `LANE_BACKENDS.beta` returns to `STAGING_REF` and `beta.environment` returns to
+`preview`, in one commit. Until all three are true, beta stays on production.
+
+**This is a carve-out for one lane, not a redefinition of the projects.** Development and
+preview still use staging, which is exactly what makes staging worth repairing, and the
+production lane still refuses every project that is not production.
 
 ---
 
@@ -113,10 +144,10 @@ during configuration resolution otherwise:
 
 ```js
 const LANE_BACKENDS = {
-  development: ['fjxhcbowoxuzulwirzyr'],  // bingd-staging
-  preview:     ['fjxhcbowoxuzulwirzyr'],
-  beta:        ['fjxhcbowoxuzulwirzyr'],
-  production:  ['abheeqyjzekiowkztfxv'],  // bingd-production, promoted 2026-08-31
+  development: [STAGING_REF],     // fjxhcbowoxuzulwirzyr, bingd-staging
+  preview:     [STAGING_REF],
+  beta:        [PRODUCTION_REF],  // 2026-09-03: the closed testers are already here
+  production:  [PRODUCTION_REF],  // abheeqyjzekiowkztfxv, promoted 2026-08-31
 };
 ```
 
@@ -145,10 +176,21 @@ const LANE_BACKENDS = {
 > the store build when they install it. No key was rotated and no client-exclusion
 > mechanism was added to force them off.
 >
-> **No beta build may target staging until it reaches 103/103 and passes smoke.** It stands
-> at 53/103: `20260817001000` contains `lock table`, which the Management API applies
-> outside a transaction. That is the first post-release infrastructure task and it blocks
-> beta redistribution, not this release.
+> **Resolved 2026-09-03: new beta builds keep working against production too.** The line
+> that stood here said no beta build may target staging until it reaches 103/103, and it
+> read as a note about redistribution being blocked. It was really a note about the beta
+> lane pointing at the wrong project: the sentence above says old binaries stay on
+> production on purpose, and the next build would have moved them off it.
+>
+> So the lane moved to production rather than the build waiting for staging.
+> `LANE_BACKENDS.beta` and `eas.json`'s `build.beta.environment` both name production, and
+> `backends.test.mjs` holds the pair together.
+>
+> **Staging is still 53/103** and repairing it is still the first post-launch
+> infrastructure task. `20260817001000` contains `lock table`, which the Management API
+> applies outside a transaction. What changed is what that blocks: it no longer blocks beta
+> redistribution, it blocks beta *returning* to staging, which needs 103/103, passing smoke
+> tests and the founder's explicit approval.
 
 This exists because the failure has no symptom. The Supabase URL is an EAS environment
 variable — a value in a web dashboard, edited by hand — and a build pointed at the wrong

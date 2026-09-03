@@ -45,7 +45,7 @@
 
     "beta": {
       "extends": "base",
-      "environment": "preview",
+      "environment": "production",
       "distribution": "store",
       "channel": "beta",
       "autoIncrement": true,

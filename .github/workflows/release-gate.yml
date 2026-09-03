@@ -213,8 +213,8 @@ jobs:
           # failed while every rule it names was still correct. The sibling step above
           # already derives from `LANE_BACKENDS`; this one does now too, so neither needs
           # editing in the middle of a release the next time a project moves.
-          STAGING=$(node -p "require('./config/backends.cjs').LANE_BACKENDS.beta[0]")
-          echo "non-production backend, from config/backends.cjs: $STAGING"
+          STAGING=$(node -p "require('./config/backends.cjs').STAGING_REF")
+          echo "staging backend, from config/backends.cjs: $STAGING"
 
           if EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
              EXPO_PUBLIC_SUPABASE_URL=https://someotherproject.supabase.co \
@@ -234,19 +234,37 @@ jobs:
           fi
           echo "production + staging: refused, as it must be"
 
-          # The mirror, and the half that would strand real people: since production is now
-          # a populated database, a beta build reaching it is the failure that matters most.
-          PRODUCTION=$(node -p "require('./config/backends.cjs').LANE_BACKENDS.production[0] || ''")
-          if [ -n "$PRODUCTION" ]; then
-            if EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
-               EXPO_PUBLIC_SUPABASE_URL=https://$PRODUCTION.supabase.co \
-               EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
-               npx expo config --type public --json > /dev/null 2>&1; then
-              echo "The beta lane resolved against production. Beta testers would write to real user data."
-              exit 1
-            fi
-            echo "beta + production: refused, as it must be"
+          # Beta and production share a backend as of 2026-09-03, and this pair of checks
+          # is what keeps that deliberate rather than accidental.
+          #
+          # The closed testers have been on the production project since it was promoted in
+          # place on 2026-08-31, so a beta build that reaches it is continuity rather than a
+          # leak. What would strand them is the opposite move: a beta build pointed at
+          # staging, which is empty and 53 of 103 migrations behind. They would sign in and
+          # find their collection gone, with no error anywhere.
+          #
+          # So the first check asserts beta CAN resolve production, and the second asserts it
+          # CANNOT resolve staging. The day staging is repaired and the founder approves the
+          # move, both flip together with config/backends.cjs.
+          PRODUCTION=$(node -p "require('./config/backends.cjs').PRODUCTION_REF")
+          if ! EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
+             EXPO_PUBLIC_SUPABASE_URL=https://$PRODUCTION.supabase.co \
+             EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
+             GOOGLE_SERVICES_JSON=./google-services.json \
+             npx expo config --type public --json > /dev/null 2>&1; then
+            echo "The beta lane refused production. Closed testers live there; see config/backends.cjs."
+            exit 1
           fi
+          echo "beta + production: permitted, which is the continuity rule"
+
+          if EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
+             EXPO_PUBLIC_SUPABASE_URL=https://$STAGING.supabase.co \
+             EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
+             npx expo config --type public --json > /dev/null 2>&1; then
+            echo "The beta lane resolved against staging. That moves closed testers off their data."
+            exit 1
+          fi
+          echo "beta + staging: refused, which is what protects the testers"
 
           # And the case the guard used to say nothing about, which is the state the
           # production EAS environment is actually in today: **no Supabase variables at all.**

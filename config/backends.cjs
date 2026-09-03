@@ -32,27 +32,63 @@
  */
 
 /**
+ * The two projects, named once.
+ *
+ * Every other file that needs to say "staging" says `STAGING_REF` rather than reaching
+ * for `LANE_BACKENDS.beta[0]`, which is how several tests and one CI step came to mean
+ * "staging" by pointing at a lane that no longer uses it. A ref is twenty characters of
+ * nothing; the names are the readable half.
+ */
+const PRODUCTION_REF = 'abheeqyjzekiowkztfxv';
+const STAGING_REF = 'fjxhcbowoxuzulwirzyr';
+
+/**
  * Lane → the project refs that lane may use.
  *
- * `production` is deliberately **empty**, and that is not an oversight to tidy up later.
- * There is no production Supabase project. A `--profile production` build refuses here,
- * by name, rather than building successfully against nonprod — which is the exact
- * cross-lane swap review 28 asked to be made impossible.
+ * ---------------------------------------------------------------------------
+ * BETA POINTS AT PRODUCTION, ON PURPOSE, SINCE 2026-09-03
+ * ---------------------------------------------------------------------------
  *
- * When a production project is created, its ref is added to `production` **and to
- * nothing else**, in the same reviewed change that creates it.
+ * This is the line most likely to look like a mistake, so here is why it is not.
+ *
+ * **The closed testers are already there.** The Android closed test and the production
+ * app are the same `app.bingd` package by design, and the binary those testers installed
+ * was built before 2026-08-31, when `abheeqyjzekiowkztfxv` was the friend-beta backend.
+ * That project was then promoted in place and became production, with every account,
+ * ranking and collection row still in it. So the closed test has been running against
+ * what is now the production database for as long as production has existed, and
+ * `release-lanes.md` already recorded that as deliberate.
+ *
+ * Pointing a *new* beta build at staging would therefore not keep testers where they
+ * are. It would move them, to an empty database, and the move has no symptom: they sign
+ * in, and their collection is gone.
+ *
+ * **Staging is also not ready to receive them.** It stands at 53 of 103 migrations, and
+ * `award_unlocks` and `invite_link_opens` do not exist in it yet. Awards and the
+ * invitation funnel would fail against it.
+ *
+ * **What this does not mean.** Staging is not redefined as production, and the two refs
+ * are still distinct everywhere. `development` and `preview` still use staging, which is
+ * what makes staging worth repairing. `assertProductionBackend` in `production-lane.cjs`
+ * is untouched and still refuses a production build pointed anywhere but production.
+ *
+ * **How beta goes back to staging**, when it should: staging reaches 103/103, its smoke
+ * tests pass, and the founder says so. Then this line changes back to `STAGING_REF` and
+ * `beta.environment` in `eas.json` changes back to `preview` in the same commit. The test
+ * in `backends.test.mjs` that pins this pair is the thing that will fail if only one of
+ * them is edited.
  */
 const LANE_BACKENDS = {
-  development: ['fjxhcbowoxuzulwirzyr'],
-  preview: ['fjxhcbowoxuzulwirzyr'],
-  beta: ['fjxhcbowoxuzulwirzyr'],
-  production: ['abheeqyjzekiowkztfxv'],
+  development: [STAGING_REF],
+  preview: [STAGING_REF],
+  beta: [PRODUCTION_REF],
+  production: [PRODUCTION_REF],
 };
 
 /** Human names, for the error message. A ref is 20 characters of nothing. */
 const REF_NAMES = {
-  abheeqyjzekiowkztfxv: 'bingd-production',
-  fjxhcbowoxuzulwirzyr: 'bingd-staging',
+  [PRODUCTION_REF]: 'bingd-production',
+  [STAGING_REF]: 'bingd-staging',
 };
 
 /**
@@ -152,6 +188,8 @@ function assertBackendIsAllowed(url, lane) {
 }
 
 module.exports = {
+  PRODUCTION_REF,
+  STAGING_REF,
   LANE_BACKENDS,
   REF_NAMES,
   supabaseProjectRef,
