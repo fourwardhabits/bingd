@@ -301,18 +301,22 @@ jobs:
           fi
           echo "production + no anon key: refused, as it must be"
 
-          # The control. Without it the three refusals above pass just as well against an
+          # The control. Without it the refusals above pass just as well against an
           # app.config.ts that throws for everything.
+          #
+          # It resolves beta against PRODUCTION as of 2026-09-03, because that is beta's own
+          # backend now. It used to name $STAGING, which was the same sentence when staging
+          # was beta's backend and became the opposite of the policy when that changed.
           #
           # It inherits `GOOGLE_SERVICES_JSON` from the placeholder step, which beta now
           # needs to resolve at all. The refusals above deliberately do not depend on that:
           # `assertBackendIsAllowed` runs before `pushNative()`, so each of them still fails
           # for the backend reason it is named after, with or without the file.
           if ! EAS_BUILD=true BINGD_LANE=beta APP_VARIANT=production \
-             EXPO_PUBLIC_SUPABASE_URL=https://$STAGING.supabase.co \
+             EXPO_PUBLIC_SUPABASE_URL=https://$PRODUCTION.supabase.co \
              EXPO_PUBLIC_SUPABASE_ANON_KEY=ci \
              npx expo config --type public --json > /dev/null 2>&1; then
             echo "The beta lane no longer resolves against its own backend. Every refusal above is meaningless."
             exit 1
           fi
-          echo "beta + staging: resolved, as it must"
+          echo "beta + production: resolved, as it must"
