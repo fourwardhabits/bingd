@@ -1050,8 +1050,31 @@ The Collection's sort chip said **Recently watched** over a wall that was plainl
 
 **Nothing about persistence changed.** The view mode is the only stored preference; filters and sort live in the Collection screen's state, so they survive Watched ↔ Watchlist, Movies ↔ TV and grid ↔ list, and reset on relaunch — exactly as before.
 
+---
 
-## 12. Letterboxd import
+### As built, 2026-09-03: the watchlist lets go of a finished series (`20260906000100`)
+
+The settled rules stand and are restated first, because this block refines one of them rather than replacing any:
+
+- TV seasons are rankable; a whole series never is.
+- A series is a grouping and watchlist object. It is the one thing `set_watchlist` accepts that can never be logged.
+- Watched or ranked content leaves the watchlist, because a watchlist entry is an intention to watch and watching ends it (`20260815040000`).
+- Unlogging or unranking never re-adds a watchlist entry. The user re-adds by hand.
+
+What was missing was the end of a show. The 2026-08-15 invariant is exact-object by design: watching Season 2 removes Season 2's entry and never reaches the series, because "I want to watch this show" stays true after one season. True, until the last season. A user who ranked every released season kept the series on their watchlist forever, with nothing left on it to intend.
+
+**The terminating rule, founder decision 2026-09-03.** A series stays on the watchlist while a currently released normal season remains unmet. Once all currently released normal seasons are met, the series leaves, automatically and server-side.
+
+The words in that sentence carry the decisions:
+
+- **Normal season**: season number 1 and up. Season 0 / Specials never blocks removal and never causes it.
+- **Currently released**: has a release date, and that date is today or earlier. A season announced without an air date, or dated in the future, does not block removal. Finishing everything that has aired is finishing the show as it exists today; when the next season arrives, re-adding it is the same deliberate act it always was.
+- **Met**: watched or ranked under the exact signals the 2026-08-15 invariant already recognises (a ranking, a bucket, a watch date, or completed season progress). There is no second definition of watched.
+- **Known to the catalogue**: the rule reads the seasons the catalogue holds. A series with no released normal season rows at all is never removed, so an unhydrated series cannot be swept on a technicality.
+
+**What this does not change.** A specific season's own watchlist entry is still governed by the exact-object rule. Unranking or unlogging a season does not re-add the series. A finished series deliberately re-added for a rewatch stays put until a season transitions to watched again. There is no Settings toggle: this is the canonical behavior, not a preference.
+
+**Existing stuck rows were corrected.** The migration backfills away series entries whose released normal seasons were all already met, per account, and reports the count as it runs. Because the whole rule lives in database triggers, every installed binary inherits it the moment the migration deploys, with no client change and no OTA.
 
 > **Stage changed 2026-08-23 — deprioritized.** Import is **not** a requirement for the
 > friend beta, for the initial App Store release, or for the initial Google Play production

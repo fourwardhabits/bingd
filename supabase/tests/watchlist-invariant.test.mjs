@@ -14,7 +14,11 @@ const MIGRATION = '20260815040000_watchlist_invariant.sql';
  * four ways the rule could be wrong in a way nobody would notice:
  *
  *   - reaching past the exact object and taking a *series* entry off when a season is
- *     watched, which would delete something still true,
+ *     watched while another released season is still unmet, which would delete
+ *     something still true. (Since 20260906000100 the series has its own terminating
+ *     rule: once every currently released normal season is met, a peer trigger removes
+ *     the parent. That rule is tested in series-watchlist.test.mjs; what this file
+ *     pins is that _leave_watchlist itself never touches the parent.)
  *   - firing on writes that are not watch signals — a note, a `watching` progress —
  *     which would delete an entry at the moment it is most correct,
  *   - putting the row back on unlog, which the founder explicitly ruled out,
@@ -86,9 +90,18 @@ describe('watchlist invariant', () => {
       await t.actAs(user);
     });
 
-    it('a completed season leaves, and its series does not', async () => {
+    it('a completed season leaves; the series survives until its last released season is met', async () => {
+      // The refined contract of 20260906000100. The season and the series are still
+      // separate objects: watching Season 2 removes Season 2's own entry and nothing
+      // else, because Season 1 is released and unmet — "I want to watch this show" is
+      // still true. Meeting the final released season is what ends it.
       const series = await t.createSeries('Parks and Recreation', 2004);
+      const s1 = await t.createSeason(series, 1, 'Season 1');
       const season = await t.createSeason(series, 2, 'Season 2');
+      await t.sql(`update media_items set release_date = '2020-01-01' where id in ($1, $2)`, [
+        s1,
+        season,
+      ]);
 
       await addToWatchlist(series);
       await addToWatchlist(season);
@@ -99,7 +112,15 @@ describe('watchlist invariant', () => {
       assert.equal(
         await watchlisted(series),
         true,
-        'wanting to watch the show survives having watched one season of it',
+        'wanting to watch the show survives while a released season remains unmet',
+      );
+
+      await call(`set_bucket($1, $2, 'loved')`, [await uuid(), s1]);
+
+      assert.equal(
+        await watchlisted(series),
+        false,
+        'the last released season was met, so the show is finished',
       );
     });
 
@@ -397,6 +418,13 @@ describe('watchlist invariant — historical backfill', () => {
     items.completed = await t.createSeason(series, 1, 'Season 1');
     items.noteOnly = await t.createMovie('Legacy Note Only', 3005);
     items.watching = await t.createSeason(series, 2, 'Season 2');
+    // Both seasons are released, so the parent's survival below states the refined
+    // contract of 20260906000100 — a released season (Season 2) remains unmet — and
+    // not merely the old exact-object scoping of this migration's backfill.
+    await t.sql(`update media_items set release_date = '2020-01-01' where id in ($1, $2)`, [
+      items.completed,
+      items.watching,
+    ]);
     items.untouched = await t.createMovie('Legacy Untouched', 3006);
     items.series = series;
     items.otherAccount = await t.createMovie('Legacy Other', 3007);
@@ -491,7 +519,12 @@ describe('watchlist invariant — historical backfill', () => {
     assert.equal(await survives(items.untouched), true);
   });
 
-  it('keeps the parent series of a watched season', async () => {
+  it('keeps the parent series while a released season remains unmet', async () => {
+    // Season 1 is completed and Season 2 is only in progress, so under the refined
+    // contract as well as under this migration's exact-object backfill the series
+    // entry is still a true intention. The terminating case — every released normal
+    // season met — is 20260906000100's backfill, tested at its own boundary in
+    // series-watchlist.test.mjs.
     assert.equal(await survives(items.series), true);
   });
 

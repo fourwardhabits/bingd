@@ -60,6 +60,12 @@
  *      ledger's primary key: a 23505 surfaces from a path the honest version answers
  *      with silence, which is the observable — the announcement no longer hangs off
  *      an insert that reported a row.
+ *  14. `_leave_series_watchlist` with its advisory lock deleted (20260906000100).
+ *      Two devices completing the final two released seasons each read the other's
+ *      season as unmet under READ COMMITTED, neither removes the series, and the
+ *      entry is stranded forever — the lost-crossing shape of mutant 12's family,
+ *      pointed at a delete. The damage is *plausible in the schema*: every row is
+ *      legal, and only the watchlist entry's continued existence is wrong.
  *
  * Mutants 1, 2, 9, 10 and 11 all replace the *five*-argument `add_comment`. `20260826000600`
  * drops the four-argument form deliberately, and a mutant declared against the old
@@ -1235,6 +1241,104 @@ $$;
   results.push([
     'mention once-ever guard dropped -> a concurrent duplicate save files a second mention',
     filed.length === 2,
+  ]);
+
+  await t1.end();
+  await t2.end();
+  await db.close();
+}
+
+// --- Mutant 14: `_leave_series_watchlist` with its advisory lock deleted. The
+//     stranded-entry defect the lock exists for, reproduced deterministically: the
+//     first completion is held open, the second runs to completion underneath it
+//     (nothing to wait on any more), and each transaction's count finds the other's
+//     season unmet — so neither removes the series and the entry outlives the show.
+//     `races/series-watchlist.mjs` SW1 is the assertion that catches it live.
+{
+  const db = await createRaceDb();
+  const fx = fixtures(db);
+
+  await db.sql(`
+create or replace function _leave_series_watchlist()
+returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_series uuid; v_released integer; v_unmet integer;
+begin
+  select mi.parent_id into v_series from public.media_items mi
+   where mi.id = new.media_item_id and mi.kind = 'season';
+  if v_series is null then return null; end if;
+  if not exists (
+    select 1 from public.watchlist w
+     where w.user_id = new.user_id and w.media_item_id = v_series
+  ) then return null; end if;
+  -- THE MUTATION: no pg_advisory_xact_lock, so the count below runs against a
+  -- snapshot that cannot include a sibling transaction's uncommitted season.
+  select count(*),
+         count(*) filter (
+           where not exists (select 1 from public.rankings r
+                              where r.user_id = new.user_id and r.media_item_id = s.id)
+             and not exists (select 1 from public.user_media um
+                              where um.user_id = new.user_id and um.media_item_id = s.id
+                                and (um.bucket is not null or um.watched_on is not null
+                                     or um.progress = 'completed'))
+         )
+    into v_released, v_unmet
+    from public.media_items s
+   where s.parent_id = v_series and s.kind = 'season' and s.season_number > 0
+     and s.release_date is not null and s.release_date <= current_date;
+  if v_released = 0 or v_unmet > 0 then return null; end if;
+  delete from public.watchlist
+   where user_id = new.user_id and media_item_id = v_series;
+  return null;
+end; $$;`);
+
+  const who = await fx.createUser();
+  const show = await fx.createSeries();
+  const s1 = await fx.createSeason(show, 1);
+  const s2 = await fx.createSeason(show, 2);
+  await db.sql(`insert into watchlist (user_id, media_item_id) values ($1, $2)`, [who, show]);
+
+  const bucketSql = `insert into user_media (user_id, media_item_id, bucket)
+                     values ($1, $2, 'loved')`;
+
+  const t1 = await db.session('phone');
+  const t2 = await db.session('tablet');
+
+  // t1 completes Season 1 and stays open; with the lock gone it holds nothing that
+  // could make t2 wait.
+  await t1.begin();
+  await t1.one(`${bucketSql} returning user_id`, [who, s1]);
+
+  await t2.begin();
+  const p2 = t2.start(bucketSql, [who, s2]);
+
+  const [keyRow] = await db.rows(
+    `select hashtextextended('series-watchlist:' || $1::text || ':' || $2::text, 0)::text as k`,
+    [who, show],
+  );
+  let blockedOnSeries = true;
+  try {
+    await t2.awaitBlocked({ on: 'advisory', advisoryKey: keyRow.k, timeoutMs: 1500 });
+  } catch {
+    blockedOnSeries = false;
+  }
+
+  await p2;
+  await t2.commit();
+  await t1.commit();
+
+  const stranded = await db.rows(
+    `select 1 from watchlist where user_id = $1 and media_item_id = $2`,
+    [who, show],
+  );
+
+  results.push([
+    'series lock removed -> the second completion no longer waits',
+    blockedOnSeries === false,
+  ]);
+  results.push([
+    'series lock removed -> the finished series is stranded on the watchlist',
+    stranded.length === 1,
   ]);
 
   await t1.end();
