@@ -17,7 +17,7 @@ import { GroupPicksSheet } from './GroupPicksSheet';
 
 const mockPush = jest.fn();
 const mockTrack = jest.fn();
-const mockSetWatchlist = jest.fn(async () => ({ outcome: 'ok' as const }));
+const mockSetWatchlist = jest.fn(async (_args: unknown) => ({ outcome: 'ok' as const }));
 const mockRpc = jest.fn();
 
 let mockRpcResults: Record<string, unknown> = {};
@@ -110,7 +110,7 @@ const pickRow = (id: string, groupScore: number, over: Record<string, unknown> =
 
 const props = () => ({
   viewerId: 'viewer-1',
-  medium: 'movies' as const,
+  medium: 'movies' as 'movies' | 'tv',
   onClose: jest.fn(),
 });
 
