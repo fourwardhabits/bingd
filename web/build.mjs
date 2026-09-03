@@ -455,8 +455,10 @@ const styles = `
       body {
         margin: 0;
         min-height: 100vh;
-        display: grid;
-        place-items: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
         padding: 2rem 1.5rem;
         background: var(--parchment);
         color: var(--ink);
@@ -464,7 +466,7 @@ const styles = `
         -webkit-font-smoothing: antialiased;
       }
 
-      main { max-width: 26rem; width: 100%; text-align: center; }
+      main { max-width: 26rem; width: 100%; min-width: 0; text-align: center; }
 
       h1 {
         margin: 0 0 0.5rem;
@@ -529,6 +531,107 @@ const styles = `
 
       footer { margin-top: 2rem; font-size: 0.8125rem; color: var(--secondary); }
       footer a { color: var(--maroon); text-underline-offset: 2px; }
+
+      /* ---------------------------------------------------------------------
+         The resolved title or profile.
+
+         A poster beside two lines of text, which is the shape a person already
+         reads on a messaging app's own link preview. The picture is small on
+         purpose: this page confirms what was shared, it does not display it.
+         --------------------------------------------------------------------- */
+      .context {
+        display: flex;
+        gap: 0.875rem;
+        align-items: center;
+        margin: 0 0 1rem;
+      }
+
+      .context-art {
+        width: 64px;
+        flex: 0 0 64px;
+        border-radius: 0.5rem;
+        background: var(--parchment);
+        object-fit: cover;
+        aspect-ratio: 2 / 3;
+      }
+
+      /* A profile picture is round and square-cropped; a poster is neither. */
+      .context.is-profile .context-art { aspect-ratio: 1; border-radius: 50%; }
+
+      .context-lines { min-width: 0; }
+      .context-lines .subject { margin: 0; }
+
+      .context-detail {
+        margin: 0.125rem 0 0;
+        font-size: 0.9375rem;
+        color: var(--secondary);
+      }
+
+      .context-note {
+        margin: 0.25rem 0 0;
+        font-size: 0.8125rem;
+        letter-spacing: 0.01em;
+        color: var(--secondary);
+      }
+
+      /* ---------------------------------------------------------------------
+         The two screenshots.
+
+         On a phone they sit under the card, the first one dominant and the
+         second peeking from behind it. On a wide screen the whole page becomes
+         two columns and they move alongside, because a 26rem column of text
+         centred in a 1440px window looks like a page that failed to load.
+         --------------------------------------------------------------------- */
+      .showcase {
+        position: relative;
+        margin: 2.5rem auto 0;
+        width: min(100%, 20rem);
+        display: flex;
+        justify-content: center;
+      }
+
+      .shot {
+        display: block;
+        max-width: 100%;
+        height: auto;
+        border-radius: 0.9rem;
+        border: 1px solid var(--hairline);
+        box-shadow: 0 12px 32px rgba(36, 35, 38, 0.14);
+      }
+
+      .shot-primary { width: 15rem; position: relative; z-index: 1; }
+
+      .shot-secondary {
+        width: 9.5rem;
+        position: absolute;
+        right: 0;
+        bottom: 1.5rem;
+        z-index: 2;
+      }
+
+      /* Under about 22rem of width the two overlap into mush, so the second one
+         steps out of the way rather than being shown badly. */
+      @media (max-width: 22rem) {
+        .shot-secondary { display: none; }
+        .shot-primary { width: 100%; }
+      }
+
+      @media (min-width: 56rem) {
+        body { display: block; padding-top: 3rem; }
+        main { margin-inline: auto; }
+        main {
+          max-width: 56rem;
+          display: grid;
+          grid-template-columns: 26rem 1fr;
+          gap: 3.5rem;
+          align-items: center;
+          text-align: left;
+        }
+        .pitch { grid-column: 1; }
+        .showcase { grid-column: 2; grid-row: 1; margin-top: 0; width: 22rem; }
+        footer { grid-column: 1 / -1; text-align: center; }
+        h1 { font-size: 3.25rem; }
+      }
 `;
 
 /**
@@ -559,8 +662,7 @@ const ORIGIN = `https://${config.domain}`;
  * behind the link is exactly what this site does not read: a profile the viewer may
  * not be allowed to see, and a title the site holds no row for.
  */
-const SOCIAL_DESCRIPTION =
-  'Rank what you have watched, see what your friends are watching, and find your next watch.';
+const SOCIAL_DESCRIPTION = 'See where it ranks with friends, or rank it yourself.';
 
 /**
  * The Open Graph and Twitter block for one page.
@@ -570,23 +672,35 @@ const SOCIAL_DESCRIPTION =
  * domain. There is nothing here a URL can reach, which is the rule router.mjs keeps
  * for destinations, kept here for markup.
  *
+ * **The card is generic even where the page is not.** `/title/<id>` resolves the film's
+ * name in the browser and shows it, and this block still says "Open on bingd." That is
+ * not an oversight: these files are static, so a `<meta>` tag cannot vary by path, and
+ * a card that named the film would need a Worker doing a TMDB-shaped lookup on every
+ * unfurl request. Deferred with the rest of the rich-preview work.
+ *
+ * `summary_large_image` because there is now an image built for it: 1200x630, the
+ * wordmark on the brand ground. It was `summary` while the only asset was the square
+ * app icon, which every unfurler either letterboxed or cropped into a corner of itself.
+ *
  * **og:url is the route prefix, not the visited URL.** The token, handle or id in the
  * path is the one part of a bingd.app link that should not be copied into a card that
  * messaging services fetch, log and cache on the sender behalf. A preview is a thing
  * a third party keeps; the identifier stays in the message.
  */
-const social = ({ title, path }) => `
-    <meta property="og:site_name" content="Bingd" />
+const social = ({ share, path }) => `
+    <meta property="og:site_name" content="bingd." />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="${title}" />
+    <meta property="og:title" content="${share}" />
     <meta property="og:description" content="${SOCIAL_DESCRIPTION}" />
-    <meta property="og:image" content="${ORIGIN}/bingd-icon.png" />
-    <meta property="og:image:alt" content="The Bingd app icon" />
+    <meta property="og:image" content="${ORIGIN}/social-card.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="The bingd. wordmark" />
     <meta property="og:url" content="${ORIGIN}${path}" />
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="${title}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${share}" />
     <meta name="twitter:description" content="${SOCIAL_DESCRIPTION}" />
-    <meta name="twitter:image" content="${ORIGIN}/bingd-icon.png" />`;
+    <meta name="twitter:image" content="${ORIGIN}/social-card.png" />`;
 
 /**
  * One page.
@@ -596,14 +710,14 @@ const social = ({ title, path }) => `
  * which is a thing no privacy setting in the app would then be able to take back. It
  * lifts with the release mode and not before.
  */
-const page = ({ dir, title, kind, heading, tagline, body }) => `<!doctype html>
+const page = ({ dir, title, share, kind, heading, tagline, body }) => `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${title}</title>${ROBOTS}
     <meta name="referrer" content="no-referrer" />
-${social({ title, path: `/${dir}/` })}
+${social({ share, path: `/${dir}/` })}
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -617,27 +731,31 @@ ${social({ title, path: `/${dir}/` })}
 
   <body>
     <main>
-      <h1>Bingd</h1>
-      <p class="tagline">${tagline}</p>
+      <div class="pitch">
+        <h1>bingd.</h1>
+        <p class="tagline">${tagline}</p>
 
-      <div class="card">
+        <div class="card">
 ${body}
 
-        <div class="actions">
-          <a class="button" id="primary-install" hidden href="#"></a>
+          <div class="actions">
+            <a class="button" id="primary-install" hidden href="#"></a>
 
-          <span id="desktop-choices" hidden>
-            <a class="button" id="install-ios" hidden href="#"></a>
-            <a class="button" id="install-android" hidden href="#"></a>
-          </span>
+            <span id="desktop-choices" hidden>
+              <a class="button" id="install-ios" hidden href="#"></a>
+              <a class="button" id="install-android" hidden href="#"></a>
+            </span>
 
-          <a class="button secondary" id="open-app" hidden href="#"></a>
+            <a class="button secondary" id="open-app" hidden href="#"></a>
+          </div>
+
+          <p id="no-destination" hidden>
+            ${isPublic ? 'bingd. is not available for this device yet.' : 'The bingd. beta is not open for this device yet.'} ${heading}
+          </p>
         </div>
-
-        <p id="no-destination" hidden>
-          ${isPublic ? 'Bingd is not available for this device yet.' : 'The Bingd beta is not open for this device yet.'} ${heading}
-        </p>
       </div>
+
+${SHOWCASE}
 
       <footer>
         <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> &middot;
@@ -679,21 +797,21 @@ ${body}
  */
 const INVITE_RETURN = isPublic
   ? `          <p>
-            <strong>After installing Bingd, come back to this page</strong> and tap
-            &ldquo;I already have Bingd&rdquo; to finish connecting with your friend.
+            <strong>After installing bingd., come back to this page</strong> and tap
+            &ldquo;I already have bingd.&rdquo; to finish connecting with your friend.
             Opening the app straight from the store works too, but the invitation will
             not follow you there.
           </p>`
   : `          <p>
-            <strong>Come back to this page once Bingd is installed</strong> and tap
-            &ldquo;I already have Bingd&rdquo;. Opening the app straight from TestFlight
+            <strong>Come back to this page once bingd. is installed</strong> and tap
+            &ldquo;I already have bingd.&rdquo;. Opening the app straight from TestFlight
             or Play works too, but the invitation will not follow you there.
           </p>`;
 
 const INVITE_BODY = `        <span id="invite-intro">
-          <p class="subject">You have been invited to Bingd.</p>
+          <p class="subject">You have been invited to bingd.</p>
           <p>
-            Bingd is where you rank what you have watched and see what your friends
+            bingd. is where you rank what you have watched and see what your friends
             really think.${
               isPublic
                 ? ' Get it below, and this invitation connects you when you arrive.'
@@ -703,32 +821,78 @@ const INVITE_BODY = `        <span id="invite-intro">
 ${INVITE_RETURN}
         </span>
         <p id="invite-broken" hidden>
-          That invitation link is incomplete &mdash; messaging apps sometimes cut long
-          links in half. Ask for it again, or get Bingd below and use the link from
-          inside the app.
+          That invitation link is incomplete. Messaging apps sometimes cut long links in
+          half. Ask for it again, or get bingd. below and use the link from inside the
+          app.
         </p>`;
 
-const PROFILE_BODY = `        <p class="subject" id="handle"></p>
+/**
+ * The block a resolved title or profile paints into, and the generic line it replaces.
+ *
+ * Both live in the markup from the start, one of them hidden, so that the page has its
+ * final shape before any network call finishes. The alternative is a card that grows a
+ * poster a second after it is read, which on a slow connection is the layout jumping
+ * under somebody's thumb.
+ *
+ * `context-art` is hidden until the image loads rather than sized and reserved: a
+ * profile with no avatar and a film whose poster TMDB no longer serves are both
+ * ordinary, and neither should leave a grey rectangle on the page.
+ */
+const CONTEXT_BLOCK = `        <div id="context" class="context" hidden>
+          <img id="context-art" class="context-art" alt="" hidden />
+          <div class="context-lines">
+            <p class="subject" id="context-name"></p>
+            <p class="context-detail" id="context-detail"></p>
+            <p class="context-note" id="context-note"></p>
+          </div>
+        </div>`;
+
+const PROFILE_BODY = `${CONTEXT_BLOCK}
+        <p class="subject" id="generic-subject">A profile on bingd.</p>
         <p>
-          This is a Bingd profile. Open it in the app to see what they have ranked and
-          what they have written &mdash; a private account stays private, whichever way
-          you arrive.
+          Open it in the app to see what they have ranked and what they have written. A
+          private account stays private, whichever way you arrive.
         </p>`;
 
-const TITLE_BODY = `        <p class="subject">A film or series on Bingd</p>
+const TITLE_BODY = `${CONTEXT_BLOCK}
+        <p class="subject" id="generic-subject">A film or series on bingd.</p>
         <p>
-          Open it in Bingd to see where your friends placed it, and where you would.
+          Open it in bingd. to see where your friends placed it, and where you would.
         </p>`;
 
 const GENERIC_BODY = isPublic
   ? `        <p>
-          Bingd is where you rank what you have watched and see what your friends really
+          bingd. is where you rank what you have watched and see what your friends really
           think. Get it below.
         </p>`
   : `        <p>
-          Bingd is in closed testing. Invitations are going out to a small first group,
+          bingd. is in closed testing. Invitations are going out to a small first group,
           and this page will become the app&rsquo;s public face when it opens up.
         </p>`;
+
+/**
+ * The two app screenshots, and why there are exactly two.
+ *
+ * A page that only asserts the app is good is a page nobody believes. One picture of
+ * the collection answers "what is this" faster than any sentence here could, and the
+ * ranking sheet beside it answers "what would I actually do in it". A third would be a
+ * carousel, and a carousel is a thing people swipe past.
+ *
+ * Both are real screenshots from the store set, cropped to drop the Android status and
+ * navigation bars. **Neither shows anybody's name, handle or face**, which is why these
+ * two were chosen out of fifteen: the feed screens are the better advertisement and
+ * every one of them has other people's accounts in it.
+ *
+ * `loading="lazy"` on the second: on a phone it sits below the fold under the primary
+ * one, and the install button is what matters above it.
+ */
+const SHOWCASE = `      <div class="showcase" aria-hidden="false">
+        <img class="shot shot-primary" src="/shot-collection.jpg" width="720" height="1447"
+             alt="A bingd. collection of ranked series, each with a score out of ten." />
+        <img class="shot shot-secondary" src="/shot-ranking.jpg" width="720" height="811"
+             loading="lazy"
+             alt="Two films side by side in bingd., under the question which did you like more." />
+      </div>`;
 
 /**
  * The second half of an "unavailable" sentence, and each route's `heading`.
@@ -740,8 +904,8 @@ const GENERIC_BODY = isPublic
  * to be vague enough for both.
  */
 const UNAVAILABLE = isPublic
-  ? 'Bingd is not on this platform yet.'
-  : 'Bingd is in closed testing.';
+  ? 'bingd. is not on this platform yet.'
+  : 'bingd. is in closed testing.';
 
 /**
  * The one address in this project a stranger is told to write to.
@@ -1320,7 +1484,8 @@ const ROUTES = [
   {
     dir: 'i',
     kind: 'invite',
-    title: 'You have been invited to Bingd',
+    share: 'You have been invited to bingd.',
+    title: 'You have been invited to bingd.',
     tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
     heading: isPublic
       ? 'Bingd is not on this platform yet.'
@@ -1330,7 +1495,8 @@ const ROUTES = [
   {
     dir: 'u',
     kind: 'profile',
-    title: 'A profile on Bingd',
+    share: 'Open on bingd.',
+    title: 'A profile on bingd.',
     tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
     heading: UNAVAILABLE,
     body: PROFILE_BODY,
@@ -1338,7 +1504,8 @@ const ROUTES = [
   {
     dir: 'title',
     kind: 'title',
-    title: 'A title on Bingd',
+    share: 'Open on bingd.',
+    title: 'A title on bingd.',
     tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
     heading: UNAVAILABLE,
     body: TITLE_BODY,
@@ -1346,7 +1513,8 @@ const ROUTES = [
   {
     dir: 'lists',
     kind: 'generic',
-    title: 'A list on Bingd',
+    share: 'Open on bingd.',
+    title: 'A list on bingd.',
     tagline: 'Rank what you&rsquo;ve watched. See what your friends really think.',
     heading: UNAVAILABLE,
     body: GENERIC_BODY,
@@ -1386,12 +1554,12 @@ for (const route of ROUTES) {
  */
 const ROOT_BODY = isPublic
   ? `        <p>
-          Bingd is where you rank what you&rsquo;ve watched and see what your friends
+          bingd. is where you rank what you&rsquo;ve watched and see what your friends
           really think &mdash; a ranked list of everything, built one comparison at a
           time.
         </p>`
   : `        <p>
-          Bingd is in closed testing. Invitations are going out to a small first group,
+          bingd. is in closed testing. Invitations are going out to a small first group,
           and this page will become the app&rsquo;s public face when it opens up.
         </p>`;
 
@@ -1402,9 +1570,9 @@ await writeFile(
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Bingd</title>
+    <title>bingd.</title>
     <meta name="description" content="Rank what you have watched, and see what your friends really think." />${ROBOTS}
-${social({ title: 'Bingd', path: '/' })}
+${social({ share: 'bingd.', path: '/' })}
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1418,7 +1586,7 @@ ${social({ title: 'Bingd', path: '/' })}
 
   <body>
     <main>
-      <h1>Bingd</h1>
+      <h1>bingd.</h1>
       <p class="tagline">Rank what you&rsquo;ve watched. See what your friends really think.</p>
 
       <div class="card">

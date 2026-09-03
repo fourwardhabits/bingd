@@ -274,28 +274,110 @@ As-built block carries the reasoning. The consequence for this site is that
 `/title/*` and `/u/*` have no sender and no origin to know about, and their pages are
 identical for every visitor.
 
-**The page resolves nothing.** Every route paints the Bingd mark, one line of positioning,
-an *Open in Bingd* button built from an already-validated identifier, and the install
-action for the visitor's platform. No table is read, on any route. That is what keeps a
-private profile private when its URL is opened from outside the app, and it is why there
-is no film name or poster on a `/title/<id>` page.
+**The page now names what was shared, and reads nothing else.** Updated 2026-09-03.
 
-**The preview card is generic, and honestly so.** Each page carries `og:site_name`,
+A `/title/<id>` page shows the film or season's name, its year and its poster. A
+`/u/<handle>` page shows a public account's display name, handle and avatar. Both are
+fetched in the browser, one request each, with the anon key the page already carries.
+
+This is not a new read path and could not have been built as one. Two policies that
+already existed decide all of it:
+
+| table | policy | what a signed-out reader gets |
+|---|---|---|
+| `media_items` | `using (true)` since `20260813000400` | the catalogue, which is TMDB data with nobody attached to it |
+| `profiles` | `using (can_i_view(id))` | `can_view_profile` answers a **null viewer** with `visibility = 'public' and status = 'active'` and nothing else |
+
+So a private account, a suspended account and a handle nobody has are one case from out
+here: zero rows, and the page keeps its generic line. **The privacy rule is Postgres's,
+enforced on the same policy the app obeys, and this page cannot widen it.** If a private
+profile ever appeared here it would mean `can_view_profile` had changed, and it would be
+visible in the app long before it was visible on the web.
+
+What is deliberately not read: `profiles.bio`, which *is* readable for a public account
+and is still nobody's business on a link preview; and anything under `user_media`,
+`rankings`, `follows` or `feed_events`. The page shows what was shared. It never shows
+what anyone did with it, and it never names the sender.
+
+The columns are named in the `select` rather than taken with `*`, so a column added to
+`media_items` later is not shipped to every visitor by accident. `overview` is the one
+that would hurt: a plot synopsis on a link preview is a spoiler nobody asked for.
+
+**The preview card is generic, and the page is not.** Each page carries `og:site_name`,
 `og:title`, `og:description`, `og:image` and the Twitter equivalents, all static text plus
-one image — `bingd-icon.png`, the app icon, shipped from `web/src/`. The card is
-`summary`, not `summary_large_image`: the large card frames its picture as *the* subject,
-and an app icon presented that way reads as a poster that failed to load. `og:url` is the
-**route prefix** and never the visited URL, so the token, handle or id in a link is not
-copied into a card that messaging services fetch, log and cache.
+one image: `social-card.png`, 1200x630, the wordmark on the brand ground, shipped from
+`web/src/`. It is `summary_large_image`, which the card was built for. It was `summary`
+while the only asset was the square app icon, which every unfurler either letterboxed or
+cropped into a corner of itself.
 
-Real per-title cards — the film's name and its poster — need a server, a TMDB lookup and
-image generation. They are deferred; see `deferred-roadmap.md`.
+The card cannot name the film even though the page can, and the reason is structural
+rather than a decision left unmade: these files are static, one per route, so a `<meta>`
+tag is the same bytes for every visitor. Naming the film in the card needs a Worker doing
+a lookup on every unfurl request. Deferred, see `deferred-roadmap.md` §45.
+
+`og:url` is the **route prefix** and never the visited URL, so the token, handle or id in
+a link is not copied into a card that messaging services fetch, log and cache.
+
+**Two app screenshots, and neither has a person in it.** `shot-collection.jpg` and
+`shot-ranking.jpg` are cropped from the store set, with the Android status and navigation
+bars removed. They were chosen out of fifteen on one criterion: the feed screens are the
+better advertisement and every one of them has other people's accounts, handles and faces
+in it. These two have posters and scores and nothing else.
 
 **The site still has no analytics of its own.** The one measurement it takes is
 `record_invite_open`, called from the invitation page only, and the published privacy
 policy says the website carries no analytics. Counting title- and profile-fallback views
 would mean either a new Supabase RPC and migration or a third-party script, and either
 would need that policy sentence changed first. Deferred deliberately, not overlooked.
+
+---
+
+## Android App Links: the first hardware test, and what it found
+
+**2026-09-03.** The founder tapped `https://bingd.app/title/<id>` on an Android phone with
+the closed-test build installed. Samsung Browser opened the fallback page instead of the
+app. This section is the audit, because the answer is not in the repository.
+
+**Every link in the chain that this repository controls is correct**, and each was checked
+rather than assumed:
+
+| link | state | how it was checked |
+|---|---|---|
+| package of the closed-test build | `app.bingd` | `eas.json` `build.beta` sets `APP_VARIANT=production` |
+| intent filter, `autoVerify`, four path prefixes | present | `app.config.ts` **at commit `89631bf`**, which is the commit build 0.1.0 (7) was made from |
+| `assetlinks.json` served | `200`, `application/json`, no redirect | direct request |
+| fingerprints in it | upload key **and** Play app-signing key | `web/deep-links.config.json`, both present since `2fbdc66` (2026-08-21), before the build |
+| Google's own verifier | **`linked: true` for both fingerprints** | `digitalassetlinks.googleapis.com/v1/assetlinks:check` |
+| the route that receives it | `app/title/[id].tsx` | asserted by `router.test.mjs` |
+| the rewrite | `/title/*  /title  200`, and `.well-known` never rewritten | asserted by `router.test.mjs` |
+
+So the configuration is not the defect. **The remaining candidates are all on the device**,
+and the distinction that matters is that Android verifies a domain **at install time** and
+caches the result. It does not retry on its own.
+
+`docs/architecture/web-deployment.md` recorded both hardware claims as *PENDING, never
+tested on hardware* until this attempt, and the site's own deploy history is the other half
+of the story: the closed-test build was installed on 2026-08-27, and a build whose
+verification attempt found no `assetlinks.json` at that moment records a failure that
+survives every later fix to the website.
+
+**Classification: D, a device-side verification state, with C as its cause.** Not A, not B,
+not F. The evidence for that is the Google verifier answering `linked: true` today for the
+exact package and both certificates, against a page that had already failed to open.
+
+**No new binary is required to test this, and none should be built for it.** The two things
+that re-trigger verification are, in order of effort:
+
+1. Settings, Apps, bingd., **Open by default** (Samsung calls it *Open supported links*).
+   Check whether `bingd.app` appears under **Supported web addresses** and whether the
+   setting is on. If the domain is listed but unverified, this is confirmed.
+2. Reinstall the closed-test build from Play now that the domain serves a correct
+   `assetlinks.json`. Verification runs again on install.
+
+One caveat worth keeping: **Samsung Messages may hand the URL to the browser explicitly**
+rather than dispatching it as an App Link, which bypasses verification whatever its state.
+Testing from a different app, a note or an email, separates that from the cache question,
+which is why the founder QA below does it that way.
 
 ---
 

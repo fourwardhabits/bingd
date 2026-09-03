@@ -9,10 +9,16 @@ import { fileURLToPath } from 'node:url';
 import {
   allDestinations,
   appLinkFor,
+  avatarUrl,
   destinationFor,
   detectPlatform,
   handleFromPath,
   installLabel,
+  posterUrl,
+  profileContextRequest,
+  profileDisplay,
+  titleContextRequest,
+  titleDisplay,
   titleIdFromPath,
   tokenFromPath,
 } from './src/router.mjs';
@@ -155,25 +161,33 @@ describe('destinationFor', () => {
 });
 
 describe('installLabel', () => {
-  it('keeps the three beta labels exactly as the beta has always shown them', () => {
+  /**
+   * The wordmark is lowercase with its full stop, on every button a person reads.
+   *
+   * These read "Bingd" until 2026-09-03. The founder's instruction is that the brand is
+   * `bingd.` in product copy, and an install button is the most product-facing copy on
+   * the site. Pinned as exact strings for the same reason they always were: a button
+   * label is the last thing anybody re-reads before tapping.
+   */
+  it('names the beta destinations in the brand’s own casing', () => {
     assert.equal(
       installLabel({ platform: 'ios', kind: 'testflight', url: 'x' }),
-      'Get the Bingd beta for iPhone',
+      'Get the bingd. beta for iPhone',
     );
     assert.equal(
       installLabel({ platform: 'android', kind: 'play-opt-in', url: 'x' }),
-      'Join the Bingd beta on Android',
+      'Join the bingd. Android beta',
     );
     assert.equal(
       installLabel({ platform: 'android', kind: 'play', url: 'x' }),
-      'Get Bingd for Android',
+      'Get bingd. on Google Play',
     );
   });
 
   it('labels the iOS store button for an iPhone', () => {
     assert.equal(
       installLabel(destinationFor('ios', { ios: { storeUrl: 'https://apps.apple.com/x' } })),
-      'Get Bingd for iPhone',
+      'Get bingd. on the App Store',
     );
   });
 
@@ -192,7 +206,7 @@ describe('installLabel', () => {
         android: { storeUrl: 'https://play.google.com/store/apps/details?id=app.bingd' },
       }),
     );
-    assert.equal(label, 'Get Bingd for Android');
+    assert.equal(label, 'Get bingd. on Google Play');
     assert.ok(!/iphone/i.test(label), 'the Android button must not name an iPhone');
   });
 
@@ -331,6 +345,195 @@ describe('appLinkFor', () => {
 // The build, and its output
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Shared-content context
+//
+// The page names the film or the public profile behind a link, so a recipient can see
+// that the link worked before deciding whether to install anything. Everything here is
+// bounded by two policies that already existed: `media_items_read`, which is
+// `using (true)`, and `profiles_read`, which is `using (can_i_view(id))` and answers a
+// signed-out reader with public, active accounts only.
+//
+// These tests cover the half that is ours: the URLs built from an identifier, and the
+// shape of what gets displayed. The privacy half is Postgres's and is tested there.
+// ---------------------------------------------------------------------------
+
+const SUPA = 'https://abheeqyjzekiowkztfxv.supabase.co';
+const UUID = '95f212bb-9bbc-4889-a466-94d1a69875ce';
+
+describe('posterUrl', () => {
+  it('builds a TMDB URL from a stored path', () => {
+    assert.equal(
+      posterUrl('/iQVrouWJHrrY4CXDIJBj1skMix3.jpg'),
+      'https://image.tmdb.org/t/p/w342/iQVrouWJHrrY4CXDIJBj1skMix3.jpg',
+    );
+  });
+
+  it('refuses anything that is not TMDB’s own path shape', () => {
+    /**
+     * `poster_path` is the one value on this page that comes from outside the build, and
+     * it ends up in `img.src`. Nothing here is expected to be hostile, and the pattern is
+     * what makes that expectation unnecessary: the result cannot become a `javascript:`
+     * URL, cannot leave the CDN, and cannot carry a quote into markup.
+     */
+    for (const bad of [
+      null,
+      undefined,
+      42,
+      '',
+      'no-leading-slash.jpg',
+      '/../../etc/passwd',
+      '/evil.jpg"onerror=alert(1)',
+      '/evil.svg',
+      'javascript:alert(1)',
+      '//evil.example/x.jpg',
+      '/a.jpg?x=1',
+    ]) {
+      assert.equal(posterUrl(bad), null, String(bad));
+    }
+  });
+
+  it('refuses a size that is not a TMDB width bucket', () => {
+    assert.equal(posterUrl('/a.jpg', '../../secret'), null);
+    assert.equal(posterUrl('/a.jpg', 'w500'), 'https://image.tmdb.org/t/p/w500/a.jpg');
+  });
+});
+
+describe('avatarUrl', () => {
+  it('builds a public storage URL for a stored avatar', () => {
+    const path = '11111111-2222-3333-4444-555555555555/a.jpg';
+    assert.equal(
+      avatarUrl(SUPA, path),
+      `${SUPA}/storage/v1/object/public/avatars/${path}`,
+    );
+  });
+
+  it('refuses a path that could climb out of the bucket or change origin', () => {
+    for (const bad of ['../../secret', 'a.jpg', '/leading/slash.jpg', null, 42, '../x/y.jpg']) {
+      assert.equal(avatarUrl(SUPA, bad), null, String(bad));
+    }
+    assert.equal(avatarUrl('https://evil.example/?x=', '1111/a.jpg'), null);
+    assert.equal(avatarUrl('not-a-url', '11111111-2222-3333-4444-555555555555/a.jpg'), null);
+  });
+});
+
+describe('the context requests', () => {
+  it('asks for one title by id, naming its columns', () => {
+    const url = titleContextRequest(SUPA, UUID);
+    assert.ok(url.startsWith(`${SUPA}/rest/v1/media_items?id=eq.${UUID}`));
+    assert.ok(url.includes('limit=1'));
+    // Named columns, so a column added to `media_items` later is not shipped to every
+    // visitor by accident. `overview` is the one that would hurt: a plot synopsis.
+    assert.ok(!url.includes('select=*'));
+    assert.ok(!url.includes('overview'));
+  });
+
+  it('asks for one profile by handle, and for three columns only', () => {
+    const url = profileContextRequest(SUPA, 'fourward');
+    assert.ok(url.startsWith(`${SUPA}/rest/v1/profiles?username=eq.fourward`));
+    assert.ok(url.includes('display_name'));
+    assert.ok(url.includes('avatar_path'));
+    // `bio` is readable for a public profile and is still nobody's business on a link
+    // preview, and nothing under it is a visibility question this page should reopen.
+    assert.ok(!url.includes('bio'));
+    assert.ok(!url.includes('email'));
+  });
+
+  it('refuses an identifier that did not come from the path validators', () => {
+    // Belt over the braces `titleIdFromPath` and `handleFromPath` already provide: these
+    // strings are concatenated into a query, so the shapes are checked twice.
+    assert.equal(titleContextRequest(SUPA, 'not-a-uuid'), null);
+    assert.equal(titleContextRequest(SUPA, `${UUID}&select=*`), null);
+    assert.equal(profileContextRequest(SUPA, 'Has.Capitals'), null);
+    assert.equal(profileContextRequest(SUPA, 'ok&or=(1.eq.1)'), null);
+    assert.equal(titleContextRequest('https://evil.example/x', UUID), null);
+  });
+});
+
+describe('titleDisplay', () => {
+  it('names a film and its year', () => {
+    assert.deepEqual(
+      titleDisplay({ kind: 'movie', title: 'Amadeus', release_date: '1984-09-19' }),
+      { name: 'Amadeus', detail: '1984' },
+    );
+  });
+
+  it('names a season by its show, because "Season 6" names nothing', () => {
+    assert.deepEqual(
+      titleDisplay({
+        kind: 'season',
+        title: 'Season 6',
+        season_number: 6,
+        release_date: '2005-09-22',
+        parent: { title: 'CSI: Crime Scene Investigation' },
+      }),
+      { name: 'CSI: Crime Scene Investigation, S6', detail: '2005' },
+    );
+  });
+
+  it('does not say the show twice when TMDB named the season after it', () => {
+    // Limited series do this: one season, named for the show.
+    assert.equal(
+      titleDisplay({
+        kind: 'season',
+        title: 'Chernobyl',
+        season_number: 1,
+        parent: { title: 'Chernobyl' },
+      }).name,
+      'Chernobyl',
+    );
+  });
+
+  it('names the specials bucket after its show, and never calls it S0', () => {
+    assert.equal(
+      titleDisplay({
+        kind: 'season',
+        title: 'Specials',
+        season_number: 0,
+        parent: { title: 'Barakamon' },
+      }).name,
+      'Barakamon, Specials',
+    );
+  });
+
+  it('falls back to the season alone when the parent did not come back', () => {
+    assert.equal(
+      titleDisplay({ kind: 'season', title: 'Season 2', season_number: 2, parent: null }).name,
+      'Season 2',
+    );
+  });
+
+  it('answers null for a row that cannot carry a name', () => {
+    for (const bad of [null, undefined, {}, { title: '   ' }, 'string']) {
+      assert.equal(titleDisplay(bad), null, JSON.stringify(bad));
+    }
+    // A malformed date is no year rather than a wrong one.
+    assert.equal(titleDisplay({ kind: 'movie', title: 'X', release_date: 'soon' }).detail, null);
+  });
+});
+
+describe('profileDisplay', () => {
+  it('prefers the display name and always keeps the handle', () => {
+    assert.deepEqual(
+      profileDisplay({ display_name: 'bingd. founder', username: 'fourward' }),
+      { name: 'bingd. founder', handle: '@fourward' },
+    );
+  });
+
+  it('falls back to the handle, never the other way round', () => {
+    assert.deepEqual(profileDisplay({ display_name: '  ', username: 'ada' }), {
+      name: 'ada',
+      handle: '@ada',
+    });
+  });
+
+  it('answers null without a handle, which is the row not existing', () => {
+    for (const bad of [null, undefined, {}, { display_name: 'Ada' }]) {
+      assert.equal(profileDisplay(bad), null);
+    }
+  });
+});
+
 describe('the built site', () => {
   const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
 
@@ -397,33 +600,59 @@ describe('the built site', () => {
   it('gives every share route a preview card with an absolute image', () => {
     for (const route of ['i', 'u', 'title', 'lists']) {
       const html = read(`${route}.html`);
-      assert.ok(html.includes('<meta property="og:site_name" content="Bingd" />'), route);
-      // Absolute, because a relative og:image is dropped silently by every unfurler —
-      // a card with no picture is indistinguishable from a card nobody wrote.
+      assert.ok(html.includes('<meta property="og:site_name" content="bingd." />'), route);
+      // Absolute, because a relative og:image is dropped silently by every unfurler.
+      // A card with no picture is indistinguishable from a card nobody wrote.
       assert.ok(
-        html.includes('<meta property="og:image" content="https://bingd.app/bingd-icon.png" />'),
+        html.includes('<meta property="og:image" content="https://bingd.app/social-card.png" />'),
         route,
       );
       assert.ok(html.includes('<meta property="og:url" content="https://bingd.app/'), route);
-      assert.ok(html.includes('<meta name="twitter:card" content="summary" />'), route);
+      assert.ok(html.includes('<meta name="twitter:card" content="summary_large_image" />'), route);
     }
-    // And the image is actually served, at exactly the path the tag names.
-    assert.ok(readFileSync(join(dist, 'bingd-icon.png')).length > 0);
+    // And the image is actually served, at exactly the path the tag names, in the shape
+    // the tag promises. A 1200x630 declared and a square delivered is a cropped card.
+    assert.ok(readFileSync(join(dist, 'social-card.png')).length > 0);
+    const card = read('title.html');
+    assert.ok(card.includes('<meta property="og:image:width" content="1200" />'));
+    assert.ok(card.includes('<meta property="og:image:height" content="630" />'));
   });
 
   it('claims nothing in a card that the site cannot know', () => {
-    // The title route is the one under pressure: the obvious next edit is a poster and
-    // a film name, and both need a server this site does not have. Until then the card
-    // says the one thing that is true — that a Bingd title is behind the link.
+    /**
+     * The title route is the one under pressure, and it is now under more of it: the
+     * *page* resolves the film's name in the browser, so the obvious next edit is to put
+     * that name in the card too. It cannot go there. These files are static, one per
+     * route, so a `<meta>` tag is the same bytes for every visitor; naming the film would
+     * need a Worker doing a lookup on every unfurl request, which is the rich-preview
+     * work this tranche deferred.
+     *
+     * So the card stays generic and the page does not, and the test says so.
+     */
     const title = read('title.html');
-    assert.ok(title.includes('<meta property="og:title" content="A title on Bingd" />'));
-    assert.ok(title.includes('<meta property="og:image:alt" content="The Bingd app icon" />'));
-    assert.ok(!title.includes('image.tmdb.org'));
-    assert.ok(!title.includes('themoviedb'));
-    // summary, not summary_large_image: the large card frames its picture as *the*
-    // subject, and an app icon presented that way reads as a poster that failed to load.
-    assert.ok(!title.includes('summary_large_image'));
+    assert.ok(title.includes('<meta property="og:title" content="Open on bingd." />'));
+    assert.ok(
+      title.includes(
+        '<meta property="og:description" content="See where it ranks with friends, or rank it yourself." />',
+      ),
+    );
+    assert.ok(title.includes('<meta property="og:image:alt" content="The bingd. wordmark" />'));
+    // No poster host anywhere in the card, even though the page loads from one.
+    const head = title.slice(0, title.indexOf('</head>'));
+    assert.ok(!head.includes('image.tmdb.org'));
+    assert.ok(!head.includes('themoviedb'));
   });
+
+  it('names the invitation in its own card rather than borrowing the share one', () => {
+    // An invitation is the one link whose preview should say what it is before it is
+    // opened. The other three are content, and "Open on bingd." is the honest line for
+    // a card that cannot name the content.
+    assert.ok(
+      read('i.html').includes('<meta property="og:title" content="You have been invited to bingd." />'),
+    );
+    assert.ok(read('u.html').includes('<meta property="og:title" content="Open on bingd." />'));
+  });
+
 
   it('keeps the identifier out of the card, because a preview is fetched by strangers', () => {
     // og:url is the route prefix. A token, handle or media id copied into it would be
@@ -439,6 +668,81 @@ describe('the built site', () => {
       const html = read(`${route}.html`);
       const url = /<meta property="og:url" content="([^"]+)"/.exec(html)[1];
       assert.equal(url, `https://bingd.app${prefix}`);
+    }
+  });
+
+  it('ships the two screenshots the page draws, and no third', () => {
+    // The page references them by name, so a build that stopped copying `src/` would
+    // otherwise show two broken frames and still pass every other test here.
+    for (const shot of ['shot-collection.jpg', 'shot-ranking.jpg']) {
+      assert.ok(readFileSync(join(dist, shot)).length > 0, shot);
+      assert.ok(read('title.html').includes(`/${shot}`), shot);
+    }
+    // Every route gets the same two, because there is one page and it is reusable.
+    for (const route of ['i', 'u', 'title', 'lists']) {
+      const html = read(`${route}.html`);
+      assert.ok(html.includes('shot-collection.jpg'), route);
+      assert.ok(html.includes('shot-ranking.jpg'), route);
+    }
+  });
+
+  it('gives both screenshots dimensions and alt text', () => {
+    /**
+     * `width`/`height` so the layout does not jump when they decode, which on a phone is
+     * the install button moving under a thumb. Alt text because a link somebody was sent
+     * is exactly the page a screen reader lands on cold.
+     */
+    const html = read('title.html');
+    assert.match(html, /shot-collection\.jpg" width="720" height="\d+"/);
+    assert.match(html, /shot-ranking\.jpg" width="720" height="\d+"/);
+    assert.match(html, /alt="A bingd\. collection of ranked series[^"]*"/);
+    assert.ok(html.includes('loading="lazy"'));
+  });
+
+  it('holds the context block hidden, with a generic line for it to replace', () => {
+    /**
+     * Both states ship in the markup and one is hidden, so the page has its final shape
+     * before any network call finishes. A card that grows a poster a second after it is
+     * read is the layout jumping under somebody's thumb, which is the thing the width
+     * and height attributes above exist to prevent everywhere else.
+     */
+    for (const route of ['u', 'title']) {
+      const html = read(`${route}.html`);
+      assert.match(html, /<div id="context" class="context" hidden>/, route);
+      assert.match(html, /<img id="context-art"[^>]*hidden/, route);
+      assert.match(html, /id="generic-subject"/, route);
+    }
+    // The invitation has no content to resolve: a token names a person, and turning one
+    // into a person is the lookup an invitation link must not offer.
+    assert.ok(!read('i.html').includes('id="context"'));
+  });
+
+  it('renders no content into the shipped HTML, only the places for it', () => {
+    // The names arrive in the browser and are written with textContent. Nothing about a
+    // film or an account is in the bytes Cloudflare serves, which is what keeps these
+    // four files identical for every visitor and cacheable at the edge.
+    for (const route of ['u', 'title']) {
+      const html = read(`${route}.html`);
+      // The slots are empty in the shipped bytes.
+      assert.match(html, /<p class="subject" id="context-name"><\/p>/, route);
+      assert.match(html, /<p class="context-detail" id="context-detail"><\/p>/, route);
+    }
+    for (const route of ['i', 'u', 'title', 'lists']) {
+      const html = read(`${route}.html`);
+      assert.ok(!html.includes('image.tmdb.org'), route);
+      assert.ok(!html.includes('/rest/v1/'), route);
+    }
+  });
+
+  it('says bingd. the way the brand is written', () => {
+    // The wordmark is lowercase with the full stop everywhere a person reads it. The
+    // legal documents keep "Bingd", deliberately: naming the entity in Terms is a
+    // different job from addressing somebody on a landing page.
+    for (const route of ['i', 'u', 'title', 'lists']) {
+      const html = read(`${route}.html`);
+      const body = html.slice(html.indexOf('<body>'));
+      assert.ok(body.includes('<h1>bingd.</h1>'), route);
+      assert.ok(!/\bBingd\b/.test(body), `${route} still capitalises the wordmark`);
     }
   });
 
@@ -520,7 +824,18 @@ describe('the built site', () => {
       const source = read(...file.split('/'));
       assert.doesNotMatch(source, /location\.search|URLSearchParams|document\.referrer/);
       assert.doesNotMatch(source, /location\.href\s*=/);
-      assert.doesNotMatch(source, /innerHTML/);
+
+      /**
+       * Every way a string becomes markup, rather than the bare word.
+       *
+       * This matched `/innerHTML/` anywhere in the file until 2026-09-03, which had the
+       * perverse effect that `page.mjs` could not *write down* the rule it obeys: the
+       * comment explaining why nothing there assembles HTML was itself a failure. The
+       * patterns below catch the assignment and the three insertion APIs, which is what
+       * the test was ever trying to say.
+       */
+      assert.doesNotMatch(source, /\.(inner|outer)HTML\s*=/);
+      assert.doesNotMatch(source, /insertAdjacentHTML|document\.write|createContextualFragment/);
     }
   });
 

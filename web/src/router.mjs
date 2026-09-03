@@ -115,23 +115,28 @@ export function allDestinations(distribution) {
  * beta never renders that kind for Android — the closed test takes the `play-opt-in`
  * branch — which is exactly why the wrong label sat unnoticed.
  *
- * So the store label reads the platform. The three beta kinds keep the labels the
- * beta has always shown, verbatim.
+ * So the store label reads the platform.
+ *
+ * **The wordmark is lowercase with the full stop, everywhere a person reads it.** It was
+ * "Bingd" here until 2026-09-03, which is the brand written the way a sentence wants it
+ * rather than the way the product is named. The legal documents still say Bingd, and
+ * deliberately: naming the entity formally in Terms is a different job from addressing
+ * somebody on a landing page.
  */
 export function installLabel(destination) {
   if (!destination) return null;
 
   switch (destination.kind) {
     case 'testflight':
-      return 'Get the Bingd beta for iPhone';
+      return 'Get the bingd. beta for iPhone';
     case 'play-opt-in':
-      return 'Join the Bingd beta on Android';
+      return 'Join the bingd. Android beta';
     case 'play':
-      return 'Get Bingd for Android';
+      return 'Get bingd. on Google Play';
     case 'store':
       return destination.platform === 'android'
-        ? 'Get Bingd for Android'
-        : 'Get Bingd for iPhone';
+        ? 'Get bingd. on Google Play'
+        : 'Get bingd. on the App Store';
     default:
       return null;
   }
@@ -276,4 +281,158 @@ export function appLinkFor(scheme, route, identifier) {
   if (!/^[a-z][a-z0-9+.-]*$/.test(scheme)) return null;
   if (!['i', 'u', 'title'].includes(route)) return null;
   return `${scheme}://${route}/${identifier}`;
+}
+// ---------------------------------------------------------------------------
+// Shared-content context
+//
+// Enough to tell a visitor "yes, this is the thing your friend sent you", and
+// deliberately not one field more.
+//
+// ---------------------------------------------------------------------------
+// Why this is allowed to read the database at all
+// ---------------------------------------------------------------------------
+//
+// Because it is not a new read path. Two policies that already exist decide
+// everything here, and both were written for the app rather than for this page:
+//
+//   - `media_items_read` is `using (true)`. The film catalogue is TMDB data with no
+//     person attached to it, and it has been world readable since 20260813000400.
+//   - `profiles_read` is `using (can_i_view(id))`, and `can_view_profile` answers a
+//     *null viewer* with `visibility = 'public' and status = 'active'` and nothing
+//     else. A private account, a suspended account and a handle that does not exist
+//     are one case from out here: zero rows.
+//
+// So the privacy rule is enforced by Postgres, on the same policy the app obeys, and
+// this page cannot widen it. It holds the anon key, which is the key the mobile
+// bundle already ships and which RLS bounds. **If a private profile ever appeared on
+// this page it would mean `can_view_profile` had changed**, and it would be visible
+// in the app long before it was visible here.
+//
+// What is deliberately not read: `profiles.bio` (readable, and still nobody's
+// business on a link preview), anything under `user_media`, `rankings`, `follows` or
+// `feed_events`. The page shows what was shared, never what anyone did with it.
+
+/** TMDB's image CDN, the same host `src/lib/images.ts` builds app poster URLs from. */
+const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
+
+/**
+ * A poster path from `media_items.poster_path` as a URL, or null.
+ *
+ * The shape check is the security half. `poster_path` arrives from the server rather
+ * than from the URL, so it is not attacker controlled in the ordinary sense, but it is
+ * still the one value on this page that comes from outside the build, and it ends up
+ * in `img.src`. Constraining it to TMDB's own form means the result cannot become a
+ * `javascript:` URL, cannot leave the CDN, and cannot carry a quote into markup even
+ * if somebody later reaches for `innerHTML`.
+ *
+ * w342 matches the app's row size, which is the width this page draws it at on a phone.
+ */
+export function posterUrl(posterPath, size = 'w342') {
+  if (typeof posterPath !== 'string') return null;
+  if (!/^\/[A-Za-z0-9._-]{1,120}\.(jpg|jpeg|png|webp)$/.test(posterPath)) return null;
+  if (!/^w\d{2,4}$/.test(size)) return null;
+  return `${TMDB_IMAGE_BASE}/${size}${posterPath}`;
+}
+
+/**
+ * A `profiles.avatar_path` as a public storage URL, or null.
+ *
+ * The `avatars` bucket is public, which is a property of the bucket rather than a
+ * decision taken here: the app serves the same URLs to signed-out readers of a public
+ * profile. The path is `<uuid>/<file>`, and the pattern pins it to that so a value
+ * cannot climb out of the bucket with `..` or point at another origin.
+ */
+export function avatarUrl(supabaseUrl, avatarPath) {
+  if (typeof supabaseUrl !== 'string' || !/^https:\/\/[a-z0-9.-]+$/.test(supabaseUrl)) return null;
+  if (typeof avatarPath !== 'string') return null;
+  if (!/^[0-9a-f-]{36}\/[A-Za-z0-9._-]{1,120}$/.test(avatarPath)) return null;
+  return `${supabaseUrl}/storage/v1/object/public/avatars/${avatarPath}`;
+}
+
+/**
+ * The PostgREST request that resolves a title, or null when there is nothing to ask.
+ *
+ * Built here rather than in `page.mjs` because it is a string concatenation with an
+ * identifier in it, which is exactly the kind of thing this file exists to keep under
+ * test. The id has already been through `titleIdFromPath`, so it is a uuid and nothing
+ * else; the embedded `parent:parent_id(title)` is what turns a season row into
+ * "The Last of Us, S1" without a second round trip.
+ *
+ * `select` names its columns. A `select=*` here would ship the overview, the genres and
+ * the popularity to every visitor for no reason, and would quietly start shipping any
+ * column added later.
+ */
+export function titleContextRequest(supabaseUrl, id) {
+  if (typeof supabaseUrl !== 'string' || !/^https:\/\/[a-z0-9.-]+$/.test(supabaseUrl)) return null;
+  if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) {
+    return null;
+  }
+  const select = 'kind,title,release_date,season_number,poster_path,parent:parent_id(title)';
+  return `${supabaseUrl}/rest/v1/media_items?id=eq.${id}&select=${select}&limit=1`;
+}
+
+/**
+ * The PostgREST request that resolves a public profile, or null.
+ *
+ * Three columns. The handle is already `handleFromPath`-validated, so it is
+ * `[a-z0-9_]{3,24}` and safe in a query string.
+ */
+export function profileContextRequest(supabaseUrl, handle) {
+  if (typeof supabaseUrl !== 'string' || !/^https:\/\/[a-z0-9.-]+$/.test(supabaseUrl)) return null;
+  if (typeof handle !== 'string' || !/^[a-z0-9_]{3,24}$/.test(handle)) return null;
+  return `${supabaseUrl}/rest/v1/profiles?username=eq.${handle}&select=display_name,username,avatar_path&limit=1`;
+}
+
+/** `2023` from `2023-01-15`, and nothing from a null or a malformed date. */
+const yearOf = (date) => {
+  const match = /^(\d{4})-\d{2}-\d{2}$/.exec(String(date ?? ''));
+  return match ? match[1] : null;
+};
+
+/**
+ * What a resolved title row should read as, or null when the row cannot carry a name.
+ *
+ * This is `compactName` from `src/lib/titles.ts`, in the one shape this page needs. It
+ * is reimplemented rather than imported because the app is React Native and this file
+ * runs in a browser with no bundler, and it is nine lines. The rule it copies: a season
+ * says the show and the season together, because "Season 1" on its own names nothing.
+ *
+ * Seasons TMDB has named after the show — limited series do this — would read as
+ * "The Last of Us, The Last of Us", so the season's own title wins when it already
+ * contains the show's.
+ */
+export function titleDisplay(row) {
+  if (!row || typeof row !== 'object') return null;
+  const own = typeof row.title === 'string' ? row.title.trim() : '';
+  if (!own) return null;
+
+  const year = yearOf(row.release_date);
+
+  if (row.kind !== 'season') {
+    return { name: own, detail: year };
+  }
+
+  const series = typeof row.parent?.title === 'string' ? row.parent.title.trim() : '';
+  if (!series || own.toLowerCase().includes(series.toLowerCase())) {
+    return { name: own, detail: year };
+  }
+
+  const number = Number.isInteger(row.season_number) ? row.season_number : null;
+  // Season 0 is TMDB's specials bucket, and "S0" is not a thing anybody says.
+  const suffix = number && number > 0 ? `S${number}` : own;
+  return { name: `${series}, ${suffix}`, detail: year };
+}
+
+/**
+ * What a resolved profile row should read as, or null.
+ *
+ * The display name is optional in the app, so the handle is the fallback and never the
+ * other way round. Nothing else from the row reaches the page.
+ */
+export function profileDisplay(row) {
+  if (!row || typeof row !== 'object') return null;
+  const handle = typeof row.username === 'string' ? row.username.trim() : '';
+  if (!handle) return null;
+  const display = typeof row.display_name === 'string' ? row.display_name.trim() : '';
+  return { name: display || handle, handle: `@${handle}` };
 }

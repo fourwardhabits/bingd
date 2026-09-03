@@ -666,13 +666,26 @@ See §12 for the full specification.
 > referral token at all — see the As-built block at §6F for why that is a decision and not
 > an omission.
 >
-> Step 3 is deliberately thin. The page is generic for every route: the Bingd mark, one
-> line of positioning, an *Open in Bingd* button and the install action for the visitor's
-> platform. It shows **no** permitted content — no film name, no poster, no handle beyond
-> the one already in the URL the visitor typed or tapped, and nothing read from any table.
-> A `/u/<handle>` page that resolved a profile would be a way to read an account from
-> outside every visibility rule in the app; a `/title/<id>` page that resolved a title
-> would be the film database this product is not.
+> Step 3 is one page, reused by every route: the bingd. wordmark, an *Open in bingd.*
+> button, the install action for the visitor's platform, and two app screenshots.
+>
+> **Revised 2026-09-03: it now shows the permitted content, and "permitted" is the whole
+> of the rule.** A `/title/<id>` page names the film or season, its year and its poster. A
+> `/u/<handle>` page names a public account, its display name, handle and avatar. Both are
+> read in the browser under the same RLS the app obeys: `media_items` is world readable and
+> always has been, and `profiles` answers a signed-out reader with `visibility = 'public'
+> and status = 'active'` accounts only. A private account returns zero rows and the page
+> keeps its generic line, without ever learning which case it was.
+>
+> The paragraph this replaces said a page resolving a profile "would be a way to read an
+> account from outside every visibility rule in the app". That was the right instinct and
+> the wrong fact: the visibility rule *is* what answers, and it answers the web exactly as
+> it answers a signed-out reader in the app.
+>
+> What the page still does not show is anything anybody **did**: no ranking, no score, no
+> watch history, no bio, and never the sender. Those are `can_i_view`-bounded reads that
+> correctly return nothing here, and showing them would need a privileged path this page
+> does not have.
 >
 > Step 5 is the manual continuation, and it is the only one there is: the token does not
 > survive a store install. See `deferred-roadmap.md` §7.
