@@ -278,6 +278,24 @@ describe('the results', () => {
     await openResults();
     expect(await screen.findByText('Nothing to pick yet')).toBeTruthy();
   });
+
+  it('shows the error state with a way back when the RPC is unavailable', async () => {
+    // The pre-migration client, or a plain network failure: the sheet must land on an
+    // honest error rather than a crash or a skeleton that never ends.
+    mockRpcResults.group_picks = Promise.resolve({
+      data: null,
+      error: { code: '42883', message: 'function group_picks does not exist' },
+    });
+    await openResults();
+    expect(await screen.findByText('Could not get picks')).toBeTruthy();
+    expect(screen.getByText('Try again')).toBeTruthy();
+  });
+
+  it('reads an unrecognised payload as the empty state rather than crashing', async () => {
+    mockRpcResults.group_picks = { status: 'ok', effective_member_count: 3, picks: 'garbage' };
+    await openResults();
+    expect(await screen.findByText('Nothing to pick yet')).toBeTruthy();
+  });
 });
 
 describe('filters', () => {

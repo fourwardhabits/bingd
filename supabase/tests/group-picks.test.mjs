@@ -71,6 +71,12 @@ const similar = (anchor, similarIds) =>
     [anchor, JSON.stringify(similarIds)],
   );
 
+const setGenres = (item, genres) =>
+  t.sql(`update media_items set genres = $2 where id = $1`, [item, genres]);
+
+const setPopularity = (item, popularity) =>
+  t.sql(`update media_items set popularity = $2 where id = $1`, [item, popularity]);
+
 const wipe = (users) =>
   Promise.all([
     t.sql(`delete from rankings where user_id = any($1::uuid[])`, [users]),
@@ -597,5 +603,216 @@ describe('what the answer discloses, and what it never can', () => {
     const result = await picks(me, [abby, bo]);
     const pick = result.picks.find((p) => p.media_item_id === saved);
     assert.equal(pick.community_score, null, 'no ratings yet: withheld, exactly as the title page would');
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('a broken cache row costs a list, never the answer', () => {
+  let me;
+  let abby;
+  let anchor;
+  let good;
+
+  before(async () => {
+    me = await t.createUser({ username: 'gp_cache_me' });
+    abby = await t.createUser({ username: 'gp_cache_abby' });
+    anchor = await t.createMovie('Robust Anchor', seq++);
+    good = await t.createMovie('The Good Candidate', seq++);
+    await follow(me, abby);
+  });
+
+  beforeEach(async () => {
+    await wipe([me, abby]);
+    await t.sql(`delete from media_cache where facet = 'similar'`);
+    await t.sql(`delete from provider_list_cache`);
+    await rank(abby, anchor, 'loved', 1);
+  });
+
+  it('skips payload entries that are not canonical uuids, and keeps the ones that are', async () => {
+    // Thirty-six hex-and-dash characters pass a lazy length check and still fail a
+    // uuid cast, which is exactly the shape that used to sink the whole call.
+    await t.sql(
+      `insert into media_cache (media_item_id, facet, payload, expires_at)
+       values ($1, 'similar', $2::jsonb, now() + interval '7 days')`,
+      [
+        anchor,
+        JSON.stringify({
+          ids: ['------------------------------------', 'not-a-uuid', 42, null, good],
+        }),
+      ],
+    );
+
+    const result = await picks(me, [abby]);
+    assert.equal(result.status, 'ok');
+    assert.ok(ids(result).includes(good), 'the well-formed entry still becomes a candidate');
+  });
+
+  it('expands an ids value that is not an array to nothing rather than raising', async () => {
+    await t.sql(
+      `insert into media_cache (media_item_id, facet, payload, expires_at)
+       values ($1, 'similar', $2::jsonb, now() + interval '7 days')`,
+      [anchor, JSON.stringify({ ids: { corrupted: true } })],
+    );
+
+    const result = await picks(me, [abby]);
+    assert.equal(result.status, 'ok');
+    assert.ok(!ids(result).includes(good));
+  });
+
+  it('survives a malformed trending payload the same way', async () => {
+    await t.sql(
+      `insert into provider_list_cache (list_key, payload, expires_at)
+       values ('trending.movie.week', $1::jsonb, now() + interval '6 hours')`,
+      [JSON.stringify({ ids: 'not-an-array' })],
+    );
+    const result = await picks(me, [abby]);
+    assert.equal(result.status, 'ok');
+  });
+
+  it('ignores an expired similar facet, unlike the deliberately unexpiring trending list', async () => {
+    await t.sql(
+      `insert into media_cache (media_item_id, facet, payload, expires_at)
+       values ($1, 'similar', $2::jsonb, now() - interval '1 hour')`,
+      [anchor, JSON.stringify({ ids: [good] })],
+    );
+    const result = await picks(me, [abby]);
+    assert.ok(!ids(result).includes(good), 'readers of media_cache must filter expiry themselves');
+  });
+
+  it('answers a duplicated payload entry with one pick, not two', async () => {
+    await similar(anchor, [good, good, good]);
+    const result = await picks(me, [abby]);
+    const occurrences = ids(result).filter((id) => id === good);
+    assert.equal(occurrences.length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The scoring principles as relationships rather than magic numbers: each test pins an
+ * ordering the product brief states, so a retuned weight that preserves the principle
+ * passes and one that breaks it fails.
+ */
+describe('the shape of the score', () => {
+  let me;
+  let abby;
+  let bo;
+  let anchorA;
+  let anchorB;
+
+  before(async () => {
+    me = await t.createUser({ username: 'gp_shape_me' });
+    abby = await t.createUser({ username: 'gp_shape_abby' });
+    bo = await t.createUser({ username: 'gp_shape_bo' });
+    anchorA = await t.createMovie('Shape Anchor A', seq++);
+    anchorB = await t.createMovie('Shape Anchor B', seq++);
+    await follow(me, abby);
+    await follow(me, bo);
+  });
+
+  beforeEach(async () => {
+    await wipe([me, abby, bo]);
+    await t.sql(`delete from media_cache where facet = 'similar'`);
+    await t.sql(`delete from provider_list_cache`);
+  });
+
+  it('lets consensus beat a spiky candidate that one member has evidence against', async () => {
+    // steady: one anchor hit for abby AND one for bo. spiky: two anchor hits for
+    // abby alone, and squarely inside the genres bo has rejected.
+    const steady = await t.createMovie('Steady For Everybody', seq++);
+    const spiky = await t.createMovie('Spiky For One', seq++);
+    const rejected = await t.createMovie('What Bo Rejected', seq++);
+    await setGenres(spiky, ['Slasher']);
+    await setGenres(rejected, ['Slasher']);
+
+    await rank(abby, anchorA, 'loved', 1);
+    await rank(abby, anchorB, 'loved', 2);
+    await rank(bo, anchorA, 'loved', 1);
+    await rank(bo, rejected, 'not_for_me', 2);
+
+    await similar(anchorA, [steady, spiky]);
+    await similar(anchorB, [spiky]);
+
+    const result = await picks(me, [abby, bo]);
+    const order = ids(result);
+    assert.ok(order.includes(steady) && order.includes(spiky));
+    assert.ok(
+      order.indexOf(steady) < order.indexOf(spiky),
+      'an 8-for-everybody beats a 10-for-one-0-for-another',
+    );
+  });
+
+  it('does not let one no-history member flatten every candidate to the same score', async () => {
+    // bo has ranked nothing and saved nothing. The caller''s own evidence must still
+    // separate the candidates.
+    const plain = await t.createMovie('Plain Candidate', seq++);
+    const wanted = await t.createMovie('Wanted Candidate', seq++);
+    await rank(me, anchorA, 'loved', 1);
+    await similar(anchorA, [plain, wanted]);
+    await save(me, wanted);
+
+    const result = await picks(me, [bo]);
+    const scoreOf = (id) => Number(result.picks.find((p) => p.media_item_id === id).group_score);
+    assert.ok(
+      scoreOf(wanted) > scoreOf(plain),
+      'the explicit save must still outrank the plain candidate',
+    );
+  });
+
+  it('orders by group evidence before popularity, whatever the popularity gap', async () => {
+    const humble = await t.createMovie('Humble But Saved', seq++);
+    const famous = await t.createMovie('Famous But Unasked', seq++);
+    await setPopularity(humble, 1);
+    await setPopularity(famous, 500);
+
+    await rank(abby, anchorA, 'loved', 1);
+    await similar(anchorA, [humble, famous]);
+    await save(bo, humble);
+
+    const result = await picks(me, [abby, bo]);
+    const order = ids(result);
+    assert.ok(order.indexOf(humble) < order.indexOf(famous), 'a save beats five hundred popularity');
+  });
+
+  it('keeps every score inside [0, 1] across a busy mixed pool', async () => {
+    const extras = [];
+    for (let i = 0; i < 4; i += 1) extras.push(await t.createMovie(`Shape Extra ${i}`, seq++));
+    await rank(abby, anchorA, 'loved', 1);
+    await rank(bo, extras[0], 'loved', 1);
+    await similar(anchorA, extras);
+    await save(abby, extras[1]);
+    await save(bo, extras[1]);
+    await t.sql(
+      `insert into provider_list_cache (list_key, payload, expires_at)
+       values ('trending.movie.week', $1::jsonb, now() + interval '6 hours')`,
+      [JSON.stringify({ ids: [extras[3]] })],
+    );
+
+    const result = await picks(me, [abby, bo]);
+    assert.ok(result.picks.length >= 3);
+    for (const pick of result.picks) {
+      const score = Number(pick.group_score);
+      assert.ok(Number.isFinite(score), 'a score is always a number');
+      assert.ok(score >= 0 && score <= 1, `score ${score} escaped [0, 1]`);
+      assert.ok(Number.isInteger(pick.saved_count) && pick.saved_count >= 0);
+      assert.ok(Number.isInteger(pick.watched_count) && pick.watched_count >= 0);
+    }
+  });
+
+  it('counts one person with several loved seasons as one watcher of the series', async () => {
+    const series = await t.createSeries('The Twice Loved Show', seq++);
+    const s1 = await t.createSeason(series, 1, 'The Twice Loved Show S1');
+    const s2 = await t.createSeason(series, 2, 'The Twice Loved Show S2');
+    await rank(abby, s1, 'loved', 1, 'tv_seasons');
+    await rank(abby, s2, 'loved', 2, 'tv_seasons');
+    await save(bo, series);
+
+    const result = await picks(me, [abby, bo], 'tv');
+    const pick = result.picks.find((p) => p.media_item_id === series);
+    assert.ok(pick, 'all-loved seasons keep the series eligible');
+    assert.equal(pick.watched_count, 1, 'two seasons, one watcher');
+    assert.equal(pick.rewatch, true);
   });
 });

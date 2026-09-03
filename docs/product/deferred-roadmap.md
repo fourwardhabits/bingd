@@ -2006,6 +2006,18 @@ call time and learns nothing from what the group then watched. Learning needs an
 signal (did the group log the pick?) that watch-tagging could supply, and it belongs to
 the same evaluation framework as §18 (Engine V2), not ahead of it.
 
+**The invoker latency ceiling, and the definer decision it defers.** Security invoker
+means every member collection row the RPC reads pays a per-row `can_i_view` policy call,
+measured at roughly a millisecond each on real PostgreSQL. After the single-scan rewrite
+of 2026-09-03 that is ~0.8s for a two-person group of 120-title rankers and ~1.4s for
+six, behind a button and a five-minute client cache. It grows linearly with the group's
+collection sizes, so a six-person group of heavy rankers will eventually feel it. The
+fix that removes the ceiling is a carefully-scoped SECURITY DEFINER body doing its own
+per-member visibility checks (five calls instead of thousands), which is a deliberate
+security-model change: the current invoker shape makes a future privacy mistake
+structurally fail, and a definer body trades that for speed. That trade is the
+founder's, recorded here rather than made quietly.
+
 **A pre-existing analytics gap recorded here so it is not bundled into the feature:**
 `leaderboard_viewed` and `leaderboard_metric_selected` declare a `metric` property that
 never reaches the vendor -- the key is missing from `ALLOWED_PROPERTY_KEYS`, and both

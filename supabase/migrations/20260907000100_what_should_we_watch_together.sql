@@ -41,6 +41,19 @@
 -- granted to `authenticated` -- the caller could make the identical call
 -- themselves, so folding it in widens nothing.
 --
+-- **What invoker costs, measured rather than assumed** (real PostgreSQL 17,
+-- 2026-09-03): every member rankings/watchlist row read here pays a per-row
+-- `can_i_view` policy call at roughly a millisecond each -- ~450x the bare
+-- read. That is why the members' rankings are read exactly once
+-- (`member_rankings`, below) instead of once per consumer. The floor that
+-- remains is one policy call per member collection row: ~0.8s for two members
+-- with 120 rankings each, ~1.4s for six. Fine behind a button and a
+-- five-minute client cache at beta scale; a six-person group of heavy rankers
+-- will feel it. The escape hatch is a carefully-scoped definer body doing its
+-- own five per-member checks, and that is a deliberate security-model change
+-- recorded as a founder decision (deferred-roadmap.md 48), not something this
+-- function may quietly become.
+--
 -- ===========================================================================
 -- 3. THE PRIVACY SHAPE OF THE ANSWER
 --
@@ -189,6 +202,30 @@ begin
     select unnest(v_members) as who
   ),
 
+  -- ------------------------------------------------- the one expensive read
+  -- Under invoker, every rankings row read here pays a per-row `can_i_view`
+  -- policy call, and that call is the whole cost of this function: measured on
+  -- real PostgreSQL 17, one pass over six members' 720 rows is ~0.7s and the
+  -- table itself is ~2ms. So the members' rankings are read EXACTLY ONCE,
+  -- materialized, and the anchors, the watch evidence and the taste vector are
+  -- all derived from this row set -- the same three reads this replaced, minus
+  -- two of the three policy sweeps. Rollup to the parent happens here so no
+  -- consumer re-joins media_items per ranking row; the medium filter does not,
+  -- because taste deliberately spans both media while anchors and watch
+  -- evidence are medium-bound.
+  member_rankings as materialized (
+    select r.user_id as who,
+           r.bucket,
+           r.position,
+           t.id as rolled_id,
+           t.kind as rolled_kind,
+           t.genres as rolled_genres
+      from rankings r
+      join members on members.who = r.user_id
+      join media_items raw on raw.id = r.media_item_id
+      join media_items t on t.id = coalesce(raw.parent_id, raw.id)
+  ),
+
   -- ------------------------------------------------------------------ saved
   -- Season watchlist rows count for their series; a movie is its own rollup.
   -- Under invoker RLS this reads exactly the watchlists the caller may see.
@@ -217,18 +254,18 @@ begin
              partition by who order by best_position, media_item_id
            ) as strength
       from (
-        select r.user_id as who, t.id as media_item_id, min(r.position) as best_position
-          from rankings r
-          join members on members.who = r.user_id
-          join media_items raw on raw.id = r.media_item_id
-          join media_items t on t.id = coalesce(raw.parent_id, raw.id)
-                            and t.kind = v_kind
-         where r.bucket = 'loved'
-         group by r.user_id, t.id
+        select who, rolled_id as media_item_id, min(position) as best_position
+          from member_rankings
+         where bucket = 'loved' and rolled_kind = v_kind
+         group by who, rolled_id
       ) rolled
   ),
 
   -- --------------------------------------------------------------- similar
+  -- The payload is service-role-written, and hardened anyway: a facet whose `ids`
+  -- is not an array expands to nothing rather than raising, and an entry that is
+  -- not a canonical dashed uuid is skipped rather than failing the cast. One bad
+  -- adapter write must cost one candidate list, never the whole answer.
   similar_hits as (
     select a.who, (ids.value)::uuid as media_item_id
       from anchor_pool a
@@ -236,10 +273,11 @@ begin
                          and mc.facet = 'similar'
                          and mc.expires_at > now()
       cross join lateral jsonb_array_elements_text(
-        coalesce(mc.payload->'ids', '[]'::jsonb)
+        case when jsonb_typeof(mc.payload->'ids') = 'array'
+             then mc.payload->'ids' else '[]'::jsonb end
       ) as ids(value)
      where a.strength <= 6
-       and ids.value ~ '^[0-9a-fA-F-]{36}$'
+       and ids.value ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
   ),
   similar_by_member as (
     select who, media_item_id, count(*)::integer as hits
@@ -260,12 +298,13 @@ begin
     select (ids.value)::uuid as media_item_id
       from provider_list_cache plc
       cross join lateral jsonb_array_elements_text(
-        coalesce(plc.payload->'ids', '[]'::jsonb)
+        case when jsonb_typeof(plc.payload->'ids') = 'array'
+             then plc.payload->'ids' else '[]'::jsonb end
       ) as ids(value)
      where plc.list_key = case when v_kind = 'movie'
                                then 'trending.movie.week'
                                else 'trending.series.week' end
-       and ids.value ~ '^[0-9a-fA-F-]{36}$'
+       and ids.value ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
   ),
 
   -- ------------------------------------------------------------ candidates
@@ -297,14 +336,11 @@ begin
   -- not_for_me 0, unbucketed log 1 -- and min() takes the worst known one,
   -- across a member's seasons of a series too.
   watch_evidence as (
-    select r.user_id as who, t.id as media_item_id,
-           min(case r.bucket when 'loved' then 2 when 'fine' then 1 else 0 end) as opinion
-      from rankings r
-      join members on members.who = r.user_id
-      join media_items raw on raw.id = r.media_item_id
-      join media_items t on t.id = coalesce(raw.parent_id, raw.id)
-                        and t.kind = v_kind
-     group by r.user_id, t.id
+    select who, rolled_id as media_item_id,
+           min(case bucket when 'loved' then 2 when 'fine' then 1 else 0 end) as opinion
+      from member_rankings
+     where rolled_kind = v_kind
+     group by who, rolled_id
   ),
   own_logged as (
     select um.user_id as who, t.id as media_item_id,
@@ -337,15 +373,12 @@ begin
   -- loves Japanese cinema means it about television too. Raw provider genres on
   -- both sides of the comparison, so the two sides cannot disagree.
   member_taste as (
-    select r.user_id as who, g.genre,
-           count(*) filter (where r.bucket = 'loved') as loved_n,
-           count(*) filter (where r.bucket = 'not_for_me') as disliked_n
-      from rankings r
-      join members on members.who = r.user_id
-      join media_items raw on raw.id = r.media_item_id
-      join media_items t on t.id = coalesce(raw.parent_id, raw.id)
-      cross join lateral unnest(t.genres) as g(genre)
-     group by r.user_id, g.genre
+    select who, g.genre,
+           count(*) filter (where bucket = 'loved') as loved_n,
+           count(*) filter (where bucket = 'not_for_me') as disliked_n
+      from member_rankings
+      cross join lateral unnest(rolled_genres) as g(genre)
+     group by who, g.genre
   ),
   member_taste_totals as (
     select who,

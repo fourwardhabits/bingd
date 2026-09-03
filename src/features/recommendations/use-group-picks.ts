@@ -81,7 +81,10 @@ export function useGroupPicks(
       if (error) throw error;
 
       const body = data as { effective_member_count: number; picks: PickRow[] } | null;
-      const rows = body?.picks ?? [];
+      // Defensive over a payload this client version does not recognise: a non-array
+      // `picks` reads as empty rather than crashing the map below. The server never
+      // sends one today; a future shape change degrades to the honest empty state.
+      const rows = Array.isArray(body?.picks) ? body.picks : [];
       const effectiveMemberCount = body?.effective_member_count ?? 1;
       if (rows.length === 0) return { picks: [], effectiveMemberCount };
 
