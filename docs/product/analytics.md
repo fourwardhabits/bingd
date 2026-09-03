@@ -13,7 +13,7 @@
 > **Do people activate, run the core loop, use the social side — and which build were
 > they on when they did it?**
 
-That is the whole brief. Fourteen events. Everything a mature analytics practice would add
+That is the whole brief. Seventeen events. Everything a mature analytics practice would add
 — retention cohorts, an activation funnel with D1/D7/D28, paid attribution, sponsorship
 reporting, an experimentation platform — is in [`deferred-roadmap.md`](./deferred-roadmap.md)
 §9–§12 with the reason it is not here.
@@ -38,8 +38,9 @@ secret: a PostHog project token is write-only and a Sentry DSN only accepts even
 
 ## 2. The canonical event set
 
-Fourteen events: eleven since 2026-08-18, two added on 2026-08-19 when the invitation
-resolver gave them writers, and one added on 2026-09-03 with Help & Support. The union in `src/lib/analytics.ts` is the
+Seventeen events: eleven since 2026-08-18, two added on 2026-08-19 when the invitation
+resolver gave them writers, one added on 2026-09-03 with Help & Support, and three added
+on 2026-09-03 with Group Picks. The union in `src/lib/analytics.ts` is the
 enforcement — there is no
 `track(name: string, props: object)` to reach for, so inventing an event is a compile
 error rather than a decision somebody makes at 2am before a demo.
@@ -118,6 +119,24 @@ would split the denominator for nothing.
 `type` is the only property. The subject is a constant and the body is a template, so the
 only part of the mail that is a person's own words is what they type after the draft
 opens — which this app never sees. No address, no account, no free text.
+
+### Group Picks — added 2026-09-03
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `group_picks_opened` | the Group Picks chip was tapped and the sheet opened | the reader | — |
+| `group_picks_generated` | a group asked for picks and the list was built — once per generation, never per filter change | the reader | `group_size`, `result_count`, `source_mix`, `filter_count` |
+| `group_picks_result_opened` | a pick row was opened into its title page | the reader | `position` |
+
+Three events for the funnel the feature actually has: opened, asked, acted. `group_size`
+is the **effective** count the server scored over, which is the honest denominator when a
+member fell out of visibility between the picker and the call. `source_mix` is one short
+tally string — `saved:4|group:9|rewatch:2|trending:0` — that says what kind of list this
+was (shared saves, inferred taste, or trending fill) without naming one title on it.
+
+What deliberately does not travel: member ids, member names, title ids, title names, the
+filter *values*, and the internal group score. Saves made from a pick reuse
+`watchlist_added` with `surface: 'group_picks'` rather than growing a fourth event.
 
 ---
 

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { invalidateAwards } from '@/features/awards/invalidate';
 import { nudgePushDelivery } from '@/features/notifications/push';
+import { filterPeople } from '@/features/people/PeoplePicker';
 import { offerPushPermission } from '@/features/notifications/push-permission';
 import { track, type Surface } from '@/lib/analytics';
 import { diagnose } from '@/lib/diagnose';
@@ -141,22 +142,13 @@ export function useRecommendRecipients(viewerId: string) {
 /**
  * A simple contains match over name and handle, for a list that has outgrown reading.
  *
- * Over the *following* list and never over the directory. Searching everybody and
- * filtering the results on the client would make the picker a people-search that
- * happens to refuse most of what it finds, and would put accounts the sender has no
- * relationship with in front of them. §16 of the tranche brief, and the server agrees:
- * `_may_recommend_to` tests the same edge this list is built from.
+ * The implementation moved to `features/people/PeoplePicker` with the picker itself
+ * (2026-09-03); this name stays so every existing caller and test keeps its import.
+ * Over the *following* list and never over the directory — the rest of the reasoning
+ * lives with `filterPeople`.
  */
 export function filterRecipients(people: Recipient[], query: string): Recipient[] {
-  // A leading @ is the handle sigil, not part of the handle — "@ben" must find ben,
-  // exactly as Search's placeholder teaches people to type it.
-  const needle = query.trim().toLowerCase().replace(/^@/, '');
-  if (!needle) return people;
-  return people.filter(
-    (person) =>
-      person.name.toLowerCase().includes(needle) ||
-      person.username.toLowerCase().includes(needle),
-  );
+  return filterPeople(people, query);
 }
 
 /**

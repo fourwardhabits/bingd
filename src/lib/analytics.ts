@@ -76,7 +76,9 @@ export type Surface =
    * network actually closes into mutuals, and it is the only follow entry point that
    * is not somebody's profile.
    */
-  | 'notifications';
+  | 'notifications'
+  /** The Group Picks results list, for saves made from a group's pick. */
+  | 'group_picks';
 
 export type SignInMethod = 'email_code' | 'password' | 'apple' | 'google';
 
@@ -295,7 +297,44 @@ export type AnalyticsEvent =
    * draft opens — which this app never sees and would not be allowed to send if it did.
    * There is no address, no account and no free text in this event.
    */
-  | { name: 'settings_support_email_opened'; props: { type: SupportTopicName } };
+  | { name: 'settings_support_email_opened'; props: { type: SupportTopicName } }
+
+  // --- Group Picks ----------------------------------------------------------
+  /**
+   * The Group Picks chip was tapped and the sheet opened.
+   *
+   * The tap, not a generation: somebody can open the sheet, look at the picker and
+   * leave, and the gap between this and `group_picks_generated` is exactly the number
+   * who did. No properties — the group does not exist yet at this moment.
+   */
+  | { name: 'group_picks_opened'; props?: undefined }
+  /**
+   * A group asked for picks and the list was built.
+   *
+   * Once per generation — a new member set or a new medium — and never re-emitted by a
+   * filter change, which narrows the same list. `group_size` is the effective group the
+   * server actually scored over; `result_count` is what the list showed before any
+   * filter; `source_mix` is the per-source tally as one short string (for example
+   * `saved:4|group:9|rewatch:2|trending:0`), which says what kind of list this was
+   * without naming one title in it. No member, no title, no id travels here.
+   */
+  | {
+      name: 'group_picks_generated';
+      props: {
+        group_size: number;
+        result_count: number;
+        source_mix: string;
+        filter_count: number;
+      };
+    }
+  /**
+   * A Group Picks row was opened into its title page.
+   *
+   * `position` is one-based within the list as shown, which answers the only question
+   * this event exists for — do people take the first suggestion or dig — without
+   * carrying what the title was.
+   */
+  | { name: 'group_picks_result_opened'; props: { position: number } };
 
 /**
  * Which of the two support rows. Spelled here rather than imported from `lib/support`,
@@ -320,6 +359,9 @@ export const ANALYTICS_EVENTS = [
   'invite_redeemed',
   'invite_activated',
   'settings_support_email_opened',
+  'group_picks_opened',
+  'group_picks_generated',
+  'group_picks_result_opened',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**
@@ -374,6 +416,12 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'position',
   'has_title',
   'type',
+  // Group Picks (2026-09-03). Counts and one tally string; the tally names sources
+  // (`saved:4|group:9|...`), never a title, a person, or an id.
+  'group_size',
+  'result_count',
+  'source_mix',
+  'filter_count',
   // Release identity (`lib/release.ts`).
   'environment',
   'platform',

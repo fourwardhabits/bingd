@@ -40,6 +40,9 @@ jest.mock('@/lib/supabase', () => ({
       const chain = {
         select: () => chain,
         eq: () => chain,
+        gt: () => chain,
+        in: () => chain,
+        limit: () => chain,
         order: () => chain,
         then: (resolve: (value: unknown) => unknown) => resolve({ data: [], error: null }),
       };
@@ -295,5 +298,29 @@ describe('coming back from People', () => {
 
     // Still the list rather than the wall, which is what the chip being on means.
     await waitFor(() => expect(view.getByText('Heat (1995)')).toBeTruthy());
+  });
+});
+
+/**
+ * **Group Picks is an action chip, not a mode.** It sits in the same wrapping chip row,
+ * opens a sheet, and belongs to the title categories only — People has no medium for a
+ * group to pick over. The flow itself is exercised in `GroupPicksSheet.test.tsx`; what
+ * this file owns is the entry point.
+ */
+describe('the Group Picks chip', () => {
+  it('sits in the chip row and opens the flow', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByText('Group Picks')).toBeTruthy());
+
+    await fireEvent.press(view.getByText('Group Picks'));
+    await waitFor(() => expect(view.getByText("Who's watching?")).toBeTruthy());
+  });
+
+  it('is absent on People', async () => {
+    mockRpcResults.people_mutuals = [person({ mutual_count: 3, mutual_names: ['Ben'] })];
+    const view = await open();
+    await choose(view, 'People');
+    await waitFor(() => expect(view.getByText('Ben + 2 more')).toBeTruthy());
+    expect(view.queryByText('Group Picks')).toBeNull();
   });
 });
