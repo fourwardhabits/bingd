@@ -71,9 +71,6 @@ const similar = (anchor, similarIds) =>
     [anchor, JSON.stringify(similarIds)],
   );
 
-const setGenres = (item, genres) =>
-  t.sql(`update media_items set genres = $2 where id = $1`, [item, genres]);
-
 const wipe = (users) =>
   Promise.all([
     t.sql(`delete from rankings where user_id = any($1::uuid[])`, [users]),
