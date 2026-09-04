@@ -488,7 +488,7 @@ comment on function _edit_comment(uuid, uuid, text, boolean, uuid[], boolean) is
   'The whole of editing a comment, behind both published signatures. p_apply_mentions separates "this caller says nobody is mentioned" from "this caller does not know about mentions" -- the four-argument form passes false, so an old bundle editing a comment cannot silently deactivate its mentions. Since 20260908000100 the ids come from the body as well as from the picked array, so adding a name by typing it notifies that person once and leaving it there notifies nobody again. Internal.';
 
 -- ---------------------------------------------------------------------------
--- 5. Grants
+-- 5. What a client may not call
 --
 -- Both new functions are internal for `_can_mention`'s reason: between them they
 -- answer questions about a named third party's follow graph and about what a
@@ -507,9 +507,30 @@ revoke execute on function _mentioned_handles(text)
 revoke execute on function _resolve_comment_mentions(uuid, uuid, uuid[], text)
   from public, anon, authenticated;
 
--- Unchanged definitions whose grants must survive this migration untouched; stated
--- rather than assumed, because `create or replace` on a definer is exactly where an
--- ACL has silently gone missing in this repo before (20260830000100, section 8).
+-- ---------------------------------------------------------------------------
+-- 6. Two docstrings that are now wrong
+--
+-- Neither function's body changes. Both describe themselves as carrying no
+-- mentions, which was true when the picked array was the only source and is
+-- misleading now that the body is: a phone predating 20260830000100 posts through
+-- the five-argument signature, and its comments do name people. A function
+-- comment is where somebody checks this, so it is worth the two statements.
+-- ---------------------------------------------------------------------------
+
+comment on function add_comment(uuid, uuid, text, boolean, uuid) is
+  'Posts one comment, or one reply, on a feed event. Since 20260830000100 a thin delegate to _add_comment, and since 20260908000100 one that still names people: it passes no mention ids, but _add_comment resolves the body itself, so a bundle published before either migration posts working mentions. All of 20260826000600''s behaviour is unchanged and now lives in one place: threads exactly one level deep, both visibility checks before any lock, every notifiable pair locked in ascending counterpart-uuid order, the parent pinned with `for share`, and an inbox row for the activity''s actor and the person replied to -- never twice for one person, never to oneself, never to a tombstone, and since 20260908000100 never alongside a mention row for that same person.';
+
+comment on function add_comment(uuid, uuid, text, boolean, uuid, uuid[]) is
+  'Posts one comment or reply and records who it names (20260830000100). Ids rather than handles, so the association survives a rename; every one is checked with _can_mention against this activity, and the whole call is refused rather than partially applied if any is ineligible. Since 20260908000100 the ids are a preference rather than the source -- the body is parsed server-side and its handles resolved through the same _can_mention, so a handle typed rather than picked names its person too, and one that resolves to nobody is quietly not a mention. At most one mention notification per (comment, person), ever. p_mention_ids is deliberately not defaulted, so this signature and the five-argument one stay unambiguous to PostgREST and a phone that has not taken this bundle goes on posting.';
+
+-- ---------------------------------------------------------------------------
+-- 7. Grants that must survive
+--
+-- Unchanged definitions, stated rather than assumed, because `create or replace`
+-- on a definer is exactly where an ACL has silently gone missing in this repo
+-- before (20260830000100, section 8).
+-- ---------------------------------------------------------------------------
+
 grant execute on function add_comment(uuid, uuid, text, boolean, uuid)         to authenticated;
 grant execute on function add_comment(uuid, uuid, text, boolean, uuid, uuid[]) to authenticated;
 grant execute on function edit_comment(uuid, uuid, text, boolean)              to authenticated;
