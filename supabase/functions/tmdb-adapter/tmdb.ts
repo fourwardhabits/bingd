@@ -277,6 +277,29 @@ export type TmdbSeriesDetail = {
   }[];
 };
 
+/**
+ * One episode of a season, as far as Bingd reads it.
+ *
+ * **Six fields, and the type is the boundary.** TMDB sends roughly twenty per
+ * episode — vote averages, guest stars, a full crew list, production codes — and
+ * declaring only these six is what stops the rest reaching `normalize.ts` at all.
+ * The Episodes tab exists so a reader can recognise a season they already watched,
+ * and nothing outside this list serves that.
+ *
+ * Every field is optional and nullable because the provider treats them that way:
+ * an unaired episode routinely has no runtime, no still and an empty overview, and
+ * TMDB sends `''` for a date it does not have. `episodesOf` is where each of those
+ * becomes a null Bingd can render around.
+ */
+export type TmdbEpisode = {
+  episode_number?: number | null;
+  name?: string | null;
+  air_date?: string | null;
+  runtime?: number | null;
+  still_path?: string | null;
+  overview?: string | null;
+};
+
 export type TmdbSeasonDetail = {
   id: number;
   season_number: number;
@@ -290,12 +313,19 @@ export type TmdbSeasonDetail = {
    * The season's episodes, which this route returns in full and the series list
    * does not.
    *
-   * Only ever counted, never stored: `media_items` has no episode table and the
-   * feed's subheading wants `8 episodes` and nothing else. It is declared as the
-   * empty shape on purpose, so that reading a field off one is a type error rather
-   * than a facet somebody starts filling in here (`20260820000400`).
+   * Counted for `media_items.episode_count` (`20260820000400`) and, since the
+   * Episodes tab, also normalized by `episodesOf` and returned to the client.
+   * **Still never stored.** There is no episode table and no `episodes` facet: this
+   * is reference metadata a season page renders, not user state, and persisting it
+   * would put provider text and image paths under PRD §19's retention window for
+   * every season anybody opens.
+   *
+   * Typed as `unknown[]` rather than `TmdbEpisode[]` on purpose. This is the raw
+   * provider array and its elements are not guaranteed to be objects at all;
+   * `episodesOf` is the only thing allowed to make a claim about what is in it, and
+   * an `unknown` here is what forces every reader through that check.
    */
-  episodes?: Record<never, never>[];
+  episodes?: unknown[];
 };
 
 export function searchMulti(

@@ -21,6 +21,7 @@ export {
 } from './DetailHeader';
 export { Divider } from './Divider';
 export { EmptyState, type EmptyStateKind } from './EmptyState';
+export { EpisodeRow, type EpisodeRowProps } from './EpisodeRow';
 export { Field, type FieldProps } from './Field';
 export { FilterChip, type FilterChipProps } from './FilterChip';
 export { HeaderBoundary } from './HeaderBoundary';

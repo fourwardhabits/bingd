@@ -377,14 +377,15 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 
 `nudge-scheduler` is worth calling out. PRD §15 makes the nudge conditional on real content, so the function's first action is a query for qualifying activity, and its most common outcome is to send nothing. That is the intended behavior, not a failure mode, and the metric to watch is the ratio of evaluations to sends.
 
-### `tmdb-adapter` — the eight actions
+### `tmdb-adapter` — the nine actions
 
 Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may call it.
 
 | Action | Caller | Purpose |
 |---|---|---|
 | `search` | signed-in user | Searches TMDB, writes the results into `media_items`, returns them Bingd-shaped |
-| `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits, trailers, certification |
+| `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits, trailers, certification. **For a season, also returns that season's episodes.** Added 2026-09-03 |
+| `season-episodes` | signed-in user | One season's episodes on their own, for an Episodes tab whose cache `detail` did not seed. Reads nothing into the catalogue and writes nothing. Added 2026-09-03 |
 | `similar` | signed-in user | Caches what TMDB associates with one title as the `similar` facet. The candidate source behind For You. Added 2026-08-16 |
 | `person` | signed-in user | Caches one person and the titles TMDB credits them on, writing those titles into the catalogue first. Added 2026-08-17 |
 | `trending` | `service_role` | Refreshes the four `provider_list_cache` lists. Added 2026-08-16 |
@@ -423,6 +424,32 @@ is silent, and the silence lasted thirteen days.
 certification source (`release_dates` for a movie, `content_ratings` for a series) all arrive
 through TMDB's `append_to_response`, so trailers and the certificate cost nothing beyond the
 detail call that was already being made. A season appends only `credits,videos`.
+
+**Episodes cost no provider request at all, in the ordinary case.** `/tv/{series}/season/{n}`
+has always returned the season's episodes in full — it is where `episode_count` comes from,
+counted off the array since `20260820000400` — and the rest of each episode was normalized
+away. Since 2026-09-03 `detail` returns that list, trimmed by `episodesOf` to the six fields
+a row renders: number, title, air date, runtime, still path, overview. A season page enriches
+on mount, so by the time the reader opens Episodes the client has usually seeded its cache
+from a response it was already waiting for.
+
+`season-episodes` is the fallback for when that did not happen: an enrichment that failed
+silently, or a row already complete enough that `detail` was never called. It makes the same
+`/tv/{series}/season/{n}` request, charged to the caller's hourly ceiling like every other
+user action, and — unlike `detail` — writes nothing at all. The client gates it behind "no
+enrichment is in flight", so the two cannot race and spend two requests on one answer.
+
+**Nothing about an episode is stored.** There is no episode table, no `episodes` facet and no
+`media_items` row: episodes are display metadata a season page renders and drops, which is
+also why they carry no retention obligation under PRD §19. The payload is capped at 200
+episodes as a bound on the response, while `episode_count` keeps counting the raw array — so a
+260-episode season still reports 260 and the cap never becomes a claim about the show.
+
+**No part of the outbound URL comes from the caller.** The body carries one Bingd uuid; the
+series id and the season number are read out of `media_items` by `seasonTarget`, which refuses
+a film, a series grouping, a season with no parent or number, a parent that is not a series,
+and a series with no tmdb id. That function is pure and separately tested, which is what makes
+"this is not a proxy" checkable rather than a claim.
 
 **TMDB Reviews were built on 2026-08-17 and removed the same day**, and the removal is the
 more useful thing to record. A `reviews` facet was added by `20260817000500`, filled from

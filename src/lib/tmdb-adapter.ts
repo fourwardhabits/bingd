@@ -144,17 +144,65 @@ export async function searchProvider(query: string, limit = 10) {
 }
 
 /**
+ * One episode of a season, as the Episodes tab renders it.
+ *
+ * Informational metadata and nothing else. An episode is not a `media_items` row, is
+ * not rankable and is not loggable (PRD §10); this exists so a reader can recognise
+ * which season of a show they actually watched. Every field but the number is
+ * nullable, because the provider treats them that way and the row draws around
+ * whatever is missing.
+ */
+export type TitleEpisode = {
+  episode_number: number;
+  title: string | null;
+  air_date: string | null;
+  runtime_minutes: number | null;
+  still_path: string | null;
+  overview: string | null;
+};
+
+/**
  * Fills one title in: runtime, overview, artwork, credits, and a series' seasons.
  *
  * Returns whether anything was written, so a caller can avoid invalidating a query
  * that would come back identical.
+ *
+ * **For a season it also returns that season's episodes**, which the adapter reads
+ * off the very same provider response it was already fetching. `use-enrichment`
+ * seeds the Episodes cache from this, which is why opening the tab on an ordinary
+ * season page costs no provider request of its own.
  */
 export async function enrichTitle(mediaItemId: string) {
-  const data = await invoke<{ enriched: boolean; reason?: string }>({
+  const data = await invoke<{
+    enriched: boolean;
+    reason?: string;
+    episodes?: TitleEpisode[];
+  }>({
     action: 'detail',
     mediaItemId,
   });
   return data;
+}
+
+/**
+ * One season's episodes, asked for on their own.
+ *
+ * The Episodes tab's fallback. `enrichTitle` already carries this list on the
+ * response a season page waits for on mount, so this runs only when that seeding did
+ * not happen — an enrichment that failed silently, or a row already complete enough
+ * that `detail` was never called.
+ *
+ * The caller passes the season's Bingd id and nothing else. The series id and the
+ * season number are read out of `media_items` inside the adapter, so no part of the
+ * provider URL comes from this client, and the TMDB credential stays where AD-8 puts
+ * it.
+ */
+export async function fetchSeasonEpisodes(mediaItemId: string) {
+  const data = await invoke<{ id: string; episodes: TitleEpisode[]; reason?: string }>({
+    action: 'season-episodes',
+    mediaItemId,
+  });
+  return data.episodes ?? [];
 }
 
 /**
