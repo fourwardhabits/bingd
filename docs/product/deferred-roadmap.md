@@ -2026,3 +2026,56 @@ one dimension the events exist to answer. Found during the Group Picks audit of
 2026-09-03; the fix is three lines plus the pinned-list update and belongs in its own
 small change, because widening the analytics allowlist inside a feature PR is how
 allowlists erode.
+
+---
+
+## 49. Season enrichment: the TMDB request every season page mount spends
+
+**Status: deferred, 2026-09-04. Found while auditing Episodes (PRD §10, "As built");
+recorded rather than fixed because the fix has a constraint Episodes now depends on.**
+
+**What is true today.** `tmdb_upsert_seasons` writes a season's title, air date,
+overview, poster and episode count, and it has never written `runtime_minutes` — not in
+`20260815000000` and not in the `20260820000400` rebuild that is the current definition.
+So a season row's runtime is null for good. `isThin()` in `use-enrichment.ts` asks
+`kind !== 'series' && !runtime_minutes`, which is therefore true of **every season row in
+the catalogue, permanently**. Opening a season title page consequently spends one
+`/tv/{series}/season/{n}` request against the reader's hourly ceiling (api.md §9), on
+every mount, whether or not anything about the row has changed.
+
+Nothing is broken by it. The season list stays correct, the enrichment is idempotent, and
+the per-user ceiling is 120 an hour, so no real reader has hit it. It is waste rather than
+a defect, which is why it is here and not in a fix.
+
+**Why it was not fixed with Episodes.** The obvious repair — teach the season upsert to
+carry a runtime, or drop the runtime clause from `isThin` for seasons — would stop the
+enrichment firing on mount. That enrichment is currently what *seeds* the Episodes tab:
+the response it is already waiting for carries the season's episodes, and
+`use-enrichment` writes them straight into the tab's query cache. Remove the enrichment
+and every reader who opens Episodes falls through to the `season-episodes` action
+instead, which is a real provider request per reader per season. The waste would move
+rather than disappear, and it would move from a call that fills the catalogue to one that
+fills nothing.
+
+**The constraint any future fix must satisfy.** Episodes has to keep obtaining its
+metadata without introducing a second TMDB request. Concretely, one of:
+
+- keep a single season-detail call on the mounts that need one and continue seeding from
+  it, having found a freshness signal better than "runtime is null" — `fetched_at` on the
+  season row is the honest one, and the seven-day season-list window in
+  `seasonListIsStale` is the precedent; or
+- let the Episodes tab own the request outright and delete the seeding path, accepting one
+  charged request per reader per season per hour, only if measurement says the mount-time
+  enrichment was not earning its keep anyway.
+
+What must not happen is a fix that reads as tidying `isThin` and quietly doubles the
+provider requests a season page makes, or one that leaves the Episodes tab loading from
+nothing on first open.
+
+**Revisit when** provider quota or Edge Function invocation cost becomes visible, or when
+season freshness is being reworked for another reason. The signal is
+`tmdb_note_request` volume against distinct season page opens.
+
+**Depends on.** `tmdb_upsert_seasons` (`20260820000400`) · `isThin` and the seeding path
+in `use-enrichment.ts` · `useSeasonEpisodes`'s fallback · the seven-day precedent in
+`seasonListIsStale` (§ the 2026-08-30 season-list work).
