@@ -1,5 +1,7 @@
 import { fireEvent, render, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
+import { theme } from '../tokens';
 import { ReactionControl } from './ReactionControl';
 
 /**
@@ -199,5 +201,133 @@ describe('a caller that passes no glyph', () => {
 
     expect(glyphsIn(cluster(view), '❤️')).toHaveLength(1);
     expect(glyphsIn(cluster(view), '😂')).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+/**
+ * The action slot's geometry (founder, 2026-09-04).
+ *
+ * The founder read the row off the device: reacting made the leftmost control
+ * "noticeably smaller and lighter" than the comment, recommend and bookmark icons beside
+ * it. It was — the heart was an Ionicon at `icon.sm` and the emoji replacing it was
+ * `caption`, 12 against 20, because each had been given the size that suited it in
+ * isolation.
+ *
+ * These assertions are about numbers rather than appearance, which is the honest limit of
+ * what a renderer test can say: they can prove the two states occupy one slot and that
+ * every emoji is treated identically, and they cannot prove the result looks level. The
+ * one judged value, `EMOJI_SIZE`, is pinned to a band rather than an exact figure so that
+ * tuning it on a device is not a test edit.
+ */
+describe('the action slot', () => {
+  /** Every representative glyph the brief names, spanning the bounds that differ most. */
+  const REPRESENTATIVE = ['❤️', '😂', '🔥', '👏', '😮'];
+
+  const flat = (node: { props: { style?: unknown } }) =>
+    StyleSheet.flatten(node.props.style as never) as Record<string, number | string>;
+
+  const emojiIn = (view: View, glyph: string) =>
+    within(actionSlot(view)).getByText(glyph, { includeHiddenElements: true });
+
+  it('is the same fixed square whether it holds a heart or an emoji', async () => {
+    const empty = flat(actionSlot(await draw(), false));
+    const reacted = flat(actionSlot(await draw({ active: true, mineGlyph: '😂', count: 1 })));
+
+    expect(empty.width).toBe(theme.layout.icon.sm);
+    expect(empty.height).toBe(theme.layout.icon.sm);
+    // The whole of "the row must not shift when somebody reacts", in one assertion.
+    expect(reacted.width).toBe(empty.width);
+    expect(reacted.height).toBe(empty.height);
+  });
+
+  it('centres whatever is in it, on both axes', async () => {
+    const style = flat(actionSlot(await draw({ active: true, mineGlyph: '🔥', count: 1 })));
+
+    expect(style.alignItems).toBe('center');
+    expect(style.justifyContent).toBe('center');
+  });
+
+  it('draws the emoji at the weight of the icons beside it, not at caption', async () => {
+    const style = flat(emojiIn(await draw({ active: true, mineGlyph: '❤️', count: 1 }), '❤️'));
+
+    expect(style.fontSize).toBeGreaterThan(theme.typography.caption.fontSize);
+    /**
+     * A band, not a figure. The lower bound is the regression this fixes — anything near
+     * caption is the complaint again. The upper bound is `icon.sm`, because a colour
+     * emoji fills its em box where a stroked icon does not, so matching the icon's
+     * nominal size overshoots. Tuning inside the band is a device decision.
+     */
+    expect(style.fontSize).toBeGreaterThanOrEqual(16);
+    expect(style.fontSize).toBeLessThanOrEqual(theme.layout.icon.sm);
+  });
+
+  /**
+   * The no-special-casing rule, stated as a test. A per-emoji size table is the thing
+   * that goes stale the first time the six change, so there must be exactly one
+   * treatment — and the fixed square above is what absorbs the differing glyph bounds.
+   */
+  it('treats every representative emoji identically', async () => {
+    /**
+     * Sequential, never `Promise.all`. Concurrent `render`s overlap their `act()` scopes
+     * and the damage lands on the *next* test in the file as a confusing "unable to
+     * find", not here — the same trap the awaited-`fireEvent` rule exists for.
+     */
+    const styles: Record<string, number | string>[] = [];
+    for (const glyph of REPRESENTATIVE) {
+      styles.push(flat(emojiIn(await draw({ active: true, mineGlyph: glyph, count: 1 }), glyph)));
+    }
+
+    for (const style of styles) {
+      expect(style).toEqual(styles[0]);
+    }
+  });
+
+  /**
+   * No `lineHeight`, and it is deliberate rather than forgotten: the slot centres the
+   * text box, so leaving the box at its natural height is what cannot clip a tall glyph
+   * and what keeps six different emoji on one optical centre. `includeFontPadding` is
+   * Android's asymmetric ascent/descent padding, which would tilt that centre.
+   */
+  it('gives the glyph a line box with room to spare, so a tall emoji cannot be clipped', async () => {
+    const style = flat(emojiIn(await draw({ active: true, mineGlyph: '🔥', count: 1 }), '🔥'));
+
+    /**
+     * The regression this guards is silent and platform-specific: `Text` merges the
+     * `caption` token first, which brings `lineHeight: 16`, and a line box shorter than
+     * the glyph crops it on Android while looking perfect on iOS. So the assertion is
+     * that the box was overridden *upward*, not merely that it exists.
+     */
+    expect(style.lineHeight).toBeGreaterThan(theme.typography.caption.lineHeight);
+    expect(Number(style.lineHeight)).toBeGreaterThanOrEqual(Number(style.fontSize) * 1.25);
+    // Taller than the slot is correct: the slot centres and does not clip.
+    expect(style.lineHeight).toBeGreaterThanOrEqual(theme.layout.icon.sm);
+    expect(style.includeFontPadding).toBe(false);
+  });
+
+  it('keeps the 44pt tap target, and keeps it the same in both states', async () => {
+    const slot = theme.layout.icon.sm;
+    const empty = actionSlot(await draw(), false);
+    const reacted = actionSlot(await draw({ active: true, mineGlyph: '👏', count: 1 }));
+
+    for (const node of [empty, reacted]) {
+      expect(slot + 2 * (node.props.hitSlop as number)).toBe(theme.layout.minTapTarget);
+    }
+  });
+
+  /**
+   * The cluster is not the action slot and must not follow it. It summarises what other
+   * people chose, sits against a caption-sized count, and is meant to read small — the
+   * founder's complaint was about the control at the end of the row, and matching the
+   * cluster to it would be the redesign this is not.
+   */
+  it('leaves the summary cluster at caption, and its own tap target at 44', async () => {
+    const view = await draw({ active: true, mineGlyph: '❤️', glyphs: ['❤️', '😂'], count: 4 });
+    const other = glyphsIn(cluster(view), '😂')[0];
+
+    expect(flat(other!).fontSize).toBe(theme.typography.caption.fontSize);
+    expect(
+      theme.typography.caption.lineHeight + 2 * (cluster(view).props.hitSlop as number),
+    ).toBe(theme.layout.minTapTarget);
   });
 });
