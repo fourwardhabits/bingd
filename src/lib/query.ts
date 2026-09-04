@@ -15,7 +15,10 @@ export const queryKeys = {
   myProfile: (userId: string) => ['my-profile', userId] as const,
   collection: (userId: string) => ['collection', userId] as const,
   rankings: (userId: string, category: string) => ['rankings', userId, category] as const,
-  feed: (userId: string, cursor?: string) => ['feed', userId, { cursor }] as const,
+  // The feed is an infinite query (feed pagination, 2026-09-04): its cursor is a *page
+  // param*, which React Query stores inside the entry itself. A cursor in the key as well
+  // would give every page its own cache entry, and the list would be one page long.
+  feed: (userId: string) => ['feed', userId] as const,
   recommendations: (userId: string) => ['recommendations', userId] as const,
   title: (mediaItemId: string) => ['title', mediaItemId] as const,
   // What the log sheet opens onto: the user's own bucket, note, watch date and

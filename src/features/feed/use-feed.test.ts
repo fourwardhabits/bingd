@@ -1,8 +1,8 @@
-import { waitFor } from '@testing-library/react-native';
+import { act, waitFor } from '@testing-library/react-native';
 
 import { renderHookWithProviders } from '@/test-utils/render';
 
-import { useFeed } from './use-feed';
+import { feedItems, FEED_PAGE_SIZE, useActorActivity, useFeed } from './use-feed';
 
 let mockFeedRows: unknown[] = [];
 let mockNoteRows: unknown[] = [];
@@ -20,6 +20,31 @@ const rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
  */
 const orderCalls: Record<string, { column: string; ascending: boolean }[]> = {};
 
+/**
+ * Every read of `feed_events`, in order, with what the caller asked for.
+ *
+ * Recorded because pagination *is* the request: no assertion over the rows a stub
+ * returned could tell a page-2 read from a repeated page-1 read. What this file can
+ * prove is the filter, the projection and the limit on each successive read, and that
+ * page 2's differs from page 1's in exactly one clause.
+ */
+type MockFeedRead = {
+  select: string | null;
+  or: string | null;
+  in: Record<string, unknown[]>;
+  limit: number | null;
+};
+const mockFeedReads: MockFeedRead[] = [];
+
+/**
+ * What the next read of `feed_events` returns, one entry per read.
+ *
+ * The queue is how a two-page feed is expressed: shift an answer per read, and fall
+ * back to `mockFeedRows` once it is empty, so every suite written before pagination
+ * existed keeps its single-page behaviour untouched.
+ */
+let mockFeedQueue: { rows?: unknown[]; error?: unknown }[] = [];
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (name: string, args: Record<string, unknown>) => {
@@ -29,20 +54,39 @@ jest.mock('@/lib/supabase', () => ({
     from: (table: string) => {
       const chain: Record<string, unknown> = {};
       orderCalls[table] ??= [];
-      const result = () =>
-        Promise.resolve({
-          data: table === 'follows' ? [{ followee_id: 'friend' }] : mockFeedRows,
-          error: null,
-        });
+      const read: MockFeedRead = { select: null, or: null, in: {}, limit: null };
+      const result = () => {
+        if (table === 'follows') {
+          return Promise.resolve({ data: [{ followee_id: 'friend' }], error: null });
+        }
+        if (table !== 'feed_events') return Promise.resolve({ data: [], error: null });
+        mockFeedReads.push(read);
+        const next = mockFeedQueue.shift();
+        if (next?.error) return Promise.resolve({ data: null, error: next.error });
+        return Promise.resolve({ data: next?.rows ?? mockFeedRows, error: null });
+      };
       Object.assign(chain, {
-        select: () => chain,
+        select: (columns: string) => {
+          read.select = columns;
+          return chain;
+        },
         eq: () => chain,
-        in: () => chain,
+        or: (filter: string) => {
+          read.or = filter;
+          return chain;
+        },
+        in: (column: string, values: unknown[]) => {
+          read.in[column] = values;
+          return chain;
+        },
         order: (column: string, options?: { ascending?: boolean }) => {
           orderCalls[table]?.push({ column, ascending: options?.ascending !== false });
           return chain;
         },
-        limit: () => result(),
+        limit: (count: number) => {
+          read.limit = count;
+          return result();
+        },
         then: (resolve: (value: unknown) => unknown) => result().then(resolve),
       });
       return chain;
@@ -83,10 +127,43 @@ const event = (over: Record<string, unknown> = {}) => {
   return { causal_at: row.created_at, ...row };
 };
 
+/**
+ * Mount the feed and wait for its first page.
+ *
+ * Returns the *flattened* list, through the same `feedItems` the screen uses, so every
+ * assertion in this file is about what a reader sees rather than about a page shape.
+ */
 const load = async () => {
   const view = await renderHookWithProviders(() => useFeed('user-1'));
   await waitFor(() => expect(view.result.current.isPending).toBe(false));
-  return view.result.current.data ?? [];
+  return feedItems(view.result.current.data?.pages);
+};
+
+/**
+ * Mount the feed and keep the hook, for the tests that page it.
+ *
+ * The hook body reads the fields the assertions below read, and that is not decoration.
+ * React Query tracks which properties a component touched **during render** and re-renders
+ * only when one of those changes; a hook that returns the result object without reading
+ * anything from it tracks nothing, and a test reading `isError` off it afterwards is
+ * reading a snapshot that was never refreshed. Touching them here is what subscribes.
+ */
+const open = async () => {
+  const view = await renderHookWithProviders(() => {
+    const query = useFeed('user-1');
+    void query.status;
+    void query.isError;
+    void query.hasNextPage;
+    void query.isFetchingNextPage;
+    void query.data;
+    return query;
+  });
+  await waitFor(() => expect(view.result.current.isPending).toBe(false));
+  return {
+    view,
+    feed: () => view.result.current,
+    items: () => feedItems(view.result.current.data?.pages),
+  };
 };
 
 /** The single item under test, so each assertion is not preceded by a null check. */
@@ -101,6 +178,8 @@ beforeEach(() => {
   mockNoteRows = [];
   mockNoteError = null;
   rpcCalls.length = 0;
+  mockFeedReads.length = 0;
+  mockFeedQueue = [];
 });
 
 describe('the embedded profile', () => {
@@ -540,5 +619,322 @@ describe('the feed asks for its rows newest-first, consequences above causes', (
     await load();
 
     expect(clause()).toEqual(first);
+  });
+});
+
+/**
+ * ---------------------------------------------------------------------------
+ * PAGINATION (2026-09-04)
+ *
+ * The defect: the feed read 30 rows once and never asked for a thirty-first. A network
+ * that had produced more than thirty eligible activities showed thirty of them and then
+ * looked finished, which is indistinguishable from having reached the end.
+ *
+ * What follows asserts the *requests*, not the returned arrays, and deliberately. The
+ * rows come back from a stub in whatever order the fixture wrote them, so no assertion
+ * over the result could tell a correct page 2 from page 1 fetched twice. The requests are
+ * what the client controls; `supabase/tests` is what proves PostgreSQL agrees.
+ */
+
+/** A row `n` steps down the fixture list, so a page has distinguishable members. */
+const nth = (n: number, over: Record<string, unknown> = {}) =>
+  event({
+    id: `event-${String(n).padStart(3, '0')}`,
+    created_at: `2026-08-${String(28 - (n % 27)).padStart(2, '0')}T00:00:00Z`,
+    ...over,
+  });
+
+/** A full page of distinct rows, which is what tells the reader there may be more. */
+const fullPage = (from = 0) =>
+  Array.from({ length: FEED_PAGE_SIZE }, (_, i) => nth(from + i));
+
+const feedRead = (n: number) => {
+  const read = mockFeedReads[n];
+  if (!read) throw new Error(`the feed made ${mockFeedReads.length} reads, not ${n + 1}`);
+  return read;
+};
+
+describe('the first page', () => {
+  it('asks for one page of rows and no more', async () => {
+    mockFeedRows = fullPage();
+    const items = await load();
+
+    expect(feedRead(0).limit).toBe(FEED_PAGE_SIZE);
+    expect(items).toHaveLength(FEED_PAGE_SIZE);
+  });
+
+  it('is twenty rows, which is the founder-facing number', async () => {
+    // Written out rather than derived, so a change to the constant has to be a
+    // deliberate change to this line as well.
+    expect(FEED_PAGE_SIZE).toBe(20);
+  });
+
+  it('carries no keyset, because there is nothing before it', async () => {
+    mockFeedRows = [event()];
+    await load();
+
+    expect(feedRead(0).or).toBeNull();
+  });
+
+  it('ends the feed when the server returns fewer rows than a page', async () => {
+    // The true-end signal, and the only one there is: a short page means exhausted.
+    mockFeedRows = [event(), event({ id: 'event-2' })];
+    const { feed } = await open();
+
+    expect(feed().hasNextPage).toBe(false);
+  });
+
+  it('offers a next page when the server filled the one it was asked for', async () => {
+    mockFeedRows = fullPage();
+    const { feed } = await open();
+
+    expect(feed().hasNextPage).toBe(true);
+  });
+});
+
+describe('the cursor into the next page', () => {
+  /** Page one full, page two short, so the list settles after two reads. */
+  const twoPages = () => {
+    mockFeedQueue = [{ rows: fullPage() }, { rows: [nth(99)] }];
+  };
+
+  it('asks for rows strictly older than the last row of the page before it', async () => {
+    twoPages();
+    const { feed } = await open();
+    const last = fullPage().at(-1) as { id: string; created_at: string };
+
+    await act(async () => {
+      await feed().fetchNextPage();
+    });
+
+    // The three branches of `(causal_at desc, causal_step desc, id asc)`, written out
+    // because PostgREST has no row-value comparison. Read down them: an older instant;
+    // or the same instant and an earlier step; or the same instant, the same step, and
+    // a later id.
+    expect(feedRead(1).or).toBe(
+      [
+        `causal_at.lt."${last.created_at}"`,
+        `and(causal_at.eq."${last.created_at}",causal_step.lt.0)`,
+        `and(causal_at.eq."${last.created_at}",causal_step.eq.0,id.gt.${last.id})`,
+      ].join(','),
+    );
+  });
+
+  it('tiebreaks on id, so rows sharing a timestamp cannot straddle the boundary', async () => {
+    /**
+     * The case this exists for: the three feed events one ranking writes share a
+     * `causal_at` to the microsecond by construction (20260901000100). A cursor naming
+     * only the timestamp would either re-serve all three or skip all three, depending on
+     * which way the comparison went — so the last branch has to name the id.
+     */
+    const shared = '2026-08-20T12:00:00Z';
+    mockFeedQueue = [
+      {
+        rows: Array.from({ length: FEED_PAGE_SIZE }, (_, i) =>
+          nth(i, { created_at: shared, causal_at: shared, causal_step: 0 }),
+        ),
+      },
+      { rows: [] },
+    ];
+    const { feed } = await open();
+    await act(async () => {
+      await feed().fetchNextPage();
+    });
+
+    const or = feedRead(1).or ?? '';
+    expect(or).toContain(`causal_step.eq.0,id.gt.event-019`);
+    // And never a bare timestamp comparison on its own, which would drop the other two.
+    expect(or.split(',and(')).toHaveLength(3);
+  });
+
+  it('carries the step, so an award does not re-serve the ranking that earned it', async () => {
+    // causal_step descends: 2 is the award, 0 the act. A page ending on the award has
+    // to ask for the *lower* steps of the same instant next.
+    const at = '2026-08-21T09:00:00Z';
+    mockFeedQueue = [
+      {
+        rows: [
+          ...Array.from({ length: FEED_PAGE_SIZE - 1 }, (_, i) => nth(i)),
+          nth(50, { created_at: at, causal_at: at, causal_step: 2 }),
+        ],
+      },
+      { rows: [] },
+    ];
+    const { feed } = await open();
+    await act(async () => {
+      await feed().fetchNextPage();
+    });
+
+    expect(feedRead(1).or).toContain(`and(causal_at.eq."${at}",causal_step.lt.2)`);
+  });
+
+  it('is taken from the raw row, not from the hydrated item', async () => {
+    /**
+     * `hydrate` drops a row whose actor cannot be named. A cursor built from the items
+     * would therefore rewind past every dropped row, and the next page would re-serve
+     * the tail of this one. The last row here is unnameable, so the two answers differ.
+     */
+    mockFeedQueue = [
+      {
+        rows: [
+          ...Array.from({ length: FEED_PAGE_SIZE - 1 }, (_, i) => nth(i)),
+          nth(77, { profiles: null }),
+        ],
+      },
+      { rows: [] },
+    ];
+    const { feed } = await open();
+    await act(async () => {
+      await feed().fetchNextPage();
+    });
+
+    expect(feedRead(1).or).toContain('id.gt.event-077');
+  });
+
+  it('keeps asking past a page that hydrated away to nothing', async () => {
+    /**
+     * A page that comes back full and hydrates to zero items adds no rows, and a page
+     * that adds no rows adds no scroll — so nothing on the screen would ever ask for the
+     * one after it, and the feed would end on a lie. The read refills instead, bounded.
+     */
+    mockFeedQueue = [
+      { rows: Array.from({ length: FEED_PAGE_SIZE }, (_, i) => nth(i, { profiles: null })) },
+      { rows: [nth(200)] },
+    ];
+    const items = await load();
+
+    expect(mockFeedReads).toHaveLength(2);
+    expect(items.map((item) => item.id)).toEqual(['event-200']);
+  });
+
+  it('gives up rather than looping when every page hydrates away', async () => {
+    mockFeedRows = Array.from({ length: FEED_PAGE_SIZE }, (_, i) => nth(i, { profiles: null }));
+    const items = await load();
+
+    expect(items).toHaveLength(0);
+    // Bounded. A pathological account must not spin here.
+    expect(mockFeedReads.length).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('what pagination must not change', () => {
+  const secondRead = async () => {
+    mockFeedQueue = [{ rows: fullPage() }, { rows: [] }];
+    const { feed } = await open();
+    await act(async () => {
+      await feed().fetchNextPage();
+    });
+    return { first: feedRead(0), second: feedRead(1) };
+  };
+
+  it('reads the same columns on every page', async () => {
+    // A projection that narrowed on page 2 would give the seam a different-looking row.
+    const { first, second } = await secondRead();
+    expect(second.select).toBe(first.select);
+  });
+
+  it('keeps the actor filter, which is what scopes the feed to the follow set', async () => {
+    const { first, second } = await secondRead();
+    expect(second.in.actor_id).toEqual(first.in.actor_id);
+    expect(first.in.actor_id).toEqual(['user-1', 'friend']);
+  });
+
+  it('keeps the type filter, which is what excludes an ineligible event', async () => {
+    /**
+     * The eligibility rule is two-sided and neither side is here: `feed_events_read` is
+     * `can_i_view(actor_id)`, so a private account, a block and a deleted row all come
+     * back as no rows, from PostgreSQL, on every page alike — this client cannot weaken
+     * that and does not try. What it *can* drop is the type allow-list, which is the one
+     * eligibility filter written on this side. So: still there, and identical.
+     */
+    const { first, second } = await secondRead();
+    expect(second.in.type).toEqual(first.in.type);
+    expect(first.in.type).toEqual(expect.arrayContaining(['title_ranked', 'watchlist_added']));
+  });
+
+  it('asks for the same sort on every page', async () => {
+    // Already asserted for a refetch above; asserted here for a *page*, which is the
+    // case where a changed clause would silently skip and duplicate rows rather than
+    // merely reorder them.
+    orderCalls['feed_events'] = [];
+    await secondRead();
+    const clause = orderCalls['feed_events'] ?? [];
+
+    expect(clause.slice(0, 3)).toEqual(clause.slice(3, 6));
+  });
+
+  it('leaves one person’s activity unpaginated, because it is not a feed', async () => {
+    // `useActorActivity` reads five rows for a profile card. It goes through the same
+    // reader, and it must not acquire a cursor — or a feed-sized limit — by doing so.
+    mockFeedRows = [event()];
+    const view = await renderHookWithProviders(() => useActorActivity('user-1'));
+    await waitFor(() => expect(view.result.current.isPending).toBe(false));
+
+    expect(feedRead(0).or).toBeNull();
+    expect(feedRead(0).limit).toBe(5);
+  });
+});
+
+describe('a page that fails', () => {
+  it('keeps the rows already on screen', async () => {
+    mockFeedQueue = [{ rows: fullPage() }, { error: { message: 'network' } }];
+    const { feed, items } = await open();
+
+    await act(async () => {
+      await feed().fetchNextPage().catch(() => {});
+    });
+    await waitFor(() => expect(feed().isError).toBe(true));
+
+    // The whole point: an error on page 2 is a footer, not an empty screen.
+    expect(items()).toHaveLength(FEED_PAGE_SIZE);
+  });
+
+  it('loads on retry, from the cursor of the page that succeeded', async () => {
+    mockFeedQueue = [{ rows: fullPage() }, { error: { message: 'network' } }];
+    const { feed, items } = await open();
+    await act(async () => {
+      await feed().fetchNextPage().catch(() => {});
+    });
+    await waitFor(() => expect(feed().isError).toBe(true));
+
+    mockFeedQueue = [{ rows: [nth(300)] }];
+    await act(async () => {
+      await feed().fetchNextPage();
+    });
+
+    await waitFor(() => expect(items()).toHaveLength(FEED_PAGE_SIZE + 1));
+    // The retry asked the same question the failure did, and asked it once.
+    expect(feedRead(2).or).toBe(feedRead(1).or);
+    expect(feed().hasNextPage).toBe(false);
+  });
+});
+
+describe('pages joined into a list', () => {
+  it('keeps one copy of an activity that appears in two of them', async () => {
+    /**
+     * The keyset makes this impossible between *adjacent* pages. It is not impossible
+     * across a refresh, where the first page is re-read and the next page is measured
+     * from a boundary that has moved — and a duplicated React key is a rendering fault,
+     * not merely a cosmetic one.
+     */
+    const items = feedItems([
+      { items: [{ id: 'a' }, { id: 'b' }] as never, cursor: null },
+      { items: [{ id: 'b' }, { id: 'c' }] as never, cursor: null },
+    ]);
+
+    expect(items.map((item) => item.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('preserves the order the pages arrived in', async () => {
+    const items = feedItems([
+      { items: [{ id: 'a' }] as never, cursor: null },
+      { items: [{ id: 'b' }] as never, cursor: null },
+    ]);
+
+    expect(items.map((item) => item.id)).toEqual(['a', 'b']);
+  });
+
+  it('is empty for a feed that has not loaded', async () => {
+    expect(feedItems(undefined)).toEqual([]);
   });
 });

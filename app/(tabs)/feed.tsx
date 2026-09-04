@@ -1,7 +1,17 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, BackHandler, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  BackHandler,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { AwardActivityLead } from '@/features/awards/AwardActivityLead';
@@ -16,7 +26,12 @@ import { CommentSheet } from '@/features/feed/CommentSheet';
 import { ReactionDetail } from '@/features/feed/ReactionDetail';
 import { ReactionPill } from '@/features/feed/ReactionPill';
 import { useCommentCounts } from '@/features/feed/use-comments';
-import { useFeed, type FeedItem } from '@/features/feed/use-feed';
+import {
+  feedItems,
+  trimFeedToFirstPage,
+  useFeed,
+  type FeedItem,
+} from '@/features/feed/use-feed';
 import {
   DEFAULT_REACTION,
   REACTION_GLYPH,
@@ -46,6 +61,7 @@ import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate
 import {
   ActivityRow,
   AppHeader,
+  Button,
   EmptyState,
   HeaderBoundary,
   IconToggle,
@@ -77,6 +93,16 @@ type FeedMode = 'feed' | 'leaderboard';
  * Local only, through the same `readPref`/`writePref` pair Collection's two preferences
  * use — a device habit rather than something about the account, so no column and no sync.
  */
+/**
+ * How close to the end of the list the next page is asked for, in points.
+ *
+ * Eight hundred is about one phone screen. The fetch has to start while the reader
+ * still has content to read or the spinner is the thing they arrive at, and a page of
+ * twenty rows is several screens deep — so a threshold of one screen buys the round
+ * trip roughly a screenful of reading time without prefetching the whole feed.
+ */
+const NEXT_PAGE_THRESHOLD = 800;
+
 const TIMEFRAME_PREF_KEY = 'leaderboard.timeframe';
 
 const FEED_MODES = [
@@ -314,7 +340,15 @@ export default function FeedScreen() {
   /** Whom the last recommendation went to, so the confirmation names a person. */
   const [recommendedTo, setRecommendedTo] = useState<string | null>(null);
 
-  const eventIds = useMemo(() => (feed.data ?? []).map((event) => event.id), [feed.data]);
+  /**
+   * The loaded pages, flattened and deduped once.
+   *
+   * `feedItems` rather than a `flatMap` here, because the dedupe is part of what makes
+   * the pagination correct rather than a tidy-up: a refresh trims the list back to one
+   * page, and the page read after that is measured from a first page that has moved.
+   */
+  const events = useMemo(() => feedItems(feed.data?.pages), [feed.data]);
+  const eventIds = useMemo(() => events.map((event) => event.id), [events]);
   const reactions = useReactions(eventIds, profile.id);
   const commentCounts = useCommentCounts(eventIds, profile.id);
   const { setReaction } = useSetReaction(profile.id);
@@ -408,7 +442,30 @@ export default function FeedScreen() {
     setRecommending(event);
   };
 
-  const events = feed.data ?? [];
+  /**
+   * Ask for the next page when the reader is within a screenful of the end.
+   *
+   * The three guards are the whole of the concurrency story, and `isFetchingNextPage` is
+   * the one that matters: `onScroll` fires on every frame of a flick, so without it a
+   * single gesture through the threshold would post the same request a dozen times.
+   * React Query would coalesce them onto one entry, but each is still a round trip.
+   * `hasNextPage` is what makes the true end quiet — once `getNextPageParam` has
+   * returned null, the bottom of the list stops asking for anything at all.
+   *
+   * `isError` is deliberate too. A failed page 2 must not be retried by the scroll
+   * position the reader is already sitting at, or a dead connection becomes a request
+   * loop; the footer offers the retry instead, and that is the only way back.
+   *
+   * The board has no pages, so the handler is not attached in that mode at all.
+   */
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (showingBoard) return;
+    if (!feed.hasNextPage || feed.isFetchingNextPage || feed.isError) return;
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const fromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    if (fromBottom <= NEXT_PAGE_THRESHOLD) void feed.fetchNextPage();
+  };
+
   const openComments = commentsFor ? (events.find((e) => e.id === commentsFor) ?? null) : null;
 
   return (
@@ -440,7 +497,16 @@ export default function FeedScreen() {
           Reactions and comment counts come with it — they are read alongside the
           events and are the part most likely to have moved. */}
       <ScrollView
+        // Named so the pagination suite can drive a scroll at it. The screen holds a
+        // second, horizontal ScrollView inside the trending shelf, so "the ScrollView"
+        // is ambiguous by type and a label is the only unambiguous handle.
+        testID="feed-scroll"
         contentContainerStyle={styles.content}
+        onScroll={onScroll}
+        // 16ms: the threshold is measured against a scroll that can be a fast flick, and
+        // the default (0, meaning once) would let a reader shoot past the end of the
+        // list without the handler ever seeing that they were near it.
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={showingBoard ? leaderboard.isRefetching : feed.isRefetching}
@@ -453,6 +519,12 @@ export default function FeedScreen() {
                 void standing.refetch();
                 return;
               }
+              // Back to one page before the refetch, so the gesture costs one request
+              // rather than one per page the reader had scrolled through — and so the
+              // list it returns is the newest page rather than the same five pages
+              // re-read in place. `refetch` keeps the old rows drawn underneath, so
+              // nothing flashes and nothing jumps.
+              trimFeedToFirstPage(queryClient, profile.id);
               void feed.refetch();
               void reactions.refetch();
               void commentCounts.refetch();
@@ -597,7 +669,15 @@ export default function FeedScreen() {
           </View>
         ) : null}
 
-        {feed.isError ? (
+        {/**
+          * The whole-screen failure is now **the first page's failure and no other**.
+          *
+          * An infinite query reports a failed page on the query itself, so the old
+          * `feed.isError` test would have thrown away thirty rows the reader was
+          * already looking at because page four timed out. A failure with rows on
+          * screen belongs in the footer, next to the retry, and keeps the list.
+          */}
+        {feed.isError && events.length === 0 ? (
           <View style={styles.pad}>
             <EmptyState
               kind="couldNotLoad"
@@ -727,6 +807,45 @@ export default function FeedScreen() {
             />
           ))
         )}
+
+        {/**
+          * The foot of the list, which says one of three things and never two.
+          *
+          * A spinner while the next page is in flight; a retry when one failed; and,
+          * once the server has genuinely run out, a single quiet line. The order is the
+          * order of precedence — a fetch in flight outranks the error that preceded it,
+          * because the retry is what put it in flight.
+          *
+          * The end line is drawn only under a list that has something in it. An empty
+          * feed already has its own empty state saying considerably more, and "That's
+          * everything" under it would be the screen agreeing with itself.
+          */}
+        {feed.isFetchingNextPage ? (
+          <View style={styles.footer}>
+            <ActivityIndicator color={theme.semantic.action} />
+          </View>
+        ) : feed.isError && events.length > 0 ? (
+          <View style={styles.footer}>
+            <Text variant="footnote" tone="secondary">
+              Could not load more activity.
+            </Text>
+            {/* Retries the failed page and nothing else: `fetchNextPage` resumes from
+                the cursor of the last page that succeeded, so the rows already on
+                screen are neither re-read nor disturbed. */}
+            <Button
+              kind="tertiary"
+              size="sm"
+              label="Try again"
+              onPress={() => void feed.fetchNextPage()}
+            />
+          </View>
+        ) : !feed.hasNextPage && events.length > 0 ? (
+          <View style={styles.footer}>
+            <Text variant="footnote" tone="secondary">
+              You&rsquo;re all caught up.
+            </Text>
+          </View>
+        ) : null}
           </>
         )}
       </ScrollView>
@@ -803,6 +922,19 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   pad: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[4] },
+  /**
+   * The foot of the activity list: the spinner, the retry and the end line.
+   *
+   * Centred and generously padded, because all three are things a reader arrives at
+   * rather than reads on the way past — and because a spinner flush against the last row
+   * reads as part of that row.
+   */
+  footer: {
+    alignItems: 'center',
+    gap: theme.space[2],
+    paddingVertical: theme.space[6],
+    paddingHorizontal: theme.layout.gutter,
+  },
   // Collapses to nothing when the shelf renders null, so an absent shelf costs no
   // space rather than an empty band above the first activity row.
   trending: { gap: theme.space[2] },
