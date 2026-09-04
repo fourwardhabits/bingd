@@ -1,12 +1,19 @@
 /**
  * tmdb-adapter — the sole holder of the TMDB key and the sole caller of TMDB (AD-8).
  *
- * Eight actions, split by who may call them:
+ * Nine actions, split by who may call them:
  *
  *   search    signed-in user   Titles TMDB knows and the local catalogue does not.
  *                              Writes them through, returns them Bingd-shaped.
  *   detail    signed-in user   Fills one title in: runtime, overview, artwork,
- *                              seasons, credits, trailers, certification.
+ *                              seasons, credits, trailers, certification. For a
+ *                              season it also returns that season's episodes, off
+ *                              the same response, for the Episodes tab.
+ *   season-episodes
+ *             signed-in user   One season's episodes on their own, for a tab whose
+ *                              cache `detail` did not seed. Reads nothing into the
+ *                              catalogue and writes nothing: episodes are display
+ *                              metadata, never stored (PRD §10).
  *   similar   signed-in user   Caches what TMDB associates with one title, as the
  *                              `similar` facet. The candidate source behind For You.
  *   person    signed-in user   Caches one person and the titles TMDB credits them
@@ -49,13 +56,16 @@ import {
 import {
   creditsFacet,
   videosFacet,
+  episodesOf,
   fromMovieDetail,
   fromSearchResult,
   fromSeasonDetail,
   fromSeriesDetail,
   personCredits,
   personRecord,
+  seasonTarget,
   seasonsOf,
+  type Episode,
   type TitleRow,
 } from './normalize.ts';
 import * as tmdb from './tmdb.ts';
@@ -358,6 +368,12 @@ async function handleSimilar(db: Db, mediaItemId: string, userId: string) {
  *
  * A season is enriched through its parent, because TMDB has no endpoint that
  * takes a season's own id: the route is /tv/{series}/season/{n}.
+ *
+ * **A season also returns its episodes.** That response already carries them — it is
+ * where `episode_count` has come from since `20260820000400` — so handing the
+ * normalized list back costs no additional provider request, and the season page
+ * whose mount triggered this enrichment can seed its Episodes tab out of the answer
+ * it was already waiting for. Nothing is stored; see `episodesOf`.
  */
 async function enrichOne(
   db: Db,
@@ -365,7 +381,17 @@ async function enrichOne(
   // Present for `detail`, absent for the two maintenance batches: those run as
   // service_role against nobody's ceiling.
   charge?: tmdb.Charge,
-): Promise<{ enriched: boolean; reason?: string }> {
+  /**
+   * Whether to normalize the season's episodes into the reply.
+   *
+   * True only for `detail`, which is a screen waiting for an answer. The
+   * maintenance batches run a hundred seasons per invocation and render nothing, so
+   * building two hundred episode objects per row there would be work whose only
+   * consumer is the garbage collector. Gated explicitly rather than on `charge`
+   * being present, which is a fact about billing and not about who is listening.
+   */
+  withEpisodes = false,
+): Promise<{ enriched: boolean; reason?: string; episodes?: Episode[] }> {
   const row = await catalogueRow(db, mediaItemId);
   if (!row) return { enriched: false, reason: 'not_found' };
 
@@ -380,7 +406,10 @@ async function enrichOne(
     await upsertSeasons(db, row.parent_id, [fromSeasonDetail(detail)]);
     if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
     if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
-    return { enriched: true };
+    // Additive, and only ever on a season. A client that predates the Episodes tab
+    // reads `enriched` off this object and never looks at the rest, so the field is
+    // invisible to every build already in the field.
+    return withEpisodes ? { enriched: true, episodes: episodesOf(detail) } : { enriched: true };
   }
 
   if (!row.tmdb_id) return { enriched: false, reason: 'no_tmdb_id' };
@@ -399,6 +428,54 @@ async function enrichOne(
   if (detail.credits) await putFacet(db, row.id, 'credits', creditsFacet(detail.credits));
   if (detail.videos) await putFacet(db, row.id, 'videos', videosFacet(detail.videos));
   return { enriched: true };
+}
+
+// ---------------------------------------------------------------------------
+// season-episodes
+// ---------------------------------------------------------------------------
+
+/**
+ * One season's episodes, for the Episodes tab, without touching the catalogue.
+ *
+ * **The fallback, not the usual path.** A season page enriches on mount and
+ * `detail` already returns this same list off the same provider response, so the
+ * common flow costs no request at all. This exists for the cases the seeding cannot
+ * cover: an enrichment that failed silently, a row complete enough that `detail` was
+ * never called, or a reader who opened the tab in a session where the seed was
+ * evicted.
+ *
+ * **A user action, and charged.** It spends a provider request on somebody's behalf,
+ * exactly like `detail`, `similar` and `person`, so it observes the same hourly
+ * ceiling and there is deliberately no service-role path into it.
+ *
+ * **Nothing here is caller-controlled.** The body carries one Bingd uuid. The series
+ * id and the season number are read out of `media_items`, which is the same trusted
+ * resolution `enrichOne` performs, so no part of the outbound URL comes from the
+ * request. That is the property worth stating: this is not a proxy.
+ *
+ * Read-only by design. `detail` is what keeps the catalogue current; a tab asking
+ * what is in a season should not be a write.
+ */
+async function handleSeasonEpisodes(db: Db, mediaItemId: string, userId: string) {
+  const row = await catalogueRow(db, mediaItemId);
+  if (!row) return { id: mediaItemId, episodes: [], reason: 'not_found' as const };
+
+  // Read before the target is resolved, and only when there is a parent to read.
+  const parent = row.parent_id ? await catalogueRow(db, row.parent_id) : null;
+
+  // Every refusal, in one pure function that tests can reach. Nothing below this
+  // line comes from the request body.
+  const target = seasonTarget(row, parent);
+  if (!target.ok) return { id: mediaItemId, episodes: [], reason: target.reason };
+
+  const detail = await tmdb.seasonDetail(
+    target.seriesTmdbId,
+    target.seasonNumber,
+    // Charged per outbound attempt, retries included, exactly as `detail` is. There
+    // is no path through this handler that reaches TMDB uncharged.
+    chargeTo(db, userId),
+  );
+  return { id: mediaItemId, episodes: episodesOf(detail) };
 }
 
 // ---------------------------------------------------------------------------
@@ -533,11 +610,29 @@ Deno.serve(async (req) => {
         const id = String(body.mediaItemId ?? '');
         if (!id) return fail('BG400', 'mediaItemId is required', 400);
         // Charged per outbound attempt inside the TMDB client, retries included.
-        const result = await enrichOne(db, id, chargeTo(db, caller.id));
+        // `withEpisodes`: this is a screen waiting, and a season's episodes ride back
+        // on the response it is already waiting for.
+        const result = await enrichOne(db, id, chargeTo(db, caller.id), true);
         if (!result.enriched && result.reason === 'not_found') {
           return fail('BG404', 'No such title', 404);
         }
         return json({ id, ...result });
+      }
+
+      // The Episodes tab's own fetch, for when `detail` did not seed it. A user
+      // action and charged, like every other action a screen triggers.
+      case 'season-episodes': {
+        if (caller.kind !== 'user') {
+          return fail('BG403', 'season-episodes is a user action', 403);
+        }
+        const id = String(body.mediaItemId ?? '');
+        if (!id) return fail('BG400', 'mediaItemId is required', 400);
+        const result = await handleSeasonEpisodes(db, id, caller.id);
+        if (result.reason === 'not_found') return fail('BG404', 'No such title', 404);
+        if (result.reason === 'not_a_season') {
+          return fail('BG400', 'Episodes belong to a season', 400);
+        }
+        return json(result);
       }
 
       // A user action for the same reason detail is: what a slate needs depends on

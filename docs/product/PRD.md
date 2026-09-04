@@ -70,6 +70,7 @@
 | Status | Statement |
 |---|---|
 | **Decided** | The rankable units are movies and TV seasons. Episodes are never ranked. Whole-series ranking is not the primary TV unit. |
+| **Decided 2026-09-03 (narrows the wording, not the rule)** | **No episode tracking or ranking.** An episode is never a unit: no episode logging, ranking, rating, watched state, progress, notes or feed activity, and no `media_items` row. Episode **metadata** is in scope as reference material — the Episodes tab on a season page shows names, air dates, runtimes, stills and synopses so a reader can recognise which season they watched. Nothing about it commits the product to episode tracking later. |
 | **Decided** | Rating happens in two steps: a three-bucket reaction (**I liked it / It was fine / I didn’t like it**), then pairwise comparison within that bucket. |
 | **Decided 2026-08-15 (supersedes the ordinal-only rule)** | The ranking output shown to users is a **0–10 score with one decimal**, derived from the title's position inside its bucket band. The exact ordinal remains the stored ground truth and is shown as secondary detail on a title page. There is still no 0–100 score and no percentile. |
 | **Decided** | A title is either **Logged** (watched, optionally bucketed) or **Ranked** (has an exact position from comparisons). Positions are never derived from an imported rating. |
@@ -4155,7 +4156,8 @@ No release ships with a known crash-rate regression, a failed privacy or capabil
 1. A signed-in user can search movies and TV series online and open a detail page with poster, year, and summary.
 2. A series page lists seasons, marked *Ranked* or *Not ranked yet*.
 3. A season can be bucketed and ranked with no prior step: ranking it is the watch claim (decided 2026-08-24). A whole series still cannot be ranked.
-4. Episodes are not rankable anywhere in the product.
+4. Episodes are not rankable anywhere in the product, and nothing about an episode is logged, rated, tracked or stored.
+4a. A season page has an **Episodes** tab, first in its row, listing the episodes TMDB publishes for that season: number and title, air date and runtime, still, and a short synopsis. Unaired episodes are shown with their published dates. Specials are treated as any other season. No row is pressable and nothing on it can be acted on — it exists so a reader can recognise which season they watched before ranking it.
 5. With no connectivity, global search is disabled with an explanation, and the user's own collection remains searchable.
 6. No TMDB credential is present in the client bundle.
 

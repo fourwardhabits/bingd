@@ -9,19 +9,28 @@
  * with "ON CONFLICT DO UPDATE command cannot affect row a second time" — and that is
  * a failure the client would see as a person with no credits at all.
  *
+ * `episodesOf` and `seasonTarget` joined them with the Episodes tab, and they are
+ * here for a sharper reason: episode metadata is the only provider array that
+ * reaches a screen without being written to Postgres first, so its parsing is the
+ * only parsing in this file with no schema behind it to catch a bad shape.
+ *
  * Run with `npm run functions:test`.
  */
 
 import { assert, assertEquals } from '@std/assert';
 
 import {
+  MAX_EPISODES,
   certificationOf,
+  episodesOf,
   fromMovieDetail,
   fromSeasonDetail,
   fromSearchResult,
+  fromSeriesDetail,
   personCredits,
   personRecord,
   ratingOf,
+  seasonTarget,
   seasonsOf,
 } from './normalize.ts';
 import type { TmdbPersonDetail } from './tmdb.ts';
@@ -323,4 +332,347 @@ Deno.test('an unaired season is null rather than zero', () => {
   assertEquals(seasonsOf({ id: 1, name: 'X', seasons: [{ id: 2, season_number: 3 }] })[0].episode_count, null);
   assertEquals(fromSeasonDetail({ id: 2, season_number: 3 }).episode_count, null);
   assertEquals(fromSeasonDetail({ id: 2, season_number: 3, episodes: [] }).episode_count, null);
+});
+
+// ---------------------------------------------------------------------------
+// episodesOf — the Episodes tab's metadata
+//
+// This is the one provider array whose elements reach a screen without passing
+// through Postgres on the way, so most of what follows is about what happens when
+// the provider sends something other than the documented shape. Nothing here is
+// stored: these objects are rendered and dropped.
+// ---------------------------------------------------------------------------
+
+/** The shape TMDB documents, with every field populated. */
+const FULL_EPISODE = {
+  episode_number: 9,
+  name: 'The Rains of Castamere',
+  air_date: '2013-06-02',
+  runtime: 51,
+  still_path: '/still9.jpg',
+  overview: 'Robb presents himself to Walder Frey.',
+};
+
+Deno.test('an ordinary episode keeps the six fields the row renders', () => {
+  const [episode] = episodesOf({ episodes: [FULL_EPISODE] });
+
+  assertEquals(episode, {
+    episode_number: 9,
+    title: 'The Rains of Castamere',
+    air_date: '2013-06-02',
+    runtime_minutes: 51,
+    still_path: '/still9.jpg',
+    overview: 'Robb presents himself to Walder Frey.',
+  });
+});
+
+Deno.test('nothing outside those six fields survives normalization', () => {
+  // TMDB sends roughly twenty fields per episode. The type declares six, and this
+  // pins that the rest are dropped rather than spread through to the client, which
+  // is what keeps the response bounded and the provider payload out of the app.
+  const [episode] = episodesOf({
+    episodes: [
+      {
+        ...FULL_EPISODE,
+        vote_average: 9.2,
+        vote_count: 4310,
+        production_code: 'GOT309',
+        crew: [{ id: 1, name: 'David Nutter', job: 'Director' }],
+        guest_stars: [{ id: 2, name: 'Michelle Fairley' }],
+        show_id: 1399,
+        id: 63067,
+      },
+    ],
+  });
+
+  assertEquals(Object.keys(episode).sort(), [
+    'air_date',
+    'episode_number',
+    'overview',
+    'runtime_minutes',
+    'still_path',
+    'title',
+  ]);
+});
+
+Deno.test('a missing title is null rather than a fabricated one', () => {
+  // The row falls back to "Episode 4" on the client. Inventing a name here would put
+  // a title in the payload that TMDB never published.
+  assertEquals(episodesOf({ episodes: [{ episode_number: 4 }] })[0].title, null);
+  assertEquals(episodesOf({ episodes: [{ episode_number: 4, name: '' }] })[0].title, null);
+  assertEquals(episodesOf({ episodes: [{ episode_number: 4, name: '   ' }] })[0].title, null);
+});
+
+Deno.test('a missing still is null, so the row draws no image at all', () => {
+  assertEquals(episodesOf({ episodes: [{ episode_number: 1 }] })[0].still_path, null);
+  assertEquals(
+    episodesOf({ episodes: [{ episode_number: 1, still_path: null }] })[0].still_path,
+    null,
+  );
+});
+
+Deno.test('a missing overview is null and an empty one is not a synopsis', () => {
+  assertEquals(episodesOf({ episodes: [{ episode_number: 1 }] })[0].overview, null);
+  assertEquals(episodesOf({ episodes: [{ episode_number: 1, overview: '' }] })[0].overview, null);
+});
+
+Deno.test('a runtime TMDB does not have is null, and zero is not a runtime', () => {
+  // Zero is the provider's placeholder for an episode it has no length for, and
+  // "0 min" on a metadata line reads as a fact about the episode.
+  assertEquals(episodesOf({ episodes: [{ episode_number: 1 }] })[0].runtime_minutes, null);
+  assertEquals(
+    episodesOf({ episodes: [{ episode_number: 1, runtime: 0 }] })[0].runtime_minutes,
+    null,
+  );
+  assertEquals(
+    episodesOf({ episodes: [{ episode_number: 1, runtime: null }] })[0].runtime_minutes,
+    null,
+  );
+});
+
+Deno.test('an air date TMDB does not have is null, because an empty string is not a date', () => {
+  assertEquals(episodesOf({ episodes: [{ episode_number: 1 }] })[0].air_date, null);
+  assertEquals(episodesOf({ episodes: [{ episode_number: 1, air_date: '' }] })[0].air_date, null);
+  assertEquals(episodesOf({ episodes: [{ episode_number: 1, air_date: null }] })[0].air_date, null);
+});
+
+Deno.test('a future episode is kept, with the date TMDB published', () => {
+  // The founder's decision: an unaired episode is shown, dated. Removing it would
+  // make the list disagree with the season's own episode_count, which counts what
+  // the provider publishes rather than what has aired.
+  const [episode] = episodesOf({
+    episodes: [{ episode_number: 8, name: 'Finale', air_date: '2099-01-01' }],
+  });
+
+  assertEquals(episode.air_date, '2099-01-01');
+  assertEquals(episode.runtime_minutes, null);
+  assertEquals(episode.still_path, null);
+});
+
+Deno.test('an episode with no number is dropped, since nothing identifies it', () => {
+  const episodes = episodesOf({
+    episodes: [
+      { episode_number: 1, name: 'Real' },
+      { name: 'Numberless' },
+      { episode_number: null, name: 'Explicitly null' },
+      { episode_number: 'two', name: 'A string' },
+      { episode_number: Number.NaN, name: 'Not a number' },
+      { episode_number: 2, name: 'Also real' },
+    ],
+  });
+
+  assertEquals(
+    episodes.map((episode) => episode.title),
+    ['Real', 'Also real'],
+  );
+});
+
+Deno.test('episode zero is kept, because Specials genuinely number from zero', () => {
+  // `countOrNull` would refuse this. It is often the one episode a reader is least
+  // sure about, so it gets its own non-negative check.
+  const [episode] = episodesOf({ episodes: [{ episode_number: 0, name: 'Prologue' }] });
+
+  assertEquals(episode.episode_number, 0);
+  assertEquals(episode.title, 'Prologue');
+});
+
+Deno.test('a malformed entry is skipped rather than spread', () => {
+  const episodes = episodesOf({
+    episodes: [null, undefined, 'Episode 1', 42, true, [], { episode_number: 3, name: 'Real' }],
+  });
+
+  assertEquals(episodes.length, 1);
+  assertEquals(episodes[0].title, 'Real');
+});
+
+Deno.test('episodes that are not an array read as no episodes, never a throw', () => {
+  // A screen showing "No episodes listed" is a recoverable answer. A 500 out of the
+  // adapter is not, and it would take the whole season page's enrichment with it.
+  assertEquals(episodesOf({}), []);
+  assertEquals(episodesOf({ episodes: undefined }), []);
+  assertEquals(episodesOf({ episodes: null }), []);
+  assertEquals(episodesOf({ episodes: 'nope' }), []);
+  assertEquals(episodesOf({ episodes: 12 }), []);
+  assertEquals(episodesOf({ episodes: { 0: { episode_number: 1 } } }), []);
+  assertEquals(episodesOf({ episodes: [] }), []);
+});
+
+Deno.test('a repeated or out-of-order number is the provider data and is kept', () => {
+  // Deduplicating would lose a real episode to tidy up a display key, and re-sorting
+  // would move rows out of the broadcast order a reader scans. The client keys on
+  // position for exactly this reason.
+  const episodes = episodesOf({
+    episodes: [
+      { episode_number: 1, name: 'One' },
+      { episode_number: 1, name: 'One again' },
+      { episode_number: 5, name: 'Five' },
+      { episode_number: 3, name: 'Three' },
+    ],
+  });
+
+  assertEquals(
+    episodes.map((episode) => episode.episode_number),
+    [1, 1, 5, 3],
+  );
+  assertEquals(
+    episodes.map((episode) => episode.title),
+    ['One', 'One again', 'Five', 'Three'],
+  );
+});
+
+Deno.test('a very long season is capped, and the cap takes the first episodes', () => {
+  const raw = Array.from({ length: MAX_EPISODES + 60 }, (_, index) => ({
+    episode_number: index + 1,
+    name: `Episode ${index + 1}`,
+  }));
+
+  const episodes = episodesOf({ episodes: raw });
+
+  assertEquals(episodes.length, MAX_EPISODES);
+  assertEquals(episodes[0].episode_number, 1);
+  assertEquals(episodes[MAX_EPISODES - 1].episode_number, MAX_EPISODES);
+});
+
+Deno.test('the cap bounds the response without shortening the season', () => {
+  // episode_count is counted off the raw array, so a 260-episode season still
+  // reports 260 while the payload carries 200. The cap is a rendering bound, never a
+  // claim about the show.
+  const raw = Array.from({ length: 260 }, (_, index) => ({ episode_number: index + 1 }));
+
+  assertEquals(episodesOf({ episodes: raw }).length, MAX_EPISODES);
+  assertEquals(fromSeasonDetail({ id: 1, season_number: 1, episodes: raw }).episode_count, 260);
+});
+
+Deno.test('the cap counts kept episodes, not scanned ones', () => {
+  // A season whose first entries are malformed must still yield MAX_EPISODES real
+  // ones. Breaking on the loop index rather than on the output length would return a
+  // short list for a long season.
+  const raw = [
+    ...Array.from({ length: 20 }, () => null),
+    ...Array.from({ length: MAX_EPISODES + 5 }, (_, index) => ({ episode_number: index + 1 })),
+  ];
+
+  assertEquals(episodesOf({ episodes: raw }).length, MAX_EPISODES);
+});
+
+Deno.test('a season detail carries episodes and a movie detail has no such field', () => {
+  // Only the season route returns episodes. The movie normalizer produces a
+  // catalogue row with no episode field at all, which is part of what stops an
+  // episode ever becoming a media_items concept.
+  const season = fromSeasonDetail({ id: 1, season_number: 2, episodes: [FULL_EPISODE] });
+  assertEquals(season.episode_count, 1);
+  assertEquals(episodesOf({ episodes: [FULL_EPISODE] }).length, 1);
+
+  const movie = fromMovieDetail({ id: 2, title: 'Heat', runtime: 170 });
+  assert(!('episodes' in movie));
+  assert(!('episode_count' in movie));
+});
+
+Deno.test('a series detail returns its season list and never a season’s episodes', () => {
+  // /tv/{id} carries `seasons` with per-season counts and no episode objects. A
+  // series grouping page must not acquire an episode list by accident.
+  const series = fromSeriesDetail({
+    id: 1399,
+    name: 'Game of Thrones',
+    seasons: [{ id: 3624, season_number: 1, name: 'Season 1', episode_count: 10 }],
+  });
+
+  assert(!('episodes' in series));
+
+  // Even handed the series payload, the episode normalizer finds nothing: `seasons`
+  // is not `episodes`, and it does not go looking.
+  assertEquals(
+    episodesOf({
+      seasons: [{ id: 3624, season_number: 1, episode_count: 10 }],
+    } as { episodes?: unknown }),
+    [],
+  );
+});
+
+// ---------------------------------------------------------------------------
+// seasonTarget — which season the adapter is allowed to ask about
+//
+// The security-relevant half of the `season-episodes` action. Both numbers in
+// `/tv/{series}/season/{n}` come out of media_items; a caller supplies one Bingd
+// uuid and no part of the outbound URL. These tests are what make that checkable
+// rather than something a reviewer has to take on trust.
+// ---------------------------------------------------------------------------
+
+const SEASON_ROW = { kind: 'season', parent_id: 'series-uuid', season_number: 2 };
+const SERIES_ROW = { kind: 'series', tmdb_id: 1399 };
+
+Deno.test('a season resolves to its parent series id and its own number', () => {
+  assertEquals(seasonTarget(SEASON_ROW, SERIES_ROW), {
+    ok: true,
+    seriesTmdbId: 1399,
+    seasonNumber: 2,
+  });
+});
+
+Deno.test('Specials resolves, because season zero is a real season', () => {
+  assertEquals(seasonTarget({ ...SEASON_ROW, season_number: 0 }, SERIES_ROW), {
+    ok: true,
+    seriesTmdbId: 1399,
+    seasonNumber: 0,
+  });
+});
+
+Deno.test('a film and a series grouping are refused rather than answered empty', () => {
+  // Distinct from an empty list, which is what a season with no published episodes
+  // looks like. The two must not produce the same reply.
+  assertEquals(seasonTarget({ kind: 'movie', parent_id: null, season_number: null }, null), {
+    ok: false,
+    reason: 'not_a_season',
+  });
+  assertEquals(seasonTarget({ kind: 'series', parent_id: null, season_number: null }, null), {
+    ok: false,
+    reason: 'not_a_season',
+  });
+});
+
+Deno.test('a season missing its parent or its number is refused', () => {
+  assertEquals(seasonTarget({ ...SEASON_ROW, parent_id: null }, SERIES_ROW), {
+    ok: false,
+    reason: 'malformed_season',
+  });
+  assertEquals(seasonTarget({ ...SEASON_ROW, season_number: null }, SERIES_ROW), {
+    ok: false,
+    reason: 'malformed_season',
+  });
+});
+
+Deno.test('a parent that is not a series is refused before any /tv request', () => {
+  // parent_id is `not null` by constraint and is not constrained to *be* a series.
+  // Without this the adapter would ask TMDB a /tv question about a film's id.
+  assertEquals(seasonTarget(SEASON_ROW, { kind: 'movie', tmdb_id: 550 }), {
+    ok: false,
+    reason: 'malformed_season',
+  });
+  assertEquals(seasonTarget(SEASON_ROW, { kind: 'season', tmdb_id: 3624 }), {
+    ok: false,
+    reason: 'malformed_season',
+  });
+  assertEquals(seasonTarget(SEASON_ROW, null), { ok: false, reason: 'malformed_season' });
+});
+
+Deno.test('a series the provider has no record of is refused, not guessed at', () => {
+  // The Wikidata seed before enrichment reaches it. Distinct from malformed, because
+  // this row becomes answerable the moment the series is enriched.
+  assertEquals(seasonTarget(SEASON_ROW, { kind: 'series', tmdb_id: null }), {
+    ok: false,
+    reason: 'no_tmdb_id',
+  });
+});
+
+Deno.test('every field of the target comes from a catalogue row and nowhere else', () => {
+  // The guarantee stated as a test: seasonTarget takes two catalogue rows and
+  // nothing else, so there is no argument a caller could supply that reaches the URL.
+  const target = seasonTarget(
+    { kind: 'season', parent_id: 'p', season_number: 7 },
+    { kind: 'series', tmdb_id: 4242 },
+  );
+
+  assert(target.ok);
+  assertEquals(target.seriesTmdbId, 4242);
+  assertEquals(target.seasonNumber, 7);
 });

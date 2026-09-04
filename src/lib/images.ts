@@ -36,6 +36,24 @@ export const backdropUri = (
 ) => (path ? `${BASE}/${BACKDROP_WIDTH[size]}${path}` : null);
 
 /**
+ * An episode still.
+ *
+ * `w300` is TMDB's small still bucket and is the right one for this. The Episodes tab
+ * draws stills at the content width of a phone, roughly 350pt, and a 16:9 still is
+ * wide rather than tall; the next bucket up is `w780`, which is more pixels than the
+ * screen can use and up to two hundred of them on one season page.
+ *
+ * There is deliberately no second size. Nothing else in the app renders a still, and
+ * a size bucket exists for a screen rather than for completeness.
+ *
+ * Null for an episode TMDB has no still for, which is every unaired one and a good
+ * many older ones. The row then renders text only rather than a placeholder box, the
+ * same choice `profileUri` and the cast strip make.
+ */
+export const stillUri = (path: string | null | undefined) =>
+  path ? `${BASE}/w300${path}` : null;
+
+/**
  * A cast member's photograph.
  *
  * w185 is TMDB's portrait bucket and is larger than any face this app draws — the

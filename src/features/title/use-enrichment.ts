@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { queryKeys } from '@/lib/query';
 import { enrichTitle } from '@/lib/tmdb-adapter';
 
+import { episodesKey } from './use-season-episodes';
+
 /** The subset of a catalogue row that decides whether the provider is worth asking. */
 export type EnrichableTitle = {
   id: string;
@@ -45,10 +47,25 @@ function isThin(title: EnrichableTitle) {
  * A failure is deliberately silent. The screen has a title, a year and the user's
  * own ranking already, and an error banner over working content would be a worse
  * screen than one missing a poster.
+ *
+ * **`enriching` is true on the first render, before the effect has run.**
+ *
+ * It used to be a `useState(false)` that the effect flipped, which meant one render
+ * where a request was about to be made and nothing said so. That was harmless while
+ * the flag only drove a "Fetching details…" line. It stopped being harmless when the
+ * Episodes tab began using it as a gate: `useSeasonEpisodes` is enabled when no
+ * enrichment is running, so a single render claiming "not enriching" was enough for
+ * the tab to fire its fallback request alongside the enrichment that was about to
+ * seed it — two provider requests where the design promises none.
+ *
+ * So it is derived rather than announced: an id that needs enriching is enriching
+ * until its attempt has settled, which is knowable during the very first render.
  */
 function useEnrichOnce(id: string | null | undefined, needed: boolean) {
   const queryClient = useQueryClient();
-  const [enriching, setEnriching] = useState(false);
+  // The ids whose attempt has finished, successfully or not. State rather than a ref
+  // because finishing has to re-render: it is what releases the gate above.
+  const [settled, setSettled] = useState<ReadonlySet<string>>(() => new Set());
   const attempted = useRef(new Set<string>());
 
   useEffect(() => {
@@ -56,11 +73,30 @@ function useEnrichOnce(id: string | null | undefined, needed: boolean) {
     attempted.current.add(id);
 
     let cancelled = false;
-    setEnriching(true);
 
     enrichTitle(id)
       .then(async (result) => {
         if (cancelled || !result.enriched) return;
+
+        /**
+         * The Episodes tab, seeded rather than invalidated.
+         *
+         * A season's enrichment reads `/tv/{series}/season/{n}`, and that response
+         * carries the episodes: the adapter now returns them instead of counting
+         * them and throwing the rest away. Writing them here is what makes the
+         * Episodes tab free — the reader who opens it is served out of the cache,
+         * and `useSeasonEpisodes` never reaches its fallback fetch.
+         *
+         * `setQueryData` and emphatically not `invalidateQueries`. Invalidating the
+         * key would mark the data we are holding as stale and send the tab off to
+         * fetch what we have in hand, which is the opposite of the point.
+         *
+         * Absent for a film and a series, which have no episodes to send. Guarded on
+         * the array rather than on the kind, so an adapter that has not been
+         * redeployed yet simply seeds nothing and the tab falls back.
+         */
+        if (result.episodes) queryClient.setQueryData(episodesKey(id), result.episodes);
+
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.title(id) }),
           queryClient.invalidateQueries({ queryKey: ['credits', id] }),
@@ -75,13 +111,32 @@ function useEnrichOnce(id: string | null | undefined, needed: boolean) {
       })
       .catch(() => {})
       .finally(() => {
-        if (!cancelled) setEnriching(false);
+        /**
+         * Recorded on failure as well as on success, and **without the `cancelled`
+         * guard the writes above use.**
+         *
+         * The two flags answer different questions. `cancelled` means "this effect
+         * has been superseded, do not touch the cache" — a claim about freshness.
+         * This is a claim about history: the one attempt `attempted` permits for this
+         * id has finished, and it has finished whether or not anybody still wants its
+         * result.
+         *
+         * Guarding it would let the two disagree. An effect re-run that lands while a
+         * request is in flight cancels it, and the re-run then finds the id already
+         * in `attempted` and does nothing — so nothing would ever mark it settled,
+         * `enriching` would stay true for good, and the Episodes tab would be gated
+         * behind a request that finished long ago. A permanent skeleton, from a
+         * one-word guard.
+         */
+        setSettled((previous) => (previous.has(id) ? previous : new Set(previous).add(id)));
       });
 
     return () => {
       cancelled = true;
     };
   }, [id, needed, queryClient]);
+
+  const enriching = Boolean(id) && needed && !settled.has(id!);
 
   return { enriching };
 }

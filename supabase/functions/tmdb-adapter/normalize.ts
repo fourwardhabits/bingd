@@ -13,6 +13,7 @@
 
 import type {
   TmdbContentRatings,
+  TmdbEpisode,
   TmdbMovieDetail,
   TmdbPersonCreditEntry,
   TmdbPersonDetail,
@@ -246,8 +247,160 @@ export function fromSeasonDetail(detail: TmdbSeasonDetail): SeasonRow {
     // rather than inferred. Without it a season enriched only through its own route
     // — which is what `enrichOne` does for every season anchor — would never
     // acquire one, and the SQL's coalesce would have nothing to keep.
+    //
+    // Counted off the **raw** array rather than off `episodesOf`, which caps at
+    // MAX_EPISODES: a 240-episode season still reports 240 here, so the cap stays a
+    // rendering bound rather than becoming a claim about the show.
     episode_count: countOrNull(detail.episodes?.length),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Episodes
+//
+// Informational metadata for the season page's Episodes tab, and nothing else.
+// Not persisted, not rankable, not loggable: PRD §10 keeps the rankable units at
+// movies and TV seasons, and this is the recognition aid that helps somebody work
+// out *which* season they watched.
+// ---------------------------------------------------------------------------
+
+/**
+ * The most episodes one response will carry.
+ *
+ * A safety bound rather than a product limit. Ordinary seasons run six to
+ * twenty-four; a daily soap or a long-running anime that the provider models as one
+ * season can run into the hundreds, and an unbounded array is an unbounded response
+ * out of an Edge Function. Two hundred trimmed episodes is roughly a hundred
+ * kilobytes, which is the same order as the credits payload this file already
+ * accepts, and it is far past anything the Episodes tab renders without the reader
+ * asking for more.
+ *
+ * `episode_count` is counted off the raw array above, so a season longer than this
+ * still reports its true length and the client can tell that it is seeing a prefix.
+ */
+export const MAX_EPISODES = 200;
+
+/** One episode as the season page renders it. */
+export type Episode = {
+  episode_number: number;
+  title: string | null;
+  air_date: string | null;
+  runtime_minutes: number | null;
+  still_path: string | null;
+  overview: string | null;
+};
+
+/**
+ * A non-negative episode index, or nothing.
+ *
+ * Not `countOrNull`, which insists on a positive number. An episode numbered zero
+ * is real — TMDB carries "Episode 0" pilots and prologues, usually in Specials —
+ * and rejecting it would silently drop the one episode a reader is most likely to
+ * be uncertain about.
+ */
+const indexOrNull = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
+
+/**
+ * A season detail's episodes, trimmed to what the Episodes tab renders.
+ *
+ * Defensive at every step, because this is the one provider array whose elements
+ * reach a screen without passing through Postgres first. `episodes` is typed
+ * `unknown[]`, a non-array is treated as an absent list, and an element that is not
+ * an object is skipped rather than spread.
+ *
+ * **An episode with no number is dropped.** The row is built around "3 · The Rains
+ * of Castamere", and an episode that cannot say which one it is has nothing to
+ * recognise it by. Every other field is allowed to be null and simply disappears
+ * from the row.
+ *
+ * **Provider order is preserved and duplicates are kept.** TMDB returns episodes in
+ * broadcast order, which is the order a reader scans; re-sorting on a number the
+ * provider may have repeated would move rows around for no gain. A repeated number
+ * is the provider's own data, and dropping the second one would lose an episode to
+ * tidy up a display key. The client keys on position for that reason.
+ */
+export function episodesOf(detail: { episodes?: unknown }): Episode[] {
+  if (!Array.isArray(detail.episodes)) return [];
+
+  const episodes: Episode[] = [];
+  for (const entry of detail.episodes) {
+    if (!entry || typeof entry !== 'object') continue;
+
+    const raw = entry as TmdbEpisode;
+    const number = indexOrNull(raw.episode_number);
+    if (number === null) continue;
+
+    episodes.push({
+      episode_number: number,
+      title: textOrNull(raw.name),
+      air_date: dateOrNull(raw.air_date),
+      // A runtime of zero is TMDB's placeholder for an episode it has no length for,
+      // which `countOrNull` already reads as nothing.
+      runtime_minutes: countOrNull(raw.runtime),
+      still_path: raw.still_path ?? null,
+      overview: textOrNull(raw.overview),
+    });
+
+    if (episodes.length >= MAX_EPISODES) break;
+  }
+
+  return episodes;
+}
+
+// ---------------------------------------------------------------------------
+// Which season to ask TMDB about
+// ---------------------------------------------------------------------------
+
+/**
+ * The catalogue columns this file needs to name a season's provider route. Declared
+ * structurally rather than imported from `store.ts`, which would pull supabase-js
+ * into a module that is otherwise pure and testable without a network.
+ */
+type SeasonRowRef = {
+  kind: string;
+  parent_id: string | null;
+  season_number: number | null;
+};
+
+type SeriesRowRef = { kind: string; tmdb_id: number | null };
+
+export type SeasonTarget =
+  | { ok: true; seriesTmdbId: number; seasonNumber: number }
+  | { ok: false; reason: 'not_a_season' | 'malformed_season' | 'no_tmdb_id' };
+
+/**
+ * A season row and its parent into the two numbers `/tv/{series}/season/{n}` needs.
+ *
+ * **This is the whole reason the Episodes action is not a proxy.** Both numbers come
+ * out of `media_items`; a caller supplies one Bingd uuid and no part of the outbound
+ * URL. Pulled out of the handler so that the refusals below are covered by ordinary
+ * tests rather than by reading the handler and believing it.
+ *
+ * Three distinct refusals, and they are not interchangeable:
+ *
+ *   not_a_season      A film or a series grouping. Episodes belong to a season, and
+ *                     answering with an empty list would be indistinguishable from a
+ *                     season the provider has published no episodes for.
+ *   malformed_season  A season with no parent, no season number, or a parent that is
+ *                     not a series. The column constraints do not enforce the last of
+ *                     those, and this is about to ask a /tv question about whatever
+ *                     the parent turns out to be.
+ *   no_tmdb_id        A series the provider has no record of — the Wikidata seed
+ *                     before enrichment reaches it.
+ *
+ * `season_number` is checked against null rather than for truthiness. Season 0 is
+ * Specials, it is a real season, and `!0` would refuse it.
+ */
+export function seasonTarget(row: SeasonRowRef, parent: SeriesRowRef | null): SeasonTarget {
+  if (row.kind !== 'season') return { ok: false, reason: 'not_a_season' };
+  if (!row.parent_id || row.season_number === null) {
+    return { ok: false, reason: 'malformed_season' };
+  }
+  if (!parent || parent.kind !== 'series') return { ok: false, reason: 'malformed_season' };
+  if (!parent.tmdb_id) return { ok: false, reason: 'no_tmdb_id' };
+
+  return { ok: true, seriesTmdbId: parent.tmdb_id, seasonNumber: row.season_number };
 }
 
 /**

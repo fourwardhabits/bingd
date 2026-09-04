@@ -42,11 +42,12 @@ import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enri
 import { TitleReviews } from '@/features/title/TitleReviews';
 import { useTitleVideos } from '@/features/title/use-title-extras';
 import { useTitleReviews, type ReviewSort } from '@/features/title/use-title-reviews';
+import { useSeasonEpisodes } from '@/features/title/use-season-episodes';
 import { diagnose } from '@/lib/diagnose';
 import { heroArtwork } from '@/lib/hero';
 import { languageName } from '@/lib/language';
 import { track } from '@/lib/analytics';
-import { posterUri, profileUri, videoUri } from '@/lib/images';
+import { posterUri, profileUri, stillUri, videoUri } from '@/lib/images';
 import { resolveMetadata } from '@/lib/media-metadata';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
@@ -57,7 +58,9 @@ import {
   Chip,
   DetailHeaderBackground,
   DetailHeaderTitle,
+  Divider,
   EmptyState,
+  EpisodeRow,
   LoadingScreen,
   PersonalState,
   Poster,
@@ -74,7 +77,22 @@ import {
 } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
-type Tab = 'cast' | 'reviews' | 'videos' | 'details' | 'seasons';
+type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons';
+
+/**
+ * How many episodes a season page draws before it offers to show the rest.
+ *
+ * Ordinary seasons run six to twenty-four and never reach this. It exists for the
+ * ones the provider models as a single long run — a daily soap, or a long anime
+ * season — where two hundred rows with a still apiece is a lot of images inside a
+ * `ScrollView` that has to lay all of them out at once.
+ *
+ * A bounded first page rather than a `FlatList`: nesting a vertical virtualized list
+ * inside this vertical `ScrollView` is the arrangement React Native warns about, and
+ * it breaks the scrolling of the page it is nested in. Nothing is lost — "Show all"
+ * reveals the rest, and no metadata is dropped on the way.
+ */
+const EPISODES_FIRST_PAGE = 50;
 
 /**
  * The title page (screens.md §6), rebuilt after the founder's device test.
@@ -121,6 +139,9 @@ export default function TitleScreen() {
   const [watchlistBusy, setWatchlistBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  // Reset by leaving the screen and nothing else. A reader who asked to see all of a
+  // long season should not have it collapse again when they visit Cast and come back.
+  const [showAllEpisodes, setShowAllEpisodes] = useState(false);
   // Null until the reader picks one, so the default is whatever the tab row leads with
   // rather than a name fixed before the title is known. It was `'cast'`, which meant a
   // series settled on Cast the moment its credits arrived — after briefly showing the
@@ -304,6 +325,29 @@ export default function TitleScreen() {
     data?.title ?? null,
     videos.data === null || seasonListNeedsReading,
   );
+  /**
+   * The Episodes tab's data, on a season and nowhere else.
+   *
+   * **Lazy, and normally already answered.** `enabled` stays false until Episodes is
+   * the tab being shown, so a reader who opens a season page and goes straight to
+   * Reviews spends nothing here. When it does turn on, the data is usually in hand:
+   * a season's enrichment reads `/tv/{series}/season/{n}`, that response carries the
+   * episodes, and `use-enrichment` writes them into this exact cache key.
+   *
+   * The `tab === null` half is what makes that work on arrival. Episodes leads a
+   * season's tab row and `activeTab` falls back to the first entry, so a reader who
+   * has chosen nothing is looking at Episodes; waiting for `tab` to be set would make
+   * the default tab the one tab that never loaded.
+   *
+   * **`!enriching` is the half that keeps it free**, and it has to be read after the
+   * enrichment hook rather than before it. Enabling the query while an enrichment is
+   * in flight would race the seed and spend a second provider request to fetch what
+   * the first one is already bringing back. Once the enrichment settles, either it
+   * seeded this key — in which case the query finds fresh data and asks nobody — or
+   * it did not, and this is the fallback doing its job.
+   */
+  const showsEpisodes = data?.title?.kind === 'season' && (tab === null || tab === 'episodes');
+  const episodes = useSeasonEpisodes(titleId, showsEpisodes && !enriching);
   // The score is derived from the band, so this needs the whole category's
   // bucket counts — not just this title's row (ranking.md §11).
   const rankCategory: RankingCategory =
@@ -498,6 +542,24 @@ export default function TitleScreen() {
      * to remove the page's only exit.
      */
     ...(isSeries ? [{ id: 'seasons' as const, label: 'Seasons' }] : []),
+    /**
+     * Episodes first, and first only for a season.
+     *
+     * The founder's decision, and it is the same argument Seasons wins on one level
+     * up: a season page's job is to help somebody decide whether they watched this
+     * season, and episode titles, dates and stills are what settle that. Cast does
+     * not — a series' cast barely changes between seasons, so it is the least
+     * distinguishing thing on the page it leads.
+     *
+     * First also means default, because `activeTab` falls back to the head of this
+     * row. That is intended: opening a season onto its episodes is the whole feature.
+     *
+     * Rendered even when the list is empty, on the same rule Seasons follows. A
+     * season always has episodes; an empty list means they have not arrived yet, and
+     * saying which of those it is beats removing the tab under a reader who is
+     * waiting for it. Never present for a film or a series grouping.
+     */
+    ...(isSeason ? [{ id: 'episodes' as const, label: 'Episodes' }] : []),
     ...(cast.length ? [{ id: 'cast' as const, label: 'Cast' }] : []),
     /**
      * Reviews is **always** present, unlike Cast and Videos.
@@ -984,6 +1046,69 @@ export default function TitleScreen() {
             onChange={(next) => setTab(next)}
           />
         </View>
+
+        {/* Episodes. Informational only: no row here is pressable, scoreable or
+            loggable, because the rankable unit is the season this page already is
+            (PRD §10). What the list does is answer "did I watch this one". */}
+        {activeTab === 'episodes' ? (
+          episodes.data?.length ? (
+            <View>
+              {(showAllEpisodes
+                ? episodes.data
+                : episodes.data.slice(0, EPISODES_FIRST_PAGE)
+              ).map((episode, index) => (
+                <View
+                  // Keyed on position as well as number. TMDB occasionally repeats an
+                  // episode number within a season, and the normalizer keeps both
+                  // rather than losing a real episode to tidy up a display key.
+                  key={`${episode.episode_number}-${index}`}
+                >
+                  {index > 0 ? <Divider /> : null}
+                  <EpisodeRow
+                    episodeNumber={episode.episode_number}
+                    title={episode.title}
+                    airDate={formatAirDate(episode.air_date)}
+                    runtimeMinutes={episode.runtime_minutes}
+                    stillUri={stillUri(episode.still_path)}
+                    overview={episode.overview}
+                  />
+                </View>
+              ))}
+
+              {!showAllEpisodes && episodes.data.length > EPISODES_FIRST_PAGE ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Show all ${episodes.data.length} episodes`}
+                  onPress={() => setShowAllEpisodes(true)}
+                  style={({ pressed }) => [styles.showAll, pressed && styles.pressed]}
+                >
+                  <Text variant="callout" tone="action">
+                    Show all {episodes.data.length} episodes
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : episodes.isPending || enriching ? (
+            <SkeletonRow count={3} />
+          ) : episodes.isError ? (
+            <EmptyState
+              kind="nothingYet"
+              compact
+              title="Episodes did not load"
+              body="Pull down to try again."
+            />
+          ) : (
+            // Distinct from the error above, and the difference is worth the words: a
+            // season the provider has published no episode list for is a fact about
+            // the show, not a fault the reader can retry away.
+            <EmptyState
+              kind="nothingYet"
+              compact
+              title="No episodes listed"
+              body="TMDB has not published an episode list for this season yet."
+            />
+          )
+        ) : null}
 
         {activeTab === 'cast' ? (
           <CastStrip cast={cast} onPressMember={(member) => router.push(`/person/${member.id}`)} />
@@ -1564,6 +1689,27 @@ function formatDate(date: string | null) {
   });
 }
 
+/**
+ * An episode's air date, short.
+ *
+ * The same UTC-pinned construction `formatDate` uses — a bare `new Date('2013-06-02')`
+ * is midnight UTC and renders as the day before west of Greenwich — with a short month
+ * because this sits on a metadata line beside a runtime rather than under a Details
+ * heading with room to spare.
+ *
+ * Null passes straight through, and the row drops the half of the line it would have
+ * filled. An unaired episode with no announced date is the ordinary case, not an error.
+ */
+function formatAirDate(date: string | null) {
+  if (!date) return null;
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
 /** Tall enough that the poster still overlaps something when there is no
  *  backdrop, so the page does not become a different design. Tracks POSTER_LIFT:
  *  a lift deeper than this band would put the poster's top above the page. */
@@ -1745,6 +1891,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[6],
     gap: theme.space[1],
+  },
+  // Reveals the rest of a long season. Full-width and gutter-aligned so it reads as
+  // the continuation of the list rather than as a control floating beside it.
+  showAll: {
+    paddingHorizontal: theme.layout.gutter,
+    minHeight: theme.layout.minTapTarget,
+    justifyContent: 'center',
   },
   pressed: { opacity: 0.7 },
 });

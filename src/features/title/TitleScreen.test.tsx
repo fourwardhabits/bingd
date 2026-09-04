@@ -117,6 +117,37 @@ jest.mock('@/features/title/use-enrichment', () => ({
   seasonListIsStale: jest.requireActual('@/features/title/use-enrichment').seasonListIsStale,
 }));
 
+/**
+ * The Episodes tab's fallback fetch.
+ *
+ * `use-enrichment` is mocked above, so nothing seeds the episode cache here and the
+ * tab takes its own path — which is the one these tests want to exercise. The seeding
+ * half, and the gate that stops the two racing, are pinned in `use-enrichment.test.ts`
+ * where the enrichment is the real one.
+ */
+const mockFetchSeasonEpisodes = jest.fn();
+jest.mock('@/lib/tmdb-adapter', () => ({
+  ...jest.requireActual('@/lib/tmdb-adapter'),
+  fetchSeasonEpisodes: (...args: unknown[]) => mockFetchSeasonEpisodes(...args),
+}));
+
+/**
+ * An air date as the row renders it.
+ *
+ * Computed rather than written out, because the exact string is the runtime's to
+ * decide: a hard-coded "17 Apr 2011" would pass here and fail on a machine with a
+ * different default locale. What is asserted is that the date is shown, joined to the
+ * runtime, and read in UTC — a bare `new Date('2011-04-17')` is midnight UTC and
+ * renders as the day before west of Greenwich.
+ */
+const airDate = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+
 // Opening a trailer and opening a review are both handovers to the operating system,
 // and what is handed over is the assertion.
 const mockOpenURL = jest.fn();
@@ -186,6 +217,10 @@ beforeEach(() => {
   alertSpy.mockClear();
   mockOpenURL.mockReset();
   mockEnrichmentArgs.length = 0;
+  mockFetchSeasonEpisodes.mockReset();
+  // The default for every test that is not about Episodes: a season with no published
+  // list. Nothing outside the Episodes describes below should be reaching for one.
+  mockFetchSeasonEpisodes.mockResolvedValue([]);
 
   mockRpcResults = {};
   mockRpcErrors = {};
@@ -1582,5 +1617,242 @@ describe('the action row', () => {
     await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
 
     expect(view.queryByLabelText(/^Recommend /)).toBeNull();
+  });
+});
+
+/**
+ * Episodes, on a season page.
+ *
+ * The founder's problem: somebody remembers watching a show and cannot remember
+ * which seasons. Bingd ranks a season, so that gap sits directly in front of the one
+ * action the page exists for. Episode titles, dates and stills are the recognition
+ * cues that close it.
+ *
+ * What these assert is mostly the boundary of the feature rather than its middle.
+ * Episodes is informational metadata (PRD §10) — no row is pressable, nothing is
+ * logged, nothing is scored — and the tab exists on a season and on nothing else.
+ */
+describe('a season, and its episodes', () => {
+  const seasonRow = {
+    ...film,
+    id: 'season-1',
+    kind: 'season',
+    title: 'Season 1',
+    release_date: '2011-04-17',
+    runtime_minutes: null,
+    parent: { id: 'series-1', title: 'Game of Thrones', poster_path: null, backdrop_path: null },
+  };
+
+  const episode = (n: number, overrides: Record<string, unknown> = {}) => ({
+    episode_number: n,
+    title: `Episode title ${n}`,
+    air_date: '2011-04-17',
+    runtime_minutes: 62,
+    still_path: `/still${n}.jpg`,
+    overview: `What happens in episode ${n}.`,
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    mockOpenId = 'season-1';
+    tableRows.media_items = [seasonRow];
+    mockFetchSeasonEpisodes.mockReset();
+    mockFetchSeasonEpisodes.mockResolvedValue([episode(1), episode(2)]);
+  });
+
+  const openSeason = async () => {
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByText(/^Season 1/)).toBeTruthy());
+    return view;
+  };
+
+  it('leads the tab row, which makes it what the page opens on', async () => {
+    // The founder's decision. Cast barely changes between seasons of a show, so it is
+    // the least distinguishing thing on the page it used to lead; episodes are the
+    // reason somebody is on a season page at all.
+    const view = await openSeason();
+
+    expect(view.getByRole('tab', { name: 'Episodes' })).toBeTruthy();
+    expect(view.getByRole('tab', { name: 'Episodes' }).props.accessibilityState.selected).toBe(
+      true,
+    );
+  });
+
+  it('shows an episode as its number, its title, and then when and how long', async () => {
+    const view = await openSeason();
+
+    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
+    expect(view.getByText('2 · Episode title 2')).toBeTruthy();
+    expect(view.getAllByText(`${airDate('2011-04-17')} · 62 min`)).toHaveLength(2);
+    expect(view.getByText('What happens in episode 1.')).toBeTruthy();
+  });
+
+  it('names an episode by its number when the provider has no title for it', async () => {
+    // "Episode 4", never a blank line and never a fabricated name.
+    mockFetchSeasonEpisodes.mockResolvedValue([episode(4, { title: null })]);
+    const view = await openSeason();
+
+    await waitFor(() => expect(view.getByText('Episode 4')).toBeTruthy());
+  });
+
+  it('drops a missing field rather than drawing a placeholder for it', async () => {
+    // An unaired episode legitimately has no runtime, no still and often no synopsis.
+    // Framing each absence would make the common case look broken.
+    mockFetchSeasonEpisodes.mockResolvedValue([
+      episode(3, { runtime_minutes: null, still_path: null, overview: null }),
+    ]);
+    const view = await openSeason();
+
+    await waitFor(() => expect(view.getByText('3 · Episode title 3')).toBeTruthy());
+    // The date survives on its own, with no stray separator beside it.
+    expect(view.getByText(airDate('2011-04-17'))).toBeTruthy();
+    expect(view.queryByText(/Unknown|TBA|null|undefined/)).toBeNull();
+  });
+
+  it('shows a future episode with the date the provider published', async () => {
+    mockFetchSeasonEpisodes.mockResolvedValue([
+      episode(8, { air_date: '2099-01-01', runtime_minutes: null, still_path: null }),
+    ]);
+    const view = await openSeason();
+
+    await waitFor(() => expect(view.getByText(airDate('2099-01-01'))).toBeTruthy());
+  });
+
+  it('leaves the whole metadata line out when there is neither a date nor a runtime', async () => {
+    mockFetchSeasonEpisodes.mockResolvedValue([
+      episode(1, { air_date: null, runtime_minutes: null }),
+    ]);
+    const view = await openSeason();
+
+    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
+    expect(view.queryByText(/ · \d+ min/)).toBeNull();
+  });
+
+  it('says the provider has published no list, rather than showing an empty tab', async () => {
+    mockFetchSeasonEpisodes.mockResolvedValue([]);
+    const view = await openSeason();
+
+    await waitFor(() => expect(view.getByText('No episodes listed')).toBeTruthy());
+    expect(
+      view.getByText('TMDB has not published an episode list for this season yet.'),
+    ).toBeTruthy();
+  });
+
+  it('offers a retry when the request failed, which is a different thing to say', async () => {
+    // An empty list is a fact about the show. A failure is something the reader can
+    // do something about, and the two must not read the same.
+    mockFetchSeasonEpisodes.mockRejectedValue(new Error('BG502'));
+    const view = await openSeason();
+
+    await waitFor(() => expect(view.getByText('Episodes did not load')).toBeTruthy());
+    expect(view.getByText('Pull down to try again.')).toBeTruthy();
+    // Never the provider's own words, or a status code.
+    expect(view.queryByText(/BG502|TMDB is unavailable|Error/)).toBeNull();
+  });
+
+  it('draws the first fifty of a long season, then offers the rest', async () => {
+    // A daily soap or a long anime run that the provider models as one season. Two
+    // hundred rows with a still apiece is a lot of images to lay out at once, and a
+    // virtualized list nested in this page's ScrollView is the arrangement React
+    // Native warns about. Nothing is dropped: "Show all" reveals them.
+    mockFetchSeasonEpisodes.mockResolvedValue(
+      Array.from({ length: 60 }, (_, index) => episode(index + 1)),
+    );
+    const view = await openSeason();
+
+    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
+    expect(view.getByText('50 · Episode title 50')).toBeTruthy();
+    expect(view.queryByText('51 · Episode title 51')).toBeNull();
+
+    await fireEvent.press(view.getByLabelText('Show all 60 episodes'));
+
+    expect(view.getByText('51 · Episode title 51')).toBeTruthy();
+    expect(view.getByText('60 · Episode title 60')).toBeTruthy();
+    expect(view.queryByLabelText('Show all 60 episodes')).toBeNull();
+  });
+
+  it('offers nothing to show when the season is exactly the first page long', async () => {
+    mockFetchSeasonEpisodes.mockResolvedValue(
+      Array.from({ length: 50 }, (_, index) => episode(index + 1)),
+    );
+    const view = await openSeason();
+
+    await waitFor(() => expect(view.getByText('50 · Episode title 50')).toBeTruthy());
+    expect(view.queryByLabelText(/Show all/)).toBeNull();
+  });
+
+  it('keeps the episodes when the reader visits another tab and comes back', async () => {
+    const view = await openSeason();
+    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('tab', { name: 'Details' }));
+    expect(view.queryByText('1 · Episode title 1')).toBeNull();
+
+    await fireEvent.press(view.getByRole('tab', { name: 'Episodes' }));
+    expect(view.getByText('1 · Episode title 1')).toBeTruthy();
+    // One request for the whole visit. The list is cached for an hour.
+    expect(mockFetchSeasonEpisodes).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders episodes as reading matter, with nothing to press on a row', async () => {
+    // The product boundary, as a test. An episode is not rankable, not loggable and
+    // not a media_items row, so a pressable episode is the first step toward a
+    // feature the decision log rules out.
+    const view = await openSeason();
+    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
+
+    expect(view.queryByLabelText(/Rank Episode title 1/)).toBeNull();
+    expect(view.queryByLabelText(/Log Episode title 1/)).toBeNull();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('keeps Rank in reach while the episodes are on screen', async () => {
+    // The journey the feature is for: recognise the season, then rank it. Rank lives
+    // in the hero cluster above the tab row and is not inside any tab, so choosing
+    // Episodes does not take it away.
+    const view = await openSeason();
+    await waitFor(() => expect(view.getByText('1 · Episode title 1')).toBeTruthy());
+
+    expect(view.getByLabelText('Rank this title')).toBeTruthy();
+  });
+});
+
+describe('the Episodes tab belongs to seasons alone', () => {
+  beforeEach(() => {
+    mockFetchSeasonEpisodes.mockReset();
+    mockFetchSeasonEpisodes.mockResolvedValue([]);
+  });
+
+  it('is absent from a film, which has no episodes to describe', async () => {
+    const view = await open();
+
+    expect(view.queryByRole('tab', { name: 'Episodes' })).toBeNull();
+    expect(mockFetchSeasonEpisodes).not.toHaveBeenCalled();
+  });
+
+  it('is absent from a series grouping, where Seasons is the way down', async () => {
+    // A series page must not become a cross-season episode browser. The rankable unit
+    // is one level below it, and Seasons is what leads there.
+    mockOpenId = 'series-1';
+    tableRows.media_items = [
+      { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
+      {
+        id: 'season-1',
+        parent_id: 'series-1',
+        kind: 'season',
+        season_number: 1,
+        title: 'Season 1',
+        release_date: '2008-01-20',
+        poster_path: null,
+        fetched_at: new Date().toISOString(),
+      },
+    ];
+
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
+
+    expect(view.queryByRole('tab', { name: 'Episodes' })).toBeNull();
+    expect(view.getByRole('tab', { name: 'Seasons' })).toBeTruthy();
+    expect(mockFetchSeasonEpisodes).not.toHaveBeenCalled();
   });
 });

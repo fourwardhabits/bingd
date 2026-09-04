@@ -282,8 +282,13 @@ Luma renders its secondary content as a scrolling row of pills. Bingd makes them
 - **Details** — released, runtime, genres, original language, and **the ordinal in full**: `#2 of 6 in Movies`, with the denominator, because a bare ordinal is unreadable without it (PRD §10).
 - **Reviews** — the user's own note. Friends' notes when the feed carries them. Absent entirely until there is something in it; a tab that is always empty is worse than a missing tab.
 - **Seasons** — series only. Per-season state, since the season is the rankable unit and the series is not (AD-1). This distinction is invisible in the data model and has to be made obvious here.
+- **Episodes** — season only, and **first in the row**, which also makes it what a season page opens on. Episode number and title, then air date and runtime, then a 16:9 still, then a synopsis clamped to three lines. Nothing on a row is pressable: this is metadata a reader scans, not a unit they act on (PRD §10). Added 2026-09-03.
 
-Tabs whose content does not exist for a given title are not rendered. A film has no Seasons tab.
+**Why Episodes leads a season page.** People remember watching a show and forget which seasons — which lands directly in front of the one action a season page exists for. Episode names, dates and stills are what settle it. Cast does not: a show's cast barely changes between seasons, so it was the least distinguishing thing on the page it used to lead.
+
+Tabs whose content does not exist for a given title are not rendered. A film has no Seasons tab and no Episodes tab; a series grouping has no Episodes tab either, because episodes belong to the season a reader selects rather than to a browser spanning all of them.
+
+**The tab row scrolls sideways when it does not fit.** A season carries five tabs, which is past what a 320pt phone holds, and any row can outgrow its width once a reader raises their system text size. The row is a flex row with a fixed gap and no wrap, so before this it simply ran off the right edge and took its last tab with it. A row that already fits is unchanged: no scroll indicator, no bounce, same left alignment.
 
 ### States
 
@@ -533,7 +538,14 @@ Conventional grouped list. Three parts carry product weight.
 
 ## 16. Not designed here
 
-Deliberately out of scope for v1, listed so their absence is not read as an oversight: any billing, paywall, price, or "Pro" surface (PRD §20); comment threads (PRD §14); a Midnight dark theme (PRD §5); episode-level anything (PRD §10); web app screens beyond the share and invite landing pages.
+Deliberately out of scope for v1, listed so their absence is not read as an oversight: any billing, paywall, price, or "Pro" surface (PRD §20); comment threads (PRD §14); a Midnight dark theme (PRD §5); **episode tracking or ranking** (PRD §10); web app screens beyond the share and invite landing pages.
+
+That last one said "episode-level anything" until the Episodes tab was built, and it was
+broader than the decision it pointed at. What PRD §10 rules out is an episode becoming a
+*unit*: no episode logging, ranking, rating, watched state, progress or feed activity. It
+has never ruled out showing a reader what is inside a season. The Episodes tab is
+informational metadata and nothing else, and nothing about it commits the product to
+episode tracking arriving later.
 
 ---
 
