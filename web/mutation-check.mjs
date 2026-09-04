@@ -44,9 +44,12 @@
  *      indexed while neither is true.
  *  11. The noindex header dropped while the mode still says beta. The pages' meta tag
  *      still says the right thing, so the mistake is invisible from the HTML alone.
- *  12. The Terms' unconfirmed-entity placeholder replaced with a plausible company name,
- *      which is what tidying it away rather than filling it in correctly looks like.
- *  13. The Terms-status gate deleted from the public block, so filling in the entity
+ *  12. The developer name given a company suffix nobody has registered. Until
+ *      2026-09-04 this was the unconfirmed-entity placeholder replaced with a plausible
+ *      company name; the operator is settled now and the tidying instinct runs the
+ *      other way, since a bare name where a contracting party belongs looks like it
+ *      lost its "LLC".
+ *  13. The Terms-status gate deleted from the public block, so settling the entity
  *      alone would open the launch — and publish a Terms still calling itself an
  *      unreviewed draft, exactly the hole an independent review found before the gate
  *      existed.
@@ -153,19 +156,26 @@ const MUTANTS = [
   },
   {
     /**
-     * The Terms' unconfirmed-entity placeholder filled in with a plausible company.
+     * The operator turned into a company that has not been registered.
      *
-     * The failure it models is not malice, it is tidying: a placeholder in capitals
-     * looks unfinished, and the obvious way to "finish" it is to write something that
-     * reads like a company name. That produces a contract naming a party that does not
-     * exist, which is worse than the obviously unfinished version it replaced.
+     * Until 2026-09-04 this mutant filled the capitalised placeholder in with "Bingd
+     * Ltd", modelling the tidying instinct: a placeholder looks unfinished, and the
+     * obvious way to finish it is to write something that reads like a company name.
+     *
+     * The placeholder is gone and the failure it modelled inverted with it. There is
+     * **no** company — the operator is a person and FourwardStudios is a developer
+     * name — so the tidying instinct now runs the other way: a developer name sitting
+     * where a contracting party belongs looks like it is missing its suffix, and "LLC"
+     * is what somebody adds. That asserts a registration nobody has filed, on the one
+     * document a person points at when they say Bingd agreed to something, and it is
+     * invisible to every other check here because the page still reads as finished.
      */
-    name: 'the Terms placeholder replaced with an invented legal entity',
+    name: 'the developer name given a company suffix it has never been registered under',
     file: BUILD,
     apply: (s) =>
       s.replace(
-        "'[LEGAL ENTITY / DEVELOPER NAME &mdash; FOUNDER TO CONFIRM]'",
-        "'Bingd Ltd'",
+        "'Suraj Kandukuri, using the developer name FourwardStudios'",
+        "'FourwardStudios LLC'",
       ),
   },
   {

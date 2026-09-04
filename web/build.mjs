@@ -114,21 +114,37 @@ if (distribution.app?.scheme && !/^[a-z][a-z0-9+.-]*$/.test(distribution.app.sch
  * until T4/T5 without any window in which pushing it makes bingd.app lie.
  */
 /**
- * The placeholder a legal identity goes in.
+ * Who the agreement is with. **Settled by the founder on 2026-09-04; L-1 item 1.**
  *
- * **Deliberately not filled in, and deliberately loud.** A Terms of Use has to name who
- * the agreement is with, and Bingd's answer to that is a decision the founder has not
- * made and this repository holds no evidence of: whether there is a company, what it is
- * called, and where it is registered are facts rather than defaults. Inventing a
- * plausible one — "Bingd Ltd", a jurisdiction picked because it is common — would
- * produce a document that reads as finished and names a party that does not exist,
- * which is worse than an obviously unfinished one.
+ * This was a placeholder in capitals for ten days, on the reasoning that whether there
+ * is a company, what it is called and where it is registered are facts rather than
+ * defaults, and that inventing a plausible one produces a document reading as finished
+ * while naming a party that does not exist. The answer turned out to be the one the
+ * placeholder could not express: **there is no company.**
  *
- * So it renders in the page, in capitals, where neither the founder nor a store
- * reviewer can miss it. web/router.test.mjs asserts it is still present, which turns
- * "remember to fill this in" into a failing test on the day it stops being true.
+ * The three facts, exactly as given:
+ *
+ *   - There is no LLC, corporation, partnership or other separate legal entity
+ *     operating Bingd.
+ *   - The legal operator is **Suraj Kandukuri**, a natural person. That is the party
+ *     the agreement is with.
+ *   - **FourwardStudios** is the developer name used publicly, in Google Play and other
+ *     developer contexts. It is a name, not an entity.
+ *
+ * **The failure mode this constant now guards is the opposite of the old one.** The
+ * placeholder's risk was naming a company that does not exist; the risk here is
+ * implying one does. "FourwardStudios LLC", "FourwardStudios, a company", or the
+ * assumed-name construction "Suraj Kandukuri d/b/a FourwardStudios" would each assert a
+ * registration nobody has filed. The wording below names the person first and the
+ * developer name as what it is, and TERMS_BODY says so again in its own sentence
+ * because one reader in ten reads a parenthetical as a corporate suffix.
+ *
+ * Deliberately no jurisdiction, no company number and no registered address, because
+ * none of those exists to state. Governing law, venue, arbitration, a legal-notice
+ * address and a lawyer's read are L-1 items 2 to 5 and remain open, which is why
+ * TERMS_STATUS below still says 'draft'.
  */
-const LEGAL_ENTITY = '[LEGAL ENTITY / DEVELOPER NAME &mdash; FOUNDER TO CONFIRM]';
+const LEGAL_ENTITY = 'Suraj Kandukuri, using the developer name FourwardStudios';
 
 /**
  * Where the Terms of Use is in its life: 'draft' or 'final'.
@@ -758,7 +774,7 @@ ${body}
 ${SHOWCASE}
 
       <footer>
-        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> &middot;
+        <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> &middot;
         <a href="/privacy">Privacy</a> &middot; <a href="/terms">Terms</a> &middot;
         <a href="/support">Support</a>
       </footer>
@@ -908,14 +924,62 @@ const UNAVAILABLE = isPublic
   : 'bingd. is in closed testing.';
 
 /**
- * The one address in this project a stranger is told to write to.
+ * The two addresses, and which one is which.
  *
- * Both stores publish it in the listing, so it has to be a mailbox somebody reads
- * rather than a plausible-looking string. It was already in the router's footer; it is
- * a constant now because three more pages say it and a support address that differs
- * between pages is a support address people stop trusting.
+ * Both stores publish an address in the listing, so each has to be a mailbox somebody
+ * reads rather than a plausible-looking string. They were one constant until
+ * 2026-09-04, and that was not a simplification: the app has drafted to
+ * `support@bingd.app` since Settings grew a Help & Support section
+ * (`src/lib/support.ts`) and the founder's Play listing publishes the same, while every
+ * page of this site said `hello@bingd.app`. The product and the listing named different
+ * mailboxes, which is SUPPORT-1 in docs/release/store-privacy-inventory.md, now settled
+ * the way the app already behaved.
+ *
+ * **CONTACT_EMAIL is the general address**, and it stays on the pages that already
+ * carry it: the privacy policy, the Terms, and the site's front page. Rewriting a
+ * published policy's contact line is a change to a legal document rather than a
+ * tidy-up, and neither document is a support channel.
+ *
+ * **SUPPORT_EMAIL is where somebody goes when they need something.** The support page
+ * and every action on it, plus the one line on the deletion page for a person who
+ * cannot get into the app to delete the account themselves. It is the address the app's
+ * own Send feedback and Report a problem rows draft to, so a reply lands in the same
+ * thread whichever route they took.
+ *
+ * Both forward to the same person. The split decides what a subject line means on
+ * arrival, not who reads it.
  */
-const SUPPORT_EMAIL = 'hello@bingd.app';
+const SUPPORT_EMAIL = 'support@bingd.app';
+const CONTACT_EMAIL = 'hello@bingd.app';
+
+/**
+ * A `mailto:` with a subject already filled in.
+ *
+ * Encoded rather than interpolated: a subject with a space in it is not a valid URL,
+ * and an unencoded one silently truncates in some clients — the same reasoning as
+ * `src/lib/support.ts`, which builds the app's two drafts.
+ *
+ * **No prefilled body.** The app can honestly supply a version and a build number
+ * because it is running; a web page cannot, and a body of guesses about somebody's
+ * phone is a body they have to delete before they can write. The page asks for those
+ * facts in words instead.
+ *
+ * The subjects extend the two the app already sends — `bingd. support` and
+ * `bingd. feedback` — rather than replacing them, so a mail filter on either prefix
+ * keeps catching both routes.
+ */
+const mailto = (subject) => `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}`;
+
+/**
+ * Cloudflare Scrape Shield rewrites every `mailto:` on this zone into a
+ * `/cdn-cgi/l/email-protection` link with a decoder script behind it
+ * (docs/architecture/web-deployment.md). On a policy page that is harmless. On this
+ * page the mail links **are** the page, and they carry a subject in a query string,
+ * so the obfuscator is switched off around each of them rather than trusted to
+ * round-trip one. `email_off` is Cloudflare's own opt-out and means nothing to any
+ * other host, which is why it is a comment.
+ */
+const plain = (html) => `<!--email_off-->${html}<!--/email_off-->`;
 
 /**
  * The date on the documents.
@@ -933,11 +997,12 @@ const DOCUMENT_DATE = '20 August 2026';
  * page's own existence is the kind of small wrongness that makes a reader doubt the
  * large claims around it. Also a literal, for DOCUMENT_DATE's reason.
  *
- * **This is the line to change when the Terms text changes** — most notably in the
- * commit that fills in LEGAL_ENTITY and sets TERMS_STATUS to 'final', which revises
- * the document and should say so.
+ * **This is the line to change when the Terms text changes.** It moved on 2026-09-04,
+ * the commit that filled in LEGAL_ENTITY: naming the operator is a revision to the
+ * document and a reader has to be able to see that it happened. It moves again in the
+ * commit that sets TERMS_STATUS to 'final'.
  */
-const TERMS_DATE = '25 August 2026';
+const TERMS_DATE = '4 September 2026';
 
 const PRIVACY_BODY = `      <p class="lede">
         ${isPublic ? 'Bingd' : 'Bingd is a closed beta. This'} describes what it actually
@@ -949,7 +1014,7 @@ const PRIVACY_BODY = `      <p class="lede">
       <p>
         Bingd is made by one independent developer. Questions about anything on this page,
         including a request to see or remove what is held about you, go to
-        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.
+        <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
       </p>
 
       <h2>What Bingd stores about you</h2>
@@ -1061,7 +1126,7 @@ const PRIVACY_BODY = `      <p class="lede">
           for anyone who has it.</li>
         <li>Delete your account, permanently, in Settings &rsaquo; Account &amp; Data.</li>
         <li>Ask for a copy of what is held about you by writing to
-          <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</li>
+          <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</li>
       </ul>
 
       <h2>Changes</h2>
@@ -1077,68 +1142,275 @@ const PRIVACY_BODY = `      <p class="lede">
         This product uses the TMDB API but is not endorsed or certified by TMDB.
       </p>`;
 
+/**
+ * The support page's own furniture, appended to `documentStyles` for that page alone.
+ *
+ * Everything else on this site is a document read top to bottom. The support page has
+ * four things somebody is meant to *press*, and a run of paragraphs is the one shape
+ * that hides a button. So: cards with a border, a real tap target, and one dominant
+ * action above them.
+ *
+ * **Mobile first and mobile mostly.** A support link is tapped from a phone, often from
+ * inside the app, so the single column is the default and the two-column grid is the
+ * override. Cards are whole-anchor rather than a heading with a link in it, because a
+ * thumb aims at a card.
+ *
+ * **Focus is drawn explicitly.** The cards remove the underline that would otherwise
+ * mark them as links, and a browser's default focus ring on a bordered block is easy to
+ * lose against a border of its own; the maroon outline sits outside the card where it
+ * cannot be mistaken for one.
+ *
+ * No opacity anywhere. `--secondary` on `--raised` is 6.3:1, and the first thing a
+ * `0.75` would have done is drop the hint under 4.5.
+ */
+const SUPPORT_STYLES = `
+      .hero-action { margin: 1.5rem 0 2.5rem; }
+
+      .hero-action .button {
+        display: inline-block;
+        width: 100%;
+        max-width: 22rem;
+        text-align: center;
+        color: var(--raised);
+      }
+
+      .help-cards { display: grid; gap: 0.75rem; margin: 0 0 1rem; }
+
+      /* Two columns once there is room for two readable ones and not before. Four
+         cards, so the grid is always full and never leaves an orphan. */
+      @media (min-width: 34rem) {
+        .help-cards { grid-template-columns: 1fr 1fr; }
+      }
+
+      a.help-card {
+        display: block;
+        padding: 1.125rem 1.25rem;
+        background: var(--raised);
+        border: 1px solid var(--hairline);
+        border-radius: 0.75rem;
+        box-shadow: 0 1px 2px rgba(36, 35, 38, 0.06);
+        text-decoration: none;
+        color: var(--secondary);
+      }
+
+      a.help-card h3 {
+        margin: 0 0 0.35rem;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-size: 1.0625rem;
+        font-weight: 500;
+        color: var(--maroon);
+      }
+
+      a.help-card p { margin: 0 0 0.6rem; font-size: 0.9375rem; }
+
+      .help-card-hint { font-size: 0.8125rem; color: var(--secondary); }
+
+      a.help-card:hover { border-color: var(--maroon); }
+
+      a:focus-visible {
+        outline: 2px solid var(--maroon);
+        outline-offset: 3px;
+      }
+
+      /* Questions read as questions rather than as sub-headings of the section above,
+         which is what the shared h3 rule makes them: same weight as the body, one step
+         up in size, and enough air above to break the run of answers. */
+      h3 { font-size: 1.0625rem; margin: 2rem 0 0.5rem; }
+
+      .aside { font-size: 0.9375rem; margin-top: 1.5rem; }
+`;
+
+/**
+ * The support page.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THIS PAGE IS FOR
+ *
+ * Two jobs, and the second one is why it was rewritten on 2026-09-04.
+ *
+ * The first is the store requirement: App Store Connect and Play Console each ask for a
+ * support URL, fetch it, and a submission without one does not proceed. That job was
+ * already done, and done honestly, by the page this replaces.
+ *
+ * The second is the one it was failing. Bingd has a few dozen users and no other way of
+ * finding out what is wrong with it. A bug report is a defect somebody found for free; a
+ * question is a screen that did not explain itself; a feature request is a gap somebody
+ * cared enough to name. The old page answered "how do I get help" and never once asked
+ * anybody to write, so the traffic it produced was whatever survived four paragraphs
+ * about what to put in an email.
+ *
+ * So: an invitation first, four labelled ways to send one, and the answers underneath
+ * for the person who would rather not write at all.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IT IS NOT, AND MUST NOT BECOME
+ *
+ * No ticket number, no queue, no search box, no chat bubble, no promised reply time.
+ * Each of those is a claim about a support operation that does not exist, and the first
+ * person to test one finds out. A help centre is also a thing somebody has to maintain:
+ * nine answers written against the schema can be re-checked in an afternoon, and ninety
+ * cannot.
+ *
+ * ---------------------------------------------------------------------------
+ * THE RULE THE ANSWERS ARE WRITTEN UNDER
+ *
+ * The privacy page's rule: every sentence describes what the app does today, and
+ * anything that could not be checked against the code was left out rather than guessed.
+ * Two proposed answers were dropped for failing that, recorded here so the next person
+ * does not spend an afternoon rediscovering why:
+ *
+ *   - **How the match score is calculated.** PRD 13 specifies it. What ships is not
+ *     settled enough across the surfaces that show it to describe in two sentences that
+ *     will still be true next month.
+ *   - **Group Picks.** Merged, but its RPC is not deployed to production, so the page
+ *     would be describing something nobody can reach yet.
+ */
 const SUPPORT_BODY = `      <p class="lede">
-        There is no help desk and there is no support team &mdash; there is one address,
-        and one person on the other end of it.
+        Found something odd, got a question, or wish bingd. worked differently? Send it
+        our way. bingd. is early, and what you tell us decides what gets fixed and built
+        next.
       </p>
 
-      <h2>Getting help</h2>
-      <p>
-        Write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>. Replies are not
-        instant and there is no queue you can check; ${
-          isPublic ? 'a small product run by one person' : 'a closed beta run by one person'
-        } is exactly as informal as that sounds.
+      <p class="hero-action">
+        ${plain(`<a class="button" href="${mailto('bingd. support')}">Contact support</a>`)}
       </p>
 
-      <h2>What to include</h2>
-      <p>
-        Almost every question is answered faster with these four things:
-      </p>
-      <ul>
-        <li>Your Bingd handle.</li>
-        <li>The <strong>version and build number</strong>, from Settings &rsaquo; scroll to
-          the bottom. It reads like <em>Bingd 0.1.0 (7)</em>.</li>
-        <li>Whether you are on iPhone or Android.</li>
-        <li>What you tapped, what you expected, and what happened instead.</li>
-      </ul>
+      <h2>Pick whichever fits</h2>
 
-      <h2>Things that are not faults</h2>
-      <ul>
-        <li><strong>Notifications are off until you turn them on.</strong> Bingd may send
-          you a notification &mdash; someone commenting on your activity, a follow request,
-          an award you earned &mdash; but only if you allowed notifications when the app
-          asked. Everything also appears in the app&rsquo;s own inbox, so nothing is missed
-          by declining. You can change which kinds are sent in Settings &rsaquo;
-          Notifications, and turn them off entirely in your phone&rsquo;s own settings for
-          Bingd.</li>
-        <li><strong>An invitation link does not follow you through an install.</strong> If
-          you install Bingd from a store or from TestFlight and open it from your home
-          screen, the invitation is not carried across. Go back to the link you were sent
-          and tap &ldquo;I already have Bingd&rdquo;.</li>
-        <li><strong>A private account stays private from a link.</strong> Opening someone&rsquo;s
-          profile link does not bypass their privacy setting.</li>
-      </ul>
+      <div class="help-cards">
+        ${plain(`<a class="help-card" href="${mailto('bingd. support - problem report')}">
+          <h3>Report a problem</h3>
+          <p>Something broke, or a screen is not behaving. Tell us what happened.</p>
+          <span class="help-card-hint">Opens your email app</span>
+        </a>`)}
 
-      <h2>Account and data</h2>
+        ${plain(`<a class="help-card" href="${mailto('bingd. feedback - idea')}">
+          <h3>Share an idea</h3>
+          <p>A feature you want, or something you think could work better. We want to hear it.</p>
+          <span class="help-card-hint">Opens your email app</span>
+        </a>`)}
+
+        ${plain(`<a class="help-card" href="${mailto('bingd. account and privacy help')}">
+          <h3>Account and privacy help</h3>
+          <p>Trouble getting in, questions about what bingd. stores about you, or
+            deleting your account.</p>
+          <span class="help-card-hint">Opens your email app</span>
+        </a>`)}
+
+        ${plain(`<a class="help-card" href="${mailto('bingd. safety report')}">
+          <h3>Report content or a user</h3>
+          <p>Something on bingd. that should not be there. The app has Report built in
+            and it is quicker, so use this for anything it does not reach.</p>
+          <span class="help-card-hint">Opens your email app</span>
+        </a>`)}
+      </div>
+
+      <h2>Quick answers</h2>
+
+      <h3>How does ranking work?</h3>
       <p>
-        What is stored and who sees it is on the <a href="/privacy">privacy page</a>.
-        Deleting your account is done inside the app and is explained on
-        <a href="/account-deletion">this page</a>.
+        Two steps. First you say roughly how it felt: <em>I liked it</em>,
+        <em>It was fine</em>, or <em>I didn&rsquo;t like it</em>. Then bingd. puts it up
+        against titles already in that group, one pair at a time, and each answer narrows
+        down where it belongs. Five or six comparisons is usual. The 0 to 10 number is
+        that position. It comes from where the title ended up in your list rather than
+        from a rating you picked.
       </p>
 
-      <h2>Reporting something serious</h2>
+      <h3>Why did a score change on something I ranked ages ago?</h3>
       <p>
-        <strong>Reviews, comments and profiles can be reported from inside the app.</strong>
-        Open the review or comment and choose Report, or use Report on somebody&rsquo;s
-        profile. It reaches the person who runs Bingd, and the person you reported is
-        never told who reported them.
+        Because a score says where a title sits against everything else in the same
+        group. Rank one more film you liked and that whole group spreads out again to
+        make room. Your order is untouched; the list it sits in got longer.
+      </p>
+
+      <h3>How are films and TV handled?</h3>
+      <p>
+        As two separate lists that never meet in a comparison. For television you rank a
+        season rather than a whole series, because six years of a show is not one thing
+        anybody has a single opinion about. Ranking a season is how you say you watched
+        it, so there is no separate step to mark it off. The series page adds up the
+        seasons you have done.
+      </p>
+
+      <h3>What is the Watchlist for?</h3>
+      <p>
+        Things you mean to watch. It sits beside Watched in your Collection. Log or rank
+        something and it drops off the watchlist by itself, because once you have watched
+        it there is nothing left to intend. A whole series leaves once you have watched
+        every season that has
+        actually been released; specials, and seasons with no air date yet, do not hold
+        it there. Unranking something later does not put it back, so add it again
+        yourself if you want it.
+      </p>
+
+      <h3>Where do recommendations come from?</h3>
+      <p>
+        Two places. <strong>For you</strong> is built on your phone each time you open
+        the tab, out of your own rankings, TMDB&rsquo;s data about which titles resemble
+        which, and things like genre, language and how widely watched something is. It
+        reads no other bingd. account, and anything already in your collection is left
+        out. Refresh changes which titles are on the wall, and the &times; on a poster
+        says don&rsquo;t show me this one. The second place is people: when somebody
+        sends you a title it arrives under <strong>Sent to you</strong>, with whatever
+        they wrote next to it.
+      </p>
+
+      <h3>How do I change which notifications I get?</h3>
+      <p>
+        Settings &rsaquo; Notification Settings, with a switch for each kind. Turn one
+        off and that kind stops being written from then on; anything already in your inbox
+        stays put. A notification only reaches your phone if you allowed that when bingd.
+        asked, and your phone&rsquo;s own settings for bingd. is where you take it back.
+        Everything lands in the in-app inbox either way, so turning push off does not
+        mean missing anything.
+      </p>
+
+      <h3>How do blocking and reporting work?</h3>
+      <p>
+        Blocking is between the two of you and works immediately: you stop seeing each
+        other, any follow between you is removed, and unblocking does not bring it back.
+        Reporting is a message to us. There is a
+        Report on somebody else&rsquo;s comment, behind the &hellip; on their review, and
+        in the menu on their profile. You pick a reason, and the person you reported is
+        never told who reported them. What is not allowed on bingd. is listed in the
+        <a href="/terms">Terms</a>.
+      </p>
+
+      <h3>How do I delete my account?</h3>
+      <p>
+        Settings &rsaquo; Account &amp; Data. Type your handle, tap
+        <strong>Delete my account</strong>, and confirm. It happens straight away and
+        cannot be undone. <a href="/account-deletion">Deleting your account</a> sets out
+        what goes, what is kept with nothing pointing at you, and the safety records that
+        stay. If you cannot get into the app at all, write to us from the address on the
+        account and we will do it for you.
+      </p>
+
+      <h3>Where does the film and TV information come from?</h3>
+      <p>
+        From TMDB. Titles, posters, cast, descriptions and dates are theirs, fetched by
+        bingd.&rsquo;s server and held for a while so the same request is not made twice.
+        This product uses the TMDB API but is not endorsed or certified by TMDB. TMDB is
+        a public database anyone can correct, so a wrong release date usually has to be
+        fixed there. Tell us anyway if it looks broken in bingd.
+      </p>
+
+      <h2>Still need help?</h2>
+      <p>
+        Email ${plain(`<a href="${mailto('bingd. support')}">${SUPPORT_EMAIL}</a>`)}.
+        Screenshots help more than anything else.
       </p>
       <p>
-        For what that does not cover &mdash; somebody impersonating you, or a security
-        problem: write to
-        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> with the word
-        <strong>URGENT</strong> in the subject. Please do not post security findings
-        publicly before they are fixed.
+        If you can, say what you were doing, what you expected to happen, and what
+        happened instead. The phone you are on and the version at the bottom of Settings,
+        which reads like <em>bingd. 1.0.0 (7)</em>, save a round trip. One person reads
+        this address, so it will not be instant, and it will be a person.
+      </p>
+      <p class="aside">
+        Not a support question?
+        ${plain(`<a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>`)} is the general
+        address.
       </p>`;
 
 const DELETION_BODY = `      <p class="lede">
@@ -1149,14 +1421,15 @@ const DELETION_BODY = `      <p class="lede">
       <h2>How</h2>
       <ul>
         <li>Open Bingd and go to <strong>Settings &rsaquo; Account &amp; Data</strong>.</li>
-        <li>Type your own handle to confirm &mdash; a yes/no dialog is a mistap, and this is
-          the one action in Bingd nothing can reverse.</li>
-        <li>Tap <strong>Delete for good</strong>.</li>
+        <li>Type your own handle in the box at the bottom &mdash; a yes/no dialog is a
+          mistap, and this is the one action in Bingd nothing can reverse.</li>
+        <li>Tap <strong>Delete my account</strong>, then confirm with
+          <strong>Delete for good</strong>.</li>
       </ul>
       <p>
         If you cannot get into the app, write to
-        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> from the email address on the
-        account and it will be done for you.
+        ${plain(`<a href="${mailto('bingd. account and privacy help')}">${SUPPORT_EMAIL}</a>`)}
+        from the email address on the account and it will be done for you.
       </p>
       <p>
         There is no &ldquo;deactivate&rdquo;. Bingd does not offer a temporary hidden state,
@@ -1280,7 +1553,8 @@ const TERMS_DRAFT_NOTICE =
     ? `
       <p>
         <strong>Draft for review.</strong> This document has not yet been reviewed by a
-        lawyer, and the operating entity named below is not yet confirmed.
+        lawyer. The operator it names is confirmed; the governing law, the venue and a
+        legal notice address are not yet settled.
       </p>
 `
     : '';
@@ -1294,8 +1568,13 @@ ${TERMS_DRAFT_NOTICE}
       <h2>Who these terms are with</h2>
       <p>
         Bingd is made and run by ${LEGAL_ENTITY} (&ldquo;we&rdquo;, &ldquo;us&rdquo;).
+        <strong>FourwardStudios is a developer name rather than a company.</strong> No
+        company, partnership or other separate legal entity operates Bingd, so these
+        terms are an agreement with Suraj Kandukuri personally.
+      </p>
+      <p>
         Questions about anything here go to
-        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.
+        <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
       </p>
 
       <h2>You need to be 13 or older</h2>
@@ -1311,7 +1590,7 @@ ${TERMS_DRAFT_NOTICE}
         <li>Keep your sign-in method secure. What happens through your account is treated
           as done by you.</li>
         <li>One person per account. Do not share it, sell it, or transfer it.</li>
-        <li>Write to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> if you think
+        <li>Write to <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> if you think
           somebody else is using it.</li>
       </ul>
 
@@ -1375,7 +1654,7 @@ ${TERMS_DRAFT_NOTICE}
       <p>
         We try to match the response to what happened.
         There is no formal appeals process today: if you think we got it wrong, write to
-        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> and a person will read it.
+        <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> and a person will read it.
         We are not obliged to monitor everything posted on Bingd, and we do not.
       </p>
       <p>
@@ -1445,7 +1724,7 @@ ${TERMS_DRAFT_NOTICE}
       </p>
 
       <h2>Contact</h2>
-      <p><a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>`;
+      <p><a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>`;
 
 const DOCUMENTS = [
   {
@@ -1464,11 +1743,22 @@ const DOCUMENTS = [
     }`,
     body: TERMS_BODY,
   },
+  /**
+   * The support page carries **no date stamp**, alone among the four.
+   *
+   * The other three are documents whose readers need to know which version they are
+   * looking at, and a store reviewer checks the privacy page's date. This one is an
+   * invitation to write in, and "last updated six weeks ago" above it answers a
+   * question nobody asked with the one fact most likely to put somebody off.
+   */
   {
     dir: 'support',
-    title: 'Support — Bingd',
-    heading: 'Support',
-    stamp: `Last updated ${DOCUMENT_DATE}.`,
+    title: 'bingd. Support',
+    description:
+      'Help with bingd., report a problem, share feedback, or get account and privacy support.',
+    heading: 'Need a hand?',
+    stamp: null,
+    extraStyles: SUPPORT_STYLES,
     body: SUPPORT_BODY,
   },
   {
@@ -1594,7 +1884,7 @@ ${ROOT_BODY}
       </div>
 
       <footer>
-        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> &middot;
+        <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> &middot;
         <a href="/privacy">Privacy</a> &middot; <a href="/terms">Terms</a> &middot;
         <a href="/support">Support</a>
       </footer>
@@ -1638,6 +1928,25 @@ const documentStyles = `
          these are read top to bottom, so the grid centring above is undone. */
       body { display: block; padding: 3rem 1.5rem 4rem; }
       main { max-width: 42rem; margin: 0 auto; text-align: left; }
+
+      /* And the *other* half of undoing it, missing until 2026-09-04.
+         --------------------------------------------------------------------------
+         The router's @media (min-width: 56rem) block turns main into a two-column
+         grid so the pitch and the screenshots sit side by side. Nothing above cancelled
+         it, and a plain override cannot: display:grid and grid-template-columns
+         are declared **only** inside that query, so there was no earlier value for
+         the long-form main rule to win against. It only overrode the width.
+         Every one of these four documents was therefore a two-column grid on any window
+         wider than 896px, with each heading, paragraph and list becoming a grid item:
+         the privacy policy read down the left column and then down the right, alternating,
+         with a heading beside the paragraph belonging to the one before it.
+         Invisible on a phone, and visible to anybody who opened the privacy URL out of
+         App Store Connect on a laptop, which is exactly who follows that link.
+         Same breakpoint, undone explicitly, because a document has one column at every
+         width. */
+      @media (min-width: 56rem) {
+        main { display: block; max-width: 42rem; }
+      }
       h1 { font-size: clamp(2rem, 8vw, 2.75rem); margin-bottom: 0.25rem; }
       h2 {
         font-family: 'DM Serif Display', Georgia, serif;
@@ -1666,14 +1975,17 @@ const documentStyles = `
         border-top: 1px solid var(--hairline);
         font-size: 0.8125rem;
       }
+      .footer-mail { margin: 0.5rem 0 0; font-size: 0.8125rem; }
 `;
 
-const document_ = ({ title, heading, stamp, body }) => `<!doctype html>
+const document_ = ({ title, description, heading, stamp, body, extraStyles }) => `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${title}</title>${ROBOTS}
+    <title>${title}</title>${
+      description ? `\n    <meta name="description" content="${description}" />` : ''
+    }${ROBOTS}
     <meta name="referrer" content="no-referrer" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1683,19 +1995,21 @@ const document_ = ({ title, heading, stamp, body }) => `<!doctype html>
       rel="stylesheet"
     />
 
-    <style>${documentStyles}</style>
+    <style>${documentStyles}${extraStyles ?? ''}</style>
   </head>
 
   <body>
     <main>
-      <h1>${heading}</h1>
-      <p class="stamp">${stamp}</p>
+      <h1>${heading}</h1>${stamp ? `\n      <p class="stamp">${stamp}</p>` : ''}
 ${body}
       <footer>
-        <a href="/privacy">Privacy</a> &middot; <a href="/terms">Terms</a> &middot;
-        <a href="/support">Support</a> &middot;
-        <a href="/account-deletion">Delete your account</a> &middot;
-        <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>
+        <a href="/support">Support</a> &middot; <a href="/privacy">Privacy</a> &middot;
+        <a href="/terms">Terms</a> &middot;
+        <a href="/account-deletion">Delete your account</a>
+        <p class="footer-mail">
+          Support ${plain(`<a href="${mailto('bingd. support')}">${SUPPORT_EMAIL}</a>`)},
+          anything else ${plain(`<a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>`)}.
+        </p>
       </footer>
     </main>
   </body>

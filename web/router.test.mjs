@@ -852,7 +852,10 @@ describe('the built site', () => {
      */
     const expected = [
       ['privacy', /Privacy/, /never leaves your device as\s+analytics|allowlist/],
-      ['support', /Support/, new RegExp('hello@bingd\\.app')],
+      // The support page's h1 became the invitation it is rather than the word
+      // "Support" (2026-09-04); its marker is the address every action on it writes
+      // to, which is the one string the page cannot be useful without.
+      ['support', /Need a hand\?/, new RegExp('support@bingd\\.app')],
       ['account-deletion', /Deleting your account/, /Settings &rsaquo; Account &amp; Data/],
       // The Terms, whose own marker is the moderation list: it is the section that has
       // to stay checkable against `moderation_actions`' six allowed actions, and a
@@ -903,10 +906,18 @@ describe('the built site', () => {
     // in-app preference cannot override an OS-level denial and vice versa.
     // Plain substrings over the HTML with its whitespace collapsed, so the assertion is
     // about the sentence rather than about where the source happens to wrap it.
+    //
+    // The wording moved on 2026-09-04 when this stopped being a bullet under *Things
+    // that are not faults* and became the answer to "how do I change which
+    // notifications I get". The three facts it has to carry did not move.
     const prose = html.replace(/\s+/g, ' ');
-    assert.ok(prose.includes('may send you a notification'), 'no honest notification sentence');
-    assert.ok(prose.includes('Settings &rsaquo; Notifications'), 'no in-app route named');
+    assert.ok(
+      prose.includes('only reaches your phone if you allowed'),
+      'no honest notification sentence',
+    );
+    assert.ok(prose.includes('Settings &rsaquo; Notification Settings'), 'no in-app route named');
     assert.ok(prose.includes('phone&rsquo;s own settings'), 'no OS-level route named');
+    assert.ok(prose.includes('in-app inbox'), 'the inbox fallback is not stated');
   });
 
   it('lets no store document be claimed by the app', () => {
@@ -1184,28 +1195,55 @@ describe('the Terms of Use', () => {
   const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
 
   /**
-   * The placeholder is the whole reason this document is safe to publish unfinished.
+   * The operator, and the thing it must never be read as.
    *
-   * It names no company because there is no confirmed company to name, and the failure
-   * this guards against is somebody filling in a plausible-looking entity to make the
-   * page look finished — which produces a contract with a party that does not exist.
-   * When the founder supplies the real one, this test fails and is deleted in the same
-   * commit, which is the point: the reminder lives where it cannot be lost.
+   * This test used to assert the **placeholder** was still there, on the reasoning that
+   * a reminder living in a failing test cannot be lost, and that its own comment said
+   * it would be deleted in the commit that supplied the real answer. That commit is
+   * 2026-09-04, and the answer is the one the placeholder could not hold: there is no
+   * company. The legal operator is a person, Suraj Kandukuri, and FourwardStudios is a
+   * developer name used in Google Play and similar contexts.
+   *
+   * So the test inverts rather than disappearing. **The old risk was naming a company
+   * that does not exist; the new one is implying that FourwardStudios is one**, which
+   * is what any of "FourwardStudios LLC", "FourwardStudios, Inc", "a company called
+   * FourwardStudios" or the assumed-name form "d/b/a" would assert. Each is a
+   * registration nobody has filed, on the document a person points at when they say
+   * Bingd agreed to something. The page has to name the person, disclaim the company,
+   * and use none of those.
    */
-  it('still says out loud that the legal entity is unconfirmed', () => {
+  it('names the operator, and never dresses the developer name up as a company', () => {
     const html = read('terms', 'index.html');
-    assert.match(
-      html,
-      /LEGAL ENTITY \/ DEVELOPER NAME &mdash; FOUNDER TO CONFIRM/,
-      'the Terms names an operating entity that nothing in this repository establishes',
+    const prose = html.replace(/\s+/g, ' ');
+
+    assert.ok(!html.includes('FOUNDER TO CONFIRM'), 'the entity placeholder is back');
+    assert.ok(prose.includes('Suraj Kandukuri'), 'the Terms names no operator');
+    assert.ok(
+      prose.includes('FourwardStudios is a developer name rather than a company'),
+      'the Terms does not say what FourwardStudios is',
     );
+    assert.ok(
+      prose.includes('agreement with Suraj Kandukuri personally'),
+      'the Terms does not say who the contracting party is',
+    );
+
+    // The entity types nobody has registered, and the assumed-name construction that
+    // asserts a filing of its own. Anchored to FourwardStudios so the Terms can still
+    // use the ordinary words about somebody else's company.
+    for (const wrong of [
+      /FourwardStudios[^.<]{0,20}\b(?:LLC|L\.L\.C|Inc|Incorporated|Ltd|Limited|Corp|Corporation|GmbH|Pty|PLC)\b/i,
+      /\bd\/b\/a\b/i,
+      /\bdoing business as\b/i,
+      /\btrading as\b/i,
+      /FourwardStudios[^.<]{0,30}\bis a (?:company|corporation|partnership|legal entity)\b/i,
+    ]) {
+      assert.doesNotMatch(html, wrong, 'the Terms claims a registration nobody has filed');
+    }
+
     // `\s+` rather than a space: the source wraps at 90 columns, so a literal match
-    // here would break on a reflow that changed nothing about the meaning.
-    assert.match(
-      html,
-      /not yet been reviewed by a\s+lawyer/,
-      'the draft status must be stated',
-    );
+    // here would break on a reflow that changed nothing about the meaning. The draft
+    // status stands — the operator was L-1 item 1, and items 2 to 5 are open.
+    assert.match(html, /not yet been reviewed by a\s+lawyer/, 'the draft status must be stated');
   });
 
   /**
@@ -1219,7 +1257,7 @@ describe('the Terms of Use', () => {
    * this one.
    */
   it('dates itself from its own deterministic revision date', () => {
-    assert.match(read('terms', 'index.html'), /Last updated 25 August 2026\./);
+    assert.match(read('terms', 'index.html'), /Last updated 4 September 2026\./);
     // The other three keep the shared date; the Terms did not drag them forward.
     assert.match(read('privacy', 'index.html'), /Last updated 20 August 2026\./);
   });
@@ -1277,6 +1315,345 @@ describe('the Terms of Use', () => {
     }
     assert.match(read('i.html'), /href="\/terms"/, 'the invitation page does not link the Terms');
     assert.match(read('index.html'), /href="\/terms"/, 'the root page does not link the Terms');
+  });
+});
+
+/**
+ * The support page, which is the only page on this site somebody is meant to *act* on.
+ *
+ * Everything above proves the site describes the app. This suite proves the one page
+ * that asks for a reply can actually take one, because every way it silently stops
+ * working looks identical to it working:
+ *
+ *   - A `mailto:` whose subject was interpolated rather than encoded is a link that
+ *     opens an empty draft, or no draft, depending on the client.
+ *   - An address that drifts from the one the app drafts to splits one conversation
+ *     across two mailboxes, and the founder reads only the one they set up.
+ *   - Cloudflare's Scrape Shield rewrites every `mailto:` on this zone into a decoder
+ *     link (docs/architecture/web-deployment.md). On a policy page that is cosmetic; on
+ *     the page whose whole purpose is the mail links, a round-trip that loses a query
+ *     string is the page failing with nothing to show for it.
+ *
+ * None of the three produces an error anywhere. They produce silence, which on a
+ * support page is indistinguishable from nobody having anything to say.
+ */
+describe('the support page', () => {
+  const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
+  const support = () => read('support', 'index.html');
+  const bodyOf = (html) => html.slice(html.indexOf('<body>'));
+  const hrefs = (html) => [...bodyOf(html).matchAll(/href="(mailto:[^"]+)"/g)].map(([, u]) => u);
+
+  /** The app's own copy of the address and the subjects it drafts to. */
+  const appSupport = () => readFileSync(join(here, '..', 'src', 'lib', 'support.ts'), 'utf8');
+
+  it('offers the four ways in, each as a draft addressed and titled for it', () => {
+    /**
+     * The four subjects are the only routing this channel has. There is no queue, no
+     * form and no ticket id — a filter on the subject is how "something is broken"
+     * gets separated from "here is an idea", so a subject that fails to survive the
+     * link is the whole triage mechanism gone.
+     */
+    const required = [
+      'bingd. support - problem report',
+      'bingd. feedback - idea',
+      'bingd. account and privacy help',
+      'bingd. safety report',
+    ];
+    const links = hrefs(support());
+
+    for (const subject of required) {
+      const wanted = `subject=${encodeURIComponent(subject)}`;
+      assert.ok(
+        links.some((u) => u.includes(wanted)),
+        `no action on the support page drafts "${subject}"`,
+      );
+    }
+
+    // And a fifth, unqualified one: the hero. Somebody who does not recognise their
+    // problem in any of the four still has one press that works.
+    assert.match(support(), /class="button"[^>]*href="mailto:/, 'the hero has no mail action');
+  });
+
+  it('encodes every draft rather than interpolating it', () => {
+    /**
+     * A subject with a space in it is not a valid URL. Some clients tolerate it, some
+     * truncate the subject at the space, and some drop the query string entirely — and
+     * which one the reader has is not knowable from here. `src/lib/support.ts` learned
+     * this for the app; the site builds its own and has to be held to the same rule.
+     */
+    for (const url of hrefs(support())) {
+      assert.doesNotMatch(url, /[\s"'<>]/, `unencoded character in ${url}`);
+      const query = url.includes('?') ? url.slice(url.indexOf('?') + 1) : '';
+      if (query) {
+        assert.doesNotMatch(query, /&(?!amp;|$)[a-z]+=(?!)/i);
+        assert.match(query, /^subject=[A-Za-z0-9._~%-]+$/, `not a subject-only query: ${url}`);
+      }
+    }
+  });
+
+  it('writes to the address the app drafts to, and to no other', () => {
+    /**
+     * The identity check, in the spirit of the deep-link ones above: the site and the
+     * app are two uncompiled halves of one support channel and were only ever checked
+     * against themselves. They disagreed for two weeks — the site said
+     * `hello@bingd.app`, the app and the founder's Play listing said
+     * `support@bingd.app` — which is SUPPORT-1 in
+     * docs/release/store-privacy-inventory.md and is what this test now prevents
+     * recurring.
+     */
+    const inApp = /SUPPORT_EMAIL = '([^']+)'/.exec(appSupport())?.[1];
+    assert.ok(inApp, 'src/lib/support.ts no longer declares SUPPORT_EMAIL');
+
+    const addresses = new Set(hrefs(support()).map((u) => u.slice('mailto:'.length).split('?')[0]));
+    addresses.delete('hello@bingd.app'); // the general address, deliberately kept
+    assert.deepStrictEqual(
+      [...addresses],
+      [inApp],
+      'the support page writes to an address the app does not',
+    );
+  });
+
+  it('extends the two subjects the app already sends rather than replacing them', () => {
+    /**
+     * The app drafts `bingd. support` and `bingd. feedback`. The page's four are
+     * prefixed with those two on purpose, so one mail rule keeps catching both routes
+     * and a person who wrote in from the app and then from the web lands in one thread.
+     */
+    const source = appSupport();
+    for (const [topic, prefix] of [
+      ['feedback', 'bingd. feedback'],
+      ['problem', 'bingd. support'],
+    ]) {
+      assert.match(
+        source,
+        new RegExp(`${topic}: '${prefix}'`),
+        `the app's ${topic} subject is no longer "${prefix}"`,
+      );
+    }
+    const subjects = hrefs(support())
+      .filter((u) => u.includes('subject='))
+      .map((u) => decodeURIComponent(u.split('subject=')[1]));
+    for (const subject of subjects) {
+      assert.ok(
+        subject.startsWith('bingd. support') ||
+          subject.startsWith('bingd. feedback') ||
+          subject.startsWith('bingd. account') ||
+          subject.startsWith('bingd. safety'),
+        `"${subject}" falls outside the four the founder settled`,
+      );
+    }
+  });
+
+  it('exempts its mail links from the zone-wide email obfuscator', () => {
+    /**
+     * Cloudflare Scrape Shield is on for this zone and rewrites `mailto:` links into
+     * `/cdn-cgi/l/email-protection` with an injected decoder. `email_off` is its own
+     * opt-out and is a comment, so it costs nothing anywhere else and cannot be linted
+     * away as dead markup. Asserted per link rather than once, because the failure is
+     * one link losing its subject while the rest keep theirs.
+     */
+    const body = bodyOf(support());
+    const wrapped = [...body.matchAll(/<!--email_off-->([\s\S]*?)<!--\/email_off-->/g)]
+      .map(([, inner]) => inner)
+      .join('\n');
+    for (const url of hrefs(support())) {
+      assert.ok(wrapped.includes(url), `${url} is not wrapped in email_off`);
+    }
+  });
+
+  it('is the page the app sends people to for help', () => {
+    /**
+     * Settings › Help & Support › Help Center opens a URL from `src/lib/legal.ts`. If
+     * that path and this page's directory ever disagree, the app's only in-product
+     * route to help is a 404 that nothing on either side reports.
+     */
+    const legal = readFileSync(join(here, '..', 'src', 'lib', 'legal.ts'), 'utf8');
+    const url = /support: '([^']+)'/.exec(legal)?.[1];
+    assert.ok(url, 'src/lib/legal.ts no longer publishes a support URL');
+    assert.strictEqual(new URL(url).pathname, '/support');
+  });
+
+  it('reaches every surface a consumer app has to publish', () => {
+    /**
+     * The store forms take a privacy URL, a support URL and an account-deletion URL,
+     * and Apple's reviewers follow them. Somebody who lands on the support page has to
+     * be able to get to the other three and to a general address without going back to
+     * a search engine.
+     */
+    const html = support();
+    for (const path of ['/privacy', '/terms', '/account-deletion']) {
+      assert.match(html, new RegExp(`href="${path}"`), `the support page does not link ${path}`);
+    }
+    assert.match(html, /hello@bingd\.app/, 'the general contact address is missing');
+  });
+
+  it('promises no support operation that does not exist', () => {
+    /**
+     * One person reads this mailbox. Every phrase below implies otherwise, and each is
+     * what a template supplies by default: a queue somebody can check, a chat widget, a
+     * reply time, a team. The first person to test one finds out, and what they find
+     * out is that the rest of the page might be written the same way.
+     */
+    const body = bodyOf(support());
+    for (const phrase of [
+      /submit a ticket/i,
+      /ticket number/i,
+      /support team/i,
+      /live chat/i,
+      /knowledge ?base/i,
+      /help ?desk/i,
+      /within \d+ (?:hours|business days|days)/i,
+      /we (?:will|aim to) (?:reply|respond) within/i,
+      /24[/ ]?7/,
+    ]) {
+      assert.doesNotMatch(body, phrase, `the support page promises "${phrase}"`);
+    }
+  });
+
+  it('carries no em dash, and no date it would have to be trusted to keep', () => {
+    /**
+     * Two founder rules, both about how the page reads rather than what it says.
+     *
+     * The em dash is a house style decision for this page's copy (the policy documents
+     * keep theirs). The stamp is the more consequential one: the other three documents
+     * date themselves because a reader needs to know which version they are looking at,
+     * and a support page that says "last updated" six weeks ago answers a question
+     * nobody asked with the fact most likely to stop somebody writing in.
+     */
+    const body = bodyOf(support());
+    assert.doesNotMatch(body, /&mdash;|—/, 'an em dash reached the support copy');
+    assert.doesNotMatch(body, /class="stamp"/, 'the support page grew a date stamp');
+  });
+
+  it('descends through its headings without skipping one', () => {
+    /**
+     * The page is read on a phone and by a screen reader, and the reader's shortcut for
+     * both is the heading list. One h1, sections at h2, questions at h3, nothing jumped.
+     */
+    const levels = [...bodyOf(support()).matchAll(/<h([1-6])[ >]/g)].map(([, n]) => Number(n));
+    assert.strictEqual(levels.filter((n) => n === 1).length, 1, 'not exactly one h1');
+    assert.strictEqual(levels[0], 1, 'the page does not open on its h1');
+    for (let i = 1; i < levels.length; i += 1) {
+      assert.ok(levels[i] <= levels[i - 1] + 1, `h${levels[i - 1]} is followed by h${levels[i]}`);
+    }
+  });
+
+  it('answers only what the build can be held to', () => {
+    /**
+     * Nine answers, each checkable against the code or a migration. Two candidates were
+     * dropped rather than guessed and are pinned as absences, because the failure mode
+     * of a help page is a confident sentence about behaviour that changed:
+     *
+     *   - the **match score**, whose calculation is not settled across the surfaces
+     *     that show it;
+     *   - **Group Picks**, merged but with its RPC undeployed, so the page would
+     *     describe something nobody can reach.
+     */
+    const body = bodyOf(support());
+    assert.doesNotMatch(body, /match score is (?:calculated|worked out)/i);
+    assert.doesNotMatch(body, /Group Picks/);
+
+    // And the answers that are there stay tied to what they were checked against.
+    for (const claim of [
+      /I liked it/, // BUCKET_LABEL, src/features/collection/score.ts
+      /Settings &rsaquo; Account &amp; Data/, // app/settings/account.tsx
+      /Settings &rsaquo; Notification Settings/, // app/settings/notification-preferences.tsx
+      /not endorsed or certified by TMDB/, // the attribution TMDB's terms require
+    ]) {
+      assert.match(body, claim, 'an answer lost the wording it was checked against');
+    }
+  });
+});
+
+/**
+ * The four documents are one column at every width.
+ *
+ * They share their stylesheet with the router, whose pages become a two-column grid at
+ * 56rem so the screenshots can sit beside the pitch. A document has no second column to
+ * put anything in, and until 2026-09-04 it got one anyway: `display: grid` is declared
+ * only inside that media query, so the long-form override of `main` had nothing to win
+ * against and reset only the width. Above 896px every heading, paragraph and list item
+ * became a grid cell and the privacy policy read in two interleaved columns.
+ *
+ * The failure is invisible below the breakpoint and invisible to every other test here,
+ * which all read the HTML. So this one reads the CSS, and asserts the reset exists at
+ * the same breakpoint the grid is declared at — because the grid rule moving is the way
+ * this comes back.
+ */
+describe('the documents\' layout', () => {
+  const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
+
+  it('cancels the router\'s two-column grid at the width it is declared', () => {
+    const source = readFileSync(join(here, 'build.mjs'), 'utf8');
+    const grid = /@media \(min-width: (\d+rem)\) \{[^}]*?body \{ display: block; padding-top/.exec(
+      source,
+    );
+    assert.ok(grid, "the router's wide-screen block is no longer recognisable");
+    const breakpoint = grid[1];
+
+    for (const dir of ['privacy', 'terms', 'support', 'account-deletion']) {
+      const css = read(dir, 'index.html');
+      const reset = new RegExp(
+        `@media \\(min-width: ${breakpoint}\\) \\{\\s*main \\{ display: block;`,
+      );
+      assert.match(css, reset, `/${dir} inherits the router's grid above ${breakpoint}`);
+
+      // And the reset has to come after the rule it cancels, or it does nothing.
+      assert.ok(
+        css.lastIndexOf('grid-template-columns: 26rem 1fr') <
+          css.search(new RegExp(`@media \\(min-width: ${breakpoint}\\) \\{\\s*main \\{ display: block;`)),
+        `/${dir} declares its reset before the grid it undoes`,
+      );
+    }
+  });
+});
+
+/**
+ * The account-deletion page, which is the one document a person follows like a recipe.
+ *
+ * Apple requires an in-app deletion path and a URL describing it, and a reviewer walks
+ * the steps. Until 2026-09-04 this page listed three steps and the middle control was
+ * missing: it said to type the handle and then tap **Delete for good**, which is the
+ * confirmation dialog's button, not the one on the screen. Somebody typing their handle
+ * and looking for that label finds **Delete my account** instead and reasonably
+ * concludes the page describes a different version of the app.
+ *
+ * Both labels come from `app/settings/account.tsx`, so the test reads them from there
+ * rather than repeating them, which is the difference between checking the page against
+ * itself and checking it against the screen.
+ */
+describe('the account-deletion page', () => {
+  const read = (...parts) => readFileSync(join(dist, ...parts), 'utf8');
+
+  it('names the controls the screen actually shows, in the order it shows them', () => {
+    const screen = readFileSync(join(here, '..', 'app', 'settings', 'account.tsx'), 'utf8');
+    const button = /label=\{busy \? '[^']*' : '([^']+)'\}/.exec(screen)?.[1];
+    const confirm = /text: '([^']+)',\s*\n\s*style: 'destructive'/.exec(screen)?.[1];
+    assert.ok(button, 'the deletion screen no longer declares its button label');
+    assert.ok(confirm, 'the deletion screen no longer declares its destructive action');
+
+    const html = read('account-deletion', 'index.html');
+    const steps = html.slice(html.indexOf('<h2>How</h2>'), html.indexOf('<h2>What is deleted'));
+
+    assert.ok(steps.includes(button), `the page never names the "${button}" button`);
+    assert.ok(steps.includes(confirm), `the page never names the "${confirm}" confirmation`);
+    assert.ok(
+      steps.indexOf(button) < steps.indexOf(confirm),
+      'the page lists the confirmation before the button that raises it',
+    );
+    assert.match(steps, /Settings &rsaquo; Account &amp; Data/, 'the route to the screen is gone');
+  });
+
+  it('sends a locked-out person to the support address rather than the general one', () => {
+    /**
+     * The one deletion route that is not in the app. It is a support request and it now
+     * arrives under a support subject, which is what tells it apart from the general
+     * mail the front page and the policies collect.
+     */
+    const html = read('account-deletion', 'index.html');
+    const paragraph = /If you cannot get into the app[\s\S]*?<\/p>/.exec(html)?.[0];
+    assert.ok(paragraph, 'the page no longer says what to do when the app cannot be opened');
+    assert.match(paragraph, /mailto:support@bingd\.app\?subject=/);
   });
 });
 
@@ -1404,7 +1781,7 @@ describe('the public build, in a sandbox', () => {
     rmSync(sandbox, { recursive: true, force: true });
   });
 
-  it('refuses while the entity placeholder and the draft status both stand', () => {
+  it('refuses while the draft status stands, whatever else is settled', () => {
     const refusal = build();
     assert.ok(refusal, 'the build must refuse public with the legal inputs unresolved');
     assert.match(refusal, /TERMS_STATUS is still "draft"/);
@@ -1414,13 +1791,20 @@ describe('the public build, in a sandbox', () => {
     assert.ok(!existsSync(sandboxDist), 'a refused build must write no output');
   });
 
-  it('still refuses with the entity filled in, because filling it in is not a legal read', () => {
-    patch('build.mjs', [
-      ["'[LEGAL ENTITY / DEVELOPER NAME &mdash; FOUNDER TO CONFIRM]'", "'Example Operator'"],
-    ]);
-
+  it('still refuses with the entity settled, because settling it is not a legal read', () => {
+    /**
+     * This step used to patch the placeholder to "Example Operator" first. Since
+     * 2026-09-04 the entity is settled in the source, so there is nothing to patch and
+     * the patch was removed rather than left as a silent no-op: `patch` does a plain
+     * `String.replace`, which finds nothing and writes the file back unchanged, and a
+     * test whose setup quietly stopped happening is worse than one that was deleted.
+     *
+     * The assertion is the one that mattered and is now checked against the real
+     * source: **a named operator does not open the gate.** TERMS_STATUS is what does,
+     * and it is a record that a lawyer read the document.
+     */
     const refusal = build();
-    assert.ok(refusal, 'the entity alone must not open the gate');
+    assert.ok(refusal, 'a settled entity alone must not open the gate');
     assert.match(refusal, /TERMS_STATUS is still "draft"/);
     assert.ok(!existsSync(sandboxDist), 'a refused build must write no output');
   });
@@ -1434,7 +1818,9 @@ describe('the public build, in a sandbox', () => {
     assert.doesNotMatch(terms, /Draft for review/);
     assert.doesNotMatch(terms, /not yet (?:been )?reviewed by a\s+lawyer/);
     assert.doesNotMatch(terms, /FOUNDER TO CONFIRM/);
-    assert.match(terms, /Example Operator/, 'the filled-in entity must be the one named');
+    assert.match(terms, /Suraj Kandukuri/, 'the settled operator must be the one named');
+    // And a launch build must not quietly acquire a company either.
+    assert.doesNotMatch(terms, /FourwardStudios[^.<]{0,20}\b(?:LLC|Inc|Ltd|Corp)\b/i);
 
     // And the launch state around it is the one the flag promises.
     const headers = readFileSync(join(sandboxDist, '_headers'), 'utf8');

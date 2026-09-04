@@ -188,13 +188,21 @@ Production Auth is configured per project and shares nothing with nonprod. Regis
   | Sender address | See below — *not chosen here* |
   | Sender name | `bingd.` — lowercase, with the period, as everywhere else |
 
-  > **The sender address is deliberately left open.** It should be on a `bingd.app`
-  > domain, and it should almost certainly be the same mailbox the stores publish — but
-  > **SUPPORT-1 is still open** (`store-privacy-inventory.md`): the repository currently
-  > names `hello@bingd.app` and the founder's Play listing names `support@bingd.app`, and
-  > which of those is a mailbox somebody reads has not been established. Picking one here
-  > would settle a question this document is not entitled to settle. Resolve SUPPORT-1,
-  > then use that address.
+  > **The sender address is deliberately left open**, and the reason changed on
+  > 2026-09-04. It used to be blocked on SUPPORT-1, which is now settled
+  > (`store-privacy-inventory.md`): `support@bingd.app` is the support address and
+  > `hello@bingd.app` is general contact.
+  >
+  > That resolves *which address the stores publish*. It does not decide this one. A
+  > sign-in code is a transactional message nobody replies to, so the sender does not
+  > have to be either published mailbox and there is a reasonable argument it should not
+  > be — a `no-reply` sender that turns out to be readable teaches people to write to a
+  > mailbox nobody opens. It should be on a `bingd.app` domain; beyond that this is a
+  > founder decision and picking one here would settle a question this document is not
+  > entitled to settle.
+  >
+  > **Still unestablished either way:** whether any `bingd.app` mailbox actually
+  > receives. Apple emails the support address during review.
 
   No provider is named and no credential belongs in this repository. See
   [`../architecture/auth.md`](../architecture/auth.md) §SMTP and

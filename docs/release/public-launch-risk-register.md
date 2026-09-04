@@ -76,12 +76,14 @@ Status legend: **OPEN** (unchanged) · **PARTIAL** (some layers closed) · **RES
 > to report it and nothing a subject would do but answer whether a row carries private
 > writing. `report()` resolves a `review` only while its note is public.
 >
-> **Founder / legal — OPEN.** The Terms names
-> `[LEGAL ENTITY / DEVELOPER NAME — FOUNDER TO CONFIRM]` and states no governing law, no
-> venue, no arbitration clause, no company number and no address. None of those is a fact
-> this repository establishes, and inventing one produces a contract naming a party that
-> does not exist. **No lawyer has read the document.** `web/router.test.mjs` asserts the
-> placeholder is still present, so it fails the day it is filled in — which is the point.
+> **Founder / legal — PARTLY SETTLED.** The Terms names its operator as of 2026-09-04:
+> **Suraj Kandukuri**, using the developer name **FourwardStudios**, with no company,
+> partnership or other separate legal entity involved. It still states no governing law,
+> no venue, no arbitration clause, no company number and no address, and **no lawyer has
+> read the document.** `web/router.test.mjs` used to assert the placeholder was still
+> present so that it failed the day it was filled in; it now asserts the opposite half —
+> that the operator is named and that FourwardStudios is never given a company suffix or
+> an assumed-name form, neither of which anybody has filed. See **L-1**.
 > The founder inputs are listed under **L-1** below.
 >
 > **Not built, and not claimed anywhere:** an admin console, automated detection, an
@@ -90,20 +92,39 @@ Status legend: **OPEN** (unchanged) · **PARTIAL** (some layers closed) · **RES
 > queue is only read when somebody looks — and is the first thing to fix if reports ever
 > arrive faster than the founder checks.
 
-### L-1 — Legal facts the Terms cannot invent — **OPEN (founder input)**
+### L-1 — Legal facts the Terms cannot invent — **PARTLY SETTLED (1 of 5)**
 
 Blocks nothing engineering-side; blocks HG-4 sign-off. Each is a decision, not a lookup:
 
-1. **Operating entity.** A person trading under their own name, or a company — and if a
-   company, its registered name and number. This is the party the agreement is with.
-2. **Governing law and venue.** Deliberately absent rather than guessed.
+1. ~~**Operating entity.**~~ **SETTLED 2026-09-04.** There is no LLC, corporation,
+   partnership or other separate legal entity operating Bingd. The legal operator is
+   **Suraj Kandukuri**, a natural person, and that is the party the agreement is with.
+   **FourwardStudios** is the developer name used publicly, in Google Play and other
+   developer contexts; it is a name and not an entity. In the Terms as
+   *"Suraj Kandukuri, using the developer name FourwardStudios"*, followed by a sentence
+   saying FourwardStudios is a developer name rather than a company, because a
+   parenthetical reads to some people as a corporate suffix. No jurisdiction, company
+   number or registered address is stated, because none exists to state. **No "d/b/a"**
+   and no other assumed-name construction: that phrasing asserts a filing of its own.
+   Pinned by `web/router.test.mjs` — which now asserts the disclaimer rather than the
+   old placeholder — and by mutant 12 in `web/mutation-check.mjs`, which reintroduces
+   "FourwardStudios LLC" and requires the suite to go red.
+2. **Governing law and venue.** Deliberately absent rather than guessed. **OPEN.**
 3. **Whether to include an arbitration clause.** Omitted on purpose: it is a substantive
-   waiver of a user's rights and not a thing to write on a guess.
+   waiver of a user's rights and not a thing to write on a guess. **OPEN.**
 4. **A contact address for legal notice**, if it must differ from the support mailbox.
-5. **A lawyer's read of the draft**, at whatever depth the budget allows.
+   **OPEN.** Note the mailboxes split on 2026-09-04: `support@bingd.app` is support and
+   `hello@bingd.app` is general contact (SUPPORT-1 in `store-privacy-inventory.md`). The
+   Terms currently gives `hello@bingd.app`.
+5. **A lawyer's read of the draft**, at whatever depth the budget allows. **OPEN**, and
+   it is the one `TERMS_STATUS` records. It stays `'draft'` until this happens, and the
+   build refuses `mode: "public"` while it does.
 
-Until 1–5 are settled the Terms is publishable as a draft — it is labelled as one, on the
-page — but HG-4 is not satisfiable.
+**Settling item 1 did not move HG-4**, and that is worth stating plainly because a
+resolved placeholder looks like progress on the gate. 2 to 5 still stand, the page still
+carries the draft-for-review notice, and the notice now says exactly which half is
+settled. Until 2–5 are done the Terms is publishable as a draft — it is labelled as one,
+on the page — but HG-4 is not satisfiable.
 
 ### M1 — original finding, for the record — **superseded 2026-08-25**
 
@@ -351,7 +372,7 @@ and as unchecked gates in PRD §27. Current split:
 | Age-rating rationale | **Drafted** |
 | TMDB attribution obligations | **Met** |
 | Support mailbox | Pending — founder must confirm it is real and monitored |
-| **Terms of use** | **Drafted 2026-08-25** at `/terms`, linked from Settings, acknowledged at signup. **Still open**: unconfirmed legal entity, no governing law, no lawyer read. See **L-1** |
+| **Terms of use** | **Drafted 2026-08-25**, operator named **2026-09-04**, at `/terms`, linked from Settings, acknowledged at signup. **Still open**: no governing law, no venue, no lawyer read. See **L-1** |
 | Brand / name / trademark clearance (HG-3) | Open |
 | Google Play production access (HG-5) | Gated on the 14-day / 12-tester rule; **no Play Console app record, signing key, service account or tester list exists yet** |
 | Final store and brand assets (HG-6) | Open |
