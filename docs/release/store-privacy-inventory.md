@@ -254,16 +254,43 @@ other IDs.
 | Privacy policy | `https://bingd.app/privacy` | **written, deploys with `main`** |
 | Support URL | `https://bingd.app/support` | **written, deploys with `main`** |
 | Account deletion | `https://bingd.app/account-deletion` | **written, deploys with `main`** |
-| **Terms of Use** | `https://bingd.app/terms` | **drafted 2026-08-25, deploys with `main`. Draft — unconfirmed legal entity, no lawyer read. See L-1** |
-| Support email | `hello@bingd.app` | **FOUNDER — SUPPORT-1: two addresses are in play. See below** |
+| **Terms of Use** | `https://bingd.app/terms` | **drafted 2026-08-25, operator named 2026-09-04, deploys with `main`. Still a draft — no governing law, no lawyer read. See L-1** |
+| Support email | `support@bingd.app` | **SETTLED 2026-09-04 — SUPPORT-1 closed. See below** |
+| General contact | `hello@bingd.app` | kept for the privacy policy, the Terms and the site's front page |
 | Marketing URL | — | not required; leave blank |
 
-### SUPPORT-1 — one canonical support address, and there are currently two
+### SUPPORT-1 — one canonical support address ~~and there are currently two~~
 
-**Unresolved, and it must be settled before either store form is submitted.** Both stores
-publish this address and Apple emails it during review, so it has to be a mailbox somebody
-reads rather than a plausible-looking string — and right now the repository does not agree
-with itself about which string it is.
+> **Settled by the founder on 2026-09-04: `support@bingd.app` is the support address,
+> and `hello@bingd.app` stays as general contact.** That is the way the app already
+> behaved — `src/lib/support.ts` has drafted to `support@bingd.app` since Settings grew
+> its Help & Support section, and the Play listing publishes the same — so what changed
+> is the website, which said `hello@bingd.app` everywhere.
+>
+> **What the split means, so it is not mistaken for the drift it replaces.** Support is
+> where somebody goes when they need something: the support page and every action on it,
+> and the deletion page's line for a person locked out of the app. General contact is
+> what the published policy documents and the site's front page already carry, and
+> rewriting a contact line inside a privacy policy is a change to a legal document rather
+> than a tidy-up. Both forward to the same person. The subject line, not the mailbox, is
+> what does the sorting.
+>
+> **Both store forms take `support@bingd.app`.** Apple emails it during review, so it
+> has to be a mailbox somebody reads. **Whether it is one is still not something this
+> repository can establish.** `src/lib/support.ts` records that it forwards through
+> Cloudflare to the founder's inbox; that is a comment in the code, not a check, and
+> sending a message to it and watching it arrive remains a founder action before either
+> form is submitted.
+>
+> **Pinned by a test, not by care.** `web/router.test.mjs` now reads
+> `SUPPORT_EMAIL` out of `src/lib/support.ts` and asserts the built page writes to that
+> and nothing else, which is what stops the two halves drifting apart again.
+>
+> Files normalised: `web/build.mjs` (now two constants), `web/router.test.mjs`, this
+> document. `supabase/seed/fetch-catalogue.mjs` keeps `hello@bingd.app` in its TMDB
+> User-Agent, which is a general contact for an operator rather than a support route.
+
+The record of the problem, kept because the shape of it is what the test now guards:
 
 | | Address | Occurrences |
 |---|---|---|
@@ -327,10 +354,9 @@ attribution section exists to satisfy, which is why the file's provenance is rec
 
 ## 6. FOUNDER actions before either store form is submitted
 
-1. **SUPPORT-1 — choose one canonical support address, and confirm it is a mailbox
-   somebody reads.** Both stores publish it and Apple emails it during review. The
-   tracked product says `hello@bingd.app`; the Play listing in `store-assets/` says
-   `support@bingd.app`. Pick one; the files to normalise afterwards are listed in §4.
+1. ~~**SUPPORT-1 — choose one canonical support address.**~~ **Done 2026-09-04:**
+   `support@bingd.app` for support, `hello@bingd.app` for general contact. Both store
+   forms take the support address. See §4.
 2. ~~**Add the official TMDB logo** (§5).~~ Done 2026-08-21 — downloaded, unmodified.
 3. **Decide the legal entity named on the privacy page.** It currently says "one
    independent developer" and names no person or company. A public launch — particularly

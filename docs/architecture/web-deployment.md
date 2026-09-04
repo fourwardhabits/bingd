@@ -23,10 +23,18 @@ So the facts are written down here rather than inferred again.
 | HTTPS | valid, no warning, no redirect loop. `http://` → `301`. `.app` is HSTS-preloaded at the TLD, so browsers refuse plain HTTP regardless |
 | Cookies | none set on any route |
 
-**Cloudflare Scrape Shield email obfuscation is on for this zone.** It rewrites the
-`mailto:hello@bingd.app` in the footer into a `/cdn-cgi/l/email-protection` link and
-injects a same-origin decoder script. Harmless, but it means the deployed HTML is never
-byte-identical to `web/dist` and a diff will always show those two lines.
+**Cloudflare Scrape Shield email obfuscation is on for this zone.** It rewrites a
+`mailto:` into a `/cdn-cgi/l/email-protection` link and injects a same-origin decoder
+script. On the policy pages that is harmless, and it means the deployed HTML is never
+byte-identical to `web/dist`; a diff will always show those lines.
+
+**The support page's mail links are opted out of it, as of 2026-09-04.** They are the
+only links on the site whose whole purpose is to open a draft, and they carry a subject
+in a query string, so a rewrite that lost one would take the page's triage with it and
+leave the link looking like it still worked. `web/build.mjs`'s `plain()` wraps each of
+them in Cloudflare's own `<!--email_off-->` markers; a test asserts every `mailto:` on
+that page sits inside a pair. The markers are HTML comments and mean nothing to any other
+host, so nothing depends on Cloudflare staying the host.
 
 ### How a deploy happens
 

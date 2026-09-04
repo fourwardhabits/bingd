@@ -116,7 +116,7 @@ not; external testers and the public link do. Budget a day or two for the first 
 |---|---|
 | Beta app description | *"Bingd is where you rank what you have watched and see what your friends really think. This is a closed beta: everything is real, and the data is on a test backend that will not carry over."* |
 | What to test | *"Sign up, rank ten titles, follow someone, recommend something. Then tap a bingd.app profile or title link from Messages and check it opens the app on the right screen."* |
-| Feedback email | `hello@bingd.app` — **FOUNDER: confirm the mailbox** |
+| Feedback email | `support@bingd.app` — settled 2026-09-04, SUPPORT-1. **FOUNDER: confirm the mailbox receives**, which is still unestablished |
 | Marketing URL | leave blank |
 | Privacy policy URL | `https://bingd.app/privacy` |
 | Sign-in required? | **Yes**, and Bingd signs people in with an emailed code, which a reviewer cannot receive. Provide the password-enabled demo account and **say where the password screen is**: *More sign-in options → Sign in with password*. **FOUNDER: create it on nonprod and put the credentials in App Review notes** — full runbook in [`store-review-access.md`](./store-review-access.md). |
@@ -245,7 +245,9 @@ the founder's own builds, which is exactly where they get tested.
    [iOS](./ios-preview-acceptance.md). Nothing below starts until this passes on **both**
    platforms.
 3. ~~TMDB logo added (`store-privacy-inventory.md` §5).~~ Done 2026-08-21.
-4. `hello@bingd.app` confirmed. Demo account created for App Review —
+4. `support@bingd.app` confirmed to receive. **Which address** is no longer the open
+   question — SUPPORT-1 settled it on 2026-09-04 — but **whether mail arrives** is, and
+   Apple emails it during review. Demo account created for App Review —
    [`store-review-access.md`](./store-review-access.md), including the seeded activity,
    without which review sees an empty app.
 5. Release gate green (`safe-update-runbook.md` §6).
