@@ -1012,8 +1012,15 @@ const PRIVACY_BODY = `      <p class="lede">
 
       <h2>Who runs Bingd</h2>
       <p>
-        Bingd is made by one independent developer. Questions about anything on this page,
-        including a request to see or remove what is held about you, go to
+        Bingd is operated by <strong>Suraj Kandukuri</strong>, using the developer name
+        <strong>FourwardStudios</strong>. FourwardStudios is a developer name rather than
+        a company; no company, partnership or other separate legal entity operates Bingd.
+        Suraj Kandukuri is the person responsible for how Bingd handles your personal
+        data, and is the data controller where that term applies.
+      </p>
+      <p>
+        Questions about anything on this page, including a request to see or remove what
+        is held about you, go to
         <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
       </p>
 

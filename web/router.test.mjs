@@ -1227,9 +1227,37 @@ describe('the Terms of Use', () => {
       'the Terms does not say who the contracting party is',
     );
 
+    /**
+     * **And the privacy policy has to say the same thing**, which it did not until
+     * 2026-09-04. It said "Bingd is made by one independent developer" and named
+     * nobody, so the two documents a reader can compare disagreed about who is on the
+     * other side of them: one named a person, the other named no one. A privacy policy
+     * is also where the responsible party is asked for by name — GDPR calls it the data
+     * controller — and "one independent developer" is not an answer to that.
+     *
+     * Asserted here rather than in a test of its own because it is the same fact, and
+     * one fact split across two tests is how the two documents drifted apart in the
+     * first place.
+     */
+    const privacy = read('privacy', 'index.html');
+    const privacyProse = privacy.replace(/\s+/g, ' ');
+    assert.ok(
+      privacyProse.includes('Bingd is operated by <strong>Suraj Kandukuri</strong>'),
+      'the privacy policy names no operator',
+    );
+    assert.ok(
+      privacyProse.includes('FourwardStudios is a developer name rather than a company'),
+      'the privacy policy does not say what FourwardStudios is',
+    );
+    assert.ok(
+      privacyProse.includes('data controller'),
+      'the privacy policy names nobody responsible for the personal data',
+    );
+
     // The entity types nobody has registered, and the assumed-name construction that
-    // asserts a filing of its own. Anchored to FourwardStudios so the Terms can still
-    // use the ordinary words about somebody else's company.
+    // asserts a filing of its own. Anchored to FourwardStudios so either document can
+    // still use the ordinary words about somebody else's company. Checked against both,
+    // because the claim is equally false on either page.
     for (const wrong of [
       /FourwardStudios[^.<]{0,20}\b(?:LLC|L\.L\.C|Inc|Incorporated|Ltd|Limited|Corp|Corporation|GmbH|Pty|PLC)\b/i,
       /\bd\/b\/a\b/i,
@@ -1238,6 +1266,11 @@ describe('the Terms of Use', () => {
       /FourwardStudios[^.<]{0,30}\bis a (?:company|corporation|partnership|legal entity)\b/i,
     ]) {
       assert.doesNotMatch(html, wrong, 'the Terms claims a registration nobody has filed');
+      assert.doesNotMatch(
+        privacy,
+        wrong,
+        'the privacy policy claims a registration nobody has filed',
+      );
     }
 
     // `\s+` rather than a space: the source wraps at 90 columns, so a literal match
