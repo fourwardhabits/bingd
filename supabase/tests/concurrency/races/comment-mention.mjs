@@ -66,6 +66,15 @@ export default function suite() {
     before(() => rc.open());
     after(() => rc.close());
 
+    /**
+     * The handle a fixture account is given, which `createUser` builds from its id.
+     *
+     * Since `20260908000100` the *body* is what decides who a comment names, so these
+     * bodies have to spell the real handle. They used to say `@x`, which was decorative
+     * when the picked array was the only source and is a comment that names nobody now.
+     */
+    const handleOf = (id) => `u${id.slice(0, 8)}`;
+
     /** A conversation with an author who follows the person about to be named. */
     const scene = async (title) => {
       const { db, fx } = ctx;
@@ -123,13 +132,13 @@ export default function suite() {
         // t1 stamps the pair and stays open. Its notification is written but not yet
         // visible to t2, which is the whole of the window.
         await t1.begin();
-        await call(t1, editSql, [await newOp(db), comment, '@x hello', [named]]);
+        await call(t1, editSql, [await newOp(db), comment, `@${handleOf(named)} hello`, [named]]);
 
         // t2 is a *different* intent by operation id — an outbox flushing the same edit
         // twice, or a second device — so the ledger cannot answer it. It has to stop on
         // the row.
         await t2.begin();
-        const p2 = fire(t2, editSql, [await newOp(db), comment, '@x hello', [named]]);
+        const p2 = fire(t2, editSql, [await newOp(db), comment, `@${handleOf(named)} hello`, [named]]);
         /**
          * The observation that makes the window real rather than hoped for. Without it a
          * scheduler that happened to run these serially would pass this test with the
@@ -169,8 +178,8 @@ export default function suite() {
         await t1.actAs(author);
         await t2.actAs(author);
         await Promise.all([
-          call(t1, editSql, [await newOp(db), comment, '@x hello', [named]]),
-          call(t2, editSql, [await newOp(db), comment, '@x hello there', [named]]),
+          call(t1, editSql, [await newOp(db), comment, `@${handleOf(named)} hello`, [named]]),
+          call(t2, editSql, [await newOp(db), comment, `@${handleOf(named)} hello there`, [named]]),
         ]);
       } finally {
         await t1.end().catch(() => {});
@@ -192,7 +201,7 @@ export default function suite() {
       const first = await db.session('first');
       try {
         await first.actAs(author);
-        await call(first, editSql, [await newOp(db), comment, '@x hello', [named]]);
+        await call(first, editSql, [await newOp(db), comment, `@${handleOf(named)} hello`, [named]]);
       } finally {
         await first.end();
       }
@@ -206,7 +215,7 @@ export default function suite() {
         // Serialised deliberately: this is not about the window, it is about the ledger
         // surviving a full remove/re-add cycle across two independent connections.
         await call(t1, editSql, [await newOp(db), comment, 'never mind', []]);
-        await call(t2, editSql, [await newOp(db), comment, '@x hello again', [named]]);
+        await call(t2, editSql, [await newOp(db), comment, `@${handleOf(named)} hello again`, [named]]);
       } finally {
         await t1.end().catch(() => {});
         await t2.end().catch(() => {});
@@ -236,8 +245,8 @@ export default function suite() {
         await t1.actAs(author);
         await t2.actAs(author);
         await Promise.all([
-          call(t1, editSql, [await newOp(db), comment, '@a @b hello', [named, second]]),
-          call(t2, editSql, [await newOp(db), comment, '@a @b hi', [named, second]]),
+          call(t1, editSql, [await newOp(db), comment, `@${handleOf(named)} @${handleOf(second)} hello`, [named, second]]),
+          call(t2, editSql, [await newOp(db), comment, `@${handleOf(named)} @${handleOf(second)} hi`, [named, second]]),
         ]);
       } finally {
         await t1.end().catch(() => {});

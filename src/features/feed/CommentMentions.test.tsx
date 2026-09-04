@@ -1,6 +1,7 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { CommentSheet } from './CommentSheet';
 
@@ -88,7 +89,7 @@ const candidate = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const open = async () => {
+const open = async (props: { onPressPerson?: (username: string) => void } = {}) => {
   const view = await renderWithProviders(
     <CommentSheet
       eventId="e1"
@@ -97,7 +98,7 @@ const open = async () => {
       viewerId={VIEWER}
       watched={new Set()}
       onClose={jest.fn()}
-      onPressPerson={jest.fn()}
+      onPressPerson={props.onPressPerson ?? jest.fn()}
     />,
   );
   await waitFor(() => expect(view.queryByText('Loading comments…')).toBeNull());
@@ -445,5 +446,145 @@ describe('what a picked handle does and does not authorise', () => {
 
     await waitFor(() => expect(lastWrite('edit_comment')).toBeTruthy());
     expect(lastWrite('edit_comment')?.p_mention_ids).toEqual(['ravi-id']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+/**
+ * A mention that somebody can *see*, which is the half of this feature the founder
+ * reported missing. Everything below `20260830000100` worked — the eligibility rule, the
+ * ledger, the notification, the dedupe — and a reader could not tell, because
+ * `SpoilerNote` drew one string and `@ravi` was the same glyphs in the same colour as
+ * the sentence around it.
+ *
+ * The population these tests draw from is `activity_comments.mentions`, never a re-parse
+ * of the body. That is the safety property: the server has already decided who this
+ * comment names and which of them this reader may be shown, so a handle that is not in
+ * that array — a stranger, somebody blocked, anybody at all on a tombstone — must render
+ * as prose and must not be tappable.
+ */
+describe('a mention in a posted comment', () => {
+  const ravi = { id: 'ravi-id', username: 'ravi', handle: 'ravi' };
+
+  /** Puts one comment in the thread and opens it. */
+  const threadWith = async (over: Record<string, unknown>, onPressPerson = jest.fn()) => {
+    mockCommentRows = [comment(over)];
+    const view = await open({ onPressPerson });
+    return { view, onPressPerson };
+  };
+
+  it('draws the name in the accent, semibold, and the rest of the sentence normally', async () => {
+    const { view } = await threadWith({ body: '@ravi thoughts?', mentions: [ravi] });
+
+    const name = view.getByLabelText('ravi, open profile');
+    expect(name.props.children).toBe('@ravi');
+    const style = Array.isArray(name.props.style) ? Object.assign({}, ...name.props.style.flat()) : name.props.style;
+    expect(style.color).toBe(theme.semantic.action);
+    expect(style.fontWeight).toBe('600');
+
+    // The sentence around it is untouched and still one readable string.
+    expect(view.getByText(/thoughts\?/)).toBeTruthy();
+  });
+
+  it('opens that person’s profile when the name is tapped', async () => {
+    const { view, onPressPerson } = await threadWith({ body: 'hey @ravi, what do you think', mentions: [ravi] });
+
+    await fireEvent.press(view.getByLabelText('ravi, open profile'));
+    expect(onPressPerson).toHaveBeenCalledWith('ravi');
+  });
+
+  /** The whole comment must not become a button; only the six characters that are a name. */
+  it('makes only the name tappable, not the comment', async () => {
+    const { view, onPressPerson } = await threadWith({ body: 'hey @ravi, what do you think', mentions: [ravi] });
+
+    await fireEvent.press(view.getByText(/what do you think/));
+    expect(onPressPerson).not.toHaveBeenCalled();
+  });
+
+  it('ends the name at the punctuation after it', async () => {
+    const { view } = await threadWith({ body: 'ask @ravi.', mentions: [ravi] });
+    expect(view.getByLabelText('ravi, open profile').props.children).toBe('@ravi');
+  });
+
+  it('links the same person twice when the body names them twice', async () => {
+    const { view, onPressPerson } = await threadWith({ body: '@ravi ... @ravi', mentions: [ravi] });
+
+    const names = view.getAllByLabelText('ravi, open profile');
+    expect(names).toHaveLength(2);
+    // The second one, because a renderer that draws only the first occurrence would pass
+    // an assertion made against `names[0]`.
+    await fireEvent.press(names[1] as (typeof names)[0]);
+    expect(onPressPerson).toHaveBeenCalledWith('ravi');
+  });
+
+  it('links several distinct people in one body', async () => {
+    const { view } = await threadWith({
+      body: '@ravi and @abisola both',
+      mentions: [ravi, { id: 'abisola-id', username: 'abisola', handle: 'abisola' }],
+    });
+
+    expect(view.getByLabelText('ravi, open profile')).toBeTruthy();
+    expect(view.getByLabelText('abisola, open profile')).toBeTruthy();
+  });
+
+  /**
+   * The safety property, stated as a test. `@stranger` is a string the author controls;
+   * drawing it as a link would offer a route to an account the server never confirmed
+   * this reader may see.
+   */
+  it('leaves a handle the server did not confirm as ordinary text', async () => {
+    const { view, onPressPerson } = await threadWith({ body: '@stranger thoughts?', mentions: [] });
+
+    expect(view.queryByLabelText('stranger, open profile')).toBeNull();
+    expect(view.getByText('@stranger thoughts?')).toBeTruthy();
+    expect(onPressPerson).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A retracted comment reports no mentions at all, which is what `activity_comments`
+   * already does. Nothing here should resurrect a name out of text that has gone.
+   */
+  it('draws no link on a comment whose author has retracted it', async () => {
+    const { view } = await threadWith({ body: null, deleted_at: new Date().toISOString(), mentions: [] });
+    expect(view.queryByLabelText('ravi, open profile')).toBeNull();
+  });
+
+  /**
+   * The rename case. The body still spells the old handle, so the old handle is what
+   * lights up — but the tap has to reach the person, who is called something else now.
+   */
+  it('lights up the frozen spelling and navigates to the current one', async () => {
+    const { view, onPressPerson } = await threadWith({
+      body: '@ravi thoughts?',
+      mentions: [{ id: 'ravi-id', username: 'ravi_2', handle: 'ravi' }],
+    });
+
+    const name = view.getByLabelText('ravi_2, open profile');
+    expect(name.props.children).toBe('@ravi');
+    await fireEvent.press(name);
+    expect(onPressPerson).toHaveBeenCalledWith('ravi_2');
+  });
+
+  /**
+   * Spoilers outrank mentions, and the masked branch renders no text at all — not
+   * clipped, not blurred, not behind an overlay. A link drawn out of withheld text would
+   * be a piece of that text on screen.
+   */
+  it('draws nothing at all, name included, while a spoiler is withheld', async () => {
+    const { view } = await threadWith({
+      body: '@ravi the ending',
+      has_spoilers: true,
+      mentions: [ravi],
+    });
+
+    expect(view.queryByLabelText('ravi, open profile')).toBeNull();
+    expect(view.queryByText(/the ending/)).toBeNull();
+    // Two of them: the mask over the withheld text, and the author's own claim marker.
+    expect(view.getAllByText('Contains spoilers').length).toBeGreaterThan(0);
+  });
+
+  it('does not crash on malformed @ text', async () => {
+    const { view } = await threadWith({ body: '@ @@ @@@@ @a @', mentions: [ravi] });
+    expect(view.getByText('@ @@ @@@@ @a @')).toBeTruthy();
   });
 });

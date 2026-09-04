@@ -2035,13 +2035,13 @@ A fixed reaction set of six on feed activity items. One reaction per user per it
 > Self-mentions notify nobody. **At most one mention notification per (comment, person),
 > ever.**
 >
-> **The client sends ids, and only ids it was given.** A mention is a handle the author
-> *picked from the suggestions* which is *still present in the text* when they post.
-> Picking supplies the id; still-present is what makes deleting the name the way to
-> remove a mention, with no second gesture. A hand-typed `@somebody` that was never
-> chosen is ordinary text and notifies nobody — the safe direction, because the
-> alternative is a client that turns arbitrary strings into lookups against the whole user
-> table.
+> **The client sends ids, and only ids it was given.** ~~A mention is a handle the author
+> *picked from the suggestions* which is *still present in the text* when they post.~~
+> **Superseded on 2026-09-08** — see the section below. Still-present is unchanged and is
+> what makes deleting the name the way to remove a mention, with no second gesture; what
+> has gone is the requirement that the author reached the person through the suggestion
+> list. The clause it was protecting — no arbitrary-user lookup — is now enforced on the
+> server, where it cannot be got wrong by a modified client.
 >
 > **The activity's visibility is re-checked every time the row is read**, not only when
 > the mention was written. A mention lands on somebody else's post, so that post's owner
@@ -2077,6 +2077,115 @@ A fixed reaction set of six on feed activity items. One reaction per user per it
 > **Deliberately not built**: mentions in reviews or feed bodies, mention mute settings,
 > mention notification grouping, and any form of tagging a person who is not already a
 > follow or a participant.
+
+> ### As built — 2026-09-08: a mention you can see, and one you can type (`20260908000100`)
+>
+> The 2026-08-30 tranche built everything about mentions except the two things a reader
+> can perceive, and the founder reported exactly those two: `@silky thoughts?` looked
+> like ordinary text, and Silky was not told. Both were true, for different reasons, and
+> this section is the settled behaviour. **Everything not restated here is unchanged** —
+> the eligibility rule, the ledger, the once-ever stamp, the candidate population, the
+> spoiler-safe inbox previews, the push copy and the routing.
+>
+> **1. A mention is now visibly a link.** Comment bodies render through `SpoilerNote`,
+> which drew one string, so a mention that worked and a mention that did not were the same
+> glyphs. A confirmed `@handle` is now drawn in the brand maroon (`tone="action"`, the
+> same accent every other inline action uses) at semibold, with **no underline** — this
+> design language does not underline anything, and the accent is the affordance. The
+> sentence around it is untouched, it wraps mid-paragraph like the words either side of
+> it, and it is a nested `Text` rather than a touchable view so that a drag beginning on a
+> name still scrolls the thread.
+>
+> Tapping it opens that person's existing profile route — the same one their name in the
+> row header goes to. It is announced to a screen reader as a link labelled
+> "{handle}, open profile"; the `@` is punctuation and is not read out as "at".
+>
+> **What lights up is decided by the server, never by re-parsing the body.** The spans are
+> built from `activity_comments.mentions`, which is already filtered through
+> `can_view_profile` for this reader. So a handle that is not a confirmed mention — nobody
+> holds it, the reader has blocked them, the comment is a tombstone — stays ordinary text
+> and is not tappable. Highlighting a handle the server did not confirm would offer a
+> route to an account out of a string the author controls.
+>
+> Where the body spells an old handle and the person has renamed, **the old spelling is
+> what lights up and the tap goes to the person**: the ledger carries both, and the text
+> is not rewritten under a reader.
+>
+> **2. A handle you typed is a mention.** The client used to be the only thing that
+> decided, and it could only send an id the suggestion list had handed it — so typing a
+> friend's handle, which is what anybody who knows the handle does, posted a comment that
+> read like a mention and notified nobody.
+>
+> `_resolve_comment_mentions` now parses the body server-side and resolves each handle,
+> so **the server is authoritative about who is notified**. The parse is
+> `username_format`'s charset and nothing else, which settles the cases the founder
+> listed:
+>
+> | Typed | Names |
+> |---|---|
+> | `@silky thoughts?` | silky — a space is not a handle character |
+> | `hey @silky, what do you think` | silky |
+> | `@silky.` | silky — a comment can end on a name and still read as a sentence |
+> | `@silky @silky` | silky, once |
+> | `@Silky` | silky — handles are stored lowercase |
+> | `email@example.com` | nobody — an `@` inside a word is not a mention |
+>
+> **Eligibility is not weakened by one account.** A typed handle goes through the same
+> `_can_mention` a picked id always faced, so a stranger, a blocked account, a suspended
+> one, or somebody who cannot see the activity resolves to nothing. What changed is the
+> *route* to a person the author was always allowed to name.
+>
+> The two sources fail differently, deliberately. An id in the array is a claim about a
+> control the author used, so an ineligible one still refuses the whole write. A handle in
+> prose is prose: an unresolvable one is quietly not a mention, because a comment
+> *about* somebody's handle must not become unpostable.
+>
+> The client still sends the ids it was offered, and they still matter — they let the
+> server prefer a person the author explicitly chose, and they are what carries a mention
+> across a rename. They are simply no longer the only source.
+>
+> **Handle recycling** is the one hazard reading the body introduces, and it is closed by
+> the order of resolution: this comment's own frozen `handle` is consulted first, then a
+> picked id, then whoever holds the name today. So a body written before a rename goes on
+> meaning the person it always meant, and somebody who later takes the freed handle
+> inherits neither the mention nor a notification.
+>
+> **3. One action, one notification.** This reverses 2026-08-30, which filed both a
+> `comment` row and a `mention` row for somebody who owned the activity *and* was named
+> in it, on the argument that they are two different statements. They are, but one action
+> by one person may put at most one line in somebody's Bell. Where the two collide the
+> **mention wins**, because "mentioned you in a comment" already implies a new remark on
+> your post and the reverse is not true. The same holds for a reply that names its own
+> recipient. The suppression is per person: a reply that names a third party still tells
+> the person being replied to.
+>
+> This is safe against the preference switch rather than merely lucky — `comment` and
+> `mention` are both the **Comments** category, so a reader who has silenced comments
+> loses both either way, and one who has not keeps exactly one.
+>
+> **Edit semantics**, unchanged in effect and now measured from the typed side too:
+> adding a name by editing tells that person once; leaving it there tells nobody again;
+> removing it sends nothing and retracts nothing already delivered; and removing then
+> re-adding files nothing, for ever. The ledger is what makes that hold, and this change
+> does not touch it.
+>
+> **A tapped notification whose comment has gone** degrades as the comment chain always
+> has: the conversation if it survives, the title if the activity has gone, and the
+> ordinary unavailable state if the title has left the catalogue too. Nothing is recalled
+> and no invalid profile route is offered.
+>
+> **No new settings, no new analytics, no new notification category.** Mentions remain on
+> the existing **Comments** toggle. In-app rows still appear when push is off, as
+> everywhere else in the app.
+>
+> **Autocomplete already exists** and is unchanged: typing `@` still opens
+> `MentionSuggestions` over the people this reader may name here. What 2026-09-08 removes
+> is the requirement to *use* it.
+>
+> **Deliberately not built**: hashtags, arbitrary URLs, any other rich text in a comment,
+> mentions in reviews or feed bodies, mention mute settings, mention notification
+> grouping, scrolling to the exact comment on a notification tap, and any form of naming a
+> person who is not already a follow or a participant.
 
 
 ### Watch tagging — Decided for public alpha
