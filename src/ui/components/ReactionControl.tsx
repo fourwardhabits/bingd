@@ -88,6 +88,32 @@ export type ReactionControlProps = {
  * The count is absent at zero rather than showing "0" — a nought beside every row is
  * a scoreboard nobody asked for.
  *
+ * ---------------------------------------------------------------------------
+ * THE ACTION SLOT IS A FIXED SQUARE, AND BOTH STATES FILL IT
+ *
+ * The slot draws two very different things — an Ionicon and a colour emoji — and until
+ * 2026-09-04 it drew them at two different sizes, because each had simply been given the
+ * size that suited it in isolation: `icon.sm` (20) for the heart, `caption` (12) for the
+ * emoji. Every neighbour in the actions strip is an Ionicon at `icon.sm`, so reacting
+ * dropped the leftmost control to 60% of its neighbours and the row visibly lost weight
+ * at the one end the reader had just touched. The founder reported it as the row looking
+ * uneven.
+ *
+ * The slot is therefore a square of `icon.sm` with both states centred in it, which
+ * fixes the two halves of the problem separately:
+ *
+ *   - **the square** ends the horizontal shift. The two states no longer measure
+ *     themselves; the slot is 20 wide whichever is in it, so nothing to the right of it
+ *     moves when somebody reacts, and the tap target is the same 44pt in both states
+ *     rather than 48 in one and 44 in the other.
+ *   - **`EMOJI_SIZE`** ends the weight mismatch. See its own note for why it is not
+ *     simply `icon.sm`.
+ *
+ * The glyph *cluster* is deliberately left at `caption`. It is a summary of what other
+ * people chose, sits beside a caption-sized count, and is meant to read as small — the
+ * complaint was about the action slot, and matching the cluster to it would be the
+ * redesign this is not.
+ *
  * What this deliberately does not own: the picker pill. Its placement is the
  * caller's — both surfaces draw it inside the row, directly above this control —
  * because a pill positioned from in here would sit inside the actions strip and
@@ -126,15 +152,15 @@ export function ReactionControl({
         accessibilityHint={onOpenPicker ? 'Long press to choose a different reaction' : undefined}
         onPress={onToggle}
         onLongPress={onOpenPicker}
-        hitSlop={slop}
-        style={({ pressed }) => [styles.heart, pressed && styles.pressed]}
+        hitSlop={slotSlop}
+        style={({ pressed }) => [styles.slot, pressed && styles.pressed]}
       >
         {mine ? (
           // No pill, no label, no name beside it: the emoji alone, in the slot the
           // heart was in, so the row's width and rhythm are unchanged (founder §6,
           // visual restraint). `allowFontScaling={false}` matches the cluster —
           // emoji do not gain legibility from Dynamic Type, they just reflow the row.
-          <Text variant="caption" allowFontScaling={false}>
+          <Text variant="caption" allowFontScaling={false} style={styles.emoji}>
             {mine}
           </Text>
         ) : (
@@ -190,15 +216,71 @@ function Glyphs({ glyphs }: { glyphs: string[] }) {
   );
 }
 
+/** The action slot, square, and the same size as every other icon in an actions strip. */
+const SLOT = theme.layout.icon.sm;
+
+/**
+ * The emoji's size in that slot, and it is deliberately not `SLOT`.
+ *
+ * An Ionicon at size 20 is a stroked outline that leaves air inside its em box. A colour
+ * emoji fills nearly all of its own, and is solid rather than drawn in one weight — so
+ * at equal nominal size the emoji reads *heavier* than the icon beside it, not equal.
+ * Set a little under, it reads level.
+ *
+ * One number for all six kinds. Their glyph bounds differ — 🔥 is tall and narrow, 👏
+ * is wide, ❤️ carries a variation selector — and none of that is corrected for here,
+ * because a per-emoji table is a thing that gets out of date the first time the set
+ * changes. The square below is what absorbs the difference: whatever the glyph's
+ * intrinsic box, it is centred in the same 20pt slot.
+ */
+const EMOJI_SIZE = 17;
+
+/**
+ * The emoji's line box, and it is **taller than the slot on purpose**.
+ *
+ * `Text` merges the `caption` token first, which brings `lineHeight: 16` — shorter than a
+ * 17pt colour emoji needs, and a line box shorter than the glyph is exactly how Android
+ * crops one. Overriding it is therefore not optional, and the safe direction is up: the
+ * slot centres its child and does not clip, so a box with room to spare costs nothing and
+ * a tight one costs the top of 🔥.
+ *
+ * 1.3em is the conventional headroom for colour emoji, which have taller ascents than the
+ * Latin text these tokens were measured on.
+ */
+const EMOJI_LINE = Math.ceil(EMOJI_SIZE * 1.3);
+
 /**
  * The slop that carries the 44pt floor for a caption-height control — the comment
- * strip's rule, now the shared one: the tap target must be 44pt, not the ink.
+ * strip's rule: the tap target must be 44pt, not the ink.
+ *
+ * Two of them, because the two controls are two heights. The cluster is caption-sized
+ * text; the action slot is `SLOT`. Sharing one figure between them was survivable while
+ * the slot's height depended on which state it was in, and is not now that it is fixed —
+ * the cluster would silently drop to 40pt.
  */
 const slop = (theme.layout.minTapTarget - theme.typography.caption.lineHeight) / 2;
+const slotSlop = (theme.layout.minTapTarget - SLOT) / 2;
 
 const styles = StyleSheet.create({
   control: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
-  heart: { flexDirection: 'row', alignItems: 'center' },
+  /**
+   * Fixed, and both dimensions matter. The width is what stops the row shifting when a
+   * 20pt heart is replaced by a glyph of some other width; the height, with
+   * `justifyContent`, is what centres every emoji identically whatever its bounds.
+   */
+  slot: { width: SLOT, height: SLOT, alignItems: 'center', justifyContent: 'center' },
+  /**
+   * The line box is the caption token's, overridden — see `EMOJI_LINE`. It ends up
+   * taller than the slot, which is right: the slot centres and does not clip, so the
+   * overflow is invisible and the glyph is whole. `includeFontPadding` is Android's
+   * asymmetric ascent/descent padding, which would tilt that centre.
+   */
+  emoji: {
+    fontSize: EMOJI_SIZE,
+    lineHeight: EMOJI_LINE,
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
   cluster: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
   glyphs: { flexDirection: 'row', alignItems: 'center' },
   glyphOverlap: { marginLeft: -theme.space[1] },
