@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, type QueryClient } from '@tanstack/react-query';
 
 import { awardAnnouncement } from '@/features/awards/announcement';
 import { GOAL_LABEL } from '@/features/goals/goals';
@@ -200,10 +200,66 @@ type CompanionRow = {
 const one = <T>(value: Embedded<T>): T | null =>
   (Array.isArray(value) ? value[0] : value) ?? null;
 
+/**
+ * How many activities one page of the feed is.
+ *
+ * Twenty, for two reasons that pull in opposite directions and meet here. The list is a
+ * `ScrollView` of full-height rows, not a virtualised list, so every row in a page is
+ * mounted and every poster in it is fetched — which argues for a small page. And the
+ * next page is requested a screenful before the reader reaches the end, so a page has to
+ * be longer than a screen or the fetch starts the moment the previous one lands — which
+ * argues for a large one. Twenty is roughly two phone screens of activity.
+ *
+ * **It was 30, fetched once, with no second page at all**, and that is the defect this
+ * replaces: a reader whose network had produced 31 eligible activities saw the thirtieth
+ * and then nothing, with no way to tell that from having reached the end.
+ */
+export const FEED_PAGE_SIZE = 20;
+
+/**
+ * Where the next page starts: the last row of the previous one, by the feed's own sort.
+ *
+ * All three keys, because the sort is `(causal_at desc, causal_step desc, id asc)` and a
+ * cursor naming fewer of them cannot say "strictly after this row" — the three feed
+ * events one ranking writes share a `causal_at` to the microsecond by construction
+ * (20260901000100), so a timestamp alone would either re-serve them or skip them.
+ */
+export type FeedCursor = {
+  causalAt: string;
+  causalStep: number;
+  id: string;
+};
+
+/** One page of the feed. `cursor` is null once the server has no more rows. */
+export type FeedPage = {
+  items: FeedItem[];
+  cursor: FeedCursor | null;
+};
+
+/**
+ * The viewer's feed, a page at a time.
+ *
+ * Keyset rather than `OFFSET`, and the reason is the one thing a social feed does
+ * constantly: it grows at the top. Under `OFFSET`, an activity posted while the reader
+ * is on page 2 shifts every later row down by one, and page 3 then re-serves a row page 2
+ * already showed — a duplicate for every insert, and a skipped row for every delete. A
+ * keyset asks "the rows after *this* row", which is a question a write at the top of the
+ * list cannot change the answer to.
+ *
+ * The follow set is re-read on every page rather than threaded through the page params.
+ * It is one indexed select against a table the reader owns half of, and holding it still
+ * would mean somebody who followed an account mid-scroll kept paging through the old set
+ * until they refreshed.
+ */
 export function useFeed(userId: string) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: queryKeys.feed(userId),
-    queryFn: async (): Promise<FeedItem[]> => {
+    initialPageParam: null as FeedCursor | null,
+    // React Query stops asking the moment this returns null, which is what makes
+    // `hasNextPage` false at the true end — and what stops the bottom of the list from
+    // requesting a page that does not exist.
+    getNextPageParam: (last: FeedPage) => last.cursor,
+    queryFn: async ({ pageParam }): Promise<FeedPage> => {
       const { data: follows, error: followsError } = await supabase
         .from('follows')
         .select('followee_id')
@@ -211,9 +267,57 @@ export function useFeed(userId: string) {
         .eq('state', 'approved');
       if (followsError) throw followsError;
 
-      return activityBy([userId, ...(follows ?? []).map((row) => row.followee_id)]);
+      return activityPage(
+        [userId, ...(follows ?? []).map((row) => row.followee_id)],
+        FEED_PAGE_SIZE,
+        pageParam,
+      );
     },
   });
+}
+
+/**
+ * Drop every page but the first, so a refresh re-reads one page instead of all of them.
+ *
+ * `refetch()` on an infinite query re-runs every page it is currently holding, in order:
+ * somebody who had scrolled to page 5 and pulled to refresh would spend five round trips
+ * to see what is new at the top. Trimming first makes the gesture mean what it looks like
+ * — go back to the newest page — and it deliberately does **not** clear the entry, so the
+ * rows already on screen stay drawn under the spinner instead of flashing to a skeleton.
+ *
+ * Nothing here touches the scroll position. Pull-to-refresh happens at the top of the
+ * list by definition, so there is nothing below to preserve and nothing to jump.
+ */
+export function trimFeedToFirstPage(queryClient: QueryClient, userId: string) {
+  queryClient.setQueryData(
+    queryKeys.feed(userId),
+    (old: { pages: FeedPage[]; pageParams: unknown[] } | undefined) =>
+      old && old.pages.length > 1
+        ? { pages: old.pages.slice(0, 1), pageParams: old.pageParams.slice(0, 1) }
+        : old,
+  );
+}
+
+/**
+ * The loaded pages as one list, with any activity that appears twice kept once.
+ *
+ * The keyset makes a duplicate impossible between two *adjacent* pages, but not across a
+ * refresh: `trimFeedToFirstPage` shortens the list, and the next page after that is read
+ * against a first page that has moved. Deduping by `id` where the pages are joined is a
+ * cheap total guarantee, and it is also what keeps React's keys unique — a duplicated key
+ * is a rendering fault and not merely a cosmetic one.
+ */
+export function feedItems(pages: FeedPage[] | undefined): FeedItem[] {
+  const seen = new Set<string>();
+  const items: FeedItem[] = [];
+  for (const page of pages ?? []) {
+    for (const item of page.items) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      items.push(item);
+    }
+  }
+  return items;
 }
 
 /**
@@ -234,7 +338,7 @@ export function useActorActivity(actorId: string | null, limit = 5) {
   return useQuery({
     queryKey: ['actor-activity', actorId, limit],
     enabled: Boolean(actorId),
-    queryFn: () => activityBy([actorId as string], limit),
+    queryFn: async () => (await activityPage([actorId as string], limit, null)).items,
   });
 }
 
@@ -262,13 +366,88 @@ const ACTIVITY_SELECT =
   'parent:parent_id(title, genres, original_language, certification)), ' +
   'profiles:actor_id(username, display_name, avatar_path)';
 
-/** The shared read. `actorIds` is a filter, never the authorisation. */
-async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
-  if (!actorIds.length) return [];
+/**
+ * Where the next page begins, taken from the **raw row** rather than the hydrated item.
+ *
+ * That distinction is load-bearing. `hydrate` drops a row whose actor cannot be named, so
+ * a cursor built from the items would rewind past every dropped row and serve the tail of
+ * the page a second time.
+ *
+ * The two fallbacks are for a bundle reading a database written before 20260901000100.
+ * Both columns are `not null` today; the fallbacks exist so such a row produces a cursor
+ * rather than `undefined` in a filter.
+ */
+function cursorFor(row: FeedRow): FeedCursor {
+  return {
+    causalAt: row.causal_at ?? row.created_at,
+    causalStep: row.causal_step ?? 0,
+    id: row.id,
+  };
+}
 
-  const { data, error } = await supabase
-    .from('feed_events')
-    .select(ACTIVITY_SELECT)
+/**
+ * "Strictly after this row, in the feed's order", as one PostgREST `or`.
+ *
+ * The lexicographic expansion of `(causal_at desc, causal_step desc, id asc)`, written
+ * out because PostgREST has no row-value comparison. Read down it: an older instant; or
+ * the same instant and an earlier step; or the same instant and the same step, and a
+ * later id. Every remaining row satisfies exactly one branch, which is what makes this
+ * boundary neither skip a row nor repeat one — and the `id` branch is what makes it
+ * total across the three rows one ranking writes in a single transaction.
+ *
+ * The timestamp is quoted so PostgREST takes it whole. It holds no comma and no
+ * parenthesis, so it cannot break out of the `and(...)` grouping either way.
+ */
+function keyset(cursor: FeedCursor): string {
+  const at = `"${cursor.causalAt}"`;
+  return [
+    `causal_at.lt.${at}`,
+    `and(causal_at.eq.${at},causal_step.lt.${cursor.causalStep})`,
+    `and(causal_at.eq.${at},causal_step.eq.${cursor.causalStep},id.gt.${cursor.id})`,
+  ].join(',');
+}
+
+/**
+ * One page of activity, hydrated, with the cursor for the next one.
+ *
+ * The loop is here for a single case and is bounded because of it: `hydrate` drops rows,
+ * so a page can come back full from the server and empty after hydration. Returning that
+ * as it stands would end the feed on a page of nothing — `hasNextPage` would still be
+ * true, but a page that adds no rows adds no scroll, and so nothing would ever ask for
+ * the one after it. Four reads is far past anything a healthy database produces (a
+ * dropped row means a broken join, or a policy hiding a row it should not), and the bound
+ * is what stops a pathological account spinning here.
+ */
+async function activityPage(
+  actorIds: string[],
+  limit: number,
+  cursor: FeedCursor | null,
+): Promise<FeedPage> {
+  if (!actorIds.length) return { items: [], cursor: null };
+
+  const items: FeedItem[] = [];
+  let next = cursor;
+  for (let read = 0; read < 4; read += 1) {
+    const rows = await activityRows(actorIds, limit, next);
+    // A short page is the end of the feed, and it is the only end signal there is:
+    // asking for one row more than needed, to find out, would cost a round trip on
+    // every page to save one at the very last.
+    next = rows.length === limit ? cursorFor(rows[rows.length - 1] as FeedRow) : null;
+    items.push(...(await hydrate(rows)));
+    if (items.length || !next) break;
+  }
+  return { items, cursor: next };
+}
+
+/** The shared read. `actorIds` is a filter, never the authorisation. */
+async function activityRows(
+  actorIds: string[],
+  limit: number,
+  cursor: FeedCursor | null,
+): Promise<FeedRow[]> {
+  const rows = supabase.from('feed_events').select(ACTIVITY_SELECT);
+
+  const { data, error } = await (cursor ? rows.or(keyset(cursor)) : rows)
     .in('actor_id', actorIds)
     .in('type', [...ACTIVITY_TYPES])
     /**
@@ -316,7 +495,7 @@ async function activityBy(actorIds: string[], limit = 30): Promise<FeedItem[]> {
     .limit(limit);
   if (error) throw error;
 
-  return hydrate((data ?? []) as unknown as FeedRow[]);
+  return (data ?? []) as unknown as FeedRow[];
 }
 
 /**
