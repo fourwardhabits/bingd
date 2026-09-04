@@ -21,7 +21,11 @@
  * the handle do, posted a comment that looked like a mention, was spelled like a mention
  * and notified nobody. `_resolve_comment_mentions` now parses the body server-side and
  * resolves each handle through `_can_mention` — the same eligibility rule a picked id
- * always faced, so a stranger's handle still resolves to nobody.
+ * always faced. Since `20260909000100` that rule is `can_discover_profile`, the oracle
+ * People search runs on, bounded by the mentioned person being able to see the activity:
+ * a handle belonging to somebody blocked, suspended, or unable to see the post resolves
+ * to nobody, and one belonging to somebody the reader could simply look up resolves to
+ * them.
  *
  * What that leaves this file is a *supporting* role, and it is deliberate that it is not
  * a deciding one:
@@ -30,10 +34,10 @@
  *     of truth any more, but they are what lets the server prefer a person the author
  *     explicitly chose over whoever holds that name today, and what keeps a mention
  *     working across a rename.
- *   - **this file still never resolves a handle to an account.** No lookup here, no
- *     arbitrary-user search on the client. The client's job is to offer the people the
- *     server already said were offerable, and to draw what the server already said the
- *     comment names.
+ *   - **this file still never resolves a handle to an account.** No lookup here, and no
+ *     privacy decision either. The client's job is to offer the people the server
+ *     already said were offerable, and to draw what the server already said the comment
+ *     names. Which accounts those are is a question with one answer, in the database.
  *
  * Still-present in the text is what makes an edit honest, and that half is unchanged:
  * type `@ravi`, think better of it, delete it, and Ravi is not mentioned, with no

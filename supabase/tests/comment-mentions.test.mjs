@@ -153,25 +153,101 @@ describe('who may be named', () => {
   });
 
   /**
-   * The founder's central worry about this feature, stated as a test: typing `@` must
-   * not become a way to reach the whole app. Erin is nobody's follow and in nobody's
-   * thread, so she is not a low-ranked row here — she is not a row.
+   * The founder's restraint clause, and `20260909000100` narrowed what it is about
+   * rather than removing it.
+   *
+   * It used to mean "a stranger is not mentionable". It now means **a bare `@` does not
+   * offer strangers**: the list that appears mid-word is the people you are likely to
+   * mean, not a slice of the user table. Erin is nobody's follow and in nobody's thread,
+   * so she is not here — until somebody types her name, which is the next test.
    */
-  it('does not offer an unrelated stranger', async () => {
+  it('does not offer an unrelated stranger to a bare @', async () => {
     const event = await eventOf(alice, await movie('cm_stranger'));
     const rows = await candidates(bob, event);
 
     assert.ok(!usernames(rows).includes('cm_erin'));
   });
 
-  it('refuses a comment that names a stranger', async () => {
+  /**
+   * The widening, from the composer's side. Typing a name is how you say you meant
+   * somebody, and a person the author could find in People search must be findable here
+   * too — otherwise they are server-mentionable and the composer says they are not,
+   * which is the worst of both.
+   */
+  it('offers an unrelated account once its name is typed', async () => {
+    const event = await eventOf(alice, await movie('cm_stranger_typed'));
+    const rows = await candidates(bob, event, 'cm_erin');
+
+    assert.ok(usernames(rows).includes('cm_erin'));
+  });
+
+  it('accepts a comment that names somebody the author could look up', async () => {
     const event = await eventOf(alice, await movie('cm_stranger_write'));
-    const error = await errorFrom(
-      bob,
-      `select add_comment(gen_random_uuid(), $1, 'hello @cm_erin', false, null, $2::uuid[])`,
-      [event, [erin]],
-    );
-    assert.equal(error.code, '42501');
+    const before = await mentionCount(erin);
+
+    const posted = await comment(bob, event, 'hello @cm_erin', { mentions: [erin] });
+
+    assert.equal(posted.status, 'ok');
+    assert.equal(await mentionCount(erin), before + 1);
+  });
+
+  /**
+   * Private is not unreachable, which is `20260819000100`'s whole point: a private
+   * account is findable by name so somebody who knows them can ask to follow, and
+   * everything they wrote stays behind `can_view_profile`. A mention carries identity,
+   * so it follows discovery.
+   *
+   * Frank is private and follows nobody. Alice is public here, so Frank can see the
+   * activity — which is the *other* clause, and the next test is what happens when he
+   * cannot.
+   */
+  it('offers and accepts a private account the author does not follow', async () => {
+    const event = await eventOf(alice, await movie('cm_private_ok'));
+    const before = await mentionCount(frank);
+
+    assert.ok(usernames(await candidates(bob, event, 'cm_frank')).includes('cm_frank'));
+
+    const posted = await comment(bob, event, 'hello @cm_frank', { mentions: [frank] });
+    assert.equal(posted.status, 'ok');
+    assert.equal(await mentionCount(frank), before + 1);
+  });
+
+  /**
+   * The bound on the widening, and the reason `can_discover_profile` alone would have
+   * been wrong. Everybody active is discoverable; only an actor's own followers can see
+   * a private actor's post, so that is who may be named under it.
+   */
+  it('offers nobody undiscoverable, however specific the fragment', async () => {
+    const event = await eventOf(alice, await movie('cm_fragment_probe'));
+
+    await t.sql(`update profiles set status = 'suspended' where id = $1`, [erin]);
+    const suspended = usernames(await candidates(bob, event, 'cm_erin'));
+    await t.sql(`update profiles set status = 'active' where id = $1`, [erin]);
+
+    assert.ok(!suspended.includes('cm_erin'), 'a suspended account is not a search result');
+  });
+
+  /**
+   * Task 8's agreement property, asserted as a property rather than case by case.
+   *
+   * Every row the composer offers must be a row the server would accept. A list that can
+   * offer somebody the write then refuses is the one failure mode a widened rule makes
+   * easy, because the population and the predicate are now computed in two places.
+   */
+  it('offers nobody the write would refuse', async () => {
+    const event = await eventOf(alice, await movie('cm_agreement'));
+    await comment(carol, event, 'carol is in the room');
+
+    for (const fragment of ['', 'cm_', 'cm_e', 'cm_frank', 'cm_dave']) {
+      for (const row of await candidates(bob, event, fragment)) {
+        await t.actAs(bob);
+        const { rows } = await t.sql(
+          `select _can_mention($1, (select id from profiles where username = $2)) as ok`,
+          [event, row.username],
+        );
+        assert.equal(rows[0].ok, true, `offered but not mentionable: ${row.username}`);
+      }
+    }
   });
 
   it('excludes a blocked account in either direction', async () => {
@@ -597,6 +673,42 @@ describe('reading a thread back', () => {
     assert.deepEqual(rows[0].mentions.map((m) => m.username), ['cm_dave']);
   });
 
+  /**
+   * The half of `20260909000100` that is not about eligibility at all.
+   *
+   * The `mentioned` CTE filtered identities through `can_view_profile`, which was
+   * invisible while every mention was a follow or a participant. Widen the rule and it
+   * becomes a regression you can see: a valid mention of a discoverable private account
+   * fires a notification and then renders as plain text, because the reader is not
+   * allowed to *view* them. Identity is not content — `20260819000100`'s line.
+   */
+  it('returns a private mentioned account to a reader who does not follow them', async () => {
+    const event = await eventOf(alice, await movie('cm_read_private'));
+    await comment(bob, event, 'hello @cm_frank', { mentions: [frank] });
+
+    // Carol follows neither Frank nor anybody relevant to him, and Frank is private.
+    await t.actAs(carol);
+    const { rows } = await t.sql(
+      `select mentions from activity_comments($1) order by created_at desc limit 1`,
+      [event],
+    );
+    const named = (rows[0].mentions ?? []).map((m) => m.username);
+    assert.deepEqual(named, ['cm_frank'], 'the link must be drawable, so the row must arrive');
+  });
+
+  /** And a reader may always see their own name light up in a comment that names them. */
+  it('returns the reader to themselves when they are the one named', async () => {
+    const event = await eventOf(alice, await movie('cm_read_self'));
+    await comment(bob, event, 'hello @cm_dave', { mentions: [dave] });
+
+    await t.actAs(dave);
+    const { rows } = await t.sql(
+      `select mentions from activity_comments($1) order by created_at desc limit 1`,
+      [event],
+    );
+    assert.deepEqual((rows[0].mentions ?? []).map((m) => m.username), ['cm_dave']);
+  });
+
   it('is an empty array rather than null when nobody is named', async () => {
     const event = await eventOf(alice, await movie('cm_none'));
     const posted = await comment(bob, event, 'nobody in particular');
@@ -732,15 +844,31 @@ describe('a handle nobody tapped', () => {
     assert.deepEqual(await mentionedOn(posted.comment_id), []);
   });
 
-  it('does not mention a stranger, and does not refuse the comment either', async () => {
+  /**
+   * The case the founder actually reported, end to end and with nothing tapped: a handle
+   * you know is real because you looked it up, belonging to somebody you do not follow.
+   * Before `20260909000100` this was silently inert.
+   */
+  it('notifies somebody the author has no relationship with at all', async () => {
     const event = await eventOf(alice, await movie('cm_typed_stranger'));
     const before = await mentionCount(erin);
 
     const posted = await typedOnly(bob, event, '@cm_erin thoughts?');
 
-    assert.equal(posted.status, 'ok', 'prose is not a control; it fails quietly');
-    assert.deepEqual(await mentionedOn(posted.comment_id), []);
-    assert.equal(await mentionCount(erin), before);
+    assert.equal(posted.status, 'ok');
+    assert.deepEqual(await mentionedOn(posted.comment_id), ['cm_erin']);
+    assert.equal(await mentionCount(erin), before + 1);
+  });
+
+  /** Discoverable, not merely public. A private account is findable and so is nameable. */
+  it('notifies a private account that can see the activity', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_private'));
+    const before = await mentionCount(frank);
+
+    const posted = await typedOnly(bob, event, '@cm_frank thoughts?');
+
+    assert.deepEqual(await mentionedOn(posted.comment_id), ['cm_frank']);
+    assert.equal(await mentionCount(frank), before + 1);
   });
 
   it('does not mention somebody blocked in either direction', async () => {

@@ -1977,8 +1977,10 @@ A fixed reaction set of six on feed activity items. One reaction per user per it
 > person named gets told. No People picker, no separate field, no mentions in reviews or
 > feed bodies, and no mention privacy settings.
 >
-> **Who may be named, and the half that is not about the author.** Two populations,
-> union:
+> **Who may be named, and the half that is not about the author.** ~~Two populations,
+> union~~ — **the two-population rule was replaced on 2026-09-09**; see that section
+> below. The second condition, about the mentioned party rather than the author, is
+> unchanged and now carries the whole bound:
 >
 > | Source | Rule |
 > |---|---|
@@ -2181,6 +2183,75 @@ A fixed reaction set of six on feed activity items. One reaction per user per it
 > **Autocomplete already exists** and is unchanged: typing `@` still opens
 > `MentionSuggestions` over the people this reader may name here. What 2026-09-08 removes
 > is the requirement to *use* it.
+>
+> ### As built — 2026-09-09: anybody you could already look up (`20260909000100`)
+>
+> The 2026-08-30 rule was "somebody you follow, or somebody already in this thread".
+> Once the body became the source of mentions (2026-09-08) that narrowness turned into
+> something a reader trips over: you type a handle you know is real, because you searched
+> for it five minutes ago, and nothing happens — no error, no suggestion, no
+> notification. The founder has widened it.
+>
+> **The new rule is one that already existed.** A user may mention anybody they are
+> legitimately allowed to *discover*, and bingd has exactly one predicate for that
+> question: `can_discover_profile` (`20260819000100`), which is what People search
+> filters on. It is reused, not restated — a second copy of a privacy rule is a second
+> thing to forget to update.
+>
+> | Case | Eligible |
+> |---|---|
+> | Approved follow | yes |
+> | Already a participant in the thread | yes |
+> | Any other profile you could find in People search | **yes — new** |
+> | Private account you do not follow | **yes — findable is not viewable, see below** |
+> | Blocked, either direction | no |
+> | Suspended or deleted | no |
+> | Yourself | no notification, and no link |
+> | Anybody who cannot see the activity | no |
+>
+> Self, blocks and suspension are kept by **deleting** their open-coded copies from
+> `_can_mention`, because `can_discover_profile` already answers false for all three.
+>
+> **Private is not unreachable**, and that is `20260819000100`'s decision rather than a
+> new one: private means "my activity is private", not "nobody can find me". A private
+> account is findable by name so somebody who knows them can ask to follow, while
+> everything they wrote stays behind `can_view_profile`. A mention carries *identity* —
+> an id, a handle, the spelling the body uses — so it follows discovery, not content.
+>
+> **What stops this being "everybody, everywhere"** is the second clause of
+> `_can_mention`, which is untouched: **the mentioned person must be able to see the
+> activity themselves.** So in practice — on a public activity, anybody you could find in
+> People search; on a private actor's activity, only that actor's own followers, which is
+> the same set that can see the post being commented on. The ceiling of ten mentions per
+> comment is unchanged and now does the anti-abuse work it used to share with the follow
+> graph.
+>
+> **The composer follows the rule, with one restraint kept.** A bare `@` still offers only
+> participants and follows: that list appears mid-word under a moving thumb, and what
+> belongs there is the people you are likely to mean, not a slice of the user table. Once
+> a fragment is typed, `mention_candidates` additionally searches discoverable profiles by
+> prefix, on the same columns and the same predicate People search uses. You have to type
+> a name to be shown a stranger, which is what typing a name means. Every offered row
+> still passes `_can_mention`, so the list and the write cannot disagree — asserted as a
+> property, not case by case.
+>
+> **The read had to move with it.** `activity_comments` filtered mentioned identities
+> through `can_view_profile`, which was invisible while every mention was a follow or a
+> participant. Left alone it would have been a visible regression: a valid mention of a
+> discoverable private account would fire a notification and then render as plain text.
+> It now uses `can_discover_profile`, the same identity-versus-content line, plus the
+> reader themselves — you must be able to see your own name light up in a comment that
+> names you.
+>
+> **Nothing else changes.** `can_discover_profile`, `can_view_profile`, `search_users`,
+> every RLS policy, the `comment_mentions` ledger, the once-ever stamp, the edit matrix,
+> the reply dedupe, the rendering, the push copy and the routing are all as they were.
+>
+> **Self mentions** notify nobody, which is the requirement, and as a consequence do not
+> render as a link either — `can_discover_profile` answers false for yourself, so no
+> ledger row exists to draw from. Letting one in to fix the cosmetics would put a row
+> whose only purpose is to notify into the table that records who was notified. Left as
+> it is, deliberately.
 >
 > **Deliberately not built**: hashtags, arbitrary URLs, any other rich text in a comment,
 > mentions in reviews or feed bodies, mention mute settings, mention notification
