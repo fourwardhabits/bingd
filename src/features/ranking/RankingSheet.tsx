@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { formatGenreRank, genreRanksFor } from '@/features/collection/genre-rank';
+import { neighboursFor } from '@/features/collection/rank-neighbours';
 import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
 import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
 import { track, type Surface } from '@/lib/analytics';
@@ -995,17 +996,43 @@ function Reveal({
   const { data: ranked } = useRankedCollection(profile.id, category as RankingCategory);
   const genres = ranked ? genreRanksFor(subjectId, ranked) : [];
 
+  /**
+   * The two names either side of it, off the same list, so this costs no second read.
+   * Empty until that list has refetched, which is why the block below renders nothing
+   * rather than a placeholder: an absent neighbour line is invisible, and a skeleton
+   * where a film's name is about to appear is not.
+   */
+  const { higher, lower } = ranked
+    ? neighboursFor(subjectId, ranked)
+    : { higher: null, lower: null };
+
   const context = [
     `#${position} ${readableCategory}`,
     ...genres.map(formatGenreRank),
   ].join('  ·  ');
+
+  /**
+   * The same two facts, said once, for the summary the panel already carries.
+   *
+   * The rows below are hidden from the accessibility tree for the reason the context
+   * line already is: the panel speaks the whole placement, and a screen reader that
+   * reads the ordinal twice is worse than one that reads it once.
+   */
+  const spokenPlacement = [
+    higher ? `Below ${higher.name}.` : position === 1 ? 'Your new number 1.' : null,
+    lower ? `Above ${lower.name}.` : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <View style={styles.reveal}>
       <View
         style={styles.panel}
         accessibilityRole="summary"
-        accessibilityLabel={`${title} scored ${formatScore(score)} out of 10. ${context}`}
+        accessibilityLabel={`${title} scored ${formatScore(score)} out of 10. ${context}${
+          spokenPlacement ? `. ${spokenPlacement}` : ''
+        }`}
       >
         <Text variant="reveal" tone="inverse" accessibilityElementsHidden>
           {formatScore(shown)}
@@ -1016,16 +1043,71 @@ function Reveal({
         {title}
       </Text>
 
-      {/* Secondary by construction: footnote, tertiary, one line. The ordinal is
-          still true and still useful, it is just no longer the claim. */}
-      <Text
-        variant="footnote"
-        tone="tertiary"
-        style={styles.centre}
-        accessibilityElementsHidden
-      >
-        {context}
-      </Text>
+      {/**
+        * **The score still leads** (founder, 2026-08-15). Everything in this block sits
+        * under the panel and stays smaller than it. What changed is that the ordinal now
+        * carries the two names that give it a meaning.
+        *
+        * "#3 Movies" says how many titles beat this one and not which, and the which is
+        * the half somebody has an opinion about. Naming the pair either side turns a
+        * number into a position between two titles they have already judged.
+        *
+        * Both names come off the list this screen already reads for its genre ranks, so
+        * the block costs no second request and cannot disagree with the ordinal above it.
+        */}
+      <View style={styles.placement}>
+        {/* Secondary by construction: footnote, tertiary, one line. The ordinal is
+            still true and still useful, it is just no longer the claim. */}
+        <Text
+          variant="footnote"
+          tone="tertiary"
+          style={styles.centre}
+          accessibilityElementsHidden
+        >
+          {context}
+        </Text>
+
+        {higher ? (
+          <Text
+            variant="footnote"
+            tone="tertiary"
+            style={styles.centre}
+            numberOfLines={1}
+            accessibilityElementsHidden
+          >
+            Below{' '}
+            <Text variant="subhead" tone="secondary">
+              {higher.name}
+            </Text>
+          </Text>
+        ) : position === 1 ? (
+          /* Nothing is invented to sit above a #1. The line says the one thing that is
+             true instead, and it is the thing the reader opened the app to find out. */
+          <Text
+            variant="ordinal"
+            tone="secondary"
+            style={styles.centre}
+            accessibilityElementsHidden
+          >
+            Your new #1
+          </Text>
+        ) : null}
+
+        {lower ? (
+          <Text
+            variant="footnote"
+            tone="tertiary"
+            style={styles.centre}
+            numberOfLines={1}
+            accessibilityElementsHidden
+          >
+            Above{' '}
+            <Text variant="subhead" tone="secondary">
+              {lower.name}
+            </Text>
+          </Text>
+        ) : null}
+      </View>
 
       {/**
         * **Nothing is said here about Too tough** (founder, 2026-08-30).
@@ -1221,6 +1303,9 @@ const styles = StyleSheet.create({
   revealExits: { flexDirection: 'row', gap: theme.space[2] },
   revealExit: { flex: 1 },
   centre: { textAlign: 'center' },
+  // Tight, so the ordinal and the two names read as one block rather than as three
+  // things that happen to sit under the score. The reveal's own gap is space[6].
+  placement: { alignSelf: 'stretch', gap: theme.space[1] },
   centredBox: {
     alignItems: 'center',
     justifyContent: 'center',
