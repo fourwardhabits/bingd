@@ -36,10 +36,33 @@ Six things, in the order they compound:
 
 The ritual all six hang off:
 
-> I watched something. I rank it on bingd. I see where it landed.
+> I finished something. I want to see what score it gets and where it lands.
 
 Every channel below is judged on whether it recruits people who will actually perform
 that loop, not on how many signups it produces.
+
+### 1.1 The post-watch reflex, and what the reveal says
+
+The loop is watch, open bingd., rank, and then three things in this order:
+
+| Beat | The question it answers |
+|---|---|
+| **Score** | How strongly did this resolve in my taste? |
+| **Placement** | Where does it actually sit against everything else I have seen? |
+| **Neighbours** | What did I just put this above and below? |
+
+These are complementary and should never be pitched as competing systems. The score is
+the one people anticipate during the comparisons. The placement is the one they did not
+see coming. The two names either side are what turn a number into an argument, which is
+the part that gets repeated to somebody else.
+
+The external form of that third beat is the content format in section 10:
+
+> Sicario just landed #4 in my Movies.
+
+**Do not document the reveal's layout here.** It lives in the code and its decisions are
+recorded in the commits that made them. What belongs in a GTM document is that the payoff
+exists and what it feels like, because that is the thing being marketed.
 
 ---
 
@@ -205,7 +228,7 @@ constraints from it govern this plan:
    permanently unattributed. Every invite number is a floor. Report it as one and never
    scale it by a guessed factor.
 
-### 5.1 Signups per source: what is actually possible today
+### 5.1 Signups per source, and the decision not to buy it with invite links
 
 `acquisition_source` exists as a nullable PostHog super-property with the values
 `friend_direct`, `launch_party`, `beli`, `letterboxd`, `amc_alist`, `reddit`,
@@ -213,30 +236,58 @@ constraints from it govern this plan:
 `redeem_invite`, which sets `invite`.** No channel sets its own value. Nothing infers a
 source from behaviour, and per `analytics.md` nothing may.
 
-So per-channel attribution does not exist out of the box. There is one way to get it
-with no code:
+So per-channel attribution does not exist out of the box. There is one mechanism that
+would produce it with no code: mint one invite link per channel and post that as the call
+to action. `invite_link_opens` would give per-channel clicks, `invite_attributions` the
+signups, and `activated_at` the activations.
 
-**Mint one invite link per channel and post that link as the call to action.**
+**Decision, 2026-09-05: do not do this.** Redeeming an invite is not a neutral act. It
+writes a one-way follow to the inviter and files an `invite_joined` notification. Running
+every channel through invite links would therefore manufacture a follow edge for every
+single acquired user, and those edges land in exactly the numbers section 5.2 exists to
+read honestly:
 
-- `invite_link_creations` records the link.
-- `invite_link_opens` counts loads of `bingd.app/i/<token>` for a live token, which is
-  the click count for that channel among people who did not already have the app.
-- `invite_attributions` rows carrying that token are the signups attributable to it.
-- `activated_at` on those rows is activation for that channel, at ten ranked titles.
+- follower counts
+- follow behaviour and follow-back rate
+- reciprocity and mutual follows
+- network density, cluster count, largest component
+- retention segmented by connection count
 
-Two consequences to accept before doing this. Store-install arrivals are still lost, so
-every per-channel figure is a floor. And redeeming an invite creates a one-way follow to
-the inviter and files an `invite_joined` notification, so every attributed signup follows
-the founder. For a founder-led launch that is desirable, but it means the founder's
-follower count is not an organic signal.
+That last one is the whole point. The question worth answering in the first waves is
+whether social connection predicts retention. If every user arrives already following the
+founder, there is no zero-connection cohort left to compare against and the question
+cannot be asked at all. Buying attribution with invite links would cost the more valuable
+measurement.
 
-If per-channel numbers matter more than that, the alternative is asking people directly.
-That is a product change and is out of scope here.
+**Perfect channel attribution is not a launch blocker.** For the first waves, use:
+
+- the timing of each outreach push, against the signup curve
+- an outreach tracker kept by hand: what was posted, where, when
+- platform-side click data wherever the channel gives it
+- PostHog session and referrer data that is already legitimately collected
+- asking people, in the research conversations in section 11
+
+Do not infer a source from behaviour. An unattributed signup is unattributed.
+
+#### Post-launch instrumentation follow-up, high priority
+
+Build campaign and source attribution **independently of social invites**.
+
+The principle that has to hold: campaign or source metadata must never create a follow,
+alter social graph state, change feed eligibility, or move any network-density metric. It
+is a label on an arrival, not a relationship.
+
+A plausible shape is a query parameter on the landing page, something like
+`bingd.app/?src=<campaign>`, carried into `acquisition_source` at signup. **Not designed
+here.** Preserving a source across a store install is the same deferred-linking problem
+described in `growth-instrumentation.md` and is not solved by this either.
 
 ### 5.2 The metric set
 
-**Acquisition.** Signups per channel, via the per-channel invite link above, reported as
-a floor.
+**Acquisition.** Signups over time against the outreach timeline, plus whatever
+platform-side click data each channel gives. Per-channel signup counts are an estimate
+during the first waves, deliberately, for the reason in 5.1. Say estimate when reporting
+them.
 
 **Activation.** Ten ranked titles. Already instrumented.
 
@@ -618,10 +669,25 @@ content format: founder posts, opening-weekend reactions, creator content, frien
 disagreements, and eventually share cards. Worth testing manually by posting them by
 hand long before anything is built. **No content engine now.**
 
-**Lists.** Deferred, still strategically interesting: power users, creators, curated
-collections, and a genuinely shareable object, which bingd. currently lacks. The
-narrowest plausible entry is Group Picks gaining "save as list", which reuses an
-existing object rather than starting a subsystem. **No implementation.**
+**The share card that could carry it.** A composition worth trying later: the newly
+ranked title's poster in the centre, the titles immediately above and below it set behind
+or beside it, the score, the placement, and the bingd. mark. It states the whole payoff in
+one image and it is self-explanatory to somebody who has never used the app.
+
+This was considered for the in-app reveal and deliberately ruled out there. Posters
+compete with the score for the one moment that screen exists for, they make the reveal
+wait on an image, and the meaning of a neighbouring poster is not obvious at a glance. The
+in-app anchors are text. **A share card is the opposite case**: nobody is mid-flow, the
+image has to work on its own in somebody else's feed, and visual richness is the point.
+
+Not built, and it needs share functionality that does not exist yet. Recorded so the
+distinction is not lost: restrained in the app, rich in the artifact.
+
+**Lists.** Deferred and **not a launch blocker**, but strategically interesting: power
+users, creators, curated collections, and a genuinely shareable object, which bingd.
+currently lacks. The narrowest plausible entry is Group Picks gaining "save as list",
+which reuses an object that already exists rather than starting a subsystem. **No
+implementation.**
 
 ---
 
@@ -656,13 +722,22 @@ Ask conversationally. The wrong answers are the valuable ones.
 
 ---
 
-## 12. Open decisions
+## 12. Decisions
 
-Listed here so they are not lost, and not resolved here.
+### Settled, 2026-09-05
 
-1. **Per-channel attribution.** Section 5.1 works today with no code but makes every
-   channel signup a follower of the founder. Accept that, or accept unattributed
-   channels, or change the product.
-2. **How hard to work the TV Time channels at all**, given 3.7. The wedge is real but
-   narrow, and the effort may be better spent on the film cohorts in section 6.
-3. **Letterboxd import**, on the trigger in 9.1 rather than on instinct.
+1. **Attribution is not bought with invite links.** Unattributed channels are accepted
+   for the first waves rather than contaminating the network metrics. Section 5.1, with
+   the post-launch follow-up recorded there.
+2. **The TV Time channels get tested, narrowly.** Not as a replacement pitch, and not at
+   the expense of the film cohorts in section 6. The target is the subset who valued
+   keeping a history, the social context, movies and TV in one place, and who can live at
+   season level. Every message states that there is no episode-level tracking. Sections
+   3.7, 3.8 and 7.4.
+3. **The reveal is score, then placement, then neighbours**, and the in-app anchors are
+   text rather than posters. Section 1.1, with the share-card idea kept in section 10.
+
+### Still open
+
+4. **Letterboxd import**, on the trigger in 9.1 rather than on instinct. Question 14 in
+   section 11 is what settles it.
