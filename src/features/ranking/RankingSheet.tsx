@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { formatGenreRank, genreRanksFor } from '@/features/collection/genre-rank';
+import { neighboursFor } from '@/features/collection/rank-neighbours';
 import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
 import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
 import { track, type Surface } from '@/lib/analytics';
@@ -995,17 +996,54 @@ function Reveal({
   const { data: ranked } = useRankedCollection(profile.id, category as RankingCategory);
   const genres = ranked ? genreRanksFor(subjectId, ranked) : [];
 
-  const context = [
-    `#${position} ${readableCategory}`,
-    ...genres.map(formatGenreRank),
-  ].join('  ·  ');
+  /**
+   * The two names either side of it, off the same list, so this costs no second read.
+   * Empty until that list has refetched, which is why the block below renders nothing
+   * rather than a placeholder: an absent neighbour line is invisible, and a skeleton
+   * where a film's name is about to appear is not.
+   */
+  const { higher, lower } = ranked
+    ? neighboursFor(subjectId, ranked)
+    : { higher: null, lower: null };
+
+  /**
+   * The placement, in the reader's words rather than the schema's.
+   *
+   * `in` is doing work: "#7 Movies" is a label and "#7 in Movies" is a sentence about
+   * where something sits. The category is `TV` for seasons, which is the only claim
+   * this line is allowed to make about them -- a season is ranked against other seasons
+   * and never against its own series, so nothing here says "#7 show".
+   */
+  const placement = `#${position} in ${readableCategory}`;
+
+  /** `#2 Crime`, and the reason genre-rank.ts exists. Still context, still last. */
+  const genreContext = genres.map(formatGenreRank).join('  ·  ');
+
+  /**
+   * The whole placement, said once, for the summary the panel carries.
+   *
+   * Every line below is hidden from the accessibility tree, which is what the context
+   * line already did: the panel speaks all of it, and a screen reader that reads the
+   * ordinal twice is worse than one that reads it once. Genres are joined with a stop
+   * rather than the interpunct they are drawn with, because a screen reader says the
+   * character.
+   */
+  const spokenPlacement = [
+    `${title} scored ${formatScore(score)} out of 10.`,
+    `${placement}.`,
+    higher ? `Below ${higher.name}.` : null,
+    lower ? `Above ${lower.name}.` : null,
+    genres.length ? `${genres.map(formatGenreRank).join('. ')}.` : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <View style={styles.reveal}>
       <View
         style={styles.panel}
         accessibilityRole="summary"
-        accessibilityLabel={`${title} scored ${formatScore(score)} out of 10. ${context}`}
+        accessibilityLabel={spokenPlacement}
       >
         <Text variant="reveal" tone="inverse" accessibilityElementsHidden>
           {formatScore(shown)}
@@ -1016,16 +1054,85 @@ function Reveal({
         {title}
       </Text>
 
-      {/* Secondary by construction: footnote, tertiary, one line. The ordinal is
-          still true and still useful, it is just no longer the claim. */}
-      <Text
-        variant="footnote"
-        tone="tertiary"
-        style={styles.centre}
-        accessibilityElementsHidden
-      >
-        {context}
-      </Text>
+      {/**
+        * **Score, then placement, then what it landed between** (founder, 2026-09-05).
+        *
+        * The score stays the hero and the count-up is untouched. The anticipation the
+        * ranking flow builds is "what am I going to give this", and the number answers
+        * it. Nothing here competes with the panel above.
+        *
+        * What changed is the second beat. The ordinal used to be a tertiary footnote
+        * sharing a line with the genre ranks, which made the answer to "where did it
+        * land" the smallest thing on the screen. It is now its own line, set in the
+        * ordinal token at full contrast, and it reads as a sentence: **#7 in Movies**.
+        *
+        * Then the anchors, because "#7" is abstract and "below Dune, above The Batman"
+        * is an opinion. That is the beat the post-watch habit is built on: a number
+        * nobody argues with, followed by two names they might.
+        *
+        * The genre ranks keep their place at the end. They were context before this
+        * change and they are context after it; what they are no longer doing is sharing
+        * a line with the fact the screen is for.
+        *
+        * Every name comes off the list this screen already reads for those genre ranks,
+        * so the block costs no second request, adds no poster fetch, and cannot disagree
+        * with the ordinal above it.
+        */}
+      <View style={styles.placement}>
+        <Text variant="ordinal" style={styles.centre} accessibilityElementsHidden>
+          {placement}
+        </Text>
+
+        {/**
+         * Nothing is invented to sit above a #1 or below a last place. The line that
+         * would name it is simply absent, and the placement above already said which
+         * end of the list this is.
+         */}
+        {higher || lower ? (
+          <View style={styles.anchors}>
+            {higher ? (
+              <Text
+                variant="footnote"
+                tone="tertiary"
+                style={styles.centre}
+                numberOfLines={1}
+                accessibilityElementsHidden
+              >
+                Below{' '}
+                <Text variant="subhead" tone="secondary">
+                  {higher.name}
+                </Text>
+              </Text>
+            ) : null}
+
+            {lower ? (
+              <Text
+                variant="footnote"
+                tone="tertiary"
+                style={styles.centre}
+                numberOfLines={1}
+                accessibilityElementsHidden
+              >
+                Above{' '}
+                <Text variant="subhead" tone="secondary">
+                  {lower.name}
+                </Text>
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {genreContext ? (
+          <Text
+            variant="footnote"
+            tone="tertiary"
+            style={styles.centre}
+            accessibilityElementsHidden
+          >
+            {genreContext}
+          </Text>
+        ) : null}
+      </View>
 
       {/**
         * **Nothing is said here about Too tough** (founder, 2026-08-30).
@@ -1221,6 +1328,13 @@ const styles = StyleSheet.create({
   revealExits: { flexDirection: 'row', gap: theme.space[2] },
   revealExit: { flex: 1 },
   centre: { textAlign: 'center' },
+  // The placement, its anchors and the genre line are one block, set apart from the
+  // title above them. The reveal's own gap is space[6], which would read as three
+  // unrelated things.
+  placement: { alignSelf: 'stretch', gap: theme.space[2] },
+  // Tighter again inside, so the two names read as a pair hanging off the ordinal
+  // rather than as two more facts.
+  anchors: { alignSelf: 'stretch', gap: theme.space[1] },
   centredBox: {
     alignItems: 'center',
     justifyContent: 'center',
