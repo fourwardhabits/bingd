@@ -32,7 +32,13 @@ module.exports = [
   {
     // Command-line scripts, where printing a report is the whole point rather than
     // a leftover debug statement, and where Node's own globals are in scope.
-    files: ['supabase/**/*.mjs', 'web/*.mjs', 'scripts/**/*.mjs', 'assets/**/*.mjs'],
+    files: [
+      'supabase/**/*.mjs',
+      'web/*.mjs',
+      'scripts/**/*.mjs',
+      'assets/**/*.mjs',
+      'store-assets/**/*.mjs',
+    ],
     languageOptions: {
       globals: {
         Buffer: 'readonly',
