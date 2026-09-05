@@ -691,34 +691,160 @@ implementation.**
 
 ---
 
-## 11. Research questions for early power users
+## 11. Research guide — behaviour first
 
-Ask conversationally. The wrong answers are the valuable ones.
+**Rewritten 2026-09-05 to be behavioural rather than a feature poll.** The previous version
+asked good opening questions and then, in question 14, asked a Letterboxd user whether an
+importer *would* change their behaviour. That is the one shape of question that reliably
+lies: people are generous about hypothetical features and accurate about last Tuesday. Every
+question below asks somebody to **reconstruct something that actually happened**.
 
-**Everyone.**
+**The rules for whoever is running the interview.**
 
-1. What did you do the last time you finished a film or a show? Walk me through the
-   actual sequence.
-2. What made you open bingd. the second time?
-3. When did you stop, and what were you doing at the time?
-4. Who do you want to see on here, and what would make you actually send it to them?
-5. What did you expect it to do that it did not?
+- Never ask *would you use X*. If a hypothetical is the only way to get at something, ask for
+  the last time the need arose instead.
+- Never name a feature bingd. has not built. Do not pitch the Letterboxd importer, do not
+  mention Lists, do not describe a Rank-later flow. If they name it first, that is the signal.
+- Ask for the *last* instance, not the typical one. "Usually I…" is a self-description;
+  "last Thursday I…" is data.
+- Follow every answer with **"show me"** where a screen exists. What they open is worth more
+  than what they say they use.
+- The wrong answers are the valuable ones. Do not rescue a silence by suggesting an answer.
 
-**Former TV Time users.**
+---
 
-6. What did you actually do most often in TV Time?
-7. What did you usually do immediately after finishing an episode?
-8. What do you miss most about it?
-9. Is season-level tracking enough for you, or do you need individual episodes?
-10. What made bingd. interesting to you, if anything did?
-11. What would make bingd. the app you open without thinking after you watch something?
-12. How much does importing your old history matter?
-13. What other replacements are you trying, and why those?
+### A. Discovery — is choosing what to watch actually painful?
 
-**Letterboxd users.** Ask exactly this, and record the answer verbatim:
+The doctrine hypothesis (PRD §3, doctrine item 5) is that mainstream viewers already get
+candidates from streaming home screens, friends, social feeds, advertising and general
+cultural awareness — and that bingd. owns evaluation rather than discovery. These questions
+are how that gets falsified.
 
-14. Would importing your Letterboxd history materially change how likely you are to use
-    bingd. regularly?
+1. What was the last thing you watched, and how did you end up choosing it?
+   - Where did you first hear about it?
+   - What made you actually press play?
+   - Were you deciding between anything else?
+2. Tell me about the last time you had trouble deciding what to watch. What did you do?
+
+*Listening for:* whether the candidate arrived from a person, a platform or a feed; and
+whether "trouble deciding" produces a real story or a shrug.
+
+### B. The post-watch reflex
+
+The whole product rests on there being a moment after the credits that bingd. can occupy.
+
+3. What did you do right after the last thing you watched ended?
+4. Do you normally record, rate, review or send anything after watching? Walk me through the
+   last time you did.
+
+*Listening for:* an existing ritual of any kind — a text to somebody, a star rating, a
+screenshot, nothing at all.
+
+### C. Ranking — anticipation, or work?
+
+Do **not** ask whether ranking is fun. Ask what happened.
+
+5. Think about the last thing you watched after installing bingd. What did you do with it?
+   - *If they did not rank it:* What happened?
+   - *If they did:* What were you most curious to see when you finished ranking it?
+6. When was the last time you started ranking something and did not finish? Take me back to
+   that comparison — which two titles were they?
+
+*Listening for three distinct things:* score anticipation ("I wanted to see what it got"),
+placement anticipation ("I wanted to see where it landed"), and comparison fatigue. Question 6
+is the one that matters most — a beta user left mid-onboarding on a comparison they could not
+call, and `Too tough` exists on every comparison surface for exactly that. If they did not
+find it, that is a discoverability finding, not a feature request.
+
+### D. Historical memory
+
+7. Have you ever wanted to record something you know you have seen, but could not remember it
+   well enough to rate it? What did you do?
+
+*Do not mention a Rank-later flow.* Deferred roadmap §49 is gated on several people hitting
+this independently.
+
+### E. The Collection as identity
+
+8. Do you ever look back through the films or shows you have watched?
+9. Where do you do that?
+10. Have you ever shown someone your ratings, list or history? **Show me what you showed them.**
+
+*Listening for:* whether a collection is an artifact they identify with or a record they
+never revisit. Doctrine item 2 says the first job outranks the second; this is the check.
+
+### F. Friends and social taste
+
+11. Who do you usually talk to after watching something?
+12. What is the last film or show you talked about with them?
+13. When you want to know what a friend thought of something, what do you do?
+
+*Listening for:* whether title-level friend opinion needs to be more prominent than the
+current Following drill-down. Doctrine item 3 defers promoting friend scores into the title
+hero until this says otherwise.
+
+### G. List-shaped behaviour
+
+Do **not** ask whether they would make lists.
+
+14. Have you made or saved a film or TV list recently?
+15. Where did you keep it?
+16. What was the list for?
+17. Did anyone else see it or use it?
+
+*Listening for:* Oscars predictions, favourites, genre lists, watch-together candidates,
+public or creator curation, private organisation. Question 17 is what separates the private
+half of roadmap §50 from the strategically important public half.
+
+### H. Where to watch
+
+18. Think of the last time you knew what you wanted to watch. How did you figure out where it
+    was available?
+
+*Listening for:* whether availability was a real friction or a non-event, and whether the
+answer was Google, a streaming search, or opening apps one by one.
+
+### I. Diary and history
+
+19. Have you ever tried to remember what you watched last month or last year? What did you do?
+
+*Do not pitch statistics or a recap.* Roadmap §51 separates diary, deep stats and recaps
+precisely because they have different audiences; this question is how to tell which one is
+being described.
+
+### J. Switching and history friction — for people already tracking
+
+20. Have you ever tried a new film or TV tracking app? What was annoying about getting started?
+21. If your current app disappeared tomorrow, what would you be most upset to lose?
+
+**Only after they have raised history friction themselves** may the interviewer ask what is in
+their existing library and how long it took to build. Do not pitch the Letterboxd importer.
+Roadmap §20 and section 9.1 below hold the trigger; question 21 is the one that fires it, and
+it fires on the words *my history* coming out of their mouth unprompted.
+
+### K. The network
+
+22. Who are the people you would actually want on an app like this?
+23. What would you want to see from them?
+24. What is the last film or show recommendation one of them gave you?
+
+*Do not ask whether they would invite three friends.* Question 24 is the behavioural version
+of the same question and the only one with an answer worth recording.
+
+---
+
+### For former TV Time users, in addition
+
+25. What did you actually do most often in TV Time?
+26. What did you usually do immediately after finishing an episode?
+27. What do you miss most about it?
+28. What did you do the last time you finished a season? Walk me through it.
+29. What other replacements have you tried, and what happened with each?
+
+Season-level tracking is stated in every TV Time outreach message (§7.4) rather than asked
+about. If they raise episode-level tracking themselves, record it verbatim — that is a
+different signal from agreeing with a prompt, and the resist list in roadmap §54 is written
+against the prompted version.
 
 ---
 
@@ -736,8 +862,18 @@ Ask conversationally. The wrong answers are the valuable ones.
    3.7, 3.8 and 7.4.
 3. **The reveal is score, then placement, then neighbours**, and the in-app anchors are
    text rather than posters. Section 1.1, with the share-card idea kept in section 10.
+4. **The product doctrine is settled and lives in the PRD**, not here. Ranking-first, the
+   Collection as identity, friend scores behind the Following drill-down, Lists deferred but
+   ranked highest, discovery secondary, diary secondary, a mainstream audience under
+   progressive disclosure, and no public-review strategy. See
+   [`../product/PRD.md`](../product/PRD.md) §3, "The doctrine pass", and
+   [`../product/deferred-roadmap.md`](../product/deferred-roadmap.md) §§49–54. This section
+   records *acquisition* decisions; that one records product ones, and neither restates the
+   other.
 
 ### Still open
 
-4. **Letterboxd import**, on the trigger in 9.1 rather than on instinct. Question 14 in
-   section 11 is what settles it.
+5. **Letterboxd import**, on the trigger in 9.1 rather than on instinct. Question 21 in
+   section 11 is what settles it — and it settles it only when the words *my history* come
+   out of somebody's mouth unprompted, which is the difference from the question this
+   replaced.

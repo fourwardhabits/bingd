@@ -148,6 +148,84 @@ Has built a meaningful collection, roughly 25–50+ ranked titles, and returns t
 
 ---
 
+### The doctrine pass — 2026-09-05
+
+Settled after a competitive review across Beli, Letterboxd, Rotten Tomatoes and TV Time /
+Bingers, plus current store-review patterns. Nineteen principles above are unchanged; this
+records the strategic decisions that sit on top of them, because each was previously an
+instinct rather than a written position. Everything deferred here has an entry in
+[`deferred-roadmap.md`](./deferred-roadmap.md) with its own revisit trigger.
+
+**1. Ranking-first, and the reflex is the product.** The intended sequence after a fresh
+watch is `WATCH → bingd. → rank → score reveal → ordinal placement → neighbouring titles`,
+and the emotional question it answers is *"what score am I going to get, and where is it
+going to land?"* bingd. is not repositioned as a generic tracker with ranking as an
+optional extra. Every surface that follows a watch should push toward the comparison.
+
+**Unranked remains a legitimate exception rather than an equal path.** The distinction is
+between *"I watched this years ago and do not remember it well enough to rank"* — a real
+limit on what somebody can honestly say — and *"I do not feel like ranking"*, which is the
+friction the product exists to make worth pushing through. The state already exists in the
+schema (`user_media` without a `rankings` row) and already behaves correctly: an unranked
+title contributes nothing to the bingd. community score, nothing to Match, and nothing to
+anybody else's view. No explicit *record it without ranking it* affordance is being built;
+roadmap §49 holds it, gated on real users hitting the memory problem independently.
+
+**2. The Collection is an identity artifact first and a utility second.** It has two jobs
+and the order matters: it is the thing somebody browses, shows a friend, identifies with
+and wants preserved — and it is *also* what powers recommendations and Match. When the two
+conflict, the first wins. Future identity extensions (profile taste summaries, Awards,
+recaps) belong to that first job; none is being built now.
+
+**3. Friend scores stay behind the Following drill-down.** Beli's evidence that people care
+intensely about a specific friend's opinion is taken seriously, and the response is to test
+whether the existing Following unit and its sheet already do that job before promoting
+every followee's score into the title hero. Clutter above the fold is the cost being
+avoided. **Revisit when** readers repeatedly open the Following sheet or ask for faster
+access to a named friend's take.
+
+**4. Lists are the highest-priority deferred feature, and they are public as well as
+private.** Private organisation is the obvious half; the strategically important half is
+public, shareable curation — Oscar predictions, Best Horror of the 2010s, Favourite Anime,
+a group's candidates. That is creator surface, discovery surface and an artifact that is
+useful to somebody with no friends on the app yet, which nothing else in the product is.
+`Group Picks → Save as List` is one plausible entry point and must not become the
+definition of the feature. Roadmap §50.
+
+**5. Discovery is secondary, on a stated hypothesis rather than on principle.** Mainstream
+viewers already receive candidates from streaming home screens, friends, TikTok, advertising,
+general cultural awareness and search. What bingd. can own is **evaluation, history, ranking
+and social taste**. For You, Group Picks, Watchlist and the existing recommendation surfaces
+stay useful and stay secondary; no Engine V2 until behaviour shows real decision pain.
+Roadmap §18 already holds the engine-scale version.
+
+**6. Where to watch closes the last gap in the loop.** `save or discover → know where it is
+→ watch → rank`. Built 2026-09-05; see [`../design/screens.md`](../design/screens.md) §6.
+
+**7. History matters; diary-first does not.** The hierarchy is the ranked Collection first,
+chronological diary second. Deep diary and statistics work disproportionately serves
+enthusiasts. Recaps are the exception — a monthly or annual Wrapped-style artifact has broad
+consumer and sharing value even where deep analysis does not. Roadmap §13 and §51.
+
+**8. The audience is mainstream, closer to Beli's breadth than to Letterboxd's enthusiast
+identity.** Power users matter — they create catalogue density, they create content, they are
+the likely paying cohort, and they drive acquisition — but the product must not become
+intimidating for the ordinary watcher. **Progressive disclosure is the governing rule:**
+power-user depth must never raise the cognitive cost of ordinary ranking, Collection, Feed,
+title detail or Watchlist. Nobody logging a film should have to walk past complex filters, a
+stats dashboard, creator controls, a large metadata block, or a writing prompt.
+
+**9. No public long-form review culture.** Letterboxd owns that and it is not what this
+product is for. Social expression here is rankings, short notes, comments, reactions, direct
+recommendations, and eventually Lists. No review infrastructure is being built. Principle 2
+above already says why.
+
+**10. Ship and learn.** The interface is good enough. The bar before launch is the absence
+of *objective* roughness — dated components, inconsistent tokens, clutter, confusing
+interaction — not a speculative redesign. After the current no-regret corrections, launch.
+
+---
+
 ## 4. Reference model and evidence boundary
 
 ### Beli as a product-mechanics reference

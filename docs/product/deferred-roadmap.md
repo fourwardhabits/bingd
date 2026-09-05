@@ -2026,3 +2026,223 @@ one dimension the events exist to answer. Found during the Group Picks audit of
 2026-09-03; the fix is three lines plus the pinned-list update and belongs in its own
 small change, because widening the analytics allowlist inside a feature PR is how
 allowlists erode.
+
+---
+
+# Added 2026-09-05 — the doctrine pass
+
+Five entries from the competitive review across Beli, Letterboxd, Rotten Tomatoes and
+TV Time / Bingers, plus the two small deferrals the physical-QA pass produced. The
+strategic positions they follow from are in [`PRD.md`](./PRD.md) §3, "The doctrine pass".
+Nothing here is built, and the priority ordering is the founder's.
+
+---
+
+## 49. The historical unranked exception
+
+**Status: deferred, 2026-09-05. The state already exists; the affordance does not.**
+
+The founder's own case, and one a beta user has already met in a different form: *"I know I
+watched this, but I do not remember it well enough to rank it."* That is a real limit on
+what somebody can honestly say, and it is not the same sentence as *"I do not feel like
+ranking"* — which is the friction the comparison flow exists to be worth.
+
+**What the schema already does, audited rather than assumed.** A `user_media` row with no
+`rankings` row is watched-and-unranked, and it is a first-class state today:
+
+| | Behaviour of an unranked logged title |
+|---|---|
+| Reachable | Yes. `log_watched` and `set_bucket` both leave a title logged without a position, and `_assert_unranked` is what guards the writers that require one |
+| Collection | Shown, in the unranked slice. PRD principle 18 — a large unranked library is a normal state, not a backlog |
+| bingd. community score | **Excluded.** `community_score` aggregates `rankings`, so an unranked title contributes nothing to anybody's mean |
+| Taste Match | **Excluded.** Computed on pairwise-ranked overlap only (PRD §13) |
+| Recommendations | Sees it as a watched title, which is correct — it is a thing you have seen and should not be recommended |
+| Other people | Owner-only. `user_media` is not readable across accounts (PRD §22) |
+| Watchlist | Correct. Logging removes it, and `unlog` does not put it back — asserted by `watchlist-invariant.test.mjs` and `series-watchlist.test.mjs` |
+
+So **no migration and no schema change** would be needed. What is missing is a deliberate
+way to *say* it: today the reader either completes the comparisons or leaves the title in a
+state the interface does not explain.
+
+**The product guardrail, and it is the whole reason this is deferred rather than built.**
+Any such affordance must remain an *exception* rather than an equal alternative to ranking
+a fresh watch. The moment "record it without ranking it" sits beside "rank it" at the same
+weight on a film somebody watched last night, the reflex the product is built on is
+optional — and an optional reflex is a tracker. `Too tough` already exists on every
+comparison surface for the *within-a-ranking* version of this problem (see §Ranking
+friction below), which is the cheaper half and is shipped.
+
+**Explicitly not being built now:** a Rank later flow, a Skip ranking action, a Mark watched
+without ranking control, a Can't remember answer, an unranked bucket, or another onboarding
+branch.
+
+**Revisit when** several real users independently hit the historical-memory problem, **or**
+import work (§20) makes the distinction unavoidable — an imported Letterboxd library
+is thousands of titles somebody watched and cannot rank, which is this problem at scale and
+is the likelier trigger of the two.
+
+### Ranking friction — audited 2026-09-05, no change required
+
+Recorded here because the audit is the useful artifact, not a change.
+
+`Too tough` calls `rank_skip`, which writes no win, no loss and no tie, and the session's
+`seen_items` guarantee (`20260901000100`) means the pair is never offered again. It skips
+the **comparison**, never the ranking, and the placement that follows is identical to one
+that met no skip at all.
+
+**Onboarding already has full parity**, because onboarding *is* the same component:
+`app/onboarding/taste.tsx` renders the same `RankingSheet` against the same
+`rank_start`/`rank_answer`/`rank_skip` session as the Log tab, Rank again and every
+re-bucketing path. The label was briefly divergent — `Skip` everywhere, `Too tough` in
+onboarding alone — and 2026-08-30 collapsed that to one word on every surface.
+`RankingSheet.test.tsx` asserts the onboarding path reaches the same `rank_skip`
+specifically. There was nothing to bring to parity.
+
+---
+
+## 50. Lists — private organisation and public curation
+
+**Status: deferred, and the highest-priority deferred feature as of 2026-09-05.**
+
+Lists have two halves and the second is the strategically important one.
+
+**Private organisation** is the obvious job: a place to keep candidates, a shortlist, the
+things a group is choosing between. It is useful and it is not why this entry is ranked
+where it is.
+
+**Public, shareable curation** is. A list is the only artifact in the product that is
+useful to somebody with **no friends on bingd. yet** — Oscar predictions, Best Horror of the
+2010s, Movies to Watch Before Halloween, Favourite Anime, Best Movies of 2026. That makes it
+simultaneously creator surface, power-user surface, discovery surface, an externally
+shareable object, and content-driven acquisition. Every other social surface in the product
+requires a graph first.
+
+**`Group Picks → Save as List` is one plausible entry point and must not become the
+definition.** Group Picks produces exactly the shape a list wants — an ordered set of titles
+with a reason — so turning one into a durable list is a small, obvious step. Designing the
+whole feature around that step would produce a list product that only exists as a byproduct
+of a group session, which is the narrow half of the job.
+
+**The constraint that comes with it:** the mainstream reader must not meet list management
+in the ordinary log, rank and browse flows. Progressive disclosure, per PRD §3.
+
+**Revisit when** users naturally express list-shaped jobs unprompted, creators or power users
+ask for persistent curation, or content-driven acquisition becomes a channel worth having.
+The research guide in [`../gtm/launch-outreach.md`](../gtm/launch-outreach.md) §11 asks for
+list-shaped *behaviour* rather than list interest, which is what would settle it.
+
+---
+
+## 51. Diary, statistics and recaps — three things, not one
+
+**Status: deferred, 2026-09-05, and deliberately split because they have different audiences.**
+
+The hierarchy is settled: **the ranked Collection is primary and a chronological diary is
+secondary.** A mass-market product that opens onto a diary is a different product.
+
+**Diary / history** — a chronological view of what was watched when. Real value, and
+disproportionately to enthusiasts. Note that §19 (rewatch and repeated viewing history) and
+§22 (per-title watch history) already hold the data-model half of this; nothing here changes
+their analysis.
+
+**Deep statistics** — eras, languages, runtimes, genre drift over time. Enthusiast-facing,
+plausibly a paid-depth surface (PRD §20), and explicitly *not* something an ordinary reader
+should meet while logging a film.
+
+**Recaps** — monthly and annual, Wrapped-shaped. **This one is mainstream and shareable**,
+which is why it is separated from the two above rather than filed with them: a person who
+would never open a statistics dashboard will still read and send their year. §13 holds the
+existing Quarterly Recap / Wrapped entry and remains the implementation home.
+
+**Revisit when** there is enough history per account for a recap to be worth reading — which
+is a calendar question as much as a product one — or when enthusiast retention specifically
+is the constraint.
+
+---
+
+## 52. Streaming region override
+
+**Status: deferred, 2026-09-05, and it is the alternative to a location permission rather
+than a step toward one.**
+
+Where to watch asks TMDB about **one country**, resolved from the device locale through
+`expo-localization` (`src/lib/region.ts`) and falling back to `US`. That is deliberate and
+it is the whole of the location story: **no GPS, no Core Location, no precise or approximate
+physical-location permission, and no new native dependency.** Provider availability is
+country-specific, not city-specific, so there is nothing a location permission would buy.
+Latitude and longitude are not stored, and region is not sent to analytics.
+
+**What the current approach cannot serve:** a traveller sees their home market, and somebody
+whose device locale does not match the market they actually subscribe in sees the wrong
+catalogue. Both are real and neither is a bug.
+
+**The deferred behaviour** is a manual choice, surfaced where a reader would look for it:
+
+```
+Streaming region      United States  ›
+```
+
+**This must be considered before any GPS or location-permission work is ever proposed.** A
+picker answers both cases exactly, costs no permission prompt, and does not put a
+location-permission string into a store listing — which is a disclosure obligation and a
+review-surface risk taken on for a country code the phone already knows.
+
+**Revisit when** a real reader reports the wrong market, or the app has users outside one.
+
+---
+
+## 53. A sort control for the Following score sheet
+
+**Status: deferred, 2026-09-05, on density rather than on principle.**
+
+The Following drill-down lists everyone the reader follows who has ranked this title,
+ordered by `following_ratings` — trustworthy Match first, then their rating, then username —
+and capped at fifty. At the sheet's realistic size today that order is the answer, and a
+control would be chrome over a list somebody can read in one glance.
+
+**The shape when it is needed** is one compact control offering four axes and no more:
+score high→low, score low→high, Match high→low, Match low→high. Not search — a list of
+people you deliberately follow, capped at fifty, is not a searching problem.
+
+**Revisit when** readers follow enough people that a typical title's sheet is long enough to
+scroll meaningfully, or when somebody asks for a specific person's take and cannot find it.
+`ui/sort.ts` already holds the app's one sort contract, so this is a consumer of an existing
+mechanism rather than a new one.
+
+---
+
+## 54. The 2026-09-05 priority ordering, and what is being resisted
+
+**Status: a classification, not a feature. Recorded so that "deferred" stops meaning one
+undifferentiated pile.**
+
+**High-importance deferred.**
+
+| | |
+|---|---|
+| **Lists** (§50) | Private *and* public. The only artifact useful without a graph |
+| **Letterboxd import** (§20) | **Priority raised 2026-09-05.** It is switching-cost infrastructure rather than a feature: what it buys is somebody's history, which is the thing they would be most upset to lose and therefore the thing keeping them where they are. §20's existing trigger stands — prioritise when real users demonstrate that reconstructing their history blocks adoption, not on instinct |
+
+**Medium-to-high deferred.** Diary and history (§51, §19, §22), with the ranked Collection
+staying primary. Statistics and recaps (§51, §13) — deep stats for enthusiasts, recaps for
+everybody. Richer profile taste identity derived from the Collection, when network and
+content volume justify it. Contextual discovery (§18, §30), expanded only if real decision
+pain appears. Where-to-watch follow-ups (§52, plus the region note in
+[`../reference/tmdb-integration.md`](../reference/tmdb-integration.md)), on the
+implementation shipped 2026-09-05 as the baseline.
+
+**Low priority, and actively resisted.** Each of these is something a competitor does that
+bingd. is choosing not to do, rather than something nobody has got to yet:
+
+- **Public long-form review culture.** Letterboxd owns it. PRD principle 2
+- **Episode-level tracking.** The rankable TV unit is the season (AD-1, PRD §10), and every
+  TV Time outreach message already states this rather than implying it is coming — GTM §7.4
+- **An AI assistant.** PRD principle 14: no language model is required for the core engine
+- **Editorial or news**, and **critic aggregation.** Rotten Tomatoes is the warning here
+  rather than the model — bingd.'s number is the room's, not a critic's
+- **Daily streaks, arbitrary points, and forced social actions.** PRD principle 15: quality
+  over engagement loops
+- **A feature-heavy title page.** Every addition there costs above-the-fold clarity, which is
+  the specific thing the physical-QA pass of 2026-09-05 was correcting
+- **Tags**, until Lists have shipped and proven insufficient. Two organisation systems
+  arriving at once means neither gets learnt
