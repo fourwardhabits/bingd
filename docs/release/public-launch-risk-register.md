@@ -577,6 +577,22 @@ as if new, and not promoted without new evidence.
   that case.
 - **Catalogue, search and direct-season-discovery edge cases** remain appropriate beta
   observation items rather than fixes.
+- **The Feed is not virtualised.** It paginates (#95, 2026-09-04) but still draws its rows
+  inside a `ScrollView`, so every row of every loaded page stays mounted and every poster
+  stays resident — a reader ten pages deep is holding two hundred rows. The page size is
+  twenty partly for this reason: smaller pages mean less memory and less poster churn per
+  fetch, and moving to 25 or 30 later is one constant and one test line.
+
+  **Not fixed now, deliberately.** The migration to `FlatList`/`FlashList` is not a list
+  swap on this screen: Trending, the Feed/Leaderboard toggle, the content header and the
+  whole Leaderboard branch share the same scroll container, and they would all have to
+  move into a `ListHeaderComponent` whose identity has to stay stable across renders.
+  That is a large regression surface on the busiest screen in the app, against a problem
+  no one has yet observed.
+
+  **What should bring it back:** evidence from real sessions — memory growth or scroll
+  jank reported or measured on a device at roughly five to ten loaded pages. Deep-scroll
+  behaviour is the signal; page count alone is not.
 
 ---
 
