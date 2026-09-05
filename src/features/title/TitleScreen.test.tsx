@@ -126,9 +126,25 @@ jest.mock('@/features/title/use-enrichment', () => ({
  * where the enrichment is the real one.
  */
 const mockFetchSeasonEpisodes = jest.fn();
+/**
+ * Availability, which the page asks about on mount rather than behind a tab.
+ *
+ * Mocked here for two reasons. The block is above the tab row, so every test in this
+ * file renders it and an unmocked call would reach the adapter; and *whether* the page
+ * asks — once, and not again when somebody changes tabs — is a decision the screen
+ * makes, so the mock records the arguments rather than discarding them.
+ */
+const mockFetchWatchProviders = jest.fn();
 jest.mock('@/lib/tmdb-adapter', () => ({
   ...jest.requireActual('@/lib/tmdb-adapter'),
   fetchSeasonEpisodes: (...args: unknown[]) => mockFetchSeasonEpisodes(...args),
+  fetchWatchProviders: (...args: unknown[]) => mockFetchWatchProviders(...args),
+}));
+
+// The device's country, which is part of the provider request. Fixed rather than left
+// to the runner, so the argument this file asserts on is the same everywhere.
+jest.mock('expo-localization', () => ({
+  getLocales: () => [{ regionCode: 'US' }],
 }));
 
 /**
@@ -218,6 +234,11 @@ beforeEach(() => {
   mockOpenURL.mockReset();
   mockEnrichmentArgs.length = 0;
   mockFetchSeasonEpisodes.mockReset();
+  mockFetchWatchProviders.mockReset();
+  // The default for every test that is not about availability: a title the provider
+  // carries nowhere, which draws no block at all. Nothing outside the Where to watch
+  // describe below should be seeing one.
+  mockFetchWatchProviders.mockResolvedValue({ region: 'US', link: null, providers: [] });
   // The default for every test that is not about Episodes: a season with no published
   // list. Nothing outside the Episodes describes below should be reaching for one.
   mockFetchSeasonEpisodes.mockResolvedValue([]);
@@ -1854,5 +1875,132 @@ describe('the Episodes tab belongs to seasons alone', () => {
     expect(view.queryByRole('tab', { name: 'Episodes' })).toBeNull();
     expect(view.getByRole('tab', { name: 'Seasons' })).toBeTruthy();
     expect(mockFetchSeasonEpisodes).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Where to watch, on the page rather than on its own.
+ *
+ * `WhereToWatch.test.tsx` covers the block's own behaviour — the grouping, the sheet,
+ * the one link, the failure story. What is left is the part only this screen can be
+ * asked about: **where it sits**, and that adding it moved nothing.
+ *
+ * The founder's placement decision is a sentence about order — under the scores, over
+ * the tabs — so it is asserted as order, in the tree, rather than as "the text is
+ * somewhere on the page".
+ */
+describe('where to watch', () => {
+  const NETFLIX = {
+    provider_id: 8,
+    name: 'Netflix',
+    logo_path: '/netflix.jpg',
+    offers: ['stream'],
+  };
+
+  /**
+   * Where something sits in the rendered tree.
+   *
+   * `queryAll` walks in document order, so comparing two indices is comparing two
+   * positions on the page. There is no role for "above", and reading it off the tree
+   * by shape would agree with any arrangement that happened to contain both.
+   */
+  const indexOf = (view: Awaited<ReturnType<typeof open>>, match: (node: never) => boolean) => {
+    const nodes = view.root!.queryAll(() => true);
+    return nodes.findIndex(match as never);
+  };
+
+  beforeEach(() => {
+    mockFetchWatchProviders.mockResolvedValue({
+      region: 'US',
+      link: 'https://www.themoviedb.org/movie/27205/watch?locale=US',
+      providers: [NETFLIX],
+    });
+    tableRows.media_cache = [credits];
+  });
+
+  it('sits under the score block and over the tab row', async () => {
+    mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 1 }];
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('where-to-watch')).toBeTruthy());
+
+    const scores = indexOf(view, (node: never) => (node as any).props?.testID === 'scores-layout');
+    const watch = indexOf(view, (node: never) => (node as any).props?.testID === 'where-to-watch');
+    const tabs = indexOf(
+      view,
+      (node: never) => (node as any).props?.accessibilityRole === 'tab',
+    );
+
+    expect(scores).toBeGreaterThan(-1);
+    expect(tabs).toBeGreaterThan(-1);
+    expect(watch).toBeGreaterThan(scores);
+    expect(watch).toBeLessThan(tabs);
+  });
+
+  it('is a row on the page and never a tab', async () => {
+    // The founder's decision, and the reason is what a tab would cost on either side:
+    // a film opens on Cast and a season opens on Episodes, both of which are those
+    // pages' point, and a season's row is already five entries long.
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('where-to-watch')).toBeTruthy());
+
+    expect(view.queryByRole('tab', { name: 'Watch' })).toBeNull();
+    expect(view.queryByRole('tab', { name: 'Where to watch' })).toBeNull();
+  });
+
+  it('leaves a film opening on its cast', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('where-to-watch')).toBeTruthy());
+
+    expect(view.getByRole('tab', { name: 'Cast' }).props.accessibilityState.selected).toBe(true);
+  });
+
+  it('asks once, and asks nothing more when the reader changes tabs', async () => {
+    // The block is not gated behind a tab, so a re-render on every tab press must not
+    // become a provider request on every tab press. This is the storm the founder
+    // asked to be held off.
+    const view = await open();
+    await waitFor(() => expect(mockFetchWatchProviders).toHaveBeenCalledTimes(1));
+    expect(mockFetchWatchProviders).toHaveBeenCalledWith('film-1', 'US');
+
+    await fireEvent.press(view.getByRole('tab', { name: 'Details' }));
+    await fireEvent.press(view.getByRole('tab', { name: 'Reviews' }));
+    await fireEvent.press(view.getByRole('tab', { name: 'Cast' }));
+
+    expect(mockFetchWatchProviders).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the page whole when the provider cannot answer', async () => {
+    // Availability is useful and not critical. A failure here must cost the block and
+    // nothing else: no error banner, no spinner, no dead page.
+    mockFetchWatchProviders.mockRejectedValue(new Error('BG502'));
+    mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 1 }];
+    const view = await open();
+
+    await waitFor(() => expect(mockFetchWatchProviders).toHaveBeenCalled());
+    expect(view.queryByTestId('where-to-watch')).toBeNull();
+    expect(view.getByText(/^Inception/)).toBeTruthy();
+    expect(view.getByText('7.4')).toBeTruthy();
+    expect(view.getByRole('tab', { name: 'Cast' })).toBeTruthy();
+    expect(view.getByLabelText('Rank this title')).toBeTruthy();
+  });
+
+  it('is on a series page too, which has no score block of its own', async () => {
+    // A series cannot be ranked, so it gets no Scores section — and availability is
+    // still the thing somebody on that page wants. "Under the scores" is a placement
+    // rule, not a dependency.
+    mockOpenId = 'series-1';
+    tableRows.media_items = [
+      {
+        ...film,
+        id: 'series-1',
+        kind: 'series',
+        title: 'Severance',
+        tmdb_id: 95396,
+      },
+    ];
+
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByTestId('where-to-watch')).toBeTruthy());
+    expect(view.queryByLabelText('Scores')).toBeNull();
   });
 });

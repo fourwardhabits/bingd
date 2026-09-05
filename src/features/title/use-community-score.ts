@@ -25,7 +25,10 @@ export type CommunityScore = {
  *     because a series cannot be ranked (PRD §10);
  *   - it counts only public, active accounts the caller could also read one by one,
  *     so it discloses nothing the schema did not already;
- *   - it returns null rather than a misleading number when too few people have rated.
+ *   - it returns null rather than a misleading number when too few people have rated —
+ *     which since 2026-09-05 means nobody at all. The threshold is a config value
+ *     (`score.community_min_ratings`, now 1) and this hook has never known it: the
+ *     server withholds, and the client draws what it is given.
  *
  * All four live in `community_score` (20260816000000, 20260816000100). This hook
  * exists to call it, and deliberately computes nothing.

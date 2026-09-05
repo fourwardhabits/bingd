@@ -115,23 +115,25 @@ test('the daily report cap still applies when it is not configured', async () =>
 /**
  * The Bingd aggregate's sample size, which is a product decision and not a fallback.
  *
- * It was 3 from `20260816000000` until the founder moved it to 10 on 2026-08-18. Three
- * strangers is not an app-wide opinion; it is three people, and putting their mean
- * under the product's own name lends it an authority it has not earned.
+ * It has been 3, then 10, and is now 1. `20260818000100` raised it on the argument that
+ * three strangers is not an app-wide opinion; `20260910000100` lowered it on the
+ * observation that the argument was about a crowded app, and that before launch almost
+ * every title has one rating or none — so a threshold of ten withheld not a weak number
+ * but every number there was, including from the reader whose own rating it counted.
  *
  * Asserted on the shipped row rather than on behaviour, because `social-notes.test.mjs`
  * lowers this value for its own population tests and would otherwise be the only place
  * the number is visible — which would make lowering it there indistinguishable from
  * changing it here.
  */
-test('the Bingd aggregate waits for ten ratings', async () => {
+test('the Bingd aggregate shows from the first rating', async () => {
   const t = await createTestDb();
   try {
     const { rows } = await t.sql(
       `select (value)::integer as n from app_config where key = 'score.community_min_ratings'`,
     );
     assert.equal(rows.length, 1, 'the row exists rather than being left to a fallback');
-    assert.equal(rows[0].n, 10);
+    assert.equal(rows[0].n, 1);
   } finally {
     await t.close();
   }

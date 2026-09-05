@@ -69,6 +69,21 @@ export const profileUri = (path: string | null | undefined) =>
   path ? `${BASE}/w185${path}` : null;
 
 /**
+ * A streaming service's logo.
+ *
+ * `w92` is TMDB's small logo bucket, and the block draws these at 28pt — so even at
+ * 3x there is headroom, and the next bucket up would be more pixels than a row of
+ * three can use. There is deliberately no second size, for the reason `stillUri`
+ * gives: a size bucket exists for a screen rather than for completeness.
+ *
+ * Null for a service TMDB publishes no logo for, which the row renders as the
+ * service's initial rather than as a broken image — the same choice `profileUri` and
+ * the cast strip make.
+ */
+export const providerLogoUri = (path: string | null | undefined) =>
+  path ? `${BASE}/w92${path}` : null;
+
+/**
  * A YouTube key into a watch URL.
  *
  * `media_cache.videos` stores the key, not a URL, for the same reason poster paths

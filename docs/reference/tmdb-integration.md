@@ -102,7 +102,41 @@ Bingd needs two slots: the About section in Settings, and the attribution line o
 
 **TMDB Reviews are no longer a surface**, and the reason is worth keeping. They were built the same day with careful naming — never called critic, professional or community reviews, since TMDB publishes no criticism and "community" already means Bingd's own aggregate on the same screen. The founder's correction was that the careful naming was solving the wrong problem: a tab called Reviews on a social product should be Bingd's own. The adapter no longer requests them and `20260817001000` deletes the facet, which also retires the retention obligation §19 would otherwise put on somebody else's users' writing. **If TMDB reviews ever return, the naming rules above return with them** — they were right, they were tested, and nothing about them was the reason the surface went.
 
+**Where to watch carries a second attribution, and it names somebody else.** Availability data is JustWatch's, republished by TMDB, and their terms for it are separate and specific:
+
+> In order to use this data you must attribute the source of the data as **JustWatch**. If we find any usage not complying with these terms we will revoke access to the API.
+
+So the credit travels with the data rather than living only in Settings: the collapsed block on title detail reads `via JustWatch` under its label, and the expanded sheet says `Availability data provided by JustWatch.` in full. Neither is a paraphrase and neither should be edited for tone. The TMDB notice above is unchanged and still sits in Settings › About and on the per-title source line.
+
 **There is no SLA.** TMDB publishes a status page and makes reasonable efforts but commits to nothing. Worth knowing, since the catalog is a hard dependency.
+
+---
+
+## Where to watch — what was built, and what was deliberately not
+
+Added 2026-09-05, as the `watch-providers` action on the adapter and one compact row on title detail, between the score block and the tab row.
+
+**Three routes, one per kind of title**, all of them built from `media_items` rather than from the request:
+
+| Bingd kind | TMDB route |
+|---|---|
+| movie | `/movie/{tmdb_id}/watch/providers` |
+| series | `/tv/{tmdb_id}/watch/providers` |
+| season | `/tv/{series_tmdb_id}/season/{n}/watch/providers` |
+
+**A season asks the season route and does not fall back to its series.** A season is Bingd's rankable TV unit, so it is the page most TV readers are on — and answering it with the show's availability would say Season 1 is on Netflix when it is Season 3 that is. Saying nothing is the honest answer to a question the provider has no data for, and it is the same rule the score circle follows below its sample floor.
+
+**Read-only, and nothing is stored.** No facet, no cache table, no migration. Availability moves on the licensor's schedule rather than ours, and persisting it would put a third party's payload under PRD §19's retention window for every title anybody opens. The only cache is the device's own query entry, which holds for twelve hours. Compare `season-episodes`, which is read-only for the same reason.
+
+**Three categories and no more.** `flatrate` becomes `stream`; `rent` and `buy` keep their names. TMDB also publishes `free` and `ads`, and both are deliberately unread: folding an ad-supported service in under **Stream** would say the same thing about Tubi as about Netflix, and inventing a fourth heading was not that change's decision to make. The consequence is stated rather than left to be discovered — a title carried only by a free or ad-supported service shows no block at all.
+
+**No provider deep links, and this is not a temporary gap.** TMDB's payload carries no per-service link, so a logo opens nothing. The one link is TMDB's own watch-options page for that title in that market, labelled `View watch options`, and it is checked in `normalize.ts` for `https` on `themoviedb.org` before it is offered — a link that fails the check is not offered rather than opened.
+
+### Region — a US default, and selection is deferred
+
+The device's own country, from `expo-localization` (`src/lib/region.ts`), and `US` when the phone reports nothing usable. `expo-localization` has been a dependency since 2026-08-13, so this adds no native module and cannot move a runtime version — which was the binding constraint, because the closed-test binary is pinned to its fingerprint.
+
+**What that leaves undone, plainly:** a traveller sees their home market, and somebody who reads English in a country whose services they do not subscribe to sees that country. **Region selection** — letting a reader say which market they are actually in — is deferred, not solved. Revisit when a real reader reports the wrong market, or when the app has users outside one.
 
 ---
 
@@ -113,7 +147,8 @@ Bingd needs two slots: the About section in Settings, and the attribution line o
 | About to charge anyone, for anything | Buy the commercial plan first |
 | Wanting posters in **server-rendered** Open Graph images | Ask `sales@themoviedb.org`, include country. Not needed for on-device share cards |
 | TMDB contacts Bingd about the account | Read the position above again. It was written to survive this |
-| Adding streaming availability display | Confirm JustWatch attribution requirements |
+| ~~Adding streaming availability display~~ | Done 2026-09-05. JustWatch attribution is on both surfaces of the block; see above |
+| A reader reports the wrong market, or the app has users outside one | Build region selection. The default is US and the limitation is stated, not hidden |
 | Considering any LLM or model-training use of TMDB data | Read the terms again; this is restricted |
 
 `sales@themoviedb.org` is the route for all of the above. TMDB asks that you include your country to help them route the request.

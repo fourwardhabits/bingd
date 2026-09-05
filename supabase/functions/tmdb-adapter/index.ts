@@ -1,7 +1,7 @@
 /**
  * tmdb-adapter — the sole holder of the TMDB key and the sole caller of TMDB (AD-8).
  *
- * Nine actions, split by who may call them:
+ * Ten actions, split by who may call them:
  *
  *   search    signed-in user   Titles TMDB knows and the local catalogue does not.
  *                              Writes them through, returns them Bingd-shaped.
@@ -14,6 +14,11 @@
  *                              cache `detail` did not seed. Reads nothing into the
  *                              catalogue and writes nothing: episodes are display
  *                              metadata, never stored (PRD §10).
+ *   watch-providers
+ *             signed-in user   Where one title can be watched in one country, from
+ *                              JustWatch by way of TMDB. Reads nothing and writes
+ *                              nothing: availability is display metadata on the
+ *                              provider's own clock, never stored.
  *   similar   signed-in user   Caches what TMDB associates with one title, as the
  *                              `similar` facet. The candidate source behind For You.
  *   person    signed-in user   Caches one person and the titles TMDB credits them
@@ -65,8 +70,10 @@ import {
   personRecord,
   seasonTarget,
   seasonsOf,
+  watchAvailability,
   type Episode,
   type TitleRow,
+  type WatchAvailability,
 } from './normalize.ts';
 import * as tmdb from './tmdb.ts';
 
@@ -479,6 +486,78 @@ async function handleSeasonEpisodes(db: Db, mediaItemId: string, userId: string)
 }
 
 // ---------------------------------------------------------------------------
+// watch-providers
+// ---------------------------------------------------------------------------
+
+/**
+ * Where one title can be watched, in one country, right now.
+ *
+ * **Read-only and stored nowhere**, exactly like `season-episodes` and for the same
+ * reason: this is provider reference data a block on a screen renders, it moves on
+ * the provider's schedule rather than ours, and persisting it would put a third
+ * party's payload under PRD §19's retention window for every title anybody opens.
+ * There is no facet, no cache table and no migration behind this action.
+ *
+ * **A user action, and charged.** It spends one provider request on somebody's
+ * behalf, so it observes the same hourly ceiling `detail`, `similar`, `person` and
+ * `season-episodes` observe, and there is deliberately no service-role path into it.
+ *
+ * **Nothing here is caller-controlled except the country.** The body carries one
+ * Bingd uuid and a two-letter region; the TMDB id and — for a season — the series id
+ * and season number are read out of `media_items`, so no part of the outbound URL
+ * comes from the request. The region never reaches the URL at all: the route has no
+ * region parameter, and `watchAvailability` uses the code to pick a key out of the
+ * response. This is not a proxy.
+ *
+ * **One request per call, always.** A season asks the season route and stops there;
+ * see `seasonWatchProviders` for why it does not fall back to its series.
+ *
+ * A title with no provider data for the region comes back with an empty list and no
+ * link, which is a real answer rather than a failure — the client hides the block.
+ */
+async function handleWatchProviders(
+  db: Db,
+  mediaItemId: string,
+  region: unknown,
+  userId: string,
+): Promise<
+  ({ id: string; reason?: 'not_found' | 'no_tmdb_id' | 'malformed_season' } & Partial<
+    WatchAvailability
+  >)
+> {
+  const row = await catalogueRow(db, mediaItemId);
+  if (!row) return { id: mediaItemId, reason: 'not_found' };
+
+  const charge = chargeTo(db, userId);
+  let payload;
+
+  if (row.kind === 'season') {
+    // The same trusted resolution `season-episodes` performs, through the same pure
+    // function, so the three refusals are the ones already covered by tests.
+    const parent = row.parent_id ? await catalogueRow(db, row.parent_id) : null;
+    const target = seasonTarget(row, parent);
+    if (!target.ok) {
+      return {
+        id: mediaItemId,
+        // `not_a_season` is unreachable on this branch — the kind was just checked —
+        // so the two the caller can actually see are named and the third is folded
+        // into the malformed case rather than invented as a new code.
+        reason: target.reason === 'no_tmdb_id' ? 'no_tmdb_id' : 'malformed_season',
+      };
+    }
+    payload = await tmdb.seasonWatchProviders(target.seriesTmdbId, target.seasonNumber, charge);
+  } else {
+    if (!row.tmdb_id) return { id: mediaItemId, reason: 'no_tmdb_id' };
+    payload =
+      row.kind === 'movie'
+        ? await tmdb.movieWatchProviders(row.tmdb_id, charge)
+        : await tmdb.seriesWatchProviders(row.tmdb_id, charge);
+  }
+
+  return { id: mediaItemId, ...watchAvailability(payload, region) };
+}
+
+// ---------------------------------------------------------------------------
 // person
 // ---------------------------------------------------------------------------
 
@@ -632,6 +711,25 @@ Deno.serve(async (req) => {
         if (result.reason === 'not_a_season') {
           return fail('BG400', 'Episodes belong to a season', 400);
         }
+        return json(result);
+      }
+
+      // Where a title can be watched. A user action and charged, like every other
+      // action a screen triggers, and read-only like `season-episodes`: nothing about
+      // availability is written to the catalogue.
+      //
+      // `region` is the device's own country when the phone reports one and `US`
+      // otherwise. It is validated and defaulted inside `watchAvailability`, which is
+      // also the only thing that reads it — the outbound URL is built from
+      // `media_items` alone.
+      case 'watch-providers': {
+        if (caller.kind !== 'user') {
+          return fail('BG403', 'watch-providers is a user action', 403);
+        }
+        const id = String(body.mediaItemId ?? '');
+        if (!id) return fail('BG400', 'mediaItemId is required', 400);
+        const result = await handleWatchProviders(db, id, body.region, caller.id);
+        if (result.reason === 'not_found') return fail('BG404', 'No such title', 404);
         return json(result);
       }
 
