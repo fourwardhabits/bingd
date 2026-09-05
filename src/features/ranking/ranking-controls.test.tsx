@@ -87,7 +87,7 @@ const callsTo = (fn: string) => mockRpc.mock.calls.filter(([name]) => name === f
  * summary label with the whole sentence, and hearing "8.7" twice is worse than hearing
  * it once — so this is the honest way to wait for the reveal.
  */
-const REVEAL = 'Film A scored 8.7 out of 10. #3 Movies';
+const REVEAL = 'Film A scored 8.7 out of 10. #3 in Movies.';
 
 beforeEach(() => {
   mockRpc.mockReset();

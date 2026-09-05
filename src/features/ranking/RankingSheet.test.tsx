@@ -530,7 +530,7 @@ describe('closing', () => {
     answering(placement);
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 Movies');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
     await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
 
     expect(callsTo('rank_cancel')).toHaveLength(0);
@@ -584,13 +584,20 @@ describe('closing', () => {
 });
 
 describe('the reveal', () => {
-  const REVEAL = 'Film A scored 8.7 out of 10. #3 Movies';
+  const REVEAL = 'Film A scored 8.7 out of 10. #3 in Movies.';
 
   /**
-   * The score is the hero and the ordinal is context beneath it — founder decision,
-   * 2026-08-15. This screen rendered `#3` at display size until Slice 3; the assertion
-   * to keep is that the *number the user sees* is the score, not that a score exists
-   * somewhere on the page.
+   * **The score is the hero, and the placement is the second beat** (founder,
+   * 2026-09-05, refining 2026-08-15).
+   *
+   * The ranking flow builds one question, "what am I going to give this", and the panel
+   * answers it. That has not changed and this test is what stops it changing: the
+   * *number the user sees* must be the score. This screen rendered `#3` at display size
+   * until Slice 3 and must not go back.
+   *
+   * What did change is that the ordinal is no longer a tertiary footnote sharing a line
+   * with the genre ranks. It is its own line now, which is asserted below rather than
+   * merely tolerated.
    */
   it('makes the score the hero and refreshes that category', async () => {
     answering(placement);
@@ -604,10 +611,10 @@ describe('the reveal', () => {
     await waitFor(() =>
       expect(sheet.getByText('8.7', { includeHiddenElements: true })).toBeTruthy(),
     );
-    // The ordinal is present, and is not the headline. Also hidden from the tree,
-    // because the panel's summary above already spoke it — reading it twice is worse
-    // than not reading it.
-    expect(sheet.getByText(/#3 Movies/, { includeHiddenElements: true })).toBeTruthy();
+    // The placement is present as its own line, and is still not the headline. Hidden
+    // from the tree because the panel's summary above already spoke it — reading it
+    // twice is worse than not reading it.
+    expect(sheet.getByText('#3 in Movies', { includeHiddenElements: true })).toBeTruthy();
 
     // Rendering happened before the spy, so re-run the placement to observe it.
     await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} surface="search" />);
@@ -652,20 +659,24 @@ describe('the reveal', () => {
     expect(sheet.queryByText(/skipped/i)).toBeNull();
     expect(sheet.queryByText(/too tough/i)).toBeNull();
     // And the reveal still says the two things it is for.
-    expect(sheet.getByText(/#3 Movies/, { includeHiddenElements: true })).toBeTruthy();
+    expect(sheet.getByText('#3 in Movies', { includeHiddenElements: true })).toBeTruthy();
   });
 });
 
 /**
  * **What the ordinal is standing next to.**
  *
- * "#3 Movies" says how many titles beat this one and not which. The pair either side is
- * the half somebody has an opinion about, and it is read off the list the reveal already
- * holds — so these assert the drawing, and `collection/rank-neighbours.test.ts` asserts
- * the deriving.
+ * "#3 in Movies" says how many titles beat this one and not which. The pair either side
+ * is the half somebody has an opinion about, and it is read off the list the reveal
+ * already holds — so these assert the drawing, and `collection/rank-neighbours.test.ts`
+ * asserts the deriving.
  *
- * The score is still the hero throughout (founder, 2026-08-15). Every test here that adds
+ * The score is still the hero throughout (founder, 2026-09-05). Every test here that adds
  * a neighbour also re-asserts that the number the reader sees is the score.
+ *
+ * **No posters.** The anchors are text, deliberately: artwork beside the panel competes
+ * with the number for the one moment the screen exists for, and it would make the reveal
+ * wait on an image. `no poster dependency` at the end of this block is the assertion.
  */
 describe('the reveal names what it landed between', () => {
   /** Position 3 of the placement above, so the subject sits between films 2 and 4. */
@@ -691,7 +702,7 @@ describe('the reveal names what it landed between', () => {
     await waitFor(() =>
       expect(sheet.getByText('8.7', { includeHiddenElements: true })).toBeTruthy(),
     );
-    expect(sheet.getByText(/#3 Movies/, { includeHiddenElements: true })).toBeTruthy();
+    expect(sheet.getByText('#3 in Movies', { includeHiddenElements: true })).toBeTruthy();
   });
 
   it('speaks the whole placement once, in the panel the screen reader reads', async () => {
@@ -702,11 +713,11 @@ describe('the reveal names what it landed between', () => {
     // One summary carries score, ordinal and both neighbours. The rows themselves are
     // hidden from the tree, so nothing is read twice.
     await sheet.findByLabelText(
-      'Film A scored 8.7 out of 10. #3 Movies. Below Sicario. Above Collateral.',
+      'Film A scored 8.7 out of 10. #3 in Movies. Below Sicario. Above Collateral.',
     );
   });
 
-  it('says "Your new #1" instead of naming a title that is not there', async () => {
+  it('says #1 in the placement, and names no title above it', async () => {
     ranked([
       { mediaItemId: 'film-a', position: 1, kind: 'movie', title: 'Film A', genres: [] },
       { mediaItemId: 'm2', position: 2, kind: 'movie', title: 'Sicario', genres: [] },
@@ -714,8 +725,10 @@ describe('the reveal names what it landed between', () => {
     answering({ ...placement, data: { ...placement.data, position: 1 } });
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. #1 Movies. Your new number 1. Above Sicario.');
-    expect(sheet.getByText('Your new #1', { includeHiddenElements: true })).toBeTruthy();
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #1 in Movies. Above Sicario.');
+    // The placement line carries it. No badge, no separate treatment, and nothing
+    // invented to sit above a #1.
+    expect(sheet.getByText('#1 in Movies', { includeHiddenElements: true })).toBeTruthy();
     expect(sheet.queryByText(/^Below/, { includeHiddenElements: true })).toBeNull();
   });
 
@@ -728,10 +741,9 @@ describe('the reveal names what it landed between', () => {
     answering(placement);
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 Movies. Below Sicario.');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies. Below Sicario.');
     expect(sheet.queryByText(/^Above/, { includeHiddenElements: true })).toBeNull();
-    // Not a #1, so the #1 line must not appear either.
-    expect(sheet.queryByText('Your new #1', { includeHiddenElements: true })).toBeNull();
+    expect(sheet.getByText('#3 in Movies', { includeHiddenElements: true })).toBeTruthy();
   });
 
   it('names a TV neighbour by its series, and calls the category TV', async () => {
@@ -750,7 +762,10 @@ describe('the reveal names what it landed between', () => {
     answering({ ...placement, data: { ...placement.data, category: 'tv_seasons' } });
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 TV. Below Severance, S1.');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in TV. Below Severance, S1.');
+    // The category is TV and the neighbour is a season. Nothing claims a rank among
+    // series, which is not a thing this product orders.
+    expect(sheet.getByText('#3 in TV', { includeHiddenElements: true })).toBeTruthy();
     // The show's name, never the bare "Season 1" the row carries.
     expect(sheet.getByText('Severance, S1', { includeHiddenElements: true })).toBeTruthy();
     expect(sheet.queryByText('Season 1', { includeHiddenElements: true })).toBeNull();
@@ -777,7 +792,10 @@ describe('the reveal names what it landed between', () => {
     const sheet = await openSheet();
 
     // Exactly what this screen said before neighbours existed.
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 Movies');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    // The placement is server-side and arrives with the placement, so it is drawn even
+    // with no list. Only the anchors wait.
+    expect(sheet.getByText('#3 in Movies', { includeHiddenElements: true })).toBeTruthy();
     expect(sheet.queryByText(/^Below/, { includeHiddenElements: true })).toBeNull();
     expect(sheet.queryByText(/^Above/, { includeHiddenElements: true })).toBeNull();
   });
@@ -787,6 +805,27 @@ describe('the reveal names what it landed between', () => {
    * already ran, so a placement that names two titles must still call exactly the RPCs a
    * placement called before: nothing here re-ranks, re-orders or re-scores anything.
    */
+  /**
+   * **The anchors are text** (founder, 2026-09-05). A poster beside the panel competes
+   * with the number for the one moment this screen exists for, and it would make the
+   * reveal wait on an image load. The neighbour rows therefore carry names and nothing
+   * else, and `neighboursFor` returns no poster path to draw with even if one tried.
+   */
+  it('draws the anchors as text, with no poster fetch of its own', async () => {
+    ranked(movies);
+    answering(placement);
+    const sheet = await openSheet();
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    expect(sheet.getByText('Sicario', { includeHiddenElements: true })).toBeTruthy();
+
+    // The comparison's two posters are gone with the comparison; the reveal draws none.
+    expect(sheet.queryByLabelText('Choose Film A')).toBeNull();
+    expect(sheet.queryByLabelText('Choose Film P')).toBeNull();
+    // And no read was opened for one.
+    expect(mockPivotRead).not.toHaveBeenCalled();
+  });
+
   it('adds no call of its own to the server', async () => {
     ranked(movies);
     answering(placement);
