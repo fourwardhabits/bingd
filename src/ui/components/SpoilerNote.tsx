@@ -2,6 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { segmentMentions } from '@/features/feed/mentions';
+
 import { theme } from '../tokens';
 import { Text } from './Text';
 
@@ -24,6 +26,17 @@ export type SpoilerNoteProps = {
    * inside a tab called Reviews tapped a control announced as "Show the note."
    */
   noun?: string;
+  /**
+   * Who this piece of writing names, from `activity_comments.mentions` — ids and both
+   * spellings, already filtered for this reader by the server.
+   *
+   * Omit it (every surface but the comment sheet) and the text renders exactly as it did
+   * before mentions were visible. Pass it and each confirmed `@handle` becomes a profile
+   * link. A handle the server did not confirm stays ordinary text either way.
+   */
+  mentions?: readonly { id: string; username: string; handle?: string | null }[];
+  /** Where a tapped name goes. Without it nothing is a link, however many mentions. */
+  onPressMention?: (username: string) => void;
 };
 
 /**
@@ -51,6 +64,8 @@ export function SpoilerNote({
   numberOfLines,
   titleForLabel,
   noun = 'review',
+  mentions,
+  onPressMention,
 }: SpoilerNoteProps) {
   const [revealed, setRevealed] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -84,6 +99,47 @@ export function SpoilerNote({
 
   const clamp = expanded ? undefined : numberOfLines;
 
+  /**
+   * Nested `Text`, not `Pressable`, and the choice is load-bearing.
+   *
+   * A mention sits inside a paragraph, so it has to wrap with the sentence around it —
+   * onto the next line where the line ends — and a `Pressable` is a view: it becomes an
+   * unbreakable box that pushes itself down and takes the layout with it. A nested
+   * `Text` is a run of glyphs that happens to answer a tap, which is what an inline link
+   * is.
+   *
+   * It also keeps the gestures right. The sheet scrolls, and the paragraph below can
+   * itself be a "show the whole comment" target; a nested `Text` claims only the glyphs
+   * it covers, so a drag that starts on a name still scrolls the thread and a tap
+   * anywhere else still expands. Wrapping each name in its own touchable view is how
+   * both of those break.
+   */
+  const body =
+    mentions?.length && onPressMention
+      ? segmentMentions(text, mentions).map((span, index) =>
+          span.kind === 'text' ? (
+            span.text
+          ) : (
+            <Text
+              // Position is the only stable key here: the same person can be named twice
+              // in one body, and the spans are rebuilt whole whenever the text changes.
+              key={`${index}-${span.id}`}
+              variant="body"
+              tone="action"
+              style={styles.mention}
+              accessibilityRole="link"
+              // The `@` is punctuation to a screen reader, and "at ravi" is not what the
+              // control does. The name and the destination, in that order.
+              accessibilityLabel={`${span.username}, open profile`}
+              onPress={() => onPressMention(span.username)}
+              suppressHighlighting
+            >
+              {span.text}
+            </Text>
+          ),
+        )
+      : text;
+
   return (
     <View style={styles.note}>
       {/* Kept after revealing, and shown to the author too. The claim is part of
@@ -108,7 +164,7 @@ export function SpoilerNote({
         disabled={!clamp}
       >
         <Text variant="body" numberOfLines={clamp}>
-          {text}
+          {body}
         </Text>
       </Pressable>
     </View>
@@ -129,6 +185,12 @@ const styles = StyleSheet.create({
     borderColor: theme.border.hairline,
     backgroundColor: theme.surface.sunken,
   },
+  /**
+   * Weight only. The colour is `tone="action"` — the maroon every other inline action in
+   * the app uses — and there is no underline, because this design language does not
+   * underline anything. The accent is the affordance, as it is on "Show" above.
+   */
+  mention: { fontWeight: '600' },
   reveal: { marginLeft: 'auto' },
   pressed: { opacity: 0.7 },
 });

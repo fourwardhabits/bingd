@@ -1162,6 +1162,11 @@ const results = [];
   const author = await fx.createUser();
   const named = await fx.createUser();
   await fx.follow(author, named);
+  // The handle `createUser` derives from the id. Since `20260908000100` the body is what
+  // decides who a comment names, so this mutant's bodies have to spell it — a placeholder
+  // `@x` names nobody, and the mutant would then be reported uncaught for the wrong
+  // reason.
+  const handle = `u${named.slice(0, 8)}`;
 
   const film = await fx.createMovie('Mutant Thirteen');
   const event = await fx.feedEvent(actor, film, 'title_ranked');
@@ -1218,14 +1223,14 @@ $$;
 
   await t1.begin();
   await t1.one(
-    `select edit_comment(gen_random_uuid(), $1, '@x hello', false, $2::uuid[]) as r`,
-    [posted.comment_id, [named]],
+    `select edit_comment(gen_random_uuid(), $1, $3, false, $2::uuid[]) as r`,
+    [posted.comment_id, [named], `@${handle} hello`],
   );
 
   await t2.begin();
   const p2 = t2.start(
-    `select edit_comment(gen_random_uuid(), $1, '@x hello', false, $2::uuid[]) as r`,
-    [posted.comment_id, [named]],
+    `select edit_comment(gen_random_uuid(), $1, $3, false, $2::uuid[]) as r`,
+    [posted.comment_id, [named], `@${handle} hello`],
   );
   await t2.awaitBlocked();
 

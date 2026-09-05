@@ -1,4 +1,10 @@
-import { applyMention, handlesIn, mentionFragment, resolveMentions } from './mentions';
+import {
+  applyMention,
+  handlesIn,
+  mentionFragment,
+  resolveMentions,
+  segmentMentions,
+} from './mentions';
 
 /**
  * The text model behind @mentions.
@@ -160,5 +166,139 @@ describe('resolveMentions', () => {
       'id-abisola',
       'id-ravi',
     ]);
+  });
+});
+
+/**
+ * What a finished comment looks like on screen — the half the founder could see was
+ * missing, because a mention that worked and a mention that did not were the same glyphs.
+ *
+ * The population is deliberately `activity_comments.mentions`, never a re-parse: the
+ * server has already decided who this comment names and which of them this reader may be
+ * shown, so the only question left here is where in the string those names sit.
+ */
+describe('segmentMentions', () => {
+  const ravi = { id: 'id-ravi', username: 'ravi', handle: 'ravi' };
+  const abisola = { id: 'id-abisola', username: 'abisola', handle: 'abisola' };
+
+  /** Joining the spans back must reproduce the body exactly, or something is lost. */
+  const rejoin = (text: string, mentions: Parameters<typeof segmentMentions>[1]) =>
+    segmentMentions(text, mentions)
+      .map((span) => span.text)
+      .join('');
+
+  it('lifts one name out of a sentence and leaves the rest alone', () => {
+    expect(segmentMentions('@ravi thoughts?', [ravi])).toEqual([
+      { kind: 'mention', text: '@ravi', id: 'id-ravi', username: 'ravi' },
+      { kind: 'text', text: ' thoughts?' },
+    ]);
+  });
+
+  it('ends the name where the handle charset does, not at the punctuation', () => {
+    expect(segmentMentions('ask @ravi.', [ravi])).toEqual([
+      { kind: 'text', text: 'ask ' },
+      { kind: 'mention', text: '@ravi', id: 'id-ravi', username: 'ravi' },
+      { kind: 'text', text: '.' },
+    ]);
+  });
+
+  it('links the same person twice when the body names them twice', () => {
+    const spans = segmentMentions('@ravi and @ravi again', [ravi]);
+    expect(spans.filter((span) => span.kind === 'mention')).toHaveLength(2);
+    expect(rejoin('@ravi and @ravi again', [ravi])).toBe('@ravi and @ravi again');
+  });
+
+  it('links several distinct people in one body', () => {
+    const spans = segmentMentions('@ravi @abisola both', [ravi, abisola]);
+    expect(spans.filter((span) => span.kind === 'mention').map((span) => span.text)).toEqual([
+      '@ravi',
+      '@abisola',
+    ]);
+  });
+
+  /**
+   * The whole of the safety argument, in one assertion. A handle the server did not
+   * confirm — nobody by that name, somebody this reader has blocked, a tombstone that
+   * reports no mentions at all — is prose, and prose is what it is drawn as.
+   */
+  it('leaves an unconfirmed handle as ordinary text', () => {
+    expect(segmentMentions('@stranger hello', [ravi])).toEqual([
+      { kind: 'text', text: '@stranger hello' },
+    ]);
+  });
+
+  it('draws nothing as a link when the comment names nobody', () => {
+    expect(segmentMentions('@ravi thoughts?', [])).toEqual([
+      { kind: 'text', text: '@ravi thoughts?' },
+    ]);
+  });
+
+  /** An email address is not a mention, here for the same reason it is not one upstream. */
+  it('does not lift a handle out of an email address', () => {
+    const confirmed = { id: 'id-example', username: 'example', handle: 'example' };
+    expect(segmentMentions('mail me@example.com', [confirmed])).toEqual([
+      { kind: 'text', text: 'mail me@example.com' },
+    ]);
+  });
+
+  /**
+   * The rename case, and it is the reason the ledger carries two spellings. The body
+   * still says `@ravi`, so `@ravi` is what lights up — but the tap has to reach the
+   * person, who is called something else now.
+   */
+  it('lights up the frozen spelling and navigates to the current one', () => {
+    expect(segmentMentions('@ravi thoughts?', [{ id: 'id-ravi', username: 'ravi_2', handle: 'ravi' }])).toEqual([
+      { kind: 'mention', text: '@ravi', id: 'id-ravi', username: 'ravi_2' },
+      { kind: 'text', text: ' thoughts?' },
+    ]);
+  });
+
+  it('matches whatever case the author typed', () => {
+    expect(segmentMentions('@Ravi thoughts?', [ravi])[0]).toEqual({
+      kind: 'mention',
+      text: '@Ravi',
+      id: 'id-ravi',
+      username: 'ravi',
+    });
+  });
+
+  /**
+   * A body is a paragraph, not a line. The spans have to survive newlines untouched, or
+   * a mention on the second line of a comment would silently swallow the break before it.
+   */
+  it('keeps a name on a later line, and the break before it', () => {
+    const body = ['first line', '@ravi second'].join('\n');
+    expect(segmentMentions(body, [ravi])).toEqual([
+      { kind: 'text', text: 'first line\n' },
+      { kind: 'mention', text: '@ravi', id: 'id-ravi', username: 'ravi' },
+      { kind: 'text', text: ' second' },
+    ]);
+  });
+
+  it('reproduces the body exactly, whatever it contains', () => {
+    for (const body of [
+      '@ravi',
+      '@@ravi',
+      'a @ravi b @abisola c',
+      '@ @ @@ @ra @ravi',
+      'ends on a name @ravi',
+      '  @ravi  ',
+    ]) {
+      expect(rejoin(body, [ravi, abisola])).toBe(body);
+    }
+  });
+
+  it('does not crash on malformed or empty text', () => {
+    expect(segmentMentions('', [ravi])).toEqual([]);
+    expect(segmentMentions('@', [ravi])).toEqual([{ kind: 'text', text: '@' }]);
+    expect(segmentMentions('@@@@', [ravi])).toEqual([{ kind: 'text', text: '@@@@' }]);
+  });
+
+  /** A ledger row with no frozen spelling is what a pre-20260830000100 row looks like. */
+  it('works from the current handle alone when no frozen spelling was stored', () => {
+    expect(segmentMentions('@ravi hi', [{ id: 'id-ravi', username: 'ravi', handle: null }])[0]).toMatchObject({
+      kind: 'mention',
+      id: 'id-ravi',
+    });
   });
 });

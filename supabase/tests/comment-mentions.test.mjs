@@ -153,25 +153,101 @@ describe('who may be named', () => {
   });
 
   /**
-   * The founder's central worry about this feature, stated as a test: typing `@` must
-   * not become a way to reach the whole app. Erin is nobody's follow and in nobody's
-   * thread, so she is not a low-ranked row here — she is not a row.
+   * The founder's restraint clause, and `20260909000100` narrowed what it is about
+   * rather than removing it.
+   *
+   * It used to mean "a stranger is not mentionable". It now means **a bare `@` does not
+   * offer strangers**: the list that appears mid-word is the people you are likely to
+   * mean, not a slice of the user table. Erin is nobody's follow and in nobody's thread,
+   * so she is not here — until somebody types her name, which is the next test.
    */
-  it('does not offer an unrelated stranger', async () => {
+  it('does not offer an unrelated stranger to a bare @', async () => {
     const event = await eventOf(alice, await movie('cm_stranger'));
     const rows = await candidates(bob, event);
 
     assert.ok(!usernames(rows).includes('cm_erin'));
   });
 
-  it('refuses a comment that names a stranger', async () => {
+  /**
+   * The widening, from the composer's side. Typing a name is how you say you meant
+   * somebody, and a person the author could find in People search must be findable here
+   * too — otherwise they are server-mentionable and the composer says they are not,
+   * which is the worst of both.
+   */
+  it('offers an unrelated account once its name is typed', async () => {
+    const event = await eventOf(alice, await movie('cm_stranger_typed'));
+    const rows = await candidates(bob, event, 'cm_erin');
+
+    assert.ok(usernames(rows).includes('cm_erin'));
+  });
+
+  it('accepts a comment that names somebody the author could look up', async () => {
     const event = await eventOf(alice, await movie('cm_stranger_write'));
-    const error = await errorFrom(
-      bob,
-      `select add_comment(gen_random_uuid(), $1, 'hello @cm_erin', false, null, $2::uuid[])`,
-      [event, [erin]],
-    );
-    assert.equal(error.code, '42501');
+    const before = await mentionCount(erin);
+
+    const posted = await comment(bob, event, 'hello @cm_erin', { mentions: [erin] });
+
+    assert.equal(posted.status, 'ok');
+    assert.equal(await mentionCount(erin), before + 1);
+  });
+
+  /**
+   * Private is not unreachable, which is `20260819000100`'s whole point: a private
+   * account is findable by name so somebody who knows them can ask to follow, and
+   * everything they wrote stays behind `can_view_profile`. A mention carries identity,
+   * so it follows discovery.
+   *
+   * Frank is private and follows nobody. Alice is public here, so Frank can see the
+   * activity — which is the *other* clause, and the next test is what happens when he
+   * cannot.
+   */
+  it('offers and accepts a private account the author does not follow', async () => {
+    const event = await eventOf(alice, await movie('cm_private_ok'));
+    const before = await mentionCount(frank);
+
+    assert.ok(usernames(await candidates(bob, event, 'cm_frank')).includes('cm_frank'));
+
+    const posted = await comment(bob, event, 'hello @cm_frank', { mentions: [frank] });
+    assert.equal(posted.status, 'ok');
+    assert.equal(await mentionCount(frank), before + 1);
+  });
+
+  /**
+   * The bound on the widening, and the reason `can_discover_profile` alone would have
+   * been wrong. Everybody active is discoverable; only an actor's own followers can see
+   * a private actor's post, so that is who may be named under it.
+   */
+  it('offers nobody undiscoverable, however specific the fragment', async () => {
+    const event = await eventOf(alice, await movie('cm_fragment_probe'));
+
+    await t.sql(`update profiles set status = 'suspended' where id = $1`, [erin]);
+    const suspended = usernames(await candidates(bob, event, 'cm_erin'));
+    await t.sql(`update profiles set status = 'active' where id = $1`, [erin]);
+
+    assert.ok(!suspended.includes('cm_erin'), 'a suspended account is not a search result');
+  });
+
+  /**
+   * Task 8's agreement property, asserted as a property rather than case by case.
+   *
+   * Every row the composer offers must be a row the server would accept. A list that can
+   * offer somebody the write then refuses is the one failure mode a widened rule makes
+   * easy, because the population and the predicate are now computed in two places.
+   */
+  it('offers nobody the write would refuse', async () => {
+    const event = await eventOf(alice, await movie('cm_agreement'));
+    await comment(carol, event, 'carol is in the room');
+
+    for (const fragment of ['', 'cm_', 'cm_e', 'cm_frank', 'cm_dave']) {
+      for (const row of await candidates(bob, event, fragment)) {
+        await t.actAs(bob);
+        const { rows } = await t.sql(
+          `select _can_mention($1, (select id from profiles where username = $2)) as ok`,
+          [event, row.username],
+        );
+        assert.equal(rows[0].ok, true, `offered but not mentionable: ${row.username}`);
+      }
+    }
   });
 
   it('excludes a blocked account in either direction', async () => {
@@ -326,7 +402,16 @@ describe('the notification', () => {
    * remark is addressed to you". The second is the one the founder asked for, precisely
    * because the first was not enough.
    */
-  it('does not swallow the comment notification for an activity owner who is also named', async () => {
+  /**
+   * The founder's rule, and it reverses 20260830000100's.
+   *
+   * That migration filed both rows on the argument that "there is a new remark on your
+   * post" and "this remark is addressed to you" are two different statements. They are,
+   * but one action by one person may put at most one line in somebody's Bell, and where
+   * the two collide the specific one wins: "mentioned you in a comment" already implies
+   * a new remark on your post, and the reverse is not true. `20260908000100`.
+   */
+  it('files the mention instead of the comment row when the owner is also named', async () => {
     const event = await eventOf(alice, await movie('cm_owner'));
     await comment(bob, event, 'thoughts, @cm_alice?', { mentions: [alice] });
 
@@ -335,10 +420,38 @@ describe('the notification', () => {
         where recipient_id = $1 and subject_id = $2 group by type order by type`,
       [alice, event],
     );
-    assert.deepEqual(rows, [
-      { type: 'comment', n: 1 },
-      { type: 'mention', n: 1 },
-    ]);
+    assert.deepEqual(rows, [{ type: 'mention', n: 1 }]);
+  });
+
+  /** The same rule one level down: a reply that names the person it is replying to. */
+  it('files one row, not two, for a reply that names its own recipient', async () => {
+    const event = await eventOf(alice, await movie('cm_reply_dedupe'));
+    const parent = (await comment(carol, event, 'the score is the film')).comment_id;
+    await comment(bob, event, '@cm_carol exactly', { parent, mentions: [carol] });
+
+    const { rows } = await t.sql(
+      `select type, count(*)::int as n from notifications
+        where recipient_id = $1 and subject_id = $2 group by type order by type`,
+      [carol, event],
+    );
+    assert.deepEqual(rows, [{ type: 'mention', n: 1 }]);
+  });
+
+  /**
+   * The suppression is per person, not per comment. A reply that names a third party
+   * must still tell the person being replied to that they were replied to.
+   */
+  it('still tells the reply recipient when somebody else is the one named', async () => {
+    const event = await eventOf(alice, await movie('cm_reply_third'));
+    const parent = (await comment(carol, event, 'worth a rewatch')).comment_id;
+    await comment(bob, event, '@cm_dave you would like this', { parent, mentions: [dave] });
+
+    const { rows } = await t.sql(
+      `select type, count(*)::int as n from notifications
+        where recipient_id = $1 and subject_id = $2 and type = 'comment' group by type`,
+      [carol, event],
+    );
+    assert.deepEqual(rows, [{ type: 'comment', n: 1 }]);
   });
 
   it('is silenced by the Comments preference, not a ninth category', async () => {
@@ -560,6 +673,42 @@ describe('reading a thread back', () => {
     assert.deepEqual(rows[0].mentions.map((m) => m.username), ['cm_dave']);
   });
 
+  /**
+   * The half of `20260909000100` that is not about eligibility at all.
+   *
+   * The `mentioned` CTE filtered identities through `can_view_profile`, which was
+   * invisible while every mention was a follow or a participant. Widen the rule and it
+   * becomes a regression you can see: a valid mention of a discoverable private account
+   * fires a notification and then renders as plain text, because the reader is not
+   * allowed to *view* them. Identity is not content — `20260819000100`'s line.
+   */
+  it('returns a private mentioned account to a reader who does not follow them', async () => {
+    const event = await eventOf(alice, await movie('cm_read_private'));
+    await comment(bob, event, 'hello @cm_frank', { mentions: [frank] });
+
+    // Carol follows neither Frank nor anybody relevant to him, and Frank is private.
+    await t.actAs(carol);
+    const { rows } = await t.sql(
+      `select mentions from activity_comments($1) order by created_at desc limit 1`,
+      [event],
+    );
+    const named = (rows[0].mentions ?? []).map((m) => m.username);
+    assert.deepEqual(named, ['cm_frank'], 'the link must be drawable, so the row must arrive');
+  });
+
+  /** And a reader may always see their own name light up in a comment that names them. */
+  it('returns the reader to themselves when they are the one named', async () => {
+    const event = await eventOf(alice, await movie('cm_read_self'));
+    await comment(bob, event, 'hello @cm_dave', { mentions: [dave] });
+
+    await t.actAs(dave);
+    const { rows } = await t.sql(
+      `select mentions from activity_comments($1) order by created_at desc limit 1`,
+      [event],
+    );
+    assert.deepEqual((rows[0].mentions ?? []).map((m) => m.username), ['cm_dave']);
+  });
+
   it('is an empty array rather than null when nobody is named', async () => {
     const event = await eventOf(alice, await movie('cm_none'));
     const posted = await comment(bob, event, 'nobody in particular');
@@ -605,6 +754,277 @@ describe('reading a thread back', () => {
 });
 
 // ---------------------------------------------------------------------------
+/**
+ * What the founder actually reported: `@silky thoughts?`, typed rather than tapped,
+ * notified nobody. Until `20260908000100` a mention was an id the client had been handed
+ * by the suggestion list, so a handle somebody typed because they already knew it was
+ * prose — spelled like a mention, read like a mention, and inert.
+ *
+ * The body is the source now, resolved server-side through the same `_can_mention` a
+ * picked id always faced. What changed is the *route* to a person the author was always
+ * allowed to name, not who that set contains — so every exclusion is re-asserted here
+ * from the typed side rather than inherited from the picked one. A resolution path that
+ * skipped the eligibility rule would pass every test in the sections above.
+ *
+ * All of these post through the **five-argument** signature, which carries no mention
+ * array at all: whatever they prove, they prove about the text alone.
+ */
+describe('a handle nobody tapped', () => {
+  const typedOnly = async (who, event, body, parent = null) => {
+    await t.actAs(who);
+    const { rows } = await t.sql(
+      `select add_comment(gen_random_uuid(), $1, $2, false, $3) as r`,
+      [event, body, parent],
+    );
+    return rows[0].r;
+  };
+
+  const typedEdit = async (who, commentId, body) => {
+    await t.actAs(who);
+    const { rows } = await t.sql(
+      `select edit_comment(gen_random_uuid(), $1, $2, false, '{}'::uuid[]) as r`,
+      [commentId, body],
+    );
+    return rows[0].r;
+  };
+
+  /** Who a comment actively names, by current handle, in a stable order. */
+  const mentionedOn = async (commentId) => {
+    const { rows } = await t.sql(
+      `select p.username from comment_mentions m
+         join profiles p on p.id = m.mentioned_id
+        where m.comment_id = $1 and m.active order by p.username`,
+      [commentId],
+    );
+    return rows.map((r) => r.username);
+  };
+
+  it('notifies somebody named by typing alone', async () => {
+    const event = await eventOf(alice, await movie('cm_typed'));
+    const before = await mentionCount(dave);
+
+    const posted = await typedOnly(bob, event, '@cm_dave thoughts?');
+
+    assert.deepEqual(await mentionedOn(posted.comment_id), ['cm_dave']);
+    assert.equal(await mentionCount(dave), before + 1);
+  });
+
+  it('ends the handle at the punctuation, and at the space', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_punct'));
+    const posted = await typedOnly(bob, event, 'ask @cm_dave. and @cm_carol, both');
+    assert.deepEqual(await mentionedOn(posted.comment_id), ['cm_carol', 'cm_dave']);
+  });
+
+  it('names one person once however many times the body says them', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_twice'));
+    const before = await mentionCount(dave);
+
+    const posted = await typedOnly(bob, event, '@cm_dave ... @cm_dave');
+
+    assert.deepEqual(await mentionedOn(posted.comment_id), ['cm_dave']);
+    assert.equal(await mentionCount(dave), before + 1, 'one comment, one notification');
+  });
+
+  it('matches whatever case the author typed', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_case'));
+    const posted = await typedOnly(bob, event, 'hey @CM_Dave');
+    assert.deepEqual(await mentionedOn(posted.comment_id), ['cm_dave']);
+  });
+
+  /**
+   * The half that must stay lenient, and the reason the two sources are treated
+   * differently at all. An id the client asserts is a control the author used, so an
+   * ineligible one still refuses the whole call (the sections above). A handle in prose
+   * is prose, and a comment *about* somebody's handle must not become unpostable.
+   */
+  it('is not a mention when nobody holds the name, and does not refuse the comment', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_nobody'));
+    const posted = await typedOnly(bob, event, '@nobody_at_all thoughts?');
+    assert.equal(posted.status, 'ok');
+    assert.deepEqual(await mentionedOn(posted.comment_id), []);
+  });
+
+  /**
+   * The case the founder actually reported, end to end and with nothing tapped: a handle
+   * you know is real because you looked it up, belonging to somebody you do not follow.
+   * Before `20260909000100` this was silently inert.
+   */
+  it('notifies somebody the author has no relationship with at all', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_stranger'));
+    const before = await mentionCount(erin);
+
+    const posted = await typedOnly(bob, event, '@cm_erin thoughts?');
+
+    assert.equal(posted.status, 'ok');
+    assert.deepEqual(await mentionedOn(posted.comment_id), ['cm_erin']);
+    assert.equal(await mentionCount(erin), before + 1);
+  });
+
+  /** Discoverable, not merely public. A private account is findable and so is nameable. */
+  it('notifies a private account that can see the activity', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_private'));
+    const before = await mentionCount(frank);
+
+    const posted = await typedOnly(bob, event, '@cm_frank thoughts?');
+
+    assert.deepEqual(await mentionedOn(posted.comment_id), ['cm_frank']);
+    assert.equal(await mentionCount(frank), before + 1);
+  });
+
+  it('does not mention somebody blocked in either direction', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_block'));
+    const before = await mentionCount(dave);
+
+    await t.sql(`insert into blocks (blocker_id, blocked_id) values ($1, $2)`, [dave, bob]);
+
+    const posted = await typedOnly(bob, event, '@cm_dave thoughts?');
+    assert.deepEqual(await mentionedOn(posted.comment_id), []);
+    assert.equal(await mentionCount(dave), before);
+
+    await t.sql(`delete from blocks where blocker_id = $1 and blocked_id = $2`, [dave, bob]);
+    await follow(bob, dave);
+  });
+
+  it('does not mention a suspended account', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_suspended'));
+    const before = await mentionCount(dave);
+
+    await t.sql(`update profiles set status = 'suspended' where id = $1`, [dave]);
+    const posted = await typedOnly(bob, event, '@cm_dave thoughts?');
+    await t.sql(`update profiles set status = 'active' where id = $1`, [dave]);
+
+    assert.deepEqual(await mentionedOn(posted.comment_id), []);
+    assert.equal(await mentionCount(dave), before);
+  });
+
+  /**
+   * The condition about the *mentioned* party rather than the author, and the one it is
+   * easiest to leave out of a new resolution path. Frank follows nobody, so a private
+   * Alice is somebody he cannot see — and naming him would be a way to tell him what a
+   * private account watched.
+   */
+  it('does not mention somebody who cannot see the activity', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_unseeable'));
+    const before = await mentionCount(frank);
+
+    await follow(bob, frank);
+    await t.sql(`update profiles set visibility = 'private' where id = $1`, [alice]);
+
+    const posted = await typedOnly(bob, event, '@cm_frank thoughts?');
+
+    await t.sql(`update profiles set visibility = 'public' where id = $1`, [alice]);
+    await unfollow(bob, frank);
+
+    assert.deepEqual(await mentionedOn(posted.comment_id), []);
+    assert.equal(await mentionCount(frank), before);
+  });
+
+  it('never mentions the author themselves', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_self'));
+    const before = await mentionCount(bob);
+
+    const posted = await typedOnly(bob, event, 'as @cm_bob always says');
+
+    assert.deepEqual(await mentionedOn(posted.comment_id), []);
+    assert.equal(await mentionCount(bob), before);
+  });
+
+  /** An @ inside a word is not a mention, which is what keeps an email address out. */
+  it('does not read a handle out of an email address', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_email'));
+    const posted = await typedOnly(bob, event, 'write to me@cm_dave.example');
+    assert.deepEqual(await mentionedOn(posted.comment_id), []);
+  });
+
+  it('does not read a name out of a longer run of handle characters', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_run'));
+    const posted = await typedOnly(bob, event, '@cm_davetheseconds');
+    assert.deepEqual(await mentionedOn(posted.comment_id), []);
+  });
+
+  // -------------------------------------------------------------------------
+  /**
+   * The edit matrix again, from the typed side.
+   *
+   * The ledger is what makes these hold and `20260908000100` does not touch it — but
+   * what feeds the ledger has changed, and "the guarantee still holds because the code
+   * under it is the same" is the reasoning this section exists to refuse.
+   */
+  it('tells a person added by a later edit, once', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_edit_add'));
+    const before = await mentionCount(dave);
+    const posted = await typedOnly(bob, event, 'good film');
+    assert.equal(await mentionCount(dave), before, 'nobody named yet');
+
+    await typedEdit(bob, posted.comment_id, 'good film @cm_dave');
+    assert.equal(await mentionCount(dave), before + 1);
+  });
+
+  it('does not tell them again when a later edit leaves the name alone', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_edit_same'));
+    const posted = await typedOnly(bob, event, '@cm_dave thoughts?');
+    const after = await mentionCount(dave);
+
+    await typedEdit(bob, posted.comment_id, '@cm_dave thoughts??');
+    await typedEdit(bob, posted.comment_id, '@cm_dave thoughts???');
+
+    assert.equal(await mentionCount(dave), after, 'repeated edits are not repeated pings');
+  });
+
+  it('says nothing when an edit removes the name, and nothing when it comes back', async () => {
+    const event = await eventOf(alice, await movie('cm_typed_edit_remove'));
+    const posted = await typedOnly(bob, event, '@cm_dave thoughts?');
+    const after = await mentionCount(dave);
+
+    await typedEdit(bob, posted.comment_id, 'thoughts?');
+    assert.deepEqual(await mentionedOn(posted.comment_id), [], 'deleting the name removes it');
+    assert.equal(await mentionCount(dave), after);
+
+    await typedEdit(bob, posted.comment_id, '@cm_dave thoughts?');
+    assert.deepEqual(await mentionedOn(posted.comment_id), ['cm_dave'], 'and re-adding restores it');
+    assert.equal(await mentionCount(dave), after, 'but the stamp is spent for good');
+  });
+
+  /**
+   * Handle recycling: the one hazard reading the body introduces, and the reason
+   * resolution consults this comment's own frozen spelling *before* it consults the
+   * username table.
+   *
+   * Somebody is named, renames, and a third party takes the name they left. An ordinary
+   * typo fix on the unchanged body must go on meaning the person it always meant, and
+   * must not hand the new holder of that handle a notification the author never wrote.
+   * Fresh accounts, because this test permanently rearranges the two it uses.
+   */
+  it('keeps a renamed person, and does not hand their old name to whoever takes it', async () => {
+    const renamer = await t.createUser({ username: 'cm_renamer' });
+    await follow(bob, renamer);
+
+    const event = await eventOf(alice, await movie('cm_typed_recycle'));
+    const posted = await typedOnly(bob, event, 'ask @cm_renamer');
+    assert.deepEqual(await mentionedOn(posted.comment_id), ['cm_renamer']);
+    const renamerBefore = await mentionCount(renamer);
+
+    await t.sql(`update profiles set username = 'cm_renamed' where id = $1`, [renamer]);
+    const taker = await t.createUser({ username: 'cm_taker' });
+    await follow(bob, taker);
+    // The trigger from 20260813001500 reserves a released handle, so the impostor takes
+    // it the only way anybody could: after the reservation is gone.
+    await t.sql(`delete from username_history where username = 'cm_renamer'`);
+    await t.sql(`update profiles set username = 'cm_renamer' where id = $1`, [taker]);
+    const takerBefore = await mentionCount(taker);
+
+    await typedEdit(bob, posted.comment_id, 'ask @cm_renamer please');
+
+    assert.deepEqual(
+      await mentionedOn(posted.comment_id),
+      ['cm_renamed'],
+      'the body still means the person it always meant',
+    );
+    assert.equal(await mentionCount(renamer), renamerBefore, 'and nobody is told twice');
+    assert.equal(await mentionCount(taker), takerBefore, 'least of all the new holder');
+  });
+});
+
 describe('the compatibility signature', () => {
   it('still posts a comment with no mentions', async () => {
     const event = await eventOf(alice, await movie('cm_compat'));

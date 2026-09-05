@@ -160,7 +160,7 @@ describe('a target that is gone', () => {
    * still set resolves to the conversation — correctly, and asserted below. This case is
    * the one where the notification points at nothing at all.
    */
-  it.each(['comment', 'reaction', 'recommendation_ranked'] as const)(
+  it.each(['comment', 'mention', 'reaction', 'recommendation_ranked'] as const)(
     'sends %s to a safe stop when the activity is gone',
     (kind) => {
       const target = targetFor(
@@ -177,7 +177,7 @@ describe('a target that is gone', () => {
    * conversation on it is still readable — so this must not degrade to "unavailable"
    * merely because the *other* link is gone.
    */
-  it.each(['comment', 'reaction', 'recommendation_ranked'] as const)(
+  it.each(['comment', 'mention', 'reaction', 'recommendation_ranked'] as const)(
     'still opens the conversation for %s when only the title has gone',
     (kind) => {
       expect(targetFor(row({ kind, mediaItemId: null }))).toEqual({

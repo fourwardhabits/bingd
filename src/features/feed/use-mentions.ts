@@ -7,21 +7,28 @@ import { supabase } from '@/lib/supabase';
  * Who the composer may offer when somebody types `@`.
  *
  * ---------------------------------------------------------------------------
- * THIS IS NOT A USER SEARCH, AND THE DIFFERENCE IS THE FEATURE
+ * THE EMPTY QUERY AND A TYPED ONE ARE DIFFERENT QUESTIONS
  *
- * `search_users` exists, and pointing this at it would have been one line. The
- * founder's rule for mentions is that typing `@` must not surface arbitrary accounts,
- * and the only version of that rule which cannot be got wrong on the client is one
- * where the client is never sent a stranger to filter out.
+ * `mention_candidates` answers both, and `20260909000100` is why they diverge.
  *
- * So `mention_candidates` (20260830000100) builds the set from the two populations the
- * server will accept a mention from — the people this reader follows, and the people
- * already in this conversation — and applies `_can_mention` to each. A stranger is not
- * ranked low here. There is no row.
+ * Mentionable now means "anybody this reader could find in People search who can also
+ * see this activity" — `can_discover_profile`, the same oracle the People tab runs on,
+ * rather than the follow-plus-participant union `20260830000100` shipped. So a stranger
+ * *is* nameable, and a composer that could not surface them would be claiming otherwise.
  *
- * That also means the empty query is meaningful and cheap: it is "everybody I could
- * name here", which is exactly what the list should show the instant the `@` is typed
- * and before anything follows it.
+ * But a bare `@` still offers only participants and follows. The list appears mid-word,
+ * under a moving thumb, and what belongs there is the people this reader is likely to
+ * mean — not a slice of the user table. Type enough of a name and the server unions in
+ * discoverable profiles by prefix; until then it does not.
+ *
+ * So the empty query stays meaningful and cheap — "the people I am likely to mean here"
+ * — and it is still the right thing to show the instant the `@` is typed.
+ *
+ * **The client does no filtering either way.** Every row that arrives is a row the write
+ * will accept; `_can_mention` is applied server-side to all three populations, so the
+ * suggestion list and the post cannot disagree. That property is asserted in
+ * `comment-mentions.test.mjs` ("offers nobody the write would refuse") rather than
+ * trusted.
  *
  * ---------------------------------------------------------------------------
  * KEYED ON THE EVENT AND THE FRAGMENT, AND ON THE READER

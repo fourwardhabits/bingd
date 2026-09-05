@@ -454,6 +454,9 @@ export function CommentThread({
     title,
     mine: comment.authorId === viewerId,
     onPressAuthor: () => onPressPerson(comment.authorUsername),
+    // The same route the author's own name uses, so a name in the body and a name in
+    // the header of the row above it go to the same place.
+    onPressMention: onPressPerson,
     onReply: () => beginReply(comment),
     onReact: () => toggleDefault(comment),
     onOpenPicker: () => setPickerFor(comment.id),
@@ -705,6 +708,7 @@ function CommentRow({
   mine,
   isReply = false,
   onPressAuthor,
+  onPressMention,
   onReply,
   onReact,
   onOpenPicker,
@@ -720,6 +724,8 @@ function CommentRow({
   mine: boolean;
   isReply?: boolean;
   onPressAuthor: () => void;
+  /** A name inside the body. Takes the handle, because that is what the text names. */
+  onPressMention: (username: string) => void;
   onReply: () => void;
   /** A plain tap: toggles the default reaction on or off. */
   onReact: () => void;
@@ -783,6 +789,12 @@ function CommentRow({
           hasSpoilers={comment.hasSpoilers}
           masked={masked}
           titleForLabel={title}
+          // The ledger, not a re-parse of the body: `activity_comments` has already
+          // decided who this comment names and which of them this reader may be shown.
+          // A handle that is not in here — a stranger, somebody blocked, anybody at all
+          // on a tombstone — stays ordinary text, which is the safe direction.
+          mentions={comment.mentions}
+          onPressMention={onPressMention}
           // The one surface where this text is not a review.
           noun="comment"
         />
