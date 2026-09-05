@@ -46,6 +46,14 @@ export type SupportTopic = 'feedback' | 'problem';
  *
  * One mailbox, two subjects, so a filter can separate "something is broken" from "here
  * is an idea" without a second address to publish and later have to keep alive.
+ *
+ * **These two strings are prefixes, and bingd.app/support extends them.** The site's
+ * cards send `bingd. support - problem report` and `bingd. feedback - idea`,
+ * built to start with what is here so one mail rule keeps catching both routes and
+ * somebody who writes in from the app and then from the web lands in one thread.
+ * Lengthening either of these splits what that rule used to catch.
+ * `web/router.test.mjs` asserts the relationship from the other side, and is
+ * where it is enforced.
  */
 const SUBJECTS: Record<SupportTopic, string> = {
   feedback: 'bingd. feedback',

@@ -100,18 +100,32 @@ export default function SettingsScreen() {
           />
         </View>
 
-        {/* Help & Support, which is the section this screen did not have.
+        {/* Help & feedback, which is the section this screen did not have.
 
-            Three rows in one place, and the order is the order of effort. Help Center is
-            `bingd.app/support`, a page that answers the questions already asked, and it
-            is first because reading is cheaper than writing. The two below it are the
-            other direction, a way to say something the page does not cover, and they are
-            the only place in the app that offers one.
+            **The two ways of saying something come first, and the page is the fallback.**
+            Until 2026-09-05 this ran the other way, on the reasoning that the order was
+            the order of effort and reading is cheaper than writing. That is true and it
+            optimised the wrong thing. Early feedback is worth more than a saved tap, and
+            a reader who wants the FAQ will find a row three deep in a four-row section
+            perfectly well, while somebody who has just hit a bug and sees a Help Center
+            first will read it as "go and look it up yourself".
+
+            So the two mail rows are the section, and Help & Support is where somebody
+            goes for the things mail is the wrong shape for: account and privacy, safety,
+            and the questions already answered. The founder's framing is that the path
+            should be Settings to email, not Settings to a web page to a card to email.
 
             Help Center used to sit in the legal group beside Privacy and Terms, on the
             grounds that all three were `openLegal` web links. That grouped them by their
             mechanism rather than by what somebody is looking for: a person hunting for
-            help does not think of it as a document. It moved here on 2026-09-03.
+            help does not think of it as a document. It moved here on 2026-09-03, and is
+            named for the page it opens rather than for a category on 2026-09-05.
+
+            **No secondary lines under the labels.** The copy considered was "Something
+            not working?" and "Have a suggestion?", and this screen has nowhere to put
+            them: `detail` is a right-aligned value slot holding things like a version
+            number, and `hint` is an accessibility hint that is never drawn. Inventing a
+            subtitle row for two labels would be redesigning Settings to fit the copy.
 
             There is deliberately no floating feedback button on the Feed or the Profile.
             A support channel a person goes looking for in Settings reads as a normal app;
@@ -122,27 +136,27 @@ export default function SettingsScreen() {
             carries a version, a build number and a platform, and carries no account, no
             identifier and no address of the person sending it. */}
         <View style={styles.section}>
-          <SectionHeader title="Help & Support" />
+          <SectionHeader title="Help & feedback" />
           <View style={[styles.group, styles.sectionGroup]}>
-            <Row
-              icon="help-circle-outline"
-              label="Help Center"
-              onPress={() => openLegal('support')}
-              external
-            />
-            <Row
-              icon="chatbubble-ellipses-outline"
-              label="Send feedback"
-              onPress={() => void openSupportEmail('feedback')}
-              external
-              hint="Opens your email app"
-            />
             <Row
               icon="alert-circle-outline"
               label="Report a problem"
               onPress={() => void openSupportEmail('problem')}
               external
               hint="Opens your email app"
+            />
+            <Row
+              icon="bulb-outline"
+              label="Share an idea"
+              onPress={() => void openSupportEmail('feedback')}
+              external
+              hint="Opens your email app"
+            />
+            <Row
+              icon="help-circle-outline"
+              label="Help & Support"
+              onPress={() => openLegal('support')}
+              external
               last
             />
           </View>
