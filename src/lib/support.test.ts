@@ -57,12 +57,8 @@ describe('the address and the subjects', () => {
   });
 
   it('separates the two with the subject, which is the only routing this channel has', () => {
-    // The strings bingd.app/support sends from its two cards, character for character.
-    // Two entry points into one mailbox have to agree or the subject is not routing.
-    expect(parse(buildSupportMailto('feedback', build)).subject).toBe('bingd. feedback - idea');
-    expect(parse(buildSupportMailto('problem', build)).subject).toBe(
-      'bingd. support - problem report',
-    );
+    expect(parse(buildSupportMailto('feedback', build)).subject).toBe('bingd. feedback');
+    expect(parse(buildSupportMailto('problem', build)).subject).toBe('bingd. support');
   });
 });
 
@@ -127,7 +123,7 @@ describe('the encoding', () => {
   it('percent-encodes the spaces in the subject and the newlines in the body', () => {
     const url = buildSupportMailto('problem', build);
 
-    expect(url).toContain('subject=bingd.%20support%20-%20problem%20report');
+    expect(url).toContain('subject=bingd.%20support');
     // An unencoded newline in a `mailto:` is where the body silently stops on some
     // clients, so this asserts on the raw URL rather than on the decoded body.
     expect(url).toContain('%0A');

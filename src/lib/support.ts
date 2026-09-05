@@ -46,16 +46,10 @@ export type SupportTopic = 'feedback' | 'problem';
  *
  * One mailbox, two subjects, so a filter can separate "something is broken" from "here
  * is an idea" without a second address to publish and later have to keep alive.
- *
- * **These are the support site's subjects, character for character.** bingd.app/support
- * offers the same two choices as cards, and until 2026-09-05 the app sent a shorter
- * subject for each: a mail rule written against the website silently missed everything
- * sent from Settings. Two entry points to one mailbox have to agree on the routing or
- * the routing is not routing. If either string changes, change it in both places.
  */
 const SUBJECTS: Record<SupportTopic, string> = {
-  feedback: 'bingd. feedback - idea',
-  problem: 'bingd. support - problem report',
+  feedback: 'bingd. feedback',
+  problem: 'bingd. support',
 };
 
 /** The build facts a report may carry. Nothing here identifies a person. */

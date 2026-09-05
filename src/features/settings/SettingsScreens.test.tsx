@@ -305,9 +305,9 @@ describe('Help & feedback in Settings', () => {
 
     const url = openURL.mock.calls.at(-1)?.[0] as string;
     expect(url.startsWith('mailto:support@bingd.app?')).toBe(true);
-    // Exact, not a prefix: this is the string bingd.app/support sends, and a mail rule
-    // that catches one entry point and misses the other is the defect being fixed.
-    expect(url).toContain('subject=bingd.%20feedback%20-%20idea');
+    // The app's own subject, which bingd.app/support extends rather than replaces, so
+    // one mail rule catches both routes (web/router.test.mjs pins the relationship).
+    expect(url).toContain('subject=bingd.%20feedback');
     expect(decodeURIComponent(url)).toContain('[Share your feedback here]');
   });
 
@@ -318,7 +318,7 @@ describe('Help & feedback in Settings', () => {
 
     const url = openURL.mock.calls.at(-1)?.[0] as string;
     expect(url.startsWith('mailto:support@bingd.app?')).toBe(true);
-    expect(url).toContain('subject=bingd.%20support%20-%20problem%20report');
+    expect(url).toContain('subject=bingd.%20support');
     const body = decodeURIComponent(url);
     expect(body).toContain('[Describe what happened here]');
     expect(body).toContain('App version:');
