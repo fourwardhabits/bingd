@@ -222,14 +222,18 @@ describe('the legal group in Settings', () => {
 });
 
 /**
- * Help & Support, which is the only place in the app that offers a way to say something
+ * Help & feedback, which is the only place in the app that offers a way to say something
  * back.
  *
  * Two rows, one mailbox, and the reason they are asserted from the screen as well as from
  * `lib/support.test.ts` is the wiring: the unit tests prove the draft is right, and these
  * prove the row a person actually taps is the one that builds it.
+ *
+ * The order is asserted too. The two mail rows lead and the web page follows, which is a
+ * founder decision from 2026-09-05 and the reverse of what shipped on 2026-09-03: early
+ * feedback is worth more than the saved tap that putting the FAQ first was buying.
  */
-describe('Help & Support in Settings', () => {
+describe('Help & feedback in Settings', () => {
   const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
 
   beforeEach(() => openURL.mockClear());
@@ -237,35 +241,73 @@ describe('Help & Support in Settings', () => {
   it('offers all three rows under their own heading', async () => {
     const view = await renderWithProviders(<SettingsScreen />);
 
-    expect(view.getByText('HELP & SUPPORT')).toBeTruthy();
-    expect(view.getByLabelText('Help Center')).toBeTruthy();
-    expect(view.getByLabelText('Send feedback')).toBeTruthy();
+    expect(view.getByText('HELP & FEEDBACK')).toBeTruthy();
     expect(view.getByLabelText('Report a problem')).toBeTruthy();
+    expect(view.getByLabelText('Share an idea')).toBeTruthy();
+    expect(view.getByLabelText('Help & Support')).toBeTruthy();
   });
 
   /**
-   * The reading half of the section, and the row that moved.
-   *
-   * It is the same `bingd.app/support` page it always opened, from a different place in
-   * the list. Pinned as an exact URL because the point of moving it was that people can
-   * find it, and a Help Center that 404s is worse than one nobody looks for.
+   * Saying something comes before looking something up. Asserted on the rendered order
+   * rather than on the labels alone, because "the rows exist" is what the test above
+   * already says and is not the decision worth protecting.
    */
-  it('opens the existing support page from Help Center', async () => {
+  it('puts the two ways of saying something before the page', async () => {
     const view = await renderWithProviders(<SettingsScreen />);
 
-    await fireEvent.press(view.getByLabelText('Help Center'));
+    // Every row that leaves the app is a link, and the query returns them in render
+    // order, so a label's position in this list is its row's position on the screen.
+    const labels = view
+      .getAllByRole('link')
+      .map((node) => node.props.accessibilityLabel as string);
+    const at = (label: string) => labels.indexOf(label);
+
+    expect(at('Report a problem')).toBeGreaterThan(-1);
+    expect(at('Report a problem')).toBeLessThan(at('Share an idea'));
+    expect(at('Share an idea')).toBeLessThan(at('Help & Support'));
+  });
+
+  /**
+   * Both rows leave the app for a mail client rather than navigating inside Settings,
+   * which is what `link` promises and `button` does not. The hint names the destination,
+   * because the default for an external row says "your browser" and these do not open one.
+   */
+  it('announces the mail rows as links that open an email app', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    for (const label of ['Report a problem', 'Share an idea']) {
+      const row = view.getByLabelText(label);
+      expect(row.props.accessibilityRole).toBe('link');
+      expect(row.props.accessibilityHint).toBe('Opens your email app');
+    }
+  });
+
+  /**
+   * The reading half of the section, and the row that moved twice.
+   *
+   * It is the same `bingd.app/support` page it always opened, from a different place in
+   * the list and now under the name of the page rather than a category. Pinned as an
+   * exact URL because the point of moving it was that people can find it, and a support
+   * row that 404s is worse than one nobody looks for.
+   */
+  it('opens the existing support page from Help & Support', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    await fireEvent.press(view.getByLabelText('Help & Support'));
 
     expect(openURL).toHaveBeenCalledWith('https://bingd.app/support');
   });
 
-  it('sends feedback to support@bingd.app under its own subject', async () => {
+  it('sends an idea to support@bingd.app under the site\u2019s own subject', async () => {
     const view = await renderWithProviders(<SettingsScreen />);
 
-    await fireEvent.press(view.getByLabelText('Send feedback'));
+    await fireEvent.press(view.getByLabelText('Share an idea'));
 
     const url = openURL.mock.calls.at(-1)?.[0] as string;
     expect(url.startsWith('mailto:support@bingd.app?')).toBe(true);
-    expect(url).toContain('subject=bingd.%20feedback');
+    // Exact, not a prefix: this is the string bingd.app/support sends, and a mail rule
+    // that catches one entry point and misses the other is the defect being fixed.
+    expect(url).toContain('subject=bingd.%20feedback%20-%20idea');
     expect(decodeURIComponent(url)).toContain('[Share your feedback here]');
   });
 
@@ -276,7 +318,7 @@ describe('Help & Support in Settings', () => {
 
     const url = openURL.mock.calls.at(-1)?.[0] as string;
     expect(url.startsWith('mailto:support@bingd.app?')).toBe(true);
-    expect(url).toContain('subject=bingd.%20support');
+    expect(url).toContain('subject=bingd.%20support%20-%20problem%20report');
     const body = decodeURIComponent(url);
     expect(body).toContain('[Describe what happened here]');
     expect(body).toContain('App version:');
@@ -291,7 +333,7 @@ describe('Help & Support in Settings', () => {
   it('puts nothing about the signed-in person into either draft', async () => {
     const view = await renderWithProviders(<SettingsScreen />);
 
-    for (const label of ['Send feedback', 'Report a problem'] as const) {
+    for (const label of ['Share an idea', 'Report a problem'] as const) {
       await fireEvent.press(view.getByLabelText(label));
       const decoded = decodeURIComponent(openURL.mock.calls.at(-1)?.[0] as string);
       expect(decoded).not.toContain('sai');
@@ -327,7 +369,7 @@ describe('Help & Support in Settings', () => {
     openURL.mockRejectedValueOnce(new Error('no handler'));
     const view = await renderWithProviders(<SettingsScreen />);
 
-    await fireEvent.press(view.getByLabelText('Send feedback'));
+    await fireEvent.press(view.getByLabelText('Share an idea'));
 
     await waitFor(() =>
       expect(Alert.alert).toHaveBeenCalledWith(
