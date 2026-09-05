@@ -367,7 +367,7 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 
 | Function | Trigger | Role |
 |---|---|---|
-| `tmdb-adapter` | User request, and an operator for the three maintenance actions | Search and detail. Sole holder of the TMDB key (AD-8). Writes through to `media_items`, `media_cache`, `provider_list_cache` and `person_cache`. **Built 2026-08-15** |
+| `tmdb-adapter` | User request, and an operator for the three maintenance actions | Search and detail. Sole holder of the TMDB key (AD-8). Writes through to `media_items`, `media_cache`, `provider_list_cache` and `person_cache`; `season-episodes` and `watch-providers` write nothing at all. **Built 2026-08-15** |
 | `import-worker` | Queue, after upload | Parse, match, build the preview, apply on confirmation, delete the source file |
 | `recs-builder` | Schedule + on significant ranking change | Generate a slate per user. See [`recommendations.md`](./recommendations.md) |
 | `match-builder` | Schedule | ~~Materialize `match_scores` (AD-7)~~ Not built, and no longer intended at this scale — `taste_match` computes live per call (AD-7, corrected 2026-08-27) |
@@ -377,7 +377,7 @@ The subject's owner is resolved server-side rather than taken from the caller, s
 
 `nudge-scheduler` is worth calling out. PRD §15 makes the nudge conditional on real content, so the function's first action is a query for qualifying activity, and its most common outcome is to send nothing. That is the intended behavior, not a failure mode, and the metric to watch is the ratio of evaluations to sends.
 
-### `tmdb-adapter` — the nine actions
+### `tmdb-adapter` — the ten actions
 
 Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may call it.
 
@@ -386,6 +386,7 @@ Built 2026-08-15. One `POST` endpoint taking `{ action, ... }`, split by who may
 | `search` | signed-in user | Searches TMDB, writes the results into `media_items`, returns them Bingd-shaped |
 | `detail` | signed-in user | Fills one title in: runtime, overview, artwork, seasons, credits, trailers, certification. **For a season, also returns that season's episodes.** Added 2026-09-03 |
 | `season-episodes` | signed-in user | One season's episodes on their own, for an Episodes tab whose cache `detail` did not seed. Reads nothing into the catalogue and writes nothing. Added 2026-09-03 |
+| `watch-providers` | signed-in user | Where one title can be watched in one country, from JustWatch by way of TMDB. Reads nothing into the catalogue and writes nothing. Added 2026-09-05 |
 | `similar` | signed-in user | Caches what TMDB associates with one title as the `similar` facet. The candidate source behind For You. Added 2026-08-16 |
 | `person` | signed-in user | Caches one person and the titles TMDB credits them on, writing those titles into the catalogue first. Added 2026-08-17 |
 | `trending` | `service_role` | Refreshes the four `provider_list_cache` lists. Added 2026-08-16 |
@@ -450,6 +451,27 @@ series id and the season number are read out of `media_items` by `seasonTarget`,
 a film, a series grouping, a season with no parent or number, a parent that is not a series,
 and a series with no tmdb id. That function is pure and separately tested, which is what makes
 "this is not a proxy" checkable rather than a claim.
+
+**`watch-providers` is `season-episodes`' twin**, and deliberately so: a user action, charged
+per outbound attempt, read-only, storing nothing, and building its whole URL out of
+`media_items`. The body carries one Bingd uuid and a two-letter country; the country never
+reaches the route at all, because TMDB's `/watch/providers` endpoints take no region parameter
+and return every market at once — the code picks one bucket out of the response, in
+`normalize.ts`, and anything that is not two letters falls back to `US`.
+
+A movie asks `/movie/{id}/watch/providers`, a series `/tv/{id}/watch/providers`, and a season
+`/tv/{series}/season/{n}/watch/providers` through the same `seasonTarget` the Episodes action
+uses. **A season does not fall back to its series**: Bingd's rankable TV unit is the season,
+so that is the page most TV readers are on, and answering it with the show's availability
+would claim Season 1 is on Netflix when it is Season 3 that is.
+
+**Nothing about availability is stored** — no facet, no table, no migration — for the reason
+episodes are not: it is display metadata on a licensor's schedule, and persisting it would put
+a third party's payload under PRD §19's retention window for every title anybody opens. The
+whole cache is the device's own query entry. Three categories are read (`flatrate` as `stream`,
+`rent`, `buy`) and two are deliberately not (`free`, `ads`); the block is absent rather than
+wrong for a title only those carry. See `docs/reference/tmdb-integration.md` for the JustWatch
+attribution this data obliges, which is separate from TMDB's own.
 
 **TMDB Reviews were built on 2026-08-17 and removed the same day**, and the removal is the
 more useful thing to record. A `reviews` facet was added by `20260817000500`, filled from

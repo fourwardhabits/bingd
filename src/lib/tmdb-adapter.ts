@@ -205,6 +205,67 @@ export async function fetchSeasonEpisodes(mediaItemId: string) {
   return data.episodes ?? [];
 }
 
+/** How a title can be watched. Three, and TMDB's `flatrate` is Bingd's `stream`. */
+export type WatchOffer = 'stream' | 'rent' | 'buy';
+
+/**
+ * One streaming service, and every way this title is offered on it.
+ *
+ * A service offered two ways — Apple TV rents and sells almost everything — is one
+ * entry carrying both, not two rows with the same logo. `logo_path` is TMDB's path
+ * form, like every other image in the app; `src/lib/images.ts` turns it into a URL.
+ *
+ * There is deliberately **no per-service link**. TMDB's payload carries none, so a
+ * logo opens nothing: building `netflix.com/title/…` out of a provider name would be
+ * a guess presented to the reader as a destination.
+ */
+export type WatchProvider = {
+  provider_id: number;
+  name: string;
+  logo_path: string | null;
+  offers: WatchOffer[];
+};
+
+export type WatchAvailability = {
+  /** The country actually answered for, which may not be the one the device asked about. */
+  region: string;
+  /** TMDB's own watch-options page for this title in this region, or null. */
+  link: string | null;
+  providers: WatchProvider[];
+};
+
+/**
+ * Where one title can be watched, from JustWatch by way of TMDB.
+ *
+ * **Read-only.** Unlike `similar` and `person` this caches nothing server-side and
+ * writes nothing to the catalogue: availability moves on the provider's schedule, and
+ * the only cache is this device's own query entry. One provider request per call,
+ * charged to the reader's hourly ceiling like every other screen-triggered fetch.
+ *
+ * The caller passes the title's Bingd id and a country code. The country is used to
+ * pick one bucket out of the response — the route has no region parameter — and the
+ * TMDB id, series id and season number all come out of `media_items` inside the
+ * adapter, so no part of the outbound URL comes from here.
+ *
+ * An empty `providers` list is a real answer: TMDB has nothing for this title in this
+ * market. The caller draws nothing rather than an empty state.
+ */
+export async function fetchWatchProviders(
+  mediaItemId: string,
+  region: string,
+): Promise<WatchAvailability> {
+  const data = await invoke<Partial<WatchAvailability> & { reason?: string }>({
+    action: 'watch-providers',
+    mediaItemId,
+    region,
+  });
+  return {
+    region: data.region ?? region,
+    link: data.link ?? null,
+    providers: data.providers ?? [],
+  };
+}
+
 /**
  * Caches what TMDB associates with one title, as the `similar` facet.
  *

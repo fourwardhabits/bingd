@@ -393,13 +393,21 @@ describe('public_notes', () => {
 
 describe('community_score', () => {
   /**
-   * **The shipped threshold is ten and this block lowers it to three.**
+   * **The shipped threshold is one and this block raises it to three.**
    *
-   * Ten fresh accounts, each ranking to completion, per sample-size assertion is
-   * about thirty seconds of test for one boolean. What these tests are about is the
-   * *population* -- the exact entity, the blocked rater, the live ranking rather than
-   * the feed snapshot -- and none of that varies with the number. The number itself is
-   * asserted once, on the shipped default, in `config-defaults.test.mjs`.
+   * These tests are about the *population* -- the exact entity, the blocked rater, the
+   * live ranking rather than the feed snapshot -- and every one of them needs a
+   * withheld number to distinguish "dropped from the mean" from "counted in it". At the
+   * shipped threshold of one there is no withheld case to observe: two raters minus a
+   * blocked one still publishes a number, and an assertion on `score` would pass
+   * whether the block worked or not.
+   *
+   * Three, rather than the ten it used to be, for the reason the old comment gave in
+   * the other direction: ten fresh accounts each ranking to completion is about thirty
+   * seconds of test for one boolean, and none of what is under test varies with the
+   * number. The number itself is asserted once, on the shipped default, in
+   * `config-defaults.test.mjs` -- and the block below this one exercises the shipped
+   * value without touching it.
    */
   before(async () => {
     await t.sql(`update app_config set value = '3'::jsonb
@@ -407,7 +415,7 @@ describe('community_score', () => {
   });
 
   after(async () => {
-    await t.sql(`update app_config set value = '10'::jsonb
+    await t.sql(`update app_config set value = '1'::jsonb
                   where key = 'score.community_min_ratings'`);
   });
 
@@ -578,5 +586,124 @@ describe('community_score', () => {
     const error = await t.asAnon(() => t.errorFrom(`select * from community_score($1)`, [id]));
     assert.equal(error?.code, '42501');
     await t.actAs(alice);
+  });
+});
+
+/**
+ * The shipped threshold, exercised at the value a real database has.
+ *
+ * The block above deliberately raises `score.community_min_ratings` to three, because
+ * a withheld number is the only way to observe a rater being dropped from the
+ * population. This one deliberately does **not** touch the config: it runs after that
+ * block restores the shipped value, and every assertion here is about the boundary the
+ * founder moved on 2026-09-05 (`20260910000100`). Reading `min_ratings` off the
+ * function is what makes it read the real row rather than one this file set.
+ *
+ * Ten ratings was withholding not a weak number but every number there was. Before
+ * launch almost every title in the catalogue has one rating or none, so a reader who
+ * ranked a film and opened its page was told "Not enough ratings" about a population
+ * that already counted them.
+ */
+describe('the bingd. score from the first rating', () => {
+  let firstSeq = 0;
+
+  /** Ranks one title for `count` fresh public accounts, incumbent always winning. */
+  const rankedBy = async (mediaItemId, count) => {
+    for (let i = 0; i < count; i += 1) {
+      firstSeq += 1;
+      const user = await t.createUser({ username: `first_rater_${firstSeq}` });
+      await t.actAs(user);
+      await t.rankToCompletion(mediaItemId, 'loved', async (pivot) => pivot);
+    }
+    await t.actAs(alice);
+  };
+
+  const scoreOf = async (mediaItemId) =>
+    (await t.sql(`select * from community_score($1)`, [mediaItemId])).rows[0];
+
+  it('reports the shipped threshold, which is one', async () => {
+    // Read off the function rather than off app_config, so this fails if the value is
+    // right and the function stops consulting it — the two ways this could break.
+    assert.equal((await scoreOf(await movie('threshold_report'))).min_ratings, 1);
+  });
+
+  it('still says nothing at all when nobody has ranked it', async () => {
+    // The existing empty state, unchanged. `n >= 1` withholds exactly this case, which
+    // is why lowering the threshold did not need a new branch anywhere.
+    const row = await scoreOf(await movie('first_none'));
+    assert.equal(row.score, null);
+    assert.equal(row.rating_count, 0);
+  });
+
+  it('publishes a single rating with its sample size beside it', async () => {
+    const id = await movie('first_one');
+    await rankedBy(id, 1);
+
+    const row = await scoreOf(id);
+    // One loved title in an empty band scores 10.0. What matters is that a number
+    // comes back at all, and that the count says how much it is worth.
+    assert.equal(Number(row.score), 10);
+    assert.equal(row.rating_count, 1);
+  });
+
+  it('publishes two, and the count keeps up', async () => {
+    const id = await movie('first_two');
+    await rankedBy(id, 2);
+
+    const row = await scoreOf(id);
+    assert.equal(Number(row.score), 10);
+    assert.equal(row.rating_count, 2);
+  });
+
+  it('keeps publishing above the threshold it used to wait for', async () => {
+    // The old boundary. Nothing about a larger sample changed, and a change that
+    // lowered the floor by breaking the ceiling would pass every test above this one.
+    const id = await movie('first_old_boundary');
+    await rankedBy(id, 3);
+
+    const row = await scoreOf(id);
+    assert.equal(Number(row.score), 10);
+    assert.equal(row.rating_count, 3);
+  });
+
+  it('counts the reader among everyone else rather than excluding them', async () => {
+    // The property the founder asked to have confirmed rather than changed: there is
+    // one bingd. aggregate for a title, and the caller's own eligible rating is in it
+    // on the same terms as anybody else's. A viewer-excluded variant would show alice
+    // a different number here from the one bob sees, and the count would differ by
+    // exactly one.
+    const id = await movie('first_self');
+    await t.rankToCompletion(id, 'loved', async (pivot) => pivot);
+
+    const mine = await scoreOf(id);
+    assert.equal(mine.rating_count, 1, 'the reader is inside their own community score');
+    assert.equal(Number(mine.score), 10);
+
+    await t.asUser(bob, async () => {
+      const theirs = await t.sql(`select * from community_score($1)`, [id]);
+      assert.equal(theirs.rows[0].rating_count, 1, 'and it is the same number for a stranger');
+      assert.equal(Number(theirs.rows[0].score), 10);
+    });
+    await t.actAs(alice);
+  });
+
+  it('leaves Following exactly where it was', async () => {
+    // Following has activated on one rating since `20260816001100` and this change did
+    // not touch it. Asserted here because the two units sit side by side on the title
+    // page, and a change to the threshold of one is the kind that quietly moves both.
+    const id = await movie('first_following');
+    const followee = await t.createUser({ username: 'first_followee' });
+    await t.actAs(followee);
+    await t.rankToCompletion(id, 'loved', async (pivot) => pivot);
+    await t.actAs(alice);
+    await t.sql(
+      `insert into follows (follower_id, followee_id, state) values ($1, $2, 'approved')
+       on conflict do nothing`,
+      [alice, followee],
+    );
+
+    const { rows } = await t.sql(`select * from following_score($1)`, [id]);
+    assert.equal(rows[0].rating_count, 1);
+    assert.equal(Number(rows[0].score), 10);
   });
 });

@@ -460,3 +460,81 @@ export type TmdbPersonDetail = {
 export function personDetail(id: number, charge?: Charge): Promise<TmdbPersonDetail> {
   return request(`/person/${id}`, { append_to_response: 'combined_credits' }, charge);
 }
+
+// ---------------------------------------------------------------------------
+// Where to watch
+//
+// TMDB republishes JustWatch's availability data on a `/watch/providers` route
+// hanging off each title, and it is the one part of the API whose terms name a
+// third party: "In order to use this data you must attribute the source of the
+// data as JustWatch." The attribution lives on the screens that draw it.
+//
+// Three routes rather than one, because a season is not addressable any other way —
+// exactly the shape `seasonDetail` already has, and for the same reason.
+// ---------------------------------------------------------------------------
+
+/**
+ * One service, as TMDB publishes it inside a country's bucket.
+ *
+ * Four fields and every one of them optional, because this type is the boundary:
+ * declaring only these is what stops `display_priority`, the ordering hint, and
+ * anything TMDB adds later from reaching a screen. `normalize.ts` is the only
+ * reader, and it drops an entry that cannot say who it is.
+ */
+export type TmdbWatchProvider = {
+  provider_id?: number | null;
+  provider_name?: string | null;
+  logo_path?: string | null;
+};
+
+/**
+ * The whole response: a country code to what is available in it.
+ *
+ * **Every country at once**, whatever `language` is set to — the route has no
+ * region parameter, so the filtering is ours. A film on ten services in forty
+ * markets is a large object, and none of it is stored or forwarded: the adapter
+ * reads exactly one country's bucket and returns that.
+ *
+ * The three offer arrays are `unknown[]`, like `TmdbSeasonDetail.episodes` and for
+ * the same reason: their elements are not guaranteed to be objects, and typing
+ * them here would let a reader spread one without checking. `free` and `ads` are
+ * deliberately absent — see `watchAvailability`.
+ */
+export type TmdbWatchProviders = {
+  results?: Record<
+    string,
+    | {
+        link?: string | null;
+        flatrate?: unknown[];
+        rent?: unknown[];
+        buy?: unknown[];
+      }
+    | undefined
+  >;
+};
+
+export function movieWatchProviders(id: number, charge?: Charge): Promise<TmdbWatchProviders> {
+  return request(`/movie/${id}/watch/providers`, {}, charge);
+}
+
+export function seriesWatchProviders(id: number, charge?: Charge): Promise<TmdbWatchProviders> {
+  return request(`/tv/${id}/watch/providers`, {}, charge);
+}
+
+/**
+ * One season's availability.
+ *
+ * **Season-specific, with no fall back to the series**, which was considered and
+ * rejected. A season is Bingd's rankable TV unit, so this is the page most TV
+ * readers are on — and answering it with the *show's* availability would say
+ * Season 1 is on Netflix when it is Season 3 that is. Saying nothing is the
+ * honest answer to a question the provider has no data for, and it is the same
+ * rule the score circle follows below its sample floor.
+ */
+export function seasonWatchProviders(
+  seriesId: number,
+  seasonNumber: number,
+  charge?: Charge,
+): Promise<TmdbWatchProviders> {
+  return request(`/tv/${seriesId}/season/${seasonNumber}/watch/providers`, {}, charge);
+}

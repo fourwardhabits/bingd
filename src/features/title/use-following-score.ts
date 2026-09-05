@@ -35,7 +35,8 @@ export type FollowingScore = {
  *   - live rankings rather than the score snapshotted into a feed event, which goes
  *     stale the moment the rater ranks anything else in the same band.
  *
- * **A sample of one is shown**, unlike Community's threshold of three. One account you
+ * **A sample of one is shown**, which Community has also done since 2026-09-05 and did
+ * not before — see `20260910000100` for why the two thresholds converged. One account you
  * chose to follow is not a weak estimate of a population; it is that person's opinion,
  * and it is also the only case a new account can produce at all. The migration's header
  * sets out why that is safe as well as useful.

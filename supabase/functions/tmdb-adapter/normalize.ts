@@ -624,3 +624,196 @@ export function personCredits(
 
   return { credits: ordered.slice(0, MAX_CREDITS), total: ordered.length };
 }
+
+// ---------------------------------------------------------------------------
+// Where to watch
+//
+// Availability, from JustWatch by way of TMDB. Reference metadata for one block on
+// one screen: never stored, never written into the catalogue, and — like episodes —
+// normalized down to the handful of fields a row actually draws before it leaves
+// this file. The raw response names every country TMDB knows; what comes out of here
+// names one.
+// ---------------------------------------------------------------------------
+
+/**
+ * The country to answer for when the caller does not name a usable one.
+ *
+ * A **US beta default**, and it is a stated limitation rather than a claim that
+ * availability is global. The device's own region is the first choice and reaches
+ * this file as `p_region`; this is what happens when the phone reports nothing, or
+ * reports something that is not a country code. Region *selection* — a reader in a
+ * market the device is not set to, a traveller — is deferred, and recorded as
+ * deferred in `docs/reference/tmdb-integration.md`.
+ */
+export const DEFAULT_WATCH_REGION = 'US';
+
+/**
+ * A safety bound on one country's list.
+ *
+ * The block draws three logos and the sheet a scrolling list; forty is far past
+ * anything a market publishes and exists so the response cannot be unbounded. It
+ * is applied after deduplication, so a service offering all three of stream, rent
+ * and buy costs one of the forty rather than three.
+ */
+export const MAX_WATCH_PROVIDERS = 40;
+
+/** How a title can be watched. Three, and TMDB's `flatrate` is Bingd's `stream`. */
+export type WatchOffer = 'stream' | 'rent' | 'buy';
+
+/** One service, and every way this title is offered on it. */
+export type WatchProvider = {
+  provider_id: number;
+  name: string;
+  /** TMDB's path form, like every other image in the schema. Null renders as initials. */
+  logo_path: string | null;
+  /** In the order stream, rent, buy. Never empty — an entry with no offer is dropped. */
+  offers: WatchOffer[];
+};
+
+export type WatchAvailability = {
+  /** The country actually answered for, which may not be the one asked about. */
+  region: string;
+  /**
+   * TMDB's own watch-options page for this title in this region, or null.
+   *
+   * The **only** link this feature has. TMDB's payload carries no per-service deep
+   * link, so a provider logo opens nothing: manufacturing `netflix.com/title/…`
+   * from a provider name would be a guess presented as a destination.
+   */
+  link: string | null;
+  providers: WatchProvider[];
+};
+
+/**
+ * The three arrays read, in the order the sheet groups them.
+ *
+ * `free` and `ads` are deliberately not read. The founder's brief names three
+ * categories and the sheet has three headings; folding an ad-supported service in
+ * under "Stream" would put Tubi beside Netflix and say the same thing about both,
+ * and inventing a fourth heading is not this tranche's decision to make. Recorded
+ * rather than quietly dropped — it is the reason a title available only on Tubi
+ * shows no block at all.
+ */
+const OFFER_SOURCES = [
+  ['stream', 'flatrate'],
+  ['rent', 'rent'],
+  ['buy', 'buy'],
+] as const;
+
+/**
+ * TMDB's own watch-options page, or nothing.
+ *
+ * Checked rather than escaped, for the reason `videoUri` states on the client: this
+ * string is about to be handed to `Linking.openURL` on a phone, and the shape is
+ * provider-owned data that has never varied. A link that is not an `https` URL on
+ * themoviedb.org is not the page this row claims to open, so the row simply is not
+ * offered — which is a better outcome than opening somewhere unexpected.
+ *
+ * Done here rather than on the client because this file is the boundary AD-8 puts
+ * around the provider: nothing downstream should have to know what TMDB sends.
+ */
+function watchOptionsLink(value: unknown): string | null {
+  if (typeof value !== 'string' || !value) return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:') return null;
+  const host = url.hostname.toLowerCase();
+  return host === 'themoviedb.org' || host === 'www.themoviedb.org' ? value : null;
+}
+
+/**
+ * A country code, or the default.
+ *
+ * Two letters, upper-cased. This is the one value in the request the caller
+ * controls, and it is used as an **object key** rather than as part of a URL — the
+ * route is built entirely from `media_items` — so the check is about answering a
+ * sensible question rather than about escaping. Anything else falls back rather
+ * than failing: a phone reporting a region TMDB has never heard of should see the
+ * US list, not an error on a title page.
+ */
+export function watchRegionOf(region: unknown): string {
+  if (typeof region !== 'string') return DEFAULT_WATCH_REGION;
+  const upper = region.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(upper) ? upper : DEFAULT_WATCH_REGION;
+}
+
+/**
+ * One country's availability, out of a response that carries every country.
+ *
+ * **Deduplicated across categories, and that is the point of the shape.** Apple TV
+ * routinely appears under both `rent` and `buy`, and two rows with the same logo and
+ * the same name reads as a rendering fault. One entry carrying `['rent', 'buy']`
+ * lets the sheet list it under both headings and the compact row count it once.
+ *
+ * Provider order is TMDB's, within the category order above: they arrive sorted by
+ * `display_priority`, which is the provider's prominence in that market, and that is
+ * a better first-three than anything derivable here. A service first seen under
+ * `rent` keeps that position when it later turns up under `buy`.
+ *
+ * Defensive at every step, because these elements reach a screen without passing
+ * through Postgres: a non-object is skipped, an entry with no numeric id or no name
+ * is dropped rather than drawn as a blank row, and a missing `logo_path` is a null
+ * the row renders around.
+ */
+export function watchAvailability(
+  payload: { results?: Record<string, unknown> } | null | undefined,
+  region: unknown,
+): WatchAvailability {
+  const resolved = watchRegionOf(region);
+  const bucket = payload?.results?.[resolved] as
+    | { link?: unknown; flatrate?: unknown; rent?: unknown; buy?: unknown }
+    | undefined;
+
+  if (!bucket || typeof bucket !== 'object') {
+    return { region: resolved, link: null, providers: [] };
+  }
+
+  const byId = new Map<number, WatchProvider>();
+
+  for (const [offer, key] of OFFER_SOURCES) {
+    const entries = bucket[key];
+    if (!Array.isArray(entries)) continue;
+
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object') continue;
+
+      const raw = entry as { provider_id?: unknown; provider_name?: unknown; logo_path?: unknown };
+      const id =
+        typeof raw.provider_id === 'number' && Number.isSafeInteger(raw.provider_id)
+          ? raw.provider_id
+          : null;
+      const name = textOrNull(typeof raw.provider_name === 'string' ? raw.provider_name : null);
+      if (id === null || !name) continue;
+
+      const held = byId.get(id);
+      if (held) {
+        // The categories are visited in a fixed order and each at most once, so a
+        // repeat within one array is the only way this can already be present —
+        // which is the provider's own data and not something to add twice.
+        if (!held.offers.includes(offer)) held.offers.push(offer);
+        continue;
+      }
+
+      if (byId.size >= MAX_WATCH_PROVIDERS) continue;
+      byId.set(id, {
+        provider_id: id,
+        name,
+        logo_path: typeof raw.logo_path === 'string' && raw.logo_path ? raw.logo_path : null,
+        offers: [offer],
+      });
+    }
+  }
+
+  return {
+    region: resolved,
+    // Present only alongside real availability. TMDB sends the link on a bucket that
+    // exists, and a bucket can exist with every offer array empty — a page saying
+    // "not available anywhere" is not a watch option.
+    link: byId.size > 0 ? watchOptionsLink(bucket.link) : null,
+    providers: [...byId.values()],
+  };
+}

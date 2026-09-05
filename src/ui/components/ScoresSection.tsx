@@ -76,11 +76,17 @@ const TWO_COLUMN_MAX_FONT_SCALE = 1.3;
  * rating. This section answers "what did everyone else make of it", which is a
  * different question and does not need the reader's own answer restated to be asked.
  *
- * **Following activates on a single rating, Bingd does not.** One account you
- * deliberately follow is not a weak estimate of a crowd; it is that person's opinion,
- * and it is the only case a new account can produce at all. A Bingd mean over two
- * strangers is a different thing entirely: it looks like data and is not, so the number
- * waits for the sample the server sets — ten ratings.
+ * **Both units activate on a single rating, and bingd. did not until 2026-09-05.** It
+ * waited for ten, on the argument that a mean over two strangers looks like data and
+ * is not. That argument was about a crowded app; before launch almost every title has
+ * one rating or none, so the threshold withheld not a weak number but every number
+ * there was — including, absurdly, from the reader whose own rating it was counting.
+ *
+ * What makes one publishable is the line already under it: the sample size is printed
+ * beside the number, so `8.7` over `1 rating` is not a claim about the crowd. It is
+ * one person's score with the count that says so, and the reader can weigh it. The
+ * threshold is still the server's — `score.community_min_ratings`, now 1 — and this
+ * component has never known the number.
  *
  * **The circle is always drawn.** Founder instruction, and it does two jobs. A unit
  * that grows a circle when the data arrives is a unit that moves; and the empty circle
@@ -219,10 +225,10 @@ function followingDetail(ratingCount: number): string {
 /**
  * "128 ratings".
  *
- * Only reached with a number beside it. Below the threshold the unit says
- * {@link NOT_ENOUGH} and stops: no countdown, because "2 more needed" invites the
- * reader to watch a figure they cannot move and the exact shortfall is a property of a
- * config value rather than of the film.
+ * Only reached with a number beside it, which since 2026-09-05 means from the first
+ * rating. Below the threshold the unit says {@link NOT_ENOUGH} and stops: no
+ * countdown, because "2 more needed" invites the reader to watch a figure they cannot
+ * move and the exact shortfall is a property of a config value rather than of the film.
  */
 function ratingsDetail(ratingCount: number): string {
   return ratingCount === 1 ? '1 rating' : `${ratingCount} ratings`;

@@ -37,6 +37,7 @@ import { useSeasons } from '@/features/search/use-title-search';
 import { useCommunityScore } from '@/features/title/use-community-score';
 import { useFollowingScore } from '@/features/title/use-following-score';
 import { FollowingRatingsSheet } from '@/features/title/FollowingRatingsSheet';
+import { WhereToWatch } from '@/features/title/WhereToWatch';
 import { useCredits } from '@/features/title/use-credits';
 import { seasonListIsStale, useTitleEnrichment } from '@/features/title/use-enrichment';
 import { TitleReviews } from '@/features/title/TitleReviews';
@@ -1038,6 +1039,20 @@ export default function TitleScreen() {
             onPressFollowing={() => setFollowingRatingsOpen(true)}
           />
         ) : null}
+
+        {/* Under the scores, over the tabs, and on every kind of title — including a
+            series, which has no score block of its own because it cannot be ranked.
+
+            The founder's placement decision, and the reason it is not a tab: a film
+            opens on Cast and a season opens on Episodes, both of which are those
+            pages' whole point, and a fifth entry on a season's row would push one of
+            them off the edge. Availability is worth finding without a tab hunt and is
+            not worth a hero band, so it is a row that grows into a sheet.
+
+            It draws nothing at all when the provider has no answer, has not answered
+            yet, or failed — see `WhereToWatch`. That is what keeps a non-critical
+            block from making the page it sits on less reliable. */}
+        <WhereToWatch mediaItemId={title.id} titleName={title.title} />
 
         <View style={styles.tabs}>
           <SegmentedTabs

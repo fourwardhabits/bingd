@@ -306,6 +306,41 @@ Two founder passes on a device, recorded together because both move the top of t
 
 **The personal cluster is the primary action of this page.** The reader's own score circle is the page's largest (`xl`, 64 — a badge size that exists for this cluster alone), the "Your score" caption is gone — a filled Maroon circle with a number in it, above a button named Rank, does not need a caption to say whose score it is — and Rank/Ranked is full 44pt control height with a `headline` label. **Recommend in the action row is outlined**: filled Maroon marks the primary action of the current context ([`design-system.md`](./design-system.md) §8), and on a title page that is this cluster. Recommend is filled again inside its own sheet, where sending is the point; Watchlist is unchanged; never two equally dominant Maroon CTAs in one view.
 
+### As built — 2026-09-05: where to watch, under the scores and over the tabs
+
+One compact row, and its size is the decision. Label on the left with `via JustWatch` beneath
+it, the first three service logos on the right at 28pt, a `+N` when there are more, and a
+chevron. Tapping opens a sheet grouping every service under **STREAM · RENT · BUY**, a service
+offered two ways appearing under both from one entry.
+
+```
+   ─────────────────────────────────────────────
+   ⬤ 8.7  bingd.        ⬤ 9.1  Following
+     12 ratings           2 people you follow
+
+   Where to watch          [N] [tv] [a]  +2   ›
+   via JustWatch
+   ─────────────────────────────────────────────
+   Cast    Details    Reviews    Videos
+```
+
+**Not a tab, and that is the whole placement argument.** A film opens on Cast and a season
+opens on Episodes, both of which are those pages' point; a season's row is already five tabs
+and scrolls sideways on a 320pt phone. Availability is worth finding without a tab hunt and is
+not worth a hero band, so it is a row on the page — under the score block, over the tabs, on
+every kind of title including a series, which has no score block of its own.
+
+**It disappears rather than explaining itself.** Loading, failed and genuinely empty all draw
+nothing: this is the one block on the page allowed to be absent, and a card apologising for a
+licensor's missing data would be a permanent apology on every obscure film in the catalogue.
+Nothing about a provider failure reaches the page around it.
+
+**A logo is not a button.** TMDB publishes no per-service deep link, so nothing here opens
+Netflix; the one action is `View watch options`, which is TMDB's own page for that title in
+that market. The JustWatch credit is on both surfaces because their terms require the source
+to be named wherever the data is shown — see
+[`../reference/tmdb-integration.md`](../reference/tmdb-integration.md).
+
 ---
 
 ## 7. Feed — reworked 2026-08-15

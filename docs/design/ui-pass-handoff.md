@@ -415,9 +415,9 @@ existed, and tapping it gave an empty list.
   the escape hatch for an accidental log is removal, which still names everything it takes.
   `rank_unrank` is untouched internally and `rank_rebucket` still uses it.
 - **Scores is one row of two columns**: Following on the left, Bingd on the right, circle
-  above the label. Same thresholds as before — Following lights on one rating from somebody
-  you follow, Bingd waits for ten — same grey circle, same `Not enough ratings`, still no
-  countdown. On a narrow device or with type size turned up it falls back to the two
+  above the label. Both light on one rating as of 2026-09-05 — Following always did, and
+  bingd. waited for ten until `20260910000100` — same grey circle, same `Not enough
+  ratings` at zero, still no countdown. On a narrow device or with type size turned up it falls back to the two
   stacked rows rather than cramming.
 - Your own score is still only in the hero.
 

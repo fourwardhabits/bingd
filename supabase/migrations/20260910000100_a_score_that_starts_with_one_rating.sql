@@ -1,0 +1,53 @@
+-- The bingd. score appears at one rating instead of ten.
+-- Founder decision, 2026-09-05.
+--
+-- ---------------------------------------------------------------------------
+-- WHY THE NUMBER MOVES, AND WHY IT IS THE ONLY THING THAT MOVES
+--
+-- `score.community_min_ratings` has been 10 since `20260818000100`, and the argument
+-- there was about authority: three strangers is not an app-wide opinion, and putting
+-- their mean under the product's own name lends it a weight it has not earned.
+--
+-- That argument was made against a different problem from the one the beta actually
+-- has. It is about a *crowded* app where a thin mean would be mistaken for a settled
+-- one. Before launch the app is the opposite: almost every title in the catalogue has
+-- one rating or none, so the threshold does not withhold a weak number — it withholds
+-- every number there is. A reader who ranks a film and then opens its page is told
+-- "Not enough ratings" about a population that includes themselves, which reads as
+-- the feature being broken rather than as the app being careful.
+--
+-- The honest context was already on the screen. `ScoresSection` prints the sample
+-- size beside the number — `1 rating`, `2 ratings`, `18 ratings` — so a reader can
+-- see exactly how much a mean is worth without the app deciding for them. That line
+-- is what makes one rating publishable: it is not a claim about the crowd, it is one
+-- person's score with the count that says so.
+--
+-- **Nothing else changes.** Not the aggregation, not the population, not the
+-- typography, not the wording, not the empty state:
+--
+--   - the mean is still `community_score` (`20260816000100`) over public, active
+--     accounts the caller could read one by one, blocks excluded in both directions;
+--   - the caller's own eligible rating was always part of that population and still
+--     is — there is no viewer-excluded variant of this number and never was, which is
+--     the property the founder asked to have confirmed rather than changed;
+--   - `rating_count` is unchanged, and zero ratings still yields a null score and the
+--     grey circle. `case when rated.n >= threshold.k` with `k = 1` withholds exactly
+--     the no-ratings case, which is the existing empty state and not a new one;
+--   - there is no low-confidence styling, no provisional label, no countdown. The
+--     count is the context.
+--
+-- An `update`, not an `insert ... on conflict`, and not a `create or replace` of the
+-- function: the row is created by `20260816000000`, `20260818000100` moved it the same
+-- way, and a database missing it has a larger problem than this file. The function's
+-- own `coalesce` fallback of 3 is deliberately left alone — it is the value for a
+-- database that has lost its config, which is a broken database rather than a
+-- configured one.
+--
+-- **This is data, not schema.** It applies to a running database in one statement and
+-- is reversible in one, which is the property that made it worth doing as a config
+-- change rather than as a rewrite of the aggregate.
+-- ---------------------------------------------------------------------------
+
+update app_config
+   set value = '1'::jsonb
+ where key = 'score.community_min_ratings';

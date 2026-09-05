@@ -21,8 +21,11 @@ import { assert, assertEquals } from '@std/assert';
 
 import {
   MAX_EPISODES,
+  MAX_WATCH_PROVIDERS,
   certificationOf,
   episodesOf,
+  watchAvailability,
+  watchRegionOf,
   fromMovieDetail,
   fromSeasonDetail,
   fromSearchResult,
@@ -675,4 +678,239 @@ Deno.test('every field of the target comes from a catalogue row and nowhere else
   assert(target.ok);
   assertEquals(target.seriesTmdbId, 4242);
   assertEquals(target.seasonNumber, 7);
+});
+
+// ---------------------------------------------------------------------------
+// Where to watch
+//
+// The third provider array that reaches a screen without being written to Postgres
+// first, after episodes and the person payload, and the only one whose terms name a
+// third party. Every assertion below is about a shape TMDB really sends: a service
+// under two categories at once, a country bucket that exists with nothing in it, a
+// market the response has never heard of.
+// ---------------------------------------------------------------------------
+
+/** Two markets, and one service in the first that is offered three different ways. */
+const PROVIDERS = {
+  results: {
+    US: {
+      link: 'https://www.themoviedb.org/movie/27205/watch?locale=US',
+      flatrate: [{ provider_id: 8, provider_name: 'Netflix', logo_path: '/netflix.jpg' }],
+      rent: [{ provider_id: 2, provider_name: 'Apple TV', logo_path: '/apple.jpg' }],
+      buy: [
+        { provider_id: 2, provider_name: 'Apple TV', logo_path: '/apple.jpg' },
+        { provider_id: 10, provider_name: 'Amazon Video', logo_path: '/amazon.jpg' },
+      ],
+    },
+    GB: {
+      link: 'https://www.themoviedb.org/movie/27205/watch?locale=GB',
+      flatrate: [{ provider_id: 39, provider_name: 'Now TV', logo_path: '/now.jpg' }],
+    },
+  },
+};
+
+Deno.test('reads exactly one country out of a response that carries every country', () => {
+  const us = watchAvailability(PROVIDERS, 'US');
+  const gb = watchAvailability(PROVIDERS, 'GB');
+
+  assertEquals(us.region, 'US');
+  assertEquals(
+    us.providers.map((p) => p.name),
+    ['Netflix', 'Apple TV', 'Amazon Video'],
+  );
+  assertEquals(
+    gb.providers.map((p) => p.name),
+    ['Now TV'],
+  );
+  // The link belongs to the market too. Serving the US page to a reader in Britain
+  // would send them to a list of services they cannot subscribe to.
+  assert(gb.link?.endsWith('locale=GB'));
+});
+
+Deno.test('a service offered two ways is one entry carrying both', () => {
+  // Apple TV under rent *and* buy is TMDB's ordinary shape rather than an anomaly.
+  // Two rows with the same logo and the same name reads as a rendering fault.
+  const { providers } = watchAvailability(PROVIDERS, 'US');
+  const apple = providers.find((p) => p.provider_id === 2);
+
+  assertEquals(apple?.offers, ['rent', 'buy']);
+  assertEquals(providers.filter((p) => p.provider_id === 2).length, 1);
+});
+
+Deno.test('the three offers keep their own categories rather than being flattened', () => {
+  const { providers } = watchAvailability(PROVIDERS, 'US');
+
+  assertEquals(providers.find((p) => p.name === 'Netflix')?.offers, ['stream']);
+  assertEquals(providers.find((p) => p.name === 'Amazon Video')?.offers, ['buy']);
+});
+
+Deno.test('provider order is the provider list order, within stream then rent then buy', () => {
+  // Each array arrives sorted by display_priority, which is that service's prominence
+  // in that market and a better first-three than anything derivable here. A service
+  // first seen under rent keeps its place when it turns up again under buy.
+  assertEquals(
+    watchAvailability(PROVIDERS, 'US').providers.map((p) => p.provider_id),
+    [8, 2, 10],
+  );
+});
+
+Deno.test('a country the response does not name comes back empty rather than borrowing one', () => {
+  const answer = watchAvailability(PROVIDERS, 'JP');
+
+  assertEquals(answer.region, 'JP');
+  assertEquals(answer.providers, []);
+  assertEquals(answer.link, null);
+});
+
+Deno.test('a bucket that exists with nothing in it carries no watch-options link', () => {
+  // TMDB sends the link on any bucket it has, including one whose offer arrays are
+  // all empty. A page saying "not available anywhere" is not a watch option, and
+  // offering it as one would be a row that leads nowhere.
+  const answer = watchAvailability(
+    { results: { US: { link: 'https://www.themoviedb.org/movie/1/watch?locale=US' } } },
+    'US',
+  );
+
+  assertEquals(answer.providers, []);
+  assertEquals(answer.link, null);
+});
+
+Deno.test('free and ad-supported offers are deliberately not read', () => {
+  // Three categories, three headings. Folding Tubi in under Stream would say the same
+  // thing about it as about Netflix, and inventing a fourth heading is not this
+  // change's decision to make. Stated here so it is not read later as a bug: a title
+  // carried only by a free or ad-supported service shows no block at all.
+  const answer = watchAvailability(
+    {
+      results: {
+        US: {
+          link: 'https://example.invalid',
+          free: [{ provider_id: 73, provider_name: 'Tubi', logo_path: '/tubi.jpg' }],
+          ads: [{ provider_id: 300, provider_name: 'Pluto TV', logo_path: '/pluto.jpg' }],
+        },
+      },
+    },
+    'US',
+  );
+
+  assertEquals(answer.providers, []);
+});
+
+Deno.test('an entry that cannot say who it is is dropped rather than drawn blank', () => {
+  const answer = watchAvailability(
+    {
+      results: {
+        US: {
+          flatrate: [
+            null,
+            'Netflix',
+            { provider_name: 'No id' },
+            { provider_id: 8 },
+            { provider_id: 1.5, provider_name: 'Fractional' },
+            { provider_id: 9, provider_name: '   ' },
+            { provider_id: 337, provider_name: 'Disney Plus', logo_path: '' },
+          ],
+        },
+      },
+    },
+    'US',
+  );
+
+  // Only the last survives, and its empty logo path becomes a null the row renders
+  // around rather than an image URL ending in nothing.
+  assertEquals(answer.providers.length, 1);
+  assertEquals(answer.providers[0].name, 'Disney Plus');
+  assertEquals(answer.providers[0].logo_path, null);
+});
+
+Deno.test('one country cannot return an unbounded list', () => {
+  const many = Array.from({ length: MAX_WATCH_PROVIDERS + 15 }, (_, i) => ({
+    provider_id: i + 1,
+    provider_name: `Service ${i + 1}`,
+    logo_path: `/${i}.jpg`,
+  }));
+
+  const answer = watchAvailability({ results: { US: { flatrate: many } } }, 'US');
+  assertEquals(answer.providers.length, MAX_WATCH_PROVIDERS);
+});
+
+Deno.test('the cap counts services rather than offers', () => {
+  // A service offered all three ways costs one of the forty, because the cap is
+  // applied after deduplication. Otherwise a market with twenty services that each
+  // rent and sell would be truncated at half its real length.
+  const both = Array.from({ length: MAX_WATCH_PROVIDERS }, (_, i) => ({
+    provider_id: i + 1,
+    provider_name: `Service ${i + 1}`,
+    logo_path: null,
+  }));
+
+  const answer = watchAvailability({ results: { US: { rent: both, buy: both } } }, 'US');
+  assertEquals(answer.providers.length, MAX_WATCH_PROVIDERS);
+  assertEquals(answer.providers[0].offers, ['rent', 'buy']);
+});
+
+Deno.test('a missing, malformed or absent response is an empty answer and never a throw', () => {
+  // Availability is the one block on the title page allowed to fail without the page
+  // failing with it, so every shape short of the expected one has to have an answer.
+  for (const payload of [null, undefined, {}, { results: undefined }, { results: { US: null } }]) {
+    const answer = watchAvailability(payload as never, 'US');
+    assertEquals(answer.providers, []);
+    assertEquals(answer.link, null);
+  }
+});
+
+Deno.test('the region is a country code or the US default, and never reaches a URL', () => {
+  // The one caller-supplied value in the request. It is used as an object key rather
+  // than as part of the route, which is built from media_items alone, so this is
+  // about answering a sensible question rather than about escaping. Anything that is
+  // not two letters falls back, because a phone reporting a region TMDB has never
+  // heard of should see the US list rather than an error on a title page.
+  assertEquals(watchRegionOf('gb'), 'GB');
+  assertEquals(watchRegionOf(' de '), 'DE');
+  assertEquals(watchRegionOf(undefined), 'US');
+  assertEquals(watchRegionOf(''), 'US');
+  assertEquals(watchRegionOf('USA'), 'US');
+  assertEquals(watchRegionOf('en-US'), 'US');
+  assertEquals(watchRegionOf(42), 'US');
+  assertEquals(watchRegionOf('../secrets'), 'US');
+});
+
+Deno.test('a watch-options link that is not TMDB over https is not offered at all', () => {
+  // Checked rather than escaped, for the reason videoUri states on the client: this
+  // string is handed to Linking.openURL on a phone. The shape is provider-owned and
+  // has never varied, so a link that is not TMDB over https is not the page the row
+  // claims to open, and not offering the row beats opening somewhere unexpected.
+  const withLink = (link: unknown) =>
+    watchAvailability(
+      {
+        results: {
+          US: {
+            link,
+            flatrate: [{ provider_id: 8, provider_name: 'Netflix', logo_path: '/n.jpg' }],
+          },
+        },
+      },
+      'US',
+    );
+
+  assertEquals(withLink('https://www.themoviedb.org/movie/27205/watch?locale=US').link,
+    'https://www.themoviedb.org/movie/27205/watch?locale=US');
+  assertEquals(withLink('https://themoviedb.org/movie/27205/watch').link,
+    'https://themoviedb.org/movie/27205/watch');
+
+  for (const bad of [
+    'http://www.themoviedb.org/movie/1/watch',
+    'https://themoviedb.org.evil.example/movie/1',
+    'https://evil.example/?x=www.themoviedb.org',
+    'javascript:alert(1)',
+    'not a url',
+    '',
+    null,
+    42,
+  ]) {
+    assertEquals(withLink(bad).link, null, `refused: ${String(bad)}`);
+    // And the providers survive the refusal — the list is the block, the link is an
+    // extra, so losing one must not lose the other.
+    assertEquals(withLink(bad).providers.length, 1);
+  }
 });
