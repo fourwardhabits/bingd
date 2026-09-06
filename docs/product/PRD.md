@@ -3096,6 +3096,12 @@ The feed reads `causal_at desc, causal_step desc, id asc`. The third key makes t
 
 **New in v0.6.** This resolves a structural absence in v0.5, where the brand system referenced notifications but no notification feature existed anywhere in scope, information architecture, entities, tests, or metrics.
 
+> **The canonical strategy is [`notifications.md`](./notifications.md)** (2026-09-06), and it is the source of truth for every type: what is live, what is implemented-disabled, what is deferred and what has been rejected, with the trigger, the deep link, the dedupe rule, the settings group and the conversion metric for each. This section states the requirement; that document states the whole matrix and is deliberately more granular than the Settings screen.
+>
+> **The doctrine, in four sentences.** A notification must help somebody act on something relevant — never "open bingd." It earns the interruption in one of four ways: another person interacted with you, something you explicitly saved became actionable, a friend created a timely conversation, or a meaningful progress state is about to expire. Every one deep-links to the object it promised; a proactive push whose only destination is the feed should not have been sent. And there must be **both** a per-type dedupe *and* a global cap across every proactive type — initially two per rolling seven days with about 36 hours between them — from which direct person-to-person notifications are exempt, because suppressing "somebody replied to you" to protect an engagement budget is the wrong trade in every direction.
+>
+> That is the rule in item 19 of §2 ("if there is nothing true to say, send nothing") given a shape that can be checked.
+
 ### Build posture — Decided for public alpha
 
 Build the **entire** system in v1: event generation, in-app inbox, per-category preferences, and a delivery abstraction that can route to inbox, push, or both.

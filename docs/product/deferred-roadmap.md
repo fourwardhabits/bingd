@@ -2246,3 +2246,74 @@ bingd. is choosing not to do, rather than something nobody has got to yet:
   the specific thing the physical-QA pass of 2026-09-05 was correcting
 - **Tags**, until Lists have shipped and proven insufficient. Two organisation systems
   arriving at once means neither gets learnt
+
+---
+
+## 55. The weekly streak reminder, and the proactive notification layer under it
+
+**Deferred 2026-09-06, with the display shipped and the push not.**
+
+The weekly streak itself is live: a compact section on the owner's own profile, derived
+from `rankings.created_at` with no schema at all (`src/features/streaks/streak.ts`). A
+valid week is one containing at least one completed ranking; the week starts on local
+Monday; an unfinished week is not a broken one.
+
+**The reminder push is specified in full in
+[`notifications.md`](./notifications.md) §4 and is not built.** At most one per week,
+only for a reader with a live streak to lose, only near the end of the week, never to
+somebody who has already ranked that week, deep-linked to the ranking surface. What
+blocks it is three things, and none is small:
+
+1. **A stored timezone.** The week boundary is local and is computed on the device. A
+   server deciding "48 hours before this reader's week ends" needs the zone, which is a
+   column and a decision about how it is captured — and it must not become a reason to
+   ask for location.
+2. **A scheduled candidate query.** `pg_cron` already drains the push outbox
+   (`20260826000300`), so the machinery exists; "readers with a live streak who have not
+   ranked this week" is a new scheduled function.
+3. **The global proactive cap and its suppression ledger** — `notifications.md` §7. The
+   cap has to exist *before* the first proactive type, not after the second, or the
+   discipline is lost at exactly the moment it starts to matter.
+
+**Copy and grace semantics are deliberately unsettled.** The display's sentence is not
+automatically the push's: one is read by somebody who chose to look at their profile, the
+other interrupts their evening.
+
+### This does not contradict "daily streaks, actively resisted"
+
+The list above rules out **daily** streaks, arbitrary points and forced social actions,
+and all three stay ruled out. A weekly cadence is the one the product's own loop actually
+has — people do not rank every day, so a daily streak would be broken by everybody inside
+a week and would be a punishment mechanic rather than a habit one. The shipped section
+carries no points, no XP, no coins, no freeze, no loss animation and nothing to buy, and
+`StreakSection.test.tsx` asserts each of those absences rather than trusting them.
+
+### The trigger to revisit
+
+**Enough public users to establish a baseline weekly return rate**, and specifically the
+shape where people *enjoy* ranking when they come back but forget to come back after
+watching something. `streak_state_viewed` is already collecting the distribution that
+answers the first half.
+
+**And the guardrail the founder set: a streak must not be used to mask weak ranking
+value.** If the ranking loop is not bringing people back on its own, a reminder that it
+exists is not the fix.
+
+---
+
+## 56. Manual award pinning on the profile
+
+**Deferred 2026-09-06**, recorded as a candidate rather than built.
+
+The profile shows three awards, chosen by seniority, then by most recently earned where
+the ledger can be read, then by the canonical order
+(`src/features/awards/featured.ts`). Choosing them by hand — a picker, a drag-to-reorder,
+a custom showcase — is the natural next request and is deliberately not in the first pass.
+
+**Why it waits.** An automatic shelf that is right most of the time teaches what the
+slots are for; a picker offered before anybody has three awards worth choosing between is
+a customisation surface over an empty shelf. It also needs somewhere to store the choice,
+which is the first thing on this profile that would.
+
+**Trigger:** readers who have earned more than three awards and say the wrong ones are
+showing. Until somebody has that problem, the ordering is the answer to it.

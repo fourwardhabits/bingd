@@ -569,6 +569,39 @@ Results of the run on 2026-08-19, from `APP_VARIANT=development`:
 
 ---
 
+## 10b. Notification measurement
+
+The types, triggers and conversion definitions live in
+[`notifications.md`](./notifications.md) §8 and are deliberately **not** duplicated here.
+What belongs in this document is the shape the measurement has to take, and one decision
+that has to be made before any of it is collected.
+
+**One event exists today.** `streak_state_viewed` — the current run, whether the week is
+already safe, and how many days remain — emitted once per settled read on the owner's own
+profile. It answers the only question a streak has before any push exists: how many
+people are looking at a live streak versus a zero. That distribution is the difference
+between a mechanic that works and decoration.
+
+**Nothing else is declared, on purpose.** `streak_reminder_sent`, `..._opened` and their
+siblings describe pushes that do not exist. Declaring them early puts permanently empty
+series in the dashboard, which reads as a broken feature rather than an absent one.
+
+**The one decision that cannot be deferred past the first proactive push.** Organic and
+notification-assisted behaviour have to be separable, or the retention question the
+whole exercise exists to answer cannot be asked: *did the reminder cause the return, or
+did the person who was coming back anyway happen to get one?* `ranking_completed`
+already carries `surface`, so the shape is available — a notification-opened ranking
+attributed to the push that produced it, either through a surface value or through an
+attribution window opened by the tap. It has to be settled **before** the first
+proactive type ships, because data gathered without it cannot be repaired afterwards.
+
+Per type, once there is one: **eligible → sent → suppressed (by reason) → opened →
+converted.** The suppression reason is the load-bearing half — without it there is no
+way to tell "this type never works" from "this type is never selected", and those two
+have opposite fixes. Open rate is never the success metric on its own.
+
+---
+
 ## 11. Deliberately not built
 
 Named here so that nobody has to guess whether it was forgotten. Each has an entry in
