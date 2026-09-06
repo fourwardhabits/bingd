@@ -29,6 +29,7 @@ import { isNearEnd } from '@/features/feed/near-end';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { ProfileAwards } from '@/features/awards/ProfileAwards';
 import { GoalsSection } from '@/features/goals/GoalsSection';
+import { StreakSection } from '@/features/streaks/StreakSection';
 import { currentYear } from '@/features/goals/use-goals';
 import { FollowListSheet } from '@/features/profile/FollowListSheet';
 import { RankedTitlesSheet } from '@/features/profile/RankedTitlesSheet';
@@ -323,6 +324,13 @@ export default function ProfileScreen() {
           userId={profile.id}
           onSeeAll={() => setAwardsOpen(true)}
         />
+
+        {/* Between the awards and the goals, which is the three-step the founder set:
+            what has been earned, what is happening this week, what the year is for.
+            Own profile only — a streak is a private fact about effort rather than a
+            public one about taste, and it draws nothing at all for an account that has
+            never ranked anything. */}
+        <StreakSection userId={profile.id} />
 
         {/* Above Top ranked, below the stats. A goal is about the year in progress
             and the stats are about all time, so this is where the page stops being a

@@ -334,7 +334,33 @@ export type AnalyticsEvent =
    * this event exists for — do people take the first suggestion or dig — without
    * carrying what the title was.
    */
-  | { name: 'group_picks_result_opened'; props: { position: number } };
+  | { name: 'group_picks_result_opened'; props: { position: number } }
+
+  // --- Weekly streak --------------------------------------------------------
+  /**
+   * The streak section was drawn on the reader's own profile, with what it said.
+   *
+   * **The question this exists to answer is whether streaks are worth keeping**, and
+   * that cannot be read off engagement alone — it needs the distribution. `weeks` is the
+   * current run, `ranked_this_week` is whether it is already safe, and `days_left` is
+   * how much of the week remains. Together they say how many people are looking at a
+   * live streak versus a zero, which is the difference between a mechanic that is
+   * working and one that is decoration.
+   *
+   * Emitted on the profile, once per settled read rather than per render — the section
+   * is on a tab that stays mounted, and an event per render would count scrolling.
+   *
+   * **There is deliberately no `streak_reminder_sent` or `..._opened` yet.** Those
+   * describe a push that does not exist: the reminder needs a scheduler, a stored
+   * timezone and a frequency cap, all of which are documented and deferred in
+   * `docs/product/notifications.md`. Declaring the events early would put permanently
+   * empty series in the dashboard and make a deferred feature look broken rather than
+   * absent.
+   */
+  | {
+      name: 'streak_state_viewed';
+      props: { weeks: number; ranked_this_week: boolean; days_left: number };
+    };
 
 /**
  * Which of the two support rows. Spelled here rather than imported from `lib/support`,
