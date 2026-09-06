@@ -442,14 +442,31 @@ describe('the section treatment', () => {
     expect(await view.findByText('Availability data provided by JustWatch.')).toBeTruthy();
   });
 
-  it('adds no rule of its own, because the heading is the separation', async () => {
-    // A hairline under the scores was the other candidate. `SectionHeader` without one
-    // is the app's dominant convention, and the constraint here is height: the block is
-    // a row and has to stay a row.
+  it('opens with the app hairline, above the row and inset to the gutter', async () => {
+    // The heading alone was the 2026-09-05 answer and the founder rejected it on a
+    // device: with the two score units directly above and nothing between them, the
+    // block still read as a continuation of Scores. This is `ScoresSection`'s own rule
+    // borrowed rather than a new one, and it costs a pixel of height.
     const view = await open();
-    const row = view.getByTestId('where-to-watch');
+    const rule = flat(view.getByTestId('where-to-watch-divider'));
 
-    expect(flat(row).borderTopWidth).toBeUndefined();
-    expect(flat(row).borderBottomWidth).toBeUndefined();
+    expect(rule.borderTopWidth).toBe(StyleSheet.hairlineWidth * 2);
+    expect(rule.borderTopColor).toBe(theme.border.hairline);
+    expect(rule.marginHorizontal).toBe(theme.layout.gutter);
+  });
+
+  it('draws the rule above the row rather than around it', async () => {
+    // A border on the row itself would box the block, which is the card treatment this
+    // is deliberately not.
+    const view = await open();
+    const row = flat(view.getByTestId('where-to-watch'));
+
+    expect(row.borderTopWidth).toBeUndefined();
+    expect(row.borderBottomWidth).toBeUndefined();
+
+    const nodes = view.root!.queryAll(() => true);
+    const at = (id: string) =>
+      nodes.findIndex((node) => (node.props as { testID?: string }).testID === id);
+    expect(at('where-to-watch-divider')).toBeLessThan(at('where-to-watch'));
   });
 });

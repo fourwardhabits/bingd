@@ -77,6 +77,23 @@ export function WhereToWatch({ mediaItemId, titleName }: WhereToWatchProps) {
 
   return (
     <>
+      {/**
+       * **The same inset hairline the Scores section draws above itself** (founder,
+       * physical Android, 2026-09-06).
+       *
+       * The maroon heading was the right change and was not enough on the device: with
+       * the two score units directly above it and nothing between them, the block still
+       * read as a continuation of Scores rather than as a section after it. The rule is
+       * the app's existing one, borrowed rather than invented — gutter-inset, doubled
+       * hairline, because a single one rounds away to nothing on some Android densities
+       * — and it costs one pixel of height.
+       *
+       * Decorative, and no accessibility role: a screen reader announcing a separator
+       * here would put a word between the scores and the availability where the design
+       * puts a pause. `ScoresSection` states the same thing about its own.
+       */}
+      <View testID="where-to-watch-divider" style={styles.divider} />
+
       <Pressable
         testID="where-to-watch"
         accessibilityRole="button"
@@ -320,8 +337,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: theme.space[3],
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[5],
+    // Half of what it was: the rule above now carries the section's top spacing, and
+    // keeping the full gap here as well would put the heading adrift below its own line.
+    paddingTop: theme.space[2],
     minHeight: theme.layout.rowMinHeight,
+  },
+  /**
+   * Inset to the gutter, at the app's hairline, and doubled — `ScoresSection`'s rule
+   * verbatim, because a single `hairlineWidth` rounds away to nothing on some Android
+   * densities. The top padding lives on the row below, so this sits tight to the
+   * section it opens rather than floating between two.
+   */
+  divider: {
+    marginHorizontal: theme.layout.gutter,
+    marginTop: theme.space[5],
+    borderTopWidth: StyleSheet.hairlineWidth * 2,
+    borderTopColor: theme.border.hairline,
   },
   copy: { flex: 1, gap: 2 },
   /** A source note, and it should read as one. See the block above it. */

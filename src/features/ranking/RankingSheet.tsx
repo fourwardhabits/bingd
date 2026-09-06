@@ -17,6 +17,7 @@ import { posterUri } from '@/lib/images';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
 import { queryKeys } from '@/lib/query';
 import { supabase } from '@/lib/supabase';
+import { compactName } from '@/lib/titles';
 import { useReducedMotion } from '@/ui/motion';
 import { theme } from '@/ui/tokens';
 import { Button, Poster, Sheet, Text, type BucketId } from '@/ui/components';
@@ -1033,6 +1034,29 @@ function Reveal({
   const showsOverall = position <= TOP_RANK_SHOWN;
 
   /**
+   * **What the reveal calls the thing it just ranked** (founder, physical Android,
+   * 2026-09-06).
+   *
+   * It printed `subject.title`, which for a season is `media_items.title` — and TMDB
+   * writes that as "Season 1". So a reader who had just ranked Vincenzo's first season
+   * saw a score, the words **Season 1**, and then `Below Fullmetal Alchemist:
+   * Brotherhood, S1` underneath: the two names either side of it identified themselves
+   * and the one it was about did not.
+   *
+   * `compactName` is the app's one answer to that and has been since 2026-08-16 — the
+   * anchors below already go through it, via `rank-neighbours`. Reading the subject's
+   * own row out of the same list and passing it through the same function is what makes
+   * the three lines agree by construction rather than by two call sites being kept in
+   * step. A movie's row returns its own title untouched, so nothing about a film moves.
+   *
+   * Falls back to the prop while the list is still refetching, which is the same render
+   * on which the anchors are absent — so the reveal degrades to exactly what it said
+   * before this change rather than to nothing.
+   */
+  const subjectRow = ranked?.find((row) => row.mediaItemId === subjectId);
+  const displayTitle = (subjectRow ? compactName(subjectRow) : null) ?? title;
+
+  /**
    * The two names either side of it, off the same list, so this costs no second read.
    * Empty until that list has refetched, which is why the block below renders nothing
    * rather than a placeholder: an absent neighbour line is invisible, and a skeleton
@@ -1069,14 +1093,15 @@ function Reveal({
    * character.
    */
   const spokenPlacement = [
-    `${title} scored ${formatScore(score)} out of 10.`,
-    higher ? `Below ${higher.name}.` : null,
-    lower ? `Above ${lower.name}.` : null,
-    // Whichever of the two the screen is drawing, in the order it draws them. A summary
-    // that read out a placement the page has decided not to show would be the founder's
-    // complaint again, with a screen reader as the surface.
+    `${displayTitle} scored ${formatScore(score)} out of 10.`,
+    // Whichever of the two the screen is drawing, in the order it draws them — which
+    // moved on 2026-09-06 and moves here with it. A summary that read out a placement
+    // the screen decided not to show would be the founder's complaint again, with a
+    // screen reader as the surface.
     placement ? `${placement}.` : null,
     genreContext ? `${genres.map(formatGenreRank).join('. ')}.` : null,
+    higher ? `Below ${higher.name}.` : null,
+    lower ? `Above ${lower.name}.` : null,
   ]
     .filter(Boolean)
     .join(' ');
@@ -1094,7 +1119,7 @@ function Reveal({
       </View>
 
       <Text variant="title2" style={styles.centre}>
-        {title}
+        {displayTitle}
       </Text>
 
       {/**
@@ -1124,14 +1149,51 @@ function Reveal({
         */}
       <View style={styles.placement}>
         {/**
-         * The anchors lead now (founder, 2026-09-05), where the ordinal used to.
+         * **The placement leads again, directly under the title** (founder, physical
+         * Android, 2026-09-06) — where it was before 2026-09-05 and where the founder
+         * put it back after seeing both on a device.
          *
-         * They are the half of this block that is about the film: "#7" is abstract and
-         * "below Dune, above The Batman" is an opinion. They are also the half that is
-         * always available — a ranked title has neighbours whatever its position, while
-         * the ordinal below is now allowed to be absent entirely — so leading with them
-         * is what keeps the block's shape stable instead of having its first line
-         * disappear for anyone outside their own top ten.
+         * What changed between the two is the part that made moving it safe: the line is
+         * now conditional and top-ten only, so it is no longer `#19 in Movies` leading
+         * the block. When it appears it is worth reading, and when it is not worth
+         * reading it is not there.
+         *
+         * It is **muted**, which is the other half of the founder's decision. The
+         * hierarchy is score, then title, then placement, then the names either side —
+         * so this must not arrive at the title's weight. `ordinal` keeps the tabular
+         * figures an ordinal wants; `secondary` is what stops it competing.
+         */}
+        {placement ? (
+          <Text
+            variant="ordinal"
+            tone="secondary"
+            style={styles.centre}
+            accessibilityElementsHidden
+          >
+            {placement}
+          </Text>
+        ) : null}
+
+        {genreContext ? (
+          <Text
+            variant="footnote"
+            // `secondary`, not `tertiary`: this is the placement line whenever the
+            // overall one is withheld, so it sits at the placement's tier rather than
+            // at the anchors'. The two below it are the quieter thing.
+            tone="secondary"
+            style={styles.centre}
+            accessibilityElementsHidden
+          >
+            {genreContext}
+          </Text>
+        ) : null}
+
+        {/**
+         * The two names either side, last and quietest.
+         *
+         * "#7" is abstract and "below Dune, above The Batman" is an opinion — which is
+         * why they are here at all — but they are context for the placement above them
+         * rather than the headline, and the founder's order says so.
          *
          * Nothing is invented to sit above a #1 or below a last place. The line that
          * would name it is simply absent.
@@ -1168,34 +1230,6 @@ function Reveal({
               </Text>
             ) : null}
           </View>
-        ) : null}
-
-        {/**
-         * Every rank the screen is showing, together, under the names — the founder's
-         * grouping. It is one line or the other and never both: `#7 in Movies` when the
-         * title is inside the reader's top ten, the qualifying genres when it is not,
-         * and nothing at all when neither applies.
-         *
-         * The two keep the typography they already had rather than converging. The
-         * overall placement is the stronger claim and stays at `ordinal` and full
-         * contrast; the genres were context before this change and are context after it.
-         * What changed is which of them is on the screen, not how either is drawn.
-         */}
-        {placement ? (
-          <Text variant="ordinal" style={styles.centre} accessibilityElementsHidden>
-            {placement}
-          </Text>
-        ) : null}
-
-        {genreContext ? (
-          <Text
-            variant="footnote"
-            tone="tertiary"
-            style={styles.centre}
-            accessibilityElementsHidden
-          >
-            {genreContext}
-          </Text>
         ) : null}
       </View>
 

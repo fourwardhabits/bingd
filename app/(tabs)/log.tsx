@@ -1,11 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
+import { useWatchlist } from '@/features/collection/use-collection';
+import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate';
+import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
 import { useRecentSearches } from '@/features/search/use-recent-searches';
@@ -92,6 +96,23 @@ export default function LogScreen() {
   // The title the open ranking is about, kept because `logging` is cleared at the
   // handoff and the post-rank sheet needs the same `LoggableTitle` back.
   const [ranked, setRanked] = useState<LoggableTitle | null>(null);
+  /** Which title's watchlist write is in flight, or null. Draws the disabled control. */
+  const [watchlistBusy, setWatchlistBusy] = useState<string | null>(null);
+  /** The same fact, written synchronously, which is what makes it a guard. See below. */
+  const watchlistInFlight = useRef<string | null>(null);
+
+  const queryClient = useQueryClient();
+
+  /**
+   * The reader's own watchlist, read through the same hook the Feed and For You read it
+   * through — so the bookmark on a Search row and the bookmark on a Feed row are drawing
+   * the same set, and saving on one screen fills in the other.
+   */
+  const watchlist = useWatchlist(profile.id);
+  const saved = useMemo(
+    () => new Set((watchlist.data ?? []).map((entry) => entry.mediaItemId)),
+    [watchlist.data],
+  );
 
   const { recent, remember, clear } = useRecentSearches(profile.id);
 
@@ -263,6 +284,71 @@ export default function LogScreen() {
     });
   };
 
+  /**
+   * **Search is a capture surface, not only a lookup one** (founder, 2026-09-06).
+   *
+   * The job is somebody seeing a film named on Instagram, opening bingd., searching it,
+   * saving it and leaving. That was Search → title detail → find the bookmark → back
+   * out; it is now one tap on the row.
+   *
+   * **The canonical path, and deliberately not a Search-shaped copy of it.** This is the
+   * same `setWatchlist` RPC, the same `newOperationId`, the same `mustReconcile`
+   * reconciliation and the same `invalidateAfterWatchlistChange` the Feed, For You,
+   * Group Picks and the person page all use — so a title saved from here is a title
+   * saved, with the same server-side consequences. `set_watchlist` writes the
+   * `watchlist_added` feed event, so a save from Search is as visible to the reader's
+   * followers as a save from anywhere else. Suppressing that because the tap happened on
+   * a different screen would be a second product rule nobody asked for.
+   *
+   * `surface: 'search'` is the one thing that differs, and it is a label on an analytics
+   * event rather than a difference in behaviour. It was already in the `Surface` union.
+   */
+  const toggleWatchlist = async (result: SearchResult) => {
+    /**
+     * One write in flight at a time, and the guard is a **ref** rather than the state
+     * below it.
+     *
+     * The state is what draws the disabled control, and it cannot be the guard: two taps
+     * inside one tick both read the same render's `watchlistBusy`, both see null, and
+     * both spend an operation id on one intent. React has not re-rendered in between and
+     * `disabled` has not taken effect either. A ref is written synchronously, so the
+     * second tap sees the first.
+     *
+     * The Feed's toggle has the state-only version and is fine in practice, because
+     * nothing there is as tappable as a row you are already looking at while deciding.
+     * This is the surface built for speed, so it gets the guard that actually holds.
+     */
+    if (watchlistInFlight.current) return;
+    watchlistInFlight.current = result.id;
+    setWatchlistBusy(result.id);
+
+    const present = !saved.has(result.id);
+    const outcome = await setWatchlist({
+      operationId: newOperationId(),
+      mediaItemId: result.id,
+      present,
+    });
+    watchlistInFlight.current = null;
+    setWatchlistBusy(null);
+
+    // Additions only, and only on `ok` — the Feed's rule, verbatim. `already_applied` is
+    // one intent replayed rather than a second save.
+    if (present && outcome.outcome === 'ok') {
+      track({ name: 'watchlist_added', props: { surface: 'search' } });
+    }
+
+    // Reconciled before the error is shown, not instead of it: `set_watchlist` can commit
+    // and lose its reply, and the client cannot tell that from a refusal. See the same
+    // comment on the Feed's toggle for the review that established this.
+    if (mustReconcile(outcome)) {
+      invalidateAfterWatchlistChange(queryClient, profile.id);
+    }
+
+    if (outcome.outcome === 'failed') {
+      Alert.alert('Could not update watchlist', outcome.message);
+    }
+  };
+
   return (
     <Screen>
       {/* Brand row, then the field on a row of its own — the same second-row
@@ -336,6 +422,9 @@ export default function LogScreen() {
         onRetry={retry}
         onOpenTitle={openTitle}
         onOpenLog={openLog}
+        saved={saved}
+        watchlistBusy={watchlistBusy}
+        onToggleWatchlist={toggleWatchlist}
       />
 
       <SeasonPicker
@@ -434,6 +523,9 @@ function Results({
   onRetry,
   onOpenTitle,
   onOpenLog,
+  saved,
+  watchlistBusy,
+  onToggleWatchlist,
 }: {
   idle: boolean;
   peopleOnly: boolean;
@@ -458,6 +550,11 @@ function Results({
   providerFailed: boolean;
   onRetry: () => void;
   onOpenTitle: (result: SearchResult) => void;
+  /** Media ids on the reader's watchlist, from the canonical `useWatchlist`. */
+  saved: Set<string>;
+  /** The id of the title whose watchlist write is in flight, or null. */
+  watchlistBusy: string | null;
+  onToggleWatchlist: (result: SearchResult) => void;
   onOpenLog: (result: SearchResult) => void;
 }) {
   if (idle) {
@@ -757,18 +854,76 @@ function Results({
                     />
                   )
                 }
+                /**
+                 * **Two actions, and the order is the founder's**: bookmark then `+`.
+                 *
+                 * Save-for-later on the left, log-and-rank-now on the right, with `+`
+                 * keeping the outer edge it has always had — so the control somebody has
+                 * learnt the position of does not move, and the new one arrives beside it
+                 * rather than in front of it.
+                 *
+                 * No labels, and the bookmark is `icon.md` against the `+`'s `icon.lg`:
+                 * ranking is what this screen is for and saving is the quicker, quieter
+                 * act. Both carry `hitSlop`, so each clears 44pt without the row growing —
+                 * the same rule the Feed's action strip follows.
+                 *
+                 * The row itself still opens the title. Both of these are `Pressable`
+                 * children of `trailing`, which is outside `TitleRow`'s own press target,
+                 * so tapping either one cannot open the page underneath.
+                 */
                 trailing={
-                  <Pressable
-                    accessibilityLabel={`Log ${title.title}`}
-                    onPress={() => onOpenLog(title)}
-                    hitSlop={theme.space[2]}
-                  >
-                    <Ionicons
-                      name="add-circle"
-                      size={theme.layout.icon.lg}
-                      color={theme.semantic.action}
-                    />
-                  </Pressable>
+                  <View style={styles.rowActions}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{
+                        selected: saved.has(title.id),
+                        disabled: watchlistBusy === title.id,
+                      }}
+                      accessibilityLabel={
+                        saved.has(title.id)
+                          ? `Remove ${title.title} from Watchlist`
+                          : `Add ${title.title} to Watchlist`
+                      }
+                      // `void`, not a returned promise: a `Pressable` handler that
+                      // returns one makes the press itself await the whole write, which
+                      // is a hang in a test and a swallowed rejection in the app.
+                      onPress={() => void onToggleWatchlist(title)}
+                      // The write is guarded in `toggleWatchlist` as well; this stops the
+                      // second tap ever reaching it, which is the difference between a
+                      // refused duplicate and one that was never made.
+                      disabled={watchlistBusy === title.id}
+                      hitSlop={theme.space[3]}
+                      style={({ pressed }) => [
+                        styles.rowAction,
+                        pressed && styles.rowActionPressed,
+                      ]}
+                    >
+                      {/* Filled maroon when saved, outlined otherwise — the app's one
+                          watchlist treatment, the same pair `ActivityRow` draws. The icon
+                          swaps in place, so nothing on the row moves while it writes. */}
+                      <Ionicons
+                        name={saved.has(title.id) ? 'bookmark' : 'bookmark-outline'}
+                        size={theme.layout.icon.md}
+                        color={
+                          saved.has(title.id) ? theme.semantic.action : theme.text.secondary
+                        }
+                      />
+                    </Pressable>
+
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Log ${title.title}`}
+                      onPress={() => onOpenLog(title)}
+                      hitSlop={theme.space[2]}
+                      style={styles.rowAction}
+                    >
+                      <Ionicons
+                        name="add-circle"
+                        size={theme.layout.icon.lg}
+                        color={theme.semantic.action}
+                      />
+                    </Pressable>
+                  </View>
                 }
                 onPress={() => onOpenTitle(title)}
               />
@@ -790,6 +945,17 @@ type ResultRow =
   | { type: 'title'; result: SearchResult };
 
 const styles = StyleSheet.create({
+  /**
+   * The two quick actions on a title row.
+   *
+   * A gap rather than padding, so the row's height is still set by its type and the
+   * poster still fits inside it — `TitleRow`'s rule, and what keeps a second control
+   * from making Search rows taller than Collection's. The controls carry their 44pt
+   * targets in `hitSlop`, which costs no layout at all.
+   */
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
+  rowAction: { alignItems: 'center', justifyContent: 'center' },
+  rowActionPressed: { opacity: 0.6 },
   // The field's own row under the brand row — the cross-tab second-row position the
   // category selector holds elsewhere. Gutter-aligned with the content below it.
   searchRow: {

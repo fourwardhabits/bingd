@@ -1,4 +1,5 @@
 import { fireEvent, waitFor, within } from '@testing-library/react-native';
+import { Alert } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
@@ -51,7 +52,13 @@ jest.mock('@/lib/supabase', () => ({
           inFilters[column] = values;
           return chain;
         },
-        order: () => Promise.resolve({ data: rows(), error: null }),
+        // Both return the chain rather than resolving. `useWatchlist` pages by keyset
+        // (`lib/read-all.ts`), so its call is `.order(...).limit(...)` and `then` is what
+        // resolves it — an `order` that resolved made `.limit` a call on a promise. The
+        // same correction `TitleScreen.test` records.
+        order: () => chain,
+        limit: () => chain,
+        gt: () => chain,
         single: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
         maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
         then: (resolve: (value: unknown) => unknown) =>
@@ -135,6 +142,7 @@ beforeEach(() => {
   );
   tableRows.user_media = [];
   tableRows.rankings = [];
+  tableRows.watchlist = [];
   tableRows.media_items = [
     { id: 'series-1', genres: ['Crime', 'Drama'], runtime_minutes: null, kind: 'series' },
     { id: 'film-1', genres: ['Sci-Fi'], runtime_minutes: 148, kind: 'movie' },
@@ -866,5 +874,236 @@ describe('artwork on a title result', () => {
     const view = await search('inception');
     await view.findByLabelText(FILM_ROW);
     expect(view.getByLabelText('Log Inception')).toBeTruthy();
+  });
+});
+
+const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+beforeEach(() => alertSpy.mockClear());
+
+/**
+ * **Search is a capture surface** (founder, 2026-09-06).
+ *
+ * The job is somebody seeing a film named on Instagram, opening bingd., searching it,
+ * saving it and leaving. That was Search → title detail → find the bookmark → back out.
+ *
+ * What these tests are mostly about is that the quick action is **the canonical path and
+ * not a Search-shaped copy of it**: the same `set_watchlist` RPC with the same argument
+ * shape, so the server writes the same row and the same `watchlist_added` feed event it
+ * would have written from the Feed, For You or the title page. A save from Search is a
+ * save.
+ */
+describe('saving from a search result', () => {
+  const bookmark = (title: string) => `Add ${title} to Watchlist`;
+  const saved = (title: string) => `Remove ${title} from Watchlist`;
+
+  it('offers the bookmark beside the existing + on a film', async () => {
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+    expect(view.getByLabelText(bookmark('Inception'))).toBeTruthy();
+    // The action that was already there, in the place it was already in.
+    expect(view.getByLabelText('Log Inception')).toBeTruthy();
+  });
+
+  it('offers it on a series too, which is a real watchlist target', async () => {
+    // A series cannot be *logged* — the season is the rankable unit — but it can be
+    // saved, and `20260906000100` is the invariant that takes it off again when the last
+    // released season is watched. Withholding the bookmark here would be a Search-only
+    // product rule.
+    const view = await search('breaking');
+
+    await waitFor(() => expect(view.getByLabelText(SERIES_ROW)).toBeTruthy());
+    expect(view.getByLabelText(bookmark('Breaking Bad'))).toBeTruthy();
+  });
+
+  it('offers nothing of the sort on a person', async () => {
+    // People rows are their own branch of the list and carry Follow, not a bookmark.
+    // A person is not a watchlist target under any product rule, so the control must not
+    // be reachable by any label on that row.
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+    const bookmarks = view.queryAllByLabelText(/to Watchlist$/);
+    // One per title result and not one more.
+    expect(bookmarks).toHaveLength(2);
+  });
+
+  it('adds through the canonical RPC, with the canonical arguments', async () => {
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText(bookmark('Inception'))).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(bookmark('Inception')));
+
+    await waitFor(() => expect(callsTo('set_watchlist')).toHaveLength(1));
+    // Exactly the call the Feed makes. `p_present: true`, a fresh operation id, and no
+    // Search-specific argument — which is what makes the feed event and every downstream
+    // consequence identical.
+    expect(callsTo('set_watchlist')[0]![1]).toEqual({
+      p_operation_id: expect.any(String),
+      p_media_item_id: 'film-1',
+      p_present: true,
+    });
+  });
+
+  it('shows the saved treatment once it is on the list', async () => {
+    tableRows.watchlist = [{ user_id: 'user-1', media_item_id: 'film-1', created_at: 'now' }];
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText(saved('Inception'))).toBeTruthy());
+    expect(view.getByLabelText(saved('Inception')).props.accessibilityState.selected).toBe(
+      true,
+    );
+    expect(view.queryByLabelText(bookmark('Inception'))).toBeNull();
+  });
+
+  it('removes when it is already saved', async () => {
+    tableRows.watchlist = [{ user_id: 'user-1', media_item_id: 'film-1', created_at: 'now' }];
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText(saved('Inception'))).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(saved('Inception')));
+
+    await waitFor(() => expect(callsTo('set_watchlist')).toHaveLength(1));
+    expect(callsTo('set_watchlist')[0]![1]).toMatchObject({ p_present: false });
+  });
+
+  it('spends one operation id on one intent, however many times it is tapped', async () => {
+    // Two ids for one tap-and-tap-again is two rows the server has to reconcile.
+    //
+    /**
+     * Held open, so the second tap lands while the first is still going.
+     *
+     * Three un-awaited `fireEvent.press` calls would be the sharper test — one tick, no
+     * re-render, which is the case only the synchronous ref in `toggleWatchlist` can
+     * refuse — and it is not available here: overlapping `act()` scopes damage the *next*
+     * test in the file as a confusing "unable to find", which is the trap
+     * `ReactionControl.test` already records. So this asserts the guard the reader can
+     * actually see, and the ref stands behind it for the tick the renderer will not
+     * reproduce.
+     */
+    let settle: (value: unknown) => void = () => {};
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'search_titles'
+        ? Promise.resolve({ data: [series, film], error: null })
+        : fn === 'set_watchlist'
+          ? new Promise((resolve) => (settle = resolve))
+          : Promise.resolve({ data: { status: 'ok' }, error: null }),
+    );
+
+    const view = await search('inception');
+    await waitFor(() => expect(view.getByLabelText(bookmark('Inception'))).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(bookmark('Inception')));
+
+    // In flight: one call, and the control says so rather than accepting another.
+    expect(callsTo('set_watchlist')).toHaveLength(1);
+    const control = view.getByLabelText(bookmark('Inception'));
+    expect(control.props.accessibilityState.disabled).toBe(true);
+
+    await fireEvent.press(control);
+    expect(callsTo('set_watchlist')).toHaveLength(1);
+
+    // Settled and drained inside the test, so the handler's tail cannot resume during
+    // the next one.
+    settle({ data: { status: 'ok' }, error: null });
+    await waitFor(() =>
+      expect(
+        view.getByLabelText(bookmark('Inception')).props.accessibilityState.disabled,
+      ).toBe(false),
+    );
+    expect(callsTo('set_watchlist')).toHaveLength(1);
+  });
+
+  it('says so rather than pretending, when the write is refused', async () => {
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'search_titles'
+        ? Promise.resolve({ data: [series, film], error: null })
+        : fn === 'set_watchlist'
+          ? Promise.resolve({ data: null, error: { message: 'nope', code: 'P0001' } })
+          : Promise.resolve({ data: { status: 'ok' }, error: null }),
+    );
+
+    const view = await search('inception');
+    await waitFor(() => expect(view.getByLabelText(bookmark('Inception'))).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(bookmark('Inception')));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    expect(alertSpy.mock.calls[0]![0]).toBe('Could not update watchlist');
+    // And the row does not lie about the outcome.
+    expect(view.getByLabelText(bookmark('Inception'))).toBeTruthy();
+  });
+
+  it('saves without ranking, logging, recommending or leaving the screen', async () => {
+    // The bookmark is one write and nothing else. Each of these would be a different
+    // product act arriving under a control that does not name it.
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText(bookmark('Inception'))).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(bookmark('Inception')));
+    await waitFor(() => expect(callsTo('set_watchlist')).toHaveLength(1));
+
+    expect(callsTo('rank_start')).toHaveLength(0);
+    expect(callsTo('log_watched')).toHaveLength(0);
+    expect(callsTo('set_bucket')).toHaveLength(0);
+    expect(callsTo('recommend')).toHaveLength(0);
+    // No navigation, and no log sheet: the reader saves and carries on searching.
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(view.queryByText('How was it?')).toBeNull();
+  });
+
+  it('does not open the title underneath it', async () => {
+    // Both controls live in `trailing`, outside the row's own press target. A bookmark
+    // that also navigated would be the opposite of a quick capture.
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText(bookmark('Inception'))).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(bookmark('Inception')));
+
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('leaves the + doing exactly what it did', async () => {
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText('Log Inception')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Log Inception'));
+
+    await waitFor(() => expect(view.getByText('How was it?')).toBeTruthy());
+    expect(callsTo('set_watchlist')).toHaveLength(0);
+  });
+
+  it('leaves the row itself opening the title', async () => {
+    const view = await search('inception');
+
+    await waitFor(() => expect(view.getByLabelText(FILM_ROW)).toBeTruthy());
+    await fireEvent.press(view.getByLabelText(FILM_ROW));
+
+    expect(mockPush).toHaveBeenCalledWith('/title/film-1');
+    expect(callsTo('set_watchlist')).toHaveLength(0);
+  });
+
+  it('keeps both controls independently reachable on a long title', async () => {
+    // A two-line title is the layout case: the row grows with its text and the actions
+    // stay a row of two, each with its own label and its own target.
+    const long = 'The Assassination of Jesse James by the Coward Robert Ford';
+    mockRpc.mockImplementation((fn: string) =>
+      fn === 'search_titles'
+        ? Promise.resolve({
+            data: [{ ...film, id: 'film-2', title: long }],
+            error: null,
+          })
+        : Promise.resolve({ data: { status: 'ok' }, error: null }),
+    );
+    tableRows.media_items = [
+      { id: 'film-2', genres: ['Drama'], runtime_minutes: 160, kind: 'movie' },
+    ];
+
+    const view = await search('jesse');
+
+    await waitFor(() => expect(view.getByLabelText(bookmark(long))).toBeTruthy());
+    expect(view.getByLabelText(`Log ${long}`)).toBeTruthy();
+
+    await fireEvent.press(view.getByLabelText(bookmark(long)));
+    await waitFor(() => expect(callsTo('set_watchlist')).toHaveLength(1));
+    expect(callsTo('set_watchlist')[0]![1]).toMatchObject({ p_media_item_id: 'film-2' });
   });
 });
