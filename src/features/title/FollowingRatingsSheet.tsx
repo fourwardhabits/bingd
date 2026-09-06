@@ -49,11 +49,21 @@ export function FollowingRatingsSheet({
 
   return (
     <Sheet visible onClose={onClose} label={`People you follow who rated ${titleName}`}>
+      {/**
+       * **One line, and the subtitle under it is gone** (founder, 2026-09-05).
+       *
+       * It read "Their scores for {titleName}." and every word of it was already on the
+       * screen: the heading says Following, the sheet is anchored over the title page for
+       * that film, and each row is an avatar beside a score circle. A sentence that
+       * restates what the reader can see costs a line at the top of a scrolling list and
+       * teaches them that the top of this sheet is not worth reading.
+       *
+       * `titleName` stays a prop because the *sheet's* accessibility label still uses it —
+       * a screen-reader user has no page underneath to infer the subject from, so the one
+       * place the film is still named is the one place it is not redundant.
+       */}
       <View style={styles.head}>
         <Text variant="title2">Following</Text>
-        <Text variant="footnote" tone="secondary">
-          Their scores for {titleName}.
-        </Text>
       </View>
 
       {ratings.isPending ? (

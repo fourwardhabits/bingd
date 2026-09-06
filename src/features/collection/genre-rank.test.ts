@@ -1,4 +1,12 @@
-import { MIN_GENRE_SIZE, formatGenreRank, genreRanksFor, type RankedRow } from './genre-rank';
+import {
+  MAX_GENRE_LINES,
+  MIN_GENRE_SIZE,
+  TOP_RANK_SHOWN,
+  formatGenreRank,
+  genreRanksFor,
+  shownGenreRanksFor,
+  type RankedRow,
+} from './genre-rank';
 
 /**
  * Derived genre ranks (screens.md §4, the reveal).
@@ -122,5 +130,96 @@ describe('genreRanksFor', () => {
 describe('formatGenreRank', () => {
   it('writes the rank without a denominator', () => {
     expect(formatGenreRank({ genre: 'Comedy', rank: 2, total: 40 })).toBe('#2 Comedy');
+  });
+});
+
+/**
+ * `shownGenreRanksFor` — the same list, filtered to what a surface will actually print.
+ *
+ * Added 2026-09-05 with the reveal's top-ten rule. The reveal's own tests exercise this
+ * through a rendered screen; what belongs here is the one property those cannot show
+ * clearly, which is also the property that makes this a function rather than a
+ * `.filter()` at the call site: **the filter has to run before the slice.**
+ */
+describe('shownGenreRanksFor', () => {
+  /** `size` titles in one genre, with the subject at `position`. */
+  const oneGenre = (position: number, size: number, genre = 'Thriller'): RankedRow[] =>
+    Array.from({ length: size }, (_, index) => ({
+      mediaItemId: index + 1 === position ? 'subject' : `f${index + 1}`,
+      position: index + 1,
+      genres: [genre],
+    }));
+
+  it('drops a placement worse than tenth, however strong its proportion', () => {
+    // 12th of 60 is a ratio of 0.20 — stronger than most placements this function will
+    // ever see, and still not a top-ten placement. The rule is the plain ordinal.
+    const list = oneGenre(12, 60);
+
+    expect(genreRanksFor('subject', list)).toEqual([
+      { genre: 'Thriller', rank: 12, total: 60 },
+    ]);
+    expect(shownGenreRanksFor('subject', list)).toEqual([]);
+  });
+
+  it('keeps a placement at exactly tenth, which is the boundary', () => {
+    expect(shownGenreRanksFor('subject', oneGenre(10, 60))).toEqual([
+      { genre: 'Thriller', rank: 10, total: 60 },
+    ]);
+    expect(shownGenreRanksFor('subject', oneGenre(11, 60))).toEqual([]);
+  });
+
+  it('filters before it slices, so a qualifying placement is never crowded out', () => {
+    // Three genres. Ordered by proportional strength the two best are both past ten, and
+    // the one that qualifies is last — so a filter applied after the slice would return
+    // nothing at all where one line is correct.
+    const list: RankedRow[] = [];
+    for (let i = 1; i <= 60; i += 1) {
+      const genres = ['Wide'];
+      if (i <= 40) genres.push('Middle');
+      if (i <= 12) genres.push('Narrow');
+      list.push({ mediaItemId: `f${i}`, position: i, genres });
+    }
+    list[11] = { mediaItemId: 'subject', position: 12, genres: ['Wide', 'Middle', 'Narrow'] };
+
+    // 12 of 60, 12 of 40, 12 of 12 — best ratio first, and only the last is a top-ten…
+    expect(genreRanksFor('subject', list, Number.MAX_SAFE_INTEGER).map((e) => e.genre)).toEqual([
+      'Wide',
+      'Middle',
+      'Narrow',
+    ]);
+    // …which is to say none of them are, at rank 12. Nothing is printed.
+    expect(shownGenreRanksFor('subject', list)).toEqual([]);
+  });
+
+  it('keeps the proportional ordering among the placements that do qualify', () => {
+    // The ordering rule is untouched by the filter: #2 of 40 still outranks #1 of 6.
+    const list: RankedRow[] = [];
+    for (let i = 1; i <= 40; i += 1) {
+      const genres = ['Big'];
+      if (i <= 6) genres.push('Small');
+      list.push({ mediaItemId: `f${i}`, position: i, genres });
+    }
+    list[1] = { mediaItemId: 'subject', position: 2, genres: ['Big', 'Small'] };
+
+    expect(shownGenreRanksFor('subject', list)).toEqual([
+      { genre: 'Big', rank: 2, total: 40 },
+      { genre: 'Small', rank: 2, total: 6 },
+    ]);
+  });
+
+  it('never returns more than the reveal draws', () => {
+    const list: RankedRow[] = [];
+    const all = ['A', 'B', 'C', 'D'];
+    for (let i = 1; i <= 30; i += 1) list.push({ mediaItemId: `f${i}`, position: i, genres: all });
+    list[1] = { mediaItemId: 'subject', position: 2, genres: all };
+
+    expect(shownGenreRanksFor('subject', list)).toHaveLength(MAX_GENRE_LINES);
+  });
+
+  it('is the same number the title-page hero uses', () => {
+    // One founder number, one definition. The hero has drawn at most one top-ten label
+    // since 2026-08-28 and the reveal joined it on 2026-09-05; two constants would
+    // eventually be two rules.
+    expect(TOP_RANK_SHOWN).toBe(10);
   });
 });

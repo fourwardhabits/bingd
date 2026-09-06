@@ -183,14 +183,14 @@ export function ReactionControl({
             style={({ pressed }) => [styles.cluster, pressed && styles.pressed]}
           >
             <Glyphs glyphs={summary} />
-            <Text variant="caption" tone={active ? 'action' : 'tertiary'}>
+            <Text variant="caption" tone={active ? 'action' : 'tertiary'} style={styles.count}>
               {count}
             </Text>
           </Pressable>
         ) : (
           <View style={styles.cluster} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
             <Glyphs glyphs={summary} />
-            <Text variant="caption" tone={active ? 'action' : 'tertiary'}>
+            <Text variant="caption" tone={active ? 'action' : 'tertiary'} style={styles.count}>
               {count}
             </Text>
           </View>
@@ -200,14 +200,37 @@ export function ReactionControl({
   );
 }
 
-/** Overlapped, so three glyphs read as one object and cost the width of about two. */
+/**
+ * Overlapped, so three glyphs read as one object and cost the width of about two.
+ *
+ * **Each glyph now sits in a fixed-height centred box, and the cropping this fixes was
+ * the cluster's rather than the action slot's** (founder, physical Android, 2026-09-05).
+ * The slot was given exactly this treatment on 2026-09-04 and the founder confirms it is
+ * right; these glyphs were left as a bare `caption` `Text`, which means Android's
+ * `includeFontPadding` was still on and the line box was still whatever the token said.
+ * Both matter for a colour emoji and neither does for the Latin text the tokens were
+ * measured on: the padding is asymmetric, so it tilts the glyph off the centre the count
+ * beside it is aligned to, and a line box sized for a 12pt cap-height crops the top of a
+ * glyph whose ascent is taller.
+ *
+ * **The size is untouched.** The founder's judgement is that the cluster reads correctly
+ * small against a caption-sized count, so `emojiText` keeps `caption`'s `fontSize` and
+ * changes only the line box, the padding and the centring — which is the difference
+ * between a glyph that is drawn wrong and one that is drawn small on purpose.
+ *
+ * The box fixes **height only**. A fixed width would change the overlap arithmetic below
+ * and move the cluster's rhythm, and width was never the axis anything was clipped on.
+ */
 function Glyphs({ glyphs }: { glyphs: string[] }) {
   if (!glyphs.length) return null;
   return (
     <View style={styles.glyphs} accessibilityElementsHidden>
       {glyphs.slice(0, 3).map((glyph, index) => (
-        <View key={glyph} style={index > 0 ? styles.glyphOverlap : undefined}>
-          <Text variant="caption" allowFontScaling={false}>
+        <View
+          key={glyph}
+          style={[styles.glyphBox, index > 0 ? styles.glyphOverlap : undefined]}
+        >
+          <Text variant="caption" allowFontScaling={false} style={styles.clusterEmoji}>
             {glyph}
           </Text>
         </View>
@@ -236,18 +259,37 @@ const SLOT = theme.layout.icon.sm;
 const EMOJI_SIZE = 17;
 
 /**
- * The emoji's line box, and it is **taller than the slot on purpose**.
+ * How much taller than its nominal size a colour emoji's line box has to be.
  *
- * `Text` merges the `caption` token first, which brings `lineHeight: 16` — shorter than a
- * 17pt colour emoji needs, and a line box shorter than the glyph is exactly how Android
- * crops one. Overriding it is therefore not optional, and the safe direction is up: the
- * slot centres its child and does not clip, so a box with room to spare costs nothing and
- * a tight one costs the top of 🔥.
+ * `Text` merges a type token first, and every token in this app was measured on Latin
+ * text — so the line box that arrives is sized for a cap height and an emoji's ascent is
+ * taller than one. A line box shorter than the glyph is exactly how Android crops it,
+ * while iOS looks perfect, which is what makes this the class of defect that reaches a
+ * device before it reaches anybody's screen.
  *
- * 1.3em is the conventional headroom for colour emoji, which have taller ascents than the
- * Latin text these tokens were measured on.
+ * The safe direction is always up: both boxes below centre their child and neither clips,
+ * so headroom costs nothing and a tight box costs the top of 🔥. **Raised from 1.3 to 1.4
+ * on 2026-09-05**, after the founder found glyphs still cropping on a physical Android
+ * pass — 1.3 is the conventional figure and conventional was not enough here.
+ *
+ * One number, applied wherever an emoji is drawn, so the action slot and the summary
+ * cluster cannot drift into two different treatments of the same problem.
  */
-const EMOJI_LINE = Math.ceil(EMOJI_SIZE * 1.3);
+const EMOJI_HEADROOM = 1.4;
+
+/** The action slot's line box. Taller than the slot on purpose; the slot does not clip. */
+const EMOJI_LINE = Math.ceil(EMOJI_SIZE * EMOJI_HEADROOM);
+
+/**
+ * The summary cluster's glyph size and its line box.
+ *
+ * **The size is `caption`'s, unchanged**, and that is the point: the founder's judgement
+ * is that the cluster reads correctly small against a caption-sized count, so the fix
+ * here is the box and the padding rather than the type. What was wrong was never how big
+ * these are.
+ */
+const CLUSTER_EMOJI_SIZE = theme.typography.caption.fontSize;
+const CLUSTER_EMOJI_LINE = Math.ceil(CLUSTER_EMOJI_SIZE * EMOJI_HEADROOM);
 
 /**
  * The slop that carries the 44pt floor for a caption-height control — the comment
@@ -279,10 +321,46 @@ const styles = StyleSheet.create({
     fontSize: EMOJI_SIZE,
     lineHeight: EMOJI_LINE,
     textAlign: 'center',
+    // Android draws text into a box whose vertical centre is not the glyph's when the
+    // ascent and descent are unequal, which is every colour emoji. Both of these are
+    // what make "centred in the slot" mean the glyph rather than the box.
+    textAlignVertical: 'center',
     includeFontPadding: false,
   },
   cluster: { flexDirection: 'row', alignItems: 'center', gap: theme.space[1] },
   glyphs: { flexDirection: 'row', alignItems: 'center' },
+
+  /**
+   * The cluster glyph's box: caption's line height, centred, height only.
+   *
+   * Height, because that is the axis a glyph is cropped and mis-centred on, and because
+   * this is the figure `slop` derives the 44pt tap target from — a box of any other
+   * height would silently move the target. Not width, because a fixed width would change
+   * the overlap below and shift the cluster's rhythm for nothing.
+   */
+  glyphBox: {
+    height: theme.typography.caption.lineHeight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clusterEmoji: {
+    fontSize: CLUSTER_EMOJI_SIZE,
+    lineHeight: CLUSTER_EMOJI_LINE,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
+  },
+  /**
+   * The count, given the same padding treatment as the glyphs beside it.
+   *
+   * It is Latin text and does not need the headroom, but it does need to stop measuring
+   * itself differently: `alignItems: 'center'` on the cluster centres two boxes against
+   * each other, and while one of them carried Android's font padding and the other did
+   * not, the two were centred on different things. That is the founder's third symptom —
+   * the emoji and the count not sitting level — and it is a property of the pair rather
+   * than of either one.
+   */
+  count: { includeFontPadding: false },
   glyphOverlap: { marginLeft: -theme.space[1] },
   pressed: { opacity: 0.7 },
 });

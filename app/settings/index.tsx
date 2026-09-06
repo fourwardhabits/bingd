@@ -60,44 +60,82 @@ export default function SettingsScreen() {
           ),
         }}
       />
+      {/* **Four named sections, and the first one had no name at all** (founder,
+          physical Android, 2026-09-05).
+
+          The screen was one unlabelled card, then Help & feedback under a heading, then
+          two more unlabelled cards. Everything but the middle section arrived at the same
+          visual weight with no statement of what it was, so the card holding Privacy
+          Policy looked exactly like the card holding Edit Profile and the reader had to
+          read every row to find out which was which. That is what "cluttered" was
+          describing — not the number of rows, which is small, but that nothing sorted
+          them.
+
+          So: **Account · Help & feedback · Legal · About**. Nothing was added, nothing
+          was removed, no destination changed, and every row does exactly what it did.
+
+          **Legal is demoted by position rather than by removal.** It sits second-to-last,
+          which is where somebody looking for it expects to find it and is out of the way
+          of everybody else. Both documents stay reachable in the app: the stores require
+          the privacy URL to be reachable, and a nested screen whose only content is two
+          links out would be a tap that buys nothing. */}
       <ScrollView contentContainerStyle={styles.page}>
-        <View style={styles.group}>
-          <Row
-            icon="person-outline"
-            label="Edit Profile"
-            detail={`@${profile.username}`}
-            onPress={() => router.push('/settings/profile')}
-          />
-          <Row
-            icon="lock-closed-outline"
-            label="Privacy"
-            onPress={() => router.push('/settings/privacy')}
-          />
-          {/* **The inbox is not reachable from here, and that is the founder's
-              Preview correction.** There was a Notifications row above this one going
-              to `/settings/notifications`, and it was a second door to a room with a
-              door already: the bell in the Feed and Profile headers opens the same
-              inbox, from the screens somebody is actually on when they wonder who
-              reacted. Two entry points to one inbox, one of them three taps deep inside
-              Settings, made the pair read as two different features.
+        <View style={styles.section}>
+          <SectionHeader title="Account" />
+          <View style={[styles.group, styles.sectionGroup]}>
+            <Row
+              icon="person-outline"
+              label="Edit Profile"
+              detail={`@${profile.username}`}
+              onPress={() => router.push('/settings/profile')}
+            />
+            <Row
+              icon="lock-closed-outline"
+              label="Privacy"
+              onPress={() => router.push('/settings/privacy')}
+            />
+            {/* **The inbox is not reachable from here, and that is the founder's
+                Preview correction.** There was a Notifications row above this one going
+                to `/settings/notifications`, and it was a second door to a room with a
+                door already: the bell in the Feed and Profile headers opens the same
+                inbox, from the screens somebody is actually on when they wonder who
+                reacted. Two entry points to one inbox, one of them three taps deep inside
+                Settings, made the pair read as two different features.
 
-              The inbox itself, the bell, and this screen are all untouched. What is
-              gone is the redundant route to it.
+                The inbox itself, the bell, and this screen are all untouched. What is
+                gone is the redundant route to it.
 
-              This row stays, because it answers a different question. "Who is waiting
-              on me" is the inbox; "what should reach me at all" is this, and the second
-              is the one somebody opens Settings for. */}
-          <Row
-            icon="notifications-outline"
-            label="Notification Settings"
-            onPress={() => router.push('/settings/notification-preferences')}
-          />
-          <Row
-            icon="shield-outline"
-            label="Account & Data"
-            onPress={() => router.push('/settings/account')}
-            last
-          />
+                This row stays, because it answers a different question. "Who is waiting
+                on me" is the inbox; "what should reach me at all" is this, and the second
+                is the one somebody opens Settings for. */}
+            <Row
+              icon="notifications-outline"
+              label="Notification Settings"
+              onPress={() => router.push('/settings/notification-preferences')}
+            />
+            <Row
+              icon="shield-outline"
+              label="Account & Data"
+              onPress={() => router.push('/settings/account')}
+            />
+            {/* **Sign out is in Account now, and the old separation is preserved rather
+                than undone.**
+
+                The founder's earlier correction was that signing out had been *inside*
+                Account & Data, next to permanent deletion — one is how you finish for the
+                day and the other cannot be undone, and putting them on the same screen
+                said they were the same kind of act. That reasoning is untouched: this is
+                a sibling row under a heading, not a control on the deletion screen, and
+                the two are still a tap apart rather than adjacent inside one destination.
+
+                What it stops being is a card of its own floating between Legal and About,
+                which is what made a heading necessary in the first place. Signing out is
+                an account action and it now sits with the other account actions.
+
+                It stays last in the group and keeps its ordinary treatment. Sign-out is
+                not destructive and must not be dressed as though it were. */}
+            <Row icon="log-out-outline" label="Sign out" onPress={() => void leave()} last />
+          </View>
         </View>
 
         {/* Help & feedback, which is the section this screen did not have.
@@ -162,13 +200,7 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Its own group, one gap below the rest.
-            The founder's correction: signing out was inside Account & Data, beside
-            permanent deletion, and the two are not the same kind of thing at all — one
-            is how you finish for the day and the other cannot be undone. Separating
-            them visually says that without dressing sign-out up as destructive, which
-            it also is not. */}
-        {/* Privacy and Terms.
+        {/* Privacy and Terms, under a heading of their own since 2026-09-05.
 
             **Links out rather than screens**, which is `lib/legal.ts`'s reasoning: a
             policy rendered in the binary can only be corrected by shipping a build,
@@ -182,27 +214,24 @@ export default function SettingsScreen() {
 
             Here rather than inside About, because About is an attribution block —
             TMDB's notice, quoted in their words — and a legal document is not a
-            credit. And above Sign out's group rather than below it, because a person
-            looking for the Terms is reading the list, while somebody signing out is
-            aiming at a row they already know the position of. */}
-        <View style={styles.group}>
-          <Row
-            icon="lock-closed-outline"
-            label="Privacy Policy"
-            onPress={() => openLegal('privacy')}
-            external
-          />
-          <Row
-            icon="document-text-outline"
-            label="Terms of Use"
-            onPress={() => openLegal('terms')}
-            external
-            last
-          />
-        </View>
-
-        <View style={styles.group}>
-          <Row icon="log-out-outline" label="Sign out" onPress={() => void leave()} last />
+            credit. */}
+        <View style={styles.section}>
+          <SectionHeader title="Legal" />
+          <View style={[styles.group, styles.sectionGroup]}>
+            <Row
+              icon="lock-closed-outline"
+              label="Privacy Policy"
+              onPress={() => openLegal('privacy')}
+              external
+            />
+            <Row
+              icon="document-text-outline"
+              label="Terms of Use"
+              onPress={() => openLegal('terms')}
+              external
+              last
+            />
+          </View>
         </View>
 
         <About />

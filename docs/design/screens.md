@@ -153,6 +153,21 @@ The composition in [`design-system.md`](./design-system.md) §9: an Amber panel,
 
 **Nothing on the reveal mentions Too tough (2026-08-30).** The panel used to be followed by "You skipped a few, so this is an estimate. You can move it from Rankings." whenever the server reported an `adjustable` placement. It appeared only for the people who used the affordance, which turned the one control that keeps a ranking honest into something the reward screen apologised for — and it landed on somebody who had just finished their first ranking. Removed and not replaced: the reveal states the score and the placement, exactly as it does for a ranking that met no Too tough at all. The placement itself is unchanged, and the title is as movable from Rankings as any other.
 
+**The reveal never names a placement worse than #10 (founder, 2026-09-05, from a physical Android pass).** It drew every placement it could compute, led by the overall ordinal:
+
+```
+8.7                                    8.7
+The Matrix                             The Matrix
+#19 in Movies              becomes
+Below Spirited Away                    Below Spirited Away
+Above Harold & Kumar…                  Above Harold & Kumar…
+#6 Science Fiction · #7 Action         #6 Science Fiction · #7 Action
+```
+
+Four lines of ordinal under a score, and the largest number on the screen was the one saying least — `#19 in Movies` is a fact about how much the reader has ranked, not about the film. The rule is now the one [`hero-rank.ts`](../../src/features/collection/hero-rank.ts) has applied to the title page since 2026-08-28, with the reveal's own allowance of two lines: **top ten overall and the genres are suppressed; otherwise the top-ten genres, at most two; otherwise nothing**, with no gap reserved. The anchors move above it, because they are the half of the block that is about the film and the half a ranked title always has.
+
+Nothing about the arithmetic moved — same `rankings.position`, same genre ordering off the same cached list, same neighbours. `TOP_RANK_SHOWN` lives in `genre-rank.ts` so the hero and the reveal read one number.
+
 Below the panel, three actions: **Share**, **Rank another**, and **Done**. **Share is absent as built (2026-08-14)** — share cards do not exist, and an action that does nothing is worse than one that has not arrived. Beli celebrates the first rank specifically ([`references/beli-229-first-rank-celebration.jpg`](./references/beli-229-first-rank-celebration.jpg)) and Bingd should too — the first reveal is the moment the product explains itself, and it is worth a distinct line of copy.
 
 ---
@@ -318,8 +333,8 @@ offered two ways appearing under both from one entry.
    ⬤ 8.7  bingd.        ⬤ 9.1  Following
      12 ratings           2 people you follow
 
-   Where to watch          [N] [tv] [a]  +2   ›
-   via JustWatch
+   WHERE TO WATCH          [N] [tv] [a]  +2   ›
+   via JustWatch                                  ← small, tertiary, italic
    ─────────────────────────────────────────────
    Cast    Details    Reviews    Videos
 ```
@@ -335,10 +350,23 @@ nothing: this is the one block on the page allowed to be absent, and a card apol
 licensor's missing data would be a permanent apology on every obscure film in the catalogue.
 Nothing about a provider failure reaches the page around it.
 
-**A logo is not a button.** TMDB publishes no per-service deep link, so nothing here opens
-Netflix; the one action is `View watch options`, which is TMDB's own page for that title in
-that market. The JustWatch credit is on both surfaces because their terms require the source
-to be named wherever the data is shown — see
+**A logo is not a button, and since 2026-09-05 nothing on this block leaves the app.** TMDB
+publishes no per-service deep link, so nothing here opens Netflix. `View watch options` —
+TMDB's own page for the title in that market — was the sheet's one action and was removed on
+the founder's ruling: a real link to the wrong place is still the wrong place. It sent
+somebody out of bingd. to a web page that sent them somewhere else, and it did not do the
+thing its position implied. Nothing replaces it; manufacturing a provider URL would be a
+guess presented as a destination.
+
+**The heading is the app's section treatment.** `WHERE TO WATCH` in small maroon caps, with
+the JustWatch credit beneath it in italic tertiary. It was a `callout` label in full ink
+until 2026-09-05, which is a row's weight rather than a section's — so sitting directly under
+the two score units it read as a third thing inside Scores. No second rule was added: a
+`SectionHeader` without one is the app's dominant convention, and the constraint here is
+height. The block is a row and stays a row.
+
+The JustWatch credit is on both surfaces because their terms require the source to be named
+wherever the data is shown — demoted, never hidden. See
 [`../reference/tmdb-integration.md`](../reference/tmdb-integration.md).
 
 ---

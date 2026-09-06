@@ -154,3 +154,45 @@ describe('who rated this, and how far to trust them', () => {
     await waitFor(() => expect(screen.getByText('abisola')).toBeTruthy());
   });
 });
+
+/**
+ * **The sheet opens on one line** (founder, 2026-09-05).
+ *
+ * It carried a subtitle — "Their scores for {titleName}." — and every word of it was
+ * already on the screen: the heading says Following, the sheet is anchored over the title
+ * page for that film, and each row is an avatar beside a score circle. A sentence that
+ * restates what the reader can see costs a line at the top of a scrolling list and
+ * teaches them the top of this sheet is not worth reading.
+ */
+describe('the head of the sheet', () => {
+  it('says Following and nothing else', async () => {
+    mockRows = [row()];
+    await open();
+
+    await waitFor(() => expect(screen.getByText('Following')).toBeTruthy());
+    expect(screen.queryByText(/Their scores for/)).toBeNull();
+  });
+
+  it('still names the title where a screen reader has no page underneath to infer it from', async () => {
+    // The one place the film is still named is the one place it is not redundant: the
+    // sheet's own label, which is what a screen reader announces on open.
+    mockRows = [row()];
+    await open();
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/People you follow who rated/)).toBeTruthy(),
+    );
+  });
+
+  it('changes nothing about the rows underneath it', async () => {
+    // The subtitle went and the list did not. Ordering, the score, the Match, the
+    // fallback to a handle and the tap into a profile are all pinned above; this is the
+    // guard that removing a line did not quietly take a row's content with it.
+    mockRows = [row()];
+    await open();
+
+    await waitFor(() => expect(screen.getByText('Abisola')).toBeTruthy());
+    expect(screen.getByText('@abisola')).toBeTruthy();
+    expect(screen.getByText('8.7', { includeHiddenElements: true })).toBeTruthy();
+  });
+});

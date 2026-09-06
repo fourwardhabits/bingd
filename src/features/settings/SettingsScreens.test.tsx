@@ -1037,3 +1037,99 @@ describe('the inbox’s two new behaviours', () => {
     expect(mockPush).toHaveBeenCalledWith('/title/film-1');
   });
 });
+
+/**
+ * **Settings has four named sections** (founder, physical Android, 2026-09-05).
+ *
+ * It had one: Help & feedback. Everything else was an unlabelled card at the same visual
+ * weight, so the card holding Privacy Policy looked exactly like the card holding Edit
+ * Profile and the reader had to read every row to find out which was which. That is what
+ * "cluttered" meant on a screen with eleven rows on it.
+ *
+ * These tests are about the *arrangement*, and every one of them holds the behaviour
+ * still: the point of the change is that nothing was added, nothing was removed, and no
+ * destination moved. `the Settings hub` above already pins what each row does.
+ */
+describe('the Settings sections', () => {
+  const headings = (view: Awaited<ReturnType<typeof renderWithProviders>>) =>
+    ['ACCOUNT', 'HELP & FEEDBACK', 'LEGAL', 'ABOUT'].map((title) =>
+      view.getByText(title),
+    );
+
+  /** Where something sits in the rendered tree. `queryAll` walks in document order. */
+  const orderOf = (
+    view: Awaited<ReturnType<typeof renderWithProviders>>,
+    match: (node: never) => boolean,
+  ) => view.root!.queryAll(() => true).findIndex(match as never);
+
+  const textAt = (value: string) => (node: never) =>
+    // A heading's text node, matched on its rendered children.
+    String((node as { props?: { children?: unknown } }).props?.children ?? '') === value;
+
+  it('names all four, where it used to name one', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+    for (const heading of headings(view)) expect(heading).toBeTruthy();
+  });
+
+  it('puts them in the founder order, with legal demoted near the bottom', async () => {
+    // Account, then the two ways of asking for help, then the documents, then the
+    // attribution block. Legal is demoted by position rather than by removal — it is
+    // still in the app, because both stores require the privacy URL to be reachable.
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    const at = ['ACCOUNT', 'HELP & FEEDBACK', 'LEGAL', 'ABOUT'].map((title) =>
+      orderOf(view, textAt(title)),
+    );
+
+    expect(at.every((index) => index > -1)).toBe(true);
+    expect(at).toEqual([...at].sort((a, b) => a - b));
+  });
+
+  it('puts Sign out inside Account rather than in a card of its own', async () => {
+    // The founder's earlier correction is preserved rather than undone: sign-out used
+    // to be *inside* Account & Data, a row from permanent deletion, and it is not going
+    // back there. This is a sibling row under a heading — still a tap away from the
+    // deletion screen, and no longer a floating card between Legal and About.
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    const account = orderOf(view, textAt('ACCOUNT'));
+    const help = orderOf(view, textAt('HELP & FEEDBACK'));
+    const signOut = orderOf(
+      view,
+      (node: never) =>
+        (node as { props?: { accessibilityLabel?: string } }).props?.accessibilityLabel ===
+        'Sign out',
+    );
+
+    expect(signOut).toBeGreaterThan(account);
+    expect(signOut).toBeLessThan(help);
+  });
+
+  it('keeps both legal documents reachable, and still leading out', async () => {
+    // The demotion is positional. A nested Legal screen was considered and rejected —
+    // its only content would be two links out, which is a tap that buys nothing — and
+    // removing either row is not available: the stores require the privacy URL.
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+    openURL.mockClear();
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    expect(view.getByLabelText('Privacy Policy')).toBeTruthy();
+    expect(view.getByLabelText('Terms of Use')).toBeTruthy();
+
+    await fireEvent.press(view.getByLabelText('Privacy Policy'));
+    expect(openURL).toHaveBeenCalledWith('https://bingd.app/privacy');
+  });
+
+  it('changes no destination, which is the whole point of a reorganisation', async () => {
+    const view = await renderWithProviders(<SettingsScreen />);
+
+    await fireEvent.press(view.getByLabelText('Edit Profile, @sai'));
+    expect(mockPush).toHaveBeenCalledWith('/settings/profile');
+
+    await fireEvent.press(view.getByLabelText('Privacy'));
+    expect(mockPush).toHaveBeenCalledWith('/settings/privacy');
+
+    await fireEvent.press(view.getByLabelText('Account & Data'));
+    expect(mockPush).toHaveBeenCalledWith('/settings/account');
+  });
+});

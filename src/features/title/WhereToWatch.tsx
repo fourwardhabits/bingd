@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { providerLogoUri } from '@/lib/images';
 import { Button, SectionHeader, Sheet, Text } from '@/ui/components';
@@ -50,8 +50,18 @@ const OFFERS: { offer: WatchOffer; label: string }[] = [
  *
  * **Attribution is on both surfaces.** TMDB's terms for this data are specific and
  * not paraphrasable: *"In order to use this data you must attribute the source of the
- * data as JustWatch."* The logos are the data, so the line travels with them — small
- * and subordinate on the row, in full in the sheet.
+ * data as JustWatch."* The logos are the data, so the line travels with them — small,
+ * italic and tertiary on the row, in full in the sheet. Demoting it is allowed; moving
+ * it behind the sheet would leave the visible half of the feature uncredited.
+ *
+ * **The heading is the app's section treatment and there is no second divider**
+ * (founder, physical Android, 2026-09-05). The row read as part of the Scores section
+ * above it, because its label was a `callout` in full ink — a row's weight, not a
+ * section's. Small maroon caps is how every other section in the app announces itself,
+ * and it separates this one at no cost in height, which is the constraint: the block is
+ * a row and must stay a row. A rule beneath the scores was the other candidate and was
+ * not taken, because `SectionHeader` without one is the app's dominant convention and
+ * the hairline in `ScoresSection` is the exception rather than the pattern.
  */
 export function WhereToWatch({ mediaItemId, titleName }: WhereToWatchProps) {
   const [open, setOpen] = useState(false);
@@ -81,8 +91,40 @@ export function WhereToWatch({ mediaItemId, titleName }: WhereToWatchProps) {
         style={({ pressed }) => [styles.row, pressed && styles.pressed]}
       >
         <View style={styles.copy}>
-          <Text variant="callout">Where to watch</Text>
-          <Text variant="caption" tone="tertiary">
+          {/**
+           * **The app's section-heading treatment, not a row label** (founder, physical
+           * Android, 2026-09-05).
+           *
+           * It was `callout` in full ink, which is the weight of a row *inside* a
+           * section — so sitting directly under the two score units it read as a third
+           * thing in the Scores section rather than as a section of its own. Small maroon
+           * caps is what every other section on every other screen uses to say "a new
+           * block starts here", and it is what separates this one at no cost in height.
+           *
+           * Written by hand rather than through `SectionHeader`, and this is the one
+           * place in the app that does it: `SectionHeader` owns the gutter, a 44pt row
+           * and a full-width flex layout, all of which would break the whole point of
+           * this block — a heading and its logos on **one line**. So the token is
+           * borrowed and the layout is not. `uppercase` is applied by this component for
+           * the same reason `SectionHeader` does it: casing is a style, and a screen
+           * reader spelling out "W H E R E" is not.
+           */}
+          <Text variant="sectionHeader" tone="action">
+            WHERE TO WATCH
+          </Text>
+          {/**
+           * **The attribution stays on this surface, demoted rather than hidden.**
+           *
+           * TMDB's terms for this data are specific and name a third party: *"In order to
+           * use this data you must attribute the source of the data as JustWatch."* The
+           * logos above are the data, so the credit has to travel with them — moving it
+           * behind the sheet would leave the visible half of the feature uncredited.
+           *
+           * What it can be is quiet. Italic, tertiary, and at `caption` under a heading
+           * it is now clearly subordinate to, where before it sat under a same-weight
+           * label and competed with it. It is a source note, and it should read as one.
+           */}
+          <Text variant="caption" tone="tertiary" style={styles.attributionInline}>
             via JustWatch
           </Text>
         </View>
@@ -113,7 +155,6 @@ export function WhereToWatch({ mediaItemId, titleName }: WhereToWatchProps) {
         <WhereToWatchSheet
           titleName={titleName}
           region={availability.data?.region ?? ''}
-          link={availability.data?.link ?? null}
           providers={providers}
           onClose={() => setOpen(false)}
         />
@@ -129,22 +170,24 @@ export function WhereToWatch({ mediaItemId, titleName }: WhereToWatchProps) {
  * carries both — which is why Apple TV can be under Rent and Buy without the row
  * above counting it twice.
  *
- * **No posters here, and no per-service link.** The sheet answers "which services",
- * so a poster would be the one thing on it that is not the answer. And a logo opens
- * nothing: TMDB's payload carries no deep link into Netflix or Max, and building one
- * out of a service's name would be a guess the reader would read as a destination.
- * The one real link is TMDB's own watch-options page, and it is labelled as that.
+ * **No posters here, and nothing that leaves the app.** The sheet answers "which
+ * services", so a poster would be the one thing on it that is not the answer. And a logo
+ * opens nothing: TMDB's payload carries no deep link into Netflix or Max, and building
+ * one out of a service's name would be a guess the reader would read as a destination.
+ *
+ * TMDB's own watch-options page was offered as a footer action until 2026-09-05 and is
+ * not any more — see the note above the foot for the founder's reasoning. So the sheet
+ * is now a statement rather than a junction: the services, the market, the credit, and
+ * the way out.
  */
 function WhereToWatchSheet({
   titleName,
   region,
-  link,
   providers,
   onClose,
 }: {
   titleName: string;
   region: string;
-  link: string | null;
   providers: WatchProvider[];
   onClose: () => void;
 }) {
@@ -193,17 +236,26 @@ function WhereToWatchSheet({
         </Text>
       </ScrollView>
 
+      {/**
+       * **There is no View watch options action, and it was removed on 2026-09-05.**
+       *
+       * It opened TMDB's own watch-options page for the title in the reader's market,
+       * which is the only real link this data comes with — and the founder's ruling is
+       * that a real link to the wrong place is still the wrong place. It sends somebody
+       * out of bingd. to a web page that then sends them somewhere else, and it does not
+       * do the thing its position implies: it does not open the film on the service they
+       * just tapped, because TMDB publishes no such link and never has.
+       *
+       * **Nothing replaces it.** Manufacturing `netflix.com/title/…` out of a provider
+       * name would be a guess presented as a destination, which is worse than the row
+       * that went. Somebody who knows a film is on Netflix can open Netflix.
+       *
+       * The adapter still normalises and validates the link (`normalize.ts`), and the
+       * client still carries it on `WatchAvailability`. That is deliberate: the data is
+       * free, the validation is the interesting part, and re-deriving both would be the
+       * cost of changing this decision back. Nothing draws it.
+       */}
       <View style={styles.foot}>
-        {link ? (
-          <Button
-            label="View watch options"
-            kind="secondary"
-            // `catch` rather than `await`: a handover to the browser that the phone
-            // refuses is not something this sheet can do anything about, and an
-            // unhandled rejection here would be an unhandled rejection on a film page.
-            onPress={() => void Linking.openURL(link).catch(() => {})}
-          />
-        ) : null}
         {/* The labelled way out every sheet carries — `Sheet` hides its scrim from the
             accessibility tree on the understanding that this exists. */}
         <Button label="Done" onPress={onClose} />
@@ -272,6 +324,8 @@ const styles = StyleSheet.create({
     minHeight: theme.layout.rowMinHeight,
   },
   copy: { flex: 1, gap: 2 },
+  /** A source note, and it should read as one. See the block above it. */
+  attributionInline: { fontStyle: 'italic' },
   logos: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
   pressed: { opacity: 0.7 },
 

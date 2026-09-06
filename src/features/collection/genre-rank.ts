@@ -34,6 +34,43 @@ export const MIN_GENRE_SIZE = 5;
 export const MAX_GENRE_LINES = 2;
 
 /**
+ * Above this, a placement stops being a statement about the title.
+ *
+ * "#3 in Movies" says something about the film; "#47 in Movies" says something about how
+ * much the reader has ranked. Ten is where one stops being the other, and it is the
+ * founder's number rather than a derived one.
+ *
+ * It lives here rather than in `hero-rank.ts`, where it was first written, because two
+ * surfaces now apply it — the title page hero and the post-ranking reveal — and one
+ * founder number defined twice is a number that will eventually be two.
+ */
+export const TOP_RANK_SHOWN = 10;
+
+/**
+ * The genre placements a surface will actually print, which is not the same list as
+ * {@link genreRanksFor} returns.
+ *
+ * **The filter has to happen before the slice**, which is the whole reason this is a
+ * function rather than a `.filter()` at the call site. `genreRanksFor` orders by
+ * proportional strength and then takes the best two, so a title sitting #12 of 40 and #6
+ * of 10 has the twelfth chosen first — and filtering the result of that would leave one
+ * line where two qualified. Asking for everything, filtering, then taking two is the
+ * order that cannot lose a qualifying placement.
+ *
+ * The ordering itself is untouched: proportional strength, exactly as before, so #2 of 40
+ * still outranks #1 of 6. `MIN_GENRE_SIZE` still applies underneath.
+ */
+export function shownGenreRanksFor(
+  mediaItemId: string,
+  rows: readonly RankedRow[],
+  limit = MAX_GENRE_LINES,
+): GenreRank[] {
+  return genreRanksFor(mediaItemId, rows, Number.MAX_SAFE_INTEGER)
+    .filter((entry) => entry.rank <= TOP_RANK_SHOWN)
+    .slice(0, limit);
+}
+
+/**
  * The strongest genre placements for one title.
  *
  * Ordered by how high the title sits *relative to* the genre's size, so a #2 of 40

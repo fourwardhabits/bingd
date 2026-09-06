@@ -331,3 +331,131 @@ describe('the action slot', () => {
     ).toBe(theme.layout.minTapTarget);
   });
 });
+
+/**
+ * **The summary cluster's geometry** (founder, physical Android, 2026-09-05).
+ *
+ * The action slot above was given a fixed square, an overridden line box and
+ * `includeFontPadding: false` on 2026-09-04, and the founder confirms it now looks right.
+ * The cluster beside it was left as a bare `caption` `Text` — so on Android the glyphs
+ * still carried the platform's asymmetric font padding and still took the token's line
+ * box, which is sized for a cap height rather than for an emoji's ascent.
+ *
+ * Three symptoms, one cause: a cropped glyph, a glyph sitting off the vertical centre,
+ * and the emoji and the count not looking level with each other.
+ *
+ * **The size is deliberately not part of the fix.** Every assertion here holds the
+ * cluster at `caption`'s `fontSize`, because the founder's judgement is that it reads
+ * correctly small and what was wrong was how it was drawn, not how big it was. A renderer
+ * cannot prove a glyph is uncropped on a device; what it can prove is that the three
+ * properties which crop and tilt one are set, and that they are set the same way in both
+ * places an emoji is drawn.
+ */
+describe('the summary cluster', () => {
+  const flat = (node: { props: { style?: unknown } }) =>
+    StyleSheet.flatten(node.props.style as never) as Record<string, number | string>;
+
+  const REPRESENTATIVE = ['❤️', '😂', '🔥', '👏', '😮'];
+
+  const clusterGlyph = async (glyph: string) => {
+    const view = await draw({
+      active: false,
+      glyphs: [glyph],
+      count: 4,
+    });
+    return flat(glyphsIn(cluster(view), glyph)[0]!);
+  };
+
+  it('gives a cluster glyph a line box with room above its size', async () => {
+    // The regression is silent and platform-specific: a box sized for Latin text crops a
+    // colour emoji on Android and looks perfect on iOS.
+    const style = await clusterGlyph('🔥');
+
+    expect(style.fontSize).toBe(theme.typography.caption.fontSize);
+    expect(Number(style.lineHeight)).toBeGreaterThanOrEqual(
+      Number(style.fontSize) * 1.25,
+    );
+    expect(Number(style.lineHeight)).toBeGreaterThan(
+      theme.typography.caption.lineHeight - 1,
+    );
+  });
+
+  it('drops the padding that would tilt it off centre, and centres it on both axes', async () => {
+    const style = await clusterGlyph('😮');
+
+    expect(style.includeFontPadding).toBe(false);
+    expect(style.textAlign).toBe('center');
+    expect(style.textAlignVertical).toBe('center');
+  });
+
+  it('treats every representative glyph identically, with no per-emoji exception', async () => {
+    // The same no-special-casing rule the action slot is held to. A per-emoji table is
+    // the thing that goes stale the first time the six change.
+    const styles: Record<string, number | string>[] = [];
+    for (const glyph of REPRESENTATIVE) styles.push(await clusterGlyph(glyph));
+
+    for (const style of styles) expect(style).toEqual(styles[0]);
+  });
+
+  it('centres the glyph in a box the tap target is still measured from', async () => {
+    // Height only, and exactly caption's line height: `slop` derives the 44pt target from
+    // that figure, so a box of any other height would silently move the target. Width is
+    // left intrinsic because a fixed one would change the overlap and shift the rhythm.
+    const view = await draw({ active: false, glyphs: ['❤️'], count: 2 });
+    const box = glyphsIn(cluster(view), '❤️')[0]!.parent;
+    const style = flat(box as never);
+
+    expect(style.height).toBe(theme.typography.caption.lineHeight);
+    expect(style.alignItems).toBe('center');
+    expect(style.justifyContent).toBe('center');
+    expect(style.width).toBeUndefined();
+  });
+
+  it('measures the count the same way it measures the glyphs', async () => {
+    // The founder's third symptom is a property of the pair rather than of either one:
+    // `alignItems: 'center'` centres two boxes against each other, and while one carried
+    // Android's font padding and the other did not, they were centred on different things.
+    const view = await draw({ active: false, glyphs: ['❤️'], count: 12 });
+    const count = within(cluster(view)).getByText('12', { includeHiddenElements: true });
+
+    expect(flat(count).includeFontPadding).toBe(false);
+  });
+
+  it('is unchanged by a two-digit count', async () => {
+    const view = await draw({ active: false, glyphs: ['❤️', '😂'], count: 12 });
+
+    expect(within(cluster(view)).getByText('12', { includeHiddenElements: true })).toBeTruthy();
+    expect(flat(glyphsIn(cluster(view), '😂')[0]!).fontSize).toBe(
+      theme.typography.caption.fontSize,
+    );
+  });
+
+  it('draws the glyph the same whether the viewer has reacted or not', async () => {
+    // Selected changes the count's tone and nothing about the glyph geometry.
+    const off = await clusterGlyph('😂');
+    const on = flat(
+      glyphsIn(
+        cluster(await draw({ active: true, mineGlyph: '❤️', glyphs: ['❤️', '😂'], count: 4 })),
+        '😂',
+      )[0]!,
+    );
+
+    expect(on).toEqual(off);
+  });
+
+  it('draws an emoji the same way in the slot and in the cluster, bar the size', async () => {
+    // One treatment, two places. The sizes differ on purpose — the slot matches the icons
+    // beside it and the cluster is a small summary — and everything else must not.
+    const view = await draw({ active: true, mineGlyph: '❤️', glyphs: ['❤️', '🔥'], count: 5 });
+    const slot = flat(within(actionSlot(view)).getByText('❤️', { includeHiddenElements: true }));
+    const summary = flat(glyphsIn(cluster(view), '🔥')[0]!);
+
+    for (const key of ['includeFontPadding', 'textAlign', 'textAlignVertical'] as const) {
+      expect(summary[key]).toEqual(slot[key]);
+    }
+    // The same headroom rule, applied to two different sizes.
+    const ratio = (style: Record<string, number | string>) =>
+      Number(style.lineHeight) / Number(style.fontSize);
+    expect(ratio(summary)).toBeCloseTo(ratio(slot), 1);
+  });
+});

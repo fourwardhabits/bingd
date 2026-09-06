@@ -1,4 +1,4 @@
-import { genreRanksFor, MIN_GENRE_SIZE, type RankedRow } from './genre-rank';
+import { genreRanksFor, MIN_GENRE_SIZE, TOP_RANK_SHOWN, type RankedRow } from './genre-rank';
 import type { RankingCategory } from './use-collection';
 
 /**
@@ -29,9 +29,14 @@ const CATEGORY_LABEL: Record<RankingCategory, string> = {
  *
  * "#3 in Movies" says something about the film; "#47 in Movies" says something about
  * how much the reader has ranked. Ten is where one stops being the other, and it is
- * the founder's number rather than a derived one. It now governs the genre line too.
+ * the founder's number rather than a derived one. It governs the genre line too.
+ *
+ * **Imported rather than declared**, since 2026-09-05: the post-ranking reveal applies
+ * the same rule, and one founder number written down twice is a number that will
+ * eventually be two. `genre-rank.ts` owns it because both surfaces already depend on
+ * that module.
  */
-const TOP_N = 10;
+const TOP_N = TOP_RANK_SHOWN;
 
 /**
  * The one rank line the hero shows, or none at all.

@@ -713,7 +713,7 @@ describe('the reveal names what it landed between', () => {
     // One summary carries score, ordinal and both neighbours. The rows themselves are
     // hidden from the tree, so nothing is read twice.
     await sheet.findByLabelText(
-      'Film A scored 8.7 out of 10. #3 in Movies. Below Sicario. Above Collateral.',
+      'Film A scored 8.7 out of 10. Below Sicario. Above Collateral. #3 in Movies.',
     );
   });
 
@@ -725,7 +725,7 @@ describe('the reveal names what it landed between', () => {
     answering({ ...placement, data: { ...placement.data, position: 1 } });
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. #1 in Movies. Above Sicario.');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. Above Sicario. #1 in Movies.');
     // The placement line carries it. No badge, no separate treatment, and nothing
     // invented to sit above a #1.
     expect(sheet.getByText('#1 in Movies', { includeHiddenElements: true })).toBeTruthy();
@@ -741,7 +741,7 @@ describe('the reveal names what it landed between', () => {
     answering(placement);
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies. Below Sicario.');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. Below Sicario. #3 in Movies.');
     expect(sheet.queryByText(/^Above/, { includeHiddenElements: true })).toBeNull();
     expect(sheet.getByText('#3 in Movies', { includeHiddenElements: true })).toBeTruthy();
   });
@@ -762,7 +762,7 @@ describe('the reveal names what it landed between', () => {
     answering({ ...placement, data: { ...placement.data, category: 'tv_seasons' } });
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in TV. Below Severance, S1.');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. Below Severance, S1. #3 in TV.');
     // The category is TV and the neighbour is a season. Nothing claims a rank among
     // series, which is not a thing this product orders.
     expect(sheet.getByText('#3 in TV', { includeHiddenElements: true })).toBeTruthy();
@@ -839,6 +839,184 @@ describe('the reveal names what it landed between', () => {
     expect(mockRpc.mock.calls).toHaveLength(1);
   });
 });
+
+/**
+ * **The reveal never names a placement worse than tenth** (founder, 2026-09-05, from a
+ * physical Android pass).
+ *
+ * What it drew was every placement it could compute, and the largest number on the screen
+ * was the one saying least: `#19 in Movies` is a fact about how much the reader has
+ * ranked rather than about the film, and it was leading the block.
+ *
+ * The rule is `hero-rank.ts`'s, which the title page has applied since 2026-08-28, with
+ * the reveal's own allowance of two lines. These tests exercise it end to end — through
+ * the real `shownGenreRanksFor` against a real ranked list — rather than unit-testing the
+ * selector alone, because the thing the founder photographed was the screen.
+ */
+describe('the reveal only names a placement worth naming', () => {
+  const ranked = (rows: unknown[]) => mockRanked.mockReturnValue({ data: rows });
+
+  /**
+   * A ranked list built to order, so a subject's overall position and its genre positions
+   * can be set independently.
+   *
+   * `MIN_GENRE_SIZE` is five, so every genre used here is padded past it — otherwise the
+   * genre would be dropped for being too small and the test would pass for the wrong
+   * reason.
+   */
+  const listOf = (subjectPosition: number, subjectGenres: string[], size = 40) => {
+    const rows: unknown[] = [];
+    for (let i = 1; i <= size; i += 1) {
+      if (i === subjectPosition) {
+        rows.push({
+          mediaItemId: 'film-a',
+          position: i,
+          kind: 'movie',
+          title: 'Film A',
+          genres: subjectGenres,
+        });
+      } else {
+        rows.push({
+          mediaItemId: `f${i}`,
+          position: i,
+          kind: 'movie',
+          title: `Film ${i}`,
+          // Every filler carries every genre under test, so a genre's population is the
+          // whole list and the subject's genre rank equals its overall position.
+          genres: subjectGenres,
+        });
+      }
+    }
+    return rows;
+  };
+
+  const revealAt = async (position: number, genres: string[] = [], size = 40) => {
+    ranked(listOf(position, genres, size));
+    answering({ ...placement, data: { ...placement.data, position } });
+    const sheet = await openSheet();
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    return sheet;
+  };
+
+  const text = (sheet: Awaited<ReturnType<typeof openSheet>>, value: string | RegExp) =>
+    sheet.queryByText(value, { includeHiddenElements: true });
+
+  it('shows the overall placement inside the top ten', async () => {
+    const sheet = await revealAt(3);
+    expect(text(sheet, '#3 in Movies')).toBeTruthy();
+  });
+
+  it('still shows it at exactly ten, which is the boundary the rule is written on', async () => {
+    const sheet = await revealAt(10);
+    expect(text(sheet, '#10 in Movies')).toBeTruthy();
+  });
+
+  it('suppresses the genres when the overall placement is shown', async () => {
+    // The broad claim is the stronger one. Two narrower ones beside it would dilute it,
+    // and the founder's complaint was the count of lines as much as any single one.
+    const sheet = await revealAt(2, ['Science Fiction', 'Action']);
+
+    expect(text(sheet, '#2 in Movies')).toBeTruthy();
+    expect(text(sheet, /Science Fiction/)).toBeNull();
+    expect(text(sheet, /Action/)).toBeNull();
+  });
+
+  it('hides the overall placement past ten, and says nothing in its place', async () => {
+    // No genres qualify here, so this is the bare case: score, title, anchors, and the
+    // block ends. Nothing invents a line to fill the space.
+    const sheet = await revealAt(19);
+
+    expect(text(sheet, '#19 in Movies')).toBeNull();
+    expect(text(sheet, /in Movies/)).toBeNull();
+  });
+
+  it('shows the qualifying genre placements instead, past ten', async () => {
+    // The founder's own example: #19 overall, and the two genre placements that are
+    // actually about the film.
+    ranked([
+      ...Array.from({ length: 18 }, (_, i) => ({
+        mediaItemId: `f${i}`,
+        position: i + 1,
+        kind: 'movie',
+        title: `Film ${i}`,
+        // Five of the eighteen above carry each genre, which puts the subject sixth in
+        // one and seventh in the other while leaving it nineteenth overall.
+        genres: [...(i < 5 ? ['Science Fiction'] : []), ...(i < 6 ? ['Action'] : [])],
+      })),
+      {
+        mediaItemId: 'film-a',
+        position: 19,
+        kind: 'movie',
+        title: 'Film A',
+        genres: ['Science Fiction', 'Action'],
+      },
+    ]);
+    answering({ ...placement, data: { ...placement.data, position: 19 } });
+    const sheet = await openSheet();
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    expect(text(sheet, '#19 in Movies')).toBeNull();
+    expect(text(sheet, /#6 Science Fiction/)).toBeTruthy();
+    expect(text(sheet, /#7 Action/)).toBeTruthy();
+  });
+
+  it('never names a genre placement worse than tenth either', async () => {
+    // Twelfth of forty in the only genre it has. The proportional strength that orders
+    // genre lines would happily have chosen it; the top-ten filter is what stops it.
+    const sheet = await revealAt(12, ['Drama']);
+
+    expect(text(sheet, /Drama/)).toBeNull();
+    expect(text(sheet, /in Movies/)).toBeNull();
+  });
+
+  it('shows at most two genre placements', async () => {
+    ranked([
+      ...Array.from({ length: 14 }, (_, i) => ({
+        mediaItemId: `f${i}`,
+        position: i + 1,
+        kind: 'movie',
+        title: `Film ${i}`,
+        genres: ['Drama', 'Crime', 'Thriller', 'Mystery'].filter((_, g) => i < 5 + g),
+      })),
+      {
+        mediaItemId: 'film-a',
+        position: 15,
+        kind: 'movie',
+        title: 'Film A',
+        genres: ['Drama', 'Crime', 'Thriller', 'Mystery'],
+      },
+    ]);
+    answering({ ...placement, data: { ...placement.data, position: 15 } });
+    const sheet = await openSheet();
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    const line = sheet.getByText(/^#\d+ /, { includeHiddenElements: true });
+    // Two ordinals on the line and no third, whatever the title qualifies for.
+    expect(String(line.props.children).match(/#\d+/g)).toHaveLength(2);
+  });
+
+  it('keeps the neighbours whatever the placement does', async () => {
+    // The anchors are the half of the block that is about the film, and they are the
+    // half a ranked title always has. A change to the ordinal rule must not touch them.
+    const sheet = await revealAt(19);
+
+    expect(text(sheet, 'Film 18')).toBeTruthy();
+    expect(text(sheet, 'Film 20')).toBeTruthy();
+  });
+
+  it('reads the anchors before the ordinal, as the screen draws them', async () => {
+    // The summary is the screen reader's copy of this block, so its order follows the
+    // visual one — and it must never speak a placement the screen decided not to show.
+    ranked(listOf(19, []));
+    answering({ ...placement, data: { ...placement.data, position: 19 } });
+    const sheet = await openSheet();
+
+    await sheet.findByLabelText(
+      'Film A scored 8.7 out of 10. Below Film 18. Above Film 20.',
+    );
+  });
+});
+
 
 /**
  * **A rebucket has already changed the collection before the first comparison.**

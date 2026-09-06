@@ -130,7 +130,9 @@ Added 2026-09-05, as the `watch-providers` action on the adapter and one compact
 
 **Three categories and no more.** `flatrate` becomes `stream`; `rent` and `buy` keep their names. TMDB also publishes `free` and `ads`, and both are deliberately unread: folding an ad-supported service in under **Stream** would say the same thing about Tubi as about Netflix, and inventing a fourth heading was not that change's decision to make. The consequence is stated rather than left to be discovered — a title carried only by a free or ad-supported service shows no block at all.
 
-**No provider deep links, and this is not a temporary gap.** TMDB's payload carries no per-service link, so a logo opens nothing. The one link is TMDB's own watch-options page for that title in that market, labelled `View watch options`, and it is checked in `normalize.ts` for `https` on `themoviedb.org` before it is offered — a link that fails the check is not offered rather than opened.
+**No provider deep links, and this is not a temporary gap.** TMDB's payload carries no per-service link, so a logo opens nothing, and manufacturing a provider URL out of a service name would be a guess presented as a destination.
+
+**Nor is there a link to TMDB's own page any more.** `View watch options` shipped on 2026-09-05 and was removed the same day, on the founder's ruling after a physical pass: a real link to the wrong place is still the wrong place. It sent somebody out of bingd. to a web page that sent them somewhere else, and it did not do the thing its position implied — open the film on the service they had just tapped. The adapter still normalises the link and still checks it in `normalize.ts` for `https` on `themoviedb.org` before returning it, and the client still carries it on `WatchAvailability`. Nothing draws it. That is deliberate: the data is free, the validation is the interesting half, and re-deriving both would be the cost of changing this decision back.
 
 ### Region — a US default, and selection is deferred
 
