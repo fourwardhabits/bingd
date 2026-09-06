@@ -289,6 +289,102 @@ describe('a title nobody has ranked', () => {
 });
 
 /**
+ * The page order, asserted rather than described (founder hierarchy pass).
+ *
+ * Every test above this one is a presence test — it asks whether something rendered,
+ * not where. That is why the order drifted twice without a single failure: the score
+ * moved below a paragraph of synopsis, five genre chips grew into three rows on a
+ * 360pt screen, and the most prominent line under the title became the date the reader
+ * already knew. None of it broke a test.
+ *
+ * So order is asserted here directly, off the rendered tree rather than off the source:
+ * `readingOrder` walks `toJSON()` depth-first and collects the text it finds, which is
+ * the order somebody scrolling reads it in. That is the property these assertions are
+ * actually about, and it survives any amount of restructuring that keeps the reading
+ * order intact.
+ *
+ * **Children only, never props.** `JSON.stringify(view.toJSON())` throws here: a node's
+ * props carry React context objects that close a circle. The walk below is not an
+ * optimisation, it is the reason this works at all.
+ */
+type RenderedNode = { children?: unknown } | string | null | undefined;
+
+/** Every string in the tree, depth-first — the order a reader meets them in. */
+const readingOrder = (node: unknown): string[] => {
+  if (typeof node === 'string') return [node];
+  if (Array.isArray(node)) return node.flatMap(readingOrder);
+  if (node && typeof node === 'object') return readingOrder((node as RenderedNode & object).children);
+  return [];
+};
+
+describe('the page hierarchy', () => {
+  /** Where a piece of rendered text sits in the page's reading order. */
+  const positionOf = (view: { toJSON: () => unknown }, needle: string) => {
+    const index = readingOrder(view.toJSON()).findIndex((text) => text.includes(needle));
+    expect(index).toBeGreaterThanOrEqual(0);
+    return index;
+  };
+
+  it('puts the scores above the description, not below it', async () => {
+    // The scores are what this app knows that nobody else's page does, and they were
+    // under three lines of TMDB synopsis — off the bottom of the founder's device.
+    const view = await open();
+    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
+
+    expect(positionOf(view, 'bingd.')).toBeLessThan(
+      positionOf(view, 'A thief who steals corporate secrets'),
+    );
+  });
+
+  it('puts the genres and the actions above the scores', async () => {
+    // Outward from what the thing *is* to what it is *about*: metadata, genres, the
+    // things you can do to it, then what it scores.
+    const view = await open();
+    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
+
+    expect(positionOf(view, 'Science Fiction')).toBeLessThan(positionOf(view, 'Watchlist'));
+    expect(positionOf(view, 'Watchlist')).toBeLessThan(positionOf(view, 'bingd.'));
+  });
+
+  it('draws at most three genre chips, and keeps the rest in Details', async () => {
+    // Five wrapped to two and sometimes three rows, which put a block of metadata
+    // between the title and the actions. Nothing is lost: Details lists them all.
+    tableRows.media_items = [
+      {
+        ...film,
+        genres: ['Science Fiction', 'Action', 'Adventure', 'Thriller', 'Drama'],
+      },
+    ];
+    const view = await open();
+
+    expect(view.getByText('Science Fiction')).toBeTruthy();
+    expect(view.getByText('Action')).toBeTruthy();
+    expect(view.getByText('Adventure')).toBeTruthy();
+    expect(view.queryByText('Thriller')).toBeNull();
+    expect(view.queryByText('Drama')).toBeNull();
+
+    await fireEvent.press(view.getByRole('tab', { name: 'Details' }));
+    await waitFor(() =>
+      expect(
+        view.getByText('Science Fiction, Action, Adventure, Thriller, Drama'),
+      ).toBeTruthy(),
+    );
+  });
+
+  it('leaves the genre chips exactly as the provider spells them', async () => {
+    // No normalisation, no merging, no relabelling. "Sci-Fi" is not a synonym this
+    // code gets to decide on: `media_items.genres` is what the adapter wrote, the
+    // filter sheet's Genre section reads the same strings, and a rename here would
+    // silently disagree with the facet a reader filters by.
+    tableRows.media_items = [{ ...film, genres: ['Science Fiction', 'Action & Adventure'] }];
+    const view = await open();
+
+    expect(view.getByText('Science Fiction')).toBeTruthy();
+    expect(view.getByText('Action & Adventure')).toBeTruthy();
+  });
+});
+
+/**
  * The metadata line is `certification · runtime · director`, and all three can be absent
  * at once — an obscure title TMDB has not rated, has no runtime for, and credits no
  * director on.
@@ -765,6 +861,26 @@ describe('a title this user has ranked', () => {
   it('puts the watch date where it answers "have I seen this"', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText(/Watched/)).toBeTruthy());
+  });
+
+  it('demotes the exact date below the description, under the hero that already answers it', async () => {
+    // It used to be the first line under the title — the most prominent thing on the
+    // page was a date the reader already knew. The hero answers "have I seen this"
+    // first now, with a score and an ordinal beside the poster; the exact date is a
+    // footnote after the synopsis. Still on the page, because the companions are on
+    // the same line and nobody would go looking for those behind a tab.
+    const view = await open();
+    await waitFor(() => expect(view.getByText(/Watched/)).toBeTruthy());
+
+    const order = readingOrder(view.toJSON());
+    const at = (needle: string) => {
+      const index = order.findIndex((text) => text.includes(needle));
+      expect(index).toBeGreaterThanOrEqual(0);
+      return index;
+    };
+    // "Watched " rather than the formatted date itself: `toLocaleDateString` resolves
+    // against the runtime's ICU data, and the assertion is about position, not spelling.
+    expect(at('A thief who steals corporate secrets')).toBeLessThan(at('Watched '));
   });
 
   it('keeps the ordinal with its denominator in Details', async () => {

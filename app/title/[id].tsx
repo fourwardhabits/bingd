@@ -877,51 +877,24 @@ export default function TitleScreen() {
           {recommendedBy && !hero.uri ? <RecommendedCallout label={recommendedBy} /> : null}
         </View>
 
-        {watchedDate || companions.data?.length ? (
-          <View style={styles.block}>
-            <Text variant="footnote" tone="secondary">
-              {[
-                watchedDate ? `Watched ${watchedDate}` : null,
-                companions.data?.length
-                  ? `with ${companions.data.map((person) => person.name).join(', ')}`
-                  : null,
-              ]
-                .filter(Boolean)
-                .join(' ')}
-            </Text>
-          </View>
-        ) : null}
+        {/* Directly under the metadata line, and still never over the artwork. The
+            founder's order is metadata → genres → description, which reads outward from
+            what the thing *is* to what it is *about*; underneath the description they
+            were a footnote to a paragraph nobody had finished reading.
 
-        {/* Above the description, and still never over the artwork. The founder's
-            order is metadata → genres → description, which reads outward from what the
-            thing *is* to what it is *about*; underneath the description they were a
-            footnote to a paragraph nobody had finished reading. */}
+            **Three, not five, and one row is the design** (hierarchy pass). Five chips
+            wrapped to two and sometimes three rows on a 360pt Android screen, which put
+            a block of metadata between the title and the actions and pushed the score
+            below the fold on the founder's device. Three is what fits one row at the
+            widths this app supports; the wrap survives as the guard for a large text
+            size, exactly as it does on the action row below. Nothing is lost — Details
+            still lists every genre, joined, under its own label. */}
         {descriptive.genres.length ? (
           <View style={styles.pills}>
-            {descriptive.genres.slice(0, 5).map((genre: string) => (
+            {descriptive.genres.slice(0, 3).map((genre: string) => (
               <Chip key={genre} label={genre} />
             ))}
           </View>
-        ) : null}
-
-        {title.overview ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={expanded ? 'Collapse description' : 'Expand description'}
-            onPress={() => setExpanded((open) => !open)}
-            style={styles.block}
-          >
-            <Text variant="body" numberOfLines={expanded ? undefined : 3}>
-              {title.overview}
-            </Text>
-            {/* No "less". Once it is open the whole thing is visible and the
-                control has nothing left to promise. */}
-            {expanded ? null : (
-              <Text variant="callout" tone="action">
-                more
-              </Text>
-            )}
-          </Pressable>
         ) : null}
 
         {/* A deliberate row rather than two glyphs floating under the title.
@@ -1009,8 +982,15 @@ export default function TitleScreen() {
         {/* **Above the tabs, and never inside them.** The founder's correction: scores
             are core Bingd data, and putting them below a tab row meant they appeared
             and disappeared as somebody looked at the cast. The page order is fixed now
-            — hero, metadata, genres, description, actions, scores, tabs — so a reader
+            — hero, metadata, genres, actions, scores, description, tabs — so a reader
             scrolling to the number finds it in the same place every time.
+
+            **Above the description since the hierarchy pass, not below it.** A synopsis
+            is three lines of prose and the scores are the thing this app is for; with
+            the description between them the founder's device needed a scroll to reach
+            the one number nobody else's page has. The description has not moved far —
+            it is the next block down — but it no longer stands between the reader and
+            what Bingd knows.
 
             A series has no aggregate of its own, because it cannot be ranked
             (PRD §10), so it gets no section rather than a permanent "No ratings yet".
@@ -1040,8 +1020,54 @@ export default function TitleScreen() {
           />
         ) : null}
 
-        {/* Under the scores, over the tabs, and on every kind of title — including a
-            series, which has no score block of its own because it cannot be ranked.
+        {title.overview ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={expanded ? 'Collapse description' : 'Expand description'}
+            onPress={() => setExpanded((open) => !open)}
+            style={styles.block}
+          >
+            <Text variant="body" numberOfLines={expanded ? undefined : 3}>
+              {title.overview}
+            </Text>
+            {/* No "less". Once it is open the whole thing is visible and the
+                control has nothing left to promise. */}
+            {expanded ? null : (
+              <Text variant="callout" tone="action">
+                more
+              </Text>
+            )}
+          </Pressable>
+        ) : null}
+
+        {/* **Demoted, and deliberately still on the page** (hierarchy pass).
+            "Watched 12 Aug 2026 with Ada" sat immediately under the title, in the band
+            the founder's device pass wanted for the score and the actions — the single
+            most prominent line on the page was a date the reader already knows. It
+            answers "have I seen this", and the hero answers that first now: a score and
+            an ordinal beside the poster. So the exact date follows the description as a
+            quiet footnote, which is the weight a date has.
+
+            Not moved into Details, and not dropped: the companions are here too, and
+            "who I watched it with" is the half nobody would think to go looking for
+            behind a tab. */}
+        {watchedDate || companions.data?.length ? (
+          <View style={styles.block}>
+            <Text variant="footnote" tone="tertiary">
+              {[
+                watchedDate ? `Watched ${watchedDate}` : null,
+                companions.data?.length
+                  ? `with ${companions.data.map((person) => person.name).join(', ')}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Under the description, over the tabs, and on every kind of title — including
+            a series, which has no score block of its own because it cannot be ranked.
 
             The founder's placement decision, and the reason it is not a tab: a film
             opens on Cast and a season opens on Episodes, both of which are those
@@ -1801,6 +1827,8 @@ const styles = StyleSheet.create({
    * the guard for the case the design cannot control: a reader at a large text size, on a
    * narrow device, in a language where "Watchlist" is two words. Without it the second
    * chip is simply cut off at the screen edge, which is what the founder found.
+   *
+   * The genre row above uses the same arrangement for the same reason — see `pills`.
    */
   actionRow: {
     flexDirection: 'row',
@@ -1808,7 +1836,11 @@ const styles = StyleSheet.create({
     columnGap: theme.space[3],
     rowGap: theme.space[2],
     paddingHorizontal: theme.layout.gutter,
-    paddingTop: theme.space[4],
+    // Tightened in the hierarchy pass (16 → 12). The row used to follow a paragraph of
+    // synopsis and needed the air to separate itself from it; it now follows a single
+    // row of genre chips, and belongs to the identity cluster above rather than
+    // floating between two blocks.
+    paddingTop: theme.space[3],
   },
   recommendedCallout: {
     flexDirection: 'row',
@@ -1870,6 +1902,11 @@ const styles = StyleSheet.create({
     paddingTop: theme.space[3],
     gap: theme.space[1],
   },
+  /**
+   * One row, and the wrap is the guard rather than the design — the same arrangement as
+   * `actionRow`, for the same reason. Three chips fit at 360pt; a reader at a large text
+   * size gets a second row instead of a chip cut off at the screen edge.
+   */
   pills: {
     flexDirection: 'row',
     flexWrap: 'wrap',
