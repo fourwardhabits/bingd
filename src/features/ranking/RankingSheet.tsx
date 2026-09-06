@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import { useNewUnlocks } from '@/features/awards/use-new-unlocks';
 import {
   formatGenreRank,
   shownGenreRanksFor,
@@ -11,7 +13,10 @@ import {
 } from '@/features/collection/genre-rank';
 import { neighboursFor } from '@/features/collection/rank-neighbours';
 import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
-import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
+import {
+  useRankedCollection,
+  type RankingCategory,
+} from '@/features/collection/use-collection';
 import { track, type Surface } from '@/lib/analytics';
 import { posterUri } from '@/lib/images';
 import { invalidateAfterCollectionChange } from '@/features/collection/invalidate';
@@ -151,6 +156,7 @@ function Session({
 }: RankingSheetProps & { subject: NonNullable<RankingSheetProps['subject']> }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
+  const router = useRouter();
 
   const [step, setStep] = useState<SessionStep | null>(null);
   // Starts true: the session is already being opened by the time anything renders.
@@ -173,7 +179,9 @@ function Session({
    * because `useState` calls a bare function argument as an initialiser rather than
    * storing it.
    */
-  const [lastAttempt, setLastAttempt] = useState<{ run: () => Promise<SessionStep> } | null>(null);
+  const [lastAttempt, setLastAttempt] = useState<{ run: () => Promise<SessionStep> } | null>(
+    null,
+  );
 
   /**
    * One operation id per intent, for the ranking RPCs that gained one in
@@ -224,6 +232,32 @@ function Session({
   // A ref because it has to be right in the same tick as the press, and because it has to
   // outlive the states that render nothing from it.
   const openSession = useRef<string | null>(null);
+
+  /**
+   * **The award payoff, and it is downstream of everything above it.**
+   *
+   * `useNewUnlocks` takes a snapshot of the reader's award ledger when this session
+   * mounts and diffs it after the placement lands. The unlock itself is not this
+   * component's work at all — `_maybe_award_unlocks` records it from a trigger inside
+   * the ranking's own transaction — so by the time `placed` arrives the rows exist and
+   * this only has to notice which of them are new.
+   *
+   * Three properties are deliberate and are what keep a decoration from becoming a
+   * dependency:
+   *
+   *   - **Nothing here is awaited by the ranking.** The detection runs from `apply`'s
+   *     `placed` branch as a fire-and-forget, after the invalidation and the analytics
+   *     that a finished ranking actually owes.
+   *   - **Every failure resolves to no celebration.** A snapshot that never landed, a
+   *     read that errored, an award key from a future migration: all of them leave
+   *     `pendingAwards` empty and the sheet closes exactly as it always did.
+   *   - **Done is never blocked.** `close()` navigates *after* it has closed, and only
+   *     if there is something to show.
+   *
+   * A ref, because `close` reads it in the same tick as the press.
+   */
+  const detectNewUnlocks = useNewUnlocks(profile.id);
+  const pendingAwards = useRef<{ awardKey: string; tierKey: string }[]>([]);
 
   const apply = useCallback(
     (next: SessionStep) => {
@@ -276,6 +310,26 @@ function Session({
          * who was activated by whom is a join on `invite_attributions`.
          */
         if (next.activated) track({ name: 'invite_activated' });
+
+        /**
+         * What this ranking unlocked, asked for last and awaited by nothing.
+         *
+         * `void` rather than `await`: `apply` is what a finished ranking runs, and a
+         * ranking must not be able to stall behind a read about badges. If the answer
+         * arrives after the reader has already pressed Done, `pendingAwards` is simply
+         * still empty when `close` reads it and there is no celebration — the
+         * congratulations notification is the other door, and it is the durable one.
+         */
+        void detectNewUnlocks()
+          .then((unlocked) => {
+            pendingAwards.current = unlocked.map((row) => ({
+              awardKey: row.awardKey,
+              tierKey: row.tierKey,
+            }));
+          })
+          .catch(() => {
+            pendingAwards.current = [];
+          });
       } else if (next.state === 'failed' && next.changed) {
         /**
          * **A failed answer can still have placed the title.**
@@ -395,6 +449,31 @@ function Session({
     onClose();
   };
 
+  /**
+   * Close, and then celebrate what the ranking earned.
+   *
+   * **Only the plain Done exit.** Rank another goes straight into another comparison and
+   * Add more details opens the log sheet on the title underneath — both are exits that
+   * continue into a task, and putting a full-screen modal across one of them would
+   * interrupt the thing the reader just chose to do. Nothing is lost by waiting: the
+   * unlock also wrote a congratulations notification, and tapping that opens this same
+   * screen for the same award.
+   *
+   * The push happens *after* `close`, so the ranking sheet is already gone and the
+   * celebration is presented over whatever opened it rather than over a dismissing
+   * sheet. Cleared before navigating, so a second Done cannot show it twice.
+   */
+  const closeAndCelebrate = async () => {
+    const earned = pendingAwards.current;
+    pendingAwards.current = [];
+    await close();
+    if (!earned.length) return;
+    router.push({
+      pathname: '/awards/celebrate',
+      params: { awards: earned.map((a) => `${a.awardKey}:${a.tierKey}`).join(',') },
+    });
+  };
+
   return (
     <Sheet visible onClose={() => void close()} label={`Rank ${subject.title}`}>
       <View style={styles.sheet}>
@@ -406,7 +485,7 @@ function Session({
             bucket={step.bucket}
             subjectId={subject.id}
             title={subject.title}
-            onDone={() => void close()}
+            onDone={() => void closeAndCelebrate()}
             onRankAnother={() => {
               void close();
               onRankAnother?.();
@@ -1123,30 +1202,30 @@ function Reveal({
       </Text>
 
       {/**
-        * **Score, then what it landed between, then whatever rank is worth naming**
-        * (founder, 2026-09-05, from a physical Android pass).
-        *
-        * The score stays the hero and the count-up is untouched. The anticipation the
-        * ranking flow builds is "what am I going to give this", and the number answers
-        * it. Nothing here competes with the panel above.
-        *
-        * **The anchors have moved above the ordinal**, and the ordinal has become
-        * conditional. Both changes answer the same complaint: the block was four lines
-        * of number under a score, led by `#19 in Movies` — the largest of them and the
-        * one saying least, because a placement outside the top ten is a fact about how
-        * much the reader has ranked rather than about the film. It is now hidden past
-        * ten, and the two names either side lead instead. They are the half of this
-        * block that is about the film, and the half a ranked title always has.
-        *
-        * Underneath, together, comes whichever rank survives the rule: the overall
-        * placement inside the top ten, otherwise up to two top-ten genre placements,
-        * otherwise nothing and no reserved gap. See the selection above the return for
-        * the whole rule and why it is `hero-rank.ts`'s, shared rather than restated.
-        *
-        * Every name comes off the list this screen already reads for those genre ranks,
-        * so the block costs no second request, adds no poster fetch, and cannot disagree
-        * with the ordinal beneath it.
-        */}
+       * **Score, then what it landed between, then whatever rank is worth naming**
+       * (founder, 2026-09-05, from a physical Android pass).
+       *
+       * The score stays the hero and the count-up is untouched. The anticipation the
+       * ranking flow builds is "what am I going to give this", and the number answers
+       * it. Nothing here competes with the panel above.
+       *
+       * **The anchors have moved above the ordinal**, and the ordinal has become
+       * conditional. Both changes answer the same complaint: the block was four lines
+       * of number under a score, led by `#19 in Movies` — the largest of them and the
+       * one saying least, because a placement outside the top ten is a fact about how
+       * much the reader has ranked rather than about the film. It is now hidden past
+       * ten, and the two names either side lead instead. They are the half of this
+       * block that is about the film, and the half a ranked title always has.
+       *
+       * Underneath, together, comes whichever rank survives the rule: the overall
+       * placement inside the top ten, otherwise up to two top-ten genre placements,
+       * otherwise nothing and no reserved gap. See the selection above the return for
+       * the whole rule and why it is `hero-rank.ts`'s, shared rather than restated.
+       *
+       * Every name comes off the list this screen already reads for those genre ranks,
+       * so the block costs no second request, adds no poster fetch, and cannot disagree
+       * with the ordinal beneath it.
+       */}
       <View style={styles.placement}>
         {/**
          * **The placement leads again, directly under the title** (founder, physical
@@ -1234,29 +1313,29 @@ function Reveal({
       </View>
 
       {/**
-        * **Nothing is said here about Too tough** (founder, 2026-08-30).
-        *
-        * This slot held "You skipped a few, so this is an estimate. You can move it from
-        * Rankings.", drawn whenever the server came back `adjustable` -- which it does
-        * when a title lands at the middle of its surviving range because the walk ran
-        * out of eligible opponents rather than because a comparison decided it.
-        *
-        * It is removed, and the reasoning is the founder's: pressing Too tough is a
-        * legitimate answer, not a confession. A paragraph that appears only for the
-        * people who used the affordance turns the one control that keeps a ranking
-        * honest into something the reveal apologises for, on the screen that is supposed
-        * to be the reward -- and it appeared at the moment somebody had just finished
-        * their first ranking.
-        *
-        * **The placement itself is unchanged, and so is the flag.** `_rank_finalize`
-        * still returns `adjustable` and `session.ts` still carries it; the
-        * uncertainty-safe midpoint still produces it, the three-skip cap still fires
-        * first, and nothing invents a comparison, a tie or a winner to fill the gap
-        * (20260901000100). What went is the sentence, not the honesty behind it: the
-        * reveal claims no more precision than it did before -- it states the score and
-        * the placement, exactly as it does for a ranking that met no Too tough at all,
-        * and the title stays as movable from Rankings as every other one.
-        */}
+       * **Nothing is said here about Too tough** (founder, 2026-08-30).
+       *
+       * This slot held "You skipped a few, so this is an estimate. You can move it from
+       * Rankings.", drawn whenever the server came back `adjustable` -- which it does
+       * when a title lands at the middle of its surviving range because the walk ran
+       * out of eligible opponents rather than because a comparison decided it.
+       *
+       * It is removed, and the reasoning is the founder's: pressing Too tough is a
+       * legitimate answer, not a confession. A paragraph that appears only for the
+       * people who used the affordance turns the one control that keeps a ranking
+       * honest into something the reveal apologises for, on the screen that is supposed
+       * to be the reward -- and it appeared at the moment somebody had just finished
+       * their first ranking.
+       *
+       * **The placement itself is unchanged, and so is the flag.** `_rank_finalize`
+       * still returns `adjustable` and `session.ts` still carries it; the
+       * uncertainty-safe midpoint still produces it, the three-skip cap still fires
+       * first, and nothing invents a comparison, a tie or a winner to fill the gap
+       * (20260901000100). What went is the sentence, not the honesty behind it: the
+       * reveal claims no more precision than it did before -- it states the score and
+       * the placement, exactly as it does for a ranking that met no Too tough at all,
+       * and the title stays as movable from Rankings as every other one.
+       */}
 
       {/**
        * **Where the reveal stopped being the end.**

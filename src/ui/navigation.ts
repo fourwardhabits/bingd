@@ -85,5 +85,14 @@ export const ROOT_SCREEN_TITLES = {
    * from a comment's author — where "‹ Comments" is the right thing to promise.
    */
   'activity/[id]': 'Comments',
+  /**
+   * The award payoff (`app/awards/celebrate.tsx`), reached from a ranking that crossed
+   * a tier and from the congratulations in the inbox.
+   *
+   * Titled rather than blank because it is a modal with a header, and "Award" is what
+   * the back gesture and the screen reader should call the thing being presented. The
+   * award's own name is on the card, where it is the message rather than chrome.
+   */
+  'awards/celebrate': 'Award',
   settings: 'Settings',
 } as const;

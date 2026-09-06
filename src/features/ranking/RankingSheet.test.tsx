@@ -23,26 +23,60 @@ const mockSelect = jest.fn();
  * different shapes — so the column list is the honest discriminator, and a test that
  * dispatched on the table name would pass even if the two collapsed onto one key.
  */
+/**
+ * The award ledger, one answer per read.
+ *
+ * `useNewUnlocks` reads `award_unlocks` twice around a ranking — once on mount for the
+ * snapshot, once after the placement — and the difference between the two answers *is*
+ * the feature. A queue is the only way to express that: shift a reply per read, and fall
+ * back to an empty ledger, which is what every test written before the celebration
+ * existed needs and gets without saying so.
+ */
+let mockUnlockQueue: { rows?: unknown[]; error?: unknown }[] = [];
+let mockUnlockReads = 0;
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     rpc: (...args: unknown[]) => mockRpc(...args),
-    from: () => ({
-      select: (columns: string) => {
-        mockSelect(columns);
-        const chain = {
-          eq: () => ({
-            single: () => (columns.includes('overview') ? mockRecallRead() : mockPivotRead()),
-            // `use-credits` narrows by media item and then by facet.
-            eq: () => ({ maybeSingle: () => mockCreditsRead() }),
-          }),
-          // The head-count probe `use-credits` opens with, awaited directly.
-          then: (resolve: (value: unknown) => unknown) => resolve({ count: 1, error: null }),
+    from: (table: string) => {
+      if (table === 'award_unlocks') {
+        const answer = () => {
+          mockUnlockReads += 1;
+          const next = mockUnlockQueue.shift();
+          if (next?.error) return Promise.resolve({ data: null, error: next.error });
+          return Promise.resolve({ data: next?.rows ?? [], error: null });
         };
+        const chain: Record<string, unknown> = {};
+        Object.assign(chain, {
+          select: () => chain,
+          eq: () => chain,
+          then: (resolve: (value: unknown) => unknown) => answer().then(resolve),
+        });
         return chain;
-      },
-    }),
+      }
+      return {
+        select: (columns: string) => {
+          mockSelect(columns);
+          const chain = {
+            eq: () => ({
+              single: () => (columns.includes('overview') ? mockRecallRead() : mockPivotRead()),
+              // `use-credits` narrows by media item and then by facet.
+              eq: () => ({ maybeSingle: () => mockCreditsRead() }),
+            }),
+            // The head-count probe `use-credits` opens with, awaited directly.
+            then: (resolve: (value: unknown) => unknown) => resolve({ count: 1, error: null }),
+          };
+          return chain;
+        },
+      };
+    },
   },
   startSessionRefresh: () => () => {},
+}));
+
+const mockPush = jest.fn();
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: (...a: unknown[]) => mockPush(...a) }),
 }));
 
 /**
@@ -126,6 +160,9 @@ const visibleText = (node: unknown): string[] => {
 };
 
 beforeEach(() => {
+  mockPush.mockReset();
+  mockUnlockQueue = [];
+  mockUnlockReads = 0;
   mockRpc.mockReset();
   mockSelect.mockReset();
   mockRanked.mockReset();
@@ -155,7 +192,12 @@ beforeEach(() => {
   });
   mockCreditsRead.mockReset();
   mockCreditsRead.mockResolvedValue({
-    data: { payload: { cast: [{ id: 1, name: 'A Name' }], crew: [{ name: 'A Director', job: 'Director' }] } },
+    data: {
+      payload: {
+        cast: [{ id: 1, name: 'A Name' }],
+        crew: [{ name: 'A Director', job: 'Director' }],
+      },
+    },
     error: null,
   });
 });
@@ -498,7 +540,9 @@ describe('closing', () => {
     await fireEvent.press(sheet.close());
     expect(sheet.onClose).toHaveBeenCalled();
 
-    await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} surface="search" />);
+    await sheet.rerender(
+      <RankingSheet subject={null} onClose={sheet.onClose} surface="search" />,
+    );
     answer(comparison());
 
     await waitFor(() => expect(callsTo('rank_cancel')).toHaveLength(1));
@@ -573,7 +617,10 @@ describe('closing', () => {
   });
 
   it('does not cancel a session the server says has gone', async () => {
-    answering(comparison(), { data: null, error: { code: 'P0002', message: 'no such session' } });
+    answering(comparison(), {
+      data: null,
+      error: { code: 'P0002', message: 'no such session' },
+    });
     const sheet = await openSheet();
 
     await fireEvent.press(await sheet.ready('Film A'));
@@ -619,8 +666,12 @@ describe('the reveal', () => {
     expect(sheet.getByText('#3 in Movies', { includeHiddenElements: true })).toBeTruthy();
 
     // Rendering happened before the spy, so re-run the placement to observe it.
-    await sheet.rerender(<RankingSheet subject={null} onClose={sheet.onClose} surface="search" />);
-    await sheet.rerender(<RankingSheet subject={subject} onClose={sheet.onClose} surface="search" />);
+    await sheet.rerender(
+      <RankingSheet subject={null} onClose={sheet.onClose} surface="search" />,
+    );
+    await sheet.rerender(
+      <RankingSheet subject={subject} onClose={sheet.onClose} surface="search" />,
+    );
     await waitFor(() => expect(invalidate).toHaveBeenCalled());
 
     const keys = invalidate.mock.calls.map(([args]) => JSON.stringify(args?.queryKey));
@@ -1013,12 +1064,9 @@ describe('the reveal only names a placement worth naming', () => {
     answering({ ...placement, data: { ...placement.data, position: 19 } });
     const sheet = await openSheet();
 
-    await sheet.findByLabelText(
-      'Film A scored 8.7 out of 10. Below Film 18. Above Film 20.',
-    );
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. Below Film 18. Above Film 20.');
   });
 });
-
 
 /**
  * **A rebucket has already changed the collection before the first comparison.**
@@ -1102,7 +1150,10 @@ describe('moving a title to another band', () => {
    * a session, and a session is not a collection change.
    */
   it('changes nothing when the rebucket reports a failure', async () => {
-    answering({ data: null, error: { code: '22023', message: 'title is already in that bucket' } });
+    answering({
+      data: null,
+      error: { code: '22023', message: 'title is already in that bucket' },
+    });
     const { invalidated } = await mount({ subject: rebucket });
 
     await waitFor(() => expect(callsTo('rank_rebucket')).toHaveLength(1));
@@ -1218,7 +1269,10 @@ describe('moving a title to another band', () => {
     // A 22023 rolled the transaction back. The reader's position is exactly where it
     // was, so "Try again" would invite them to repeat something that will be refused
     // again for the same reason.
-    answering({ data: null, error: { code: '22023', message: 'title is already in that bucket' } });
+    answering({
+      data: null,
+      error: { code: '22023', message: 'title is already in that bucket' },
+    });
     const view = await mount({ subject: rebucket });
 
     await waitFor(() => expect(callsTo('rank_rebucket')).toHaveLength(1));
@@ -1237,7 +1291,10 @@ describe('moving a title to another band', () => {
   it('says the outcome is unknown rather than that it failed', async () => {
     // A bare code is not a refusal this app raises — `write-outcome.ts` reads it as an
     // outcome nobody can prove either way, and marks the step `changed`.
-    answering({ data: null, error: { code: '', message: 'TypeError: Network request failed' } });
+    answering({
+      data: null,
+      error: { code: '', message: 'TypeError: Network request failed' },
+    });
     const view = await mount({ subject: { ...subject, mode: 'rerank' as const } });
 
     await waitFor(() => expect(view.getByText('Not sure that landed')).toBeTruthy());
@@ -1283,7 +1340,9 @@ describe('moving a title to another band', () => {
     const view = await mount();
 
     await waitFor(() =>
-      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(false),
+      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(
+        false,
+      ),
     );
     await fireEvent.press(view.getByLabelText('Choose Film A'));
 
@@ -1297,7 +1356,9 @@ describe('moving a title to another band', () => {
     const view = await mount();
 
     await waitFor(() =>
-      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(false),
+      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(
+        false,
+      ),
     );
     await fireEvent.press(view.getByLabelText('Choose Film A'));
 
@@ -1311,7 +1372,9 @@ describe('moving a title to another band', () => {
     const view = await mount();
 
     await waitFor(() =>
-      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(false),
+      expect(view.getByLabelText('Choose Film A').props.accessibilityState.disabled).toBe(
+        false,
+      ),
     );
     await fireEvent.press(view.getByLabelText('Choose Film A'));
 
@@ -1324,7 +1387,10 @@ describe('a title that is already ranked', () => {
   it('is explained without Postgres wording', async () => {
     answering({
       data: null,
-      error: { code: '23505', message: 'title is already ranked; use rank_rebucket to move it' },
+      error: {
+        code: '23505',
+        message: 'title is already ranked; use rank_rebucket to move it',
+      },
     });
     const sheet = await openSheet();
 
@@ -1493,5 +1559,153 @@ describe('what the reveal says, and in what order', () => {
     const title = orderOf(sheet, textAt('Film A'));
     const below = orderOf(sheet, textAt('Film 18'));
     expect(below).toBeGreaterThan(title);
+  });
+});
+
+/**
+ * The award payoff, and the guarantee underneath it.
+ *
+ * The founder's rule for this feature is that it is **downstream**: the award was
+ * granted by a database trigger inside the ranking's own transaction, and everything
+ * here only reads what that trigger recorded. So the assertions that matter most are the
+ * negative ones — a ranking finishes, closes and reports success whatever this does.
+ */
+describe('celebrating what the ranking earned', () => {
+  const unlock = (awardKey: string, tierKey: string) => ({
+    award_key: awardKey,
+    tier_key: tierKey,
+    earned_at: '2026-09-06T10:00:00Z',
+  });
+
+  /**
+   * Rank a title to its placement, let the detection land, and press Done.
+   *
+   * **The wait is the design, not a workaround.** The diff is fired from `apply` without
+   * being awaited, precisely so a ranking cannot stall behind a read about badges — so a
+   * reader who taps Done in the same frame the placement lands gets no celebration, and
+   * that is correct: the congratulations notification is the other door, and it is the
+   * durable one. A human pressing a button after reading their score has taken far
+   * longer than one round trip, and waiting for the second read is how a test spends the
+   * same time.
+   */
+  const rankAndFinish = async () => {
+    answering(placement);
+    const sheet = await openSheet();
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    await waitFor(() => expect(mockUnlockReads).toBe(2));
+    await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
+    return sheet;
+  };
+
+  it('celebrates a tier this ranking crossed', async () => {
+    // Empty before, one row after: the difference is the award.
+    mockUnlockQueue = [{ rows: [] }, { rows: [unlock('movie-muncher', 'bronze')] }];
+
+    const sheet = await rankAndFinish();
+
+    await waitFor(() =>
+      expect(mockPush).toHaveBeenCalledWith({
+        pathname: '/awards/celebrate',
+        params: { awards: 'movie-muncher:bronze' },
+      }),
+    );
+    expect(sheet.onClose).toHaveBeenCalled();
+  });
+
+  it('carries every tier crossed in one breath into one flow', async () => {
+    /**
+     * One ranking can cross a Movies threshold and a combined Movies-and-TV threshold at
+     * once — `_maybe_award_unlocks` loops over every named track — and two modals stacked
+     * on each other is two things to dismiss for one accomplishment.
+     */
+    mockUnlockQueue = [
+      { rows: [] },
+      { rows: [unlock('movie-muncher', 'bronze'), unlock('two-screen-life', 'tourist')] },
+    ];
+
+    await rankAndFinish();
+
+    await waitFor(() =>
+      expect(mockPush).toHaveBeenCalledWith({
+        pathname: '/awards/celebrate',
+        params: { awards: 'movie-muncher:bronze,two-screen-life:tourist' },
+      }),
+    );
+  });
+
+  it('celebrates nothing when the ranking crossed nothing', async () => {
+    mockUnlockQueue = [
+      { rows: [unlock('movie-muncher', 'bronze')] },
+      { rows: [unlock('movie-muncher', 'bronze')] },
+    ];
+
+    const sheet = await rankAndFinish();
+
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(sheet.onClose).toHaveBeenCalled();
+  });
+
+  it('never re-celebrates a tier the reader already had', async () => {
+    // The ledger is the reader's whole history. Without the before-and-after diff, every
+    // Done would congratulate them for a year of awards.
+    mockUnlockQueue = [
+      { rows: [unlock('lol-mode', 'giggle'), unlock('movie-muncher', 'bronze')] },
+      { rows: [unlock('lol-mode', 'giggle'), unlock('movie-muncher', 'bronze')] },
+    ];
+
+    await rankAndFinish();
+
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('celebrates nothing when the snapshot could not be taken', async () => {
+    /**
+     * Failing quiet is the only safe direction. If the first read failed, every row on
+     * the ledger looks new — and the reader would be congratulated for their entire
+     * history because their phone lost signal for a second.
+     */
+    mockUnlockQueue = [
+      { error: { message: 'offline' } },
+      { rows: [unlock('movie-muncher', 'bronze')] },
+    ];
+
+    answering(placement);
+    const sheet = await openSheet();
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies.');
+    await fireEvent.press(sheet.getByRole('button', { name: 'Done' }));
+
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(sheet.onClose).toHaveBeenCalled();
+    // **And the second read never happens.** Without a snapshot there is nothing to
+    // compare against, so asking again would spend a round trip on an answer that
+    // cannot be used — and the queue's second entry, an award, stays unread.
+    expect(mockUnlockReads).toBe(1);
+  });
+
+  it('finishes the ranking even when the detection read fails outright', async () => {
+    // The negative assertion the whole design exists for: a ranking succeeded, the
+    // collection moved, the award is on the ledger — and a failed read about badges
+    // changes none of that.
+    mockUnlockQueue = [{ rows: [] }, { error: { message: 'offline' } }];
+
+    const sheet = await rankAndFinish();
+
+    await waitFor(() => expect(sheet.onClose).toHaveBeenCalled());
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(callsTo('rank_cancel')).toHaveLength(0);
+  });
+
+  it('asks the ledger nothing at all when the ranking never placed', async () => {
+    // A reader who opens the sheet and closes it has earned nothing, and the ledger is
+    // not a thing to read on the way past. The snapshot on mount is the one read.
+    answering(comparison());
+    const sheet = await openSheet();
+    await sheet.ready('Film A');
+    await waitFor(() => expect(mockUnlockReads).toBe(1));
+
+    await fireEvent.press(sheet.getByRole('button', { name: 'Close' }));
+
+    expect(mockUnlockReads).toBe(1);
+    expect(mockPush).not.toHaveBeenCalled();
   });
 });
