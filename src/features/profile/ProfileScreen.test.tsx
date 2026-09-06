@@ -102,6 +102,32 @@ jest.mock('@/lib/supabase', () => ({
   startSessionRefresh: () => () => {},
 }));
 
+/**
+ * The awards shelf, as its heading and its one control.
+ *
+ * Doubled rather than rendered, because the real section runs the twenty-track fact read
+ * — eight tables through `read-all`'s keyset helpers — and this file's Supabase stand-in
+ * is a filter-and-sort over fixture arrays with no `or`/`gt` on it. Teaching it those
+ * would be building a second database to assert that a section sits above Goals.
+ * `ProfileAwards.test.tsx` covers the section itself, against a doubled query.
+ *
+ * The heading is spelled as `SectionHeader` renders it — upper-cased — so a test looking
+ * for the shelf is looking for the string a reader would see.
+ */
+jest.mock('@/features/awards/ProfileAwards', () => {
+  const { Pressable, Text, View } = jest.requireActual('react-native');
+  return {
+    ProfileAwards: ({ onSeeAll }: { onSeeAll: () => void }) => (
+      <View>
+        <Text>BINGD. AWARDS</Text>
+        <Pressable accessibilityRole="button" onPress={onSeeAll}>
+          <Text>See all</Text>
+        </Pressable>
+      </View>
+    ),
+  };
+});
+
 jest.mock('expo-router', () => ({
   // The inbox query refetches when the screen it is on regains focus, so anything
   // rendering a bell reaches for this. A no-op here: focus is not what these test.
@@ -383,9 +409,17 @@ describe('recent activity', () => {
     expect(view.queryByText('Nothing here yet')).toBeNull();
   });
 
-  it('puts a new ranking first, and keeps the newest five', async () => {
-    // The rest of the contract: a fresh activity takes the top slot, and the five the
-    // section holds are the newest five *of this person's*, however old the fifth is.
+  it('puts a new ranking first, newest down to oldest', async () => {
+    /**
+     * The rest of the contract: a fresh activity takes the top slot, and the order down
+     * the section is the order down the feed.
+     *
+     * **This used to assert that the sixth event was dropped.** The section read five
+     * rows once and stopped, which is the defect the founder's 2026-09-06 pass replaced
+     * with pages: six of somebody's events are now six rows, and the section keeps
+     * going as the reader scrolls rather than ending at an arbitrary number with
+     * nothing on the page saying so.
+     */
     mockTables.feed_events = Array.from({ length: 6 }, (_, i) => ({
       ...activity(`e${i}`, 'user-1', 'Sai'),
       media_item_id: `film-${i}`,
@@ -397,10 +431,22 @@ describe('recent activity', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getAllByText(/Film number 5/)).toHaveLength(1));
-    // Six events, five slots: the oldest is the one that yields.
-    expect(view.queryByText(/Film number 0/)).toBeNull();
+    // The sixth is on the page now. A first page is twenty, so all six fit in it.
+    expect(view.getAllByText(/Film number 0/)).toHaveLength(1);
     const drawn = renderedText(view.toJSON());
     expect(drawn.indexOf('Film number 5')).toBeLessThan(drawn.indexOf('Film number 4'));
+    expect(drawn.indexOf('Film number 1')).toBeLessThan(drawn.indexOf('Film number 0'));
+  });
+
+  it('stops asking once the history has run out, and says the list has ended', async () => {
+    // `getNextPageParam` returns null on a page shorter than the limit, which is what
+    // makes the bottom of the profile quiet rather than requesting a page that does not
+    // exist. The line under it is how a reader tells "the end" from "still loading".
+    mockTables.feed_events = [activity('only', 'user-1', 'Sai')];
+
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText(/That’s the end of the list/)).toBeTruthy());
   });
 
   it('says so when there is none, rather than leaving a bare heading', async () => {
@@ -619,7 +665,7 @@ describe('the shape of the page', () => {
     }));
   };
 
-  it('reads identity, bio, stats, buttons, goals — in that order', async () => {
+  it('reads identity, bio, stats, buttons, awards, goals — in that order', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('Nothing ranked yet')).toBeTruthy());
 
@@ -628,7 +674,12 @@ describe('the shape of the page', () => {
       'Films, mostly.',
       'Followers',
       'Share Profile',
-      'bingd. Awards',
+      // `bingd. Awards` was the second button in this row until 2026-09-06. It is a
+      // section now, above Goals, and Invite friends took the slot — see
+      // `ProfileActions`. `SectionHeader` upper-cases, so the shelf is matched on the
+      // heading it actually renders.
+      'Invite friends',
+      'BINGD. AWARDS',
       // Top ranked's empty state. A section heading would have been the natural marker,
       // and `SectionHeader` upper-cases its title, so none of them is on the page as it
       // is written.

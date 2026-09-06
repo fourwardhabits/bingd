@@ -1,8 +1,16 @@
-
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  RefreshControl,
+  ScrollView,
+  Share,
+  StyleSheet,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
@@ -11,8 +19,15 @@ import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { useReactions, useSetReaction, REACTION_GLYPH } from '@/features/feed/use-reactions';
-import { useActorActivity } from '@/features/feed/use-feed';
+import {
+  feedItems,
+  trimActorActivityToFirstPage,
+  useActorActivity,
+} from '@/features/feed/use-feed';
+import { ActivityPageFooter } from '@/features/feed/ActivityPageFooter';
+import { isNearEnd } from '@/features/feed/near-end';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
+import { ProfileAwards } from '@/features/awards/ProfileAwards';
 import { GoalsSection } from '@/features/goals/GoalsSection';
 import { currentYear } from '@/features/goals/use-goals';
 import { FollowListSheet } from '@/features/profile/FollowListSheet';
@@ -123,13 +138,24 @@ export default function ProfileScreen() {
    * section: the newest N events *by this actor*, however old, with
    * `feed_events_read` still the authorisation. Recent means "their most recent",
    * not "recent enough for the feed".
+   *
+   * **Paged since the founder's decision that it should keep going.** `feedItems`
+   * rather than a `flatMap`, for the same reason the feed uses it: the dedupe is part
+   * of what makes the pagination correct rather than a tidy-up, because a refresh
+   * trims the list back to one page and the page read after that is measured from a
+   * first page that has moved.
    */
-  const recent = feed.data ?? [];
-  const eventIds = recent.map((event) => event.id);
+  const recent = useMemo(() => feedItems(feed.data?.pages), [feed.data]);
+  const eventIds = useMemo(() => recent.map((event) => event.id), [recent]);
   const reactions = useReactions(eventIds, profile.id);
   const commentCounts = useCommentCounts(eventIds, profile.id);
   const { setReaction } = useSetReaction(profile.id);
   const openComments = commentsFor ? (recent.find((e) => e.id === commentsFor) ?? null) : null;
+
+  const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!feed.hasNextPage || feed.isFetchingNextPage || feed.isError) return;
+    if (isNearEnd(event)) void feed.fetchNextPage();
+  };
 
   /**
    * The profile as a link somebody else can open.
@@ -142,7 +168,10 @@ export default function ProfileScreen() {
     try {
       await Share.share({ message: url, url });
     } catch (error) {
-      Alert.alert('Could not share', error instanceof Error ? error.message : 'Sharing failed.');
+      Alert.alert(
+        'Could not share',
+        error instanceof Error ? error.message : 'Sharing failed.',
+      );
     }
   };
 
@@ -164,6 +193,10 @@ export default function ProfileScreen() {
    * one indistinguishable — so there is no stuck state on this screen for a pull to clear.
    */
   const refreshAll = () => {
+    // Back to one page before the refetch, or a reader who had scrolled to page four
+    // spends four round trips to see what is new at the top. The rows already on
+    // screen stay drawn under the spinner — the entry is trimmed, not cleared.
+    trimActorActivityToFirstPage(queryClient, profile.id);
     void feed.refetch();
     void stats.refetch();
     void queryClient.refetchQueries({ queryKey: queryKeys.goals(profile.id, currentYear()) });
@@ -185,6 +218,20 @@ export default function ProfileScreen() {
       />
       <ScrollView
         contentContainerStyle={styles.content}
+        /**
+         * The next page, asked for when the reader is within a screenful of the end.
+         *
+         * The three guards are the whole of the concurrency story, and
+         * `isFetchingNextPage` is the one that matters: `onScroll` fires on every frame
+         * of a flick, so without it a single gesture through the threshold would post
+         * the same request a dozen times.
+         *
+         * `isError` is deliberate. A failed page must not be retried by the scroll
+         * position the reader is already sitting at, or a dead connection becomes a
+         * request loop — the footer offers the retry, and that is the only way back.
+         */
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             // Still the two queries this component observes, deliberately: the spinner
@@ -243,39 +290,44 @@ export default function ProfileScreen() {
           onPressSeasons={stats.isPending ? undefined : () => setTitleList('tv_seasons')}
           controls={
             /**
-             * Share Profile and Bingd Awards in that order, then Invite friends.
+             * `[ Share Profile ] [ Invite friends ]`, one row.
              *
-             * Share Profile is what a profile is *for*: it is the thing you hand to
-             * somebody so they can follow you, and the one action that does that
-             * belongs at the top of it. Edit Profile is housekeeping and already has a
-             * home behind the gear, so promoting it here made the most common act the
-             * second-most prominent one.
+             * Share Profile is what a profile is *for*: the thing you hand to somebody
+             * so they can follow you. Invite friends is the same act pointed at a person
+             * who is not on Bingd yet, and on an app with no users it is the more
+             * valuable of the two — so it takes the fill and comes up out of the row it
+             * used to have to itself. Edit Profile is housekeeping and already has a
+             * home behind the gear.
              *
-             * The pair itself is `ProfileActions`, which is also what `/u/[username]`
+             * **`bingd. Awards` has left this row.** It is a section on the page now,
+             * above Goals, with its own See all into the same sheet the button opened.
+             *
+             * The row itself is `ProfileActions`, which is also what `/u/[username]`
              * draws — the ordering, the fill and the narrow-width behaviour all live
-             * there, so the two screens cannot drift apart again.
+             * there, so the two screens cannot drift apart again. Own profile only for
+             * the trailing half: an invite is from the signed-in person, and that page
+             * is about somebody else.
              */
-            <View style={styles.controlStack}>
-              <ProfileActions
-                onShare={() => void shareProfile()}
-                onOpenAwards={() => setAwardsOpen(true)}
-              />
-              {/* Under the pair, full width, outlined like Share: inviting somebody is
-                  sharing pointed at a person who is not on Bingd yet. Own profile only —
-                  `/u/[username]` deliberately does not render this, because an invite is
-                  from the signed-in person and that page is about somebody else. */}
-              <InviteFriendsButton />
-            </View>
+            <ProfileActions
+              onShare={() => void shareProfile()}
+              trailing={<InviteFriendsButton />}
+            />
           }
+        />
+
+        {/* Above Goals, and that order is the product decision rather than a layout
+            one: an award is something earned and finished, a goal is something in
+            progress. Identity before intention. */}
+        <ProfileAwards
+          viewerId={profile.id}
+          userId={profile.id}
+          onSeeAll={() => setAwardsOpen(true)}
         />
 
         {/* Above Top ranked, below the stats. A goal is about the year in progress
             and the stats are about all time, so this is where the page stops being a
             summary and starts being about now. */}
-        <GoalsSection
-          userId={profile.id}
-          onPressTitle={(id) => router.push(`/title/${id}`)}
-        />
+        <GoalsSection userId={profile.id} onPressTitle={(id) => router.push(`/title/${id}`)} />
 
         {/**
          * **See all goes to the Collection tab, not to a second list of the same
@@ -303,17 +355,26 @@ export default function ProfileScreen() {
 
         {/* Immediately after Top Ranked, and that order is the product decision rather
             than a layout one: what somebody loves, then what they want to watch next. */}
-        <ProfileWatchlist userId={profile.id} onPressTitle={(id) => router.push(`/title/${id}`)} />
+        <ProfileWatchlist
+          userId={profile.id}
+          onPressTitle={(id) => router.push(`/title/${id}`)}
+        />
 
         <View style={styles.section}>
           <SectionHeader title="Recent activity" />
           {feed.isPending ? (
             <SkeletonRow count={2} />
-          ) : feed.isError ? (
-            /* Before the empty branch, not after it. `recent` is derived from
-               `feed.data ?? []`, so a failed read is indistinguishable from an account
-               that has done nothing — and "Nothing here yet" is a statement about the
-               reader rather than about the request. */
+          ) : feed.isError && recent.length === 0 ? (
+            /* Before the empty branch, not after it. A failed read would otherwise be
+               indistinguishable from an account that has done nothing — and "Nothing
+               here yet" is a statement about the reader rather than about the request.
+
+               **`recent.length === 0` is what makes this the *first* page's error.**
+               Once rows are on screen an infinite query still reports `isError` after a
+               later page fails, and this state would then replace nothing but add a
+               sentence about the whole read above a screenful of activity that arrived
+               perfectly well. That case belongs to `ActivityPageFooter`, which apologises
+               for the one page that failed and leaves the rest alone. */
             <EmptyState
               kind="couldNotLoad"
               compact
@@ -365,7 +426,9 @@ export default function ProfileScreen() {
                   watched: watched.data,
                 })}
                 timeLabel={new Date(event.createdAt).toLocaleDateString()}
-                onPressTitle={() => event.mediaItemId && router.push(`/title/${event.mediaItemId}`)}
+                onPressTitle={() =>
+                  event.mediaItemId && router.push(`/title/${event.mediaItemId}`)
+                }
                 // The same interactions the Feed offers, because it is the same event.
                 // Reading what people said about your own ranking is the point of
                 // having the row here at all.
@@ -380,6 +443,13 @@ export default function ProfileScreen() {
               />
             );
           })}
+          <ActivityPageFooter
+            isFetchingNextPage={feed.isFetchingNextPage}
+            isError={feed.isError}
+            hasNextPage={feed.hasNextPage}
+            count={recent.length}
+            onRetry={() => void feed.fetchNextPage()}
+          />
         </View>
       </ScrollView>
 
@@ -445,7 +515,4 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   content: { paddingBottom: theme.space[10] },
   section: { paddingTop: theme.space[5], gap: theme.space[2] },
-  // The pair, then Invite friends beneath it, at the same rhythm the pair keeps. The
-  // pair's own layout is `ProfileActions`.
-  controlStack: { gap: theme.space[2] },
 });

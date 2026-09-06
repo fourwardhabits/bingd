@@ -259,14 +259,14 @@ describe('tier boundaries', () => {
   it('is locked below the first threshold', () => {
     const result = movieMuncher(49);
     expect(result.earnedTier).toBeNull();
-    expect(result.detailLine).toBe('Next: Watch 50 movies');
+    expect(result.detailLine).toBe('Next: Bronze · Watch 50 movies');
     expect(result.countLabel).toBe('49 / 50');
   });
 
   it('is earned exactly at the first threshold', () => {
     const result = movieMuncher(50);
     expect(result.earnedTier?.label).toBe('Bronze');
-    expect(result.detailLine).toBe('Next: Watch 200 movies');
+    expect(result.detailLine).toBe('Next: Silver · Watch 200 movies');
   });
 
   it('is earned exactly at the third threshold, and says what earned it', () => {
@@ -572,21 +572,21 @@ describe('what a row is called', () => {
   it('shows the family name before the first tier', () => {
     const locked = gremlin(6);
     expect(locked.title).toBe('Genre Gremlin');
-    expect(locked.detailLine).toBe('Next: Watch 14 different genres');
+    expect(locked.detailLine).toBe('Next: Dabbler · Watch 14 different genres');
     expect(locked.countLabel).toBe('6 / 14');
   });
 
   it('becomes the first tier name once it is earned', () => {
     const tier1 = gremlin(14);
     expect(tier1.title).toBe('Dabbler');
-    expect(tier1.detailLine).toBe('Next: Watch 16 different genres');
+    expect(tier1.detailLine).toBe('Next: Mixer · Watch 16 different genres');
     expect(tier1.countLabel).toBe('14 / 16');
   });
 
   it('becomes the second tier name at the second threshold', () => {
     const tier2 = gremlin(16);
     expect(tier2.title).toBe('Mixer');
-    expect(tier2.detailLine).toBe('Next: Watch 17 different genres');
+    expect(tier2.detailLine).toBe('Next: Chaos Collector · Watch 17 different genres');
   });
 
   it('becomes the third tier name at the top, and states what earned it', () => {
@@ -596,17 +596,32 @@ describe('what a row is called', () => {
     expect(tier3.countLabel).toBe('17');
   });
 
-  it('never reveals the next tier name before it is earned', () => {
-    // The specific leak this guards: a locked row that said "Dabbler" would give away
-    // the reward, and a tier-1 row that said "Mixer" would give away the next one.
-    for (const [reached, forbidden] of [
-      [6, ['Dabbler', 'Mixer', 'Chaos Collector']],
-      [14, ['Mixer', 'Chaos Collector']],
-      [16, ['Chaos Collector']],
+  it('names the next tier and never the one after it', () => {
+    /**
+     * **The founder reversed this on 2026-09-06, and the invariant it leaves is the
+     * interesting half.**
+     *
+     * The rule was "never show a tier that has not been earned", on the argument that
+     * naming it spends the reward early. What that produced was `LOL Mode` over
+     * `Next: Watch 25 comedies`, and the founder's reading of that row is the correct
+     * one: nothing on it says whether LOL Mode is what you have, what you are working
+     * toward, or the name of the family. A reward nobody can identify is not withheld.
+     *
+     * So the next tier is named — and **only** the next one. The tier after it is still
+     * unspoken, which is what keeps a ladder from being handed over three rungs at a
+     * time: a reader working toward Dabbler learns that Dabbler is the prize, not that
+     * Mixer and Chaos Collector are waiting behind it.
+     */
+    for (const [reached, shown, hidden] of [
+      [6, 'Dabbler', ['Mixer', 'Chaos Collector']],
+      [14, 'Mixer', ['Chaos Collector']],
+      [16, 'Chaos Collector', []],
     ] as const) {
       const progress = gremlin(reached);
-      const shown = [progress.title, progress.detailLine].join(' ');
-      for (const name of forbidden) expect([reached, name, shown.includes(name)]).toEqual([reached, name, false]);
+      const line = [progress.title, progress.detailLine].join(' ');
+      expect([reached, line.includes(shown)]).toEqual([reached, true]);
+      for (const name of hidden)
+        expect([reached, name, line.includes(name)]).toEqual([reached, name, false]);
     }
   });
 
@@ -672,10 +687,10 @@ describe('what a row is called', () => {
   it('reads correctly on both sides of each of the three thresholds', () => {
     const boundaries: [number, string | null, string, string][] = [
       // genres,  tier earned,        heading,          detail line
-      [13, null, 'Genre Gremlin', 'Next: Watch 14 different genres'],
-      [14, 'Dabbler', 'Dabbler', 'Next: Watch 16 different genres'],
-      [15, 'Dabbler', 'Dabbler', 'Next: Watch 16 different genres'],
-      [16, 'Mixer', 'Mixer', 'Next: Watch 17 different genres'],
+      [13, null, 'Genre Gremlin', 'Next: Dabbler · Watch 14 different genres'],
+      [14, 'Dabbler', 'Dabbler', 'Next: Mixer · Watch 16 different genres'],
+      [15, 'Dabbler', 'Dabbler', 'Next: Mixer · Watch 16 different genres'],
+      [16, 'Mixer', 'Mixer', 'Next: Chaos Collector · Watch 17 different genres'],
       [17, 'Chaos Collector', 'Chaos Collector', 'Watched 17 different genres'],
       // Eighteen is outside the ladder on purpose: the reader who does collect every
       // genre is still Chaos Collector, and the row must not read "18 / 17".
@@ -866,7 +881,7 @@ describe('Comment Gremlin', () => {
 
   it('asks for comments, in the copy as well as in the count', () => {
     const { progress } = rowsFor('comment-gremlin', facts({ written: [] }));
-    expect(progress.detailLine).toBe('Next: Write 20 comments');
+    expect(progress.detailLine).toBe('Next: Whisper · Write 20 comments');
   });
 
   it('never reprints what was written', () => {
@@ -944,7 +959,7 @@ describe('Two-Screen Life', () => {
   it('is earned at exactly fifteen and fifteen', () => {
     const result = award('two-screen-life', twoScreen(15, 15));
     expect(result.earnedTier?.label).toBe('Tourist');
-    expect(result.detailLine).toBe('Next: Watch 50 movies and 50 TV seasons');
+    expect(result.detailLine).toBe('Next: Resident · Watch 50 movies and 50 TV seasons');
   });
 
   it('re-measures against the tier being worked toward', () => {
@@ -1211,7 +1226,7 @@ describe('a track the viewer is not entitled to read', () => {
     expect(result.withheld).toBe(false);
     expect(result.value).toBe(2);
     expect(result.countLabel).toBe('2 / 3');
-    expect(result.detailLine).toBe('Next: Bring 3 people to bingd.');
+    expect(result.detailLine).toBe('Next: Bronze · Bring 3 people to bingd.');
   });
 
   it('names no invitee in a visitor’s Invite Instigator breakdown', () => {

@@ -17,7 +17,7 @@ export type AwardRowProps = {
  * One award, as a row.
  *
  *     [badge]  Dabbler                                          10 / 14
- *      ●○○     Next: Watch 14 different genres
+ *      ●○○     Next: Mixer · Watch 16 different genres
  *
  * The founder's shape, and the count on the right is doing the work a progress bar
  * would do in a taller row. A bar per award over twenty awards is twenty bars, which
@@ -29,10 +29,17 @@ export type AwardRowProps = {
  * a third line saying "Dabbler earned", which stated the achievement and celebrated it
  * nowhere. The badge art changes with it and the dots below fill in.
  *
- * **The next tier's name is never shown.** A locked Genre Gremlin says "Genre Gremlin",
- * not "Dabbler", because handing over the name in advance spends the reward before it
- * is earned. What the row does show is the requirement — "Next: Watch 8 different
- * genres" — which is the useful half.
+ * **The next tier's name is on the second line, and only the next one.** A locked Genre
+ * Gremlin is headed "Genre Gremlin" and says "Next: Dabbler · Watch 14 different
+ * genres". The rule until 2026-09-06 was that no unearned tier was ever named at all;
+ * what that produced was a heading and a requirement with nothing between them saying
+ * which was the award, and the founder's reading of "LOL Mode / Next: Watch 25 comedies"
+ * is the one that settled it. The tier *after* next is still unspoken. See
+ * `progress.ts`'s `detailLine` for the whole argument.
+ *
+ * **The heading is still the reward.** Naming the next tier in the requirement is not
+ * the same as promoting it into the title: the title changes on the unlock and that is
+ * what makes earning one visible.
  *
  * **Metal tracks keep their family name.** Movie Muncher stays Movie Muncher at every
  * tier: a row headed "Silver" says nothing about what was done, and three rows headed

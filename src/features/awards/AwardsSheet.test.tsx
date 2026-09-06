@@ -223,7 +223,7 @@ describe('the sheet', () => {
   it('shows the goal still to reach, with the count beside it', async () => {
     seed('user_media', movies(7));
     await open();
-    expect(screen.getByText('Next: Watch 50 movies')).toBeTruthy();
+    expect(screen.getByText('Next: Bronze · Watch 50 movies')).toBeTruthy();
     expect(count('7 / 50')).toBeTruthy();
   });
 
@@ -304,7 +304,7 @@ describe('the sheet', () => {
     expect(screen.getByLabelText('Movie Muncher. Could not load this one')).toBeTruthy();
     expect(screen.queryByLabelText('Comment Gremlin. Could not load this one')).toBeNull();
     expect(
-      screen.getByLabelText('Comment Gremlin. Whisper locked. Next: Write 20 comments. 1 of 20'),
+      screen.getByLabelText('Comment Gremlin. Whisper locked. Next: Whisper · Write 20 comments. 1 of 20'),
     ).toBeTruthy();
   });
 });
@@ -349,7 +349,7 @@ describe('what a row is called', () => {
     seed('user_media', genres(FOURTEEN.slice(0, 6)));
     await open();
     expect(screen.getByText('Genre Gremlin')).toBeTruthy();
-    expect(screen.getByText('Next: Watch 14 different genres')).toBeTruthy();
+    expect(screen.getByText('Next: Dabbler · Watch 14 different genres')).toBeTruthy();
     expect(count('6 / 14')).toBeTruthy();
     // The reward is not spent early: the tier's name is nowhere on the sheet.
     expect(screen.queryByText('Dabbler')).toBeNull();
@@ -359,7 +359,7 @@ describe('what a row is called', () => {
     seed('user_media', genres(FOURTEEN));
     await open();
     expect(screen.getByText('Dabbler')).toBeTruthy();
-    expect(screen.getByText('Next: Watch 16 different genres')).toBeTruthy();
+    expect(screen.getByText('Next: Mixer · Watch 16 different genres')).toBeTruthy();
     // Both the old line and the next tier's name are absent.
     expect(screen.queryByText('Dabbler earned')).toBeNull();
     expect(screen.queryByText('Mixer')).toBeNull();
@@ -369,7 +369,7 @@ describe('what a row is called', () => {
     seed('user_media', genres(SIXTEEN));
     await open();
     expect(screen.getByText('Mixer')).toBeTruthy();
-    expect(screen.getByText('Next: Watch 17 different genres')).toBeTruthy();
+    expect(screen.getByText('Next: Chaos Collector · Watch 17 different genres')).toBeTruthy();
     expect(screen.queryByText('Genre Gremlin')).toBeNull();
     expect(screen.queryByText('Chaos Collector')).toBeNull();
   });
@@ -442,7 +442,7 @@ describe('what a row is called', () => {
     // still has to say what would earn it, and a title fainter than its own subtitle
     // reads as broken rather than as locked.
     await open();
-    const detail = screen.getByText('Next: Watch 14 different genres');
+    const detail = screen.getByText('Next: Dabbler · Watch 14 different genres');
     const colour = (StyleSheet.flatten(detail.props.style) as { color?: string }).color;
     expect(colour).toBe(theme.text.secondary);
     expect(titleColour('Genre Gremlin')).toBe(theme.text.secondary);
@@ -1297,7 +1297,7 @@ describe('somebody else’s awards', () => {
     await visit();
 
     expect(
-      screen.getByLabelText('Comment Gremlin. Whisper locked. Next: Write 20 comments. 0 of 20'),
+      screen.getByLabelText('Comment Gremlin. Whisper locked. Next: Whisper · Write 20 comments. 0 of 20'),
     ).toBeTruthy();
   });
 

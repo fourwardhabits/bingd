@@ -333,13 +333,65 @@ export function feedItems(pages: FeedPage[] | undefined): FeedItem[] {
  * `can_i_view(actor_id)`, so a private account the viewer does not follow returns
  * nothing here exactly as it does anywhere else — the authorisation was never coming
  * from the follow set, it was coming from the policy.
+ *
+ * ---------------------------------------------------------------------------
+ * PAGED, ON THE FEED'S OWN KEYSET
+ *
+ * **It read five rows, once, with no second page** — the same defect `useFeed` was
+ * given pages for, one screen later. A profile said "Recent activity" and meant "the
+ * five most recent", and there was nothing on the page to tell that from a history five
+ * events long. The founder's decision is that it continues as the reader scrolls.
+ *
+ * The cursor is `useFeed`'s, unchanged, and that reuse is safe for one specific reason
+ * rather than by resemblance: this is the *same call* — `activityPage`, the same
+ * projection, the same `(causal_at desc, causal_step desc, id asc)` order, the same
+ * `feed_events_read` policy — narrowed to one actor by the argument the function already
+ * took. A keyset is only valid over the sort it was built for, so a profile that ordered
+ * its activity differently could not have this cursor; this one orders it identically.
+ *
+ * The page size is `FEED_PAGE_SIZE` rather than a second number. Twenty is what the
+ * project already means by "a page of activity", the rows are the same rows, and a
+ * profile-only constant would be a second thing to keep in step for no stated reason.
+ * ---------------------------------------------------------------------------
  */
-export function useActorActivity(actorId: string | null, limit = 5) {
-  return useQuery({
+export function useActorActivity(actorId: string | null, limit = FEED_PAGE_SIZE) {
+  return useInfiniteQuery({
     queryKey: ['actor-activity', actorId, limit],
     enabled: Boolean(actorId),
-    queryFn: async () => (await activityPage([actorId as string], limit, null)).items,
+    initialPageParam: null as FeedCursor | null,
+    // Null at the true end, which is what makes `hasNextPage` false and stops the
+    // bottom of a profile asking for a page that does not exist.
+    getNextPageParam: (last: FeedPage) => last.cursor,
+    queryFn: async ({ pageParam }): Promise<FeedPage> =>
+      activityPage([actorId as string], limit, pageParam),
   });
+}
+
+/**
+ * The profile's counterpart to {@link trimFeedToFirstPage}, and it exists for the same
+ * reason: `refetch()` on an infinite query re-runs every page it holds, so pulling to
+ * refresh a profile scrolled to page four would spend four round trips to see what is
+ * new at the top.
+ *
+ * Keyed on `(actorId, limit)` because that is the query key, and the limit is a
+ * parameter rather than a constant at the call site — passing it keeps this honest if a
+ * caller ever asks for a different page size.
+ *
+ * Deliberately does not remove the entry: the rows already on screen stay drawn under
+ * the spinner instead of flashing to a skeleton.
+ */
+export function trimActorActivityToFirstPage(
+  queryClient: QueryClient,
+  actorId: string | null,
+  limit = FEED_PAGE_SIZE,
+) {
+  queryClient.setQueryData(
+    ['actor-activity', actorId, limit],
+    (old: { pages: FeedPage[]; pageParams: unknown[] } | undefined) =>
+      old && old.pages.length > 1
+        ? { pages: old.pages.slice(0, 1), pageParams: old.pageParams.slice(0, 1) }
+        : old,
+  );
 }
 
 /**

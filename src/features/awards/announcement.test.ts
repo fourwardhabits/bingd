@@ -136,10 +136,14 @@ describe('the sheet and the announcement cannot disagree', () => {
     }
   });
 
-  it('shows the first tier locked and unnamed before anything is earned', () => {
-    // The founder's third acceptance case. Before the first tier the row is the family
-    // name and the badge is dim — never the next tier's name, which would hand over the
-    // reward before it was earned and leave nothing to arrive later.
+  it('keeps the family name as the heading before anything is earned', () => {
+    // The founder's third acceptance case. Before the first tier the *heading* is the
+    // family name and the badge is dim — the tier is not promoted into the title until
+    // it is actually reached.
+    //
+    // The detail line does name it, since 2026-09-06: "Comment Gremlin" over "Next:
+    // Write 20 comments" left nothing on the row saying which of the two was the award.
+    // See `progress.ts`. The heading is still the thing that changes on an unlock.
     const gremlin = track('comment-gremlin');
     const progress = evaluate(gremlin, emptyFacts);
 
@@ -148,6 +152,6 @@ describe('the sheet and the announcement cannot disagree', () => {
     expect(progress.title).toBe('Comment Gremlin');
     expect(progress.title).not.toBe('Whisper');
     expect(progress.badgeTierLabel).toBe('Whisper');
-    expect(progress.detailLine).toBe('Next: Write 20 comments');
+    expect(progress.detailLine).toBe('Next: Whisper · Write 20 comments');
   });
 });
