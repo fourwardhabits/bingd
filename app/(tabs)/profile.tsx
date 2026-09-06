@@ -25,6 +25,7 @@ import {
   useActorActivity,
 } from '@/features/feed/use-feed';
 import { ActivityPageFooter } from '@/features/feed/ActivityPageFooter';
+import { activityLead } from '@/features/feed/ActivityLead';
 import { isNearEnd } from '@/features/feed/near-end';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
 import { ProfileAwards } from '@/features/awards/ProfileAwards';
@@ -415,6 +416,16 @@ export default function ProfileScreen() {
                 title={event.title}
                 year={event.year}
                 posterUri={posterUri(event.posterPath)}
+                /**
+                 * The same leading artwork the feed draws, from the same resolver.
+                 *
+                 * Without it an award row fell back to `<Poster uri={null}>` and
+                 * `MissingArtwork` drew the initial — a beige tile reading "S" where
+                 * the feed showed Spark, for the same event. The data was never
+                 * missing: this row is the same `FeedItem` from the same
+                 * `activityPage` call, and only the rendering differed.
+                 */
+                lead={activityLead(event)}
                 metadata={activityMetadata({
                   kind: event.kind,
                   genres: event.genres,

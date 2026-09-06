@@ -14,8 +14,6 @@ import {
 } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
-import { AwardActivityLead } from '@/features/awards/AwardActivityLead';
-import { GoalActivityLead } from '@/features/goals/GoalActivityLead';
 import { goalAchievement } from '@/features/goals/goals';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { useWatchlist } from '@/features/collection/use-collection';
@@ -32,6 +30,7 @@ import {
   useFeed,
   type FeedItem,
 } from '@/features/feed/use-feed';
+import { activityLead } from '@/features/feed/ActivityLead';
 import {
   DEFAULT_REACTION,
   REACTION_GLYPH,
@@ -307,11 +306,14 @@ export default function FeedScreen() {
     // Under the unit runner `useNavigation` is mocked to whatever the test supplies;
     // a navigator that cannot report focus is one this screen has no business
     // listening to, and the optional call is what keeps that from being a crash.
-    const unsubscribe = navigation.addListener?.('tabPress' as never, (() => {
-      if (!showingBoard) return;
-      if (navigation.isFocused && !navigation.isFocused()) return;
-      setMode('feed');
-    }) as never);
+    const unsubscribe = navigation.addListener?.(
+      'tabPress' as never,
+      (() => {
+        if (!showingBoard) return;
+        if (navigation.isFocused && !navigation.isFocused()) return;
+        setMode('feed');
+      }) as never,
+    );
     return () => unsubscribe?.();
   }, [navigation, showingBoard]);
 
@@ -471,18 +473,18 @@ export default function FeedScreen() {
   return (
     <Screen>
       {/**
-        * **The app bar is the app bar again** — wordmark left, bell right, and nothing
-        * else (founder follow-up §1).
-        *
-        * The Feed/Trophy toggle lived here for a day. It fitted, and it was the wrong
-        * place: the top bar is the one row that is identical on every tab, so a control
-        * that appears on exactly one of them makes the app's most stable landmark move.
-        * It also put a *content* decision — which list am I reading — in the chrome,
-        * beside a control about a different thing entirely.
-        *
-        * It is now in the content header row below, opposite whatever that content is
-        * called. The bell keeps its corner and its hit area untouched.
-        */}
+       * **The app bar is the app bar again** — wordmark left, bell right, and nothing
+       * else (founder follow-up §1).
+       *
+       * The Feed/Trophy toggle lived here for a day. It fitted, and it was the wrong
+       * place: the top bar is the one row that is identical on every tab, so a control
+       * that appears on exactly one of them makes the app's most stable landmark move.
+       * It also put a *content* decision — which list am I reading — in the chrome,
+       * beside a control about a different thing entirely.
+       *
+       * It is now in the content header row below, opposite whatever that content is
+       * called. The bell keeps its corner and its hit area untouched.
+       */}
       <AppHeader
         notifications={{
           count: unreadCount(notifications.data),
@@ -547,35 +549,35 @@ export default function FeedScreen() {
         }
       >
         {/**
-          * The board replaces the whole content area, Trending included.
-          *
-          * Not a section appended below the feed. The founder's word for it is a mode:
-          * "toggling Trophy switches the main Feed content area into Leaderboard", and a
-          * board sharing the screen with a shelf and an activity list would be a fourth
-          * thing on the busiest screen in the app rather than an alternative to it.
-          *
-          * Everything the feed owns — the sheets below, the reaction pickers, the
-          * recommend flow — stays mounted and untouched, so returning to Feed returns to
-          * exactly the feed that was there. That is founder acceptance D.
-          */}
+         * The board replaces the whole content area, Trending included.
+         *
+         * Not a section appended below the feed. The founder's word for it is a mode:
+         * "toggling Trophy switches the main Feed content area into Leaderboard", and a
+         * board sharing the screen with a shelf and an activity list would be a fourth
+         * thing on the busiest screen in the app rather than an alternative to it.
+         *
+         * Everything the feed owns — the sheets below, the reaction pickers, the
+         * recommend flow — stays mounted and untouched, so returning to Feed returns to
+         * exactly the feed that was there. That is founder acceptance D.
+         */}
         {/**
-          * **The content header row** (founder follow-up §1).
-          *
-          *     TRENDING NOW                    [Feed] [Trophy]
-          *     THIS MONTH ▼                    [Feed] [Trophy]
-          *
-          * One row, drawn in both modes, so the toggle keeps its position while the thing
-          * across from it changes. That is what makes it read as a control over *this
-          * content* rather than as chrome: it sits at the head of the list it switches.
-          *
-          * The left side is the heading of whatever is immediately below — the shelf's
-          * name in Feed mode, the timeframe selector in Leaderboard mode. In Feed mode it
-          * is drawn only when the shelf will actually render: `TrendingShelf` returns null
-          * when it has nothing, and a heading over an absent shelf would be a label for
-          * nothing. `useTrending` is called here purely to know that, and costs no
-          * request — it is the same query key the shelf itself uses, so React Query
-          * answers both from one fetch.
-          */}
+         * **The content header row** (founder follow-up §1).
+         *
+         *     TRENDING NOW                    [Feed] [Trophy]
+         *     THIS MONTH ▼                    [Feed] [Trophy]
+         *
+         * One row, drawn in both modes, so the toggle keeps its position while the thing
+         * across from it changes. That is what makes it read as a control over *this
+         * content* rather than as chrome: it sits at the head of the list it switches.
+         *
+         * The left side is the heading of whatever is immediately below — the shelf's
+         * name in Feed mode, the timeframe selector in Leaderboard mode. In Feed mode it
+         * is drawn only when the shelf will actually render: `TrendingShelf` returns null
+         * when it has nothing, and a heading over an absent shelf would be a label for
+         * nothing. `useTrending` is called here purely to know that, and costs no
+         * request — it is the same query key the shelf itself uses, so React Query
+         * answers both from one fetch.
+         */}
         <View style={styles.contentHeader}>
           {/* The gutter is applied here, on the board's side only. `SectionHeader` pads
               itself and a section-sized `MediumSelector` deliberately does not, so a
@@ -597,12 +599,12 @@ export default function FeedScreen() {
           </View>
 
           {/**
-            * The same `IconToggle` Collection's Poster/List control uses — one component,
-            * so the two cannot drift into two dialects of the same idea. They behave
-            * differently on purpose: Collection persists its choice across launches and
-            * this one deliberately does not (§6), which is exactly why they must look the
-            * same by construction rather than by agreement.
-            */}
+           * The same `IconToggle` Collection's Poster/List control uses — one component,
+           * so the two cannot drift into two dialects of the same idea. They behave
+           * differently on purpose: Collection persists its choice across launches and
+           * this one deliberately does not (§6), which is exactly why they must look the
+           * same by construction rather than by agreement.
+           */}
           <IconToggle
             label="Feed mode"
             value={mode}
@@ -623,229 +625,228 @@ export default function FeedScreen() {
           />
         ) : (
           <>
-        {/* One shelf, above the activity. It renders nothing at all when there is
+            {/* One shelf, above the activity. It renders nothing at all when there is
             nothing to show, so the social feed keeps the top of the screen whenever
             discovery has nothing to add — which is the ordering PRD §14 wants.
 
             `showTitle={false}`: its heading moved up into the content header row above,
             opposite the toggle. Drawing it in both places would be the same words twice. */}
-        <View style={styles.trending}>
-          <TrendingShelf
-            userId={profile.id}
-            showTitle={false}
-            onPressTitle={(mediaItemId) => router.push(`/title/${mediaItemId}`)}
-          />
-        </View>
+            <View style={styles.trending}>
+              <TrendingShelf
+                userId={profile.id}
+                showTitle={false}
+                onPressTitle={(mediaItemId) => router.push(`/title/${mediaItemId}`)}
+              />
+            </View>
 
-        {/**
-          * Where discovery ends and the social feed begins.
-          *
-          * The founder's note: Trending stays at the top, must **not** be sticky, and a
-          * reader should scroll naturally past it into activity — but there was nothing
-          * marking the boundary, so the first activity row read as one more thing in
-          * the shelf's section.
-          *
-          * A hairline and a heading, which is the app's existing vocabulary for exactly
-          * this. **ACTIVITY** rather than "From your network": the feed also carries the
-          * reader's own rankings, so "your network" would be false on the row somebody
-          * is most likely to recognise.
-          *
-          * Drawn even while the feed is loading or empty, because its job is to say
-          * what the rest of the screen is — and an empty state under a heading is
-          * legible where the same empty state floating below a shelf is not.
-          */}
-        <View style={styles.boundary}>
-          <SectionHeader title="Activity" />
-        </View>
+            {/**
+             * Where discovery ends and the social feed begins.
+             *
+             * The founder's note: Trending stays at the top, must **not** be sticky, and a
+             * reader should scroll naturally past it into activity — but there was nothing
+             * marking the boundary, so the first activity row read as one more thing in
+             * the shelf's section.
+             *
+             * A hairline and a heading, which is the app's existing vocabulary for exactly
+             * this. **ACTIVITY** rather than "From your network": the feed also carries the
+             * reader's own rankings, so "your network" would be false on the row somebody
+             * is most likely to recognise.
+             *
+             * Drawn even while the feed is loading or empty, because its job is to say
+             * what the rest of the screen is — and an empty state under a heading is
+             * legible where the same empty state floating below a shelf is not.
+             */}
+            <View style={styles.boundary}>
+              <SectionHeader title="Activity" />
+            </View>
 
-        {/* The confirmation, on the screen the reader is still looking at rather than in
+            {/* The confirmation, on the screen the reader is still looking at rather than in
             an alert they have to dismiss. It names the person, because "Sent" on its own
             leaves them checking. Same shape as the title page’s. */}
-        {recommendedTo ? (
-          <View style={styles.pad}>
-            <Text variant="footnote" tone="secondary">
-              {`Recommended to ${recommendedTo}`}
-            </Text>
-          </View>
-        ) : null}
+            {recommendedTo ? (
+              <View style={styles.pad}>
+                <Text variant="footnote" tone="secondary">
+                  {`Recommended to ${recommendedTo}`}
+                </Text>
+              </View>
+            ) : null}
 
-        {/**
-          * The whole-screen failure is now **the first page's failure and no other**.
-          *
-          * An infinite query reports a failed page on the query itself, so the old
-          * `feed.isError` test would have thrown away thirty rows the reader was
-          * already looking at because page four timed out. A failure with rows on
-          * screen belongs in the footer, next to the retry, and keeps the list.
-          */}
-        {feed.isError && events.length === 0 ? (
-          <View style={styles.pad}>
-            <EmptyState
-              kind="couldNotLoad"
-              title="Could not load activity"
-              body="Check your connection and try again."
-            />
-          </View>
-        ) : feed.isPending ? (
-          <SkeletonRow count={5} />
-        ) : events.length === 0 ? (
-          <View style={styles.pad}>
-            <EmptyState
-              kind="nothingYet"
-              compact
-              title="Your feed is quiet right now."
-              body="Rank a title, or follow someone, and activity will appear here."
-            />
-          </View>
-        ) : (
-          events.map((event) => (
-            <ActivityRow
-              key={event.id}
-              actorName={event.actorName}
-              actorAvatarUri={event.actorAvatarUri}
-              // Own activity has no profile to visit that is not the tab the user
-              // is already one tap from, so the name is not a link on those rows.
-              onPressActor={
-                event.actorId === profile.id || !event.actorUsername
-                  ? undefined
-                  : () => router.push(`/u/${event.actorUsername}`)
-              }
-              verb={verbFor(event.type)}
-              tail={tailFor(event.type, event.title)}
-              companions={event.companions}
-              title={event.title}
-              year={event.year}
-              posterUri={posterUri(event.posterPath)}
-              // The badge leads an award row — the real artwork, in the poster's
-              // box (20260828000100). Everything else about the row is ordinary.
-              lead={
-                event.award ? (
-                  <AwardActivityLead awardKey={event.award.key} tierKey={event.award.tierKey} />
-                ) : event.goal ? (
-                  <GoalActivityLead />
-                ) : undefined
-              }
-              /**
-               * The second line, and on these two types it is the only thing that says
-               * what actually happened (founder, 2026-08-29).
-               *
-               * It was `Bronze` on an award row and `25 movies` on a goal row. Neither
-               * is product copy: a metal names a tier and not an achievement, and a bare
-               * count is a fragment. Both now come from a shared function —
-               * `awardAnnouncement` off the canonical thresholds, `goalAchievement` off
-               * the completion's own frozen target — so this row and the earner's inbox
-               * row cannot quote different numbers for one event.
-               *
-               * `metadataFor` is still the answer everywhere else, and would otherwise
-               * reach for a runtime and a certification that neither of these rows has.
-               */
-              metadata={
-                event.award
-                  ? event.award.achievement
-                  : event.goal
-                    ? goalAchievement(event.goal.category, event.goal.target)
-                    : metadataFor(event)
-              }
-              score={event.score}
-              bucket={event.bucket}
-              note={event.note?.text ?? null}
-              noteHasSpoilers={event.note?.hasSpoilers ?? false}
-              noteMasked={shouldMask({
-                hasSpoilers: event.note?.hasSpoilers ?? false,
-                mediaItemId: event.mediaItemId,
-                viewerId: profile.id,
-                authorId: event.actorId,
-                watched: watched.data,
-              })}
-              timeLabel={relativeTime(event.createdAt)}
-              // An award row opens the earner's Awards, not a title (§5): their
-              // own tab for the viewer's own award, the public profile's sheet
-              // for anybody else's. An event with neither subject is a no-op.
-              onPressTitle={() => {
-                if (event.mediaItemId) {
-                  router.push(`/title/${event.mediaItemId}`);
-                } else if (event.award) {
-                  if (event.actorId === profile.id) {
-                    router.push({ pathname: '/profile', params: { awards: '1' } });
-                  } else if (event.actorUsername) {
-                    router.push({
-                      pathname: '/u/[username]',
-                      params: { username: event.actorUsername, awards: '1' },
-                    });
+            {/**
+             * The whole-screen failure is now **the first page's failure and no other**.
+             *
+             * An infinite query reports a failed page on the query itself, so the old
+             * `feed.isError` test would have thrown away thirty rows the reader was
+             * already looking at because page four timed out. A failure with rows on
+             * screen belongs in the footer, next to the retry, and keeps the list.
+             */}
+            {feed.isError && events.length === 0 ? (
+              <View style={styles.pad}>
+                <EmptyState
+                  kind="couldNotLoad"
+                  title="Could not load activity"
+                  body="Check your connection and try again."
+                />
+              </View>
+            ) : feed.isPending ? (
+              <SkeletonRow count={5} />
+            ) : events.length === 0 ? (
+              <View style={styles.pad}>
+                <EmptyState
+                  kind="nothingYet"
+                  compact
+                  title="Your feed is quiet right now."
+                  body="Rank a title, or follow someone, and activity will appear here."
+                />
+              </View>
+            ) : (
+              events.map((event) => (
+                <ActivityRow
+                  key={event.id}
+                  actorName={event.actorName}
+                  actorAvatarUri={event.actorAvatarUri}
+                  // Own activity has no profile to visit that is not the tab the user
+                  // is already one tap from, so the name is not a link on those rows.
+                  onPressActor={
+                    event.actorId === profile.id || !event.actorUsername
+                      ? undefined
+                      : () => router.push(`/u/${event.actorUsername}`)
                   }
-                } else if (event.goal) {
+                  verb={verbFor(event.type)}
+                  tail={tailFor(event.type, event.title)}
+                  companions={event.companions}
+                  title={event.title}
+                  year={event.year}
+                  posterUri={posterUri(event.posterPath)}
+                  // The badge leads an award row — the real artwork, in the poster's
+                  // box (20260828000100). Everything else about the row is ordinary.
+                  //
+                  // Resolved by `activityLead` rather than decided here, since 2026-09-06:
+                  // the profile drew a beige "S" where this drew Spark, because what leads a
+                  // row is a property of the activity and three call sites were each having
+                  // an opinion about it.
+                  lead={activityLead(event)}
                   /**
-                   * The earner's profile, where their goals live (founder §12).
+                   * The second line, and on these two types it is the only thing that says
+                   * what actually happened (founder, 2026-08-29).
                    *
-                   * Not a dead end and not a title: the useful thing to do with "Abisola
-                   * hit their 2026 Movies goal" is look at Abisola. No `?awards=1` here —
-                   * goals are on the profile itself, a scroll under the identity block,
-                   * rather than behind a sheet.
+                   * It was `Bronze` on an award row and `25 movies` on a goal row. Neither
+                   * is product copy: a metal names a tier and not an achievement, and a bare
+                   * count is a fragment. Both now come from a shared function —
+                   * `awardAnnouncement` off the canonical thresholds, `goalAchievement` off
+                   * the completion's own frozen target — so this row and the earner's inbox
+                   * row cannot quote different numbers for one event.
+                   *
+                   * `metadataFor` is still the answer everywhere else, and would otherwise
+                   * reach for a runtime and a certification that neither of these rows has.
                    */
-                  if (event.actorId === profile.id) {
-                    router.push('/profile');
-                  } else if (event.actorUsername) {
-                    router.push(`/u/${event.actorUsername}`);
+                  metadata={
+                    event.award
+                      ? event.award.achievement
+                      : event.goal
+                        ? goalAchievement(event.goal.category, event.goal.target)
+                        : metadataFor(event)
                   }
-                }
-              }}
-              // Watchlisting your own already-watched title is not a thing anyone
-              // means to do, so the control is not offered on your own activity.
-              onPressWatchlist={
-                event.mediaItemId && event.actorId !== profile.id
-                  ? () => toggleWatchlist(event.mediaItemId!)
-                  : undefined
-              }
-              inWatchlist={event.mediaItemId ? saved.has(event.mediaItemId) : false}
-              onPressRecommend={
-                event.mediaItemId && event.kind !== 'series'
-                  ? () => openRecommend(event)
-                  : undefined
-              }
-              reaction={reactionFor(event.id)}
-              onPressComments={() => setCommentsFor(event.id)}
-              commentCount={commentCounts.data?.get(event.id) ?? 0}
-            />
-          ))
-        )}
+                  score={event.score}
+                  bucket={event.bucket}
+                  note={event.note?.text ?? null}
+                  noteHasSpoilers={event.note?.hasSpoilers ?? false}
+                  noteMasked={shouldMask({
+                    hasSpoilers: event.note?.hasSpoilers ?? false,
+                    mediaItemId: event.mediaItemId,
+                    viewerId: profile.id,
+                    authorId: event.actorId,
+                    watched: watched.data,
+                  })}
+                  timeLabel={relativeTime(event.createdAt)}
+                  // An award row opens the earner's Awards, not a title (§5): their
+                  // own tab for the viewer's own award, the public profile's sheet
+                  // for anybody else's. An event with neither subject is a no-op.
+                  onPressTitle={() => {
+                    if (event.mediaItemId) {
+                      router.push(`/title/${event.mediaItemId}`);
+                    } else if (event.award) {
+                      if (event.actorId === profile.id) {
+                        router.push({ pathname: '/profile', params: { awards: '1' } });
+                      } else if (event.actorUsername) {
+                        router.push({
+                          pathname: '/u/[username]',
+                          params: { username: event.actorUsername, awards: '1' },
+                        });
+                      }
+                    } else if (event.goal) {
+                      /**
+                       * The earner's profile, where their goals live (founder §12).
+                       *
+                       * Not a dead end and not a title: the useful thing to do with "Abisola
+                       * hit their 2026 Movies goal" is look at Abisola. No `?awards=1` here —
+                       * goals are on the profile itself, a scroll under the identity block,
+                       * rather than behind a sheet.
+                       */
+                      if (event.actorId === profile.id) {
+                        router.push('/profile');
+                      } else if (event.actorUsername) {
+                        router.push(`/u/${event.actorUsername}`);
+                      }
+                    }
+                  }}
+                  // Watchlisting your own already-watched title is not a thing anyone
+                  // means to do, so the control is not offered on your own activity.
+                  onPressWatchlist={
+                    event.mediaItemId && event.actorId !== profile.id
+                      ? () => toggleWatchlist(event.mediaItemId!)
+                      : undefined
+                  }
+                  inWatchlist={event.mediaItemId ? saved.has(event.mediaItemId) : false}
+                  onPressRecommend={
+                    event.mediaItemId && event.kind !== 'series'
+                      ? () => openRecommend(event)
+                      : undefined
+                  }
+                  reaction={reactionFor(event.id)}
+                  onPressComments={() => setCommentsFor(event.id)}
+                  commentCount={commentCounts.data?.get(event.id) ?? 0}
+                />
+              ))
+            )}
 
-        {/**
-          * The foot of the list, which says one of three things and never two.
-          *
-          * A spinner while the next page is in flight; a retry when one failed; and,
-          * once the server has genuinely run out, a single quiet line. The order is the
-          * order of precedence — a fetch in flight outranks the error that preceded it,
-          * because the retry is what put it in flight.
-          *
-          * The end line is drawn only under a list that has something in it. An empty
-          * feed already has its own empty state saying considerably more, and "That's
-          * everything" under it would be the screen agreeing with itself.
-          */}
-        {feed.isFetchingNextPage ? (
-          <View style={styles.footer}>
-            <ActivityIndicator color={theme.semantic.action} />
-          </View>
-        ) : feed.isError && events.length > 0 ? (
-          <View style={styles.footer}>
-            <Text variant="footnote" tone="secondary">
-              Could not load more activity.
-            </Text>
-            {/* Retries the failed page and nothing else: `fetchNextPage` resumes from
+            {/**
+             * The foot of the list, which says one of three things and never two.
+             *
+             * A spinner while the next page is in flight; a retry when one failed; and,
+             * once the server has genuinely run out, a single quiet line. The order is the
+             * order of precedence — a fetch in flight outranks the error that preceded it,
+             * because the retry is what put it in flight.
+             *
+             * The end line is drawn only under a list that has something in it. An empty
+             * feed already has its own empty state saying considerably more, and "That's
+             * everything" under it would be the screen agreeing with itself.
+             */}
+            {feed.isFetchingNextPage ? (
+              <View style={styles.footer}>
+                <ActivityIndicator color={theme.semantic.action} />
+              </View>
+            ) : feed.isError && events.length > 0 ? (
+              <View style={styles.footer}>
+                <Text variant="footnote" tone="secondary">
+                  Could not load more activity.
+                </Text>
+                {/* Retries the failed page and nothing else: `fetchNextPage` resumes from
                 the cursor of the last page that succeeded, so the rows already on
                 screen are neither re-read nor disturbed. */}
-            <Button
-              kind="tertiary"
-              size="sm"
-              label="Try again"
-              onPress={() => void feed.fetchNextPage()}
-            />
-          </View>
-        ) : !feed.hasNextPage && events.length > 0 ? (
-          <View style={styles.footer}>
-            <Text variant="footnote" tone="secondary">
-              You&rsquo;re all caught up.
-            </Text>
-          </View>
-        ) : null}
+                <Button
+                  kind="tertiary"
+                  size="sm"
+                  label="Try again"
+                  onPress={() => void feed.fetchNextPage()}
+                />
+              </View>
+            ) : !feed.hasNextPage && events.length > 0 ? (
+              <View style={styles.footer}>
+                <Text variant="footnote" tone="secondary">
+                  You&rsquo;re all caught up.
+                </Text>
+              </View>
+            ) : null}
           </>
         )}
       </ScrollView>

@@ -366,7 +366,10 @@ describe('recent activity', () => {
     // A friend's ranking under a heading on your own profile is a different
     // claim from the one the heading makes. The query asks about this actor
     // alone, so the friend's event must never arrive here at all.
-    mockTables.feed_events = [activity('e1', 'user-1', 'Sai'), activity('e2', 'friend', 'Anna')];
+    mockTables.feed_events = [
+      activity('e1', 'user-1', 'Sai'),
+      activity('e2', 'friend', 'Anna'),
+    ];
 
     const view = await open();
     // A regex, because the title and its year share one Text node: the activity
@@ -748,5 +751,66 @@ describe('the shape of the page', () => {
     // A 100% match with your own catalogue is a tautology, and the badge slot under the
     // avatar is empty on this screen by construction.
     expect(view.queryByText('Match')).toBeNull();
+  });
+});
+
+/**
+ * **The founder's physical-QA finding, as a regression.**
+ *
+ * "Suraj Kandukuri earned the Spark award" rendered the canonical Spark glyph in the
+ * Feed and a beige tile reading **S** here. The data was never missing: this row is the
+ * same `FeedItem` from the same `activityPage` call the feed reads, so `event.award` was
+ * populated all along. Only the feed passed `lead`, so `ActivityRow` fell back to a
+ * poster that does not exist and `MissingArtwork` drew the initial of the award's name.
+ *
+ * `ActivityLead.test.tsx` asserts what the resolver returns. This asserts that the
+ * profile *asks* it — which is the half that was broken, and the half a unit test on the
+ * resolver could never have caught.
+ */
+describe('an award in Recent activity', () => {
+  const awardActivity = () => ({
+    id: 'award-1',
+    type: 'award_earned',
+    actor_id: 'user-1',
+    media_item_id: null,
+    created_at: '2026-08-15T00:00:00Z',
+    causal_at: '2026-08-15T00:00:00Z',
+    causal_step: 2,
+    payload: {
+      award: 'boom-club',
+      tier: 'spark',
+      award_name: 'Boom Club',
+      tier_label: 'Spark',
+    },
+    media_items: null,
+    profiles: { username: 'Sai', display_name: 'Sai', avatar_path: null },
+  });
+
+  it('leads with the canonical award artwork, not the initial of its name', async () => {
+    mockTables.feed_events = [awardActivity()];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText(/Spark/)).toBeTruthy());
+
+    // `boom-club-spark` is one of the thirty tiers still standing in with an emoji
+    // (`badges.ts`). The glyph is the proof that the badge table was consulted at all —
+    // before the fix this row drew `MissingArtwork` and there was no ✨ anywhere on the
+    // page. `ActivityLead.test.tsx` asserts the other half: that no award row can fall
+    // back to an initial.
+    expect(renderedText(view.toJSON())).toContain('✨');
+  });
+
+  it('keeps the sentence, the timestamp and the comment control it already had', async () => {
+    // The artwork was the only thing wrong. Everything else about the row is ordinary
+    // and stays that way — including the actor avatar overlaid on the lead, which is
+    // why the row still contains a lone initial and why the assertion above is about
+    // the badge being present rather than about a letter being absent.
+    mockTables.feed_events = [awardActivity()];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText(/earned the/)).toBeTruthy());
+    expect(view.getByText(/Spark/)).toBeTruthy();
+    expect(view.getByLabelText(/Comment on Sai's activity/)).toBeTruthy();
+    expect(renderedText(view.toJSON())).toContain('2026');
   });
 });

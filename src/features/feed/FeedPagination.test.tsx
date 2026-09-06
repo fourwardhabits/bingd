@@ -439,3 +439,50 @@ describe('new activity arriving at the top', () => {
     expect(rowsFor(view, 19)).toHaveLength(1);
   });
 });
+
+/**
+ * **The other half of the founder's physical-QA finding.**
+ *
+ * "Suraj Kandukuri earned the Spark award" drew the Spark glyph here and a beige tile
+ * reading **S** on the profile — one event, two surfaces, two pictures. The data was
+ * never missing: both read the same `FeedItem` from the same `activityPage` call, and
+ * only this screen passed `lead`.
+ *
+ * This assertion is the reference the profile's is measured against. Paired with
+ * `ProfileScreen.test.tsx`'s "an award in Recent activity", it says the two surfaces
+ * resolve the same canonical artwork for the same award — which is the property, and
+ * neither test alone states it.
+ */
+describe('an award in the feed leads with its canonical artwork', () => {
+  const awardRow = () =>
+    row(1, {
+      type: 'award_earned',
+      media_item_id: null,
+      media_items: null,
+      payload: {
+        award: 'boom-club',
+        tier: 'spark',
+        award_name: 'Boom Club',
+        tier_label: 'Spark',
+      },
+    });
+
+  /** Every string in the tree, depth-first. Props are skipped: they close a circle. */
+  const drawn = (node: unknown): string[] => {
+    if (typeof node === 'string') return [node];
+    if (Array.isArray(node)) return node.flatMap(drawn);
+    if (node && typeof node === 'object')
+      return drawn((node as { children?: unknown }).children);
+    return [];
+  };
+
+  it('draws the badge the awards table names for that tier', async () => {
+    mockFeedQueue = [{ rows: [awardRow()] }];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText(/Spark/)).toBeTruthy());
+    // `boom-club-spark`, from `badges.ts`. The same glyph the profile's own award test
+    // asserts — the two surfaces ask one resolver, `activityLead`.
+    expect(drawn(view.toJSON())).toContain('✨');
+  });
+});
