@@ -259,37 +259,66 @@ const SLOT = theme.layout.icon.sm;
 const EMOJI_SIZE = 17;
 
 /**
- * How much taller than its nominal size a colour emoji's line box has to be.
+ * The action slot's height, which is not its width.
  *
- * `Text` merges a type token first, and every token in this app was measured on Latin
- * text — so the line box that arrives is sized for a cap height and an emoji's ascent is
- * taller than one. A line box shorter than the glyph is exactly how Android crops it,
- * while iOS looks perfect, which is what makes this the class of defect that reaches a
- * device before it reaches anybody's screen.
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS THE THIRD ATTEMPT, AND WHAT THE FIRST TWO GOT WRONG
  *
- * The safe direction is always up: both boxes below centre their child and neither clips,
- * so headroom costs nothing and a tight box costs the top of 🔥. **Raised from 1.3 to 1.4
- * on 2026-09-05**, after the founder found glyphs still cropping on a physical Android
- * pass — 1.3 is the conventional figure and conventional was not enough here.
+ * 2026-09-04 gave the slot a fixed 20pt square, because the emoji and the heart were
+ * two different sizes and the row lost weight at the end the reader had just touched.
+ * That part worked and is untouched.
  *
- * One number, applied wherever an emoji is drawn, so the action slot and the summary
- * cluster cannot drift into two different treatments of the same problem.
+ * 2026-09-05 (#103) then found the glyph still cropping and answered it by overriding
+ * the line box **upward** — `ceil(17 × 1.4) = 24` inside a 20pt slot — on the reasoning
+ * that the slot centres and does not clip, so headroom is free. The founder took that
+ * fix to a device and the glyph was still clipped and now visibly sat *below* the three
+ * Ionicons beside it.
+ *
+ * The mistake is visible the moment it is written down. **`ReactionPill` has drawn six
+ * colour emoji correctly since the day it shipped**, and its recipe is the opposite one:
+ * a `title2` glyph, a 28pt line box, and a **36pt container** — the box is comfortably
+ * larger than the line, not smaller than it. Both boxes here were smaller than their
+ * line: 20 holding 24, and 16 holding 17.
+ *
+ * That inversion produces exactly the two symptoms reported, because React Native on
+ * Android implements `lineHeight` by expanding the **ascent** — the extra leading is
+ * added above the glyph, which pushes it down inside its own line box. Overflow it into
+ * a shorter container and the glyph is drawn low *and* the bottom of it leaves the area
+ * an ancestor is willing to paint.
+ *
+ * ---------------------------------------------------------------------------
+ * THE RULE NOW: NO LINE BOX AT ALL, IN A CONTAINER WITH ROOM
+ *
+ * Two properties, and neither is a number to tune:
+ *
+ *   1. **No explicit `lineHeight`.** `Text` merges a type token first and every token in
+ *      this app was measured on Latin text, so `caption`'s 16 arrives whether it suits a
+ *      colour emoji or not — which is what the override was for. Cancelling it outright
+ *      is the better answer: with no line box the glyph is laid out on the font's own
+ *      ascent and descent, the `Text`'s measured height *is* the glyph, and centring the
+ *      box centres what the reader sees. Nothing is added above it to push it down.
+ *   2. **A container taller than the glyph needs**, following the pill. `EMOJI_BOX` and
+ *      the cluster's 16 are both past the ~1.17em a colour emoji actually occupies, so
+ *      there is nothing to overflow and nothing for an ancestor to clip.
+ *
+ * `includeFontPadding: false` stays: it is Android's asymmetric ascent/descent padding
+ * and it is the other thing that tilts a glyph off the centre its neighbours sit on.
+ *
+ * **No size changed in any of the three passes.** The founder's judgement is that the
+ * emoji reads correctly at 17 in the slot and at caption in the cluster; what was wrong
+ * was never how big it is.
  */
-const EMOJI_HEADROOM = 1.4;
-
-/** The action slot's line box. Taller than the slot on purpose; the slot does not clip. */
-const EMOJI_LINE = Math.ceil(EMOJI_SIZE * EMOJI_HEADROOM);
+const EMOJI_BOX = 24;
 
 /**
- * The summary cluster's glyph size and its line box.
+ * The summary cluster's glyph size — `caption`'s, unchanged.
  *
- * **The size is `caption`'s, unchanged**, and that is the point: the founder's judgement
- * is that the cluster reads correctly small against a caption-sized count, so the fix
- * here is the box and the padding rather than the type. What was wrong was never how big
- * these are.
+ * Its container is `caption.lineHeight`, which is 16 against a 12pt glyph: the same
+ * shape as the slot, and the same shape as the pill. That figure is also what `slop`
+ * derives the 44pt tap target from, so it is deliberately the token rather than a
+ * number of its own.
  */
 const CLUSTER_EMOJI_SIZE = theme.typography.caption.fontSize;
-const CLUSTER_EMOJI_LINE = Math.ceil(CLUSTER_EMOJI_SIZE * EMOJI_HEADROOM);
 
 /**
  * The slop that carries the 44pt floor for a caption-height control — the comment
@@ -301,7 +330,10 @@ const CLUSTER_EMOJI_LINE = Math.ceil(CLUSTER_EMOJI_SIZE * EMOJI_HEADROOM);
  * the cluster would silently drop to 40pt.
  */
 const slop = (theme.layout.minTapTarget - theme.typography.caption.lineHeight) / 2;
-const slotSlop = (theme.layout.minTapTarget - SLOT) / 2;
+// Derived from the slot's *height*, which is `EMOJI_BOX` rather than `SLOT` since
+// 2026-09-06 — the slot is 20 wide and 24 tall now, and slop has to answer the taller
+// of the two or the target quietly grows past 44.
+const slotSlop = (theme.layout.minTapTarget - EMOJI_BOX) / 2;
 
 const styles = StyleSheet.create({
   control: { flexDirection: 'row', alignItems: 'center', gap: theme.space[2] },
@@ -310,20 +342,42 @@ const styles = StyleSheet.create({
    * 20pt heart is replaced by a glyph of some other width; the height, with
    * `justifyContent`, is what centres every emoji identically whatever its bounds.
    */
-  slot: { width: SLOT, height: SLOT, alignItems: 'center', justifyContent: 'center' },
   /**
-   * The line box is the caption token's, overridden — see `EMOJI_LINE`. It ends up
-   * taller than the slot, which is right: the slot centres and does not clip, so the
-   * overflow is invisible and the glyph is whole. `includeFontPadding` is Android's
-   * asymmetric ascent/descent padding, which would tilt that centre.
+   * **Twenty wide and twenty-four tall**, and the two numbers answer two different
+   * things.
+   *
+   * The *width* is `SLOT` and is what stops the row shifting when a 20pt heart is
+   * replaced by a glyph of some other width — unchanged since 2026-09-04, and the reason
+   * this was a fixed box in the first place.
+   *
+   * The *height* is `EMOJI_BOX` and is the 2026-09-06 correction. It was `SLOT` too, so
+   * the slot was 20pt holding a 24pt line box, and every pixel of the difference was
+   * overflow that Android drew low and something else clipped. The container is now
+   * larger than what it holds, which is the shape `ReactionPill` has always had.
+   *
+   * Not made square at 24: that would widen the action slot by four points and move the
+   * three icons beside it, which is Feed row geometry this change has no business
+   * touching.
+   */
+  slot: { width: SLOT, height: EMOJI_BOX, alignItems: 'center', justifyContent: 'center' },
+  /**
+   * **No `lineHeight`, and that is the fix rather than an omission.**
+   *
+   * `Text` merges `caption` first, which brings a 16pt line box sized for Latin text.
+   * Overriding it upward is what #103 did and what put the glyph below its neighbours:
+   * React Native on Android grows a line box by expanding the *ascent*, so the extra
+   * space lands above the glyph and pushes it down. Cancelling the token outright leaves
+   * the glyph on the font's own metrics, which is what makes the `Text`'s measured box
+   * and the glyph the same thing — so the slot's `justifyContent` centres what the reader
+   * actually sees.
+   *
+   * `includeFontPadding` is Android's asymmetric ascent/descent padding and is the other
+   * thing that tilts a glyph off the centre its neighbours sit on.
    */
   emoji: {
     fontSize: EMOJI_SIZE,
-    lineHeight: EMOJI_LINE,
+    lineHeight: undefined,
     textAlign: 'center',
-    // Android draws text into a box whose vertical centre is not the glyph's when the
-    // ascent and descent are unequal, which is every colour emoji. Both of these are
-    // what make "centred in the slot" mean the glyph rather than the box.
     textAlignVertical: 'center',
     includeFontPadding: false,
   },
@@ -333,19 +387,21 @@ const styles = StyleSheet.create({
   /**
    * The cluster glyph's box: caption's line height, centred, height only.
    *
-   * Height, because that is the axis a glyph is cropped and mis-centred on, and because
-   * this is the figure `slop` derives the 44pt tap target from — a box of any other
-   * height would silently move the target. Not width, because a fixed width would change
-   * the overlap below and shift the cluster's rhythm for nothing.
+   * Sixteen against a twelve-point glyph is the same shape as the slot above and as the
+   * pill — a container with room, rather than a line box with overflow. It is also the
+   * figure `slop` derives the 44pt tap target from, so a box of any other height would
+   * silently move the target. Not a fixed width, because that would change the overlap
+   * below and shift the cluster's rhythm for nothing.
    */
   glyphBox: {
     height: theme.typography.caption.lineHeight,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /** The slot's treatment at the cluster's size. See `emoji` for why there is no line box. */
   clusterEmoji: {
     fontSize: CLUSTER_EMOJI_SIZE,
-    lineHeight: CLUSTER_EMOJI_LINE,
+    lineHeight: undefined,
     textAlign: 'center',
     textAlignVertical: 'center',
     includeFontPadding: false,

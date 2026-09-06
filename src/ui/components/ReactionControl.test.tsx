@@ -227,18 +227,75 @@ describe('the action slot', () => {
   const flat = (node: { props: { style?: unknown } }) =>
     StyleSheet.flatten(node.props.style as never) as Record<string, number | string>;
 
+  /** The same, for a node that may be the propless root the walk below ends on. */
+  const flatLoose = (node: { props?: { style?: unknown } }) =>
+    StyleSheet.flatten(node.props?.style as never) as Record<string, unknown> | undefined;
+
   const emojiIn = (view: View, glyph: string) =>
     within(actionSlot(view)).getByText(glyph, { includeHiddenElements: true });
 
-  it('is the same fixed square whether it holds a heart or an emoji', async () => {
+  /**
+   * The height a `Text` actually occupies, which is its `lineHeight` when one is set and
+   * the font's own metrics when it is not.
+   *
+   * With no line box there is nothing to overflow, so `0` is the honest answer for
+   * "how much does this demand of its container" — the glyph is laid out on its natural
+   * ascent and descent, and a container sized past that has room by construction.
+   */
+  const lineBoxOf = (style: Record<string, number | string>) => Number(style.lineHeight ?? 0);
+
+  it('is the same fixed box whether it holds a heart or an emoji', async () => {
     const empty = flat(actionSlot(await draw(), false));
     const reacted = flat(actionSlot(await draw({ active: true, mineGlyph: '😂', count: 1 })));
 
+    // The *width* is what stops the row shifting when a 20pt heart is replaced by a
+    // glyph of some other width. It is still `icon.sm`, and still the reason this is a
+    // fixed box at all.
     expect(empty.width).toBe(theme.layout.icon.sm);
-    expect(empty.height).toBe(theme.layout.icon.sm);
+    // The *height* is taller than the width since 2026-09-06, and that is the fix: a
+    // container has to be larger than what it holds. It was `icon.sm` too, so the slot
+    // was 20pt around a 24pt line box and every pixel of the difference was overflow.
+    expect(Number(empty.height)).toBeGreaterThan(Number(empty.width));
+
     // The whole of "the row must not shift when somebody reacts", in one assertion.
     expect(reacted.width).toBe(empty.width);
     expect(reacted.height).toBe(empty.height);
+  });
+
+  /**
+   * The invariant the last two attempts both broke, stated so a third cannot.
+   *
+   * `ReactionPill` has drawn six colour emoji correctly since it shipped, and its shape
+   * is a 28pt line box inside a 36pt container. Both boxes here were the other way round
+   * — 20 holding 24, and 16 holding 17 — and React Native on Android grows a line box by
+   * expanding the *ascent*, so the excess lands above the glyph and pushes it down into
+   * whatever is willing to clip it.
+   */
+  it('never gives the glyph a line box larger than the container holding it', async () => {
+    const view = await draw({ active: true, mineGlyph: '🔥', glyphs: ['🔥', '😮'], count: 4 });
+
+    const slot = flat(actionSlot(view));
+    const slotGlyph = flat(emojiIn(view, '🔥'));
+    expect(lineBoxOf(slotGlyph)).toBeLessThanOrEqual(Number(slot.height));
+
+    const box = flat(glyphsIn(cluster(view), '😮')[0]!.parent as never);
+    const clusterGlyph = flat(glyphsIn(cluster(view), '😮')[0]!);
+    expect(lineBoxOf(clusterGlyph)).toBeLessThanOrEqual(Number(box.height));
+  });
+
+  it('puts no clipping ancestor between the glyph and the row', async () => {
+    // A container with room is only room if nothing above it hides what spills. Walked
+    // rather than asserted on one node, because the ancestor that clips is exactly the
+    // one nobody thought about.
+    const view = await draw({ active: true, mineGlyph: '😭', glyphs: ['😭'], count: 1 });
+
+    type Node = { parent?: Node | null; props?: { style?: unknown } };
+    let node: Node | null | undefined = emojiIn(view, '😭') as unknown as Node;
+    while (node) {
+      // The root container has no props of its own; everything below it does.
+      expect(flatLoose(node)?.overflow).not.toBe('hidden');
+      node = node.parent;
+    }
   });
 
   it('centres whatever is in it, on both axes', async () => {
@@ -284,34 +341,37 @@ describe('the action slot', () => {
   });
 
   /**
-   * No `lineHeight`, and it is deliberate rather than forgotten: the slot centres the
-   * text box, so leaving the box at its natural height is what cannot clip a tall glyph
-   * and what keeps six different emoji on one optical centre. `includeFontPadding` is
-   * Android's asymmetric ascent/descent padding, which would tilt that centre.
+   * **No `lineHeight` at all**, which is the 2026-09-06 fix and not an omission.
+   *
+   * `Text` merges `caption` first and brings a 16pt line box sized for Latin text, so a
+   * 17pt colour emoji arrives in a box shorter than it needs. #103 answered that by
+   * overriding the box *upward* to 24, and the founder's device showed the glyph still
+   * clipped and now sitting below the three Ionicons beside it — because React Native on
+   * Android grows a line box by expanding the ascent, so the extra space lands above the
+   * glyph and pushes it down.
+   *
+   * Cancelling the token outright leaves the glyph on the font's own metrics: the
+   * `Text`'s measured box and the glyph become the same thing, so the slot's
+   * `justifyContent` centres what the reader actually sees. `includeFontPadding` is
+   * Android's asymmetric padding and is the other thing that tilts a glyph off centre.
    */
-  it('gives the glyph a line box with room to spare, so a tall emoji cannot be clipped', async () => {
+  it('carries no line box, so nothing is added above the glyph', async () => {
     const style = flat(emojiIn(await draw({ active: true, mineGlyph: '🔥', count: 1 }), '🔥'));
 
-    /**
-     * The regression this guards is silent and platform-specific: `Text` merges the
-     * `caption` token first, which brings `lineHeight: 16`, and a line box shorter than
-     * the glyph crops it on Android while looking perfect on iOS. So the assertion is
-     * that the box was overridden *upward*, not merely that it exists.
-     */
-    expect(style.lineHeight).toBeGreaterThan(theme.typography.caption.lineHeight);
-    expect(Number(style.lineHeight)).toBeGreaterThanOrEqual(Number(style.fontSize) * 1.25);
-    // Taller than the slot is correct: the slot centres and does not clip.
-    expect(style.lineHeight).toBeGreaterThanOrEqual(theme.layout.icon.sm);
+    expect(style.lineHeight).toBeUndefined();
     expect(style.includeFontPadding).toBe(false);
+    expect(style.textAlignVertical).toBe('center');
   });
 
   it('keeps the 44pt tap target, and keeps it the same in both states', async () => {
-    const slot = theme.layout.icon.sm;
     const empty = actionSlot(await draw(), false);
     const reacted = actionSlot(await draw({ active: true, mineGlyph: '👏', count: 1 }));
 
+    // Measured from the slot's own height rather than from `icon.sm`, which is only its
+    // width now. Reading the wrong one is how the target quietly grows past 44.
+    const height = Number(flat(empty).height);
     for (const node of [empty, reacted]) {
-      expect(slot + 2 * (node.props.hitSlop as number)).toBe(theme.layout.minTapTarget);
+      expect(height + 2 * (node.props.hitSlop as number)).toBe(theme.layout.minTapTarget);
     }
   });
 
@@ -366,18 +426,13 @@ describe('the summary cluster', () => {
     return flat(glyphsIn(cluster(view), glyph)[0]!);
   };
 
-  it('gives a cluster glyph a line box with room above its size', async () => {
-    // The regression is silent and platform-specific: a box sized for Latin text crops a
-    // colour emoji on Android and looks perfect on iOS.
+  it('carries no line box either, at the size it has always been', async () => {
+    // The same fix as the slot, at the cluster's size. The size is what the founder
+    // confirmed is right; the line box is what was wrong.
     const style = await clusterGlyph('🔥');
 
     expect(style.fontSize).toBe(theme.typography.caption.fontSize);
-    expect(Number(style.lineHeight)).toBeGreaterThanOrEqual(
-      Number(style.fontSize) * 1.25,
-    );
-    expect(Number(style.lineHeight)).toBeGreaterThan(
-      theme.typography.caption.lineHeight - 1,
-    );
+    expect(style.lineHeight).toBeUndefined();
   });
 
   it('drops the padding that would tilt it off centre, and centres it on both axes', async () => {
@@ -450,12 +505,16 @@ describe('the summary cluster', () => {
     const slot = flat(within(actionSlot(view)).getByText('❤️', { includeHiddenElements: true }));
     const summary = flat(glyphsIn(cluster(view), '🔥')[0]!);
 
-    for (const key of ['includeFontPadding', 'textAlign', 'textAlignVertical'] as const) {
+    for (const key of [
+      'includeFontPadding',
+      'textAlign',
+      'textAlignVertical',
+      'lineHeight',
+    ] as const) {
       expect(summary[key]).toEqual(slot[key]);
     }
-    // The same headroom rule, applied to two different sizes.
-    const ratio = (style: Record<string, number | string>) =>
-      Number(style.lineHeight) / Number(style.fontSize);
-    expect(ratio(summary)).toBeCloseTo(ratio(slot), 1);
+    // Two sizes on purpose — the slot matches the icons beside it and the cluster is a
+    // small summary — and one rule for everything else.
+    expect(Number(summary.fontSize)).toBeLessThan(Number(slot.fontSize));
   });
 });

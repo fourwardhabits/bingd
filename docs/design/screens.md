@@ -156,15 +156,19 @@ The composition in [`design-system.md`](./design-system.md) §9: an Amber panel,
 **The reveal never names a placement worse than #10 (founder, 2026-09-05, from a physical Android pass).** It drew every placement it could compute, led by the overall ordinal:
 
 ```
-8.7                                    8.7
-The Matrix                             The Matrix
-#19 in Movies              becomes
-Below Spirited Away                    Below Spirited Away
-Above Harold & Kumar…                  Above Harold & Kumar…
-#6 Science Fiction · #7 Action         #6 Science Fiction · #7 Action
+8.7                                     7.1
+The Matrix                              Vincenzo, S1
+#19 in Movies              becomes      #9 Comedy · #9 Drama
+Below Spirited Away                     Below Fullmetal Alchemist: Brotherhood, S1
+Above Harold & Kumar…                   Above The Office, S1
+#6 Science Fiction · #7 Action
 ```
 
-Four lines of ordinal under a score, and the largest number on the screen was the one saying least — `#19 in Movies` is a fact about how much the reader has ranked, not about the film. The rule is now the one [`hero-rank.ts`](../../src/features/collection/hero-rank.ts) has applied to the title page since 2026-08-28, with the reveal's own allowance of two lines: **top ten overall and the genres are suppressed; otherwise the top-ten genres, at most two; otherwise nothing**, with no gap reserved. The anchors move above it, because they are the half of the block that is about the film and the half a ranked title always has.
+Four lines of ordinal under a score, and the largest number on the screen was the one saying least — `#19 in Movies` is a fact about how much the reader has ranked, not about the film. The rule is now the one [`hero-rank.ts`](../../src/features/collection/hero-rank.ts) has applied to the title page since 2026-08-28, with the reveal's own allowance of two lines: **top ten overall and the genres are suppressed; otherwise the top-ten genres, at most two; otherwise nothing**, with no gap reserved.
+
+**The order settled on 2026-09-06, after the founder saw both on a device.** The placement went below the anchors on 2026-09-05 and came back under the title once it was top-ten-only — because the reason for moving it was that it was often the wrong thing to lead with, and a conditional line is not. It is drawn **muted**: the hierarchy is score, title, placement, then the names either side, and an ordinal at the title's weight is two headlines.
+
+**A season is named the way everything else names one.** It printed `media_items.title`, which TMDB writes as "Season 1" — so a reader who had just ranked Vincenzo saw a score, the words *Season 1*, and two anchors underneath that identified themselves while the subject did not. The subject's own row now goes through [`compactName`](../../src/lib/titles.ts), which is what the anchors have always used, so the three lines agree by construction. A film's title is returned untouched.
 
 Nothing about the arithmetic moved — same `rankings.position`, same genre ordering off the same cached list, same neighbours. `TOP_RANK_SHOWN` lives in `genre-rank.ts` so the hero and the reveal read one number.
 
@@ -332,7 +336,7 @@ offered two ways appearing under both from one entry.
    ─────────────────────────────────────────────
    ⬤ 8.7  bingd.        ⬤ 9.1  Following
      12 ratings           2 people you follow
-
+   ─────────────────────────────────────────────
    WHERE TO WATCH          [N] [tv] [a]  +2   ›
    via JustWatch                                  ← small, tertiary, italic
    ─────────────────────────────────────────────
@@ -358,12 +362,15 @@ somebody out of bingd. to a web page that sent them somewhere else, and it did n
 thing its position implied. Nothing replaces it; manufacturing a provider URL would be a
 guess presented as a destination.
 
-**The heading is the app's section treatment.** `WHERE TO WATCH` in small maroon caps, with
-the JustWatch credit beneath it in italic tertiary. It was a `callout` label in full ink
-until 2026-09-05, which is a row's weight rather than a section's — so sitting directly under
-the two score units it read as a third thing inside Scores. No second rule was added: a
-`SectionHeader` without one is the app's dominant convention, and the constraint here is
-height. The block is a row and stays a row.
+**The heading is the app's section treatment, over the app's own hairline.** `WHERE TO WATCH`
+in small maroon caps, with the JustWatch credit beneath it in italic tertiary. It was a
+`callout` label in full ink until 2026-09-05, which is a row's weight rather than a
+section's — so sitting directly under the two score units it read as a third thing inside
+Scores. The heading alone was tried first and the founder rejected it on a device: with the
+score units directly above and nothing between them the block still read as a continuation.
+The rule added on 2026-09-06 is `ScoresSection`'s own — gutter-inset, doubled hairline —
+borrowed rather than invented, and it costs a pixel of height. The block is a row and stays
+a row.
 
 The JustWatch credit is on both surfaces because their terms require the source to be named
 wherever the data is shown — demoted, never hidden. See

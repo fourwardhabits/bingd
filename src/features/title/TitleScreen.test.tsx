@@ -1924,6 +1924,10 @@ describe('where to watch', () => {
     await waitFor(() => expect(view.getByTestId('where-to-watch')).toBeTruthy());
 
     const scores = indexOf(view, (node: never) => (node as any).props?.testID === 'scores-layout');
+    const rule = indexOf(
+      view,
+      (node: never) => (node as any).props?.testID === 'where-to-watch-divider',
+    );
     const watch = indexOf(view, (node: never) => (node as any).props?.testID === 'where-to-watch');
     const tabs = indexOf(
       view,
@@ -1932,7 +1936,9 @@ describe('where to watch', () => {
 
     expect(scores).toBeGreaterThan(-1);
     expect(tabs).toBeGreaterThan(-1);
-    expect(watch).toBeGreaterThan(scores);
+    // Scores, then the rule that separates them, then the block, then the tab row.
+    expect(rule).toBeGreaterThan(scores);
+    expect(watch).toBeGreaterThan(rule);
     expect(watch).toBeLessThan(tabs);
   });
 

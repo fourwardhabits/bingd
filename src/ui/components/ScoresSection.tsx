@@ -65,9 +65,10 @@ const TWO_COLUMN_MAX_FONT_SCALE = 1.3;
  *
  * **The inset rule above the header** separates the scores from the actions over them.
  * Inset to the gutter and at the hairline the rest of the app uses — a full-bleed rule
- * would cut the page in half and announce a new screen, which this is not. It is the
- * only structural line on the title page and it is there because scores were reading as
- * a continuation of the action row rather than as their own block.
+ * would cut the page in half and announce a new screen, which this is not. It is there
+ * because scores were reading as a continuation of the action row rather than as their
+ * own block — and since 2026-09-06 `WhereToWatch` opens with the same rule for the same
+ * reason, so this is the pattern on the title page rather than the exception it was.
  *
  * **Your own score is not here, and that is the founder's correction of 2026-08-18.**
  * It leads the hero, opposite the poster, with the rank context and the Ranked control

@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { renderWithProviders } from '@/test-utils/render';
 import { queryKeys } from '@/lib/query';
+import { theme } from '@/ui/tokens';
 
 import { RankingSheet, type RankingSheetProps } from './RankingSheet';
 
@@ -713,7 +715,7 @@ describe('the reveal names what it landed between', () => {
     // One summary carries score, ordinal and both neighbours. The rows themselves are
     // hidden from the tree, so nothing is read twice.
     await sheet.findByLabelText(
-      'Film A scored 8.7 out of 10. Below Sicario. Above Collateral. #3 in Movies.',
+      'Film A scored 8.7 out of 10. #3 in Movies. Below Sicario. Above Collateral.',
     );
   });
 
@@ -725,7 +727,7 @@ describe('the reveal names what it landed between', () => {
     answering({ ...placement, data: { ...placement.data, position: 1 } });
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. Above Sicario. #1 in Movies.');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #1 in Movies. Above Sicario.');
     // The placement line carries it. No badge, no separate treatment, and nothing
     // invented to sit above a #1.
     expect(sheet.getByText('#1 in Movies', { includeHiddenElements: true })).toBeTruthy();
@@ -741,7 +743,7 @@ describe('the reveal names what it landed between', () => {
     answering(placement);
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. Below Sicario. #3 in Movies.');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in Movies. Below Sicario.');
     expect(sheet.queryByText(/^Above/, { includeHiddenElements: true })).toBeNull();
     expect(sheet.getByText('#3 in Movies', { includeHiddenElements: true })).toBeTruthy();
   });
@@ -762,7 +764,7 @@ describe('the reveal names what it landed between', () => {
     answering({ ...placement, data: { ...placement.data, category: 'tv_seasons' } });
     const sheet = await openSheet();
 
-    await sheet.findByLabelText('Film A scored 8.7 out of 10. Below Severance, S1. #3 in TV.');
+    await sheet.findByLabelText('Film A scored 8.7 out of 10. #3 in TV. Below Severance, S1.');
     // The category is TV and the neighbour is a season. Nothing claims a rank among
     // series, which is not a thing this product orders.
     expect(sheet.getByText('#3 in TV', { includeHiddenElements: true })).toBeTruthy();
@@ -1332,5 +1334,164 @@ describe('a title that is already ranked', () => {
       ).toBeTruthy(),
     );
     expect(sheet.queryByText(/rank_rebucket/)).toBeNull();
+  });
+});
+
+/**
+ * **What the reveal calls the thing it just ranked, and what order it says it in**
+ * (founder, physical Android, 2026-09-06).
+ *
+ * Two findings from one screenshot. A season showed the words **Season 1** under its
+ * score — which is `media_items.title` for a season, and identifies nothing — while the
+ * two anchors underneath it read `Below Fullmetal Alchemist: Brotherhood, S1`. And the
+ * placement, moved below the anchors the day before, wanted to be back under the title
+ * now that it is top-ten-only and no longer the loudest wrong thing on the screen.
+ */
+describe('what the reveal says, and in what order', () => {
+  const ranked = (rows: unknown[]) => mockRanked.mockReturnValue({ data: rows });
+
+  const season = (over: Record<string, unknown> = {}) => ({
+    mediaItemId: 'film-a',
+    position: 3,
+    kind: 'season',
+    title: 'Season 1',
+    seriesTitle: 'Vincenzo',
+    seasonNumber: 1,
+    genres: [],
+    ...over,
+  });
+
+  /** Where something sits in the rendered tree. `queryAll` walks in document order. */
+  const orderOf = (
+    view: Awaited<ReturnType<typeof openSheet>>,
+    match: (node: never) => boolean,
+  ) => view.root!.queryAll(() => true).findIndex(match as never);
+
+  const textAt = (value: string | RegExp) => (node: never) => {
+    const children = (node as { props?: { children?: unknown } }).props?.children;
+    const text = Array.isArray(children) ? children.join('') : String(children ?? '');
+    return typeof value === 'string' ? text === value : value.test(text);
+  };
+
+  it('names a ranked season by its series and season number', async () => {
+    // `Vincenzo, S1`, never the bare `Season 1` the row carries — which is a complete
+    // name only on a page where the show is already written somewhere else.
+    ranked([
+      season(),
+      { ...season(), mediaItemId: 'other', position: 4, seriesTitle: 'The Office' },
+    ]);
+    answering({ ...placement, data: { ...placement.data, category: 'tv_seasons' } });
+    const sheet = await openSheet();
+
+    await sheet.findByText('Vincenzo, S1');
+    expect(sheet.queryByText('Season 1')).toBeNull();
+  });
+
+  it('uses the same formatter the anchors use, so the three lines agree', async () => {
+    // The anchors have gone through `compactName` since `rank-neighbours` was written.
+    // The subject now reads its own row out of the same list and through the same
+    // function, which is what makes them agree by construction rather than by two call
+    // sites being kept in step.
+    ranked([
+      { ...season(), mediaItemId: 'above', position: 2, seriesTitle: 'The Office' },
+      season(),
+    ]);
+    answering({ ...placement, data: { ...placement.data, category: 'tv_seasons' } });
+    const sheet = await openSheet();
+
+    await sheet.findByText('Vincenzo, S1');
+    expect(sheet.getByText('The Office, S1', { includeHiddenElements: true })).toBeTruthy();
+  });
+
+  it('leaves a film called what it is called', async () => {
+    // `compactName` returns a movie's own title untouched. "The Matrix", never
+    // "The Matrix, Movie".
+    ranked([
+      { mediaItemId: 'film-a', position: 3, kind: 'movie', title: 'Film A', genres: [] },
+    ]);
+    answering(placement);
+    const sheet = await openSheet();
+
+    await sheet.findByText('Film A');
+  });
+
+  it('keeps a long series name whole rather than inventing a shorter one', async () => {
+    const long = 'Fullmetal Alchemist: Brotherhood';
+    ranked([season({ seriesTitle: long, seasonNumber: 2 })]);
+    answering({ ...placement, data: { ...placement.data, category: 'tv_seasons' } });
+    const sheet = await openSheet();
+
+    await sheet.findByText(`${long}, S2`);
+  });
+
+  it('falls back to the plain title while the list is still arriving', async () => {
+    // The same render on which the anchors are absent. Degrading to what the screen said
+    // before this change beats degrading to nothing.
+    ranked([]);
+    answering(placement);
+    const sheet = await openSheet();
+
+    await sheet.findByText('Film A');
+  });
+
+  it('puts the placement under the title and the neighbours under that', async () => {
+    // The founder's hierarchy, asserted as tree order rather than as presence: score,
+    // title, placement, then the two names either side.
+    ranked([
+      { mediaItemId: 'm2', position: 2, kind: 'movie', title: 'Sicario', genres: [] },
+      { mediaItemId: 'film-a', position: 3, kind: 'movie', title: 'Film A', genres: [] },
+      { mediaItemId: 'm4', position: 4, kind: 'movie', title: 'Collateral', genres: [] },
+    ]);
+    answering(placement);
+    const sheet = await openSheet();
+    await sheet.findByText('Film A');
+
+    const title = orderOf(sheet, textAt('Film A'));
+    const rank = orderOf(sheet, textAt('#3 in Movies'));
+    const below = orderOf(sheet, textAt('Sicario'));
+    const above = orderOf(sheet, textAt('Collateral'));
+
+    expect(title).toBeGreaterThan(-1);
+    expect(rank).toBeGreaterThan(title);
+    expect(below).toBeGreaterThan(rank);
+    expect(above).toBeGreaterThan(below);
+  });
+
+  it('draws the placement muted, so it cannot compete with the title', async () => {
+    // Hierarchy is score, title, placement, neighbours. An ordinal at the title's weight
+    // is two headlines.
+    ranked([
+      { mediaItemId: 'film-a', position: 3, kind: 'movie', title: 'Film A', genres: [] },
+    ]);
+    answering(placement);
+    const sheet = await openSheet();
+
+    // Hidden from the accessibility tree — the panel speaks the whole placement once —
+    // so the query has to say so.
+    const line = await sheet.findByText('#3 in Movies', { includeHiddenElements: true });
+    expect(StyleSheet.flatten(line.props.style).color).toBe(theme.text.secondary);
+  });
+
+  it('closes the gap entirely when nothing qualifies', async () => {
+    // Past ten with no qualifying genre: the block goes straight from the title to the
+    // neighbours, and no line is reserved for a placement that is not there.
+    ranked(
+      Array.from({ length: 40 }, (_, index) => ({
+        mediaItemId: index === 18 ? 'film-a' : `f${index}`,
+        position: index + 1,
+        kind: 'movie',
+        title: index === 18 ? 'Film A' : `Film ${index + 1}`,
+        genres: [],
+      })),
+    );
+    answering({ ...placement, data: { ...placement.data, position: 19 } });
+    const sheet = await openSheet();
+    await sheet.findByText('Film A');
+
+    expect(sheet.queryByText(/in Movies/, { includeHiddenElements: true })).toBeNull();
+
+    const title = orderOf(sheet, textAt('Film A'));
+    const below = orderOf(sheet, textAt('Film 18'));
+    expect(below).toBeGreaterThan(title);
   });
 });
