@@ -48,13 +48,19 @@ The loop is watch, open bingd., rank, and then three things in this order:
 | Beat | The question it answers |
 |---|---|
 | **Score** | How strongly did this resolve in my taste? |
-| **Placement** | Where does it actually sit against everything else I have seen? |
 | **Neighbours** | What did I just put this above and below? |
+| **Placement** | Where does it sit against everything else I have seen — *when that is worth saying* |
 
 These are complementary and should never be pitched as competing systems. The score is
-the one people anticipate during the comparisons. The placement is the one they did not
-see coming. The two names either side are what turn a number into an argument, which is
-the part that gets repeated to somebody else.
+the one people anticipate during the comparisons. The two names either side are what turn
+a number into an argument, which is the part that gets repeated to somebody else.
+
+**The placement is now conditional, and the order changed with it (2026-09-05).** It is
+shown only for a top-ten placement — overall, or failing that up to two top-ten genre
+placements, and otherwise nothing. Outside the top ten an ordinal stops being a statement
+about the title and becomes one about how much the reader has ranked, which is not a
+payoff. So the marketing claim is the score and the neighbours, and the placement is the
+line that lands when somebody has just put something near the top.
 
 The external form of that third beat is the content format in section 10:
 
@@ -860,8 +866,11 @@ against the prompted version.
    keeping a history, the social context, movies and TV in one place, and who can live at
    season level. Every message states that there is no episode-level tracking. Sections
    3.7, 3.8 and 7.4.
-3. **The reveal is score, then placement, then neighbours**, and the in-app anchors are
-   text rather than posters. Section 1.1, with the share-card idea kept in section 10.
+3. **The reveal is score, then neighbours, then a placement only when it is worth
+   naming** — top ten overall, otherwise up to two top-ten genre placements, otherwise
+   nothing. The in-app anchors are text rather than posters. Section 1.1, with the
+   share-card idea kept in section 10. Revised 2026-09-05 from "score, then placement,
+   then neighbours", which is what a physical Android pass rejected.
 4. **The product doctrine is settled and lives in the PRD**, not here. Ranking-first, the
    Collection as identity, friend scores behind the Following drill-down, Lists deferred but
    ranked highest, discovery secondary, diary secondary, a mainstream audience under

@@ -1,6 +1,8 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
+import { theme } from '@/ui/tokens';
 
 import { WhereToWatch } from './WhereToWatch';
 
@@ -97,7 +99,9 @@ describe('the collapsed row', () => {
   it('names itself, its source and the services behind it', async () => {
     const view = await open();
 
-    expect(view.getByText('Where to watch')).toBeTruthy();
+    // The app's section-heading treatment since 2026-09-05: small maroon caps, which is
+    // what stops the block reading as a third unit inside the Scores section above it.
+    expect(view.getByText('WHERE TO WATCH')).toBeTruthy();
     // TMDB's terms for this data are specific: the source must be attributed as
     // JustWatch. The logos are the data, so the line travels with them.
     expect(view.getByText('via JustWatch')).toBeTruthy();
@@ -312,25 +316,39 @@ describe('the sheet', () => {
   });
 });
 
-describe('the one link this feature has', () => {
-  it('opens TMDB own watch-options page, labelled as what it is', async () => {
-    const view = await open();
-    await fireEvent.press(view.getByTestId('where-to-watch'));
-
-    const action = await view.findByText('View watch options');
-    await fireEvent.press(action);
-    expect(mockOpenURL).toHaveBeenCalledWith(LINK);
-  });
-
-  it('offers no action at all when TMDB published no link', async () => {
-    mockFetch.mockResolvedValue(availability([NETFLIX], null));
+describe('nothing here leaves the app', () => {
+  /**
+   * **`View watch options` was removed on 2026-09-05** (founder), and these tests are
+   * what stop it coming back by accident.
+   *
+   * It opened TMDB's own watch-options page for the title in the reader's market — the
+   * only real link this data comes with — and the ruling is that a real link to the wrong
+   * place is still the wrong place. It sent somebody out of bingd. to a web page that
+   * then sent them somewhere else, and it did not do the thing its position implied: it
+   * did not open the film on the service they had just tapped, because TMDB publishes no
+   * such link.
+   */
+  it('offers no action out of the sheet, even when TMDB published a link', async () => {
     const view = await open();
     await fireEvent.press(view.getByTestId('where-to-watch'));
 
     await waitFor(() => expect(view.getByText('STREAM')).toBeTruthy());
     expect(view.queryByText('View watch options')).toBeNull();
-    // And Done is still there, so the sheet is never a room with no door.
+    expect(mockOpenURL).not.toHaveBeenCalled();
+    // Done is still there, so the sheet is never a room with no door.
     expect(view.getByText('Done')).toBeTruthy();
+  });
+
+  it('hands nothing to the operating system from anywhere on the sheet', async () => {
+    // The whole surface, not just the footer that used to hold the action.
+    const view = await open();
+    await fireEvent.press(view.getByTestId('where-to-watch'));
+
+    await fireEvent.press(await view.findByLabelText('Netflix, Stream'));
+    await fireEvent.press(view.getByText('Availability data provided by JustWatch.'));
+    await fireEvent.press(view.getByText('Where to watch'));
+
+    expect(mockOpenURL).not.toHaveBeenCalled();
   });
 
   it('never turns a service into a destination', async () => {
@@ -372,5 +390,66 @@ describe('what it costs', () => {
 
     await waitFor(() => expect(mockFetch).toHaveBeenCalled());
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * **The block is its own section, and the credit is still on it** (founder, physical
+ * Android, 2026-09-05).
+ *
+ * The row sat directly under the two score units with a `callout` label in full ink —
+ * a row's weight rather than a section's — so it read as a third thing inside Scores.
+ * The fix is the app's own section treatment, which separates it at no cost in height.
+ *
+ * The attribution moves with it and does not go behind the sheet. TMDB's terms for this
+ * data name a third party and require the source to be attributed wherever it is shown;
+ * the logos on this row *are* the data. Demoting it is allowed and hiding it is not.
+ */
+describe('the section treatment', () => {
+  const flat = (node: { props: { style?: unknown } }) =>
+    StyleSheet.flatten(node.props.style as never) as Record<string, unknown>;
+
+  it('uses the app section heading rather than a row label', async () => {
+    const view = await open();
+    const heading = view.getByText('WHERE TO WATCH');
+
+    // The same token and tone `SectionHeader` uses everywhere else. Written by hand here
+    // only because SectionHeader owns a 44pt full-width row, and this heading has to
+    // share a line with the logos.
+    expect(flat(heading).fontFamily).toBe(theme.typography.sectionHeader.fontFamily);
+    expect(flat(heading).fontSize).toBe(theme.typography.sectionHeader.fontSize);
+    expect(flat(heading).color).toBe(theme.semantic.action);
+  });
+
+  it('keeps the JustWatch credit on the collapsed surface, demoted', async () => {
+    const view = await open();
+    const credit = view.getByText('via JustWatch');
+
+    expect(flat(credit).fontStyle).toBe('italic');
+    expect(flat(credit).color).toBe(theme.text.tertiary);
+    // Subordinate to the heading it sits under, which is the whole of "demoted".
+    expect(Number(flat(credit).fontSize)).toBeLessThanOrEqual(
+      theme.typography.sectionHeader.fontSize,
+    );
+  });
+
+  it('still spells the credit out in full inside the sheet', async () => {
+    // Two surfaces, two treatments, one obligation. Removing either would leave a
+    // JustWatch-sourced list somewhere with no source on it.
+    const view = await open();
+    await fireEvent.press(view.getByTestId('where-to-watch'));
+
+    expect(await view.findByText('Availability data provided by JustWatch.')).toBeTruthy();
+  });
+
+  it('adds no rule of its own, because the heading is the separation', async () => {
+    // A hairline under the scores was the other candidate. `SectionHeader` without one
+    // is the app's dominant convention, and the constraint here is height: the block is
+    // a row and has to stay a row.
+    const view = await open();
+    const row = view.getByTestId('where-to-watch');
+
+    expect(flat(row).borderTopWidth).toBeUndefined();
+    expect(flat(row).borderBottomWidth).toBeUndefined();
   });
 });

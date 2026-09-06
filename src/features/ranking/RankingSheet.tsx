@@ -4,7 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
-import { formatGenreRank, genreRanksFor } from '@/features/collection/genre-rank';
+import {
+  formatGenreRank,
+  shownGenreRanksFor,
+  TOP_RANK_SHOWN,
+} from '@/features/collection/genre-rank';
 import { neighboursFor } from '@/features/collection/rank-neighbours';
 import { formatScore, revealFloor, type Bucket } from '@/features/collection/score';
 import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
@@ -994,7 +998,39 @@ function Reveal({
   // key `apply` invalidated when the title was placed — so this resolves to the list
   // *including* it, and no new query or endpoint is needed to derive a genre rank.
   const { data: ranked } = useRankedCollection(profile.id, category as RankingCategory);
-  const genres = ranked ? genreRanksFor(subjectId, ranked) : [];
+
+  /**
+   * **The reveal never names a placement worse than tenth** (founder, 2026-09-05, off a
+   * physical Android pass).
+   *
+   * What it showed was every placement it could compute, stacked:
+   *
+   *     #19 in Movies
+   *     Below Spirited Away
+   *     Above Harold & Kumar Go to White Castle
+   *     #6 Science Fiction · #7 Action
+   *
+   * Four lines of ordinal under a score, and the largest number on the screen is the one
+   * saying least. `#19 in Movies` is not a fact about the film; it is a fact about how
+   * much the reader has ranked, and it was leading the block and pushing the two that
+   * *are* about the film to the bottom.
+   *
+   * The rule is `hero-rank.ts`'s, which has drawn at most one top-ten label on the title
+   * page since 2026-08-28, applied here with the reveal's own allowance of two lines:
+   *
+   *   1. **Top ten overall** — `#7 in Movies`, and the genres are suppressed. The broad
+   *      claim is the stronger one, so the narrower ones would only dilute it.
+   *   2. **Otherwise the top-ten genres**, at most two, and never one worse than tenth.
+   *   3. **Otherwise nothing.** The block simply ends after the anchors, and no gap is
+   *      reserved — the same rule `PersonalState` follows for a null ordinal.
+   *
+   * Nothing about the arithmetic moved. `position` is still `rankings.position`, the
+   * genre ranks still come off the same cached list by the same proportional ordering,
+   * and the anchors are still the two names either side. This is a filter on what is
+   * printed, and `genre-rank.ts` holds it so both surfaces read one number.
+   */
+  const genres = ranked ? shownGenreRanksFor(subjectId, ranked) : [];
+  const showsOverall = position <= TOP_RANK_SHOWN;
 
   /**
    * The two names either side of it, off the same list, so this costs no second read.
@@ -1014,10 +1050,14 @@ function Reveal({
    * this line is allowed to make about them -- a season is ranked against other seasons
    * and never against its own series, so nothing here says "#7 show".
    */
-  const placement = `#${position} in ${readableCategory}`;
+  const placement = showsOverall ? `#${position} in ${readableCategory}` : null;
 
-  /** `#2 Crime`, and the reason genre-rank.ts exists. Still context, still last. */
-  const genreContext = genres.map(formatGenreRank).join('  ·  ');
+  /**
+   * `#6 Science Fiction · #7 Action`, and only when the overall placement is not being
+   * shown — see the rule above. Two at most, none worse than tenth, and still no
+   * denominator: that is on the title page.
+   */
+  const genreContext = showsOverall ? '' : genres.map(formatGenreRank).join('  ·  ');
 
   /**
    * The whole placement, said once, for the summary the panel carries.
@@ -1030,10 +1070,13 @@ function Reveal({
    */
   const spokenPlacement = [
     `${title} scored ${formatScore(score)} out of 10.`,
-    `${placement}.`,
     higher ? `Below ${higher.name}.` : null,
     lower ? `Above ${lower.name}.` : null,
-    genres.length ? `${genres.map(formatGenreRank).join('. ')}.` : null,
+    // Whichever of the two the screen is drawing, in the order it draws them. A summary
+    // that read out a placement the page has decided not to show would be the founder's
+    // complaint again, with a screen reader as the surface.
+    placement ? `${placement}.` : null,
+    genreContext ? `${genres.map(formatGenreRank).join('. ')}.` : null,
   ]
     .filter(Boolean)
     .join(' ');
@@ -1055,38 +1098,43 @@ function Reveal({
       </Text>
 
       {/**
-        * **Score, then placement, then what it landed between** (founder, 2026-09-05).
+        * **Score, then what it landed between, then whatever rank is worth naming**
+        * (founder, 2026-09-05, from a physical Android pass).
         *
         * The score stays the hero and the count-up is untouched. The anticipation the
         * ranking flow builds is "what am I going to give this", and the number answers
         * it. Nothing here competes with the panel above.
         *
-        * What changed is the second beat. The ordinal used to be a tertiary footnote
-        * sharing a line with the genre ranks, which made the answer to "where did it
-        * land" the smallest thing on the screen. It is now its own line, set in the
-        * ordinal token at full contrast, and it reads as a sentence: **#7 in Movies**.
+        * **The anchors have moved above the ordinal**, and the ordinal has become
+        * conditional. Both changes answer the same complaint: the block was four lines
+        * of number under a score, led by `#19 in Movies` — the largest of them and the
+        * one saying least, because a placement outside the top ten is a fact about how
+        * much the reader has ranked rather than about the film. It is now hidden past
+        * ten, and the two names either side lead instead. They are the half of this
+        * block that is about the film, and the half a ranked title always has.
         *
-        * Then the anchors, because "#7" is abstract and "below Dune, above The Batman"
-        * is an opinion. That is the beat the post-watch habit is built on: a number
-        * nobody argues with, followed by two names they might.
-        *
-        * The genre ranks keep their place at the end. They were context before this
-        * change and they are context after it; what they are no longer doing is sharing
-        * a line with the fact the screen is for.
+        * Underneath, together, comes whichever rank survives the rule: the overall
+        * placement inside the top ten, otherwise up to two top-ten genre placements,
+        * otherwise nothing and no reserved gap. See the selection above the return for
+        * the whole rule and why it is `hero-rank.ts`'s, shared rather than restated.
         *
         * Every name comes off the list this screen already reads for those genre ranks,
         * so the block costs no second request, adds no poster fetch, and cannot disagree
-        * with the ordinal above it.
+        * with the ordinal beneath it.
         */}
       <View style={styles.placement}>
-        <Text variant="ordinal" style={styles.centre} accessibilityElementsHidden>
-          {placement}
-        </Text>
-
         {/**
+         * The anchors lead now (founder, 2026-09-05), where the ordinal used to.
+         *
+         * They are the half of this block that is about the film: "#7" is abstract and
+         * "below Dune, above The Batman" is an opinion. They are also the half that is
+         * always available — a ranked title has neighbours whatever its position, while
+         * the ordinal below is now allowed to be absent entirely — so leading with them
+         * is what keeps the block's shape stable instead of having its first line
+         * disappear for anyone outside their own top ten.
+         *
          * Nothing is invented to sit above a #1 or below a last place. The line that
-         * would name it is simply absent, and the placement above already said which
-         * end of the list this is.
+         * would name it is simply absent.
          */}
         {higher || lower ? (
           <View style={styles.anchors}>
@@ -1120,6 +1168,23 @@ function Reveal({
               </Text>
             ) : null}
           </View>
+        ) : null}
+
+        {/**
+         * Every rank the screen is showing, together, under the names — the founder's
+         * grouping. It is one line or the other and never both: `#7 in Movies` when the
+         * title is inside the reader's top ten, the qualifying genres when it is not,
+         * and nothing at all when neither applies.
+         *
+         * The two keep the typography they already had rather than converging. The
+         * overall placement is the stronger claim and stays at `ordinal` and full
+         * contrast; the genres were context before this change and are context after it.
+         * What changed is which of them is on the screen, not how either is drawn.
+         */}
+        {placement ? (
+          <Text variant="ordinal" style={styles.centre} accessibilityElementsHidden>
+            {placement}
+          </Text>
         ) : null}
 
         {genreContext ? (
