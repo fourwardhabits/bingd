@@ -119,6 +119,32 @@ jest.mock('@/features/awards/AwardsSheet', () => ({
 }));
 
 /**
+ * The awards shelf, as its heading and its one control.
+ *
+ * Doubled rather than rendered, because the real section runs the twenty-track fact read
+ * — eight tables through `read-all`'s keyset helpers — and this file's Supabase stand-in
+ * is a filter-and-sort over fixture arrays with no `or`/`gt` on it. Teaching it those
+ * would be building a second database to assert that a section is on the page above Top
+ * ranked. `ProfileAwards.test.tsx` covers the section itself, against a doubled query.
+ *
+ * The heading is spelled as `SectionHeader` renders it — upper-cased — so a test looking
+ * for the shelf is looking for the string a reader would see.
+ */
+jest.mock('@/features/awards/ProfileAwards', () => {
+  const { Pressable, Text, View } = jest.requireActual('react-native');
+  return {
+    ProfileAwards: ({ onSeeAll }: { onSeeAll: () => void }) => (
+      <View>
+        <Text>BINGD. AWARDS</Text>
+        <Pressable accessibilityRole="button" onPress={onSeeAll}>
+          <Text>See all</Text>
+        </Pressable>
+      </View>
+    ),
+  };
+});
+
+/**
  * `Stack.Screen` renders its `headerRight`, which it did not used to.
  *
  * It was `() => null`, which was fine while the only thing this screen put in the
@@ -1156,12 +1182,15 @@ describe('Taste Match', () => {
  * become the reader instead.
  */
 describe('sharing and awards on somebody else’s profile', () => {
-  it('offers both, under the follow control', async () => {
+  it('offers Share alone in the header row, with the shelf below it', async () => {
+    // `bingd. Awards` was the other half of this row until 2026-09-06. It is a section
+    // now, above Top ranked, with its own See all into the same sheet the button opened.
     const view = await open();
 
     await waitFor(() => expect(view.getByText('@anna')).toBeTruthy());
     expect(view.getByRole('button', { name: 'Share Profile' })).toBeTruthy();
-    expect(view.getByRole('button', { name: 'bingd. Awards' })).toBeTruthy();
+    expect(view.queryByRole('button', { name: 'bingd. Awards' })).toBeNull();
+    expect(view.getByText('BINGD. AWARDS')).toBeTruthy();
     // But not Invite friends: an invitation is from the signed-in person, and this
     // page is about somebody else. The control lives on the own profile alone.
     expect(view.queryByRole('button', { name: 'Invite friends' })).toBeNull();
@@ -1192,7 +1221,7 @@ describe('sharing and awards on somebody else’s profile', () => {
     // Closed until asked for: it reads nine things when it mounts.
     expect(awardsProps).toBeNull();
 
-    await fireEvent.press(view.getByRole('button', { name: 'bingd. Awards' }));
+    await fireEvent.press(view.getByRole('button', { name: 'See all' }));
 
     // `anna-id`, never `viewer`. The whole sheet is a reading of one user's collection,
     // so the wrong id here is somebody else's awards under Anna's name.
@@ -1203,7 +1232,7 @@ describe('sharing and awards on somebody else’s profile', () => {
   it('offers neither on an account the viewer may not read', async () => {
     // The controls live in the branch that renders only once `public_profiles` came
     // back. A private account the viewer does not follow never reaches it, so there is
-    // no Awards button to open a collection they are not entitled to.
+    // no Awards shelf and no See all to open a collection they are not entitled to.
     tableRows.public_profiles = [];
     mockRpcResults.profile_identity = [
       { ...anna, avatar_path: null, visibility: 'private' },
@@ -1212,7 +1241,8 @@ describe('sharing and awards on somebody else’s profile', () => {
     const view = await open();
 
     await waitFor(() => expect(view.getByText('This account is private')).toBeTruthy());
-    expect(view.queryByRole('button', { name: 'bingd. Awards' })).toBeNull();
+    expect(view.queryByRole('button', { name: 'See all' })).toBeNull();
+    expect(view.queryByText('BINGD. AWARDS')).toBeNull();
     expect(view.queryByRole('button', { name: 'Share Profile' })).toBeNull();
   });
 });
@@ -1230,33 +1260,25 @@ describe('sharing and awards on somebody else’s profile', () => {
  * is the *arrangement* this screen puts around it, which is the half that has to match
  * the owner's profile position for position:
  *
- *     [ Share Profile ]  [ bingd. Awards ]
+ *     [           Share Profile          ]
  *     [        Follow / Following        ]
  *
- * The full-width slot underneath the pair holds Invite friends on your own profile, and
- * here it holds the one control that depends on who is looking.
+ * The trailing half of the top row holds Invite friends on your own profile, and nothing
+ * here — inviting people "from" somebody else's page would be a sentence with the wrong
+ * subject — so Share takes the full width rather than half of it and a gap. The row
+ * underneath holds the one control that depends on who is looking.
  */
 describe('the shape of somebody else’s profile', () => {
-  it('puts Share and Awards in the pair, and the relationship underneath', async () => {
+  it('puts Share in the header row and the relationship underneath', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('Anna')).toBeTruthy());
 
-    // Rendered order is the arrangement. Follow was above the pair, which put a
-    // different thing in the top row on each of the two screens.
+    // Rendered order is the arrangement. Follow was above the row, which put a
+    // different thing in the top position on each of the two screens.
     const controls = view
-      .getAllByText(/^(Share Profile|bingd\. Awards|Follow)$/)
+      .getAllByText(/^(Share Profile|Follow)$/)
       .map((node) => node.props.children);
-    expect(controls).toEqual(['Share Profile', 'bingd. Awards', 'Follow']);
-  });
-
-  it('fills Awards in maroon, as the owner’s profile does', async () => {
-    const view = await open();
-    await waitFor(() => expect(view.getByText('bingd. Awards')).toBeTruthy());
-
-    // It was `secondary` here and filled on the owner's — the same object in two
-    // treatments one tap apart. The founder wants Awards to pop on both.
-    const awards = view.getByRole('button', { name: 'bingd. Awards' });
-    expect(StyleSheet.flatten(awards.props.style).backgroundColor).toBe(theme.semantic.action);
+    expect(controls).toEqual(['Share Profile', 'Follow']);
   });
 
   it('fills Follow in maroon while there is no relationship', async () => {

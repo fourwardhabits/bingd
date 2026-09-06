@@ -863,15 +863,97 @@ describe('what pagination must not change', () => {
     expect(clause.slice(0, 3)).toEqual(clause.slice(3, 6));
   });
 
-  it('leaves one person’s activity unpaginated, because it is not a feed', async () => {
-    // `useActorActivity` reads five rows for a profile card. It goes through the same
-    // reader, and it must not acquire a cursor — or a feed-sized limit — by doing so.
-    mockFeedRows = [event()];
-    const view = await renderHookWithProviders(() => useActorActivity('user-1'));
+  /**
+   * **One person's activity is paged too, on this same cursor** (founder, 2026-09-06).
+   *
+   * It read five rows once and stopped, and a profile had no way to say that "Recent
+   * activity" meant "the five most recent" rather than "the five that exist". The
+   * founder's decision is that it continues as the reader scrolls.
+   *
+   * The reuse is safe for a specific reason rather than by resemblance: this is the same
+   * `activityPage` call, the same projection, the same `(causal_at desc, causal_step
+   * desc, id asc)` order and the same `feed_events_read` policy, narrowed to one actor
+   * by an argument the function already took. A keyset is only valid over the sort it
+   * was built for, and this is that sort — which is what these three assertions pin.
+   */
+  it('pages one person’s activity on the feed’s own cursor', async () => {
+    mockFeedQueue = [{ rows: fullPage() }, { rows: [nth(300)] }];
+    const view = await renderHookWithProviders(() => {
+      // Touched during render, which is what subscribes: React Query tracks the
+      // properties a component read and re-renders only when one of those changes.
+      // See `open` above — an untouched `isError` is a snapshot that never refreshes.
+      const query = useActorActivity('user-1');
+      void query.status;
+      void query.isError;
+      void query.hasNextPage;
+      void query.isFetchingNextPage;
+      void query.data;
+      return query;
+    });
     await waitFor(() => expect(view.result.current.isPending).toBe(false));
 
+    // Page one asks for no cursor, and asks about this actor alone.
     expect(feedRead(0).or).toBeNull();
-    expect(feedRead(0).limit).toBe(5);
+    expect(feedRead(0).in.actor_id).toEqual(['user-1']);
+    expect(feedRead(0).limit).toBe(FEED_PAGE_SIZE);
+
+    await act(async () => {
+      await view.result.current.fetchNextPage();
+    });
+
+    // Page two carries the keyset, and is still scoped to the same one actor. A page
+    // that widened the actor filter would serve somebody else's history under this
+    // person's heading.
+    expect(feedRead(1).or).toContain('causal_at.lt.');
+    expect(feedRead(1).in.actor_id).toEqual(['user-1']);
+  });
+
+  it('stops asking at the true end, so a short history is quiet', async () => {
+    // A page shorter than the limit is the end — `cursorFor` is only built when the
+    // server filled the page — and `getNextPageParam` returning null is what makes the
+    // bottom of a profile stop requesting anything at all.
+    mockFeedQueue = [{ rows: [event()] }];
+    const view = await renderHookWithProviders(() => {
+      // Touched during render, which is what subscribes: React Query tracks the
+      // properties a component read and re-renders only when one of those changes.
+      // See `open` above — an untouched `isError` is a snapshot that never refreshes.
+      const query = useActorActivity('user-1');
+      void query.status;
+      void query.isError;
+      void query.hasNextPage;
+      void query.isFetchingNextPage;
+      void query.data;
+      return query;
+    });
+    await waitFor(() => expect(view.result.current.isPending).toBe(false));
+
+    expect(view.result.current.hasNextPage).toBe(false);
+  });
+
+  it('keeps the rows already on screen when a later page fails', async () => {
+    // The founder's requirement, on the profile as much as on the feed: a page that
+    // fails is a footer, not an empty history.
+    mockFeedQueue = [{ rows: fullPage() }, { error: { message: 'network' } }];
+    const view = await renderHookWithProviders(() => {
+      // Touched during render, which is what subscribes: React Query tracks the
+      // properties a component read and re-renders only when one of those changes.
+      // See `open` above — an untouched `isError` is a snapshot that never refreshes.
+      const query = useActorActivity('user-1');
+      void query.status;
+      void query.isError;
+      void query.hasNextPage;
+      void query.isFetchingNextPage;
+      void query.data;
+      return query;
+    });
+    await waitFor(() => expect(view.result.current.isPending).toBe(false));
+
+    await act(async () => {
+      await view.result.current.fetchNextPage().catch(() => {});
+    });
+    await waitFor(() => expect(view.result.current.isError).toBe(true));
+
+    expect(feedItems(view.result.current.data?.pages)).toHaveLength(FEED_PAGE_SIZE);
   });
 });
 

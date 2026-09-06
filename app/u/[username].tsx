@@ -1,15 +1,27 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
 import { AwardsSheet } from '@/features/awards/AwardsSheet';
+import { ProfileAwards } from '@/features/awards/ProfileAwards';
 import { useLoggedCollection } from '@/features/collection/use-collection';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import { activityMetadata, tailFor, verbFor } from '@/features/feed/activity';
 import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
-import { useActorActivity } from '@/features/feed/use-feed';
+import { feedItems, useActorActivity } from '@/features/feed/use-feed';
+import { ActivityPageFooter } from '@/features/feed/ActivityPageFooter';
+import { isNearEnd } from '@/features/feed/near-end';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
 import { FollowControl } from '@/features/profile/FollowControl';
 import { FollowListSheet } from '@/features/profile/FollowListSheet';
@@ -183,16 +195,31 @@ export default function PublicProfileScreen() {
   // Asked about this actor directly. Filtering the viewer's own feed would have
   // shown nothing for any public account they had not followed, because that query
   // spans the follow set — the authorisation comes from feed_events_read either way.
-  const recent = activity.data ?? [];
+  //
+  // Paged since the founder's decision that Recent activity should keep going as the
+  // reader scrolls. `feedItems` rather than a `flatMap`, so a page read after the list
+  // has moved cannot produce a duplicated React key.
+  const recent = useMemo(() => feedItems(activity.data?.pages), [activity.data]);
+  const eventIds = useMemo(() => recent.map((event) => event.id), [recent]);
   // Comments reach this page as well as the Feed, because this is where somebody
   // arrives after finding a person in Search — the Feed only carries activity by
   // accounts they already follow. Reactions deliberately stay Feed-only for now:
   // they were built there and moving them is a product decision, not a wiring one.
-  const commentCounts = useCommentCounts(
-    recent.map((event) => event.id),
-    viewer.id,
-  );
+  const commentCounts = useCommentCounts(eventIds, viewer.id);
   const openComments = commentsFor ? (recent.find((e) => e.id === commentsFor) ?? null) : null;
+
+  /**
+   * The next page, once the reader is within a screenful of the end.
+   *
+   * The same three guards the feed uses, and `isFetchingNextPage` is the one that
+   * matters: `onScroll` fires on every frame of a flick. `isError` keeps a failed page
+   * from being retried by a scroll position somebody is already sitting at — the footer
+   * offers the retry instead.
+   */
+  const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!activity.hasNextPage || activity.isFetchingNextPage || activity.isError) return;
+    if (isNearEnd(event)) void activity.fetchNextPage();
+  };
 
   /**
    * The one line under the handle, and the two counts it needs to be honest.
@@ -244,27 +271,30 @@ export default function PublicProfileScreen() {
     try {
       await Share.share({ message: url, url });
     } catch (error) {
-      Alert.alert('Could not share', error instanceof Error ? error.message : 'Sharing failed.');
+      Alert.alert(
+        'Could not share',
+        error instanceof Error ? error.message : 'Sharing failed.',
+      );
     }
   };
 
   return (
     <Screen includeBottomInset edges={[]}>
       {/**
-        * **The corner the owner's profile uses for its gear and bell.**
-        *
-        * Report and Block live behind this rather than as permanent buttons in the
-        * action area — the founder's note, and the reasoning is in `ProfileMenu`. What
-        * matters here is only that it is the *same corner*: a reader who has learned
-        * that the controls for a profile are top right is right on both screens.
-        *
-        * `menuUserId` rather than `profile.data.id`, so it is present on the
-        * discoverable-but-unreadable branch and on the *blocked* one — a private account
-        * somebody wants to report, and an account they have already blocked, are the two
-        * cases where the control matters most and the two where the readable row is
-        * absent. Absent on the viewer's own profile, which this screen can be, and
-        * absent when the handle resolved to nothing at all: there is nobody to report.
-        */}
+       * **The corner the owner's profile uses for its gear and bell.**
+       *
+       * Report and Block live behind this rather than as permanent buttons in the
+       * action area — the founder's note, and the reasoning is in `ProfileMenu`. What
+       * matters here is only that it is the *same corner*: a reader who has learned
+       * that the controls for a profile are top right is right on both screens.
+       *
+       * `menuUserId` rather than `profile.data.id`, so it is present on the
+       * discoverable-but-unreadable branch and on the *blocked* one — a private account
+       * somebody wants to report, and an account they have already blocked, are the two
+       * cases where the control matters most and the two where the readable row is
+       * absent. Absent on the viewer's own profile, which this screen can be, and
+       * absent when the handle resolved to nothing at all: there is nobody to report.
+       */}
       <Stack.Screen
         options={{
           headerShown: true,
@@ -358,7 +388,11 @@ export default function PublicProfileScreen() {
           body="This profile is not available."
         />
       ) : (
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+        >
           {/* The same component the viewer's own profile draws. The founder's
               correction: the two had become two designs, and a reader could not tell
               that what they see here is what other people see on them. What differs is
@@ -420,32 +454,32 @@ export default function PublicProfileScreen() {
               /**
                * **The same stack as the owner's profile, position for position.**
                *
-               *     [ Share Profile ]  [ bingd. Awards ]
+               *     [           Share Profile          ]
                *     [        Follow / Following        ]
                *
                * The founder's rule for this pass: looking at somebody else should feel
-               * like looking at your own profile, so the pair sits where the pair sits
-               * and the full-width slot underneath — Invite friends on your own — holds
-               * the one control that depends on who is looking. It was the other way
-               * round here, which put a different thing in the top row on each screen
-               * and made the two read as two designs again.
+               * like looking at your own profile, so the row sits where the row sits and
+               * what differs is exactly the thing that genuinely depends on who is
+               * looking. On the owner's own profile the trailing half of the top row is
+               * Invite friends; here it is empty, because inviting people "from"
+               * somebody else's page would be a sentence with the wrong subject — so
+               * Share takes the full width rather than half of it and a gap.
                *
-               * **The pair is `ProfileActions`, which the owner's profile draws too.**
-               * It was two `Button`s written out here, and they had drifted: Awards was
-               * `secondary` on this screen and filled Maroon on the owner's, so the same
-               * object wore two treatments one tap apart. The founder's device pass also
-               * found the label wrapping to two lines at iPhone width. Both are fixed in
-               * the component rather than here, because a rule two call sites keep by
-               * agreement is a rule that will be broken again.
+               * **`bingd. Awards` used to be the other half of this row on both
+               * screens.** It is a section on the page now, above Top ranked, with its
+               * own See all into the same sheet the button opened.
                *
-               * Follow does not lose by Awards taking the fill — it is full-width Maroon
-               * on its own row underneath, which is the louder of the two positions.
+               * **The row is `ProfileActions`, which the owner's profile draws too.** It
+               * was two `Button`s written out here, and they had drifted: the same
+               * object wore two treatments one tap apart. Fixed in the component rather
+               * than here, because a rule two call sites keep by agreement is a rule
+               * that will be broken again.
+               *
+               * Follow is full-width Maroon on its own row underneath, which is the
+               * louder of the two positions and where a relationship control belongs.
                */
               <View style={styles.controls}>
-                <ProfileActions
-                  onShare={() => void shareProfile()}
-                  onOpenAwards={() => setAwardsOpen(true)}
-                />
+                <ProfileActions onShare={() => void shareProfile()} />
                 <FollowControl
                   userId={subjectId}
                   name={profile.data.name}
@@ -456,6 +490,20 @@ export default function PublicProfileScreen() {
                 />
               </View>
             }
+          />
+
+          {/* The same shelf, in the same place, on both profiles — which is the parity
+              rule this pass is holding to. The owner's has Goals under it and this one
+              does not, so "above Goals" resolves here to "directly under the identity
+              block", which is the same position on the page.
+
+              The viewed user's awards, not the reader's: `subjectId` is the row this
+              screen resolved. `viewer.id` is who is asking, and the sheet behind See all
+              computes from what *that* account may read. */}
+          <ProfileAwards
+            viewerId={viewer.id}
+            userId={subjectId}
+            onSeeAll={() => setAwardsOpen(true)}
           />
 
           <TopRanked
@@ -590,11 +638,25 @@ export default function PublicProfileScreen() {
                     watched: watched.data,
                   })}
                   timeLabel={new Date(event.createdAt).toLocaleDateString()}
-                  onPressTitle={() => event.mediaItemId && router.push(`/title/${event.mediaItemId}`)}
+                  onPressTitle={() =>
+                    event.mediaItemId && router.push(`/title/${event.mediaItemId}`)
+                  }
                   onPressComments={() => setCommentsFor(event.id)}
                   commentCount={commentCounts.data?.get(event.id) ?? 0}
                 />
               ))}
+              {/* A later page failing keeps the rows that arrived. This section has no
+                  first-page error state at all — it is drawn only when `recent.length`
+                  is non-zero — so the footer is the only thing here that can say a page
+                  did not load, and it says it about that page rather than about the
+                  history above it. */}
+              <ActivityPageFooter
+                isFetchingNextPage={activity.isFetchingNextPage}
+                isError={activity.isError}
+                hasNextPage={activity.hasNextPage}
+                count={recent.length}
+                onRetry={() => void activity.fetchNextPage()}
+              />
             </View>
           ) : null}
         </ScrollView>

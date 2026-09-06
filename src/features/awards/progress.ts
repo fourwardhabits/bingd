@@ -39,7 +39,7 @@ export type AwardProgress = {
   nextTier: AwardTier | null;
   /** Where the reader is, measured against the tier they are working toward. */
   value: number;
-  /** `Next: Watch 50 movies` — or, at the top, what was done to finish it. */
+  /** `Next: Silver · Watch 200 movies` — or, at the top, what was done to finish it. */
   detailLine: string;
   /** `27 / 50` while there is a tier to reach, and `1,164` once there is not. */
   countLabel: string;
@@ -125,9 +125,13 @@ export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
     trackKey: track.key,
     displayName: track.displayName,
     /**
-     * **Never the next tier's name.** A locked Genre Gremlin says "Genre Gremlin" and
-     * "Next: watch 8 different genres" — not "Dabbler", which would hand over the
-     * reward before it was earned and leave nothing to arrive later.
+     * **Never the next tier's name**, which is what keeps the heading a record of what
+     * was actually won: a locked Genre Gremlin is headed "Genre Gremlin", not "Dabbler",
+     * so the title changing *is* the unlock.
+     *
+     * The next tier is named on `detailLine` instead, since 2026-09-06 — see the note
+     * there. Naming it in the requirement and promoting it into the heading are
+     * different acts: one says what the prize is called, the other pretends it is won.
      */
     title: earnedTier && !track.metalTiers ? earnedTier.label : track.displayName,
     badge: badgeFor(track.key, badgeTier.key),
@@ -136,11 +140,38 @@ export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
     earnedTierIndex,
     nextTier,
     value,
+    /**
+     * **The next tier is named, and that is the founder's reversal of 2026-09-06.**
+     *
+     * The line was `Next: Watch 25 comedies` under a heading that said `LOL Mode`, and
+     * the founder's reading of it is the correct one: nothing on the row says whether
+     * LOL Mode is what they have, what they are working toward, or the name of the
+     * family the tiers belong to. Three readings, one of them right, no way to tell.
+     *
+     * The rule this replaces was "the next tier's name is never shown, because handing
+     * over the name in advance spends the reward before it is earned". That is a real
+     * cost and it is the smaller one. A reward nobody can identify is not withheld, it
+     * is invisible — and `Next: Cackle` is what makes the *heading* legible too, because
+     * once the row names a tier the reader can see that the heading is not one.
+     *
+     * So: `Next: Cackle · Watch 25 comedies`. The name of the thing, then the price of
+     * it. Both halves come from the structured tier, never from parsing a display
+     * string: `tier.label` is the name and `track.next(tier.threshold)` is the
+     * requirement, exactly as before.
+     *
+     * On a metal track this reads `Next: Silver · Watch 50 movies`, where the heading is
+     * the family name at every tier and the metal is the only thing that moves. That is
+     * the case the pattern was always unambiguous for, and it stays unambiguous.
+     *
+     * One line rather than two. Twenty rows in the sheet and three lines apiece is a
+     * screen and a half of scrolling added to answer a question that fits in five words.
+     *
+     * Past the top there is nothing to aim at, so the line states what was done rather
+     * than inventing a fourth tier to be short of.
+     */
     detailLine: nextTier
-      ? `Next: ${track.next(nextTier.threshold)}`
-      : // Past the top there is nothing to aim at, so the line states what was done
-        // rather than inventing a fourth tier to be short of.
-        track.earned(top.threshold),
+      ? `Next: ${nextTier.label} · ${track.next(nextTier.threshold)}`
+      : track.earned(top.threshold),
     countLabel: nextTier ? `${count(value)} / ${count(nextTier.threshold)}` : count(value),
     unavailable: false,
     withheld: false,

@@ -27,6 +27,12 @@ import { Button } from '@/ui/components';
  * No success state is shown. Opening the share sheet is not an invitation sent — the
  * person may cancel it — and the one honest signal, `invite_link_created`, is already
  * emitted where the row is recorded (`createInviteLink`).
+ *
+ * **Filled Maroon since the header pass, and it sits beside Share Profile rather than
+ * under it.** Share Profile is what you do with people who are already here; this is
+ * how anybody new arrives, which on an app with no users yet is the more valuable of
+ * the two. `fit`, because half a gutter row at 320pt is 140 and "Invite friends" at
+ * `md`'s default padding does not fit it — see `ProfileActions`.
  */
 export function InviteFriendsButton() {
   const [inviting, setInviting] = useState(false);
@@ -59,10 +65,6 @@ export function InviteFriendsButton() {
   };
 
   return (
-    <Button
-      label={inviting ? 'Inviting…' : 'Invite friends'}
-      kind="secondary"
-      onPress={() => void invite()}
-    />
+    <Button label={inviting ? 'Inviting…' : 'Invite friends'} fit onPress={() => void invite()} />
   );
 }
