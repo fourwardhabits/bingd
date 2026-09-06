@@ -285,6 +285,20 @@ function Navigation() {
                 there is nowhere behind it to return to. Leaving is an explicit choice
                 made on the screen itself. */}
               <Stack.Screen name="onboarding/taste" options={{ headerShown: false }} />
+              {/* A modal, like Settings, and for the same reason: it is a thing that
+                  happens *over* whatever the reader was doing rather than a place they
+                  navigated to. Dismissed by Done, by the back gesture, and by Android's
+                  hardware back — all three land back where the ranking left them,
+                  because the navigator does that for a presented screen without this
+                  file having to say so. */}
+              <Stack.Screen
+                name="awards/celebrate"
+                options={{
+                  presentation: 'modal',
+                  headerShown: true,
+                  title: ROOT_SCREEN_TITLES['awards/celebrate'],
+                }}
+              />
               <Stack.Screen
                 name="settings"
                 options={{

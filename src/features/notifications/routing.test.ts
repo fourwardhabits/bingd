@@ -258,6 +258,59 @@ describe('a target that is gone', () => {
   });
 
   /**
+   * **The award notification opens the award, not the shelf it is on** (2026-09-06).
+   *
+   * The identity was already in the row — `_maybe_award_unlocks` has written `award` and
+   * `tier` into `notifications.payload` since 20260828000100, and `my_notifications`
+   * surfaces both — so this needed no schema change and no new payload field. What it
+   * needs is the fallback below, because rows written before the celebration existed
+   * carry the same payload but reach an older resolver's expectations.
+   */
+  describe('an award notification with the tier it is about', () => {
+    const earned = (award: { key: string; tierKey: string } | null) =>
+      targetFor(row({ kind: 'award_earned', award } as Parameters<typeof targetFor>[0]));
+
+    it('opens the celebration for that exact award', () => {
+      expect(earned({ key: 'lol-mode', tierKey: 'giggle' })).toEqual({
+        kind: 'award-celebration',
+        awardKey: 'lol-mode',
+        tierKey: 'giggle',
+      });
+    });
+
+    it('falls back to the sheet when the row names no award', () => {
+      // Where every award notification led before the celebration existed, which makes
+      // this a degradation to the previous behaviour rather than to nothing.
+      expect(earned(null)).toEqual({ kind: 'awards' });
+    });
+
+    it('falls back when the row names an award but no tier', () => {
+      // Half an identity is not an identity: the celebration is keyed on the pair.
+      expect(earned({ key: 'lol-mode', tierKey: '' })).toEqual({ kind: 'awards' });
+    });
+
+    it('leads to the celebration route with the pair on it', () => {
+      expect(
+        hrefFor({ kind: 'award-celebration', awardKey: 'lol-mode', tierKey: 'giggle' }),
+      ).toEqual({
+        pathname: '/awards/celebrate',
+        params: { awards: 'lol-mode:giggle' },
+      });
+    });
+
+    it('promises the award rather than the shelf', () => {
+      expect(
+        hintFor(
+          row({
+            kind: 'award_earned',
+            award: { key: 'lol-mode', tierKey: 'giggle' },
+          } as Parameters<typeof hintFor>[0]),
+        ),
+      ).toBe('Opens the award you earned');
+    });
+  });
+
+  /**
    * Independent review 23's Major, pinned as the deliberate behaviour it is.
    *
    * The resolver does not consult `can_view_profile`, so an actor who went private

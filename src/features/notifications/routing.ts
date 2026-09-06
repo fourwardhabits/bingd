@@ -63,6 +63,20 @@ export type NotificationTarget =
    */
   | { kind: 'activity'; eventId: string }
   | { kind: 'awards' }
+  /**
+   * One specific award, on the screen that celebrates it (`app/awards/celebrate.tsx`).
+   *
+   * **The identity was already in the row**, which is why this needed no schema change
+   * and no new payload field: `_maybe_award_unlocks` has written `award` and `tier` into
+   * `notifications.payload` since 20260828000100, and `my_notifications` already surfaces
+   * both as `row.award`. `(award_key, tier_key)` is the ledger's own identity for a tier
+   * minus the user id, and the celebration takes the user from the session.
+   *
+   * A row missing either — an older notification, a payload shape from before this
+   * existed — falls through to `awards`, which is where every award notification led
+   * before this and is still a correct destination.
+   */
+  | { kind: 'award-celebration'; awardKey: string; tierKey: string }
   /** The reader's own profile, where their annual goals live (20260829000200). */
   | { kind: 'goals' }
   /**
@@ -232,9 +246,28 @@ export function targetChainFor(row: Notification): NotificationTarget[] {
     case 'invite_welcome':
       return [...profile, unavailable('That account is no longer available.')];
 
-    /** The earner's own Awards — written by the unlock ledger since 20260828000100. */
+    /**
+     * The award itself, celebrated — with the Awards sheet behind it.
+     *
+     * A chain rather than one link, and the fallback is the load-bearing half. The
+     * celebration needs `(award, tier)`; a row written before the ledger carried them,
+     * or a push whose payload does not name them, has neither. Falling through to the
+     * sheet is exactly where this notification led before the celebration existed, so
+     * an older row degrades to the behaviour it was built with rather than to nothing.
+     */
     case 'award_earned':
-      return [{ kind: 'awards' }];
+      return [
+        ...(row.award?.key && row.award?.tierKey
+          ? [
+              {
+                kind: 'award-celebration' as const,
+                awardKey: row.award.key,
+                tierKey: row.award.tierKey,
+              },
+            ]
+          : []),
+        { kind: 'awards' },
+      ];
 
     /**
      * The earner's own annual goals (20260829000200).
@@ -285,6 +318,16 @@ export function hrefFor(target: NotificationTarget): Href | null {
      */
     case 'awards':
       return { pathname: '/profile', params: { awards: '1' } };
+    /**
+     * `award:tier`, in the same comma-joined shape a ranking pushes — one parameter, so
+     * that a celebration of two awards and a celebration of one are the same route with
+     * the same reader.
+     */
+    case 'award-celebration':
+      return {
+        pathname: '/awards/celebrate',
+        params: { awards: `${target.awardKey}:${target.tierKey}` },
+      };
     // No parameter: the goals section is on the profile itself, a scroll under the
     // identity block, rather than behind a sheet the way Awards is.
     case 'goals':
@@ -313,6 +356,8 @@ export function hintFor(row: Notification): string {
       return 'Opens the conversation';
     case 'awards':
       return 'Opens your awards';
+    case 'award-celebration':
+      return 'Opens the award you earned';
     case 'goals':
       return 'Opens your goals';
     case 'unavailable':
