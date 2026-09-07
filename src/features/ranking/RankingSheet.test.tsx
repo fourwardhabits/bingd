@@ -80,6 +80,16 @@ jest.mock('expo-router', () => ({
 }));
 
 /**
+ * `track` alone, with the vocabulary left real, so `ranking_completed`'s props are
+ * checked against the same union the app compiles against rather than a stub of it.
+ */
+const mockTrack = jest.fn();
+jest.mock('@/lib/analytics', () => ({
+  ...jest.requireActual('@/lib/analytics'),
+  track: (...a: unknown[]) => mockTrack(...a),
+}));
+
+/**
  * The ranked list the reveal reads for its genre ranks and its neighbours.
  *
  * Mocked rather than driven through the `from` stub above, because `useRankedCollection`
@@ -161,6 +171,7 @@ const visibleText = (node: unknown): string[] => {
 
 beforeEach(() => {
   mockPush.mockReset();
+  mockTrack.mockReset();
   mockUnlockQueue = [];
   mockUnlockReads = 0;
   mockRpc.mockReset();
@@ -1831,5 +1842,58 @@ describe('the reveal reads title, then placement, then where it landed', () => {
     await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
     expect(sheet.queryByText('#20 in Movies', { includeHiddenElements: true })).toBeNull();
     expect(sheet.getByText('Film A', { includeHiddenElements: true })).toBeTruthy();
+  });
+});
+
+/**
+ * **What a completion is reported as, per intent.**
+ *
+ * The founder's Terrace House report (2026-09-07) was two feed rows for one watch, and
+ * the fix was to name the three intents on the Ranked menu. `ranking_completed` had the
+ * same defect one layer down and nobody could see it: every completion of an
+ * already-ranked title carried `rebucket: false` and was indistinguishable from a first
+ * placement, so an Adjust placement counted as a new ranking in every funnel. The event
+ * now says which act it was, in the same four words the sheet opens the session with.
+ *
+ * Each case answers the opening call with a placement outright — an empty band — so the
+ * event fires from the same `placed` branch a comparison-driven placement reaches.
+ */
+describe('what a completion is reported as', () => {
+  const completions = (name: string) =>
+    mockTrack.mock.calls.filter(([event]) => (event as { name: string }).name === name);
+
+  it.each([
+    ['start', undefined, 'rank_start', false],
+    ['rebucket', 'rebucket', 'rank_rebucket', true],
+    ['rerank', 'rerank', 'rank_again', false],
+    ['again', 'again', 'rank_again', false],
+  ] as const)(
+    'reports mode %s from a placement that opened as %s',
+    async (mode, opened, rpc, rebucket) => {
+      answering(placement);
+      const sheet = await openSheet(
+        opened ? { subject: { ...subject, mode: opened } } : {},
+      );
+
+      await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+      await waitFor(() => expect(callsTo(rpc)).toHaveLength(1));
+
+      expect(completions('ranking_completed')).toHaveLength(1);
+      expect(completions('ranking_completed')[0][0]).toMatchObject({
+        name: 'ranking_completed',
+        props: { media_kind: 'movie', surface: 'search', comparisons: 0, rebucket, mode },
+      });
+    },
+  );
+
+  it('emits nothing for a placement that may have landed but could not say so', async () => {
+    // The lost-reply case. `rank_again` here answers with no code, which `classifyWrite`
+    // reads as unknown: the title may be ranked, and an event on a maybe is how a retry
+    // becomes two rankings. The undercount is the deliberate direction.
+    answering({ data: null, error: { code: '', message: 'TypeError: fail' } });
+    const sheet = await openSheet({ subject: { ...subject, mode: 'again' } });
+
+    await waitFor(() => expect(sheet.getByText('Not sure that landed')).toBeTruthy());
+    expect(completions('ranking_completed')).toHaveLength(0);
   });
 });

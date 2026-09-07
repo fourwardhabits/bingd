@@ -95,6 +95,28 @@ export type LeaderboardMetricName = 'titles' | 'movies' | 'tv' | 'reviews';
 export type Bucket = 'loved' | 'fine' | 'not_for_me';
 
 /**
+ * Which act a completed ranking was, in the vocabulary `RankingSheet` already uses for
+ * its `mode` prop — and the one PR #114 settled on the Ranked menu.
+ *
+ * Four completions reach the same `placed` answer and mean four different things:
+ *
+ * - `start` — a first placement. The title had no position; it has one now.
+ * - `rebucket` — *Change your rating* into a different band. A correction, no activity.
+ * - `rerank` — *Adjust placement*, or *Change your rating* re-choosing the band it
+ *   already has. A correction inside the band, no activity.
+ * - `again` — *I watched it again*. A second viewing, and the one completion of an
+ *   already-ranked title that writes a new `title_ranked` activity.
+ *
+ * **Without this, `rerank` and `again` were indistinguishable from `start`.** The event
+ * carried only `rebucket: boolean`, so an Adjust placement — which the founder's own
+ * Terrace House report is about — counted as a brand-new ranking in every funnel that
+ * reads `ranking_completed` as "watched and placed a new title". The rerank-versus-rewatch
+ * distinction lives in the database (`_rank_finalize`'s `p_new_watch`) and on the menu;
+ * this is the same distinction carried into the one place that could not see it.
+ */
+export type RankingMode = 'start' | 'rebucket' | 'rerank' | 'again';
+
+/**
  * Where a person came from, when that is ever known.
  *
  * **One value has a writer, and only one.** `invite` is set by `redeem_invite`
@@ -169,8 +191,12 @@ export type AnalyticsEvent =
    * has a position.
    *
    * **Not** the ranking sheet opening, not a comparison answered, and not a session
-   * that was abandoned or cancelled. `rebucket` says whether this was a first placement
-   * or a title moving band, which are different actions with the same completion.
+   * that was abandoned or cancelled. `mode` says which of the four acts completed —
+   * see `RankingMode` — so a rerank or a rewatch of an already-ranked title cannot be
+   * read as a first placement. `rebucket` is kept beside it for the dashboards and
+   * saved queries written against it: it is exactly `mode === 'rebucket'`, and a
+   * second spelling of one fact is tolerable where removing the first would cut a
+   * series in two.
    */
   | {
       name: 'ranking_completed';
@@ -179,6 +205,7 @@ export type AnalyticsEvent =
         surface: Surface;
         comparisons: number;
         rebucket: boolean;
+        mode: RankingMode;
       };
     }
   /**
@@ -462,6 +489,9 @@ export const ALLOWED_PROPERTY_KEYS: readonly string[] = [
   'bucket',
   'comparisons',
   'rebucket',
+  // Which act a ranking completion was (`RankingMode`). A closed set of four words;
+  // never a title, an id or a person.
+  'mode',
   'state',
   'position',
   'has_title',

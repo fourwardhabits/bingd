@@ -58,7 +58,7 @@ error rather than a decision somebody makes at 2am before a demo.
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
 | `title_logged` | `set_bucket` answered `ok` | the collector | `media_kind`, `surface`, `bucket` |
-| `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `rebucket` |
+| `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `mode`, `rebucket` |
 | `watchlist_added` | `set_watchlist(present: true)` answered `ok` | the saver | `surface` |
 
 ### Social and discovery
@@ -164,9 +164,28 @@ through, rather than from the three buttons.
 ordering is `ranking_completed`. It is not the log sheet opening.
 
 **`ranking_completed`** is the server answering `placed`. It is **not** the ranking sheet
-opening, not a comparison answered, and not an abandoned session. `rebucket: true` is a
-ranked title moving band, which discards its position and re-runs comparisons — a
-different act with the same completion.
+opening, not a comparison answered, and not an abandoned session. `mode` says which of
+four acts completed, in the words the Ranked menu uses (2026-09-07):
+
+| `mode` | The act | Writes a `title_ranked` activity |
+|---|---|---|
+| `start` | a first placement; the title had no position | yes |
+| `rebucket` | *Change your rating* into a different band | no |
+| `rerank` | *Adjust placement*, or *Change your rating* re-choosing the same band | no |
+| `again` | *I watched it again* — a second viewing | yes, exactly one |
+
+It is there because the three completions of an already-ranked title reach the same
+`placed` answer as a first placement and, until 2026-09-07, were counted as one. A
+reader who adjusted a placement showed up as a new ranking in every funnel that reads
+this event as "watched and placed a new title" — which is the wrong number in the
+direction that flatters, and it is also the one query that cannot be repaired
+afterwards, because the event carried nothing to split it on. **A count of first
+watches is `mode in ('start', 'again')`**; a count of new titles ranked is `mode =
+'start'`; corrections are the other two.
+
+`rebucket` is kept beside it and is exactly `mode = 'rebucket'`. A second spelling of
+one fact is tolerable where deleting the first would cut every saved query and chart
+written against it in two.
 
 **`watchlist_added`** is an addition. Removals are not measured; nothing in the beta asks.
 It carries **no `media_kind`**, deliberately: the watchlist accepts a whole series as well
@@ -492,7 +511,7 @@ a number that looks like growth and is not.
 | `invite_redeemed` | **structurally unique** | the primary key on `invitee_id` means only one call can insert; a replay is `already_applied`, a second token is `already_attributed`, and both emit nothing |
 | `invite_activated` | **structurally unique** | the server reports the transition, not the state: only the transaction whose guarded UPDATE flipped `activated_at` is told `activated: true` |
 | `title_logged` | approximately once | `already_applied` is one intent replayed; only `ok` counts |
-| `ranking_completed` | approximately once | `failed && changed` is the lost-reply case and emits nothing |
+| `ranking_completed` | approximately once **per completion** | `failed && changed` is the lost-reply case and emits nothing. A rerank or rewatch of an already-ranked title is a second completion and a second event, and `mode` is what says it was not a second *title* |
 | `recommendation_sent` | approximately once | a refusal inside a 200 is not a send; an unknown outcome holds its id for the retry and emits nothing |
 | `recommendation_opened` | once per row per process | the server answered; a per-process set covers a stale `opened_at` and two quick presses |
 | `onboarding_completed` | once per flow | guarded on the flow having already *ended*, so two buttons on one summary report one completion |
