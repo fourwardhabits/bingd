@@ -533,7 +533,7 @@ describe('a title this user has ranked', () => {
   it('puts its one copy in the hero and never in the Scores section', async () => {
     const view = await open();
 
-    await waitFor(() => expect(view.getByLabelText('Scores')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
     // The hero badge is the one copy, spoken as a score. The "Your score" caption
     // under it went in the founder's hierarchy pass — a filled circle with a number,
     // above a button named Rank, does not need a caption to say whose score it is —
@@ -944,13 +944,14 @@ describe('the community score', () => {
     expect(view.getByText('12 ratings')).toBeTruthy();
   });
 
-  it('lives in its own section rather than beside the reader’s own score', async () => {
+  it('lives in its own row rather than beside the reader’s own score', async () => {
     // The two were the same shape at the same weight in the hero, one about you and
-    // one about the room. The hero answers "what did I think" now.
+    // one about the room. The hero answers "what did I think" now; this row answers
+    // what everybody else did, directly under the metadata.
     mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
     const view = await open();
 
-    await waitFor(() => expect(view.getByLabelText('Scores')).toBeTruthy());
+    await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
   });
 
   it('never calls the aggregate a rank', async () => {
@@ -2157,6 +2158,204 @@ describe('where to watch', () => {
 
     const view = await renderWithProviders(<TitleScreen />);
     await waitFor(() => expect(view.getByTestId('where-to-watch')).toBeTruthy());
+    expect(view.queryByTestId('scores-section')).toBeNull();
+  });
+});
+
+/**
+ * **The score row is part of the title's identity** (founder, physical Android,
+ * 2026-09-06).
+ *
+ * The scores sat below the transient notices under a `SCORES` heading with a rule above
+ * them, which read on a device as a separate lower section *about* the title. They are
+ * not: what everybody made of a film is part of what the film is on bingd., the same way
+ * its runtime and director are. So the row follows the metadata line with nothing between
+ * them, and the one rule sits beneath the scores — closing core identity off from the
+ * descriptive content that follows.
+ *
+ * Structure is asserted off the rendered tree by `testID`, in order, because that is the
+ * property: not that the pieces exist, but where each sits relative to the next. Copy,
+ * counts and the drilldown are asserted alongside so the move cannot have cost them.
+ */
+describe('the score row sits with the title', () => {
+  type IdNode = { props?: { testID?: string }; children?: unknown[] } | string | null;
+
+  /** Every testID in the tree, depth-first — children only, never other props. */
+  const testIds = (node: unknown): string[] => {
+    if (!node || typeof node === 'string') return [];
+    if (Array.isArray(node)) return node.flatMap(testIds);
+    const n = node as IdNode & object;
+    const own = n.props?.testID ? [n.props.testID] : [];
+    return [...own, ...testIds(n.children ?? [])];
+  };
+
+  const structure = (view: { toJSON: () => unknown }) => testIds(view.toJSON());
+
+  /** The ids strictly between two others, in tree order. */
+  const between = (order: string[], a: string, b: string) => {
+    const from = order.indexOf(a);
+    const to = order.indexOf(b);
+    expect(from).toBeGreaterThanOrEqual(0);
+    expect(to).toBeGreaterThan(from);
+    return order.slice(from + 1, to);
+  };
+
+  const text = (view: { toJSON: () => unknown }) => readingOrder(view.toJSON());
+
+  const rankThisFilm = () => {
+    tableRows.rankings = [
+      { user_id: 'user-1', media_item_id: 'film-1', position: 1, category: 'movies', bucket: 'loved' },
+    ];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        watched_on: '2026-08-12',
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+  };
+
+  it('has no SCORES heading', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
+
+    expect(view.queryByText('SCORES')).toBeNull();
+    expect(view.queryByText('Scores')).toBeNull();
     expect(view.queryByLabelText('Scores')).toBeNull();
+  });
+
+  it('follows the metadata line directly, with nothing between them', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
+
+    expect(between(structure(view), 'title-meta', 'scores-section')).toEqual([]);
+  });
+
+  it('draws no rule between the metadata and the scores', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
+
+    const order = structure(view);
+    // The rule exists, and it comes after the row — never before it.
+    expect(order.indexOf('scores-divider')).toBeGreaterThan(order.indexOf('scores-layout'));
+  });
+
+  it('draws exactly one rule, between the scores and the synopsis', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
+
+    expect(view.getAllByTestId('scores-divider')).toHaveLength(1);
+    // Scores above the synopsis in reading order; the rule is the last thing in the
+    // section, so it is what separates the two.
+    const order = text(view);
+    expect(order.findIndex((t) => t === 'bingd.')).toBeLessThan(
+      order.findIndex((t) => t.includes('A thief who steals corporate secrets')),
+    );
+    // And the rule is the last thing in the section: only the two units sit between the
+    // layout and it.
+    expect(between(structure(view), 'scores-layout', 'scores-divider')).toEqual([
+      'scores-unit',
+      'scores-unit',
+    ]);
+  });
+
+  it('holds for a ranked movie, with the personal score left in the hero', async () => {
+    rankThisFilm();
+    mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
+
+    expect(between(structure(view), 'title-meta', 'scores-section')).toEqual([]);
+    // The reader's own score is not duplicated into the row.
+    expect(view.getAllByLabelText('10.0 out of 10, I liked it')).toHaveLength(1);
+    expect(view.getByText('12 ratings')).toBeTruthy();
+  });
+
+  it('holds for an unranked movie', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
+
+    expect(view.getByLabelText('Rank this title')).toBeTruthy();
+    expect(between(structure(view), 'title-meta', 'scores-section')).toEqual([]);
+  });
+
+  it('holds for a ranked TV season', async () => {
+    mockOpenId = 'season-1';
+    tableRows.media_items = [
+      {
+        ...film,
+        id: 'season-1',
+        kind: 'season',
+        title: 'Season 1',
+        release_date: '2023-04-01',
+        runtime_minutes: null,
+        parent: { id: 'series-1', title: 'Breaking Bad', poster_path: null, backdrop_path: null },
+      },
+    ];
+    tableRows.rankings = [
+      { user_id: 'user-1', media_item_id: 'season-1', position: 1, category: 'tv_seasons', bucket: 'loved' },
+    ];
+    tableRows.user_media = [
+      { user_id: 'user-1', media_item_id: 'season-1', bucket: 'loved', watched_on: null, note: null },
+    ];
+
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
+
+    const order = structure(view);
+    expect(order.indexOf('scores-section')).toBeGreaterThan(order.indexOf('title-meta'));
+    expect(order.indexOf('scores-divider')).toBeGreaterThan(order.indexOf('scores-layout'));
+  });
+
+  it('draws no score row on a series, which cannot be ranked', async () => {
+    mockOpenId = 'series-1';
+    tableRows.media_items = [
+      { ...film, id: 'series-1', kind: 'series', title: 'Breaking Bad', runtime_minutes: null },
+    ];
+
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() => expect(view.getByText(/^Breaking Bad/)).toBeTruthy());
+
+    expect(view.queryByTestId('scores-section')).toBeNull();
+    expect(view.queryByTestId('scores-divider')).toBeNull();
+  });
+
+  it('keeps the insufficient-ratings state, in the same place', async () => {
+    // Both units empty: the circles stay, the four words stay, and the row does not
+    // move just because it has nothing to say yet.
+    const view = await open();
+    await waitFor(() => expect(view.getAllByText('Not enough ratings')).toHaveLength(2));
+
+    expect(between(structure(view), 'title-meta', 'scores-section')).toEqual([]);
+    expect(view.queryByText(/more needed/)).toBeNull();
+  });
+
+  it('still opens the people behind the Following number', async () => {
+    mockRpcResults.following_score = [{ score: '8.6', rating_count: 3, following_count: 9 }];
+    const view = await open();
+    await waitFor(() => expect(view.getByText('3 people you follow')).toBeTruthy());
+
+    await fireEvent.press(view.getByRole('button', { name: /^Following\. 3 people you follow/ }));
+
+    await waitFor(() =>
+      expect(view.getByLabelText('People you follow who rated Inception')).toBeTruthy(),
+    );
+  });
+
+  it('says the same numbers it always did', async () => {
+    mockRpcResults.community_score = [{ score: '7.4', rating_count: 12, min_ratings: 3 }];
+    mockRpcResults.following_score = [{ score: '9.1', rating_count: 1, following_count: 4 }];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
+    expect(view.getByText('12 ratings')).toBeTruthy();
+    expect(view.getByText('9.1')).toBeTruthy();
+    expect(view.getByText('1 person you follow')).toBeTruthy();
+    expect(view.getByText('bingd.')).toBeTruthy();
+    expect(view.getByText('Following')).toBeTruthy();
   });
 });

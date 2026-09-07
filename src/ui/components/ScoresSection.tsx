@@ -2,7 +2,6 @@ import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { theme } from '../tokens';
 import { EmptyScoreBadge, ScoreBadge } from './ScoreBadge';
-import { SectionHeader } from './SectionHeader';
 import { Text } from './Text';
 
 export type ScoresSectionProps = {
@@ -63,12 +62,22 @@ const TWO_COLUMN_MAX_FONT_SCALE = 1.3;
  * {@link TWO_COLUMN_MAX_FONT_SCALE}, the two units become two full-width rows. Same
  * composition, more room: the fallback is a wider line, not a different design.
  *
- * **The inset rule above the header** separates the scores from the actions over them.
- * Inset to the gutter and at the hairline the rest of the app uses — a full-bleed rule
- * would cut the page in half and announce a new screen, which this is not. It is there
- * because scores were reading as a continuation of the action row rather than as their
- * own block — and since 2026-09-06 `WhereToWatch` opens with the same rule for the same
- * reason, so this is the pattern on the title page rather than the exception it was.
+ * **No heading, and the rule sits *beneath* the row** (founder, physical Android,
+ * 2026-09-06). It opened with an inset hairline and a `SCORES` label, which together put
+ * a visible seam between the title's metadata and the numbers — and the numbers are part
+ * of what the title *is* on bingd., not a lower section about it. The founder's
+ * screenshot read as: title, a gap, a heading, then the scores. It reads as one block
+ * now: name, year, runtime and director, then what everybody made of it.
+ *
+ * The rule is kept and moved to the bottom, where it does the separating that matters —
+ * core identity above, descriptive content (synopsis, genres) below. One rule, not two.
+ * The units name themselves ("bingd.", "Following", the count or "Not enough ratings"),
+ * so nothing a screen reader needed was in the heading; it was chrome. `WhereToWatch`
+ * still opens with its own inset rule, unchanged.
+ *
+ * **No background wash.** Tried without one first, per the founder's default: the
+ * circles, the alignment under the metadata and the tighter spacing carry the hierarchy
+ * on their own, and a tinted band would be a card in everything but name.
  *
  * **Your own score is not here, and that is the founder's correction of 2026-08-18.**
  * It leads the hero, opposite the poster, with the rank context and the Ranked control
@@ -107,14 +116,7 @@ export function ScoresSection({ bingd, following, onPressFollowing }: ScoresSect
   const sideBySide = width >= TWO_COLUMN_MIN_WIDTH && fontScale <= TWO_COLUMN_MAX_FONT_SCALE;
 
   return (
-    <View style={styles.section}>
-      {/* Decorative and inset. No accessibility role: a screen reader announcing a
-          separator here would put a word between the actions and the scores where the
-          design puts a pause. */}
-      <View testID="scores-divider" style={styles.divider} />
-
-      <SectionHeader title="Scores" />
-
+    <View testID="scores-section" style={styles.section}>
       {/* One container either way. The testID is how the layout test tells them apart:
           there is no role for "two columns", and reading it off the tree by shape made
           the test agree with any stack that happened to have a row in it. */}
@@ -142,6 +144,12 @@ export function ScoresSection({ bingd, following, onPressFollowing }: ScoresSect
           />
         ) : null}
       </View>
+
+      {/* Decorative and inset, and *after* the row: it closes the title's core identity
+          — name, metadata, scores — off from the descriptive content beneath. No
+          accessibility role: a screen reader announcing a separator here would put a
+          word between the scores and the synopsis where the design puts a pause. */}
+      <View testID="scores-divider" style={styles.divider} />
     </View>
   );
 }
@@ -236,14 +244,21 @@ function ratingsDetail(ratingCount: number): string {
 }
 
 const styles = StyleSheet.create({
-  section: { paddingTop: theme.space[5], gap: theme.space[2] },
+  /**
+   * Tight to the metadata above — `space[3]`, not the `space[5]` a new section gets —
+   * because this is the same block continuing rather than a section starting. The
+   * heading's own `gap` already steps its lines; this is one more of those steps,
+   * slightly larger, and not a band.
+   */
+  section: { paddingTop: theme.space[3], gap: theme.space[2] },
 
   /** Inset to the gutter, at the app's hairline. Doubled because a single
    *  `hairlineWidth` rounds away to nothing on some Android densities, which is the
-   *  same reason every other rule in the app is drawn this way. */
+   *  same reason every other rule in the app is drawn this way. Beneath the row now,
+   *  so the air goes above the rule; the synopsis block carries its own top padding. */
   divider: {
     marginHorizontal: theme.layout.gutter,
-    marginBottom: theme.space[2],
+    marginTop: theme.space[3],
     borderTopWidth: StyleSheet.hairlineWidth * 2,
     borderTopColor: theme.border.hairline,
   },
