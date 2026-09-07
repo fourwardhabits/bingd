@@ -325,36 +325,41 @@ describe('the page hierarchy', () => {
     return index;
   };
 
-  it('puts the scores above the description, not below it', async () => {
-    // The scores are what this app knows that nobody else's page does, and they were
-    // under three lines of TMDB synopsis — off the bottom of the founder's device.
-    const view = await open();
-    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
-
-    expect(positionOf(view, 'bingd.')).toBeLessThan(
-      positionOf(view, 'A thief who steals corporate secrets'),
-    );
-  });
-
-  it('puts the scores above the synopsis and the genres under it', async () => {
+  it('reads outward: title, metadata, genres, synopsis, then the scores', async () => {
     /**
-     * **The founder's final order** (2026-09-06): hero, title, scores, synopsis,
-     * genres, where to watch, tabs.
+     * **The founder’s reconverged order** (physical Android, 2026-09-07): hero, title
+     * and year, metadata, genres, synopsis, scores, where to watch, tabs.
      *
-     * Genres moved *below* the synopsis on this pass. They led it before, on the
-     * argument that a page should read outward from what a thing is to what it is
-     * about — and on a device that put a row of metadata between the title and the one
-     * number nobody else's page has.
+     * The page had been cut into six small bands with rules between them by successive
+     * corrections — each defensible on its own, and together a screen the founder liked
+     * less than the one it replaced. This is the rhythm restored: outward from what the
+     * thing is called, to what it is, to what it is about, and only then to what other
+     * people made of it and where to watch it.
+     *
+     * Genres are back above the synopsis. They led it until 2026-09-06, moved below it
+     * to get the scores nearer the top, and come back with the scores now in the lower
+     * half where the rest of this order puts them.
      */
     const view = await open();
     await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
 
-    expect(positionOf(view, 'bingd.')).toBeLessThan(
+    expect(positionOf(view, '148m')).toBeLessThan(positionOf(view, 'Science Fiction'));
+    expect(positionOf(view, 'Science Fiction')).toBeLessThan(
       positionOf(view, 'A thief who steals corporate secrets'),
     );
     expect(positionOf(view, 'A thief who steals corporate secrets')).toBeLessThan(
-      positionOf(view, 'Science Fiction'),
+      positionOf(view, 'bingd.'),
     );
+  });
+
+  it('keeps the scores above the tabs, which is the rule that never changed', async () => {
+    // Scores are core bingd. data and must not appear and disappear as somebody looks
+    // at the cast. Every reordering of this page has preserved that, and this is what
+    // says so out loud.
+    const view = await open();
+    await waitFor(() => expect(view.getByText('bingd.')).toBeTruthy());
+
+    expect(positionOf(view, 'bingd.')).toBeLessThan(positionOf(view, 'Details'));
   });
 
   it('keeps Watchlist and Recommend in the hero, not in a row of their own', async () => {
@@ -377,48 +382,40 @@ describe('the page hierarchy', () => {
     expect(view.queryByText('Recommend')).toBeNull();
   });
 
-  it('counts the genres it does not draw, rather than wrapping to a second row', async () => {
+  it('draws the genres as one row between the metadata and the synopsis', async () => {
     /**
-     * **`+N` rather than a second row** (founder, 2026-09-06). Three chips fit one row
-     * at every width this app supports; a fourth wraps, and the two-line block of
-     * metadata that produced is what the founder rejected on a device.
+     * **How many chips fit is `GenreRow`’s question, not this page’s** (2026-09-07).
      *
-     * Not a chip itself: it is a count, not a genre, and a reader must not be able to
-     * mistake `+2` for something the film is.
+     * It used to be a fixed three here, and that constant was the founder’s wrapped
+     * `+1`: at some widths the third chip fitted and the marker did not. The count is
+     * measured now, so the number of chips depends on a layout pass this renderer does
+     * not run — asserting it here would be asserting the absence of a layout engine.
+     * `GenreRow.test.tsx` covers the counting against real widths.
+     *
+     * What this page is still responsible for is that the row exists, that it is in the
+     * right place, and that nothing is lost.
      */
     tableRows.media_items = [
       { ...film, genres: ['Science Fiction', 'Action', 'Adventure', 'Thriller', 'Drama'] },
     ];
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('+2')).toBeTruthy());
-    expect(view.getByLabelText('And 2 more genres')).toBeTruthy();
+    await waitFor(() => expect(view.getByTestId('genre-row')).toBeTruthy());
+    expect(positionOf(view, '148m')).toBeLessThan(positionOf(view, 'Science Fiction'));
+    expect(positionOf(view, 'Science Fiction')).toBeLessThan(
+      positionOf(view, 'A thief who steals corporate secrets'),
+    );
   });
 
-  it('counts nothing when every genre fits', async () => {
-    tableRows.media_items = [{ ...film, genres: ['Science Fiction', 'Action'] }];
-    const view = await open();
-
-    await waitFor(() => expect(view.getByText('Science Fiction')).toBeTruthy());
-    expect(view.queryByText(/^\+\d/)).toBeNull();
-  });
-
-  it('draws at most three genre chips, and keeps the rest in Details', async () => {
-    // Five wrapped to two and sometimes three rows, which put a block of metadata
-    // between the title and the actions. Nothing is lost: Details lists them all.
+  it('states the ones it could not fit, and loses none of them', async () => {
     tableRows.media_items = [
-      {
-        ...film,
-        genres: ['Science Fiction', 'Action', 'Adventure', 'Thriller', 'Drama'],
-      },
+      { ...film, genres: ['Science Fiction', 'Action', 'Adventure', 'Thriller', 'Drama'] },
     ];
     const view = await open();
 
-    expect(view.getByText('Science Fiction')).toBeTruthy();
-    expect(view.getByText('Action')).toBeTruthy();
-    expect(view.getByText('Adventure')).toBeTruthy();
-    expect(view.queryByText('Thriller')).toBeNull();
-    expect(view.queryByText('Drama')).toBeNull();
+    // A count, not a chip: a reader must not be able to mistake it for a genre.
+    await waitFor(() => expect(view.getByText(/^\+\d+$/)).toBeTruthy());
+    expect(view.getByLabelText(/^And \d+ more genres\. See all genres$/)).toBeTruthy();
 
     await fireEvent.press(view.getByRole('tab', { name: 'Details' }));
     await waitFor(() =>
@@ -426,6 +423,29 @@ describe('the page hierarchy', () => {
         view.getByText('Science Fiction, Action, Adventure, Thriller, Drama'),
       ).toBeTruthy(),
     );
+  });
+
+  it('counts nothing when every genre fits', async () => {
+    tableRows.media_items = [{ ...film, genres: ['Science Fiction'] }];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByText('Science Fiction')).toBeTruthy());
+    expect(view.queryByText(/^\+\d/)).toBeNull();
+  });
+
+  it('opens the whole list from the row', async () => {
+    tableRows.media_items = [
+      { ...film, genres: ['Science Fiction', 'Action', 'Adventure', 'Thriller'] },
+    ];
+    const view = await open();
+
+    await waitFor(() => expect(view.getByTestId('genre-row')).toBeTruthy());
+    await fireEvent.press(view.getByLabelText('Science Fiction. See all genres'));
+
+    await waitFor(() => expect(view.getByLabelText('All genres')).toBeTruthy());
+    for (const genre of ['Science Fiction', 'Action', 'Adventure', 'Thriller']) {
+      expect(view.getAllByText(genre).length).toBeGreaterThan(0);
+    }
   });
 
   it('leaves the genre chips exactly as the provider spells them', async () => {
@@ -436,7 +456,12 @@ describe('the page hierarchy', () => {
     tableRows.media_items = [{ ...film, genres: ['Science Fiction', 'Action & Adventure'] }];
     const view = await open();
 
+    await waitFor(() => expect(view.getByTestId('genre-row')).toBeTruthy());
+    // Whichever of them the row has room for is spelled the provider’s way, and the
+    // sheet behind it holds both, unaltered.
     expect(view.getByText('Science Fiction')).toBeTruthy();
+    await fireEvent.press(view.getByLabelText('Science Fiction. See all genres'));
+    await waitFor(() => expect(view.getByLabelText('All genres')).toBeTruthy());
     expect(view.getByText('Action & Adventure')).toBeTruthy();
   });
 });
@@ -604,9 +629,9 @@ describe('a title this user has ranked', () => {
       expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
     );
     await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
-    await waitFor(() => expect(view.getByLabelText('Rank again')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('I watched it again')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Rank again'));
+    await fireEvent.press(view.getByLabelText('I watched it again'));
 
     await waitFor(() =>
       expect(mockRpc).toHaveBeenCalledWith('rank_again', expect.anything()),
@@ -622,9 +647,9 @@ describe('a title this user has ranked', () => {
       expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
     );
     await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
-    await waitFor(() => expect(view.getByLabelText('Rank again')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('I watched it again')).toBeTruthy());
 
-    await fireEvent.press(view.getByLabelText('Rank again'));
+    await fireEvent.press(view.getByLabelText('I watched it again'));
 
     // Rank again redoes the comparisons; it does not decide a rating. The bucket goes
     // straight through from `rankings.bucket`, in the database's own spelling.
@@ -658,7 +683,7 @@ describe('a title this user has ranked', () => {
     await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
 
     await waitFor(() => expect(view.getByLabelText('Change your rating')).toBeTruthy());
-    expect(view.getByLabelText('Rank again')).toBeTruthy();
+    expect(view.getByLabelText('I watched it again')).toBeTruthy();
     expect(view.queryByText('Pick a different loved, fine or not for me')).toBeNull();
     expect(view.queryByText('Compare it again in the same rating')).toBeNull();
   });
@@ -677,13 +702,14 @@ describe('a title this user has ranked', () => {
     );
     await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
 
-    await waitFor(() => expect(view.getByLabelText('Rank again')).toBeTruthy());
+    await waitFor(() => expect(view.getByLabelText('I watched it again')).toBeTruthy());
     // This fixture holds a private note, so the one writing row reads Edit your note.
     // The headings and the last three rows are the same whichever state it is in.
     for (const label of [
       'Edit your note',
       'Who I watched with',
-      'Rank again',
+      'Adjust placement',
+      'I watched it again',
       'Change your rating',
       'Remove from collection',
     ]) {
@@ -2163,21 +2189,17 @@ describe('where to watch', () => {
 });
 
 /**
- * **The score row is part of the title's identity** (founder, physical Android,
- * 2026-09-06).
+ * **The score row, in the page's lower half** (founder reconvergence, physical Android,
+ * 2026-09-07).
  *
- * The scores sat below the transient notices under a `SCORES` heading with a rule above
- * them, which read on a device as a separate lower section *about* the title. They are
- * not: what everybody made of a film is part of what the film is on bingd., the same way
- * its runtime and director are. So the row follows the metadata line with nothing between
- * them, and the one rule sits beneath the scores — closing core identity off from the
- * descriptive content that follows.
- *
- * Structure is asserted off the rendered tree by `testID`, in order, because that is the
- * property: not that the pieces exist, but where each sits relative to the next. Copy,
- * counts and the drilldown are asserted alongside so the move cannot have cost them.
+ * This block has moved three times in a week and the reasoning is in the screen. What
+ * matters here is that each move was invisible to the tests that existed: they asserted
+ * that the pieces were present, and presence is exactly what never changed. So structure
+ * is asserted off the rendered tree by `testID` in order, and the copy, the counts and
+ * the drilldown are asserted alongside, because a reordering must not quietly cost any
+ * of them.
  */
-describe('the score row sits with the title', () => {
+describe('the score row and what surrounds it', () => {
   type IdNode = { props?: { testID?: string }; children?: unknown[] } | string | null;
 
   /** Every testID in the tree, depth-first — children only, never other props. */
@@ -2190,17 +2212,9 @@ describe('the score row sits with the title', () => {
   };
 
   const structure = (view: { toJSON: () => unknown }) => testIds(view.toJSON());
-
-  /** The ids strictly between two others, in tree order. */
-  const between = (order: string[], a: string, b: string) => {
-    const from = order.indexOf(a);
-    const to = order.indexOf(b);
-    expect(from).toBeGreaterThanOrEqual(0);
-    expect(to).toBeGreaterThan(from);
-    return order.slice(from + 1, to);
-  };
-
   const text = (view: { toJSON: () => unknown }) => readingOrder(view.toJSON());
+  const at = (view: { toJSON: () => unknown }, needle: string) =>
+    text(view).findIndex((t) => t.includes(needle));
 
   const rankThisFilm = () => {
     tableRows.rankings = [
@@ -2228,39 +2242,58 @@ describe('the score row sits with the title', () => {
     expect(view.queryByLabelText('Scores')).toBeNull();
   });
 
-  it('follows the metadata line directly, with nothing between them', async () => {
+  it('follows the synopsis rather than the metadata', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
 
-    expect(between(structure(view), 'title-meta', 'scores-section')).toEqual([]);
+    expect(at(view, '148m')).toBeLessThan(at(view, 'A thief who steals corporate secrets'));
+    expect(at(view, 'A thief who steals corporate secrets')).toBeLessThan(at(view, 'bingd.'));
   });
 
-  it('draws no rule between the metadata and the scores', async () => {
+  it('draws no rule between the title metadata and the synopsis', async () => {
+    /**
+     * The founder's instruction, and the thing that made the page feel fragmented: a
+     * reader going from the title to what it is about must cross nothing. Every rule on
+     * this page is now in the lower half, around the two utility blocks.
+     */
     const view = await open();
     await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
 
     const order = structure(view);
-    // The rule exists, and it comes after the row — never before it.
-    expect(order.indexOf('scores-divider')).toBeGreaterThan(order.indexOf('scores-layout'));
+    const rules = ['scores-divider', 'where-to-watch-divider'];
+    for (const rule of rules) {
+      // Every rule sits after the synopsis, which is to say after the score section
+      // begins — never up in the title's own half of the page.
+      if (order.includes(rule)) {
+        expect(order.indexOf(rule)).toBeGreaterThan(order.indexOf('title-meta'));
+      }
+    }
+    expect(order.indexOf('scores-divider')).toBeGreaterThan(order.indexOf('title-meta'));
+    // And nothing at all separates the metadata from the description.
+    expect(order.slice(order.indexOf('title-meta') + 1, order.indexOf('scores-section'))).not.toContain(
+      'scores-divider',
+    );
   });
 
-  it('draws exactly one rule, between the scores and the synopsis', async () => {
+  it('draws its one rule above the row, closing off the description', async () => {
     const view = await open();
     await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
 
     expect(view.getAllByTestId('scores-divider')).toHaveLength(1);
-    // Scores above the synopsis in reading order; the rule is the last thing in the
-    // section, so it is what separates the two.
-    const order = text(view);
-    expect(order.findIndex((t) => t === 'bingd.')).toBeLessThan(
-      order.findIndex((t) => t.includes('A thief who steals corporate secrets')),
-    );
-    // And the rule is the last thing in the section: only the two units sit between the
-    // layout and it.
-    expect(between(structure(view), 'scores-layout', 'scores-divider')).toEqual([
-      'scores-unit',
-      'scores-unit',
-    ]);
+    const order = structure(view);
+    expect(order.indexOf('scores-divider')).toBeLessThan(order.indexOf('scores-layout'));
+    // Inside the section, so it travels with it whenever the block moves again.
+    expect(order.indexOf('scores-section')).toBeLessThan(order.indexOf('scores-divider'));
+  });
+
+  it('sits above Where to watch, which keeps its own rule', async () => {
+    const view = await open();
+    await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
+
+    const order = structure(view);
+    if (order.includes('where-to-watch-divider')) {
+      expect(order.indexOf('scores-layout')).toBeLessThan(order.indexOf('where-to-watch-divider'));
+    }
   });
 
   it('holds for a ranked movie, with the personal score left in the hero', async () => {
@@ -2269,7 +2302,7 @@ describe('the score row sits with the title', () => {
     const view = await open();
     await waitFor(() => expect(view.getByText('7.4')).toBeTruthy());
 
-    expect(between(structure(view), 'title-meta', 'scores-section')).toEqual([]);
+    expect(at(view, 'A thief who steals corporate secrets')).toBeLessThan(at(view, 'bingd.'));
     // The reader's own score is not duplicated into the row.
     expect(view.getAllByLabelText('10.0 out of 10, I liked it')).toHaveLength(1);
     expect(view.getByText('12 ratings')).toBeTruthy();
@@ -2280,7 +2313,7 @@ describe('the score row sits with the title', () => {
     await waitFor(() => expect(view.getByTestId('scores-section')).toBeTruthy());
 
     expect(view.getByLabelText('Rank this title')).toBeTruthy();
-    expect(between(structure(view), 'title-meta', 'scores-section')).toEqual([]);
+    expect(at(view, 'A thief who steals corporate secrets')).toBeLessThan(at(view, 'bingd.'));
   });
 
   it('holds for a ranked TV season', async () => {
@@ -2308,7 +2341,7 @@ describe('the score row sits with the title', () => {
 
     const order = structure(view);
     expect(order.indexOf('scores-section')).toBeGreaterThan(order.indexOf('title-meta'));
-    expect(order.indexOf('scores-divider')).toBeGreaterThan(order.indexOf('scores-layout'));
+    expect(order.indexOf('scores-divider')).toBeLessThan(order.indexOf('scores-layout'));
   });
 
   it('draws no score row on a series, which cannot be ranked', async () => {
@@ -2324,13 +2357,10 @@ describe('the score row sits with the title', () => {
     expect(view.queryByTestId('scores-divider')).toBeNull();
   });
 
-  it('keeps the insufficient-ratings state, in the same place', async () => {
-    // Both units empty: the circles stay, the four words stay, and the row does not
-    // move just because it has nothing to say yet.
+  it('keeps the insufficient-ratings state', async () => {
     const view = await open();
     await waitFor(() => expect(view.getAllByText('Not enough ratings')).toHaveLength(2));
 
-    expect(between(structure(view), 'title-meta', 'scores-section')).toEqual([]);
     expect(view.queryByText(/more needed/)).toBeNull();
   });
 
@@ -2357,5 +2387,207 @@ describe('the score row sits with the title', () => {
     expect(view.getByText('1 person you follow')).toBeTruthy();
     expect(view.getByText('bingd.')).toBeTruthy();
     expect(view.getByText('Following')).toBeTruthy();
+  });
+});
+
+/**
+ * **A rerank is not a rewatch** (founder, physical Android, 2026-09-07).
+ *
+ * The report: ranked *Terrace House: Tokyo 2019-2020, S1*, adjusted the placement a
+ * minute later, and the feed carried two "ranked" rows for one watch — 8.3, then 8.6.
+ *
+ * The database was never wrong. `_rank_finalize` has posted `title_ranked` only
+ * `if p_new_watch or not v_replaced` since 20260826000500, so a session that replaces an
+ * existing position announces nothing; production holds exactly one `rankings` row and
+ * one `user_media` row for that season, so no watch was duplicated either. What produced
+ * the second activity was this menu: the row that reads like "redo my ranking" was
+ * **Rank again**, which the product defines as a second viewing and which therefore
+ * earns an activity by design.
+ *
+ * The fix is that the menu now names the intent, and all three are reachable:
+ *
+ *   Adjust placement    `rerank` — same watch, no activity
+ *   I watched it again  `again`  — a real rewatch, exactly one activity
+ *   Change your rating  the band, through the log sheet
+ *
+ * These tests pin the parameter that decides it, `p_new_watch`, because that single
+ * boolean is the whole difference between the two intents and nothing on screen shows
+ * it. Server behaviour is not re-tested here — it is SQL, and it was already correct.
+ */
+describe('adjusting a ranking versus watching it again', () => {
+  /** A ranked film, which is the only state this menu exists in. */
+  beforeEach(() => {
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        position: 1,
+        category: 'movies',
+        bucket: 'loved',
+      },
+    ];
+    tableRows.user_media = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'film-1',
+        bucket: 'loved',
+        watched_on: '2026-08-12',
+        note: null,
+        note_visibility: 'private',
+        note_has_spoilers: false,
+      },
+    ];
+  });
+
+  const openMenu = async () => {
+    const view = await open();
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
+    await waitFor(() => expect(view.getByLabelText('Adjust placement')).toBeTruthy());
+    return view;
+  };
+
+  /** Every `rank_again` call the screen made, with its arguments. */
+  const againCalls = () =>
+    mockRpc.mock.calls.filter(([name]: [string]) => name === 'rank_again');
+
+  it('offers both intents, named so neither can be mistaken for the other', async () => {
+    const view = await openMenu();
+
+    expect(view.getByLabelText('Adjust placement')).toBeTruthy();
+    expect(view.getByLabelText('I watched it again')).toBeTruthy();
+    // The old label is gone: it read as "redo my ranking" and meant "I watched it
+    // again", which is exactly the ambiguity that produced the duplicate.
+    expect(view.queryByLabelText('Rank again')).toBeNull();
+  });
+
+  it('adjusts the placement without declaring a new watch', async () => {
+    // `p_new_watch: false` is what makes `_rank_finalize` suppress the activity.
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Adjust placement'));
+
+    await waitFor(() => expect(againCalls().length).toBe(1));
+    expect(againCalls()[0]![1]).toEqual(
+      expect.objectContaining({ p_new_watch: false, p_bucket: 'loved' }),
+    );
+  });
+
+  it('declares a new watch only from the rewatch row', async () => {
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('I watched it again'));
+
+    await waitFor(() => expect(againCalls().length).toBe(1));
+    expect(againCalls()[0]![1]).toEqual(
+      expect.objectContaining({ p_new_watch: true, p_bucket: 'loved' }),
+    );
+  });
+
+  it('never unranks and restarts, in either intent', async () => {
+    // The atomic call is what keeps the title from having no position for a moment.
+    // Composing the pair here would lose the ranking outright on a dropped connection.
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Adjust placement'));
+
+    await waitFor(() => expect(againCalls().length).toBe(1));
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_unrank', expect.anything());
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_start', expect.anything());
+  });
+
+  it('keeps the band the title already has, rather than deciding a rating', async () => {
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Adjust placement'));
+
+    // Straight through from `rankings.bucket`, in the database's own spelling. Adjusting
+    // a placement is not an opinion about the band.
+    await waitFor(() =>
+      expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_bucket: 'loved' })),
+    );
+  });
+
+  it('carries one operation id per intent, so a retry is not a second opinion', async () => {
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Adjust placement'));
+
+    await waitFor(() => expect(againCalls().length).toBe(1));
+    /**
+     * The idempotency boundary is threaded: `rank_again` is called *through* the
+     * operation-id parameter, so `_claim_operation_result` answers a repeat of one
+     * intent with the stored result rather than running a second session.
+     *
+     * The key is asserted rather than its value, because this suite does not mock
+     * `expo-crypto` and `randomUUID` yields nothing here. What would be wrong is the
+     * parameter being absent from the call — that is the shape that turns a retry into
+     * a second opinion, and it is what this pins.
+     */
+    expect(Object.keys(againCalls()[0]![1] as object)).toContain('p_operation_id');
+  });
+
+  it('does not open a second session when the row is double-tapped', async () => {
+    const view = await openMenu();
+    const row = view.getByLabelText('Adjust placement');
+
+    await fireEvent.press(row);
+    await fireEvent.press(row);
+
+    // The menu closes on the first press, so the second lands on nothing — and the
+    // sheet is keyed by title, so even a re-entry would reuse one session.
+    await waitFor(() => expect(againCalls().length).toBe(1));
+  });
+
+  it('holds for a season, which is the shape the founder reported', async () => {
+    mockOpenId = 'season-1';
+    tableRows.media_items = [
+      {
+        ...film,
+        id: 'season-1',
+        kind: 'season',
+        title: 'Season 1',
+        release_date: '2023-04-01',
+        runtime_minutes: null,
+        parent: { id: 'series-1', title: 'Breaking Bad', poster_path: null, backdrop_path: null },
+      },
+    ];
+    tableRows.rankings = [
+      {
+        user_id: 'user-1',
+        media_item_id: 'season-1',
+        position: 1,
+        category: 'tv_seasons',
+        bucket: 'loved',
+      },
+    ];
+    tableRows.user_media = [
+      { user_id: 'user-1', media_item_id: 'season-1', bucket: 'loved', watched_on: null, note: null },
+    ];
+
+    const view = await renderWithProviders(<TitleScreen />);
+    await waitFor(() =>
+      expect(view.getByLabelText('Ranked. Change or remove this.')).toBeTruthy(),
+    );
+    await fireEvent.press(view.getByLabelText('Ranked. Change or remove this.'));
+    await waitFor(() => expect(view.getByLabelText('Adjust placement')).toBeTruthy());
+
+    await fireEvent.press(view.getByLabelText('Adjust placement'));
+
+    await waitFor(() => expect(againCalls().length).toBe(1));
+    expect(againCalls()[0]![1]).toEqual(expect.objectContaining({ p_new_watch: false }));
+  });
+
+  it('leaves Change your rating as the band control, writing no ranking call itself', async () => {
+    // The third intent. It opens the log sheet's bucket chooser; the ranking call that
+    // follows is decided there, by whether the band actually moved.
+    const view = await openMenu();
+
+    await fireEvent.press(view.getByLabelText('Change your rating'));
+
+    expect(againCalls()).toHaveLength(0);
+    expect(mockRpc).not.toHaveBeenCalledWith('rank_rebucket', expect.anything());
   });
 });

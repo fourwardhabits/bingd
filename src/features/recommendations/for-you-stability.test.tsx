@@ -422,9 +422,11 @@ describe('refreshing the wall', () => {
     // hit. The arrangement still has to come back identical, because the seed lives in
     // a module rather than in the screen's state. That is what stops For You reshuffling
     // every time somebody visits another tab and returns.
-    // One press per side since the dropdown became a visible tab row (2026-09-06).
-    await fireEvent.press(view.getByRole('tab', { name: 'TV shows' }));
-    await fireEvent.press(view.getByRole('tab', { name: 'Movies' }));
+    const selector = () => view.getAllByLabelText(/^Showing /)[0]!;
+    await fireEvent.press(selector());
+    await fireEvent.press(view.getByText('TV shows'));
+    await fireEvent.press(selector());
+    await fireEvent.press(view.getByText('Movies'));
 
     await waitFor(() => expect(wall(view)).toEqual(before));
   });

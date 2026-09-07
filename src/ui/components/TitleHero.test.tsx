@@ -118,31 +118,34 @@ describe('the hero fade', () => {
   });
 
   /**
-   * The status-bar correction, revised in the ranking/hero tranche. The image still
-   * starts below the inset — the founder's pull-down made the resting state — but the
-   * frame now grows by exactly the inset, so the bar's height is not paid for out of
-   * the artwork. The image box below the bar keeps the backdrop's own 16:9.
+   * **The artwork reaches the top of the screen** (founder, physical Android,
+   * 2026-09-07).
+   *
+   * It used to start below the inset, with the frame’s warm ground filling the band
+   * behind the transparent header — which is exactly the "backdrop chopped off by a
+   * solid bar" the founder reported. The chrome overlays the image now and the inset is
+   * spent on a scrim instead, so the frame is the image and nothing is added to it.
    */
-  it('starts the artwork below the status bar, and grows the frame by exactly the inset', async () => {
+  it('fills the frame with artwork rather than starting it below a band', async () => {
     const bare = await treeOf(<TitleHero uri={BACKDROP} />);
     const inset = await treeOf(<TitleHero uri={BACKDROP} topInset={59} />);
 
     const imageOf = (nodes: typeof bare) => nodes.find((node) => node.props.source)!;
     expect(imageOf(bare).style.top).toBe(0);
-    expect(imageOf(inset).style.top).toBe(59);
+    // The inset no longer moves the artwork — that offset was the band.
+    expect(imageOf(inset).style.top ?? 0).toBe(0);
 
     const frameOf = (nodes: typeof bare) =>
       nodes.find((node) => typeof node.style.height === 'number' && !node.props.source)!;
-    expect(frameOf(inset).style.height).toBe((frameOf(bare).style.height as number) + 59);
+    expect(frameOf(inset).style.height).toBe(frameOf(bare).style.height);
   });
 
   /**
-   * The image box is the backdrop's own shape. Fixed frame ratios (1.4, 1.62, 1.5)
-   * each cropped something on some device; sizing the box from the artwork means
-   * `cover` has nothing to crop, and the founder's "more of the top" is simply the
-   * whole picture. Pinned so a future "small tweak" moves this knowingly.
+   * The frame is the backdrop’s own shape. Fixed frame ratios (1.4, 1.62, 1.5) each
+   * cropped something on some device; sizing from the artwork means `cover` has nothing
+   * to crop. Pinned so a future "small tweak" moves this knowingly.
    */
-  it('holds the visible image box to the backdrop’s 16:9, inset or not', async () => {
+  it('holds the frame to the backdrop’s 16:9, inset or not', async () => {
     const { Dimensions } = jest.requireActual('react-native');
     const { width } = Dimensions.get('window');
 
@@ -153,7 +156,25 @@ describe('the hero fade', () => {
     expect(frameOf(bare).style.height).toBe(width / (16 / 9));
 
     const inset = await treeOf(<TitleHero uri={BACKDROP} topInset={48} />);
-    expect((frameOf(inset).style.height as number) - 48).toBe(width / (16 / 9));
+    expect(frameOf(inset).style.height).toBe(width / (16 / 9));
+  });
+
+  it('scrims the top only where chrome overlays the artwork', async () => {
+    // Contrast for the back control, which now sits on the image. No inset means no
+    // transparent header over the hero, and then there is nothing to make legible.
+    const { Dimensions } = jest.requireActual('react-native');
+    const { width } = Dimensions.get('window');
+    const gradients = (nodes: ReturnType<typeof walk>) =>
+      nodes.filter((node) => typeof node.style.experimental_backgroundImage === 'string');
+
+    const bare = await treeOf(<TitleHero uri={BACKDROP} />);
+    const inset = await treeOf(<TitleHero uri={BACKDROP} topInset={59} />);
+
+    expect(gradients(inset).length).toBe(gradients(bare).length + 1);
+    const top = gradients(inset).find((node) => typeof node.style.height === 'number');
+    expect(top).toBeTruthy();
+    // Only as tall as the chrome: the status bar plus the bar itself, never the hero.
+    expect(top!.style.height as number).toBeLessThan(width / (16 / 9));
   });
 
   it('draws a warm band and no artwork when there is none', async () => {

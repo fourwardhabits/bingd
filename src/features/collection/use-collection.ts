@@ -106,6 +106,16 @@ export type LoggedEntry = {
   seriesTitle: string | null;
   /** The season's number, for the same reason. */
   seasonNumber?: number | null;
+  /**
+   * The parent series' **id**, for a season, mirroring `RankedEntry.seriesId`.
+   *
+   * Added 2026-09-07 for Search, which has to answer a question about a series using
+   * facts recorded against its seasons: a reader who ranked Terrace House S1 was shown a
+   * series row with a bare `+`, looking exactly like a title they had never opened. The
+   * embedded `parent` carries the series' title and genres and never its id, and titles
+   * are not identifiers.
+   */
+  seriesId?: string | null;
   /** ISO 639-1, for the collection filters. */
   language: string | null;
   bucket: 'loved' | 'fine' | 'not_for_me' | null;
@@ -267,7 +277,12 @@ export function useLoggedCollection(userId: string) {
                 // `.gt()` cursor on it would skip every row but the last of any group
                 // written in the same instant. The order it expresses is applied below.
                 .select(
-                  'media_item_id, bucket, watched_on, created_at, media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent:parent_id(title, genres, original_language))',
+                  // `parent_id` alongside the embedded `parent`: the embed carries what a
+                  // season's row needs to *say* (its series' title, genres, language) and
+                  // not the id that says which series it belongs to. Search needs the id
+                  // to answer "has this reader touched any season of this series", which
+                  // it cannot do by matching titles.
+                  'media_item_id, bucket, watched_on, created_at, media_items(title, season_number, release_date, poster_path, genres, runtime_minutes, kind, original_language, parent_id, parent:parent_id(title, genres, original_language))',
                 )
                 .eq('user_id', userId),
               'media_item_id',
@@ -320,6 +335,7 @@ export function useLoggedCollection(userId: string) {
             kind: shape.kind,
             seriesTitle: meta.seriesTitle,
             seasonNumber: shape.season_number ?? null,
+            seriesId: shape.parent_id ?? null,
             language: meta.language,
             bucket: row.bucket,
             watchedOn: row.watched_on,

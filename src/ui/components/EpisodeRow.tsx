@@ -1,5 +1,6 @@
 import { Image } from 'expo-image';
-import { StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { theme } from '../tokens';
 import { Text } from './Text';
@@ -30,6 +31,18 @@ export type EpisodeRowProps = {
  * recognise something and a full paragraph twenty-four times over stops the page
  * being scannable.
  *
+ * **The clamp opens** (founder, physical Android, 2026-09-07). It was three lines with
+ * no way past them, so an episode whose synopsis ran longer simply ended mid-sentence —
+ * and the one case a reader most needs the rest of the text is the one where three lines
+ * were not enough to recognise it. The affordance is the title page’s own: a `more` in
+ * Maroon under the clamped text, which expands it in place. Scannability is preserved by
+ * the default rather than by the ceiling: every row still opens clamped, and one open
+ * row does not open the other twenty-three.
+ *
+ * **No `less`, which is the app’s existing convention** (the title page’s synopsis says
+ * so too): once it is open the whole thing is visible and the control has nothing left
+ * to promise. The row is still not a *record* — opening a synopsis logs nothing.
+ *
  * **Everything missing simply disappears.** No "Unknown", no "TBA", no grey
  * placeholder box where a still would be. An unaired episode legitimately has no
  * runtime, no still and often no synopsis, and drawing a frame around each absence
@@ -44,6 +57,15 @@ export function EpisodeRow({
   stillUri,
   overview,
 }: EpisodeRowProps) {
+  /**
+   * Per row, and deliberately not lifted.
+   *
+   * A season page holds twenty-odd of these and each one is its own question. Hoisting
+   * this into the screen would make "which episodes are open" a piece of page state to
+   * reset, persist and reason about, for a preference that lasts as long as somebody is
+   * looking at one episode.
+   */
+  const [expanded, setExpanded] = useState(false);
   // "3 · The Rains of Castamere", or "Episode 3" when TMDB has no name for it. The
   // number is never dropped: it is the field a reader scans down.
   const heading = title ? `${episodeNumber} · ${title}` : `Episode ${episodeNumber}`;
@@ -82,9 +104,25 @@ export function EpisodeRow({
       ) : null}
 
       {overview ? (
-        <Text variant="body" tone="secondary" numberOfLines={3}>
-          {overview}
-        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          accessibilityLabel={expanded ? 'Collapse description' : 'Expand description'}
+          onPress={() => setExpanded((open) => !open)}
+          style={styles.synopsis}
+        >
+          <Text variant="body" tone="secondary" numberOfLines={expanded ? undefined : 3}>
+            {overview}
+          </Text>
+          {/* No "less": the title page’s synopsis sets the convention, and once the
+              text is open the control has nothing left to promise. Pressing again
+              still closes it — the affordance is gone, not the behaviour. */}
+          {expanded ? null : (
+            <Text variant="callout" tone="action">
+              more
+            </Text>
+          )}
+        </Pressable>
       ) : null}
     </View>
   );
@@ -96,6 +134,8 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space[4],
     gap: theme.space[2],
   },
+  // The text and its affordance are one target, gapped like the row above them.
+  synopsis: { gap: theme.space[1] },
   still: {
     width: '100%',
     // 16:9, the same token the backdrop uses. `aspectRatio` rather than a fixed

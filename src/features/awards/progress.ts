@@ -69,18 +69,37 @@ export type AwardProgress = {
  * its number genuinely differs between Bronze and Gold. The other nineteen ignore it.
  */
 /**
- * What the tier a reader is working toward is actually called.
+ * What the tier a reader is working toward is actually called — or nothing, when the
+ * honest answer is that it has no name of its own.
  *
- * A creative track carries a unique name per tier and it is used unchanged. A metal
- * track does not — its tiers are Bronze, Silver and Gold in the canonical table, and
- * there is no other name in the definitions to prefer — so the family name supplies the
- * rest and the result names the award instead of describing it.
+ * Seventeen of the twenty tracks give every tier a real name: Cackle, Moonwalker,
+ * Sob Lord. Those are the award, they are used exactly as the definitions spell them,
+ * and they are what makes `Next:` worth reading.
  *
- * `metalTiers` is the flag the track already carries for exactly this distinction; it is
- * what `title` reads to decide whether an earned tier replaces the heading.
+ * The three `metalTiers` tracks have no such name. Their tiers are Bronze, Silver and
+ * Gold, which are not names but positions in a sequence — and **the dots already say
+ * which position** (founder, 2026-09-07). `Next: Movie Muncher Silver` was this
+ * function's previous answer and it spent a third of the line restating the heading
+ * plus a word the badge was already drawing; `Next: Silver` before it named nothing at
+ * all. So a metal track contributes no name and the line is its criteria alone, under a
+ * heading that is already the family's name.
+ *
+ * Null rather than the family name: repeating the heading verbatim is not information,
+ * and the alternative — putting the metal back — is the thing being removed.
  */
-const nextAwardName = (track: AwardTrack, tier: AwardTier) =>
-  track.metalTiers ? `${track.displayName} ${tier.label}` : tier.label;
+const nextAwardName = (track: AwardTrack, tier: AwardTier): string | null =>
+  track.metalTiers ? null : tier.label;
+
+/**
+ * `Next: Cackle · Watch 100 comedies`, or `Next: Watch 200 movies` where the tier has no
+ * name of its own. The separator exists to divide two things, so it is absent when there
+ * is only one.
+ */
+const nextLine = (track: AwardTrack, tier: AwardTier) => {
+  const name = nextAwardName(track, tier);
+  const criteria = track.next(tier.threshold);
+  return name ? `Next: ${name} · ${criteria}` : `Next: ${criteria}`;
+};
 
 const measure = (track: AwardTrack, facts: AwardFacts, tier: AwardTier) =>
   breakdownTotal(track.contributions(facts, tier));
@@ -184,24 +203,19 @@ export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
      * than inventing a fourth tier to be short of.
      */
     /**
-     * **And the name is the award's, not a bare metal** (founder, 2026-09-06).
+     * **The name of the next award, and no generic tier word** (founder, 2026-09-07).
      *
-     * `Movie Muncher` over `Next: Silver · Watch 200 movies` was the second half of the
-     * same complaint: "Silver" is an adjective, and a reader looking at it cannot tell
-     * whether the thing they are working toward is called Silver, called Movie Muncher,
-     * or something they have not been told yet.
+     * `Next: Cackle · Watch 100 comedies` — the thing, then the price of it. Where the
+     * next tier has a canonical name it is used exactly as written; where it does not,
+     * the line is the criteria alone rather than Bronze, Silver or Gold, which the dots
+     * beside it already communicate. See `nextAwardName` for which tracks are which.
      *
-     * Seventeen of the twenty tracks have genuinely unique tier names — Giggle, Cackle,
-     * Wheeze — and those are used exactly as they are. The three metal tracks do not:
-     * their tiers really are called Bronze, Silver and Gold in the canonical
-     * definitions, and there is no other name to reach for. So the *family* supplies the
-     * rest of it and the line reads `Next: Movie Muncher Silver`, which names the award
-     * rather than describing it. Nothing is invented and nothing is substituted — both
-     * halves come from `AwardTrack`.
+     * One line rather than two: twenty rows at three lines apiece is a screen and a half
+     * of scrolling to answer a question that fits in five words. Past the top tier there
+     * is nothing to aim at, so the line states what was done rather than inventing a
+     * fourth tier to be short of.
      */
-    detailLine: nextTier
-      ? `Next: ${nextAwardName(track, nextTier)} · ${track.next(nextTier.threshold)}`
-      : track.earned(top.threshold),
+    detailLine: nextTier ? nextLine(track, nextTier) : track.earned(top.threshold),
     countLabel: nextTier ? `${count(value)} / ${count(nextTier.threshold)}` : count(value),
     unavailable: false,
     withheld: false,

@@ -226,7 +226,7 @@ describe('the sheet', () => {
   it('shows the goal still to reach, with the count beside it', async () => {
     seed('user_media', movies(7));
     await open();
-    expect(screen.getByText('Next: Movie Muncher Bronze · Watch 50 movies')).toBeTruthy();
+    expect(screen.getByText('Next: Watch 50 movies')).toBeTruthy();
     expect(count('7 / 50')).toBeTruthy();
   });
 

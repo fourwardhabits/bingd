@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
 
-import { paperAlpha, theme } from '../tokens';
+import { inkAlpha, paperAlpha, theme } from '../tokens';
 
 export type TitleHeroProps = {
   uri?: string | null;
@@ -22,20 +22,23 @@ export type TitleHeroProps = {
    */
   blurred?: boolean;
   /**
-   * The status-bar inset, when the hero runs under a transparent header.
+   * The status-bar inset, used to scrim the chrome rather than to move the artwork.
    *
-   * **This is the founder's pull-down, made the resting state.** The title page draws
-   * its header transparent, so the top of the frame sits under the status bar and the
-   * navigation controls — and on the physical device the top of every backdrop was
-   * occluded by them. Pulling the scroll view down slid the artwork below the bar and
-   * produced the composition the founder wanted; no `contentPosition` value could,
-   * because the top of the image was never *cropped*, it was *covered*.
+   * **This prop used to push the image down, and that band is what the founder saw
+   * chopping the backdrop off** (physical Android, 2026-09-07). The reasoning behind it
+   * was sound: the header is transparent, so the top of every backdrop sat under the
+   * status bar and the back control, and sliding the artwork below them made the whole
+   * picture visible. What it produced on a device was a solid horizontal band of
+   * `surface.sunken` across the top of the app's one full-bleed surface — the artwork
+   * did not reach the top of the screen, it *terminated under a bar*.
    *
-   * So the image starts this far down, with the frame's warm band behind the bar —
-   * and the frame is taller by exactly this much, so the inset is not paid for out of
-   * the artwork. The image box below the bar keeps the backdrop's own 16:9 (see
-   * `height` in the component), which is what makes the whole picture, top edge
-   * included, visible on every device.
+   * So the image fills the frame again and the inset is spent on a scrim instead: a
+   * short ink gradient over the top, under the chrome, which is what every full-bleed
+   * hero does. The back control keeps its contrast, the backdrop reaches the top edge,
+   * and the frame is exactly the backdrop's own 16:9 with nothing added to it.
+   *
+   * Zero where there is no transparent header over the hero — tests, and any caller
+   * that has its own opaque bar — and then no scrim is drawn at all.
    */
   topInset?: number;
 };
@@ -61,21 +64,21 @@ export function TitleHero({
 }: TitleHeroProps) {
   const { width } = useWindowDimensions();
   /**
-   * The inset, plus the backdrop's own 16:9 — so the visible image box is exactly the
-   * shape the artwork was composed in, on every device.
+   * The backdrop's own 16:9, and nothing added to it.
    *
-   * This replaces a fixed frame ratio (1.62, then 1.5), and the founder's fourth look
-   * is why: at any fixed ratio the image box — the frame minus `topInset` — is the
-   * wrong shape on most devices, so `cover` always crops something. Wider than 16:9
-   * and the bottom of the backdrop is lost under the fade; narrower and the sides go,
-   * which is what the founder called "too cropped" back when the whole frame was 1.4.
-   * Sizing the box *from* the artwork instead of reverse-engineering a ratio means the
-   * full backdrop — its top edge included — is on screen everywhere: a 393pt phone
-   * with a 59pt inset gets a 280pt frame (deeper than 1.5 gave it), a small-inset
-   * Android does not pay for an inset it does not have, and the no-inset case (tests,
-   * no transparent header) is a bare 16:9.
+   * This replaces a fixed frame ratio (1.62, then 1.5): at any fixed ratio `cover` had
+   * to crop something — wider than 16:9 and the bottom of the backdrop went under the
+   * fade, narrower and the sides went, which is what the founder called "too cropped".
+   * Sizing the frame *from* the artwork means the whole picture is on screen on every
+   * device, at the shape it was composed in.
+   *
+   * **`topInset` is no longer added here** (2026-09-07). It was, so that the artwork
+   * could start below the transparent header with the frame's warm ground behind the
+   * bar — and that ground is the band the founder saw the backdrop stop under. The
+   * chrome overlays the artwork now, with `TopScrim` for contrast, so the frame is the
+   * image and the image is the frame.
    */
-  const height = topInset + width / BACKDROP_RATIO;
+  const height = width / BACKDROP_RATIO;
 
   // No artwork at all is still common — the seed catalogue ships without any. A short
   // warm band is not a failure state and does not pretend to be an image: no grey box,
@@ -104,13 +107,51 @@ export function TitleHero({
         // at full strength is still the most saturated thing on a Paper page, and the
         // point is a field for the real poster to sit on, not a second subject.
         blurRadius={blurred ? POSTER_BLUR : 0}
-        style={[styles.fill, { top: topInset }, blurred && styles.dimmed]}
+        style={[styles.fill, blurred && styles.dimmed]}
         accessibilityIgnoresInvertColors
       />
       <Scrim height={height} />
+      {topInset > 0 ? <TopScrim height={topInset + NAV_BAR_HEIGHT} /> : null}
     </View>
   );
 }
+
+/**
+ * The bar height the chrome occupies below the status bar, mirrored from
+ * `DetailHeader`. A constant rather than an import, because this component is in the
+ * design system and that hook is a feature of two routes — the number is the platform’s,
+ * not either module’s.
+ */
+const NAV_BAR_HEIGHT = Platform.select({ android: 56, default: 44 }) as number;
+
+/**
+ * Contrast for the back control, over the top of the artwork.
+ *
+ * The founder’s constraint is that the backdrop reaches the top of the screen, which
+ * means the navigation controls sit *on* it — and a dark glyph on a pale backdrop is a
+ * back button nobody can find. A short ink ramp under the chrome is the standard answer
+ * and the one the celebration wall already uses: it costs no height, no module and no
+ * fingerprint, and it is strongest exactly where the glyph is.
+ *
+ * Eased rather than linear, and gone well before the artwork’s subject: by the bottom of
+ * the bar it is doing nothing at all.
+ */
+function TopScrim({ height }: { height: number }) {
+  return (
+    <View
+      pointerEvents="none"
+      style={[styles.topScrim, { height, experimental_backgroundImage: TOP_SCRIM_GRADIENT }]}
+    />
+  );
+}
+
+const TOP_SCRIM_GRADIENT = [
+  'linear-gradient(to bottom,',
+  `${inkAlpha(0.38)} 0%,`,
+  `${inkAlpha(0.22)} 45%,`,
+  `${inkAlpha(0.06)} 78%,`,
+  `${inkAlpha(0)} 100%)`,
+].join(' ');
 
 /**
  * Enough to destroy the detail without turning the image to flat colour.
@@ -202,5 +243,7 @@ const styles = StyleSheet.create({
   // decide where the fade starts, so the view it is drawn on has to span the height
   // those percentages are measured against.
   scrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  // Anchored to the top and only as tall as the chrome it exists to make legible.
+  topScrim: { position: 'absolute', top: 0, left: 0, right: 0 },
   collapsed: { backgroundColor: theme.surface.sunken },
 });

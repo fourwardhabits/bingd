@@ -668,7 +668,14 @@ describe('the shape of the page', () => {
     }));
   };
 
-  it('reads identity, bio, stats, buttons, awards, goals — in that order', async () => {
+  it('reads identity, bio, stats, buttons, Your 2026, then awards', async () => {
+    /**
+     * **Your 2026 moved above bingd. Awards** (founder, physical Android, 2026-09-07).
+     *
+     * The order was awards then goals, on "identity before intention". The founder
+     * reversed it: an owner opens their own profile for the year they are having, so
+     * the half of the page that is still moving comes before the half that has settled.
+     */
     const view = await open();
     await waitFor(() => expect(view.getByText('Nothing ranked yet')).toBeTruthy());
 
@@ -678,14 +685,12 @@ describe('the shape of the page', () => {
       'Followers',
       'Share Profile',
       // `bingd. Awards` was the second button in this row until 2026-09-06. It is a
-      // section now, above Goals, and Invite friends took the slot — see
-      // `ProfileActions`. `SectionHeader` upper-cases, so the shelf is matched on the
-      // heading it actually renders.
+      // section now and Invite friends took the slot — see `ProfileActions`.
       'Invite friends',
+      // `SectionHeader` upper-cases, so both shelves are matched on what they render.
+      'YOUR 2026',
       'BINGD. AWARDS',
-      // Top ranked's empty state. A section heading would have been the natural marker,
-      // and `SectionHeader` upper-cases its title, so none of them is on the page as it
-      // is written.
+      // Top ranked’s empty state, which is its only marker on an empty account.
       'Nothing ranked yet',
     ]);
 

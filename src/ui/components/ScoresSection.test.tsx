@@ -217,14 +217,19 @@ describe('the people behind the Following number (founder, 2026-08-27 §13)', ()
 });
 
 /**
- * **No heading, and the rule beneath** (founder, physical Android, 2026-09-06).
+ * **No heading, and one inset rule** (founder, 2026-09-06 and 2026-09-07).
  *
- * The `SCORES` label and the rule above the row made a seam between a title's metadata
- * and the numbers, and the numbers are part of what a title is. The units name
- * themselves, so the heading was chrome; the rule stays, at the bottom, where it closes
- * core identity off from descriptive content.
+ * The `SCORES` label is gone for good: the units name themselves, so it was chrome, and
+ * it made the block read as a lower section *about* the title.
+ *
+ * The rule has moved twice and is back above the row, which is worth a test rather than
+ * only a comment. It went beneath on 2026-09-06, when the block sat directly under the
+ * title’s metadata and its job was to close the title’s identity off from the
+ * description. The page reconverged on 2026-09-07 — genres and synopsis now come first —
+ * so from its new position the rule separates the description above from the utility
+ * block below, and belongs above the row again.
  */
-describe('reading as part of the title rather than a section about it', () => {
+describe('the section’s own shape', () => {
   it('draws no heading', async () => {
     await render(<ScoresSection {...both} />);
 
@@ -233,25 +238,24 @@ describe('reading as part of the title rather than a section about it', () => {
     expect(screen.queryByRole('header')).toBeNull();
   });
 
-  it('draws its one rule after the units, not before them', async () => {
+  it('opens with its one rule, above the units', async () => {
     await render(<ScoresSection {...both} />);
     const section = screen.getByTestId('scores-section');
 
-    // In render order: the layout holding the units first, the rule last.
     const ids = (section.children as { props?: { testID?: string } }[])
       .map((child) => child?.props?.testID)
       .filter(Boolean);
-    expect(ids).toEqual(['scores-layout', 'scores-divider']);
+    expect(ids).toEqual(['scores-divider', 'scores-layout']);
   });
 
-  it('leaves the rule inset and hairline, unchanged by the move', async () => {
+  it('leaves the rule inset and hairline, unchanged by either move', async () => {
     await render(<ScoresSection {...both} />);
     const divider = flatten(screen.getByTestId('scores-divider').props.style);
 
     expect(divider.marginHorizontal).toBe(16);
     expect(divider.borderTopWidth).toBeLessThanOrEqual(1);
     expect(divider.backgroundColor).toBeUndefined();
-    // No wash behind the row either: the founder's default, and the one shipped.
+    // No wash behind the row either: the founder’s default, and the one shipped.
     const section = flatten(screen.getByTestId('scores-section').props.style);
     expect(section.backgroundColor).toBeUndefined();
   });

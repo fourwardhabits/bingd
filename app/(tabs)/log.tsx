@@ -14,6 +14,11 @@ import { invalidateAfterWatchlistChange } from '@/features/collection/invalidate
 import { mustReconcile, newOperationId, setWatchlist } from '@/features/collection/writes';
 import { RankingSheet, type RankingSubject } from '@/features/ranking/RankingSheet';
 import { SeasonPicker } from '@/features/search/SeasonPicker';
+import {
+  seriesChildState,
+  seriesSecondaryLine,
+  type SeriesChildState,
+} from '@/features/search/series-state';
 import { useRecentSearches } from '@/features/search/use-recent-searches';
 import { useTitleSearch, yearOf, type SearchResult } from '@/features/search/use-title-search';
 import {
@@ -141,6 +146,17 @@ export default function LogScreen() {
   const watchedIds = useMemo(
     () => new Set((logged.data?.entries ?? []).map((entry) => entry.mediaItemId)),
     [logged.data],
+  );
+  /**
+   * The reader's season history, grouped by series, for the series rows.
+   *
+   * Derived from the two reads already in hand rather than fetched: a series row asks a
+   * question about seasons, and every season this reader has logged is in `logged` with
+   * every score in `scores`. See `series-state.ts` for the bug this closes.
+   */
+  const seriesState = useMemo(
+    () => seriesChildState(logged.data?.entries ?? [], (id) => scores.has(id)),
+    [logged.data, scores],
   );
 
   const { recent, remember, clear } = useRecentSearches(profile.id);
@@ -454,6 +470,7 @@ export default function LogScreen() {
         saved={saved}
         scores={scores}
         watched={watchedIds}
+        seriesState={seriesState}
         watchlistBusy={watchlistBusy}
         onToggleWatchlist={toggleWatchlist}
       />
@@ -560,6 +577,7 @@ function Results({
   saved,
   scores,
   watched,
+  seriesState,
   watchlistBusy,
   onToggleWatchlist,
 }: {
@@ -592,6 +610,8 @@ function Results({
   scores: Map<string, MyScore>;
   /** Media ids this reader has logged, ranked or not — the watched-but-unranked case. */
   watched: Set<string>;
+  /** Season activity per series id, for the series rows (`series-state.ts`). */
+  seriesState: Map<string, SeriesChildState>;
   /** The id of the title whose watchlist write is in flight, or null. */
   watchlistBusy: string | null;
   onToggleWatchlist: (result: SearchResult) => void;
@@ -887,14 +907,20 @@ function Results({
                 posterUri={posterUri(title.poster_path)}
                 secondary={
                   title.kind === 'series' ? (
-                    // No count for a series the catalogue has only just met: its seasons
-                    // are fetched when the picker opens, and "0 seasons" would be the app
-                    // stating as fact something it has not looked up yet.
-                    title.season_count ? (
-                      `Series · ${title.season_count} seasons`
-                    ) : (
-                      'Series'
-                    )
+                    /**
+                     * **A series says what the reader has already done with it** (founder,
+                     * physical Android, 2026-09-07).
+                     *
+                     * It said only what it was — `Series · 3 seasons` — so a show whose
+                     * first season this reader had ranked was indistinguishable from one
+                     * they had never opened, `+` and all. The fact lives on the season and
+                     * the row is about the series; `seriesChildState` is the join.
+                     *
+                     * Still no score and still a `+`: seasons are the rankable unit, and
+                     * the `+` opens the season picker, which is the correct next step for
+                     * every one of these states — including "one ranked, two to go".
+                     */
+                    seriesSecondaryLine(title.season_count, seriesState.get(title.id))
                   ) : (
                     <TitleMetadata
                       runtimeMinutes={title.runtime_minutes}

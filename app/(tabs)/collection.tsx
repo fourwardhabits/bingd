@@ -27,7 +27,7 @@ import {
   Button,
   HeaderBoundary,
   EmptyState,
-  MEDIUM_OPTIONS,
+  MediumSelector,
   Screen,
   SegmentedTabs,
   SkeletonRow,
@@ -339,31 +339,21 @@ export default function CollectionScreen() {
     <Screen>
       <AppHeader />
       {/**
-       * **Two tab rows, and they are deliberately not the same size** (founder
-       * addendum, 2026-09-06).
+       * **The medium is a dropdown again, and one visible tab row beneath it**
+       * (founder, physical Android, 2026-09-07).
        *
-       * Movies and TV were a dropdown: a control that hides one of its two options
-       * behind a tap and a sheet, for a choice a reader makes constantly. They are
-       * visible peer tabs now, in the position and at roughly the weight the dropdown's
-       * `title1` held, so the swap costs no vertical space.
+       * It was two stacked tab rows for a day — Movies/TV over Watched/Watchlist — on
+       * the argument that a constant choice should not hide behind a sheet. On a device
+       * that argument lost to what it produced: two navigation bars in a column, which
+       * read as one four-item control that had been split rather than as a hierarchy,
+       * and which drew differently here than on For You. The dropdown is the screen's
+       * *title* — one line, `title1`, the category it is showing — so the only visible
+       * tabs are the ones that switch state within it. That is the rhythm the app had.
        *
-       * Watched / Watchlist stays `secondary` — unchanged, and that is the point. The
-       * two rows answer different questions (which universe, then which state within
-       * it), so a reader has to be able to read them as a hierarchy rather than as two
-       * competing navigation bars. Scale and underline weight carry that; no card, no
-       * background block, no second heading.
-       *
-       * Search's All / Movies / TV / People deliberately did **not** follow: those
-       * filter a result set rather than switching a destination, and they keep the
-       * rounded chip language. See `SegmentedTabs`'s own note.
+       * Search's All / Movies / TV / People is deliberately still chips: those filter a
+       * result set rather than naming which collection you are in.
        */}
-      <SegmentedTabs
-        variant="primary"
-        options={MEDIUM_OPTIONS}
-        value={medium}
-        onChange={changeMedium}
-        accessibilityLabel="Media type"
-      />
+      <MediumSelector value={medium} onChange={changeMedium} />
       <SegmentedTabs
         options={segments}
         value={active}

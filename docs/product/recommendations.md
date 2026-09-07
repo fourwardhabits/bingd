@@ -165,3 +165,102 @@ and neither is needed to answer the question this pass was about.
   to attack — more candidate sources rather than more suppression.
 - When per-position attribution is wanted, which is the first thing needed to ask whether
   the *ordering* is good rather than only whether it is fresh.
+
+---
+
+## 9. Breadth audit — does the engine use the whole ranked corpus?
+
+Founder question, 2026-09-07: *are recommendations genuinely informed by the user's broad
+ranked corpus, or does candidate generation effectively rely on a small subset?*
+
+Measured against production on 2026-09-07 (read-only) and against the real scorer.
+**Nothing was changed by this audit** — no weights, no anchors, no exposure tiers, no
+sources, no config.
+
+### 9.1 The answer, in one line
+
+**Scoring is broad; candidate *generation* is narrow, deliberately and by a fixed cap.**
+Every ranked title feeds the taste vector, which carries 30% of the score. The candidate
+pool itself is generated from at most **six** anchors, and they are the same six until the
+reader re-ranks.
+
+### 9.2 Measured, for the three highest-history accounts
+
+| | user A | user B | user C |
+|---|---|---|---|
+| Ranked titles | 111 (56 film / 55 TV) | 75 (47 / 28) | 52 (52 / 0) |
+| Buckets | 97 loved · 12 fine · 2 not for me | 69 · 4 · 2 | 48 · 4 · 0 |
+| **Eligible** anchors (films) | 47 | 43 | 48 |
+| **Eligible** anchors (TV, series-deduped) | 28 from 50 seasons | 26 from 26 | 0 |
+| **Used** per slate | 6 | 6 | 6 |
+| Distinct genres in the corpus | 13 | 16 | 15 |
+
+So for user A a Movies slate reasons from **6 of 47** eligible titles — 13% — and a TV
+slate from 6 of 28 series.
+
+### 9.3 Where the rest of the corpus does count
+
+`tasteFrom` is built from **every** ranked title across *both* media, weighted
+`max(0.1, score/10)` so even a disliked title is evidence. That vector supplies
+`genre` (0.18) and `language` (0.12) of the score: **30% of the ranking of every
+candidate is informed by the whole corpus**, and it is what re-scores the pool that the
+six anchors produced.
+
+`WEIGHTS`: anchor 0.60, genre 0.18, language 0.12, popularity 0.10.
+
+### 9.4 The truncation, named
+
+- `ANCHOR_LIMIT = 6` in `rank.ts`, applied in `anchorsFrom`.
+- Anchors are `loved` only, walked in **ranked position order**, so they are the reader's
+  top six loved titles — deterministic, and unchanged until the reader re-ranks or
+  re-buckets. Refresh does not rotate them.
+- A season anchors on its **series**, deduplicated, so a five-season favourite is one
+  anchor rather than five.
+- Filters narrow the anchor scope too, so a filtered wall is anchored on filtered titles.
+
+### 9.5 Candidate pool, before and after exclusions
+
+| source | ceiling | measured |
+|---|---|---|
+| Similar-to-anchor | 6 × 20 | exactly 20 ids per anchor (min/median/max all 20 across 97 cached facets) |
+| Social (`social_candidates`) | 40 | RPC limit |
+| Trending fallback | 20 | 20 ids per list |
+| **Raw ceiling** | **180** | before dedupe |
+
+Then: deduplicated, narrowed to the requested medium, and excluded against the reader's
+collection (`user_media`), watchlist and dismissals. For a high-history account the
+exclusions are the binding constraint — user A has logged 111 titles, most of them the
+popular ones these sources return.
+
+### 9.6 Concentration
+
+Diversity ceilings are absolute counts against a 20-item slate, not shares:
+`MAX_PER_ANCHOR = 4`, `MAX_PER_FRANCHISE = 2`, `MAX_GENRE_SHARE = 0.4` (8 slots).
+So one anchor can supply at most a fifth of a wall, and a full wall must draw on **at
+least five** distinct anchors. Within that, a few high-weight titles do dominate
+*generation*: anchor score is 60% of the total and 100% of the anchor-derived pool comes
+from those six.
+
+### 9.7 Source diversity
+
+Three sources, and two of them are the same for everybody: trending is global, and social
+is the follow graph rather than the corpus. Only the similar-to-anchor source is about
+this reader's taste, and it is the one capped at six. **The candidate sources are narrow
+even when the history is broad** — which is the founder's second question, and the answer
+is yes.
+
+### 9.8 Freshness, and the A/B/A/B question
+
+`refresh-diagnostic.test.ts` now measures cycling as well as turnover. Over six
+generations: no return to an earlier wall two refreshes later, no orbit around the first
+wall, and more than 18 distinct titles visited — so the wall is **not** alternating
+between two arrangements. The `REFRESH_ANCHORS` exemption expiring (#112) holds.
+
+### 9.9 No deterministic bug found
+
+Everything above is the design behaving as written. Nothing here is a defect, so nothing
+was changed and no founder decision is being forced.
+
+The lever, if breadth is wanted, is `ANCHOR_LIMIT` — but it is one provider request per
+anchor per slate, so raising it is a cost decision rather than a code one, and it should
+wait for the 336-hour impression window to produce data (§8).
