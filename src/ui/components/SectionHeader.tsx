@@ -7,6 +7,19 @@ export type SectionHeaderProps = {
   title: string;
   actionLabel?: string;
   onPressAction?: () => void;
+  /**
+   * Print the title exactly as given instead of upper-casing it.
+   *
+   * **One caller, and it is a brand exception the founder made deliberately**: the
+   * profile's awards shelf reads `bingd. AWARDS`, because the product's name is
+   * lower-case with a full stop and `BINGD. AWARDS` spells it wrong. Everything else on
+   * every surface stays upper-cased, which is what makes this an exception rather than a
+   * second style.
+   *
+   * The spoken name is `title` either way — uppercasing was always a style and never a
+   * spelling, which is why `accessibilityLabel` has never been derived from it.
+   */
+  exactCase?: boolean;
 };
 
 /**
@@ -21,7 +34,12 @@ export type SectionHeaderProps = {
  * screens must not hand-roll a header: Profile did, omitted the padding on one
  * of its two, and shipped a heading flush to the screen edge.
  */
-export function SectionHeader({ title, actionLabel, onPressAction }: SectionHeaderProps) {
+export function SectionHeader({
+  title,
+  actionLabel,
+  onPressAction,
+  exactCase = false,
+}: SectionHeaderProps) {
   return (
     <View
       style={styles.row}
@@ -31,7 +49,7 @@ export function SectionHeader({ title, actionLabel, onPressAction }: SectionHead
       accessibilityLabel={title}
     >
       <Text variant="sectionHeader" tone="action">
-        {title.toUpperCase()}
+        {exactCase ? title : title.toUpperCase()}
       </Text>
       {actionLabel && onPressAction ? (
         <Pressable accessibilityRole="button" onPress={onPressAction}>

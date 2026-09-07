@@ -78,9 +78,9 @@ beforeEach(() => {
 });
 
 describe('the shelf', () => {
-  it('names itself, upper-cased, the way every section on the page does', async () => {
+  it('spells the brand exactly, which is the one section that is not upper-cased', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByText('BINGD. AWARDS')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd. AWARDS')).toBeTruthy());
   });
 
   it('draws the awards that were earned', async () => {
@@ -91,17 +91,17 @@ describe('the shelf', () => {
     expect(view.getByText('Giggle')).toBeTruthy();
   });
 
-  it('shows at most three, however many were earned', async () => {
+  it('shows at most five, however many were earned', async () => {
     mockAwards = settled(
-      ['a', 'b', 'c', 'd', 'e'].map((key, i) => award(key, 2, `Award ${i}`)),
+      ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((key, i) => award(key, 2, `Award ${i}`)),
     );
     const view = await open();
 
     await waitFor(() => expect(view.getByText('Award 0')).toBeTruthy());
-    expect(view.getByText('Award 2')).toBeTruthy();
-    // The fourth and fifth are behind See all, which is where a list belongs.
-    expect(view.queryByText('Award 3')).toBeNull();
-    expect(view.queryByText('Award 4')).toBeNull();
+    expect(view.getByText('Award 4')).toBeTruthy();
+    // The sixth and seventh are behind See all, which is where a list belongs.
+    expect(view.queryByText('Award 5')).toBeNull();
+    expect(view.queryByText('Award 6')).toBeNull();
   });
 
   it('leaves a locked track off the shelf entirely', async () => {
@@ -110,7 +110,7 @@ describe('the shelf', () => {
     mockAwards = settled([award('locked', -1, 'LOL Mode')]);
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('BINGD. AWARDS')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd. AWARDS')).toBeTruthy());
     expect(view.queryByText('LOL Mode')).toBeNull();
   });
 });
@@ -121,7 +121,7 @@ describe('the empty slots', () => {
     // missing is how a shelf becomes a scoreboard of what somebody has not done.
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('BINGD. AWARDS')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd. AWARDS')).toBeTruthy());
     expect(view.queryByText(/Locked/i)).toBeNull();
     expect(view.queryByText(/Keep watching/i)).toBeNull();
   });
@@ -134,17 +134,17 @@ describe('the empty slots', () => {
    * One render per case, deliberately: a second `render` in the same test replaces the
    * screen, and assertions against the first view then read a tree that is gone.
    */
-  it('draws three empty slots for an account that has earned nothing', async () => {
+  it('draws five empty slots for an account that has earned nothing', async () => {
     const view = await open();
-    await waitFor(() => expect(view.getByText('BINGD. AWARDS')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd. AWARDS')).toBeTruthy());
 
     expect(
       view.getAllByTestId('award-slot-empty', { includeHiddenElements: true }),
-    ).toHaveLength(3);
+    ).toHaveLength(5);
     expect(view.queryAllByTestId('award-slot')).toHaveLength(0);
   });
 
-  it('fills what it has and leaves the rest of the three empty', async () => {
+  it('fills what it has and leaves the rest of the five empty', async () => {
     mockAwards = settled([award('a', 2, 'Wheeze')]);
     const view = await open();
     await waitFor(() => expect(view.getByText('Wheeze')).toBeTruthy());
@@ -152,15 +152,17 @@ describe('the empty slots', () => {
     expect(view.getAllByTestId('award-slot')).toHaveLength(1);
     expect(
       view.getAllByTestId('award-slot-empty', { includeHiddenElements: true }),
-    ).toHaveLength(2);
+    ).toHaveLength(4);
   });
 
-  it('draws no empty slot at all once three are earned', async () => {
-    mockAwards = settled(['a', 'b', 'c'].map((key, i) => award(key, 2, `Award ${i}`)));
+  it('draws no empty slot at all once five are earned', async () => {
+    mockAwards = settled(
+      ['a', 'b', 'c', 'd', 'e'].map((key, i) => award(key, 2, `Award ${i}`)),
+    );
     const view = await open();
     await waitFor(() => expect(view.getByText('Award 0')).toBeTruthy());
 
-    expect(view.getAllByTestId('award-slot')).toHaveLength(3);
+    expect(view.getAllByTestId('award-slot')).toHaveLength(5);
     expect(
       view.queryAllByTestId('award-slot-empty', { includeHiddenElements: true }),
     ).toHaveLength(0);
@@ -171,7 +173,7 @@ describe('the empty slots', () => {
     // before Goals is the worst version of this section for the readers least able to
     // skip it.
     const view = await open();
-    await waitFor(() => expect(view.getByText('BINGD. AWARDS')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd. AWARDS')).toBeTruthy());
 
     for (const slot of view.getAllByTestId('award-slot-empty', {
       includeHiddenElements: true,
@@ -200,7 +202,7 @@ describe('the empty slots', () => {
     await waitFor(() =>
       expect(
         view.getAllByTestId('award-slot-empty', { includeHiddenElements: true }),
-      ).toHaveLength(3),
+      ).toHaveLength(5),
     );
 
     expect(wellOpacity(view)).toBeUndefined();
@@ -211,7 +213,7 @@ describe('the empty slots', () => {
     await waitFor(() =>
       expect(
         view.getAllByTestId('award-slot-empty', { includeHiddenElements: true }),
-      ).toHaveLength(3),
+      ).toHaveLength(5),
     );
 
     expect(wellOpacity(view)).toBeLessThan(1);
@@ -255,7 +257,7 @@ describe('when the read does not land', () => {
     mockAwards = { isPending: true, isError: false };
     const view = await open();
 
-    await waitFor(() => expect(view.getByText('BINGD. AWARDS')).toBeTruthy());
+    await waitFor(() => expect(view.getByText('bingd. AWARDS')).toBeTruthy());
     // Three empty wells would be a claim that the person has earned nothing.
     expect(
       view.queryAllByTestId('award-slot-empty', { includeHiddenElements: true }),
@@ -274,7 +276,7 @@ describe('when the read does not land', () => {
     mockAwards = { isPending: false, isError: true };
     const view = await open();
 
-    expect(view.queryByText('BINGD. AWARDS')).toBeNull();
+    expect(view.queryByText('bingd. AWARDS')).toBeNull();
     expect(view.queryByText(/Could not load/i)).toBeNull();
   });
 });

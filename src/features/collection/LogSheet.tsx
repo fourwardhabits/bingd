@@ -8,6 +8,7 @@ import { queryKeys } from '@/lib/query';
 import { track, type Surface } from '@/lib/analytics';
 import { compactName } from '@/lib/titles';
 import { useCurrentProfile } from '@/features/auth';
+import { readNoteVisibilityDefault, rememberNoteVisibility } from './note-visibility-pref';
 import { theme } from '@/ui/tokens';
 import {
   BucketChoices,
@@ -275,6 +276,23 @@ function Body({
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
   const logState = useLogState(profile.id, title.id);
+  /**
+   * What a new note opens on for this reader, once the local store answers.
+   *
+   * Null until it lands, and the fallback while it is null is the product default —
+   * on. A composer that opened private and then flipped to public a beat later would
+   * be worse than either, and the read is local so the gap is a frame.
+   */
+  const [rememberedVisibility, setRememberedVisibility] = useState<NoteVisibility | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void readNoteVisibilityDefault(profile.id).then((stored) => {
+      if (!cancelled) setRememberedVisibility(stored);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile.id]);
   const { data: existing } = logState;
   const state = existing ?? emptyLogState;
   /**
@@ -494,11 +512,23 @@ function Body({
    * the author kept private. The last term only ever decides a note that has no stored
    * value to contradict.
    */
+  /**
+   * **The remembered default, and it is the last term rather than the first.**
+   *
+   * The founder's rule (2026-09-06): a first-ever note opens with *Share as a review*
+   * on, and after that a new note opens on whatever they chose last time. What the rule
+   * must never do is republish existing writing — so it sits behind `state.note`, which
+   * is the promise that a saved note opens on its stored value and nothing else.
+   *
+   * `noteIntent === 'review'` still wins over it: arriving through "Write a review" is
+   * an explicit request to publish this one, whatever the habit is.
+   */
   const visibility =
     visibilityEdit ??
     (state.note
       ? state.noteVisibility
-      : openWriting ?? (noteIntent === 'review' ? 'public' : 'private'));
+      : (openWriting ??
+        (noteIntent === 'review' ? 'public' : (rememberedVisibility ?? 'public'))));
   const spoilers = spoilersEdit ?? state.noteSpoilers;
   const effectiveDate = dateEdit ?? state.watchedOn ?? today();
   /**
@@ -518,8 +548,7 @@ function Body({
 
   // Logging is a collection change like any other: it writes a feed event, moves the
   // watchlist, and changes what this reader has watched. The same set as ranking.
-  const refresh = () =>
-    invalidateAfterCollectionChange(queryClient, profile.id, title.id);
+  const refresh = () => invalidateAfterCollectionChange(queryClient, profile.id, title.id);
 
   /**
    * What is stored about this title, answered only once the read is at rest.
@@ -741,7 +770,8 @@ function Body({
     const storedVisibility = knownClaims.current?.visibility ?? state.noteVisibility;
     const storedSpoilers = knownClaims.current?.spoilers ?? state.noteSpoilers;
     const claimsChanged =
-      Boolean(trimmed) && (nextVisibility !== storedVisibility || nextSpoilers !== storedSpoilers);
+      Boolean(trimmed) &&
+      (nextVisibility !== storedVisibility || nextSpoilers !== storedSpoilers);
 
     if (!noteChanged && !dateChanged && !claimsChanged) return;
 
@@ -802,6 +832,19 @@ function Body({
           if (writesNoteHere) {
             knownNote.current = trimmed;
             knownClaims.current = { visibility: nextVisibility, spoilers: nextSpoilers };
+            /**
+             * **The habit, remembered — and only here.**
+             *
+             * This branch is a note being written on a row that did not exist, which is
+             * the definition of a new composition. The `save_note` branch below is an
+             * edit to writing that already exists, and a decision about *that note* is
+             * not a change of habit — remembering it there is how a reader who unshared
+             * one old private note would find every future note opening private.
+             *
+             * Only on an acknowledged success, for the same reason `createdRow` is:
+             * a save that failed says nothing about what anybody intended.
+             */
+            void rememberNoteVisibility(profile.id, nextVisibility);
           }
         }
         ok = report(result);
@@ -1431,10 +1474,16 @@ function Body({
             icon="calendar-outline"
             label="Watch date"
             value={
-              loaded ? (datelessOnPurpose ? 'Not recorded' : formatWatchDate(effectiveDate)) : undefined
+              loaded
+                ? datelessOnPurpose
+                  ? 'Not recorded'
+                  : formatWatchDate(effectiveDate)
+                : undefined
             }
             expanded={expanded === 'date'}
-            onPress={loaded ? () => setExpanded(expanded === 'date' ? null : 'date') : undefined}
+            onPress={
+              loaded ? () => setExpanded(expanded === 'date' ? null : 'date') : undefined
+            }
             disabledReason={GATE_REASON[fieldState]}
           />
           {loaded && expanded === 'date' ? (
@@ -1456,19 +1505,19 @@ function Body({
         </View>
 
         {/**
-          * **The end of the flow, said out loud.**
-          *
-          * Only in the post-rank state, and it is the whole reason that state is not a
-          * dead end: everything above it is optional, and without a control that says so
-          * a form of Add rows reads as things you have to do. Done commits nothing —
-          * every row above writes on its own, and the flush it carries is only the
-          * autosave's leave-the-field contract applied to leaving the sheet, so text
-          * typed a moment ago is not waiting out a debounce when the sheet unmounts.
-          *
-          * The ordinary sheet does not get one. It has a Close in its header and a
-          * backdrop, and a title that has not been ranked yet has no moment this would
-          * be the end of.
-          */}
+         * **The end of the flow, said out loud.**
+         *
+         * Only in the post-rank state, and it is the whole reason that state is not a
+         * dead end: everything above it is optional, and without a control that says so
+         * a form of Add rows reads as things you have to do. Done commits nothing —
+         * every row above writes on its own, and the flush it carries is only the
+         * autosave's leave-the-field contract applied to leaving the sheet, so text
+         * typed a moment ago is not waiting out a debounce when the sheet unmounts.
+         *
+         * The ordinary sheet does not get one. It has a Close in its header and a
+         * backdrop, and a title that has not been ranked yet has no moment this would
+         * be the end of.
+         */}
         {postRank ? (
           <View style={styles.done}>
             <Button label="Done" onPress={finish} />

@@ -27,7 +27,7 @@ import {
   Button,
   HeaderBoundary,
   EmptyState,
-  MediumSelector,
+  MEDIUM_OPTIONS,
   Screen,
   SegmentedTabs,
   SkeletonRow,
@@ -338,8 +338,38 @@ export default function CollectionScreen() {
   return (
     <Screen>
       <AppHeader />
-      <MediumSelector value={medium} onChange={changeMedium} />
-      <SegmentedTabs options={segments} value={active} onChange={setSegment} />
+      {/**
+       * **Two tab rows, and they are deliberately not the same size** (founder
+       * addendum, 2026-09-06).
+       *
+       * Movies and TV were a dropdown: a control that hides one of its two options
+       * behind a tap and a sheet, for a choice a reader makes constantly. They are
+       * visible peer tabs now, in the position and at roughly the weight the dropdown's
+       * `title1` held, so the swap costs no vertical space.
+       *
+       * Watched / Watchlist stays `secondary` — unchanged, and that is the point. The
+       * two rows answer different questions (which universe, then which state within
+       * it), so a reader has to be able to read them as a hierarchy rather than as two
+       * competing navigation bars. Scale and underline weight carry that; no card, no
+       * background block, no second heading.
+       *
+       * Search's All / Movies / TV / People deliberately did **not** follow: those
+       * filter a result set rather than switching a destination, and they keep the
+       * rounded chip language. See `SegmentedTabs`'s own note.
+       */}
+      <SegmentedTabs
+        variant="primary"
+        options={MEDIUM_OPTIONS}
+        value={medium}
+        onChange={changeMedium}
+        accessibilityLabel="Media type"
+      />
+      <SegmentedTabs
+        options={segments}
+        value={active}
+        onChange={setSegment}
+        accessibilityLabel="Collection section"
+      />
       {/* Beneath the Movies/TV and Watched/Watchlist controls, which are both
           navigation: the same seam Feed and Log use, in the analogous place. The
           information architecture is untouched. */}
@@ -382,7 +412,12 @@ export default function CollectionScreen() {
         <Watched userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
       ) : null}
       {active === 'watchlist' ? (
-        <Watchlist userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
+        <Watchlist
+          userId={profile.id}
+          medium={medium}
+          state={viewState}
+          onChange={changeView}
+        />
       ) : null}
       {active === 'unranked' ? (
         <Unranked userId={profile.id} medium={medium} state={viewState} onChange={changeView} />
@@ -643,4 +678,3 @@ function shouldShowUnrankedNudge({
 
   return rankedCount > pref.rankedCountAtDismissal;
 }
-

@@ -17,7 +17,19 @@ export type ScoreBadgeProps = {
    */
   bucket?: Bucket | null;
   size?: ScoreBadgeSize;
-  /** Makes the unranked state a button into the ranking sheet. */
+  /**
+   * Makes the badge a button into the canonical log-and-rank sheet — **in both states**
+   * since 2026-09-06.
+   *
+   * It used to apply to the unranked ring alone, which made the more useful half of the
+   * control dead: on a search row a reader who has already ranked something is shown
+   * their own 9.0 and, until this, could do nothing with it. The founder's rule is that
+   * the score is bingd.'s most useful state indicator, so it is also the place to press
+   * to change it.
+   *
+   * Absent on every collection wall and every feed row, which is where the badge is
+   * reporting rather than offering — so those are untouched.
+   */
   onPress?: () => void;
 };
 
@@ -50,16 +62,25 @@ export function ScoreBadge({ score, bucket, size = 'md', onPress }: ScoreBadgePr
   }
 
   const value = formatScore(score);
+  // "8.7" alone is a bare number in a list of film titles. The unit is what makes it
+  // mean anything read aloud.
+  const spoken = bucket ? `${value} out of 10, ${BUCKET_LABEL[bucket]}` : `${value} out of 10`;
 
-  return (
+  /**
+   * The circle carries the accessible name itself rather than being wrapped in a node
+   * that does, and that is not incidental: a wrapper puts a view with no style between
+   * the label and the fill, so anything reading the treatment off the labelled node —
+   * `ScoreBadge.test.tsx` does exactly that — finds nothing. Pressability is added
+   * *around* it below, where the role genuinely changes.
+   */
+  const circle = (
     <View
       accessible
-      accessibilityRole="text"
-      // "8.7" alone is a bare number in a list of film titles. The unit is what
-      // makes it mean anything read aloud.
-      accessibilityLabel={
-        bucket ? `${value} out of 10, ${BUCKET_LABEL[bucket]}` : `${value} out of 10`
-      }
+      accessibilityRole={onPress ? 'button' : 'text'}
+      accessibilityLabel={spoken}
+      // The score says what it is; the hint says what pressing it does. Without this a
+      // screen reader announces a number that happens to be a button.
+      accessibilityHint={onPress ? 'Opens your log, where you can rank it again' : undefined}
       style={[styles.circle, styles.filled, { width: diameter, height: diameter }]}
     >
       <Text
@@ -73,6 +94,18 @@ export function ScoreBadge({ score, bucket, size = 'md', onPress }: ScoreBadgePr
         {value}
       </Text>
     </View>
+  );
+
+  if (!onPress) return circle;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={theme.space[2]}
+      style={({ pressed }) => pressed && styles.pressed}
+    >
+      {circle}
+    </Pressable>
   );
 }
 

@@ -6,6 +6,8 @@ import { queryKeys } from '@/lib/query';
 import { Button, EmptyState, SectionHeader, SkeletonRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
+import { StreakLine } from '@/features/streaks/StreakLine';
+
 import { GoalBar } from './GoalBar';
 import { GoalSheet } from './GoalSheet';
 import { GoalTitlesSheet } from './GoalTitlesSheet';
@@ -25,6 +27,13 @@ export type GoalsSectionProps = {
    * "open my watch" is not the same destination.
    */
   onPressTitle?: (mediaItemId: string) => void;
+  /**
+   * Whose weekly streak to draw under the bars, or nothing.
+   *
+   * Own profile only: a streak is a private fact about effort rather than a public one
+   * about taste, and this section is drawn on somebody else's profile too.
+   */
+  streakUserId?: string;
 };
 
 /**
@@ -40,6 +49,7 @@ export function GoalsSection({
   userId,
   year = currentYear(),
   onPressTitle,
+  streakUserId,
 }: GoalsSectionProps) {
   const queryClient = useQueryClient();
   const goals = useWatchGoals(userId, year);
@@ -86,7 +96,9 @@ export function GoalsSection({
         // unknown current value opens a sheet that would happily write an empty draft
         // over a goal the user has actually set.
         actionLabel={goals.isSuccess && statuses.length > 0 ? 'Edit' : undefined}
-        onPressAction={goals.isSuccess && statuses.length > 0 ? () => setEditing(true) : undefined}
+        onPressAction={
+          goals.isSuccess && statuses.length > 0 ? () => setEditing(true) : undefined
+        }
       />
 
       {goals.isPending ? (
@@ -124,6 +136,25 @@ export function GoalsSection({
           ))}
         </View>
       )}
+
+      {/**
+       * **The weekly streak, under the goal bars rather than in a section of its own**
+       * (founder, 2026-09-06).
+       *
+       * It shipped with a `WEEKLY STREAK` heading and a two-line block, which made a
+       * third heading in a part of the profile that already had two — and the streak
+       * is not a peer of Goals and Awards. It is a fact about the year in progress,
+       * which is exactly what this section is: `YOUR 2026` covers it.
+       *
+       * So: one compact row, no heading, directly beneath the bars. The section owns
+       * it because the section owns the frame it belongs in, and putting it here means
+       * a profile gains the information without gaining a band.
+       *
+       * `streakUserId` rather than `userId`, because this section is drawn on
+       * somebody else's profile too and a streak is a private fact about effort —
+       * the caller passes it only where that is the reader's own.
+       */}
+      {streakUserId ? <StreakLine userId={streakUserId} /> : null}
 
       {/* Mounted only while open. The sheet seeds its draft from `targets` on mount,
           so a sheet that lived alongside this section would seed itself from `{}`

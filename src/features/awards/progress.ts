@@ -68,6 +68,20 @@ export type AwardProgress = {
  * step. Two-Screen Life is why this takes a tier: its caps move with the threshold, so
  * its number genuinely differs between Bronze and Gold. The other nineteen ignore it.
  */
+/**
+ * What the tier a reader is working toward is actually called.
+ *
+ * A creative track carries a unique name per tier and it is used unchanged. A metal
+ * track does not — its tiers are Bronze, Silver and Gold in the canonical table, and
+ * there is no other name in the definitions to prefer — so the family name supplies the
+ * rest and the result names the award instead of describing it.
+ *
+ * `metalTiers` is the flag the track already carries for exactly this distinction; it is
+ * what `title` reads to decide whether an earned tier replaces the heading.
+ */
+const nextAwardName = (track: AwardTrack, tier: AwardTier) =>
+  track.metalTiers ? `${track.displayName} ${tier.label}` : tier.label;
+
 const measure = (track: AwardTrack, facts: AwardFacts, tier: AwardTier) =>
   breakdownTotal(track.contributions(facts, tier));
 
@@ -169,8 +183,24 @@ export function evaluate(track: AwardTrack, facts: AwardFacts): AwardProgress {
      * Past the top there is nothing to aim at, so the line states what was done rather
      * than inventing a fourth tier to be short of.
      */
+    /**
+     * **And the name is the award's, not a bare metal** (founder, 2026-09-06).
+     *
+     * `Movie Muncher` over `Next: Silver · Watch 200 movies` was the second half of the
+     * same complaint: "Silver" is an adjective, and a reader looking at it cannot tell
+     * whether the thing they are working toward is called Silver, called Movie Muncher,
+     * or something they have not been told yet.
+     *
+     * Seventeen of the twenty tracks have genuinely unique tier names — Giggle, Cackle,
+     * Wheeze — and those are used exactly as they are. The three metal tracks do not:
+     * their tiers really are called Bronze, Silver and Gold in the canonical
+     * definitions, and there is no other name to reach for. So the *family* supplies the
+     * rest of it and the line reads `Next: Movie Muncher Silver`, which names the award
+     * rather than describing it. Nothing is invented and nothing is substituted — both
+     * halves come from `AwardTrack`.
+     */
     detailLine: nextTier
-      ? `Next: ${nextTier.label} · ${track.next(nextTier.threshold)}`
+      ? `Next: ${nextAwardName(track, nextTier)} · ${track.next(nextTier.threshold)}`
       : track.earned(top.threshold),
     countLabel: nextTier ? `${count(value)} / ${count(nextTier.threshold)}` : count(value),
     unavailable: false,

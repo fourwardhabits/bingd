@@ -14,11 +14,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useCurrentProfile } from '@/features/auth';
+import { useCelebrationHandoff } from '@/features/awards/celebration-queue';
 import { LogSheet, type LoggableTitle, type PostRank } from '@/features/collection/LogSheet';
 import { BUCKET_IDS } from '@/features/collection/use-log-state';
 import { heroRankFor } from '@/features/collection/hero-rank';
-import { useCompanions } from '@/features/collection/use-companions';
-import { useRankedCollection, type RankingCategory } from '@/features/collection/use-collection';
+import {
+  useRankedCollection,
+  type RankingCategory,
+} from '@/features/collection/use-collection';
 import { useTitleScore } from '@/features/collection/use-score';
 import { shouldMask, useWatched } from '@/features/collection/use-watched';
 import {
@@ -96,6 +99,15 @@ type Tab = 'episodes' | 'cast' | 'reviews' | 'videos' | 'details' | 'seasons';
 const EPISODES_FIRST_PAGE = 50;
 
 /**
+ * How many genre chips the page draws before it counts the rest.
+ *
+ * Three fit one row at every width this app supports. A fourth does not, and wrapping it
+ * produced the two-line block of metadata the founder rejected on a device — see the
+ * `+N` beside them.
+ */
+const GENRE_CHIPS = 3;
+
+/**
  * The title page (screens.md §6), rebuilt after the founder's device test.
  *
  * What that test rejected, and what replaced it:
@@ -132,6 +144,8 @@ export default function TitleScreen() {
   }>();
   const profile = useCurrentProfile();
   const queryClient = useQueryClient();
+  /** Drains the post-ranking celebration queue when the log flow ends. */
+  const celebrate = useCelebrationHandoff();
   const router = useRouter();
   // For the hero: the header is transparent, so the artwork's own top would sit under
   // the status bar without it (TitleHero's `topInset`).
@@ -294,7 +308,6 @@ export default function TitleScreen() {
   const community = useCommunityScore(titleId, profile.id);
   const following = useFollowingScore(titleId, profile.id);
   const watched = useWatched(profile.id);
-  const companions = useCompanions(profile.id, titleId);
   // Seeded rows arrive with no artwork, overview or credits. Opening the screen is
   // what fetches them, unless the bulk pass got there first.
   // The second condition is about the Phase E deployment rather than about this title:
@@ -397,7 +410,11 @@ export default function TitleScreen() {
   if (!hasId) {
     return (
       <Screen includeBottomInset>
-        <EmptyState kind="nothingMatches" title="Title not found" body="This link is incomplete." />
+        <EmptyState
+          kind="nothingMatches"
+          title="Title not found"
+          body="This link is incomplete."
+        />
       </Screen>
     );
   }
@@ -468,14 +485,6 @@ export default function TitleScreen() {
     { parentIsVisible: true },
   );
   const isWatchlisted = Boolean(data.watchlist);
-  const watchedDate = data.logged?.watched_on
-    ? new Date(`${data.logged.watched_on}T00:00:00Z`).toLocaleDateString(undefined, {
-        timeZone: 'UTC',
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      })
-    : null;
   /**
    * Which of the two the writing on this title currently is, or neither.
    *
@@ -822,6 +831,51 @@ export default function TitleScreen() {
               onPressRanked={() => setManaging(true)}
               rankable={rankable}
             />
+            {/**
+             * **Watchlist and Recommend, icon-only, beside the rank control**
+             * (founder, physical Android, 2026-09-06).
+             *
+             * They were a labelled `[ Watchlist ] [ Recommend ]` row in the body,
+             * under the description. The founder rejected it on the device for two
+             * reasons that are really one: a chip the size of a button, in Maroon,
+             * competed with Rank for the page's primary action, and the row cost a
+             * band of vertical space that pushed the scores below the fold.
+             *
+             * As glyphs they are what they always were — secondary acts on a title —
+             * and they sit where the acts about *this reader and this title* belong,
+             * which is the cluster the score is already in. Rank keeps its label
+             * because it is the page's one primary action and a bare glyph would not
+             * say so.
+             *
+             * Both keep their full accessible names, their 44pt targets through
+             * `hitSlop`, and their exact behaviour. A series gets Watchlist alone: it
+             * cannot be ranked or recommended (PRD §10), which is the same rule the
+             * labelled row applied.
+             */}
+            <View style={styles.heroActions}>
+              <HeroAction
+                icon={isWatchlisted ? 'bookmark' : 'bookmark-outline'}
+                selected={isWatchlisted}
+                accessibilityLabel={
+                  isWatchlisted
+                    ? `Remove ${title.title} from your watchlist`
+                    : `Add ${title.title} to your watchlist`
+                }
+                onPress={() => void toggleWatchlist()}
+                disabled={watchlistBusy}
+              />
+              {rankable ? (
+                <HeroAction
+                  icon="paper-plane-outline"
+                  accessibilityLabel={`Recommend ${title.title} to a friend`}
+                  onPress={() => {
+                    setActionError(null);
+                    setRecommendedTo(null);
+                    setRecommending(true);
+                  }}
+                />
+              ) : null}
+            </View>
           </View>
         </View>
 
@@ -877,68 +931,6 @@ export default function TitleScreen() {
           {recommendedBy && !hero.uri ? <RecommendedCallout label={recommendedBy} /> : null}
         </View>
 
-        {/* Directly under the metadata line, and still never over the artwork. The
-            founder's order is metadata → genres → description, which reads outward from
-            what the thing *is* to what it is *about*; underneath the description they
-            were a footnote to a paragraph nobody had finished reading.
-
-            **Three, not five, and one row is the design** (hierarchy pass). Five chips
-            wrapped to two and sometimes three rows on a 360pt Android screen, which put
-            a block of metadata between the title and the actions and pushed the score
-            below the fold on the founder's device. Three is what fits one row at the
-            widths this app supports; the wrap survives as the guard for a large text
-            size, exactly as it does on the action row below. Nothing is lost — Details
-            still lists every genre, joined, under its own label. */}
-        {descriptive.genres.length ? (
-          <View style={styles.pills}>
-            {descriptive.genres.slice(0, 3).map((genre: string) => (
-              <Chip key={genre} label={genre} />
-            ))}
-          </View>
-        ) : null}
-
-        {/* A deliberate row rather than two glyphs floating under the title.
-            Rank is not here — it belongs opposite the poster, with the score it
-            changes, and a second Rank affordance is the duplication the founder
-            already rejected once. */}
-        <View style={styles.actionRow}>
-          <RowAction
-            icon={isWatchlisted ? 'bookmark' : 'bookmark-outline'}
-            label={isWatchlisted ? 'Saved' : 'Watchlist'}
-            accessibilityLabel={
-              isWatchlisted ? `Remove ${title.title} from your watchlist` : `Add ${title.title} to your watchlist`
-            }
-            selected={isWatchlisted}
-            onPress={() => void toggleWatchlist()}
-            disabled={watchlistBusy}
-          />
-          {/* Recommend is a first-class Bingd action: it is what somebody does with a
-              title they already have an opinion about, and it goes to one named person
-              rather than to an address book. A series has no Recommend, for the same
-              reason it has no Rank — it is not a thing anybody watched (PRD §10), which
-              leaves a series page with Watchlist alone. Season pages keep both. */}
-          {/* Outlined since the hierarchy pass: Rank, up in the hero cluster, is the
-              page's one filled-Maroon action. Two equally dominant maroon CTAs was
-              exactly the founder's complaint — see RowAction's `primary` note. */}
-          {rankable ? (
-            <RowAction
-              icon="paper-plane-outline"
-              label="Recommend"
-              accessibilityLabel={`Recommend ${title.title} to a friend`}
-              onPress={() => {
-                setActionError(null);
-                setRecommendedTo(null);
-                setRecommending(true);
-              }}
-            />
-          ) : null}
-          {/* There is no third control. Share used to sit here and it was the one that
-              pushed the row off the edge of a narrow Android screen: three labelled chips
-              do not fit at 360pt with the gutter this page uses. It has not been dropped.
-              The Recommend sheet ends in "Share off Bingd", which is the same native
-              share with the reader's invite link attached. One act, one door. */}
-        </View>
-
         {actionError ? (
           <View style={styles.block}>
             <Text variant="footnote" tone="action">
@@ -964,7 +956,8 @@ export default function TitleScreen() {
         {personal.isError ? (
           <View style={styles.block}>
             <Text variant="footnote" tone="secondary">
-              {diagnose(personal.error) ?? 'Your rating and watchlist state could not be loaded.'}
+              {diagnose(personal.error) ??
+                'Your rating and watchlist state could not be loaded.'}
             </Text>
             <Pressable
               accessibilityRole="button"
@@ -1040,29 +1033,45 @@ export default function TitleScreen() {
           </Pressable>
         ) : null}
 
-        {/* **Demoted, and deliberately still on the page** (hierarchy pass).
-            "Watched 12 Aug 2026 with Ada" sat immediately under the title, in the band
-            the founder's device pass wanted for the score and the actions — the single
-            most prominent line on the page was a date the reader already knows. It
-            answers "have I seen this", and the hero answers that first now: a score and
-            an ordinal beside the poster. So the exact date follows the description as a
-            quiet footnote, which is the weight a date has.
+        {/* Under the description, which is where the founder's final order puts them. The
+            founder's order is metadata → genres → description, which reads outward from
+            what the thing *is* to what it is *about*; underneath the description they
+            were a footnote to a paragraph nobody had finished reading.
 
-            Not moved into Details, and not dropped: the companions are here too, and
-            "who I watched it with" is the half nobody would think to go looking for
-            behind a tab. */}
-        {watchedDate || companions.data?.length ? (
-          <View style={styles.block}>
-            <Text variant="footnote" tone="tertiary">
-              {[
-                watchedDate ? `Watched ${watchedDate}` : null,
-                companions.data?.length
-                  ? `with ${companions.data.map((person) => person.name).join(', ')}`
-                  : null,
-              ]
-                .filter(Boolean)
-                .join(' ')}
-            </Text>
+            **Three, not five, and one row is the design** (hierarchy pass). Five chips
+            wrapped to two and sometimes three rows on a 360pt Android screen, which put
+            a block of metadata between the title and the actions and pushed the score
+            below the fold on the founder's device. Three is what fits one row at the
+            widths this app supports; the wrap survives as the guard for a large text
+            size, exactly as it does on the action row below. Nothing is lost — Details
+            still lists every genre, joined, under its own label. */}
+        {descriptive.genres.length ? (
+          <View style={styles.pills}>
+            {descriptive.genres.slice(0, GENRE_CHIPS).map((genre: string) => (
+              <Chip key={genre} label={genre} />
+            ))}
+            {/**
+             * **`+N` rather than a second row** (founder, 2026-09-06).
+             *
+             * Three chips fit one row at every width this app supports; a fourth does
+             * not, and wrapping it produced the two-line block of metadata the founder
+             * rejected. The overflow is *stated* instead — a reader can see that there
+             * are more without the page growing a band to prove it — and Details still
+             * lists every genre, joined, under its own label.
+             *
+             * Not a chip: it is a count, not a genre, and a reader must not be able to
+             * mistake `+2` for something a title is.
+             */}
+            {descriptive.genres.length > GENRE_CHIPS ? (
+              <Text
+                variant="footnote"
+                tone="tertiary"
+                style={styles.genreOverflow}
+                accessibilityLabel={`And ${descriptive.genres.length - GENRE_CHIPS} more genres`}
+              >
+                {`+${descriptive.genres.length - GENRE_CHIPS}`}
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
@@ -1152,7 +1161,10 @@ export default function TitleScreen() {
         ) : null}
 
         {activeTab === 'cast' ? (
-          <CastStrip cast={cast} onPressMember={(member) => router.push(`/person/${member.id}`)} />
+          <CastStrip
+            cast={cast}
+            onPressMember={(member) => router.push(`/person/${member.id}`)}
+          />
         ) : null}
 
         {activeTab === 'videos' && videos.data?.length ? (
@@ -1181,7 +1193,9 @@ export default function TitleScreen() {
                       "Trailer" alone said neither: three rows reading "Trailer 1",
                       "Teaser", "Trailer" tell a reader nothing about which to tap. */}
                   <Text variant="caption" tone="tertiary">
-                    {[SITE_LABEL[video.site] ?? video.site, video.type].filter(Boolean).join(' · ')}
+                    {[SITE_LABEL[video.site] ?? video.site, video.type]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </Text>
                 </View>
               </Pressable>
@@ -1208,7 +1222,9 @@ export default function TitleScreen() {
             }
             onPressAuthor={(handle) => router.push(`/u/${handle}`)}
             viewerRanked={Boolean(data.ranked)}
-            viewerHasReview={(reviews.data ?? []).some((review) => review.userId === profile.id)}
+            viewerHasReview={(reviews.data ?? []).some(
+              (review) => review.userId === profile.id,
+            )}
             // One composer. A note has always been written in the log sheet, where the
             // spoiler flag and the visibility are chosen beside it; a second one here
             // would be a second content model wearing a different button.
@@ -1236,7 +1252,9 @@ export default function TitleScreen() {
             <Detail
               label="Your rank"
               value={
-                data.ranked && total ? `#${data.ranked.position} of ${total} in ${rankCategoryLabel}` : null
+                data.ranked && total
+                  ? `#${data.ranked.position} of ${total} in ${rankCategoryLabel}`
+                  : null
               }
             />
           </View>
@@ -1298,14 +1316,20 @@ export default function TitleScreen() {
         openWriting={openWriting}
         openSection={openSection}
         postRank={placement}
+        /* Both exits end the post-ranking flow, so both drain the celebration queue.
+           This is the half the founder physically hit: a reader who takes *Add details*
+           finishes here rather than on the reveal, and the payoff used to be held by a
+           ranking sheet that had already unmounted. Empty queue, nothing happens. */
         onDone={() => {
           setLoggingTitle(null);
           setPlacement(null);
+          celebrate();
         }}
         onClose={() => {
           setLoggingTitle(null);
           setPlacement(null);
           setActionError(null);
+          celebrate();
         }}
         onRank={(bucket, mode) => {
           if (!loggingTitle) return;
@@ -1324,7 +1348,6 @@ export default function TitleScreen() {
       <RankingSheet
         subject={rankingSubject}
         onClose={() => setRankingSubject(null)}
-        onRankAnother={() => setRankingSubject(null)}
         // Ranking is a subflow of logging, so it returns to the log rather than ending
         // at a number. The same sheet, on the same title, with the score at the top of
         // it — there is one implementation of "the rest of your log" and this is it.
@@ -1357,29 +1380,29 @@ export default function TitleScreen() {
           draft state on mount, and one that stayed mounted would keep a search
           somebody abandoned. */}
       {/**
-        * The way back out of a ranking, and out of the collection.
-        *
-        * Both were unreachable before this: the only thing the Ranked chip did was
-        * reopen the comparison, so an accidental ranking could be changed and never
-        * undone, and a title logged by mistake stayed logged.
-        *
-        * **Two rows, since the founder's final pass. There is no "remove ranking".** It
-        * was the middle row and it offered a state Bingd does not otherwise have: a
-        * title sitting in somebody's collection with no position, permanently, by
-        * choice. The product rule is that a title you keep is a title you have an
-        * opinion about — the Unranked tab is a queue to get through, not a place to
-        * park things — and an action whose whole purpose is to create a state the rest
-        * of the app treats as unfinished is an action that should not be offered.
-        *
-        * So: change the rating if it was wrong, and remove it from the collection if it
-        * should not be there. The second is the full escape hatch for an accidental log
-        * and always was; what it costs over the old middle row is a confirmation and
-        * the watch date, which is the right price for the rarer intention.
-        *
-        * **`rank_unrank` itself is untouched.** It is what `rank_rebucket` calls to move
-        * a title between bands, and it is granted, tested and load-bearing. What has
-        * gone is one row in one sheet.
-        */}
+       * The way back out of a ranking, and out of the collection.
+       *
+       * Both were unreachable before this: the only thing the Ranked chip did was
+       * reopen the comparison, so an accidental ranking could be changed and never
+       * undone, and a title logged by mistake stayed logged.
+       *
+       * **Two rows, since the founder's final pass. There is no "remove ranking".** It
+       * was the middle row and it offered a state Bingd does not otherwise have: a
+       * title sitting in somebody's collection with no position, permanently, by
+       * choice. The product rule is that a title you keep is a title you have an
+       * opinion about — the Unranked tab is a queue to get through, not a place to
+       * park things — and an action whose whole purpose is to create a state the rest
+       * of the app treats as unfinished is an action that should not be offered.
+       *
+       * So: change the rating if it was wrong, and remove it from the collection if it
+       * should not be there. The second is the full escape hatch for an accidental log
+       * and always was; what it costs over the old middle row is a confirmation and
+       * the watch date, which is the right price for the rarer intention.
+       *
+       * **`rank_unrank` itself is untouched.** It is what `rank_rebucket` calls to move
+       * a title between bands, and it is granted, tested and load-bearing. What has
+       * gone is one row in one sheet.
+       */}
       {managing ? (
         <Sheet
           visible
@@ -1388,36 +1411,42 @@ export default function TitleScreen() {
         >
           <View style={styles.menu}>
             {/**
-              * **Three groups, because seven undifferentiated rows is a list rather than
-              * a menu.**
-              *
-              * Your log is what you wrote about it, ranking is where it sits, collection
-              * is whether you keep it at all — and the destructive one is last and on its
-              * own, which is the only ordering that never puts Remove under a thumb
-              * reaching for something else.
-              */}
+             * **Three groups, because seven undifferentiated rows is a list rather than
+             * a menu.**
+             *
+             * Your log is what you wrote about it, ranking is where it sits, collection
+             * is whether you keep it at all — and the destructive one is last and on its
+             * own, which is the only ordering that never puts Remove under a thumb
+             * reaching for something else.
+             */}
             <MenuGroup title="Your log" />
             {/**
-              * **One field, one row (founder simplification, 2026-08-27).**
-              *
-              * `user_media` holds one `note` under one `note_visibility`, and the sheet
-              * now shows it as one thing: a note, with "Share as a review" as a state it
-              * can be in. The two rows this replaces — Review and Private note, each
-              * offering the conversion the other way — asked the reader to choose
-              * between two names for one piece of writing before opening it, which was
-              * the founder's exact complaint about the sheet itself. The label still
-              * says which state the writing is in, because "Edit your review" is a
-              * promise about where the text is visible; the conversion controls live in
-              * the composer, beside the text they describe.
-              *
-              * **The founder's device pass: every `value` in this menu is gone.**
-              * `SheetRow` draws the label and the secondary sentence on one line, so at
-              * the width of a phone every explanation truncated — rows of clipped grey
-              * text under clear labels, worse than no explanation at all.
-              */}
+             * **One field, one row (founder simplification, 2026-08-27).**
+             *
+             * `user_media` holds one `note` under one `note_visibility`, and the sheet
+             * now shows it as one thing: a note, with "Share as a review" as a state it
+             * can be in. The two rows this replaces — Review and Private note, each
+             * offering the conversion the other way — asked the reader to choose
+             * between two names for one piece of writing before opening it, which was
+             * the founder's exact complaint about the sheet itself. The label still
+             * says which state the writing is in, because "Edit your review" is a
+             * promise about where the text is visible; the conversion controls live in
+             * the composer, beside the text they describe.
+             *
+             * **The founder's device pass: every `value` in this menu is gone.**
+             * `SheetRow` draws the label and the secondary sentence on one line, so at
+             * the width of a phone every explanation truncated — rows of clipped grey
+             * text under clear labels, worse than no explanation at all.
+             */}
             <SheetRow
               icon="chatbubble-ellipses-outline"
-              label={hasReview ? 'Edit your review' : hasPrivateNote ? 'Edit your note' : 'Add a note'}
+              label={
+                hasReview
+                  ? 'Edit your review'
+                  : hasPrivateNote
+                    ? 'Edit your note'
+                    : 'Add a note'
+              }
               onPress={() => {
                 setManaging(false);
                 openLog('note', hasReview ? 'public' : 'private');
@@ -1425,28 +1454,28 @@ export default function TitleScreen() {
             />
 
             {/**
-              * **Directly under the writing row, because it is the other half of the
-              * same log** (founder, 2026-08-29).
-              *
-              * Companions were reachable only through *Change your rating*, which opens
-              * the bucket chooser — so the way to correct who you watched something with
-              * ran through a control that offers to re-rate it. The founder's device pass
-              * called that hidden, and it is: the row a reader is looking for is named
-              * "Who I watched with" and the row they had to press was named something
-              * else entirely.
-              *
-              * **It edits the log occurrence that is already there.** `openLog` opens
-              * the same sheet every other entry point opens, on the same `user_media`
-              * row, with the companion picker expanded — `section`, not `writing`, so
-              * the note composer stays closed and the keyboard stays down. It starts no
-              * ranking, writes no bucket, creates no second log and posts no activity;
-              * `useSetCompanions` remains the only writer, so watched-with notification
-              * is exactly as once-only as it was from every other door.
-              *
-              * In *Your log* rather than in *Ranking* for the same reason the note is:
-              * this group is what you recorded about watching it, and the group below is
-              * where it sits against everything else.
-              */}
+             * **Directly under the writing row, because it is the other half of the
+             * same log** (founder, 2026-08-29).
+             *
+             * Companions were reachable only through *Change your rating*, which opens
+             * the bucket chooser — so the way to correct who you watched something with
+             * ran through a control that offers to re-rate it. The founder's device pass
+             * called that hidden, and it is: the row a reader is looking for is named
+             * "Who I watched with" and the row they had to press was named something
+             * else entirely.
+             *
+             * **It edits the log occurrence that is already there.** `openLog` opens
+             * the same sheet every other entry point opens, on the same `user_media`
+             * row, with the companion picker expanded — `section`, not `writing`, so
+             * the note composer stays closed and the keyboard stays down. It starts no
+             * ranking, writes no bucket, creates no second log and posts no activity;
+             * `useSetCompanions` remains the only writer, so watched-with notification
+             * is exactly as once-only as it was from every other door.
+             *
+             * In *Your log* rather than in *Ranking* for the same reason the note is:
+             * this group is what you recorded about watching it, and the group below is
+             * where it sits against everything else.
+             */}
             <SheetRow
               icon="people-outline"
               label="Who I watched with"
@@ -1458,30 +1487,30 @@ export default function TitleScreen() {
 
             <MenuGroup title="Ranking" />
             {/**
-              * **Rank again means you watched it again.**
-              *
-              * That is the product definition (`docs/product/prd.md` §10), and it is why
-              * this row is the one place in the app that declares a second viewing:
-              * completing it writes exactly one new `title_ranked` activity, where
-              * Change your rating below writes none.
-              *
-              * `rank_again` (20260825000200, re-signed 20260826000500) opens a
-              * comparison session **over the position the title already has**. Nothing
-              * the reader can see moves until they finish: close the sheet, lose the
-              * network, kill the app, and the score, the band and the place in the list
-              * are exactly where they were. The founder's device pass found the
-              * opposite — the score vanished the moment this row was tapped — and that
-              * was the server unranking before it opened the session.
-              *
-              * The client writer is `session.rankAgain`, reached by opening the ranking
-              * sheet in `again` mode, which is the *only* way this app is allowed to do
-              * it. Composing `rank_unrank` and `rank_start` here would be two calls with
-              * a window between them in which the title has no position and no session.
-              *
-              * The bucket is passed straight through from `rankings.bucket`, so this row
-              * decides no rating — it redoes the comparisons inside the band that is
-              * already chosen.
-              */}
+             * **Rank again means you watched it again.**
+             *
+             * That is the product definition (`docs/product/prd.md` §10), and it is why
+             * this row is the one place in the app that declares a second viewing:
+             * completing it writes exactly one new `title_ranked` activity, where
+             * Change your rating below writes none.
+             *
+             * `rank_again` (20260825000200, re-signed 20260826000500) opens a
+             * comparison session **over the position the title already has**. Nothing
+             * the reader can see moves until they finish: close the sheet, lose the
+             * network, kill the app, and the score, the band and the place in the list
+             * are exactly where they were. The founder's device pass found the
+             * opposite — the score vanished the moment this row was tapped — and that
+             * was the server unranking before it opened the session.
+             *
+             * The client writer is `session.rankAgain`, reached by opening the ranking
+             * sheet in `again` mode, which is the *only* way this app is allowed to do
+             * it. Composing `rank_unrank` and `rank_start` here would be two calls with
+             * a window between them in which the title has no position and no session.
+             *
+             * The bucket is passed straight through from `rankings.bucket`, so this row
+             * decides no rating — it redoes the comparisons inside the band that is
+             * already chosen.
+             */}
             <SheetRow
               icon="repeat-outline"
               label="Rank again"
@@ -1620,66 +1649,55 @@ function Detail({ label, value }: { label: string; value: string | null }) {
 }
 
 /**
- * One action in the row under the description.
+ * A secondary act on this title, as a glyph beside the score.
  *
- * Icon first with a word beside it, rather than a bare glyph. The bare version was
- * what made these read as floating: a bookmark on its own says nothing about whether
- * it is a state or a button, and "Saved" versus "Watchlist" is the whole difference
- * the control exists to show.
+ * **Icon-only, and that is the founder's 2026-09-06 correction.** Watchlist and Recommend
+ * were labelled chips in a row of their own under the description. On a device that row
+ * did two things wrong at once: a chip the size of a button competed with Rank for the
+ * page's primary action, and the band it occupied pushed the scores below the fold.
+ *
+ * As glyphs they are what they always were — things you can do to a title, subordinate to
+ * ranking it — and they sit in the cluster that is already about this reader and this
+ * title. Rank keeps its label because it is the one primary action here and a bare glyph
+ * would not say so.
+ *
+ * The accessible name is the whole sentence, because to a screen reader the glyph says
+ * nothing at all. `hitSlop` rather than a larger box: the control clears 44pt without the
+ * hero band growing, which is the same rule `ActivityRow`'s strip follows.
  */
-function RowAction({
+function HeroAction({
   icon,
-  label,
   accessibilityLabel,
   onPress,
-  disabled = false,
+  disabled,
   selected,
-  primary = false,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
-  label: string;
   accessibilityLabel: string;
   onPress: () => void;
   disabled?: boolean;
   selected?: boolean;
-  /**
-   * The button-hierarchy rule, revised (founder, 2026-08-27, second pass): filled
-   * Maroon marks the primary action *of the current context*, not the primary social
-   * act everywhere. On a title page that context is the score/Rank cluster in the
-   * hero — ranking is the core act and directly creates the score — so nothing in
-   * this row wears the fill any more. Recommend is still filled Maroon *inside* the
-   * Recommend sheet, where sending is the point of the surface. The prop survives
-   * for the next context that earns it.
-   */
-  primary?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ disabled, ...(selected === undefined ? {} : { selected }) }}
+      accessibilityState={{ selected: Boolean(selected), disabled: Boolean(disabled) }}
       onPress={onPress}
       disabled={disabled}
-      hitSlop={theme.space[2]}
-      style={({ pressed }) => [
-        styles.rowAction,
-        selected && styles.rowActionOn,
-        primary && styles.rowActionPrimary,
-        (pressed || disabled) && styles.pressed,
-      ]}
+      hitSlop={theme.space[3]}
+      style={({ pressed }) => [styles.heroAction, pressed && styles.pressed]}
     >
       <Ionicons
         name={icon}
-        size={theme.layout.icon.sm}
-        color={primary ? theme.text.inverse : theme.semantic.action}
+        size={theme.layout.icon.md}
+        // Maroon when held, neutral otherwise — the app's one watchlist treatment, the
+        // same pair the feed row and the search row draw.
+        color={selected ? theme.semantic.action : theme.text.secondary}
       />
-      <Text variant="callout" tone={primary ? 'inverse' : 'action'}>
-        {label}
-      </Text>
     </Pressable>
   );
 }
-
 
 /**
  * Where a video plays, as a word rather than a hostname.
@@ -1811,6 +1829,18 @@ const styles = StyleSheet.create({
    * screenshots showed.
    */
   scoreColumn: { flex: 1, justifyContent: 'flex-end', paddingBottom: theme.space[3] },
+  /**
+   * The two secondary glyphs, under the score cluster they belong to.
+   *
+   * A row rather than a column so they read as a pair of small acts rather than as a
+   * stack competing with the score above them, and gapped generously enough that two
+   * 24pt glyphs with slop cannot overlap targets.
+   */
+  heroActions: { flexDirection: 'row', gap: theme.space[5], paddingTop: theme.space[3] },
+  heroAction: { alignItems: 'center', justifyContent: 'center' },
+  // Aligned to the chips rather than to the row: a count is not a chip and must not
+  // wear a chip's box, but it does have to sit on the same line as one.
+  genreOverflow: { alignSelf: 'center' },
   heading: {
     paddingHorizontal: theme.layout.gutter,
     // Halved in the hierarchy pass (16 → 8): with the poster overlapping the hero

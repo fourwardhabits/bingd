@@ -2,13 +2,13 @@ import { useEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { track } from '@/lib/analytics';
-import { SectionHeader, Text } from '@/ui/components';
+import { Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
 
 import { daysLeftInWeek } from './streak';
 import { useStreak } from './use-streak';
 
-export type StreakSectionProps = {
+export type StreakLineProps = {
   /** The owner's own id. This section is not drawn on anybody else's profile. */
   userId: string;
 };
@@ -40,7 +40,7 @@ export type StreakSectionProps = {
  * the second line says how long there is to keep it — days, not a countdown, and once,
  * not four times. `streak.ts` is where the grace itself lives.
  */
-export function StreakSection({ userId }: StreakSectionProps) {
+export function StreakLine({ userId }: StreakLineProps) {
   const streak = useStreak(userId);
   const reported = useRef(false);
 
@@ -72,24 +72,26 @@ export function StreakSection({ userId }: StreakSectionProps) {
   // account that has not ranked anything yet. All three are the same answer here.
   if (!data?.hasHistory) return null;
 
+  const run = data.weeks === 1 ? 'A one week streak' : `A ${data.weeks} week streak`;
+  const state = line(data.weeks, data.rankedThisWeek, daysLeft);
+
   return (
-    <View style={styles.section}>
-      <SectionHeader title="Weekly streak" />
-      <View style={styles.body}>
-        <Text
-          variant="title2"
-          // The flame is decoration beside a number that already says it. Read out, it
-          // would be "fire, four weeks".
-          accessibilityLabel={
-            data.weeks === 1 ? 'A one week streak' : `A ${data.weeks} week streak`
-          }
-        >
-          {`🔥 ${data.weeks} ${data.weeks === 1 ? 'week' : 'weeks'}`}
+    <View style={styles.row}>
+      {/* One line, not two. The flame and the number are the fact; what follows the
+          middle dot is its state. A separator rather than a second line, because this
+          row sits under the goal bars and a two-line block there would rebuild the
+          section the founder just collapsed. */}
+      <Text
+        variant="callout"
+        // The flame is decoration beside a number that already says it. Read out, it
+        // would be "fire, four weeks".
+        accessibilityLabel={`${run}. ${state}`}
+      >
+        {`🔥 ${data.weeks} ${data.weeks === 1 ? 'week' : 'weeks'}`}
+        <Text variant="callout" tone="secondary">
+          {` · ${state}`}
         </Text>
-        <Text variant="footnote" tone="secondary">
-          {line(data.weeks, data.rankedThisWeek, daysLeft)}
-        </Text>
-      </View>
+      </Text>
     </View>
   );
 }
@@ -110,6 +112,7 @@ function line(weeks: number, rankedThisWeek: boolean, daysLeft: number): string 
 }
 
 const styles = StyleSheet.create({
-  section: { paddingTop: theme.space[5], gap: theme.space[2] },
-  body: { paddingHorizontal: theme.layout.gutter, gap: theme.space[1] },
+  // Under the goal bars, at the section's own gutter. No top section padding: it
+  // belongs to the block above it rather than starting a new one.
+  row: { paddingHorizontal: theme.layout.gutter, paddingTop: theme.space[2] },
 });

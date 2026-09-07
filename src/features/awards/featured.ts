@@ -3,13 +3,16 @@ import type { AwardProgress } from './progress';
 /**
  * How many awards a profile puts on the shelf.
  *
- * **Three, and it was nearly five.** The section is an identity artefact sitting above
- * Goals, not a leaderboard: three fit one row at 320pt with the badge large enough to
- * read, and a row of five turns each badge into a thumbnail of something the reader
- * cannot make out. The full twenty are one tap away behind See all, which is where a
- * list belongs.
+ * **Five, and it was three** — the founder reversed it on the physical Android pass of
+ * 2026-09-06. Three slots made a shelf that was mostly gap for an active account, and
+ * the section read as a placeholder rather than as a record.
+ *
+ * Five still fits one row without horizontal scrolling. The badge shrinks to do it, and
+ * that is the trade: five smaller marks read as a shelf, three large ones with holes
+ * between them read as something unfinished. The full twenty stay one tap away behind
+ * See all, which is where a list belongs.
  */
-export const PROFILE_AWARD_SLOTS = 3;
+export const PROFILE_AWARD_SLOTS = 5;
 
 /**
  * When each tier was crossed, keyed `awardKey:tierKey`. See `use-award-unlocks.ts`.

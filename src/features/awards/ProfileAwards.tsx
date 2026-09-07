@@ -1,4 +1,4 @@
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { SectionHeader, SkeletonRow, Text } from '@/ui/components';
 import { theme } from '@/ui/tokens';
@@ -20,7 +20,7 @@ export type ProfileAwardsProps = {
 };
 
 /**
- * bingd. Awards, on the profile — three earned awards, above Goals.
+ * bingd. Awards, on the profile — five earned awards, above Goals.
  *
  * ---------------------------------------------------------------------------
  * WHY IT IS A SECTION AND NOT THE BUTTON IT REPLACES
@@ -35,8 +35,10 @@ export type ProfileAwardsProps = {
  * before intention: what this person *is* on Bingd, then what they are working on.
  * ---------------------------------------------------------------------------
  *
- * **Three slots, always three.** The composition does not collapse when somebody has
- * earned one award, and it does not grow when they have earned nine. A row that changes
+ * **Five slots, always five.** The composition does not collapse when somebody has
+ * earned one award, and it does not grow when they have earned nine. It was three until
+ * the founder's physical pass of 2026-09-06, where a mostly-empty row of three read as a
+ * placeholder rather than a record. A row that changes
  * width with achievement makes a new account look broken and a full one look like a
  * different design, and the whole point of the section is that it is the same shelf on
  * every profile with a different amount on it.
@@ -59,6 +61,23 @@ export type ProfileAwardsProps = {
  */
 export function ProfileAwards({ viewerId, userId, onSeeAll }: ProfileAwardsProps) {
   const isSelf = viewerId === userId;
+  const { width } = useWindowDimensions();
+  /**
+   * The badge, sized so five fit one row without horizontal scrolling.
+   *
+   * Derived rather than fixed, because five slots at the token's own 52pt overflow a
+   * 320pt screen by a few points — and the failure mode of overflowing is the fifth
+   * award silently leaving the row, which is the shelf being wrong about what somebody
+   * has earned. Capped at the token so a large phone does not inflate them past the
+   * size the badge art was cut for.
+   */
+  const badgeSize = Math.min(
+    theme.layout.awardBadge,
+    Math.floor(
+      (width - theme.layout.gutter * 2 - theme.space[2] * (PROFILE_AWARD_SLOTS - 1)) /
+        PROFILE_AWARD_SLOTS,
+    ),
+  );
   const awards = useAwards(viewerId, userId);
   // Owner only — see `useAwardUnlocks`. A visitor gets no unlock times and the
   // selection falls back to seniority plus the canonical order, which is total.
@@ -81,7 +100,8 @@ export function ProfileAwards({ viewerId, userId, onSeeAll }: ProfileAwardsProps
   return (
     <View style={styles.section}>
       <SectionHeader
-        title="bingd. Awards"
+        title="bingd. AWARDS"
+        exactCase
         // Offered even with an empty shelf: the sheet is where the twenty are, and
         // "what could I earn" is the question a new account has.
         actionLabel="See all"
@@ -94,9 +114,9 @@ export function ProfileAwards({ viewerId, userId, onSeeAll }: ProfileAwardsProps
           {Array.from({ length: PROFILE_AWARD_SLOTS }, (_, index) => {
             const award = featured[index];
             return award ? (
-              <Slot key={award.trackKey} award={award} />
+              <Slot key={award.trackKey} award={award} size={badgeSize} />
             ) : (
-              <EmptySlot key={`empty-${index}`} dim={!isSelf} />
+              <EmptySlot key={`empty-${index}`} dim={!isSelf} size={badgeSize} />
             );
           })}
         </View>
@@ -106,7 +126,7 @@ export function ProfileAwards({ viewerId, userId, onSeeAll }: ProfileAwardsProps
 }
 
 /** One earned award: badge, its tier dots, and what it is called. */
-function Slot({ award }: { award: AwardProgress }) {
+function Slot({ award, size }: { award: AwardProgress; size: number }) {
   return (
     <View
       testID="award-slot"
@@ -118,8 +138,8 @@ function Slot({ award }: { award: AwardProgress }) {
       // carries "Gold" in the cases where the title does not.
       accessibilityLabel={`${award.title}. ${award.badgeTierLabel} earned.`}
     >
-      <View style={styles.badge}>
-        <AwardBadge badge={award.badge} earned />
+      <View style={[styles.badge, { width: size, height: size }]}>
+        <AwardBadge badge={award.badge} earned size={size} />
         <TierDots earnedTierIndex={award.earnedTierIndex} />
       </View>
       <Text variant="caption" numberOfLines={2} style={styles.name}>
@@ -137,10 +157,10 @@ function Slot({ award }: { award: AwardProgress }) {
  * before Goals would be the worst version of this section for the readers least able to
  * skip it.
  */
-function EmptySlot({ dim }: { dim: boolean }) {
+function EmptySlot({ dim, size }: { dim: boolean; size: number }) {
   return (
     <View
-      // The three-slot composition is the thing to hold: a row that changed width with
+      // The five-slot composition is the thing to hold: a row that changed width with
       // achievement would make a new account look broken. There is nothing else on an
       // empty slot to assert against, so it is named.
       testID="award-slot-empty"
@@ -148,39 +168,46 @@ function EmptySlot({ dim }: { dim: boolean }) {
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      <View style={[styles.badge, styles.empty, dim && styles.emptyDim]} />
+      <View
+        style={[
+          styles.badge,
+          styles.empty,
+          { width: size, height: size, borderRadius: size / 2 },
+          dim && styles.emptyDim,
+        ]}
+      />
     </View>
   );
 }
 
-const BADGE = theme.layout.awardBadge;
-
 const styles = StyleSheet.create({
   section: { paddingTop: theme.space[5], gap: theme.space[2] },
   /**
-   * Three equal columns rather than three content-sized ones, so a one-word award and a
+   * Five equal columns rather than five content-sized ones, so a one-word award and a
    * three-word award occupy the same slot and the shelf does not shift as it fills.
+   *
+   * `space[2]` between them rather than `space[3]`: at five across, four points per gap
+   * is four points of badge, and the badge is the thing worth the width.
    */
   row: {
     flexDirection: 'row',
     paddingHorizontal: theme.layout.gutter,
-    gap: theme.space[3],
+    gap: theme.space[2],
   },
   slot: { flex: 1, alignItems: 'center', gap: theme.space[1] },
-  // Exactly the badge's own size, so `TierDots` can position against its bottom edge —
-  // the same box the sheet's rows give it.
-  badge: { width: BADGE, height: BADGE },
+  // Sized by the caller, so `TierDots` positions against the badge's own bottom edge
+  // whatever width five columns leave it.
+  badge: {},
   /**
    * A ring, not a pale disc. At this size a low-opacity fill reads as artwork that
    * failed to load; an outline reads as a place something goes.
    */
   empty: {
-    borderRadius: BADGE / 2,
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: theme.border.hairline,
     backgroundColor: theme.surface.sunken,
   },
-  // Somebody else's unfilled slot. Present, so the row keeps its three-slot shape, and
+  // Somebody else's unfilled slot. Present, so the row keeps its five-slot shape, and
   // quiet, so their profile does not read as a list of things they have not done.
   emptyDim: { opacity: 0.4 },
   name: { textAlign: 'center' },

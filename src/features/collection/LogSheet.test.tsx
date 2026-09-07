@@ -7,6 +7,21 @@ import { renderWithProviders } from '@/test-utils/render';
 import { LogSheet, type LoggableTitle, type LogSheetProps } from './LogSheet';
 import { emptyLogState } from './use-log-state';
 
+/**
+ * A real local store, because the remembered share default is only meaningful across
+ * compositions: what a test needs to express is "they turned it off and saved, and the
+ * next new note opened off".
+ */
+const mockPrefs = new Map<string, unknown>();
+
+jest.mock('@/lib/prefs', () => ({
+  readPref: (name: string) => Promise.resolve(mockPrefs.get(name) ?? null),
+  writePref: (name: string, value: unknown) => {
+    mockPrefs.set(name, value);
+    return Promise.resolve();
+  },
+}));
+
 const mockRpc = jest.fn();
 const mockFrom = jest.fn();
 
@@ -123,6 +138,7 @@ const stubSlowReads = (
 
 beforeEach(() => {
   issued = 0;
+  mockPrefs.clear();
   mockRpc.mockReset();
   mockFrom.mockReset();
   mockRpc.mockResolvedValue({ data: { status: 'ok' }, error: null });
@@ -172,7 +188,9 @@ const failing = (fn: string, error: { code?: string; message: string }) => {
 const WRITING = 'Note';
 
 const open = async (title: LoggableTitle | null, props: Partial<LogSheetProps> = {}) => {
-  const view = await renderWithProviders(<LogSheet title={title} onClose={() => {}} surface="search" {...props} />);
+  const view = await renderWithProviders(
+    <LogSheet title={title} onClose={() => {}} surface="search" {...props} />,
+  );
 
   return {
     ...view,
@@ -512,7 +530,9 @@ describe('a title that is already ranked', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
+    await waitFor(() =>
+      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
+    );
     await fireEvent.press(sheet.bucket('I liked it'));
 
     // Its own sentence: nothing about the rating is changing, so “Changing this”
@@ -528,7 +548,9 @@ describe('a title that is already ranked', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
+    await waitFor(() =>
+      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
+    );
     await fireEvent.press(sheet.bucket('I liked it'));
     await fireEvent.press(sheet.getByRole('button', { name: 'Re-rank' }));
 
@@ -543,7 +565,9 @@ describe('a title that is already ranked', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
+    await waitFor(() =>
+      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
+    );
     await fireEvent.press(sheet.bucket('I liked it'));
     await fireEvent.press(sheet.getByRole('button', { name: 'Cancel' }));
 
@@ -556,7 +580,9 @@ describe('a title that is already ranked', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
+    await waitFor(() =>
+      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
+    );
     await fireEvent.press(sheet.bucket('It was fine'));
 
     expect(sheet.getByText('Changing this will re-rank Film A.')).toBeTruthy();
@@ -569,7 +595,9 @@ describe('a title that is already ranked', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
+    await waitFor(() =>
+      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
+    );
     await fireEvent.press(sheet.bucket('It was fine'));
     await fireEvent.press(sheet.getByRole('button', { name: 'Cancel' }));
 
@@ -582,7 +610,9 @@ describe('a title that is already ranked', () => {
     const onRank = jest.fn();
     const sheet = await open(filmA, { onRank });
 
-    await waitFor(() => expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true));
+    await waitFor(() =>
+      expect(sheet.bucket('I liked it').props.accessibilityState.selected).toBe(true),
+    );
     await fireEvent.press(sheet.bucket('It was fine'));
     await fireEvent.press(sheet.getByRole('button', { name: 'Re-rank' }));
 
@@ -982,38 +1012,34 @@ describe('the autosave lane', () => {
     expect(callsTo('save_note')[0][1].p_note).toBe('');
   });
 
-  it(
-    'saves mid-stream once typing has outrun the max wait',
-    async () => {
-      // A trailing debounce alone re-arms on every keystroke, so a sentence typed
-      // without a pause would ride unsaved for its whole length (review 66b). Once
-      // dirty text has waited AUTOSAVE_MAX_WAIT, the next keystroke saves instead.
-      //
-      // The loop stops the moment a save appears rather than typing for a fixed
-      // wall time: on a slow CI runner the fixed version outlived the suite's 15s
-      // budget (the release gate's one red on the first run of this tranche). If
-      // the runner is slow enough that a gap exceeds the ordinary debounce, the
-      // trailing timer fires instead — either way a save lands mid-stream, which
-      // is the contract: typing, however continuous, cannot stay unsaved.
-      const sheet = await open(filmA);
-      await sheet.openNotes();
+  it('saves mid-stream once typing has outrun the max wait', async () => {
+    // A trailing debounce alone re-arms on every keystroke, so a sentence typed
+    // without a pause would ride unsaved for its whole length (review 66b). Once
+    // dirty text has waited AUTOSAVE_MAX_WAIT, the next keystroke saves instead.
+    //
+    // The loop stops the moment a save appears rather than typing for a fixed
+    // wall time: on a slow CI runner the fixed version outlived the suite's 15s
+    // budget (the release gate's one red on the first run of this tranche). If
+    // the runner is slow enough that a gap exceeds the ordinary debounce, the
+    // trailing timer fires instead — either way a save lands mid-stream, which
+    // is the contract: typing, however continuous, cannot stay unsaved.
+    const sheet = await open(filmA);
+    await sheet.openNotes();
 
-      const started = Date.now();
-      let draft = 'no';
-      while (callsTo('log_watched').length === 0 && Date.now() - started < 10_000) {
-        draft += ' pause';
-        await fireEvent.changeText(sheet.note(), draft);
-        await act(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 250));
-        });
-      }
+    const started = Date.now();
+    let draft = 'no';
+    while (callsTo('log_watched').length === 0 && Date.now() - started < 10_000) {
+      draft += ' pause';
+      await fireEvent.changeText(sheet.note(), draft);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      });
+    }
 
-      // The save fired during the stream — before any blur, close or rest the
-      // reader chose to take.
-      expect(callsTo('log_watched').length).toBeGreaterThanOrEqual(1);
-    },
-    30_000,
-  );
+    // The save fired during the stream — before any blur, close or rest the
+    // reader chose to take.
+    expect(callsTo('log_watched').length).toBeGreaterThanOrEqual(1);
+  }, 30_000);
 
   it('converges when a first save loses its reply and the text has moved on', async () => {
     // 08007: the first write may have committed. The retry is a new intent with the
@@ -1190,23 +1216,37 @@ describe('what a note says about itself', () => {
   const reviewToggle = (sheet: Awaited<ReturnType<typeof open>>) =>
     sheet.getByLabelText('Share this note as a public review');
 
-  it('opens a new note private, so nothing is published by inattention', async () => {
+  it('opens a first-ever note shared, because a review nobody can read is not a review', async () => {
+    /**
+     * **Reversed by the founder, 2026-09-06.** It opened private on the reasoning that
+     * nothing should be published by inattention. What that produced was a product
+     * whose social half was off by default for everybody who never found the toggle.
+     *
+     * The protection that mattered is kept and is elsewhere: writing that already
+     * exists opens on the visibility it was saved with, so no habit and no default can
+     * republish an old private note.
+     */
     const sheet = await open(filmA);
     await sheet.openNotes();
 
-    expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false);
+    await waitFor(() =>
+      expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(true),
+    );
+    // Spoilers stay independent and stay off.
     expect(spoilerToggle(sheet).props.accessibilityState.checked).toBe(false);
-    expect(sheet.getByText('Only you can read this.')).toBeTruthy();
+    // And the private helper is gone with it: a shared note that says "Only you can
+    // read this" is the app contradicting itself.
+    expect(sheet.queryByText('Only you can read this.')).toBeNull();
   });
 
-  it('writes a first note private when the reader was only logging', async () => {
+  it('writes a first note shared when the reader was only logging', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'just for me');
     await fireEvent(sheet.note(), 'blur');
 
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
-    expect(callsTo('log_watched')[0][1].p_note_visibility).toBe('private');
+    expect(callsTo('log_watched')[0][1].p_note_visibility).toBe('public');
   });
 
   /**
@@ -1264,7 +1304,9 @@ describe('what a note says about itself', () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
 
-    await waitFor(() => expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false));
+    await waitFor(() =>
+      expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false),
+    );
     expect(sheet.getByText('Only you can read this.')).toBeTruthy();
 
     // Editing the text must carry the stored visibility rather than the default.
@@ -1309,7 +1351,9 @@ describe('what a note says about itself', () => {
     await waitFor(() => expect(sheet.note().props.value).toBe('out in the open'));
 
     // Unticking "Share as a review" is how a published note is taken back.
-    await waitFor(() => expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(true));
+    await waitFor(() =>
+      expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(true),
+    );
     await fireEvent.press(reviewToggle(sheet));
 
     await waitFor(() => expect(callsTo('save_note')).toHaveLength(1));
@@ -1324,7 +1368,9 @@ describe('what a note says about itself', () => {
     await sheet.openNotes();
     await fireEvent.press(spoilerToggle(sheet));
 
-    await waitFor(() => expect(spoilerToggle(sheet).props.accessibilityState.checked).toBe(true));
+    await waitFor(() =>
+      expect(spoilerToggle(sheet).props.accessibilityState.checked).toBe(true),
+    );
     expect(callsTo('log_watched')).toHaveLength(0);
     expect(callsTo('save_note')).toHaveLength(0);
   });
@@ -1361,9 +1407,7 @@ describe('what a note says about itself', () => {
     await waitFor(() => expect(sheet.notesRow().props.accessibilityState.disabled).toBe(false));
 
     await sheet.openNotes();
-    await waitFor(() =>
-      expect(sheet.note().props.value).toBe('written when this was private'),
-    );
+    await waitFor(() => expect(sheet.note().props.value).toBe('written when this was private'));
     // The stored visibility, not the default the sheet was showing a moment ago.
     expect(reviewToggle(sheet).props.accessibilityState.checked).toBe(false);
     expect(sheet.getByText('Only you can read this.')).toBeTruthy();
@@ -1434,9 +1478,7 @@ describe('the watch date', () => {
     // "No date exists" is this test's premise, and only the landed read states it.
     // Pressed before that, the stamp is rightly withheld (the slow-read test below),
     // which is a different case than the one pinned here.
-    await waitFor(() =>
-      expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
-    );
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false));
     await fireEvent.press(sheet.bucket('I liked it'));
 
     await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
@@ -1454,9 +1496,7 @@ describe('the watch date', () => {
     // this test found the real overwrite (fixed in `choose`) while claiming to test
     // only the loaded case; the loaded case is what it pins again now, and the
     // unloaded one has its own test below.
-    await waitFor(() =>
-      expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
-    );
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false));
     expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today');
     await fireEvent.press(sheet.bucket('I liked it'));
 
@@ -1475,7 +1515,10 @@ describe('the watch date', () => {
    * has not landed stamps nothing.
    */
   it('does not stamp today when a bucket is chosen before the stored date has loaded', async () => {
-    const { release } = stubSlowReads({ bucket: null, watched_on: '2020-03-04', note: null }, null);
+    const { release } = stubSlowReads(
+      { bucket: null, watched_on: '2020-03-04', note: null },
+      null,
+    );
     const sheet = await open(filmA);
 
     // Pressed while the read is still held open — the window a slow network keeps.
@@ -1486,9 +1529,7 @@ describe('the watch date', () => {
     release();
 
     // The date survives, and its arrival does not trigger a late stamp either.
-    await waitFor(() =>
-      expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
-    );
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false));
     expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today');
     expect(callsTo('log_watched')).toHaveLength(0);
   });
@@ -1503,7 +1544,10 @@ describe('the watch date', () => {
    * at rest, not merely that some read once landed.
    */
   it('does not stamp today from a cached "no date" while its refetch is still in flight', async () => {
-    const { release } = stubSlowReads({ bucket: null, watched_on: '2020-03-04', note: null }, null);
+    const { release } = stubSlowReads(
+      { bucket: null, watched_on: '2020-03-04', note: null },
+      null,
+    );
     const sheet = await open(filmA);
     await act(async () => {
       sheet.client.setQueryData(queryKeys.logState('user-1', 'film-a'), emptyLogState);
@@ -1511,9 +1555,7 @@ describe('the watch date', () => {
 
     // The cached answer makes the row live and claim "Today" while the refetch is
     // still held open — which is exactly the window being tested.
-    await waitFor(() =>
-      expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
-    );
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false));
     expect(sheet.dateRow().props.accessibilityValue.text).toBe('Today');
 
     await fireEvent.press(sheet.bucket('I liked it'));
@@ -1557,9 +1599,7 @@ describe('the watch date', () => {
     // Waiting on the row being enabled rather than on its text not being 'Today':
     // before the read lands the row has no text at all, which is also not 'Today',
     // and this test would have passed without ever seeing the date it is about.
-    await waitFor(() =>
-      expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false),
-    );
+    await waitFor(() => expect(sheet.dateRow().props.accessibilityState.disabled).toBe(false));
     expect(sheet.dateRow().props.accessibilityValue.text).not.toBe('Today');
   });
 });
@@ -1592,10 +1632,10 @@ describe('when the log state cannot be read', () => {
   it('names the failing dependency outside production, and offers a retry', async () => {
     const sheet = await open(filmA);
 
-    await waitFor(() =>
-      expect(sheet.getByText(/note_visibility does not exist/)).toBeTruthy(),
-    );
-    expect(sheet.getByLabelText('Retry loading what you wrote and your watch date')).toBeTruthy();
+    await waitFor(() => expect(sheet.getByText(/note_visibility does not exist/)).toBeTruthy());
+    expect(
+      sheet.getByLabelText('Retry loading what you wrote and your watch date'),
+    ).toBeTruthy();
   });
 
   it('still lets a bucket be chosen and ranking start', async () => {
@@ -1652,7 +1692,9 @@ describe('two accounts on one device', () => {
     // and their own read fails — the case where a shared cache entry would be the
     // only thing with anything in it.
     stubFailedLogState();
-    const view = await renderWithProviders(<LogSheet title={filmA} onClose={() => {}} surface="search" />);
+    const view = await renderWithProviders(
+      <LogSheet title={filmA} onClose={() => {}} surface="search" />,
+    );
 
     // Somebody else's note, written into the cache under the key shape this used to
     // have: title only, no account. One client, so a shared key really would be
@@ -2031,24 +2073,34 @@ describe('the one Note row', () => {
     );
   });
 
-  it('is a private note until it is shared', async () => {
+  it('becomes a private note the moment the reader unshares it', async () => {
+    // The default is shared since 2026-09-06, so the private helper appears when the
+    // reader chooses privacy rather than by arriving. The copy must follow the state
+    // either way: a shared note that says "Only you can read this" is the app
+    // contradicting itself, and so is the reverse.
     const sheet = await open(filmA);
     await sheet.openNotes();
+    await waitFor(() => expect(sheet.queryByText('Only you can read this.')).toBeNull());
+
+    await fireEvent.press(shareChip(sheet));
 
     expect(sheet.notesRow().props.accessibilityState.expanded).toBe(true);
-    expect(sheet.getByText('Only you can read this.')).toBeTruthy();
+    await waitFor(() => expect(sheet.getByText('Only you can read this.')).toBeTruthy());
   });
 
-  it('says Shared on the row the moment new writing is shared', async () => {
+  it('says Shared on the row while new writing is shared', async () => {
     const sheet = await open(filmA);
     await sheet.openNotes();
     await fireEvent.changeText(sheet.note(), 'three words here');
 
-    await fireEvent.press(shareChip(sheet));
-
+    // Shared by default now, so the row says so without anything being pressed.
     await waitFor(() =>
       expect(sheet.notesRow().props.accessibilityValue.text).toBe('Shared · 3 words'),
     );
+
+    // And stops saying so the moment it is turned off.
+    await fireEvent.press(shareChip(sheet));
+    await waitFor(() => expect(sheet.notesRow().props.accessibilityValue.text).toBe('3 words'));
   });
 
   /**
@@ -2222,9 +2274,8 @@ describe('the state after a ranking', () => {
     await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
 
     await sheet.openNotes();
-    // Sharing first and writing second: the chip against an empty field writes
-    // nothing, and the save that first stores the text carries the choice with it.
-    await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
+    // Shared by default since 2026-09-06, so nothing is pressed: writing and blurring
+    // is the whole gesture, and the save carries the default with it.
     await fireEvent.changeText(sheet.note(), 'The last twenty minutes are the whole film.');
     await fireEvent(sheet.note(), 'blur');
 
@@ -2240,6 +2291,8 @@ describe('the state after a ranking', () => {
     await waitFor(() => expect(sheet.getByText('Ranked')).toBeTruthy());
 
     await sheet.openNotes();
+    // Turned off deliberately, which is the only way a note is private now.
+    await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
     await fireEvent.changeText(sheet.note(), 'must rewatch');
     await fireEvent(sheet.note(), 'blur');
 
@@ -2303,9 +2356,9 @@ describe('add more details opens the whole log', () => {
 
     // Who I watched with.
     await waitFor(() =>
-      expect(
-        sheet.getByLabelText('Who I watched with').props.accessibilityState.disabled,
-      ).toBe(false),
+      expect(sheet.getByLabelText('Who I watched with').props.accessibilityState.disabled).toBe(
+        false,
+      ),
     );
     await fireEvent.press(sheet.getByRole('button', { name: 'Who I watched with' }));
     // The picker itself, which with no mutuals in this fixture is its empty state. What
@@ -2357,5 +2410,133 @@ describe('add more details opens the whole log', () => {
     expect(callsTo('rank_rebucket')).toHaveLength(0);
     // One write against the row that already exists, not a second log.
     expect(callsTo('log_watched')).toHaveLength(1);
+  });
+});
+
+/**
+ * **Share as a review remembers what the reader chose last time** (founder, 2026-09-06).
+ *
+ * The founder's exact sequence: the first new note opens shared; turn it off and save,
+ * and the next new note opens off; turn it back on and save, and the next opens on.
+ *
+ * The rule this must never break is the one that protects writing that already exists: a
+ * saved note opens on the visibility it was saved with, whatever the habit is. A general
+ * preference that could retroactively publish an old private note would be the worst
+ * possible version of this feature, so the ordering is asserted here directly rather
+ * than left to the implementation to remember.
+ */
+describe('the remembered share default', () => {
+  const shareOn = (sheet: Awaited<ReturnType<typeof open>>) =>
+    sheet.getByLabelText('Share this note as a public review').props.accessibilityState.checked;
+
+  it('opens on for a reader who has never chosen', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await waitFor(() => expect(shareOn(sheet)).toBe(true));
+  });
+
+  it('opens off for a reader whose last new note was private', async () => {
+    mockPrefs.set('user-1.notes.share-default', 'private');
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await waitFor(() => expect(shareOn(sheet)).toBe(false));
+    expect(sheet.getByText('Only you can read this.')).toBeTruthy();
+  });
+
+  it('opens on again once their last new note was shared', async () => {
+    mockPrefs.set('user-1.notes.share-default', 'public');
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await waitFor(() => expect(shareOn(sheet)).toBe(true));
+  });
+
+  it('remembers a private choice when the note actually saves', async () => {
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
+    await fireEvent.changeText(sheet.note(), 'just for me');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    await waitFor(() => expect(mockPrefs.get('user-1.notes.share-default')).toBe('private'));
+  });
+
+  it('remembers a shared choice too, so the habit goes both ways', async () => {
+    mockPrefs.set('user-1.notes.share-default', 'private');
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await waitFor(() => expect(shareOn(sheet)).toBe(false));
+
+    await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
+    await fireEvent.changeText(sheet.note(), 'everyone should see this');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    await waitFor(() => expect(mockPrefs.get('user-1.notes.share-default')).toBe('public'));
+  });
+
+  it('remembers nothing from a save that failed', async () => {
+    // A write that did not land says nothing about what anybody intended.
+    mockRpc.mockResolvedValue({ data: null, error: { code: '08006', message: 'offline' } });
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
+    await fireEvent.changeText(sheet.note(), 'just for me');
+    await fireEvent(sheet.note(), 'blur');
+
+    await waitFor(() => expect(callsTo('log_watched')).toHaveLength(1));
+    expect(mockPrefs.get('user-1.notes.share-default')).toBeUndefined();
+  });
+
+  it('never lets the habit republish a note that was saved private', async () => {
+    /**
+     * The load-bearing assertion of the whole feature. A reader whose habit is "shared"
+     * opens an existing private note: it must open private, because the stored value is
+     * a decision about *that* note and the preference is only ever a default for one
+     * that has none.
+     */
+    mockPrefs.set('user-1.notes.share-default', 'public');
+    stubReads(
+      { bucket: 'loved', note: 'kept to myself', note_visibility: 'private' },
+      { bucket: 'loved' },
+    );
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+
+    await waitFor(() => expect(shareOn(sheet)).toBe(false));
+    expect(sheet.getByText('Only you can read this.')).toBeTruthy();
+  });
+
+  it('does not rewrite the habit when an existing note is edited', async () => {
+    // Unsharing one old note is a decision about that note, not a change of habit —
+    // otherwise tidying up one review would quietly make every future note private.
+    mockPrefs.set('user-1.notes.share-default', 'public');
+    stubReads(
+      { bucket: 'loved', note: 'said too much', note_visibility: 'public' },
+      { bucket: 'loved' },
+    );
+    const sheet = await open(filmA);
+    await sheet.openNotes();
+    await waitFor(() => expect(shareOn(sheet)).toBe(true));
+
+    await fireEvent.press(sheet.getByLabelText('Share this note as a public review'));
+    await fireEvent.changeText(sheet.note(), 'said too much, on reflection');
+    await fireEvent(sheet.note(), 'blur');
+
+    // Two saves, because the toggle autosaves the claim and the blur saves the text.
+    // Neither is a new composition, which is the point.
+    await waitFor(() => expect(callsTo('save_note').length).toBeGreaterThan(0));
+    expect(mockPrefs.get('user-1.notes.share-default')).toBe('public');
+  });
+
+  it('is overruled by an explicit Write a review, which is a request about this one', async () => {
+    mockPrefs.set('user-1.notes.share-default', 'private');
+    const sheet = await open(filmA, { noteIntent: 'review' });
+    await sheet.openNotes();
+
+    await waitFor(() => expect(shareOn(sheet)).toBe(true));
   });
 });

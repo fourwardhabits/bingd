@@ -307,7 +307,9 @@ describe('details, under both posters', () => {
     // `TitleRecallSheet`'s own read — the overview and the director — rather than
     // anything this screen holds. Nothing else in the app renders it, so seeing it is
     // the proof that the shared component is what opened.
-    await waitFor(() => expect(sheet.getByText('A courier misplaces a briefcase.')).toBeTruthy());
+    await waitFor(() =>
+      expect(sheet.getByText('A courier misplaces a briefcase.')).toBeTruthy(),
+    );
     expect(sheet.getByText('Directed by A Director')).toBeTruthy();
     // And the comparison is still standing behind it.
     expect(callsTo('rank_answer')).toHaveLength(0);
@@ -324,7 +326,9 @@ describe('details, under both posters', () => {
 
     await fireEvent(sheet.card('Film P'), 'longPress');
 
-    await waitFor(() => expect(sheet.getByText('A courier misplaces a briefcase.')).toBeTruthy());
+    await waitFor(() =>
+      expect(sheet.getByText('A courier misplaces a briefcase.')).toBeTruthy(),
+    );
     // A long press that also answered would file a judgement on a title the reader was
     // still trying to place.
     expect(callsTo('rank_answer')).toHaveLength(0);
@@ -345,10 +349,11 @@ describe('finishing the log after a ranking', () => {
     const sheet = await openSheet({ onFinishLog });
 
     await sheet.findByLabelText(REVEAL);
-    // "Add more details", not "Finish your log": the ranking is complete by the time
-    // this button exists, and the label must not frame the optional half as an
-    // unfinished obligation (founder correction, 2026-08-27).
-    await fireEvent.press(sheet.getByRole('button', { name: 'Add more details' }));
+    // "Add details", not "Finish your log": the ranking is complete by the time this
+    // button exists, and the label must not frame the optional half as an unfinished
+    // obligation (founder correction, 2026-08-27; shortened 2026-09-06 when the row
+    // became two buttons wide).
+    await fireEvent.press(sheet.getByRole('button', { name: 'Add details' }));
 
     // The placement travels with the call: the session already had it, and making the
     // log sheet re-query for a number this screen is holding would put a spinner in the
@@ -385,15 +390,29 @@ describe('finishing the log after a ranking', () => {
     expect(sheet.getByText('Film A')).toBeTruthy();
   });
 
-  it('keeps the old pair of controls when there is no log to return to', async () => {
+  it('leaves Done alone when there is no log to return to', async () => {
     answering(placement);
     const sheet = await openSheet();
 
     await sheet.findByLabelText(REVEAL);
-    // A caller with no log sheet mounted gets what the reveal always had, rather than a
-    // button that leads nowhere.
-    expect(sheet.queryByRole('button', { name: 'Add more details' })).toBeNull();
-    expect(sheet.getByRole('button', { name: 'Rank another' })).toBeTruthy();
+    // A caller with no log sheet mounted gets the one exit rather than a button that
+    // leads nowhere.
+    expect(sheet.queryByRole('button', { name: 'Add details' })).toBeNull();
     expect(sheet.getByRole('button', { name: 'Done' })).toBeTruthy();
+  });
+
+  it('no longer offers Rank another', async () => {
+    /**
+     * Removed on the founder's physical Android pass, 2026-09-06. Three reasons and the
+     * third settled it: it did not earn its place, it appeared not to work on the
+     * device, and it made a three-control ending out of a moment with exactly two
+     * sensible next steps — write more about this, or stop. Ranking something else
+     * starts from Search or the Collection, which is where a reader is already going.
+     */
+    answering(placement);
+    const sheet = await openSheet({ onFinishLog: jest.fn() });
+
+    await sheet.findByLabelText(REVEAL);
+    expect(sheet.queryByRole('button', { name: 'Rank another' })).toBeNull();
   });
 });

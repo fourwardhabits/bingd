@@ -1,11 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useCurrentProfile } from '@/features/auth';
+import {
+  enqueueCelebrations,
+  useCelebrationHandoff,
+} from '@/features/awards/celebration-queue';
 import { useNewUnlocks } from '@/features/awards/use-new-unlocks';
+import { useStreakAdvance } from '@/features/streaks/use-streak-advance';
 import {
   formatGenreRank,
   shownGenreRanksFor,
@@ -74,8 +78,6 @@ export type RankingSheetProps = {
   /** The title being placed, with the bucket the user already chose for it. */
   subject: RankingSubject | null;
   onClose: () => void;
-  /** "Rank another" — closes this and sends the user back to search. */
-  onRankAnother?: () => void;
   /**
    * "Add more details" — closes this and hands the reader back to `LogSheet` in its
    * post-rank state, carrying the score the session just produced.
@@ -124,13 +126,7 @@ export type RankingSheetProps = {
  * of the mechanic. Decided by the founder, 2026-08-13. The position is visible everywhere
  * else in the app, which is why this component fetches only titles.
  */
-export function RankingSheet({
-  subject,
-  onClose,
-  onRankAnother,
-  onFinishLog,
-  surface,
-}: RankingSheetProps) {
+export function RankingSheet({ subject, onClose, onFinishLog, surface }: RankingSheetProps) {
   if (!subject) return null;
 
   // Keyed by the title, so moving to a different one starts a genuinely new component
@@ -140,7 +136,6 @@ export function RankingSheet({
       key={subject.id}
       subject={subject}
       onClose={onClose}
-      onRankAnother={onRankAnother}
       onFinishLog={onFinishLog}
       surface={surface}
     />
@@ -150,14 +145,11 @@ export function RankingSheet({
 function Session({
   subject,
   onClose,
-  onRankAnother,
   onFinishLog,
   surface,
 }: RankingSheetProps & { subject: NonNullable<RankingSheetProps['subject']> }) {
   const queryClient = useQueryClient();
   const profile = useCurrentProfile();
-  const router = useRouter();
-
   const [step, setStep] = useState<SessionStep | null>(null);
   // Starts true: the session is already being opened by the time anything renders.
   const [busy, setBusy] = useState(true);
@@ -249,15 +241,28 @@ function Session({
    *     `placed` branch as a fire-and-forget, after the invalidation and the analytics
    *     that a finished ranking actually owes.
    *   - **Every failure resolves to no celebration.** A snapshot that never landed, a
-   *     read that errored, an award key from a future migration: all of them leave
-   *     `pendingAwards` empty and the sheet closes exactly as it always did.
-   *   - **Done is never blocked.** `close()` navigates *after* it has closed, and only
-   *     if there is something to show.
+   *     read that errored, an award key from a future migration: all of them leave the
+   *     queue empty and the sheet closes exactly as it always did.
+   *   - **No exit is ever blocked.** The hand-off happens after the sheet has closed.
    *
-   * A ref, because `close` reads it in the same tick as the press.
+   * ---------------------------------------------------------------------------
+   * **IT ENQUEUES RATHER THAN NAVIGATING, AND THAT IS THE 2026-09-06 FIX.**
+   *
+   * The celebration was attached to one exit — the Reveal's Done — and the founder
+   * physically earned an award and never saw it. Ranking has three exits, and *Add
+   * details* is the one that continues into the log sheet: a reader who takes it
+   * finishes somewhere this component no longer exists to notice, so the payoff was
+   * being held by something that had already unmounted.
+   *
+   * So detection puts its result in a module-level queue (`celebration-queue.ts`) and
+   * whichever surface the reader actually finishes on drains it. The streak is detected
+   * here too and rides the same queue, which is what makes an award and a week's streak
+   * one flow rather than two modals fighting over the screen.
+   * ---------------------------------------------------------------------------
    */
   const detectNewUnlocks = useNewUnlocks(profile.id);
-  const pendingAwards = useRef<{ awardKey: string; tierKey: string }[]>([]);
+  const detectStreak = useStreakAdvance(profile.id);
+  const celebrate = useCelebrationHandoff();
 
   const apply = useCallback(
     (next: SessionStep) => {
@@ -312,24 +317,30 @@ function Session({
         if (next.activated) track({ name: 'invite_activated' });
 
         /**
-         * What this ranking unlocked, asked for last and awaited by nothing.
+         * What this ranking earned, asked for last and awaited by nothing.
          *
          * `void` rather than `await`: `apply` is what a finished ranking runs, and a
-         * ranking must not be able to stall behind a read about badges. If the answer
-         * arrives after the reader has already pressed Done, `pendingAwards` is simply
-         * still empty when `close` reads it and there is no celebration — the
-         * congratulations notification is the other door, and it is the durable one.
+         * ranking must not be able to stall behind a read about badges. Both detections
+         * are independent — one failing must not cost the other its celebration — so
+         * they settle separately and each enqueues on its own.
          */
         void detectNewUnlocks()
           .then((unlocked) => {
-            pendingAwards.current = unlocked.map((row) => ({
-              awardKey: row.awardKey,
-              tierKey: row.tierKey,
-            }));
+            enqueueCelebrations(
+              unlocked.map((row) => ({
+                kind: 'award' as const,
+                awardKey: row.awardKey,
+                tierKey: row.tierKey,
+              })),
+            );
           })
-          .catch(() => {
-            pendingAwards.current = [];
-          });
+          .catch(() => {});
+
+        void detectStreak()
+          .then((weeks) => {
+            if (weeks != null) enqueueCelebrations([{ kind: 'streak', weeks }]);
+          })
+          .catch(() => {});
       } else if (next.state === 'failed' && next.changed) {
         /**
          * **A failed answer can still have placed the title.**
@@ -459,19 +470,15 @@ function Session({
    * unlock also wrote a congratulations notification, and tapping that opens this same
    * screen for the same award.
    *
-   * The push happens *after* `close`, so the ranking sheet is already gone and the
+   * The hand-off happens *after* `close`, so the ranking sheet is already gone and the
    * celebration is presented over whatever opened it rather than over a dismissing
-   * sheet. Cleared before navigating, so a second Done cannot show it twice.
+   * sheet. The queue is emptied by the drain, so a second Done cannot show it twice —
+   * and *Add details* leaves the queue standing, because the flow has not ended: the
+   * log sheet drains it when the reader is finished there.
    */
   const closeAndCelebrate = async () => {
-    const earned = pendingAwards.current;
-    pendingAwards.current = [];
     await close();
-    if (!earned.length) return;
-    router.push({
-      pathname: '/awards/celebrate',
-      params: { awards: earned.map((a) => `${a.awardKey}:${a.tierKey}`).join(',') },
-    });
+    celebrate();
   };
 
   return (
@@ -486,10 +493,6 @@ function Session({
             subjectId={subject.id}
             title={subject.title}
             onDone={() => void closeAndCelebrate()}
-            onRankAnother={() => {
-              void close();
-              onRankAnother?.();
-            }}
             onFinishLog={
               onFinishLog
                 ? () => {
@@ -1057,7 +1060,6 @@ function Reveal({
   subjectId,
   title,
   onDone,
-  onRankAnother,
   onFinishLog,
 }: {
   score: number;
@@ -1067,7 +1069,6 @@ function Reveal({
   subjectId: string;
   title: string;
   onDone: () => void;
-  onRankAnother: () => void;
   onFinishLog?: () => void;
 }) {
   const profile = useCurrentProfile();
@@ -1346,31 +1347,34 @@ function Reveal({
        * unreachable at the one moment somebody wants them, and that later tapping Ranked
        * gave no obvious way back either.
        *
-       * So the primary control now continues the log rather than leaving it, and the two
-       * exits move into a row beneath. That row is the density decision: two `md`
-       * buttons side by side occupy the height one of them used to, so the flow gains a
-       * step without the screen gaining any.
+       * So the primary control continues the log rather than leaving it.
        *
-       * Done is still one tap and still writes nothing. Nothing here is required.
+       * ---------------------------------------------------------------------------
+       * **RANK ANOTHER IS GONE** (founder, physical Android, 2026-09-06).
+       *
+       * Three reasons, and the third is the one that settled it: it did not earn its
+       * place, it appeared not to work on the device, and it made a three-control ending
+       * out of a moment that has exactly two sensible next steps — write more about this,
+       * or stop. Ranking something else starts from Search or the Collection, which is
+       * where a reader is already going.
+       *
+       * What is left is one row of two: **Add details filled, Done outlined.** The
+       * emphasis is deliberate and it is not "the app wants you to do more work" — the
+       * note, the people you watched it with and the watch date are the half of a log
+       * that is worth anything later, and this is the one moment somebody has them in
+       * mind. Done is still one tap, still writes nothing, and nothing here is required.
+       * ---------------------------------------------------------------------------
        */}
-      {onFinishLog ? (
-        <View style={styles.revealControls}>
-          <Button label="Add more details" onPress={onFinishLog} />
-          <View style={styles.revealExits}>
-            <View style={styles.revealExit}>
-              <Button label="Rank another" kind="secondary" onPress={onRankAnother} />
-            </View>
-            <View style={styles.revealExit}>
-              <Button label="Done" kind="secondary" onPress={onDone} />
-            </View>
+      <View style={styles.revealExits}>
+        {onFinishLog ? (
+          <View style={styles.revealExit}>
+            <Button label="Add details" fit onPress={onFinishLog} />
           </View>
+        ) : null}
+        <View style={styles.revealExit}>
+          <Button label="Done" kind="secondary" fit onPress={onDone} />
         </View>
-      ) : (
-        <View style={styles.revealControls}>
-          <Button label="Rank another" onPress={onRankAnother} />
-          <Button label="Done" kind="secondary" onPress={onDone} />
-        </View>
-      )}
+      </View>
     </View>
   );
 }

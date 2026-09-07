@@ -40,13 +40,15 @@ const at = (
 const keys = (list: AwardProgress[]) => list.map((award) => award.trackKey);
 
 describe('how many', () => {
-  it('is three', () => {
-    expect(PROFILE_AWARD_SLOTS).toBe(3);
+  it('is five', () => {
+    // Three until the founder's physical pass of 2026-09-06: a mostly-empty row of
+    // three read as a placeholder rather than as a record of what somebody had earned.
+    expect(PROFILE_AWARD_SLOTS).toBe(5);
   });
 
   it('never returns more than the slots, however many were earned', () => {
-    const many = ['a', 'b', 'c', 'd', 'e'].map((key) => at(key, 0));
-    expect(featuredAwards(many)).toHaveLength(3);
+    const many = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((key) => at(key, 0));
+    expect(featuredAwards(many)).toHaveLength(5);
   });
 
   it('returns fewer than the slots rather than padding, and the section draws the gap', () => {
@@ -143,7 +145,7 @@ describe('then the canonical order, which is what makes it total', () => {
   it('gives the same answer twice, so a profile does not reshuffle between opens', () => {
     const list = [at('a', 1), at('b', 2), at('c', 1), at('d', 0), at('e', 2)];
     expect(keys(featuredAwards(list))).toEqual(keys(featuredAwards(list)));
-    expect(keys(featuredAwards(list))).toEqual(['b', 'e', 'a']);
+    expect(keys(featuredAwards(list))).toEqual(['b', 'e', 'a', 'c', 'd']);
   });
 
   it('does not mutate the list it was given', () => {
