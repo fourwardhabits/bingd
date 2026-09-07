@@ -931,6 +931,50 @@ export default function TitleScreen() {
           {recommendedBy && !hero.uri ? <RecommendedCallout label={recommendedBy} /> : null}
         </View>
 
+        {/* **Directly beneath the metadata, as part of the title's identity** (founder,
+            physical Android, 2026-09-06).
+
+            The scores sat below the transient notices with a SCORES heading and a rule
+            above them, which read on a device as a separate lower section about the
+            title. They are not: what everybody made of a film is part of what the film
+            *is* on bingd., the same way its runtime and director are. So the row follows
+            the metadata line with nothing between them - no heading, no rule - and the
+            one rule sits *beneath* the scores, closing off core identity from the
+            descriptive content (synopsis, genres) that follows. ScoresSection draws it.
+
+            Above the tabs, and never inside them, is still the founder's standing rule:
+            scores are core bingd. data and must not appear and disappear as somebody
+            looks at the cast. The page order is fixed - hero, metadata, scores,
+            description, genres, where to watch, tabs - so a reader scrolling to the
+            number finds it in the same place every time.
+
+            A series has no aggregate of its own, because it cannot be ranked (PRD s10),
+            so it gets no row rather than a permanent "Not enough ratings".
+
+            **The reader's own score is not in here.** It is in the hero, opposite the
+            poster, with the rank context and the Ranked control beside it. It led this
+            row as well until 2026-08-18, which put the same number on the page twice
+            and made the second copy the weaker one. Founder correction. */}
+        {!isSeries ? (
+          <ScoresSection
+            // Everybody's, then the reader's own people — the founder's order from the
+            // Preview pass. Both units are always drawn: a grey circle and "Not enough
+            // ratings" is a real answer, and a unit that appears when the data does is
+            // a page that moves under the reader.
+            bingd={{
+              score: community.data?.score ?? null,
+              ratingCount: community.data?.ratingCount ?? 0,
+            }}
+            following={{
+              score: following.data?.score ?? null,
+              ratingCount: following.data?.ratingCount ?? 0,
+            }}
+            // §13: the aggregate opens its members. Only offered once the count is
+            // real — ScoresSection itself refuses a tap on an empty unit.
+            onPressFollowing={() => setFollowingRatingsOpen(true)}
+          />
+        ) : null}
+
         {actionError ? (
           <View style={styles.block}>
             <Text variant="footnote" tone="action">
@@ -970,47 +1014,6 @@ export default function TitleScreen() {
               </Text>
             </Pressable>
           </View>
-        ) : null}
-
-        {/* **Above the tabs, and never inside them.** The founder's correction: scores
-            are core Bingd data, and putting them below a tab row meant they appeared
-            and disappeared as somebody looked at the cast. The page order is fixed now
-            — hero, metadata, genres, actions, scores, description, tabs — so a reader
-            scrolling to the number finds it in the same place every time.
-
-            **Above the description since the hierarchy pass, not below it.** A synopsis
-            is three lines of prose and the scores are the thing this app is for; with
-            the description between them the founder's device needed a scroll to reach
-            the one number nobody else's page has. The description has not moved far —
-            it is the next block down — but it no longer stands between the reader and
-            what Bingd knows.
-
-            A series has no aggregate of its own, because it cannot be ranked
-            (PRD §10), so it gets no section rather than a permanent "No ratings yet".
-
-            **The reader's own score is not in here.** It is in the hero, opposite the
-            poster, with the rank context and the Ranked control beside it. It led this
-            section as well until 2026-08-18, which put the same number on the page
-            twice and made the second copy the weaker one — no rank line, no way to
-            change the rating. Founder correction. */}
-        {!isSeries ? (
-          <ScoresSection
-            // Everybody's, then the reader's own people — the founder's order from the
-            // Preview pass. Both units are always drawn: a grey circle and "Not enough
-            // ratings" is a real answer, and a unit that appears when the data does is
-            // a page that moves under the reader.
-            bingd={{
-              score: community.data?.score ?? null,
-              ratingCount: community.data?.ratingCount ?? 0,
-            }}
-            following={{
-              score: following.data?.score ?? null,
-              ratingCount: following.data?.ratingCount ?? 0,
-            }}
-            // §13: the aggregate opens its members. Only offered once the count is
-            // real — ScoresSection itself refuses a tap on an empty unit.
-            onPressFollowing={() => setFollowingRatingsOpen(true)}
-          />
         ) : null}
 
         {title.overview ? (

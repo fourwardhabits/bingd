@@ -215,3 +215,44 @@ describe('the people behind the Following number (founder, 2026-08-27 §13)', ()
     expect(screen.getAllByRole('button')).toHaveLength(1);
   });
 });
+
+/**
+ * **No heading, and the rule beneath** (founder, physical Android, 2026-09-06).
+ *
+ * The `SCORES` label and the rule above the row made a seam between a title's metadata
+ * and the numbers, and the numbers are part of what a title is. The units name
+ * themselves, so the heading was chrome; the rule stays, at the bottom, where it closes
+ * core identity off from descriptive content.
+ */
+describe('reading as part of the title rather than a section about it', () => {
+  it('draws no heading', async () => {
+    await render(<ScoresSection {...both} />);
+
+    expect(screen.queryByText('SCORES')).toBeNull();
+    expect(screen.queryByText('Scores')).toBeNull();
+    expect(screen.queryByRole('header')).toBeNull();
+  });
+
+  it('draws its one rule after the units, not before them', async () => {
+    await render(<ScoresSection {...both} />);
+    const section = screen.getByTestId('scores-section');
+
+    // In render order: the layout holding the units first, the rule last.
+    const ids = (section.children as { props?: { testID?: string } }[])
+      .map((child) => child?.props?.testID)
+      .filter(Boolean);
+    expect(ids).toEqual(['scores-layout', 'scores-divider']);
+  });
+
+  it('leaves the rule inset and hairline, unchanged by the move', async () => {
+    await render(<ScoresSection {...both} />);
+    const divider = flatten(screen.getByTestId('scores-divider').props.style);
+
+    expect(divider.marginHorizontal).toBe(16);
+    expect(divider.borderTopWidth).toBeLessThanOrEqual(1);
+    expect(divider.backgroundColor).toBeUndefined();
+    // No wash behind the row either: the founder's default, and the one shipped.
+    const section = flatten(screen.getByTestId('scores-section').props.style);
+    expect(section.backgroundColor).toBeUndefined();
+  });
+});
