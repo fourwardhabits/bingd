@@ -7,6 +7,7 @@ import {
   UPLOAD_DEADLINE_MS,
   authStorageKey,
   requestWithDeadline,
+  resetContractReports,
   resetExpiryReports,
 } from './supabase';
 
@@ -112,6 +113,7 @@ beforeEach(() => {
   jest.useFakeTimers();
   (reportHandled as jest.Mock).mockClear();
   resetExpiryReports();
+  resetContractReports();
 });
 afterEach(() => {
   jest.useRealTimers();
@@ -384,5 +386,187 @@ describe('authStorageKey', () => {
    */
   it('is the key the Supabase client itself uses', () => {
     expect(authStorageKey).toBe('sb-project-auth-token');
+  });
+});
+
+describe('what a backend-contract failure reports', () => {
+  /**
+   * **The hole this closes, stated as the founder's own operating position.** The Android
+   * beta moves by OTA, iOS sits on an older runtime, and migrations are deliberately held
+   * — so "a client that asks for an RPC the active backend does not have" is not an
+   * accident here, it is a standing consequence of how this project ships. The person
+   * holding the phone sees a sheet error and `lib/diagnose.ts` names the missing thing on
+   * a non-production build. Nothing reached Sentry: `diagnose` returns null in
+   * production, no call site forwards a Supabase error on, and `reportHandled` had
+   * exactly one caller, the deadline above.
+   *
+   * These pin the report and, as much, the things it must never carry.
+   */
+  const answering = (status: number, body: unknown) => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      })) as unknown as typeof fetch;
+  };
+
+  /** The inspection is detached from the response, so let its microtasks run. */
+  const settled = async () => {
+    await jest.advanceTimersByTimeAsync(0);
+    await jest.advanceTimersByTimeAsync(0);
+  };
+
+  it('names the RPC the backend does not have, and nothing about the caller', async () => {
+    answering(404, {
+      code: 'PGRST202',
+      message: 'Could not find the function public.group_picks_generate(p_group) in the schema cache',
+      hint: null,
+      details: null,
+    });
+
+    await requestWithDeadline(
+      'https://project.supabase.co/rest/v1/rpc/group_picks_generate?select=*',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer header.payload.signature', apikey: 'anon-key' },
+        body: JSON.stringify({ p_note: 'a private sentence' }),
+      },
+    );
+    await settled();
+
+    expect(reportHandled).toHaveBeenCalledTimes(1);
+    const [error, context] = (reportHandled as jest.Mock).mock.calls[0] as [
+      Error,
+      Record<string, unknown>,
+    ];
+
+    expect(error.name).toBe('BackendContractError');
+    expect(context).toEqual({
+      scope: 'backend.contract',
+      lane: 'rest',
+      code: 'PGRST202',
+      symbol: 'public.group_picks_generate',
+      rpc: 'group_picks_generate',
+    });
+
+    // The whole report is a code, a function name and a lane. Not the token, not the
+    // key, not the body the caller sent, and not PostgREST's sentence.
+    const written = `${error.message} ${JSON.stringify(context)}`;
+    for (const secret of ['header.payload.signature', 'anon-key', 'a private sentence', 'schema cache']) {
+      expect(written).not.toContain(secret);
+    }
+  });
+
+  it('reports a column the backend is missing on an ordinary table read', async () => {
+    answering(400, { code: '42703', message: 'column media_items.episode_count does not exist' });
+
+    await requestWithDeadline(
+      'https://project.supabase.co/rest/v1/media_items?select=episode_count&title=eq.Severance',
+    );
+    await settled();
+
+    expect(reportHandled).toHaveBeenCalledTimes(1);
+    const [, context] = (reportHandled as jest.Mock).mock.calls[0] as [
+      Error,
+      Record<string, unknown>,
+    ];
+    // No RPC in the path, and the query string named a title — neither travels.
+    expect(context).toEqual({
+      scope: 'backend.contract',
+      lane: 'rest',
+      code: '42703',
+      symbol: 'media_items.episode_count',
+      rpc: 'none',
+    });
+    expect(JSON.stringify(context)).not.toContain('Severance');
+  });
+
+  it('reports one absent function once, however many screens ask for it', async () => {
+    // A missing RPC is not a transient: every mount and every retry fails identically
+    // for as long as the build and the database disagree. Sixty identical events an hour
+    // for days is a quota spent saying one thing.
+    answering(404, {
+      code: 'PGRST202',
+      message: 'Could not find the function public.rank_again(p_x) in the schema cache',
+    });
+
+    for (let i = 0; i < 4; i += 1) {
+      await requestWithDeadline('https://project.supabase.co/rest/v1/rpc/rank_again', {
+        method: 'POST',
+      });
+      await settled();
+    }
+
+    expect(reportHandled).toHaveBeenCalledTimes(1);
+  });
+
+  it('says nothing about the refusals this app raises on purpose', async () => {
+    // A rate limit, an RLS denial, a unique violation and a bad parameter are answers,
+    // not drift. `write-outcome.ts` already classifies them and a person can act on them.
+    for (const [status, body] of [
+      [400, { code: '22023', message: 'a note of 5000 characters is too long' }],
+      [403, { code: '42501', message: 'insufficient privilege' }],
+      [409, { code: '23505', message: 'duplicate key value violates unique constraint' }],
+      [429, { code: '53400', message: 'too many attempts' }],
+      [500, { code: 'XX000', message: 'internal' }],
+    ] as const) {
+      answering(status, body);
+      await requestWithDeadline('https://project.supabase.co/rest/v1/rpc/add_comment', {
+        method: 'POST',
+      });
+      await settled();
+    }
+
+    expect(reportHandled).not.toHaveBeenCalled();
+  });
+
+  it('says nothing about a healthy answer, or about auth and storage', async () => {
+    answering(200, [{ id: '00000000-0000-4000-8000-000000000001' }]);
+    await requestWithDeadline('https://project.supabase.co/rest/v1/rpc/rank_start', {
+      method: 'POST',
+    });
+    await settled();
+
+    // A 400 from GoTrue is a bad password, not a schema.
+    answering(400, { code: 'PGRST202', message: 'Could not find the function public.x' });
+    await requestWithDeadline('https://project.supabase.co/auth/v1/token?grant_type=password');
+    await settled();
+
+    expect(reportHandled).not.toHaveBeenCalled();
+  });
+
+  it('leaves the response its caller reads completely untouched', async () => {
+    // The inspection reads a clone. If it read the response the caller would find an
+    // already-consumed body, which would turn a diagnostic into an outage.
+    answering(404, {
+      code: 'PGRST202',
+      message: 'Could not find the function public.rank_again(p_x) in the schema cache',
+    });
+
+    const response = await requestWithDeadline(
+      'https://project.supabase.co/rest/v1/rpc/rank_again',
+      { method: 'POST' },
+    );
+    await settled();
+
+    expect(response.bodyUsed).toBe(false);
+    await expect(response.json()).resolves.toMatchObject({ code: 'PGRST202' });
+    expect(reportHandled).toHaveBeenCalledTimes(1);
+  });
+
+  it('cannot fail the request it is watching', async () => {
+    // An answer that is not JSON at all — a gateway's HTML error page, which is what a
+    // 404 from anything but PostgREST looks like.
+    globalThis.fetch = (async () =>
+      new Response('<html>Not Found</html>', { status: 404 })) as unknown as typeof fetch;
+
+    const response = await requestWithDeadline(
+      'https://project.supabase.co/rest/v1/rpc/rank_again',
+      { method: 'POST' },
+    );
+    await settled();
+
+    expect(response.status).toBe(404);
+    expect(reportHandled).not.toHaveBeenCalled();
   });
 });
