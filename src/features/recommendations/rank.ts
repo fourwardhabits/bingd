@@ -873,7 +873,40 @@ function explore(
   // candidates are visited in. Empty when there is no exposure to rotate against, which
   // is what makes the un-rotated path below byte-for-byte the old behaviour.
   const anchors = new Set(
-    exposure ? pool.slice(0, REFRESH_ANCHORS).map((candidate) => candidate.mediaItemId) : [],
+    exposure
+      ? pool
+          .slice(0, REFRESH_ANCHORS)
+          /**
+           * **And the exemption expires** (founder, 2026-09-06).
+           *
+           * This was the defect behind the founder's *Jobs* and *Creed III*: two titles
+           * recurring across weeks, and an external high-history reader reporting the
+           * same. The exemption is by rank in the pool, the rank is a pure function of
+           * the reader's own rankings, and a collection that is not changing produces
+           * the same order every time — so the *same two titles* were exempt from every
+           * penalty on every refresh, in every session, for as long as the reader's
+           * taste held still. `refresh-diagnostic.test.ts` measured it: `c000` and
+           * `c001` on five of five generations.
+           *
+           * Removing the exemption is the opposite failure — a wall that throws away
+           * the best answer it has the first time somebody asks for something else. So
+           * it expires instead: a title is protected until the reader has genuinely
+           * seen it {@link EXPOSURE_TIERS} times, and after that it rotates like
+           * anything else. Relevance stays primary for the first few looks, which is
+           * what the exemption was for, and nothing is pinned for ever, which is what
+           * it accidentally did.
+           *
+           * `seen` spans both halves of the penalty — this session's arrangement and
+           * the durable impressions of previous ones (`mergeExposure`) — so a title
+           * that filled the top slot across several launches loses its protection
+           * without the reader having to refresh their way through it in one sitting.
+           */
+          .filter(
+            (candidate) =>
+              (exposure.seen.get(candidate.mediaItemId) ?? 0) < EXPOSURE_TIERS,
+          )
+          .map((candidate) => candidate.mediaItemId)
+      : [],
   );
 
   /**

@@ -336,6 +336,30 @@ export type AnalyticsEvent =
    */
   | { name: 'group_picks_result_opened'; props: { position: number } }
 
+  // --- Recommendations ------------------------------------------------------
+  /**
+   * A genuinely new For You wall was put in front of somebody.
+   *
+   * **The question this exists to answer is whether repetition is getting better**, and
+   * it cannot be read off opens or watchlist saves: a reader who is shown the same nine
+   * films every week and saves one of them looks identical in those numbers to a reader
+   * being shown a fresh wall. `repeat_count` is the measurement — how many of the titles
+   * on this wall the reader had already been shown inside the impression window — so the
+   * founder's "Jobs and Creed III again" becomes a number rather than a recollection.
+   *
+   * `size` beside it is what makes the ratio meaningful, and `medium` separates the two
+   * walls, which have different pool depths and will not improve at the same rate.
+   *
+   * **Emitted once per distinct slate, from the same guard the impression writer uses.**
+   * A wall that re-renders, or grows by a page it has already recorded, emits nothing —
+   * the guard is `noteImpressions`' own returned set, so the event and the impression
+   * cannot disagree about what "shown" means. No title id travels.
+   */
+  | {
+      name: 'for_you_slate_shown';
+      props: { medium: 'movies' | 'tv'; size: number; repeat_count: number };
+    }
+
   // --- Weekly streak --------------------------------------------------------
   /**
    * The streak section was drawn on the reader's own profile, with what it said.

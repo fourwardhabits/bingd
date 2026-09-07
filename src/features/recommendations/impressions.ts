@@ -93,12 +93,15 @@ const remember = (key: string) => {
  * — so a five-page wall is two calls rather than one truncation. Chunking is what makes
  * the whole wall recordable; slicing was what made it silently partial.
  */
-export async function noteImpressions(key: string, mediaItemIds: readonly string[]) {
-  if (mediaItemIds.length === 0) return;
+export async function noteImpressions(
+  key: string,
+  mediaItemIds: readonly string[],
+): Promise<readonly string[]> {
+  if (mediaItemIds.length === 0) return [];
 
   const already = remember(key);
   const fresh = [...new Set(mediaItemIds)].filter((id) => !already.has(id));
-  if (fresh.length === 0) return;
+  if (fresh.length === 0) return [];
 
   // Marked *before* the await, not after. Two renders can reach this line before either
   // request settles, and marking on success would let both through — which the server
@@ -120,6 +123,16 @@ export async function noteImpressions(key: string, mediaItemIds: readonly string
       for (const id of chunk) already.delete(id);
     }
   }
+
+  /**
+   * The ids this call actually recorded, for the one analytics event that wants them.
+   *
+   * Returned rather than emitted here: this module is the writer and knows nothing about
+   * what a slate *is*, so an event fired from inside it would be counting round trips
+   * rather than walls. The caller has the medium and the whole wall — and it also has
+   * this guard's answer, which is the only thing that knows a slate is genuinely new.
+   */
+  return fresh;
 }
 
 /** Test seam. Nothing in the app calls this. */

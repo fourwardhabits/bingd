@@ -1211,6 +1211,12 @@ This is a specific application of the universal over-limit rule in §20.
 
 ## 13. Taste match and recommendations
 
+> **The For You product doctrine is [`recommendations.md`](./recommendations.md)** (2026-09-06), and it is the source of truth for the candidate sources, the freshness rules, dismissal, diversity, the low-pool fallback and the measurement. This section states the requirement; that document states how the wall is actually built and what has been measured about it.
+>
+> **The doctrine, in three sentences.** Relevance is primary — freshness is a preference over *ordering*, never a licence to show something worse. Novelty means "something else I have not seen", not "anything else". And repetition is honest when the candidate pool is genuinely small: padding a wall with titles the engine does not believe in is worse than admitting there are only twelve.
+>
+> The 2026-09-06 pass found and fixed one real defect — an exemption that protected the two strongest candidates from every freshness penalty and never expired, which is why the same two films recurred for weeks — and identified one remaining lever that is a configuration value rather than code (`foryou.impression_window_hours`). Both are written up there.
+
 ### Match score — Decided for public alpha
 
 Match compares the **relative ordering of titles both users have Ranked**. The user-facing output always pairs compatibility with evidence volume.

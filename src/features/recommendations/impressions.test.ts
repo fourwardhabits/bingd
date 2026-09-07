@@ -200,7 +200,9 @@ describe('when the write fails', () => {
     // it would be an unhandled rejection over a background fact about ordering.
     mockRpc.mockRejectedValueOnce(new Error('offline'));
 
-    await expect(noteImpressions('movies|{}', ['a', 'b'])).resolves.toBeUndefined();
+    // Resolves rather than rejects — and resolves with the ids it recorded, which is
+    // what the one analytics event on this path is guarded by (`for_you_slate_shown`).
+    await expect(noteImpressions('movies|{}', ['a', 'b'])).resolves.toEqual(['a', 'b']);
     await noteImpressions('movies|{}', ['a', 'b']);
     expect(mockRpc).toHaveBeenCalledTimes(2);
   });
