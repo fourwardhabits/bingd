@@ -439,6 +439,15 @@ export const ANALYTICS_EVENTS = [
   'group_picks_opened',
   'group_picks_generated',
   'group_picks_result_opened',
+  /**
+   * Both arrived on 2026-09-06 (#112 and #108) as members of the union above and were
+   * never added here, so `analytics.test.ts` pinned seventeen names while the app
+   * emitted nineteen. This list is "the emittable names, for tests and for the spec to
+   * be checked against", and a list the spec is checked against has to be complete or
+   * the check proves nothing.
+   */
+  'for_you_slate_shown',
+  'streak_state_viewed',
 ] as const satisfies readonly AnalyticsEvent['name'][];
 
 /**

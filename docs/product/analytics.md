@@ -13,7 +13,7 @@
 > **Do people activate, run the core loop, use the social side — and which build were
 > they on when they did it?**
 
-That is the whole brief. Seventeen events. Everything a mature analytics practice would add
+That is the whole brief. Nineteen events. Everything a mature analytics practice would add
 — retention cohorts, an activation funnel with D1/D7/D28, paid attribution, sponsorship
 reporting, an experimentation platform — is in [`deferred-roadmap.md`](./deferred-roadmap.md)
 §9–§12 with the reason it is not here.
@@ -38,9 +38,10 @@ secret: a PostHog project token is write-only and a Sentry DSN only accepts even
 
 ## 2. The canonical event set
 
-Seventeen events: eleven since 2026-08-18, two added on 2026-08-19 when the invitation
-resolver gave them writers, one added on 2026-09-03 with Help & Support, and three added
-on 2026-09-03 with Group Picks. The union in `src/lib/analytics.ts` is the
+Nineteen events: eleven since 2026-08-18, two added on 2026-08-19 when the invitation
+resolver gave them writers, one added on 2026-09-03 with Help & Support, three added
+on 2026-09-03 with Group Picks, and two added on 2026-09-06 with For You rotation and
+the weekly streak. The union in `src/lib/analytics.ts` is the
 enforcement — there is no
 `track(name: string, props: object)` to reach for, so inventing an event is a compile
 error rather than a decision somebody makes at 2am before a demo.
@@ -99,12 +100,16 @@ already on emits nothing, or the count would measure fidgeting.
 so the event, the chip and the RPC argument are one string rather than a fourth spelling
 of the same four things.
 
-**The other experiment — recommendation rotation — has no events at all**, deliberately.
-Its question is whether repeated visits produce a fresher slate, and that is answerable
-from data the feature already stores: `recommendation_impressions` records what was shown
-and `recommendation_feedback` records what was dismissed. Emitting a client event per
-slate would be a second, worse copy of a server-side fact — and would put a stream of
-writes on a screen the founder asked to keep quiet (PRD §13).
+**The other experiment — recommendation rotation — had no events at all** when this
+section was written, deliberately: its question is whether repeated visits produce a
+fresher slate, `recommendation_impressions` records what was shown and
+`recommendation_feedback` what was dismissed, and a client event per slate would be a
+second, worse copy of a server-side fact. That held until 2026-09-06, when the founder's
+"Jobs and Creed III again" turned out to be unanswerable from the impressions table
+alone — it records that a title was shown, not how much of a wall the reader had
+already seen. `for_you_slate_shown` (the For You section below) is the one event that
+answers it, gated on the same guard the impression writer uses so it cannot become the
+stream of writes this paragraph was refusing.
 
 ### Help & Support — added 2026-09-03
 
@@ -137,6 +142,36 @@ was (shared saves, inferred taste, or trending fill) without naming one title on
 What deliberately does not travel: member ids, member names, title ids, title names, the
 filter *values*, and the internal group score. Saves made from a pick reuse
 `watchlist_added` with `surface: 'group_picks'` rather than growing a fourth event.
+
+### For You — added 2026-09-06
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `for_you_slate_shown` | a genuinely new wall was put in front of the reader — once per distinct slate, from the same guard `noteImpressions` uses, never per render or per page already recorded | the reader | `medium`, `size`, `repeat_count` |
+
+One event, and it exists to make repetition a number. Opens and saves cannot answer
+whether the wall is getting fresher: a reader shown the same nine films every week and
+saving one looks identical in those numbers to a reader shown a fresh wall.
+`repeat_count` is how many titles on this wall the reader had already been shown inside
+the impression window (`foryou.impression_window_hours`); `size` beside it makes the
+ratio meaningful, and `medium` separates the two walls, which have different pool
+depths and will not improve at the same rate. No title id travels.
+
+**This corrects §2's earlier claim** that the rotation experiment had "no events at
+all". It has one, added with #112 on 2026-09-06, and it was emitted for a day before
+being written here — which is exactly the drift the pinned list in `analytics.test.ts`
+exists to make visible.
+
+### Weekly streak — added 2026-09-06
+
+| Event | Fires exactly when | Owner | Properties |
+|---|---|---|---|
+| `streak_state_viewed` | the streak section was drawn on the reader's **own** profile, once per settled read rather than per render | the reader | `weeks`, `ranked_this_week`, `days_left` |
+
+The distribution, not the engagement: how many people are looking at a live streak
+versus a zero, which is what says whether the mechanic is working before any reminder
+push exists. §10b carries the measurement plan it belongs to. Deliberately no
+`streak_reminder_*` events — those describe a push that does not exist.
 
 ---
 
@@ -517,6 +552,8 @@ a number that looks like growth and is not.
 | `onboarding_completed` | once per flow | guarded on the flow having already *ended*, so two buttons on one summary report one completion |
 | `follow_created` | approximately once | `already_applied` carries no state and emits nothing; a known existing edge, and a relationship not yet read, both emit nothing |
 | `watchlist_added` | approximately once | additions only, `ok` only |
+| `for_you_slate_shown` | once per distinct slate per process | guarded by `noteImpressions`' own returned set, so a re-render, a bookmark or a page already recorded emits nothing; the server's hour-truncated impression key is the second guard |
+| `streak_state_viewed` | once per profile mount | a component-lifetime ref, so scrolling the profile tab is not a second view; a relaunch is |
 
 Three soft edges, stated rather than buried:
 

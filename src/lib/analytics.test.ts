@@ -85,13 +85,16 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the seventeen canonical names and nothing else', () => {
-    // Pinned deliberately. Adding an eighteenth is a product decision that has to be made
+  it('is the nineteen canonical names and nothing else', () => {
+    // Pinned deliberately. Adding a twentieth is a product decision that has to be made
     // in `docs/product/analytics.md` as well as here, and this failing is the reminder.
-    // The three group_picks names arrived 2026-09-03 with the feature.
+    // The three group_picks names arrived 2026-09-03 with the feature; the For You
+    // slate and the streak names arrived 2026-09-06 (#112, #108) and were emitted for a
+    // day without being pinned here or written into the spec.
     expect([...ANALYTICS_EVENTS].sort()).toEqual(
       [
         'follow_created',
+        'for_you_slate_shown',
         'group_picks_generated',
         'group_picks_opened',
         'group_picks_result_opened',
@@ -106,10 +109,20 @@ describe('the event vocabulary', () => {
         'sign_in_completed',
         'signup_completed',
         'settings_support_email_opened',
+        'streak_state_viewed',
         'title_logged',
         'watchlist_added',
       ].sort(),
     );
+  });
+
+  it('pins every name the union can emit, so the spec check cannot miss one', () => {
+    // The union is the compile-time control and this list is what the spec is checked
+    // against. They drifted once: two events were emitted for a day without being
+    // pinned or documented. Each name the app actually sends has to be in the list.
+    for (const name of ['for_you_slate_shown', 'streak_state_viewed'] as const) {
+      expect(ANALYTICS_EVENTS as readonly string[]).toContain(name);
+    }
   });
 
   it('sends the declared name unchanged', () => {
