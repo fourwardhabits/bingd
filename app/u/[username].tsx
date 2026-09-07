@@ -21,6 +21,7 @@ import { CommentSheet } from '@/features/feed/CommentSheet';
 import { useCommentCounts } from '@/features/feed/use-comments';
 import { feedItems, useActorActivity } from '@/features/feed/use-feed';
 import { ActivityPageFooter } from '@/features/feed/ActivityPageFooter';
+import { activityLead } from '@/features/feed/ActivityLead';
 import { isNearEnd } from '@/features/feed/near-end';
 import { ReportSheet } from '@/features/moderation/ReportSheet';
 import { FollowControl } from '@/features/profile/FollowControl';
@@ -619,6 +620,10 @@ export default function PublicProfileScreen() {
                   title={event.title}
                   year={event.year}
                   posterUri={posterUri(event.posterPath)}
+                  // The same leading artwork the feed draws, from the same resolver —
+                  // an award row leads with its badge here too, rather than with the
+                  // initial of its name. See `ActivityLead`.
+                  lead={activityLead(event)}
                   metadata={activityMetadata({
                     kind: event.kind,
                     genres: event.genres,
