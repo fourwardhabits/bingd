@@ -963,6 +963,17 @@ Three properties this is required to keep:
 > (`20260825000200`), so a completion whose reply is lost and is pressed again is
 > answered from the ledger: the same position, the same score, and no second activity.
 
+> **A ranking activity is a snapshot — founder decision 2026-09-07.** The score a
+> `title_ranked` activity shows is the score that was announced for *that* watch, written
+> into the event's payload at completion, and it is never rewritten. An *Adjust placement*
+> or a *Change your rating* later can move the title to a different score in the
+> Collection and on the title page — 8.3 in the feed, 8.6 on the title — and that is
+> correct, not drift: the feed says what was announced, the Collection says what is held
+> now. Two invariants carry it. **A correction never creates a feed post**, which is what
+> makes the snapshot honest (a post per correction would be a duplicate of an act that did
+> not happen); **an explicit rewatch may**, because it is a new watch with its own score.
+> Both are `watch-again.test.mjs`. No migration rewrites historic feed scores, deliberately.
+
 ### Open and provisional
 
 | Status | Item |

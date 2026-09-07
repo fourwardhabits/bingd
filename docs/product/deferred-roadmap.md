@@ -2317,3 +2317,49 @@ which is the first thing on this profile that would.
 
 **Trigger:** readers who have earned more than three awards and say the wrong ones are
 showing. Until somebody has that problem, the ordering is the answer to it.
+
+---
+
+## 57. Scale ceilings and privilege hygiene deferred from the 2026-09-07 hardening pass
+
+**Deferred 2026-09-07**, by founder direction, from the launch-hardening audit off `93648ad`. None of these is a defect at beta scale; each is a ceiling or a hygiene item with a named trigger, recorded here so the trigger is watched rather than rediscovered. No speculative runtime change was made for any of them.
+
+### 57a. The Feed's actor URL ceiling
+
+**What it is.** `use-feed.ts` reads the feed with a PostgREST `in.(…)` filter over every followee id the reader has, on the request line. That line has a length ceiling in the gateway and the server, and a reader following on the order of 150–200 accounts approaches it: past it the feed request is refused with a request-line error rather than answered short.
+
+**Why it is deferred.** Nobody in the beta follows more than a few dozen accounts, and the fix is a server-side feed RPC (a followee set resolved in the database from `auth.uid()`, keyset paginated as today) — a new function and a client read path, not a tuning.
+
+**Revisit when.** *Before* users commonly approach ~150–200 follows, or sooner the moment a request-line / URI-too-long error appears in Sentry against the feed. `BackendContractError` will not catch it — that is a 414, not a schema code — so it is an explicit thing to watch.
+
+**Depends on.** A `my_feed` RPC with the same cursor contract as `feed pagination, 2026-09-04` · a reader that stops sending the id list.
+
+### 57b. Leaderboard and people-search scaling
+
+**What it is.** `_leaderboard_counts` aggregates `user_media` per metric and timeframe at read time, and `search_users` is a filtered scan over profiles. Both are correct and both are O(accounts) per request.
+
+**Why it is deferred.** At ~100 accounts each is milliseconds; at ~1,000 still well inside the request deadline; the shape only bites in the thousands, and the right fix then (a materialised monthly board refreshed on write, a trigram or search-vector index on handles and names) depends on which one is measured slow.
+
+**Revisit when.** Measured latency or an `explain analyze` plan shows either exceeding ~200 ms at p95 as accounts approach the low thousands.
+
+**Depends on.** Query-plan evidence from production, not a guess.
+
+### 57c. Pruning `processed_operations` and `recommendation_impressions`
+
+**What it is.** Two append-only tables with no reaper. `processed_operations` is the idempotency ledger (one row per operation id, forever); `recommendation_impressions` is one row per (reader, title, hour) shown.
+
+**Why it is deferred.** Both are bounded per user per day and neither is read by a scan — the ledger is a primary-key lookup, the impressions are keyed by reader inside the exposure window. Growth is linear and slow, and a pruner that deletes a ledger row the client might still replay is a correctness change, not housekeeping.
+
+**Revisit when.** Table size or the impression read's latency becomes an operational fact: a nightly count that keeps climbing past what the plan needs, or `for_you_slate_shown` latency moving.
+
+**Depends on.** A retention rule for the ledger that is provably longer than any client retry horizon · a window-based delete for impressions that leaves the exposure window intact.
+
+### 57d. `TRUNCATE` / `TRIGGER` / `REFERENCES` privilege hygiene
+
+**What it is.** Several tables still carry the default grants that let `authenticated` hold `TRUNCATE`, `TRIGGER` or `REFERENCES` privilege. None is reachable through PostgREST (it issues no DDL and no `TRUNCATE`), and RLS governs every row read and write, so this is hygiene rather than a current exploit.
+
+**Why it is deferred.** A sweep across every table is a wide migration touching grants that four earlier passes reasoned about individually; doing it under launch pressure trades a non-exploit for a regression risk on the one thing that is definitely enforced (the RLS policies and the writer grants around them).
+
+**Revisit when.** The next migration that already touches grants schema-wide, or a second read path (a reporting role, an operator connection) that is not PostgREST.
+
+**Depends on.** A grants inventory test in `supabase/tests/rls.test.mjs` that pins the intended state before the sweep changes it.
