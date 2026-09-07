@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -90,6 +90,20 @@ jest.mock('@/lib/analytics', () => ({
 }));
 
 /**
+ * The streak detector, so a test can say whether a completion asked it anything. The
+ * real hook reads `rankings.created_at` through the Supabase mock above, which has no
+ * `.order` and so resolves to null inside the hook's own catch — invisible, which is
+ * exactly the problem this mock makes visible.
+ */
+const mockDetectStreak = jest.fn();
+jest.mock('@/features/streaks/use-streak-advance', () => ({
+  // Always a promise, whatever a test has (or has not) told the mock to answer: the
+  // sheet chains .then on it, and a reset mock returning undefined would crash every
+  // completion in this file for a reason unrelated to what it was testing.
+  useStreakAdvance: () => () => Promise.resolve(mockDetectStreak()),
+}));
+
+/**
  * The ranked list the reveal reads for its genre ranks and its neighbours.
  *
  * Mocked rather than driven through the `from` stub above, because `useRankedCollection`
@@ -172,6 +186,7 @@ const visibleText = (node: unknown): string[] => {
 beforeEach(() => {
   mockPush.mockReset();
   mockTrack.mockReset();
+  mockDetectStreak.mockReset();
   mockUnlockQueue = [];
   mockUnlockReads = 0;
   mockRpc.mockReset();
@@ -1871,9 +1886,7 @@ describe('what a completion is reported as', () => {
     'reports mode %s from a placement that opened as %s',
     async (mode, opened, rpc, rebucket) => {
       answering(placement);
-      const sheet = await openSheet(
-        opened ? { subject: { ...subject, mode: opened } } : {},
-      );
+      const sheet = await openSheet(opened ? { subject: { ...subject, mode: opened } } : {});
 
       await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
       await waitFor(() => expect(callsTo(rpc)).toHaveLength(1));
@@ -1895,5 +1908,37 @@ describe('what a completion is reported as', () => {
 
     await waitFor(() => expect(sheet.getByText('Not sure that landed')).toBeTruthy());
     expect(completions('ranking_completed')).toHaveLength(0);
+  });
+});
+
+/**
+ * **Which completions ask about the streak.**
+ *
+ * The streak is derived from `rankings.created_at`, and a correction re-inserts that row
+ * with `now()` until `20260911000100` lands — so an Adjust placement in an otherwise empty
+ * week read as "ranked this week", and this sheet celebrated it. A correction is not a
+ * ranking act (PRD, 2026-08-26: it posts no activity), so it is not asked. A first
+ * placement and a rewatch are.
+ */
+describe('which completions ask about the streak', () => {
+  it.each([
+    ['start', undefined, 'rank_start', true],
+    ['again', 'again', 'rank_again', true],
+    ['rerank', 'rerank', 'rank_again', false],
+    ['rebucket', 'rebucket', 'rank_rebucket', false],
+  ] as const)('%s asks: %s', async (_label, opened, rpc, asked) => {
+    answering(placement);
+    const sheet = await openSheet(opened ? { subject: { ...subject, mode: opened } } : {});
+
+    await sheet.findByLabelText(/Film A scored 8.7 out of 10/);
+    await waitFor(() => expect(callsTo(rpc)).toHaveLength(1));
+
+    if (asked) {
+      await waitFor(() => expect(mockDetectStreak).toHaveBeenCalledTimes(1));
+    } else {
+      // Detached with `void`, so give it the same chance the positive cases needed.
+      await act(async () => {});
+      expect(mockDetectStreak).not.toHaveBeenCalled();
+    }
   });
 });
