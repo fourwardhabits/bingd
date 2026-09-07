@@ -13,6 +13,7 @@ import {
   usernameAvailability,
   useAuth,
 } from '@/features/auth';
+import { type TasteOnboarding } from '@/features/onboarding/use-taste-onboarding';
 import { track } from '@/lib/analytics';
 import { openLegal } from '@/lib/legal';
 import { queryKeys } from '@/lib/query';
@@ -211,6 +212,33 @@ export default function CreateProfileScreen() {
         // `created` only. `already_exists` below is a replay of an account that was
         // already there, and counting it would report a second signup for one person.
         track({ name: 'signup_completed' });
+        /**
+         * **A profile the server has just created belongs in the taste flow, and this
+         * process knows it without asking** (pre-GTM audit, 2026-09-07).
+         *
+         * The first-run check is bounded at four seconds (`use-taste-onboarding.ts`),
+         * and a timeout answers "not needed", because for the whole population that is
+         * the safe answer: an existing account losing the app is worse than a new one
+         * losing a suggestion. But *here* the population is one account, and `created`
+         * is the server's own word that it has nothing in it — no ranking, no logged
+         * title, no phase on this device. Seeding the check's cache with that answer
+         * means the gate routes a brand-new account into Build your taste from what is
+         * already known, rather than from two counts that can hang and strand it on an
+         * empty Feed with nothing to show. The same answer the counts would give, minus
+         * the two round trips and the deadline.
+         *
+         * `created` only — `already_exists` says nothing about the account's contents —
+         * and the screen's own `begin` still refuses to enrol an account whose phase is
+         * already decided, so nothing here can put an established reader through the
+         * flow. Re-evaluation stays what it was for every other path: a timed-out
+         * account is asked again on its next launch.
+         */
+        if (auth.status === 'onboarding') {
+          queryClient.setQueryData<TasteOnboarding>(queryKeys.tasteOnboarding(auth.userId), {
+            ranked: 0,
+            needed: true,
+          });
+        }
         await clearPendingDisplayName();
         await applyVisibility();
         await openTheGate();

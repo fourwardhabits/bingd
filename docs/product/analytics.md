@@ -38,11 +38,13 @@ secret: a PostHog project token is write-only and a Sentry DSN only accepts even
 
 ## 2. The canonical event set
 
-Nineteen events: eleven since 2026-08-18, two added on 2026-08-19 when the invitation
+Twenty-one events: eleven since 2026-08-18, two added on 2026-08-19 when the invitation
 resolver gave them writers, one added on 2026-09-03 with Help & Support, three added
-on 2026-09-03 with Group Picks, and two added on 2026-09-06 with For You rotation and
-the weekly streak. The union in `src/lib/analytics.ts` is the
-enforcement — there is no
+on 2026-09-03 with Group Picks, two added on 2026-09-06 with For You rotation and
+the weekly streak, and two added on 2026-09-07 with the pre-GTM convergence — the two
+funnel denominators, `onboarding_started` and `ranking_started`, without which "did
+onboarding begin" and "did they abandon ranking" had no number. The union in
+`src/lib/analytics.ts` is the enforcement — there is no
 `track(name: string, props: object)` to reach for, so inventing an event is a compile
 error rather than a decision somebody makes at 2am before a demo.
 
@@ -52,6 +54,7 @@ error rather than a decision somebody makes at 2am before a demo.
 |---|---|---|---|
 | `sign_in_completed` | a Supabase session exists | the person signing in | `method` |
 | `signup_completed` | `create_profile` answered `created` | the new account | — |
+| `onboarding_started` | the first-run taste flow **became active** for this account on this device — the one write of the `active` phase, never a resume, a rerender or a relaunch | the account | — |
 | `onboarding_completed` | the first-run taste flow ended, by either exit | the account | `skipped`, `titles_ranked` |
 
 ### Core loop
@@ -59,7 +62,8 @@ error rather than a decision somebody makes at 2am before a demo.
 | Event | Fires exactly when | Owner | Properties |
 |---|---|---|---|
 | `title_logged` | `set_bucket` answered `ok` | the collector | `media_kind`, `surface`, `bucket` |
-| `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `mode`, `rebucket` |
+| `ranking_started` | the opening call answered with a comparison, or with a placement outright (an empty band) — once per session, on whichever attempt first opened | the ranker | `media_kind`, `surface`, `mode` |
+| `ranking_completed` | the ranking session answered `placed` | the ranker | `media_kind`, `surface`, `comparisons`, `mode`, `rebucket`, `skips` |
 | `watchlist_added` | `set_watchlist(present: true)` answered `ok` | the saver | `surface` |
 
 ### Social and discovery
@@ -157,6 +161,16 @@ the impression window (`foryou.impression_window_hours`); `size` beside it makes
 ratio meaningful, and `medium` separates the two walls, which have different pool
 depths and will not improve at the same rate. No title id travels.
 
+**`size: 0` is a real value** (2026-09-07). The slate query settled successfully and the
+**unfiltered** wall drew nothing — no candidate survived scoring and the reader's own
+dismissals — so the reader met an empty For You. It is emitted once per wall key from the
+hook's own guard, because the impression writer has nothing to record for an empty wall.
+It is never emitted while the query is pending, never for a failed request (that is the
+error state, with its retry), and never for a wall the reader emptied with their own
+filters, where Clear all is on screen. `repeat_count` is `0` by construction. "Are
+recommendation walls sometimes empty" is `size = 0` over all `for_you_slate_shown`, per
+`medium`.
+
 **This corrects §2's earlier claim** that the rotation experiment had "no events at
 all". It has one, added with #112 on 2026-09-06, and it was emitted for a day before
 being written here — which is exactly the drift the pinned list in `analytics.test.ts`
@@ -190,6 +204,17 @@ with no sign-in produces PostHog's own `Application Installed` and nothing of ou
 `already_exists`, which means the profile was already there — a replay, not a signup, and
 it emits nothing.
 
+**`onboarding_started`** (2026-09-07) is the flow becoming active, not the screen being
+seen. It is emitted from the one line in `useBeginTasteOnboarding` that writes the
+`active` phase, after both guards have found nothing decided in memory or on disk — so an
+account that closed the app on film three and reopened emits nothing (the start happened
+on the launch that wrote `active`), a second mount of the screen emits nothing, and an
+account that already finished or declined emits nothing. It is **not** `signup_completed`:
+an account created on this device but routed to the Feed by a timed-out first-run check
+has no start, which is the gap the seed in `create-profile.tsx` exists to close. **The
+denominator for `onboarding_completed`** is this event, and `onboarding_started` without a
+matching completion is the abandonment the beta could not previously count.
+
 **`onboarding_completed`** covers both exits and `skipped` separates them. One event
 rather than two, so the denominator cannot drift: everybody who reaches the end of the
 flow is in it. It is emitted from `useCompleteTasteOnboarding`, which all three exits go
@@ -221,6 +246,24 @@ watches is `mode in ('start', 'again')`**; a count of new titles ranked is `mode
 `rebucket` is kept beside it and is exactly `mode = 'rebucket'`. A second spelling of
 one fact is tolerable where deleting the first would cut every saved query and chart
 written against it in two.
+
+`skips` (2026-09-07) is how many *Too tough* presses the server accepted during the
+session. It is counted on the client from the answered `rank_skip` calls, because
+`_rank_finalize` returns no skip count; an Undo after a skip does not subtract, so it is
+the number of times the control was **used** rather than the net. It is not a measure of
+how uncertain the placement is — `adjustable` is the server's word for that and it is
+deliberately not on this event.
+
+**`ranking_started`** (2026-09-07) is a session, not a tap. It fires when the opening
+call — `rank_start`, `rank_again` or `rank_rebucket` — is answered with a comparison to
+show, or with the placement outright where the band was empty and there was nothing to
+compare against. A refused opening (a suspended account, a title already ranked) emits
+nothing. Once per session, on whichever attempt first opens: a lost reply retried under
+the same operation id that then opens is one start, and a pivot, a skip and an undo inside
+the session are none. It carries the same `mode` vocabulary as the completion so the two
+join on it, and `media_kind` comes from the title being ranked rather than from the
+server's answer, because a comparison carries no category. **`ranking_started` minus
+`ranking_completed`, per `mode`, is the abandonment rate.**
 
 **`watchlist_added`** is an addition. Removals are not measured; nothing in the beta asks.
 It carries **no `media_kind`**, deliberately: the watchlist accepts a whole series as well
@@ -356,8 +399,9 @@ where it comes from.
 | `bucket` | `loved`, `fine`, `not_for_me` |
 | `method` | `email_code`, `apple`, `google` |
 | `state` | `approved`, `pending` |
+| `mode` | `start`, `rebucket`, `rerank`, `again` — on `ranking_started` and `ranking_completed` alike |
 | `skipped`, `rebucket`, `has_title` | booleans |
-| `titles_ranked`, `comparisons`, `position` | counts |
+| `titles_ranked`, `comparisons`, `skips`, `position` | counts |
 
 `surface` is named for what a person would recognise rather than for the component or the
 route, because a component gets renamed in a redesign and the historical data then refers
@@ -426,7 +470,34 @@ Which is what makes these four distinguishable at a glance:
 | Android dev client | development | android | dev_client | *(null)* |
 | iOS dev client | development | ios | dev_client | *(null)* |
 | Preview | preview | ios/android | embedded → ota | preview |
-| TestFlight / store | production | ios/android | embedded → ota | production |
+| Community beta (TestFlight / closed test) | **production** | ios/android | embedded → ota | beta |
+| Public release (App Store / Play) | production | ios/android | embedded → ota | production |
+
+### Which builds are strangers on — read `eas_channel`, not `environment`
+
+**`environment` is not the production-versus-beta discriminator, and a dashboard that
+filters on it is counting the community beta as the public launch.** `environment` is
+`APP_VARIANT`, and the beta lane builds the *production* variant on purpose (`lib/env.ts`,
+`isRelease`): a TestFlight build and the App Store build that replaces it share a bundle
+identifier and a scheme, so they share a variant. The beta row and the release row above
+are identical in that column.
+
+**`eas_channel` is the canonical release-lane filter.** It is `Updates.channel`, set by
+the EAS profile that built the binary (`eas.json`: `development`, `preview`, `beta`,
+`production`), and it is on every canonical event and every lifecycle event as a super
+property. The rules, stated once (2026-09-07):
+
+- **Stranger and public-launch dashboards filter `eas_channel = 'production'`.** That is
+  the only lane a person the founder has never met can be on.
+- **The community beta stays separately filterable as `eas_channel = 'beta'`**, and its
+  numbers are never added to the launch's: friends ranking their fifth film in August are
+  not evidence about activation in October.
+- **`eas_channel` is null on a development build**, by EAS's design; `build_kind =
+  'dev_client'` is the field that names those, and they belong in no product dashboard.
+- **A `lane` property is deliberately not added.** `lib/env.ts` already has a `lane`
+  value, but it is a build-time input rather than a runtime fact about the binary that is
+  actually running, and two properties answering "which lane" that can disagree is worse
+  than one. `eas_channel` is what the update server enforced; it is the one to trust.
 
 Nothing here is a secret. A version, a build number, a channel name and an update id are
 printed on every build's own About screen; there is no DSN, project token or Supabase key
@@ -621,7 +692,9 @@ Results of the run on 2026-08-19, from `APP_VARIANT=development`:
 5. **Decide the PostHog project separation.** One project with `environment` as a property
    is what is implemented and is adequate for a friend beta. Two projects — nonprod and
    production — is the cleaner arrangement before a public launch, and is a founder
-   decision plus one environment variable.
+   decision plus one environment variable. **Until then, and whatever is decided, the
+   beta-versus-launch split is `eas_channel`, not `environment`** — see §6. The beta lane
+   reports `environment: production`.
 
 ---
 

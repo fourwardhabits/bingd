@@ -1,7 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+
+import { diagnosticsAvailable } from '@/features/diagnostics/availability';
 
 import { useCurrentProfile } from '@/features/auth';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
@@ -111,8 +113,27 @@ export default function RecommendationsScreen() {
    * opens the same list every day; For You is a question asked fresh each visit, and an
    * app that reopened on People because somebody once looked there would be answering a
    * question nobody asked twice.
+   *
+   * **Except on arrival by `PEOPLE_DISCOVERY`** (2026-09-07). The end of onboarding and
+   * an empty Feed both send people here *to find people*, and this parameter is how
+   * they say so. Read at mount and consumed on change, the way the profile tab reads
+   * its `awards` parameter: a tab stays mounted, so an initial-state read alone would
+   * open nothing for somebody who had already visited For You, and the parameter is
+   * cleared in the same breath so that choosing Movies afterwards is not undone by a
+   * value still sitting in the URL.
    */
-  const [peopleOpen, setPeopleOpen] = useState(false);
+  const { show } = useLocalSearchParams<{ show?: string }>();
+  const [peopleOpen, setPeopleOpen] = useState(show === 'people');
+  useEffect(() => {
+    if (show === 'people') {
+      // Synchronising FROM an external system — the URL — which is the case the
+      // rule's own doc carves out; the param is consumed in the same breath, so this
+      // fires once per arrival, not per render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPeopleOpen(true);
+      router.setParams({ show: undefined });
+    }
+  }, [show, router]);
   /**
    * The title side the reader is on, and it is untouched by a visit to People.
    *
@@ -373,16 +394,38 @@ export default function RecommendationsScreen() {
     });
   };
 
+  /**
+   * Why this tile is here, on a long press.
+   *
+   * **Production gets the sentence and nothing else** (pre-GTM audit, 2026-09-07). This
+   * used to put `score 0.412`, the anchor contributions and the popularity prior in
+   * front of anybody who held a poster — the working the engine shows a developer, in
+   * the vocabulary of `rank.ts`, on a store build. The sentence `headlineFor` derives is
+   * the explanation PRD §13 requires and the only one a reader is owed: "Because you
+   * loved Heat", "More drama, which you rank highly", "Popular right now".
+   *
+   * The raw diagnostics stay, behind the same gate as the Diagnostics sheet —
+   * `diagnosticsAvailable`, which is beta and below and never a release lane. They are
+   * how the founder reads a wall on a device, and a beta tester holding a poster is the
+   * person that reading is for.
+   */
   const explain = (item: ForYouItem) => {
     const { explanation } = item;
     const taste = slate.data?.taste;
     if (!taste) return;
 
+    // The real taste, not a stand-in. A stand-in with a large `sampleSize` was
+    // defeating the suppression that stops a taste built from one ranking being
+    // asserted in words, so this panel showed a sentence the wall would not.
+    const headline = headlineFor(explanation, taste, (code) => languageName(code) ?? code);
+
+    if (!diagnosticsAvailable) {
+      Alert.alert(item.title, headline);
+      return;
+    }
+
     const lines = [
-      // The real taste, not a stand-in. A stand-in with a large `sampleSize` was
-      // defeating the suppression that stops a taste built from one ranking being
-      // asserted in words, so this panel showed a sentence the wall would not.
-      headlineFor(explanation, taste, (code) => languageName(code) ?? code),
+      headline,
       `score ${explanation.total.toFixed(3)}`,
       explanation.anchors.length
         ? `anchors: ${explanation.anchors
@@ -620,6 +663,24 @@ export default function RecommendationsScreen() {
                 />
               }
             >
+              {/**
+               * **What this wall is, when it is not yet the reader's** (pre-GTM audit,
+               * 2026-09-07).
+               *
+               * `lowData` is the hook's own word for a slate scored with no resolved
+               * anchors — a wall drawn from the popularity fallback and the genre
+               * affinity of a taste too thin to quote. A stranger who has ranked two
+               * films sees exactly this wall, and without a word for it the screen called
+               * For You is presenting last week's trending page as personalisation.
+               * One quiet line in the footnote register the exhausted notice already
+               * uses, above the artwork, and gone the moment an anchor resolves. Not a
+               * header, not a card, and nothing about the slate itself moved.
+               */}
+              {slate.data?.lowData ? (
+                <Text variant="footnote" tone="tertiary" style={styles.lowData}>
+                  Popular right now while bingd. learns your taste.
+                </Text>
+              ) : null}
               <PosterGrid
                 tiles={items.map((item) => ({
                   id: item.mediaItemId,
@@ -896,6 +957,10 @@ const styles = StyleSheet.create({
   exhausted: {
     paddingHorizontal: theme.layout.gutter,
     paddingTop: theme.space[4],
+    textAlign: 'center',
+  },
+  lowData: {
+    paddingHorizontal: theme.layout.gutter,
     textAlign: 'center',
   },
   filterRow: {

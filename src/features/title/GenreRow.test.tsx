@@ -2,6 +2,8 @@ import { fireEvent, screen } from '@testing-library/react-native';
 
 import { renderWithProviders } from '@/test-utils/render';
 
+import { theme } from '@/ui/tokens';
+
 import { GenreRow } from './GenreRow';
 
 /**
@@ -163,5 +165,25 @@ describe('one row of genres', () => {
 
     expect(flat.flexWrap).toBe('nowrap');
     expect(flat.flexDirection).toBe('row');
+  });
+});
+
+/**
+ * **The target each chip offers** (pre-GTM audit, 2026-09-07). A 32pt chip and the
+ * `+N` marker beside it both answer a 44pt thumb, through the slop every chip row shares.
+ */
+describe('the target each chip offers', () => {
+  it('lifts every chip and the marker to the target with the shared chip slop', async () => {
+    await renderWithProviders(
+      <GenreRow genres={['Anime', 'Action & Adventure', 'Comedy', 'Drama']} />,
+    );
+    await layout(300, () => 90);
+
+    expect(marker()).toBeTruthy();
+    const controls = screen.getAllByRole('button');
+    expect(controls.length).toBeGreaterThan(1);
+    for (const control of controls) {
+      expect(control.props.hitSlop).toEqual(theme.layout.chipHitSlop);
+    }
   });
 });

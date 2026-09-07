@@ -2363,3 +2363,33 @@ showing. Until somebody has that problem, the ordering is the answer to it.
 **Revisit when.** The next migration that already touches grants schema-wide, or a second read path (a reporting role, an operator connection) that is not PostgREST.
 
 **Depends on.** A grants inventory test in `supabase/tests/rls.test.mjs` that pins the intended state before the sweep changes it.
+
+---
+
+## 58. Deferred from the pre-GTM convergence, 2026-09-07
+
+**Deferred 2026-09-07**, by founder direction, from the bounded convergence tranche that closed the product audit's comprehension and activation gaps ahead of the Android release-candidate physical QA. Each item was looked at and left, with the reason.
+
+### 58a. A new account on a second device, when the first-run check times out
+
+**What it is.** `useTasteOnboarding` bounds its two counts and Keychain read at four seconds and answers "not needed" on silence, pinned for the session. A brand-new account signing in on a *second* device whose counts hang lands on an empty Feed for that session. (The account created in *this* process is now seeded into the flow from `create_profile`'s `created` answer, which is the case that matters for a stranger's first install.)
+
+**Why it is deferred.** The bounded fix is re-evaluating the timed-out answer on the next foreground, which means a stale-time that depends on the answer and a re-route mid-session; the account is re-asked on its next launch already, because no phase was written. Two devices in the first four minutes of an account is not the launch shape.
+
+**Revisit when.** `onboarding_started` fails to follow `signup_completed` for accounts whose first session carried a request-deadline report, at any rate worth a sentence.
+
+### 58b. `SeasonPicker` presents as a native `pageSheet`
+
+**What it is.** Every other sheet in the app is `Sheet` — bottom-anchored, content-height, `statusBarTranslucent`, inset-aware. `SeasonPicker` still reaches for `<Modal presentationStyle="pageSheet">` with its own `SafeAreaView`, so it is the one full-height sheet, and on Android it draws its safe area differently from `MediumSelector`'s option sheet beside it.
+
+**Why it is deferred.** Making it consistent is a modal-architecture change to the log flow's first step, not a touch-target correction, and the founder's physical pass had no defect against it beyond the difference itself. Likewise, sheet heights across the app are not unified; that is a design pass, not a fix.
+
+**Revisit when.** A physical-QA finding names the picker, or the log flow's first step is next redesigned.
+
+### 58c. An empty *filtered* wall is not reported
+
+**What it is.** `for_you_slate_shown` now carries `size: 0` for an unfiltered wall that drew nothing. A wall the reader emptied with their own filters is not reported, deliberately — it is the reader's filter, not the engine, and Clear all is on screen.
+
+**Why it is deferred.** Reporting it would need a `filtered` property (or a filter count) on the event, which is the filter-context instrumentation `analytics.md` §5 already defers with its reasons.
+
+**Revisit when.** Filter context is instrumented for any other reason.

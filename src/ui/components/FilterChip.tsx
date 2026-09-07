@@ -38,7 +38,9 @@ export function FilterChip({
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ selected }}
       onPress={onPress}
-      hitSlop={theme.space[1]}
+      // 32pt drawn, 44pt pressed. It was `space[1]` all round, which made the chip 40pt
+      // tall to a thumb — short of the target by the four points the audit measured.
+      hitSlop={theme.layout.chipHitSlop}
       style={({ pressed }) => [styles.chip, selected && styles.on, pressed && styles.pressed]}
     >
       <Ionicons

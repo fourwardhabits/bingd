@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 import { bandSizes, scoreFor } from '@/features/collection/score';
 import { useRankedCollection, type RankedEntry } from '@/features/collection/use-collection';
@@ -752,10 +752,37 @@ export function useForYou(
   // baseline this measurement wants: how repetitive the wall is against what previous
   // sessions showed, not against what this render just recorded.
   const exposureAtLaunch = exposure.data;
+  /**
+   * The wall key an empty slate was last reported for, so `size: 0` is said once.
+   *
+   * The impression writer is the guard for a wall with something on it and has nothing
+   * to record for one without, so an empty wall needs a guard of its own. A ref, keyed
+   * on the wall, for the same once-per-slate semantics: a re-render does not repeat it,
+   * and a different medium or a different filter set is a different (empty) wall.
+   */
+  const emptyReported = useRef<string | null>(null);
   useEffect(() => {
     if (!items) return;
     const ids = items.map((item) => item.mediaItemId);
     noteSlateOnScreen(wallKey, ids);
+    /**
+     * **An empty wall is a slate too** (2026-09-07), and the question "are
+     * recommendation walls sometimes empty" had no number until it was one.
+     *
+     * `items` is only ever defined once the slate query has *succeeded* — a pending
+     * query has no data and a failed one is `isError` — so this is never "still
+     * loading" and never a request that fell over. It is the unfiltered wall only: a
+     * reader who filtered the wall to Westerns in Korean emptied it themselves, and
+     * Clear all is on screen for that. What remains is the case worth counting — the
+     * engine scored nothing this reader could be shown.
+     */
+    if (ids.length === 0) {
+      if (isFiltered(filters ?? emptyFilters())) return;
+      if (emptyReported.current === wallKey) return;
+      emptyReported.current = wallKey;
+      track({ name: 'for_you_slate_shown', props: { medium, size: 0, repeat_count: 0 } });
+      return;
+    }
     /**
      * And the durable half, which is the same fact written where a relaunch can read it.
      *
@@ -780,7 +807,7 @@ export function useForYou(
         },
       });
     });
-  }, [wallKey, items, medium, exposureAtLaunch]);
+  }, [wallKey, items, medium, filters, exposureAtLaunch]);
 
   /**
    * The three reads above are inputs to this query, so their failures are its failures.

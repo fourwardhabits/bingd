@@ -22,7 +22,7 @@ import { DiagnosticsSheet } from '@/features/diagnostics/DiagnosticsSheet';
 import { diagnosticsAvailable } from '@/features/diagnostics/availability';
 import { withGrace } from '@/lib/grace';
 import { posterUri } from '@/lib/images';
-import { TAB_ROUTES, type TabRoute } from '@/lib/routes';
+import { PEOPLE_DISCOVERY, TAB_ROUTES, type Destination } from '@/lib/routes';
 import { theme } from '@/ui/tokens';
 import {
   Button,
@@ -91,11 +91,11 @@ export default function TasteOnboardingScreen() {
    * The exit somebody has asked for, held while the notification step is on screen.
    *
    * The destination is captured rather than recomputed, because the two buttons on the
-   * summary mean two different places — "Explore For You" and "See my collection" — and
-   * the founder's device pass found exactly this kind of destination getting lost when a
+   * summary mean two different places — "Explore For You" and "Find people" — and the
+   * founder's device pass found exactly this kind of destination getting lost when a
    * helper decided it instead of the button. Null means no step is showing.
    */
-  const [leaving, setLeaving] = useState<{ skipped: boolean; to: TabRoute } | null>(null);
+  const [leaving, setLeaving] = useState<{ skipped: boolean; to: Destination } | null>(null);
   /**
    * That somebody has asked to leave — which the flow's own state stops being able to say.
    *
@@ -218,7 +218,7 @@ export default function TasteOnboardingScreen() {
    * the Keychain returning. That account reopens on the summary with its five films
    * intact, which is the documented resume behaviour rather than a loop.
    */
-  const finish = ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
+  const finish = ({ skipped, to }: { skipped: boolean; to: Destination }) => {
     void complete({ skipped });
     router.replace(to);
   };
@@ -263,7 +263,7 @@ export default function TasteOnboardingScreen() {
    * `finish` neither offers the step nor decides whether it is owed. Moved rather than
    * rewritten.)
    */
-  const leave = async ({ skipped, to }: { skipped: boolean; to: TabRoute }) => {
+  const leave = async ({ skipped, to }: { skipped: boolean; to: Destination }) => {
     if (departing.current) return;
     departing.current = true;
     // Before the first await, so the summary is still the summary for the whole of the
@@ -318,15 +318,23 @@ export default function TasteOnboardingScreen() {
           // `recommendations` — the label on the bar and the name of the file have
           // never matched, which is most of how this went wrong in the first place.
           onExplore={() => void leave({ skipped: false, to: TAB_ROUTES.forYou })}
-          onCollection={() => void leave({ skipped: false, to: TAB_ROUTES.collection })}
+          // The same tab, opened on People. See `PEOPLE_DISCOVERY` for why this is a
+          // parameter on For You rather than a screen of its own.
+          onFindPeople={() => void leave({ skipped: false, to: PEOPLE_DISCOVERY })}
         />
       ) : (
         <>
           <View style={styles.intro}>
             <Text variant="title1">Build your taste</Text>
+            {/* The second sentence is the pre-GTM audit's finding (2026-09-07): a
+                stranger's first liked film reveals 10.0 and #1, and the second ranking
+                moves it. Said here, before the first comparison, so the first reveal is
+                an instance of something already explained rather than a number the app
+                appears to change its mind about. The reveal echoes it once, quietly. */}
             <Text variant="body" tone="secondary">
               Rank five films you have seen. bingd. learns from how they compare to each other,
-              not from stars.
+              not from stars. Each one gets a score from where it lands, and that score can
+              move as you rank more.
             </Text>
 
             <Progress ranked={ranked} />
@@ -466,6 +474,8 @@ export default function TasteOnboardingScreen() {
             title: choosing.title,
             bucket,
             posterUri: choosing.posterUri,
+            // Films only, on this screen. See `kind` on `justRanked`.
+            kind: 'movie',
             mode: 'start',
           });
           setJustRanked({
@@ -547,10 +557,10 @@ function Progress({ ranked }: { ranked: number }) {
  */
 function Summary({
   onExplore,
-  onCollection,
+  onFindPeople,
 }: {
   onExplore: () => void;
-  onCollection: () => void;
+  onFindPeople: () => void;
 }) {
   // Owned here, like the one in Settings, and for the same reason: a sheet mounted
   // anywhere but inside the screen that opens it cannot be presented reliably. See
@@ -580,7 +590,18 @@ function Summary({
 
       <View style={styles.summaryActions}>
         <Button label="Explore For You" onPress={onExplore} />
-        <Button label="See my collection" kind="secondary" onPress={onCollection} />
+        {/**
+         * **Find people, where See my collection was** (pre-GTM audit, 2026-09-07).
+         *
+         * The social half of the product works once somebody has connections, and the
+         * audit found that an isolated account had no obvious path from here into
+         * People: the summary offered For You and the Collection, and the Collection is
+         * one tap away on the bar for the rest of this person's life. The moment five
+         * films are placed is the one moment the app can say "now find the people whose
+         * rankings you will see", so the secondary action says exactly that and lands on
+         * For You's existing People state — not a new screen, not a sixth tab.
+         */}
+        <Button label="Find people" kind="secondary" onPress={onFindPeople} />
         {/* The summary is as far from Settings as the flow above it, and the build-4
             stranding happened exactly here — so the way out for a wrong account is
             offered on this branch too, under the real actions rather than beside them. */}

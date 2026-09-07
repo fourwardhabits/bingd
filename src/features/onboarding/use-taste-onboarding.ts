@@ -448,6 +448,18 @@ export function useBeginTasteOnboarding(userId: string) {
     if (stored || intent.has(userId)) return;
 
     intent.set(userId, 'active');
+    /**
+     * `onboarding_started`, here and nowhere else (2026-09-07).
+     *
+     * This line is the one moment the flow genuinely *becomes* active for an account on
+     * this device: the two guards above have just established that nothing in memory
+     * and nothing on disk had decided it. A resume — `active` already stored, the app
+     * reopened on film three — returns before reaching here, and so does every second
+     * render of the screen, so this cannot count a mount, a refetch or a relaunch. After
+     * the memory write and before the disk one, on the same ordering rule `complete`
+     * follows: state the router depends on is recorded before anything that can throw.
+     */
+    track({ name: 'onboarding_started' });
     await writePref<TastePhase>(phaseKey(userId), 'active').catch(() => {});
   }, [userId]);
 }

@@ -56,6 +56,7 @@ jest.mock('@/lib/supabase', () => ({
 
 jest.mock('expo-router', () => ({
   useFocusEffect: () => {},
+  useLocalSearchParams: () => ({}),
   useRouter: () => ({ push: () => {}, replace: () => {}, back: () => {} }),
   Stack: { Screen: () => null },
 }));

@@ -39,6 +39,9 @@ jest.mock('@/lib/prefs', () => ({
   },
 }));
 
+const mockTrack = jest.fn();
+jest.mock('@/lib/analytics', () => ({ track: (...args: unknown[]) => mockTrack(...args) }));
+
 jest.mock('@/lib/supabase', () => ({
   supabase: {
     from: (table: string) => {
@@ -76,6 +79,7 @@ beforeEach(() => {
   for (const key of Object.keys(mockTableGates)) delete mockTableGates[key];
   for (const key of Object.keys(mockRequests)) delete mockRequests[key];
   resetTasteIntent();
+  mockTrack.mockReset();
 });
 
 const read = async () => {
@@ -528,5 +532,52 @@ describe('what the check costs a cold start', () => {
 
     expect(result.current.data).toEqual({ ranked: 3, needed: true });
     expect(mockRequests.rankings ?? 0).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * **`onboarding_started`, once, at the moment the flow becomes active** (pre-GTM
+ * analytics, 2026-09-07).
+ *
+ * `onboarding_completed` had no denominator: an account that saw Build your taste and
+ * closed the app was indistinguishable from one never offered it. The start is emitted
+ * from the one line where the phase is written as `active` — so a resume, a second
+ * arrival in the same process and an account that already decided all emit nothing.
+ */
+describe('onboarding_started', () => {
+  const starts = () =>
+    mockTrack.mock.calls.filter(([event]) => (event as { name: string }).name === 'onboarding_started');
+
+  it('is sent once, when the flow becomes active', async () => {
+    await begin('user-1');
+
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0][0]).toEqual({ name: 'onboarding_started' });
+    expect(mockPrefs.get('user-1.onboarding.taste.phase')).toBe('active');
+  });
+
+  it('is not sent again by a second arrival in the same process', async () => {
+    await begin('user-1');
+    await begin('user-1');
+
+    expect(starts()).toHaveLength(1);
+  });
+
+  it('is not sent for a flow resumed from the device', async () => {
+    // Closed on film three and reopened: the phase is already `active` on disk, and the
+    // start happened on the launch that wrote it.
+    mockPrefs.set('user-1.onboarding.taste.phase', 'active');
+
+    await begin('user-1');
+
+    expect(starts()).toHaveLength(0);
+  });
+
+  it('is not sent for an account that has already decided', async () => {
+    mockPrefs.set('user-1.onboarding.taste.phase', 'skipped');
+
+    await begin('user-1');
+
+    expect(starts()).toHaveLength(0);
   });
 });

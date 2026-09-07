@@ -59,7 +59,7 @@ export function IconToggle<T extends string>({
 }: IconToggleProps<T>) {
   return (
     <View style={[styles.group, style]} accessibilityRole="radiogroup" accessibilityLabel={label}>
-      {options.map((option) => {
+      {options.map((option, index) => {
         const selected = option.value === value;
         return (
           <Pressable
@@ -68,6 +68,19 @@ export function IconToggle<T extends string>({
             accessibilityState={{ selected }}
             accessibilityLabel={option.label}
             onPress={() => onChange(option.value)}
+            /**
+             * 36 × 32 drawn, 44 × 44 pressed. Vertical slop is the chip arithmetic;
+             * horizontal slop goes on the *outer* edges only. The two cells touch, and
+             * React Native hit-tests siblings last-first, so a left slop on the second
+             * cell would take the first cell's own right edge from it. Each outer edge
+             * gets the eight points that make its cell 44 wide.
+             */
+            hitSlop={{
+              top: theme.layout.chipHitSlop.top,
+              bottom: theme.layout.chipHitSlop.bottom,
+              left: index === 0 ? theme.space[2] : 0,
+              right: index === options.length - 1 ? theme.space[2] : 0,
+            }}
             style={({ pressed }) => [
               styles.cell,
               selected && styles.cellOn,

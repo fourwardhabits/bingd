@@ -85,12 +85,14 @@ beforeEach(() => {
 const propertiesOf = (call = 0) => mockCapture.mock.calls[call][1] as Record<string, unknown>;
 
 describe('the event vocabulary', () => {
-  it('is the nineteen canonical names and nothing else', () => {
-    // Pinned deliberately. Adding a twentieth is a product decision that has to be made
-    // in `docs/product/analytics.md` as well as here, and this failing is the reminder.
-    // The three group_picks names arrived 2026-09-03 with the feature; the For You
-    // slate and the streak names arrived 2026-09-06 (#112, #108) and were emitted for a
-    // day without being pinned here or written into the spec.
+  it('is the twenty-one canonical names and nothing else', () => {
+    // Pinned deliberately. Adding a twenty-second is a product decision that has to be
+    // made in `docs/product/analytics.md` as well as here, and this failing is the
+    // reminder. The three group_picks names arrived 2026-09-03 with the feature; the For
+    // You slate and the streak names arrived 2026-09-06 (#112, #108) and were emitted
+    // for a day without being pinned here or written into the spec; the two funnel
+    // denominators — onboarding_started and ranking_started — arrived 2026-09-07 with
+    // the pre-GTM convergence.
     expect([...ANALYTICS_EVENTS].sort()).toEqual(
       [
         'follow_created',
@@ -103,7 +105,9 @@ describe('the event vocabulary', () => {
         'invite_redeemed',
         'member_search_result_opened',
         'onboarding_completed',
+        'onboarding_started',
         'ranking_completed',
+        'ranking_started',
         'recommendation_opened',
         'recommendation_sent',
         'sign_in_completed',
@@ -202,10 +206,42 @@ describe('ranking_completed', () => {
     mockCapture.mockClear();
     track({
       name: 'ranking_completed',
-      props: { media_kind: 'movie', surface: 'title', comparisons: 3, rebucket, mode },
+      props: { media_kind: 'movie', surface: 'title', comparisons: 3, rebucket, mode, skips: 0 },
     });
 
-    expect(propertiesOf()).toMatchObject({ mode, rebucket, comparisons: 3 });
+    expect(propertiesOf()).toMatchObject({ mode, rebucket, comparisons: 3, skips: 0 });
+  });
+
+  it('carries the skip count through the allowlist', () => {
+    // A count and nothing else: `skips` is how often Too tough was pressed and accepted
+    // (2026-09-07), never which comparison it was pressed on.
+    mockCapture.mockClear();
+    track({
+      name: 'ranking_completed',
+      props: {
+        media_kind: 'movie',
+        surface: 'search',
+        comparisons: 4,
+        rebucket: false,
+        mode: 'start',
+        skips: 2,
+      },
+    });
+
+    expect(propertiesOf()).toMatchObject({ skips: 2 });
+  });
+
+  it('carries a start with the same mode vocabulary as the completion', () => {
+    mockCapture.mockClear();
+    track({
+      name: 'ranking_started',
+      props: { media_kind: 'tv_season', surface: 'onboarding', mode: 'start' },
+    });
+
+    expect(mockCapture).toHaveBeenCalledWith(
+      'ranking_started',
+      expect.objectContaining({ media_kind: 'tv_season', surface: 'onboarding', mode: 'start' }),
+    );
   });
 });
 

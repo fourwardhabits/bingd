@@ -52,7 +52,13 @@ let issuedIds = 0;
 jest.mock('expo-crypto', () => ({ randomUUID: () => `op-${(issuedIds += 1)}` }));
 
 const SESSION = 'session-1';
-const subject = { id: 'film-a', title: 'Film A', bucket: 'loved' as const, posterUri: null };
+const subject = {
+  id: 'film-a',
+  title: 'Film A',
+  bucket: 'loved' as const,
+  posterUri: null,
+  kind: 'movie' as const,
+};
 
 const comparison = {
   data: { done: false, session_id: SESSION, pivot: 'film-p' },

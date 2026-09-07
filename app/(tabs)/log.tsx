@@ -519,6 +519,7 @@ export default function LogScreen() {
             title: logging.title,
             bucket,
             posterUri: logging.posterUri,
+            kind: logging.kind,
             mode,
           });
           setRanked(logging);
@@ -657,11 +658,15 @@ function Results({
             ))}
           </>
         ) : (
+          // The body described the flow before + moved onto the row (pre-GTM audit,
+          // 2026-09-07): "open it, then log it" is two taps the app no longer asks
+          // for. + acts from the result — a film goes straight to its bucket, a show
+          // asks which season first — and the sentence now says that.
           <EmptyState
             kind="nothingYet"
             compact
             title="What did you watch?"
-            body="Search for a title, open it, then log it with +."
+            body="Search for a film or show you have watched, then tap + to rank it. Shows are ranked by season."
           />
         )}
       </ScrollView>

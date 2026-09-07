@@ -37,6 +37,15 @@ export const layout = {
   avatar: { xxs: 18, xs: 24, sm: 32, md: 44, lg: 72 },
   icon: { sm: 20, md: 24, lg: 28 },
   control: { searchFieldHeight: 40, chipHeight: 32, headerHeight: 44 },
+  /**
+   * What lifts a 32pt chip to the 44pt target without drawing it any larger
+   * (2026-09-07). Vertical is the arithmetic, `(44 - 32) / 2`; horizontal is half of
+   * a chip row's `space[2]` gap, so two neighbours' slops meet without crossing and a
+   * press between them still belongs to the nearer one. `FilterChip`, `SortMenu` and
+   * the title page's genre chips share it, which is what keeps three rows of the same
+   * control answering a thumb the same way.
+   */
+  chipHitSlop: { top: 6, bottom: 6, left: space[1], right: space[1] },
   row: { dense: 56, media: 76, ordinalColumn: 28 },
   /**
    * The compact list row (design-system.md §8). 60pt is set by the text block —

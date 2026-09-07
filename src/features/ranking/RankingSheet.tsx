@@ -52,6 +52,13 @@ export type RankingSubject = {
   bucket: BucketId;
   posterUri?: string | null;
   /**
+   * A film or one season, in `LoggableTitle`'s own words — every caller builds this
+   * from one. It is here for `ranking_started` (2026-09-07), which fires before the
+   * server has said what category it opened, so the kind cannot come from the answer
+   * the way `ranking_completed`'s does.
+   */
+  kind: 'movie' | 'season';
+  /**
    * How this session begins, which is four different acts over three calls.
    *
    * `start` — the default — is a first ranking: the title had no position and gets one.
@@ -220,6 +227,25 @@ function Session({
    */
   const answeredCount = useRef(0);
 
+  /**
+   * How many Too tough presses the server accepted, for `ranking_completed.skips`.
+   *
+   * A ref for the same reason as `answeredCount`. Counted from the answered `rank_skip`
+   * calls rather than read back, because `_rank_finalize` returns no skip count — and an
+   * Undo after a skip does not subtract, so this is how often the control was *used*,
+   * which is the question the event exists to answer (2026-09-07).
+   */
+  const skipCount = useRef(0);
+
+  /**
+   * Whether `ranking_started` has been sent for this session.
+   *
+   * Once per mount, on whichever attempt first opens: a refused opening emits nothing,
+   * and a retry that then succeeds is the same start. Everything after it — a pivot, a
+   * skip, an undo — is inside the session and is not one.
+   */
+  const started = useRef(false);
+
   // The session the server is still holding, if any — what closing owes a rank_cancel to.
   // A ref because it has to be right in the same tick as the press, and because it has to
   // outlive the states that render nothing from it.
@@ -272,6 +298,26 @@ function Session({
       // connection, a suspension mid-session — leaves it standing, so the id is kept.
       else if (next.state !== 'failed' || next.restart) openSession.current = null;
 
+      /**
+       * `ranking_started`, on the first answer that is a session.
+       *
+       * `comparing` is the ordinary opening; `placed` is an empty band, where the server
+       * finishes without asking anything and the session still genuinely started. A
+       * failure is not a start, whatever the reader tapped. `subject.kind` rather than a
+       * category off the answer, because a comparison carries none.
+       */
+      if (!started.current && (next.state === 'comparing' || next.state === 'placed')) {
+        started.current = true;
+        track({
+          name: 'ranking_started',
+          props: {
+            media_kind: subject.kind === 'season' ? 'tv_season' : 'movie',
+            surface,
+            mode: subject.mode ?? 'start',
+          },
+        });
+      }
+
       setStep(next);
       if (next.state === 'placed') {
         // Everything a finished ranking changes, named in one place so the two
@@ -305,6 +351,9 @@ function Session({
             // placement and used to be counted as one; the menu tells them apart and
             // so, now, does the event (`RankingMode`).
             mode: subject.mode ?? 'start',
+            // How often Too tough was pressed and accepted on the way here. See
+            // `skipCount`.
+            skips: skipCount.current,
           },
         });
         /**
@@ -372,7 +421,7 @@ function Session({
         invalidateAfterCollectionChange(queryClient, profile.id, subject.id);
       }
     },
-    [profile.id, queryClient, subject.id, subject.mode, surface],
+    [profile.id, queryClient, subject.id, subject.kind, subject.mode, surface],
   );
 
   /**
@@ -458,7 +507,7 @@ function Session({
     };
   }, [subject, apply, withIntent]);
 
-  const act = async (run: () => Promise<SessionStep>, progress = 0) => {
+  const act = async (run: () => Promise<SessionStep>, progress = 0, skip = false) => {
     if (busy) return;
     setLastAttempt({ run });
     setBusy(true);
@@ -467,6 +516,9 @@ function Session({
     if (progress) {
       answeredCount.current = Math.max(0, answeredCount.current + progress);
     }
+    // A skip the server answered — with another pair, or with the placement the
+    // three-skip cap produces. A refused one was not a skip the session had.
+    if (skip && next.state !== 'failed') skipCount.current += 1;
     apply(next);
   };
 
@@ -511,6 +563,7 @@ function Session({
             bucket={step.bucket}
             subjectId={subject.id}
             title={subject.title}
+            surface={surface}
             onDone={() => void closeAndCelebrate()}
             onFinishLog={
               onFinishLog
@@ -560,12 +613,15 @@ function Session({
               )
             }
             onSkip={() =>
-              void act(() =>
-                withIntent(
-                  `skip:${step.sessionId}:${step.pivotId}`,
-                  (op) => rankSkip(step.sessionId, subject.id, op),
-                  outcomeUnknown,
-                ),
+              void act(
+                () =>
+                  withIntent(
+                    `skip:${step.sessionId}:${step.pivotId}`,
+                    (op) => rankSkip(step.sessionId, subject.id, op),
+                    outcomeUnknown,
+                  ),
+                0,
+                true,
               )
             }
             onClose={() => void close()}
@@ -629,12 +685,23 @@ function Session({
             <Button label="Close" kind="secondary" onPress={() => void close()} />
           </Centred>
         ) : step?.state === 'ended' ? (
+          /**
+           * Undo at the first comparison: the server ended the session, and the title
+           * is exactly where the bucket tap left it — Logged, in the Collection, with no
+           * position and therefore no score. That last half is the part the old copy
+           * ("stays logged, rank it whenever you like") left the reader to infer, and
+           * the pre-GTM audit found a stranger cannot: a title that is "in your
+           * collection" reads as finished. So the outcome is stated in full, including
+           * where the ranking can be picked up again (2026-09-07). Copy only — nothing
+           * about the session, the bucket or the unranked contract moved.
+           */
           <Centred>
             <Text variant="title2" style={styles.centre}>
-              Still in your collection
+              Logged, not ranked yet
             </Text>
             <Text variant="body" tone="secondary" style={styles.centre}>
-              {subject.title} stays logged. You can rank it whenever you like.
+              {subject.title} is saved in your Collection without a bingd. score. Rank it
+              from your Collection or its title page whenever you like.
             </Text>
             <Button label="Done" onPress={() => void close()} />
           </Centred>
@@ -1078,6 +1145,7 @@ function Reveal({
   bucket,
   subjectId,
   title,
+  surface,
   onDone,
   onFinishLog,
 }: {
@@ -1087,6 +1155,8 @@ function Reveal({
   bucket: string;
   subjectId: string;
   title: string;
+  /** Where this reveal is happening; onboarding's reveals carry one extra line. */
+  surface: Surface;
   onDone: () => void;
   onFinishLog?: () => void;
 }) {
@@ -1326,6 +1396,33 @@ function Reveal({
             </Text>
           ) : null}
         </View>
+      ) : null}
+
+      {/**
+       * **What the number is, said once, to the people who have never seen one**
+       * (pre-GTM audit, 2026-09-07).
+       *
+       * A stranger's first liked film reveals `10.0` and `#1 in Movies`, and the second
+       * ranking moves it. Nothing on the reveal said that the score is a statement about
+       * where the title sits among their own rankings — so it read as a star rating the
+       * app had assigned and then changed its mind about. PRD §10 has always held that
+       * "a score moves when the list moves" and "the interface never presents a score as
+       * a fixed property of the film"; this is the first time the reveal says so.
+       *
+       * **Onboarding's reveals only.** The condition is the `surface` the sheet already
+       * carries for analytics, which is exactly "the first five rankings this account
+       * will ever see" — and it is a condition the app already has, rather than a
+       * first-reveal flag that would need persisting, resetting on a second device, and
+       * getting wrong. A reader who has ranked two hundred titles is not told this on
+       * every reveal; the intro of Build your taste says it once before the first
+       * comparison, and this is its echo under the first scores. `tertiary`, under the
+       * anchors, so it never competes with the number it is explaining.
+       */}
+      {surface === 'onboarding' ? (
+        <Text variant="footnote" tone="tertiary" style={styles.centre}>
+          Your score comes from where this lands in your rankings. It can move as you rank
+          more.
+        </Text>
       ) : null}
 
       {/**

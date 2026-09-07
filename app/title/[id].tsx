@@ -1314,6 +1314,7 @@ export default function TitleScreen() {
             title: loggingTitle.title,
             bucket,
             posterUri: loggingTitle.posterUri,
+            kind: loggingTitle.kind,
             mode,
           });
           setRankedTitle(loggingTitle);
@@ -1511,6 +1512,8 @@ export default function TitleScreen() {
                         title: title.title,
                         bucket: rankedBucket,
                         posterUri: posterUri(title.poster_path, 'card'),
+                        // Only a film or a season is ever ranked; a series has no menu.
+                        kind: title.kind === 'season' ? 'season' : 'movie',
                         // `rankAgain` with `newWatch: false`: the session runs over the
                         // position the title already holds, and finishing replaces it
                         // without announcing anything. See `RankingSheet`’s `mode`.
@@ -1549,6 +1552,8 @@ export default function TitleScreen() {
                         title: title.title,
                         bucket: rankedBucket,
                         posterUri: posterUri(title.poster_path, 'card'),
+                        // Only a film or a season is ever ranked; a series has no menu.
+                        kind: title.kind === 'season' ? 'season' : 'movie',
                         mode: 'again',
                       });
                     }
