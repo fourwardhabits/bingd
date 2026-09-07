@@ -3,8 +3,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
-import { diagnosticsAvailable } from '@/features/diagnostics/availability';
-
 import { useCurrentProfile } from '@/features/auth';
 import { unreadCount, useNotifications } from '@/features/notifications/use-notifications';
 import { CollectionFilterSheet } from '@/features/collection/CollectionFilterSheet';
@@ -404,10 +402,13 @@ export default function RecommendationsScreen() {
    * the explanation PRD §13 requires and the only one a reader is owed: "Because you
    * loved Heat", "More drama, which you rank highly", "Popular right now".
    *
-   * The raw diagnostics stay, behind the same gate as the Diagnostics sheet —
-   * `diagnosticsAvailable`, which is beta and below and never a release lane. They are
-   * how the founder reads a wall on a device, and a beta tester holding a poster is the
-   * person that reading is for.
+   * The raw diagnostics survive in local development only — `__DEV__`, a dev client
+   * attached to Metro — and nowhere else (founder decision, 2026-09-07). The first cut of
+   * this gated them on `diagnosticsAvailable`, which is beta and below, on the reasoning
+   * that a beta tester holding a poster is who the working is for. The founder's ruling
+   * is that a community beta build is a stranger's build for this purpose: the same
+   * sentence a store user gets, and nothing in `rank.ts` vocabulary. The Diagnostics
+   * sheet keeps its own wider gate; this one is narrower on purpose.
    */
   const explain = (item: ForYouItem) => {
     const { explanation } = item;
@@ -419,7 +420,7 @@ export default function RecommendationsScreen() {
     // asserted in words, so this panel showed a sentence the wall would not.
     const headline = headlineFor(explanation, taste, (code) => languageName(code) ?? code);
 
-    if (!diagnosticsAvailable) {
+    if (!__DEV__) {
       Alert.alert(item.title, headline);
       return;
     }

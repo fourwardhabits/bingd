@@ -1,6 +1,7 @@
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
+import { diagnosticsAvailable } from '@/features/diagnostics/availability';
 import { renderWithProviders } from '@/test-utils/render';
 
 // Not colocated with the screen: everything under app/ is pulled into the bundle by
@@ -14,9 +15,9 @@ import RecommendationsScreen from '../../../app/(tabs)/recommendations';
  * Three findings from the product audit, on one screen:
  *
  *   1. A long press on a poster put `score 0.412`, anchor contributions and the
- *      popularity prior in front of anybody holding a store build. The sentence
- *      `headlineFor` derives is the whole of what a reader is owed; the working stays
- *      behind the diagnostics gate, for the founder on a beta build.
+ *      popularity prior in front of anybody holding a built binary. The sentence
+ *      `headlineFor` derives is the whole of what a reader is owed, on the store and on
+ *      the community beta alike; the working survives under `__DEV__` only.
  *   2. A wall drawn from the popularity fallback said nothing about being one, so a
  *      screen called For You presented last week's trending page as personalisation.
  *   3. Nothing led an isolated account to People. `PEOPLE_DISCOVERY` is the parameter
@@ -30,8 +31,6 @@ const mockRpc = jest.fn();
 let mockRpcResults: Record<string, unknown> = {};
 /** What `useLocalSearchParams` answers — the URL this arrival came in on. */
 let mockParams: Record<string, string> = {};
-/** The diagnostics gate, as a beta build (true) or a store build (false) would have it. */
-let mockDiagnostics = false;
 
 jest.mock('@/lib/supabase', () => ({
   supabase: {
@@ -79,13 +78,17 @@ jest.mock('@/features/auth', () => ({
   }),
 }));
 
-// A getter, so each test can decide which build it is on. The screen reads the binding
-// at the moment of the long press, which is what makes flipping it between tests work.
-jest.mock('@/features/diagnostics/availability', () => ({
-  get diagnosticsAvailable() {
-    return mockDiagnostics;
-  },
-}));
+/**
+ * Which build the long press happens on.
+ *
+ * The gate is `__DEV__` and nothing else (founder decision, 2026-09-07): a dev client
+ * attached to Metro keeps the working, and every built binary — community beta included —
+ * gets the sentence. Jest runs with `__DEV__` true, so the default here is the built
+ * binary and a test opts back into development. The screen reads the global at the
+ * moment of the press, which is what makes flipping it between tests honest.
+ */
+const dev = globalThis as unknown as { __DEV__: boolean };
+const ORIGINAL_DEV = dev.__DEV__;
 
 /**
  * One title on the wall, scored on an anchor, so the sentence has something to say and
@@ -142,7 +145,7 @@ beforeEach(() => {
   mockSetParams.mockReset();
   mockRpc.mockReset();
   mockParams = {};
-  mockDiagnostics = false;
+  dev.__DEV__ = false;
   mockSlate.lowData = false;
   mockSlate.anchorsUsed = 1;
   mockRpcResults = {
@@ -153,6 +156,10 @@ beforeEach(() => {
     people_taste_matches: [],
   };
   jest.restoreAllMocks();
+});
+
+afterAll(() => {
+  dev.__DEV__ = ORIGINAL_DEV;
 });
 
 describe('why this tile is here, on a long press', () => {
@@ -186,8 +193,24 @@ describe('why this tile is here, on a long press', () => {
     expect(body).not.toMatch(/0\.\d{2,3}/);
   });
 
-  it('keeps the working for a build that can open Diagnostics', async () => {
-    mockDiagnostics = true;
+  it('gives a community beta build the sentence too, whatever Diagnostics allows', async () => {
+    // A beta build is a built binary: `__DEV__` false, while the Diagnostics sheet's own
+    // gate (`diagnosticsAvailable`, beta and below) is still open. The long press must
+    // not follow that wider gate — the founder's ruling is that a beta tester holding a
+    // poster is a stranger for this purpose.
+    expect(diagnosticsAvailable).toBe(true);
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const view = await open();
+
+    await holdInception(view);
+
+    const body = String(alert.mock.calls[0]?.[1]);
+    expect(body).toBe('Because you loved Heat');
+    expect(body).not.toMatch(/score|anchors?:|popularity prior/i);
+  });
+
+  it('keeps the working in local development only', async () => {
+    dev.__DEV__ = true;
     const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     const view = await open();
 
